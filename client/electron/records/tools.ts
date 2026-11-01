@@ -99,8 +99,14 @@ const LOOKUPS: RecordToolSpec[] = [
     schema: z.object({
       type: z.string().max(40).optional(), implements: z.string().max(40).optional(),
       state: z.array(z.string().max(40)).max(20).optional(),
-      fields: z.record(z.string(), z.union([scalar, z.object({ in: z.array(scalar).max(50) }), z.object({ contains: z.string().min(1).max(TAG_MAX_LENGTH) }).strict()]))
-        .optional().describe('欄の値。タグの欄は { contains: "タグ" } / field values; a tags field takes { contains: "tag" }'),
+      fields: z.record(z.string(), z.union([
+        scalar, z.object({ in: z.array(scalar).max(50) }), z.object({ contains: z.string().min(1).max(TAG_MAX_LENGTH) }).strict(),
+        z.object({ gte: z.union([z.string().max(40), z.number()]).optional(), lt: z.union([z.string().max(40), z.number()]).optional() }).strict(),
+      ])).optional().describe('欄の値。タグの欄は { contains: "タグ" }。日付・日時・数の欄は範囲 { gte?, lt? }（gte 以上・lt 未満。例 期限が今日まで: { due: { lt: "2026-11-06" } }） / field values; a tags field takes { contains }; a date / datetime / number field a range { gte?, lt? } (gte ≤ value < lt)'),
+      sort: z.object({ field: z.string().max(40), order: z.enum(['asc', 'desc']).optional() }).strict().optional()
+        .describe('日付・日時・数の欄で並べる（空は最後）。例 期限の近い順 { field: "due" } / order by a date / datetime / number field, empty last'),
+      finishedSince: z.string().max(40).optional().describe('この日時以降に終わった（完了・中止など、終わりの状態に入った）記録だけ。例 今日終わったこと / only records that reached a final state at or after this time'),
+      link: z.object({ name: z.string().max(40), id }).strict().optional().describe('このつながりがこの記録を指すものだけ（例 まとまりの中のタスク { name: "bundle", id }） / records whose link `name` points at `id`'),
       linkedTo: z.object({ id, hops: z.union([z.literal(1), z.literal(2)]).optional() }).optional(),
       text: z.string().max(100).optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).max(10000).optional(),
       countOnly: z.boolean().optional(),
@@ -290,6 +296,7 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         type: z.enum(creatable as [string, ...string[]]), title: z.string().min(1).max(200), summary: z.string().max(300).optional(),
         fields: z.record(z.string(), z.union([scalar, z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT)])).optional()
           .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
+        state: z.string().max(40).optional().describe('始める状態（型の create_states のどれか。例 task の preparing＝AI が下ごしらえしてから担当に渡す）。ふつうは省く / the state to start in (one of the type\'s create_states, e.g. task preparing: the AI prepares first, then hands it over); normally leave out'),
       }).strict(),
       description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。\nCreate a server-only record (${creatable.join(', ')}). Name people and customers by id.`,
       request: input => ({ method: 'POST', path: '/item', body: input }),
@@ -307,6 +314,12 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         note: a.note === 'required' ? z.string().min(1).max(2000) : z.string().max(2000).optional(),
       }
       for (const [arg, kind] of Object.entries(a.args)) shape[arg] = kindSchema(kind, t.fields[arg]?.options)
+      // Record links the action sets (task: set_bundle → bundle, finish_prep → prepared). Left out = unchanged.
+      const links = a.links ?? []
+      if (links.length > 0) {
+        shape.links = z.object(Object.fromEntries(links.map(l => [l, (t.links[l]?.cardinality === 'one' ? z.union([id, z.null()]) : z.array(id).max(50)).optional()
+          .describe(t.links[l]?.label ?? l)]))).strict().optional().describe('この操作で決めるつながり（記録の id）。省いたものはそのまま / links this action sets (record ids); left out = unchanged')
+      }
       const from = a.from ? a.from.join(' / ') : 'どの状態からでも'
       const aiNote = a.who.includes('ai') ? '' : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
         // ok_from (task complete): the person may do it on someone's OK; the AI only suggests it.
@@ -320,7 +333,10 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
           `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}`,
         request: input => {
           const args = Object.fromEntries(Object.keys(a.args).map(k => [k, input[k]]))
-          return { method: 'POST', path: `/item/${enc(String(input.id))}/actions/${enc(name)}`, body: { expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}), args } }
+          return {
+            method: 'POST', path: `/item/${enc(String(input.id))}/actions/${enc(name)}`,
+            body: { expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}), args, ...(input.links !== undefined ? { links: input.links } : {}) },
+          }
         },
       })
     }
@@ -502,7 +518,8 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
-  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。`
+  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。` +
+  `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。タスクの完了と「受けられない」は本人だけができます（AI はできません）。`
 
 export interface RecordTools {
   specs: RecordToolSpec[]
