@@ -148,7 +148,9 @@ The dependency points one way: **business → connector**. (#372's first cut had
   is part of the ledger entry and **the AI must give one** — a note drafted from the
   consultation, citing its basis; optional for people. `update_deal` is a decision,
   `refresh_deal` is not). An update
-  writes only the mapping's `write: true` fields.
+  writes only the mapping's `write: true` fields. A field of kind `tags` cannot be mapped at all
+  (its stored JSON text would be written outside as is; `records.md` "Tags"), test
+  `tests/unit/plugins.test.ts` "a tags field cannot be mapped".
 - **Creates** (milestone 4, design §3-6): every create names `correlation_property` (a unique-value
   custom property the company makes in the outside system, e.g. `acb_operation_id`; the core writes
   the operation id there so a lost answer is looked up, never re-sent). Two shapes: **attached**

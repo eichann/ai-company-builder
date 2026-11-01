@@ -10,7 +10,7 @@
  * (`member.companyId`): another company's record id is a record that does not exist.
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
-import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
+import { normalizeTag, ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
@@ -88,6 +88,8 @@ interface ParsedQuery {
   implements?: string
   state?: string[]
   fields: Array<{ name: string; values: Scalar[] }>
+  /** `{ contains: tag }` on a tags field. */
+  contains: Array<{ name: string; tag: string }>
   linkedTo?: { id: string; hops: 1 | 2 }
   text?: string
   limit: number
@@ -101,7 +103,7 @@ function parseQuery(body: unknown): ParsedQuery | string {
   const b = body as Record<string, unknown>
   const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
-  const q: ParsedQuery = { fields: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
+  const q: ParsedQuery = { fields: [], contains: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
     if (typeof b.type !== 'string' || !ONTOLOGY_NAME_RE.test(b.type)) return 'type must be a type name'
     q.type = b.type
@@ -121,6 +123,13 @@ function parseQuery(body: unknown): ParsedQuery | string {
     for (const [name, v] of entries) {
       if (!ONTOLOGY_NAME_RE.test(name)) return 'Field names are lower-case English'
       let values: unknown[]
+      if (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'contains')) {
+        if (Object.keys(v).length !== 1) return `Field ${name}: { contains: tag } alone`
+        const tag = normalizeTag((v as { contains: unknown }).contains)
+        if (tag === null) return `Field ${name}: contains takes one tag (1–40 characters)`
+        q.contains.push({ name, tag })
+        continue
+      }
       if (isScalar(v)) values = [v]
       else if (typeof v === 'object' && v !== null && Array.isArray((v as { in?: unknown }).in)) values = (v as { in: unknown[] }).in
       else return `Field ${name}: a value or { in: [...] }`
@@ -283,8 +292,18 @@ export function createRecordService(deps: RecordServiceDeps) {
         const def = types.get(q.type)!.definition
         for (const f of q.fields) {
           if (def.fields[f.name]?.source !== 'server') return refuse('bad-request', `Field ${f.name} is not a server field of ${q.type}`)
+          if (def.fields[f.name].kind === 'tags') return refuse('bad-request', `Field ${f.name} holds tags: use { contains: tag }`)
         }
         if (q.state && !q.state.every(s => def.states.includes(s))) return refuse('bad-request', `Unknown state of ${q.type}`)
+      }
+      if (q.contains.length > 0) {
+        // Only types whose field of that name holds tags (a text field that happens to look like a list is never searched).
+        const withTags = [...types].filter(([, t]) => q.contains.every(c => t.definition.fields[c.name]?.kind === 'tags')).map(([n]) => n)
+        if (q.type && types.has(q.type) && !withTags.includes(q.type)) {
+          return refuse('bad-request', `contains: ${q.contains.map(c => c.name).join(', ')} must be tags fields of ${q.type}`)
+        }
+        filter.types = filter.types ? filter.types.filter(t => withTags.includes(t)) : withTags
+        filter.contains = q.contains
       }
       if (q.state) filter.states = q.state
       if (q.fields.length > 0) filter.fields = q.fields
