@@ -222,19 +222,19 @@ GET  /api/config                                  setup state (no auth)
                               POST /outbound-recipients, POST /outbound,
                               GET|PUT /outbound/:messageId, GET|POST …/recipients,
                               POST …/send, POST …/resolve, POST …/discard  outbound-mail.ts
-                                                                (送るメール: outbound-mail.md)
+                                                                (送るもの: outbound-mail.md)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
                               the state finds the company (google-connector.md)  oauth.ts
                               GET|PUT /google/minutes-folder, POST /me/minutes/check,
                               GET /me/minutes/item/:recordId/text,
-                              POST /me/minutes/item/:recordId/deal               minutes.ts
+                              POST /me/minutes/item/:recordId/bundle             minutes.ts
                                                                 (議事録の取り込み: minutes.md)
                               GET /me/calendar/today                          calendar.ts
                                                                 (今日の予定: calendar.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
                               POST /item/:recordId/file-links (+ /remove),
-                              GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
+                              GET /minutes/:recordId/text, POST /minutes/:recordId/bundle,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId,
                               POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId

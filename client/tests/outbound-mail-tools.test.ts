@@ -32,7 +32,7 @@ const draft = (over: Partial<OutboundMailView> = {}): OutboundMailView => ({
   to: [{ ref: REF, email: 'suzuki@a-corp.example', name: '鈴木 一郎', source: 'calendar', firstTime: true }],
   cc: [{ ref: `r${'2'.repeat(24)}`, email: 'tanaka@div.example', name: '田中', source: 'member', firstTime: false }],
   subject: '本日はありがとうございました', body: '本文 https://example.com', bodyDeleted: false, linkCount: 1,
-  minutesId: 'minutes-0123456789abcdef', dealId: null, sentAt: null, providerMessageId: null, lastChangedBy: 'ai', updatedAt: 't',
+  meetingId: 'meeting-0123456789abcdef', bundleId: null, sentAt: null, providerMessageId: null, lastChangedBy: 'ai', updatedAt: 't',
   ...over,
 })
 
@@ -72,13 +72,13 @@ test('the AI drafts and looks up recipients; no tool sends; Codex only looks up'
 
 test('a draft carries refs only (an address is refused), goes with the record token, and becomes the card', async () => {
   const { tools, cards, seen } = await turn('act')
-  const withAddress = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: [REF], to: ['evil@attacker.example'], subject: 's', body: 'b' }))
+  const withAddress = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], to: ['evil@attacker.example'], subject: 's', body: 'b' }))
   assert.equal(withAddress.error, '入力が正しくありません。')
-  const rawRef = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: ['evil@attacker.example'], subject: 's', body: 'b' }))
+  const rawRef = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: ['evil@attacker.example'], subject: 's', body: 'b' }))
   assert.equal(rawRef.error, '入力が正しくありません。')
   assert.equal(seen.filter(s => s.url.endsWith('/outbound')).length, 0)
 
-  const told = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
+  const told = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
   const call = seen.find(s => s.url.endsWith('/api/records-ai/outbound'))!
   assert.equal(call.headers.Authorization, `Bearer ${TOKEN}`)
   assert.equal(call.headers.Cookie, undefined)

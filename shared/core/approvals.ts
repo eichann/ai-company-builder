@@ -86,8 +86,8 @@ export interface PluginApprovalPayload {
   changes: ApprovalFieldChange[]
   /** create: the title and the raw outside properties to send (create_deal). */
   create: { title: string; properties: Record<string, string> } | null
-  /** Where the request came from (a minutes record and the quoted sentence), for the card; not authority. */
-  basis: { minutesId: string | null; quote: string | null }
+  /** Where the request came from (a meeting record and the quoted sentence of its minutes), for the card; not authority. */
+  basis: { meetingId: string | null; quote: string | null }
 }
 
 export type ApprovalPayload = PluginApprovalPayload

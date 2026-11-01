@@ -339,7 +339,7 @@ export function createPluginImportService(deps: PluginImportDeps) {
      * by a member in the connection's read scope, and only when the package
      * declares a `contact` object with `get`. Nothing is stored.
      */
-    async dealContacts(member: Member, recordId: string): Promise<{ ok: true; contacts: Array<{ externalId: string; email: string | null; name: string | null }> } | { ok: false; reason: string }> {
+    async recordContacts(member: Member, recordId: string): Promise<{ ok: true; contacts: Array<{ externalId: string; email: string | null; name: string | null }> } | { ok: false; reason: string }> {
       const handle = companyData.forCompany(member.companyId)
       const row = RECORD_ID_RE.test(recordId) ? handle.records.byIds([recordId])[0] : undefined
       const readable = row && row.removedAt === null && recordReader(member, handle.scopes.listWithRules()).record(row)

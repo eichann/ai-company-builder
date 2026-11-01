@@ -22,9 +22,9 @@ const view: ApprovalView = {
   operationLabel: '案件の欄を HubSpot に書き戻す', systemLabel: 'HubSpot', recordId: 'deal-preview01', recordTitle: '研修導入（プレビュー株式会社）',
   changes: [{ field: 'amount', label: '金額', before: 1200000, after: 1500000, beforeShown: '1,200,000', afterShown: '1,500,000', changePercent: 25 }],
   create: null, similar: null,
-  basis: { minutesId: 'minutes-preview01', minutesTitle: '11/5 商談', quote: 'チャット窓口も最初から入れたい' },
+  basis: { meetingId: 'meeting-preview01', meetingTitle: '11/5 商談', quote: 'チャット窓口も最初から入れたい' },
   precedents: { total: 1, items: [{ approvalId: 'approval-preview0000', at: '2026-09-02T10:00:00.000Z', state: 'approved', fields: [{ label: '金額', beforeShown: '800,000', afterShown: '1,000,000' }], reason: '対象部署が増えたため', nowShown: [{ label: '金額', shown: '1,000,000' }] }] },
-  materials: [{ kind: 'record', recordId: 'deal-preview01', title: '研修導入（プレビュー株式会社）', version: 9 }, { kind: 'minutes', recordId: 'minutes-preview01', title: '11/5 商談', version: null }],
+  materials: [{ kind: 'record', recordId: 'deal-preview01', title: '研修導入（プレビュー株式会社）', version: 9 }, { kind: 'meeting', recordId: 'meeting-preview01', title: '11/5 商談', version: null }],
   proposedReason: '先方が対象を広げたいと言ったため', requestedBy: 'u-sato', requestedByAi: true, approver: 'u-abe', approverRule: 'dept_manager', approverRuleLabel: '部署の責任者',
   hash: HASH, version: 1, createdAt: '2026-11-05T06:41:00.000Z', viewerMayApprove: approver, viewerIsRequester: !approver, outcome: null,
 }

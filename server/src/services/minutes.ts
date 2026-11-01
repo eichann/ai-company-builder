@@ -4,32 +4,36 @@
  *
  * - **Discovery** (`check`): when the member's app asks (at start, every 10
  *   minutes, on a button — no server timer), the member's own calendar is read
- *   with their own Google permission; only Meet meetings with someone from
- *   outside the company's Google domain count (internal-only meetings are never
- *   read further). For each with generated notes / transcript, one `minutes`
- *   record (server only, in the company's minutes folder) per conference —
+ *   with their own Google permission; the company's setting says which Meet
+ *   meetings count (default: only those with someone from outside the
+ *   company's Google domain — internal-only meetings are then never read
+ *   further). For each with generated notes / transcript, one `meeting`
+ *   record (会議, server only, in the company's minutes folder) per conference —
  *   the organizer is the assignee when they are a member who can read it,
  *   else the member who found it. Stored: the meeting's title, time, attending
  *   member ids, the count of outside attendees, opaque Google ids and the
- *   documents' versions. **No text of the minutes is ever stored or logged.**
- * - **Deal**: candidates are found mechanically (outside attendees' email
- *   domains ↔ imported customers' `domain`; the meeting title ↔ deal titles);
- *   exactly one readable open deal is linked, otherwise a person or their AI
- *   chooses (`linkDeal`). Nothing is written to the outside system here.
+ *   minutes documents' versions. **No text of the minutes is ever stored or logged.**
+ * - **まとまり** (`bundle`): candidates are found mechanically, whatever their
+ *   type — outside attendees' email domains ↔ the `domain` of 相手 records
+ *   (types implementing `counterpart`) that a まとまり links to; the meeting
+ *   title ↔ まとまり titles; exactly one readable unfinished まとまり is linked
+ *   (with that まとまり's 相手), otherwise a person or their AI chooses
+ *   (`linkBundle`). Nothing is written to the outside system here.
  * - **Text** (`text`): read again from Google with the requesting member's own
  *   permission, for the assignee or an attendee who may read the record; handed
  *   back once, marked as outside text (data, not instructions) with the
  *   instruction-like flags. The consultation AI reads it (no separate reader AI,
  *   owner §11) and makes outputs with the typed tools; the server's gates decide.
  */
-import { MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
+import { MEETING_INTAKE_CHOICES, MEETING_TYPE, meetingIntakeOf, meetingIsRead, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
 import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { isExternalAddress, emailDomain, normalizeEmail } from '../../shared/core/mail'
 import { foldAsciiCase, nameKey, normalizeRepoPath } from '../../shared/core/paths'
 import { findPrivateScope, FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
+import type { TypeDefinition } from '../../shared/core/record-types'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
-import type { MinutesCheckResult, MinutesDealSummary, MinutesFolderSetting, MinutesLinkDealResult, MinutesText } from '../../shared/types/minutes'
+import type { MinutesBundleSummary, MinutesCheckResult, MinutesFolderSetting, MinutesLinkBundleResult, MinutesText } from '../../shared/types/minutes'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
@@ -69,6 +73,7 @@ export const MINUTES_FOLDER_REFUSED = {
   error: 'この場所は議事録の置き場所に選べません。部署のフォルダを選んでください。',
   code: 'MINUTES_FOLDER_REFUSED',
 }
+
 export const MINUTES_NOT_YOURS = {
   error: 'この議事録は、担当の人か会議に出た人だけが読めます。',
   code: 'MINUTES_NOT_YOURS',
@@ -151,32 +156,45 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return choice ?? null
   }
 
-  /** The minutes record `id` if the member may read it (anything else is "not found"). */
-  function readableMinutes(handle: CompanyData, reader: RecordReader, id: string): RecordRow | null {
+  /** The meeting record `id` if the member may read it (anything else is "not found"). */
+  function readableMeeting(handle: CompanyData, reader: RecordReader, id: string): RecordRow | null {
     if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) return null
     const row = handle.records.byIds([id])[0]
-    if (!row || row.removedAt !== null || row.type !== 'minutes' || !reader.record(row)) return null
+    if (!row || row.removedAt !== null || row.type !== MEETING_TYPE || !reader.record(row)) return null
     return row
   }
 
-  /** Open deals the meeting may be about, readable by `reader` (mechanical: domains, then title). */
-  function dealCandidates(handle: CompanyData, reader: RecordReader, externalDomains: string[], title: string): RecordRow[] {
+  /** The names of the types in force implementing an interface (`bundle`, `counterpart`). */
+  function typesImplementing(handle: CompanyData, iface: string): Map<string, TypeDefinition> {
+    const out = new Map<string, TypeDefinition>()
+    for (const [name, t] of currentTypes(handle.records)) if (t.definition.implements.includes(iface)) out.set(name, t.definition)
+    return out
+  }
+
+  /**
+   * Unfinished まとまり (any type implementing `bundle`) the meeting may be about,
+   * readable by `reader` — mechanical: outside domains ↔ the `domain` of a 相手
+   * the まとまり links to, then the title.
+   */
+  function bundleCandidates(handle: CompanyData, reader: RecordReader, externalDomains: string[], title: string): RecordRow[] {
     const records = handle.records
-    const types = currentTypes(records)
-    const dealDef = types.get('deal')?.definition
-    if (!dealDef) return []
+    const bundles = typesImplementing(handle, 'bundle')
+    if (bundles.size === 0) return []
     const old = new Set(handle.plugins.oldConnectionRecordIds())
     const open = (rows: RecordRow[]) => {
       const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s.state]))
-      return rows.filter(r => r.type === 'deal' && r.removedAt === null && !old.has(r.id) && reader.record(r)
-        && !dealDef.final.includes(states.get(r.id) ?? dealDef.initial ?? ''))
+      return rows.filter(r => {
+        const def = bundles.get(r.type)
+        return !!def && r.removedAt === null && !old.has(r.id) && reader.record(r) && !def.final.includes(states.get(r.id) ?? def.initial ?? '')
+      })
     }
     let byDomain: RecordRow[] = []
-    if (externalDomains.length > 0 && types.get('customer')?.definition.fields.domain?.source === 'server') {
-      const customers = records.candidates({ types: ['customer'], fields: [{ name: 'domain', values: externalDomains }] }, 200)
+    const counterparts = [...typesImplementing(handle, 'counterpart').keys()]
+    if (externalDomains.length > 0 && counterparts.length > 0) {
+      const found = records.candidates({ types: counterparts, fields: [{ name: 'domain', values: externalDomains }] }, 200)
         .filter(c => !old.has(c.id) && reader.record(c))
-      const dealIds = [...new Set(records.linksTo(customers.map(c => c.id)).filter(l => l.name === 'customer').map(l => l.sourceId))]
-      byDomain = open(records.byIds(dealIds))
+      const bundleIds = [...new Set(records.linksTo(found.map(c => c.id)).map(l => l.sourceId))]
+      byDomain = open(records.byIds(bundleIds))
     }
     const t = squash(title)
     const titleMatch = (r: RecordRow) => {
@@ -188,13 +206,23 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       return both.length > 0 ? both : byDomain
     }
     if (t.length < 2) return []
-    const all = records.candidates({ types: ['deal'] }, 2000)
+    const all = records.candidates({ types: [...bundles.keys()] }, 2000)
     return open(records.byIds(all.map(r => r.id))).filter(titleMatch)
   }
 
-  /** The deal's customer (its `customer` link), if any. */
-  function customerOf(handle: CompanyData, dealId: string): string | null {
-    return handle.records.linksFrom([dealId]).find(l => l.name === 'customer' && l.targetId)?.targetId ?? null
+  /** The まとまり's 相手: the first record it links to whose type implements `counterpart`, if any. */
+  function counterpartOf(handle: CompanyData, bundleId: string): string | null {
+    const counterparts = typesImplementing(handle, 'counterpart')
+    const targets = handle.records.linksFrom([bundleId]).map(l => l.targetId).filter((t): t is string => !!t)
+    const live = new Map(handle.records.byIds(targets).filter(r => r.removedAt === null && counterparts.has(r.type)).map(r => [r.id, r]))
+    return targets.find(t => live.has(t)) ?? null
+  }
+
+  /** A まとまり as the AI and the app see it. */
+  function bundleSummary(handle: CompanyData, row: RecordRow): MinutesBundleSummary {
+    const s = fieldsOf(handle.records, row.id)
+    const label = currentTypes(handle.records).get(row.type)?.definition.label ?? row.type
+    return { id: row.id, type: row.type, typeLabel: label, title: row.title, state: s.state, fields: s.fields, version: s.version }
   }
 
   /** Is the member the minutes' assignee or an attendee? */
@@ -207,25 +235,38 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     folderSetting(member: Member): Outcome<MinutesFolderSetting> {
       if (!FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', 'この設定は管理者だけが見られます', { code: 'FORBIDDEN' })
       const handle = companyData.forCompany(member.companyId)
-      return ok({ folder: handle.records.minutesFolder(), choices: folderChoices(handle) })
+      return ok({ folder: handle.records.minutesFolder(), choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()) })
     },
 
-    /** PUT /google/minutes-folder { folder: string | null } — owner/admin; a department folder, never private. */
+    /**
+     * PUT /google/minutes-folder { folder?: string | null, meetings?: 'external' | 'all' } —
+     * owner/admin; at least one. The folder is a department folder, never private.
+     */
     setFolder(member: Member, body: unknown): Outcome<MinutesFolderSetting> {
       if (!FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', 'この設定は管理者だけが変えられます', { code: 'FORBIDDEN' })
       const b = body as Record<string, unknown> | null
-      if (typeof b !== 'object' || b === null || Array.isArray(b) || !('folder' in b)) return refuse('bad-request', 'folder: a department folder or null', { code: 'BAD_REQUEST' })
-      for (const k of Object.keys(b)) if (k !== 'folder') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
-      const handle = companyData.forCompany(member.companyId)
-      let folder: string | null = null
-      if (b.folder !== null) {
-        const wanted = typeof b.folder === 'string' ? normalizeRepoPath(b.folder) : null
-        folder = wanted ? usableFolder(handle, wanted) : null
-        // One answer for "not a department" and "private": the place is never named.
-        if (!folder) return refuse('bad-request', MINUTES_FOLDER_REFUSED.error, { code: MINUTES_FOLDER_REFUSED.code })
+      if (typeof b !== 'object' || b === null || Array.isArray(b) || !('folder' in b || 'meetings' in b)) {
+        return refuse('bad-request', 'folder: a department folder or null; meetings: external or all', { code: 'BAD_REQUEST' })
       }
-      handle.records.setMinutesFolder(folder, member.userId, deps.clock.now())
-      return ok({ folder, choices: folderChoices(handle) })
+      for (const k of Object.keys(b)) if (k !== 'folder' && k !== 'meetings') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
+      if ('meetings' in b && !(MEETING_INTAKE_CHOICES as readonly unknown[]).includes(b.meetings)) {
+        return refuse('bad-request', `meetings: ${MEETING_INTAKE_CHOICES.join(' or ')}`, { code: 'BAD_REQUEST' })
+      }
+      const handle = companyData.forCompany(member.companyId)
+      let folder: string | null = handle.records.minutesFolder()
+      if ('folder' in b) {
+        folder = null
+        if (b.folder !== null) {
+          const wanted = typeof b.folder === 'string' ? normalizeRepoPath(b.folder) : null
+          folder = wanted ? usableFolder(handle, wanted) : null
+          // One answer for "not a department" and "private": the place is never named.
+          if (!folder) return refuse('bad-request', MINUTES_FOLDER_REFUSED.error, { code: MINUTES_FOLDER_REFUSED.code })
+        }
+      }
+      const at = deps.clock.now()
+      if ('folder' in b) handle.records.setMinutesFolder(folder, member.userId, at)
+      if ('meetings' in b) handle.records.setMeetingIntake(b.meetings as string, member.userId, at)
+      return ok({ folder, choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()) })
     },
 
     /** POST /me/minutes/check — the member's own calendar, with their own Google permission. */
@@ -236,8 +277,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const reader = recordReader(member, handle.scopes.listWithRules())
       const nowMs = deps.clock.nowMs()
 
-      // The member's own minutes stuck in 「読んでいる」 (the app puts them back with `retry`).
-      const stale = records.candidates({ types: ['minutes'], states: ['reading'], fields: [{ name: 'assignee', values: [member.userId] }] }, 200)
+      // The member's own meetings whose minutes are stuck in 「読んでいる」 (the app puts them back with `retry`).
+      const stale = records.candidates({ types: [MEETING_TYPE], states: ['reading'], fields: [{ name: 'assignee', values: [member.userId] }] }, 200)
         .filter(r => reader.record(r))
         .filter(r => {
           const at = Date.parse(fieldsOf(records, r.id).updatedAt ?? '')
@@ -261,6 +302,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const domain = handle.connectors.client()?.domain
       if (!domain) return refuse('forbidden', 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。', { code: 'GOOGLE_STOPPED' })
       result.checked = true
+      const intake = meetingIntakeOf(records.meetingIntake())
       const members = deps.members(member.companyId)
       const byEmail = new Map(members.flatMap(m => {
         const e = normalizeEmail(m.email)
@@ -268,16 +310,20 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       }))
 
       for (const event of events.slice(0, MAX_MEETINGS_PER_CHECK)) {
-        // Internal-only meetings are never read (design §1-2): not even their Meet record.
+        // A meeting the setting does not read (default: internal-only, design §1-2) is never read further:
+        // not even its Meet record.
         const external = event.attendees.filter(a => isExternalAddress(a.email, [domain]))
-        if (external.length === 0) { result.internalOnly++; continue }
+        if (!meetingIsRead(intake, external.length)) { result.internalOnly++; continue }
         result.meetings++
         try {
           const conference = await meetings.conferenceFor(member.companyId, member.userId, event)
           if (!conference) { result.waiting++; continue }
-          // One record per conference, whoever finds it (the id is the conference's).
-          const id = newRecordId('minutes', deps.tokenDigest.digest(`minutes:${conference}`).slice(0, 24))
-          if (records.find(id) && records.states([id]).length > 0) { result.existing++; continue }
+          // One record per conference, whoever finds it (the id is the conference's). A record made
+          // before the type was renamed keeps its `minutes-…` id (db migrateCoreInterfaceLinks).
+          const key = deps.tokenDigest.digest(`minutes:${conference}`).slice(0, 24)
+          const id = newRecordId(MEETING_TYPE, key)
+          const known = (rid: string) => !!records.find(rid) && records.states([rid]).length > 0
+          if (known(id) || known(newRecordId('minutes', key))) { result.existing++; continue }
           const docs = await meetings.documents(member.companyId, member.userId, conference)
           if (docs.length === 0) { result.waiting++; continue }
           const versions: string[] = []
@@ -292,7 +338,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           const organizer = event.organizer ? byEmail.get(normalizeEmail(event.organizer) ?? '') : undefined
           const ref: SourceRef = { conference, event: event.eventId, docs: docs.map(d => ({ kind: d.kind, id: d.docId })) }
           const base = {
-            type: 'minutes', id, title: (event.title || '会議').slice(0, 200), folder,
+            type: MEETING_TYPE, id, title: (event.title || '会議').slice(0, 200), folder,
             actor: GOOGLE_ACTOR, note: `${member.userId} のカレンダーから`,
           }
           // The organizer is the assignee when they are a member who can read the folder; else the finder.
@@ -302,16 +348,16 @@ export function createMinutesService(deps: MinutesServiceDeps) {
             const role = members.find(m => m.userId === assignee)?.role
             if (!role) continue
             const assigneeReader = recordReader({ companyId: member.companyId, userId: assignee, role }, handle.scopes.listWithRules())
-            const candidates = dealCandidates(handle, assigneeReader, [...new Set(external.map(a => emailDomain(a.email)))], event.title)
-            const deal = candidates.length === 1 ? candidates[0] : null
-            const customer = deal ? customerOf(handle, deal.id) : null
+            const candidates = bundleCandidates(handle, assigneeReader, [...new Set(external.map(a => emailDomain(a.email)))], event.title)
+            const bundle = candidates.length === 1 ? candidates[0] : null
+            const counterpart = bundle ? counterpartOf(handle, bundle.id) : null
             const input = {
               ...base,
               fields: {
                 meeting_at: event.start, assignee, attendees: JSON.stringify(attending), external_count: external.length,
                 source_ref: JSON.stringify(ref), doc_version: versions.join(','),
               },
-              links: { ...(deal ? { deal: [deal.id] } : {}), ...(customer ? { customer: [customer] } : {}) },
+              links: { ...(bundle ? { bundle: [bundle.id] } : {}), ...(counterpart ? { counterpart: [counterpart] } : {}) },
             }
             const problem = writer.check(member.companyId, input)
             if (problem?.reason === 'assignee-cannot-read') continue
@@ -339,7 +385,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const records = handle.records
       if (!records.settings().enabled) return disabled()
       const reader = recordReader(member, handle.scopes.listWithRules())
-      const row = readableMinutes(handle, reader, recordId)
+      const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
       if (!isYours(now.fields, member.userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
@@ -369,18 +415,16 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const text = parts.join('\n\n')
 
       const names = new Map(deps.members(member.companyId).map(m => [m.userId, m.name]))
-      const deal = handle.records.linksFrom([row.id]).find(l => l.name === 'deal' && l.targetId)
-      const dealRow = deal ? handle.records.byIds([deal.targetId as string]).find(r => r.removedAt === null && reader.record(r)) : undefined
-      let dealSummary: MinutesDealSummary | null = null
-      if (dealRow) {
-        const s = fieldsOf(records, dealRow.id)
-        dealSummary = { id: dealRow.id, title: dealRow.title, state: s.state, fields: s.fields, version: s.version }
-      }
+      const linked = handle.records.linksFrom([row.id]).find(l => l.name === 'bundle' && l.targetId)
+      const bundleRow = linked ? handle.records.byIds([linked.targetId as string]).find(r => r.removedAt === null && reader.record(r)) : undefined
+      const bundle = bundleRow ? bundleSummary(handle, bundleRow) : null
       const domain = handle.connectors.client()?.domain ?? null
       const externalDomains = event && domain
         ? [...new Set(event.attendees.filter(a => isExternalAddress(a.email, [domain])).map(a => emailDomain(a.email)))]
         : []
-      const candidates = dealSummary ? [] : dealCandidates(handle, reader, externalDomains, row.title).map(r => ({ id: r.id, title: r.title }))
+      const types = currentTypes(records)
+      const candidates = bundle ? [] : bundleCandidates(handle, reader, externalDomains, row.title)
+        .map(r => ({ id: r.id, title: r.title, typeLabel: types.get(r.type)?.definition.label ?? r.type }))
       return ok({
         recordId: row.id,
         header: MINUTES_TEXT_HEADER,
@@ -392,47 +436,53 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         folder: row.folder,
         attendees: attendeeIds(now.fields.attendees).map(id => ({ memberId: id, displayName: names.get(id) ?? '' })),
         externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
-        deal: dealSummary,
+        bundle,
         candidates,
         instructionLike: findInstructionLikeText(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 
-    /** POST …/minutes/:recordId/deal { dealId, expectedVersion? } — the assignee, an admin, or their AI. */
-    linkDeal(member: Member, actor: Omit<ServiceActor, 'id'>, recordId: string, body: unknown): Outcome<MinutesLinkDealResult> {
+    /**
+     * POST …/minutes/item/:recordId/bundle { bundleId, expectedVersion? } — the assignee, an admin,
+     * or their AI: which まとまり (any type implementing `bundle`) the meeting belongs to.
+     */
+    linkBundle(member: Member, actor: Omit<ServiceActor, 'id'>, recordId: string, body: unknown): Outcome<MinutesLinkBundleResult> {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
       const reader = recordReader(member, handle.scopes.listWithRules())
-      const row = readableMinutes(handle, reader, recordId)
+      const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
       if (now.fields.assignee !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) {
-        return refuse('forbidden', '案件を選べるのは、議事録の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
+        return refuse('forbidden', 'どのまとまりの会議かを選べるのは、会議の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
       }
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return refuse('bad-request', 'The body must be an object', { code: 'BAD_REQUEST' })
-      for (const k of Object.keys(b)) if (k !== 'dealId' && k !== 'expectedVersion') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
+      for (const k of Object.keys(b)) if (k !== 'bundleId' && k !== 'expectedVersion') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
       if (b.expectedVersion !== undefined && (typeof b.expectedVersion !== 'number' || !Number.isInteger(b.expectedVersion))) {
         return refuse('bad-request', 'expectedVersion: a whole number', { code: 'BAD_REQUEST' })
       }
-      const dealRow = typeof b.dealId === 'string' && RECORD_ID_RE.test(b.dealId)
-        ? records.byIds([b.dealId]).find(r => r.removedAt === null && r.type === 'deal' && reader.record(r))
+      // Any まとまり the member reads, whatever its type; anything else (a missing id, an unreadable
+      // record, a record of another kind) gets one answer.
+      const bundles = typesImplementing(handle, 'bundle')
+      const bundleRow = typeof b.bundleId === 'string' && RECORD_ID_RE.test(b.bundleId)
+        ? records.byIds([b.bundleId]).find(r => r.removedAt === null && bundles.has(r.type) && reader.record(r))
         : undefined
-      if (!dealRow) return refuse('bad-request', 'dealId: a deal record you can read', { code: 'BAD_LINK' })
-      const customer = customerOf(handle, dealRow.id)
+      if (!bundleRow) return refuse('bad-request', 'bundleId: a まとまり (bundle) record you can read', { code: 'BAD_LINK' })
+      const counterpart = counterpartOf(handle, bundleRow.id)
       const expected = typeof b.expectedVersion === 'number' ? b.expectedVersion : now.version
       const r = writer.transition(member.companyId, {
-        recordId: row.id, action: 'link_deal', expectedVersion: expected, to: null,
-        links: { deal: [dealRow.id], customer: customer ? [customer] : [] },
+        recordId: row.id, action: 'link_bundle', expectedVersion: expected, to: null,
+        links: { bundle: [bundleRow.id], counterpart: counterpart ? [counterpart] : [] },
         actor: { id: member.userId, ...actor },
       })
       if (!r.ok) {
         if (r.reason === 'stale') return refuse('conflict', 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', { code: 'VERSION_CONFLICT', version: fieldsOf(records, row.id).version })
         if (r.reason === 'records-off') return disabled()
-        return refuse('bad-request', '案件をつなげませんでした', { code: 'MINUTES_LINK_REFUSED' })
+        return refuse('bad-request', 'まとまりをつなげませんでした', { code: 'MINUTES_LINK_REFUSED' })
       }
-      return ok({ recordId: row.id, dealId: dealRow.id, customerId: customer, version: r.entry.version })
+      return ok({ recordId: row.id, bundleId: bundleRow.id, counterpartId: counterpart, version: r.entry.version })
     },
 
     /**
@@ -441,11 +491,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
      * source. Only for the assignee or an attendee who may read the record.
      * `external`: outside the company's Google domain.
      */
-    async meetingAttendees(companyId: string, userId: string, role: string, minutesId: string): Promise<Outcome<Array<MeetingAttendee & { external: boolean }>>> {
+    async meetingAttendees(companyId: string, userId: string, role: string, meetingId: string): Promise<Outcome<Array<MeetingAttendee & { external: boolean }>>> {
       const member: Member = { companyId, userId, role }
       const handle = companyData.forCompany(companyId)
       if (!handle.records.settings().enabled) return disabled()
-      const row = readableMinutes(handle, recordReader(member, handle.scopes.listWithRules()), minutesId)
+      const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), meetingId)
       if (!row) return notFound()
       const now = fieldsOf(handle.records, row.id)
       if (!isYours(now.fields, userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })

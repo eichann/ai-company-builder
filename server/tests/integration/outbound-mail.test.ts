@@ -79,8 +79,8 @@ let kekDir: string, shelfDir: string
 const logLines: string[] = []
 const answers: string[] = []
 const owner = { companyId: CO, userId: 'm-owner', role: 'owner' }
-let dealId: string
-let minutesId: string
+let bundleId: string
+let meetingId: string
 
 async function call(opts: { user?: string | null; token?: string; method: string; path: string; body?: unknown }) {
   currentUser.id = opts.user ?? null
@@ -182,7 +182,7 @@ beforeAll(async () => {
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['m-sato'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
   expect((await person('m-owner', 'POST', '/plugins/sample-sales/import')).status).toBe(200)
-  dealId = (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND external_id = '1000000001' AND object = 'deal'").get(CO) as Json).record_id
+  bundleId = (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND external_id = '1000000001' AND object = 'deal'").get(CO) as Json).record_id
   // The minutes of the sales meeting (made by the minutes service in G7; here through the service writer).
   const { createServiceRecordWriter } = await import('../../src/services/record-engine')
   const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
@@ -192,12 +192,12 @@ beforeAll(async () => {
     isMember: () => true, roleOf: () => 'member', notify: () => {},
   })
   const made = writer.create(CO, {
-    type: 'minutes', title: '商談の議事録', folder: '営業部',
+    type: 'meeting', title: '商談', folder: '営業部',
     fields: { assignee: 'm-sato', source_ref: JSON.stringify({ conference: GOOGLE_SEED.salesConference, event: GOOGLE_SEED.salesEvent, docs: [] }), external_count: 2 },
-    links: { deal: [dealId] }, actor: { id: 'm-sato', kind: 'human', source: null },
+    links: { bundle: [bundleId] }, actor: { id: 'm-sato', kind: 'human', source: null },
   })
   expect(made.ok, JSON.stringify(made)).toBe(true)
-  minutesId = (made as Json).record.id
+  meetingId = (made as Json).record.id
 })
 
 afterAll(async () => {
@@ -218,7 +218,7 @@ describe('outbound mail', () => {
   it('the verified recipients: external calendar attendees, the deal\'s HubSpot contacts, members; refs are stable', async () => {
     await allow('m-sato', ['minutes'])
     token = await tokenFor('m-sato')
-    const r = await ai(token, 'POST', '/outbound-recipients', { minutesId })
+    const r = await ai(token, 'POST', '/outbound-recipients', { meetingId })
     expect(r.status, r.text).toBe(200)
     recipients = r.body.data.recipients
     expect(r.body.data.unreadable).toEqual([])
@@ -232,7 +232,7 @@ describe('outbound mail', () => {
     expect(recipients.every((x: Json) => x.ref.match(/^r[0-9a-f]{24}$/))).toBe(true)
     expect(pick(recipients, 'calendar', GOOGLE_SEED.customerSuzuki).firstTime).toBe(true)
     expect(pick(recipients, 'member', EMAILS['m-tanaka']).firstTime).toBe(false)
-    const again = await ai(token, 'POST', '/outbound-recipients', { minutesId })
+    const again = await ai(token, 'POST', '/outbound-recipients', { meetingId })
     expect(again.body.data.recipients.map((x: Json) => x.ref)).toEqual(recipients.map((x: Json) => x.ref))
   })
 
@@ -240,19 +240,19 @@ describe('outbound mail', () => {
     const to = [pick(recipients, 'calendar', GOOGLE_SEED.customerSuzuki).ref, pick(recipients, 'hubspot', GOOGLE_SEED.customerYamaguchi).ref]
     const cc = [pick(recipients, 'member', EMAILS['m-tanaka']).ref]
     const forged = `r${'0'.repeat(24)}`
-    const refused = await ai(token, 'POST', '/outbound', { minutesId, toRefs: [forged], subject: '件名', body: '本文' })
+    const refused = await ai(token, 'POST', '/outbound', { meetingId, toRefs: [forged], subject: '件名', body: '本文' })
     expect([refused.status, refused.body.code]).toEqual([400, 'RECIPIENT_NOT_OFFERED'])
     // An address in the body of the request is not a recipient (refs only); a raw address as a ref is refused.
-    const raw = await ai(token, 'POST', '/outbound', { minutesId, toRefs: ['evil@attacker.example'], to: ['evil@attacker.example'], subject: '件名', body: '本文' })
+    const raw = await ai(token, 'POST', '/outbound', { meetingId, toRefs: ['evil@attacker.example'], to: ['evil@attacker.example'], subject: '件名', body: '本文' })
     expect(raw.status).toBe(400)
 
     const made = await ai(token, 'POST', '/outbound', {
-      minutesId, toRefs: to, ccRefs: cc, to: ['evil@attacker.example'],
+      meetingId, toRefs: to, ccRefs: cc, to: ['evil@attacker.example'],
       subject: '本日はありがとうございました', body: '鈴木様\n\n本日はありがとうございました。\n資料: https://example.com/doc\n',
     })
     expect(made.status, made.text).toBe(201)
     draft = made.body.data.draft
-    expect(draft).toMatchObject({ state: 'draft', version: 1, from: GOOGLE_SEED.member, linkCount: 1, dealId, minutesId, lastChangedBy: 'ai' })
+    expect(draft).toMatchObject({ state: 'draft', version: 1, from: GOOGLE_SEED.member, linkCount: 1, bundleId, meetingId, lastChangedBy: 'ai' })
     expect(draft.hash).toMatch(/^sha256:[0-9a-f]{64}$/)
     expect(draft.to.map((x: Json) => [x.source, x.email])).toEqual([['calendar', GOOGLE_SEED.customerSuzuki], ['hubspot', GOOGLE_SEED.customerYamaguchi]])
     expect(draft.cc.map((x: Json) => [x.source, x.email])).toEqual([['member', EMAILS['m-tanaka']]])
@@ -349,14 +349,14 @@ describe('outbound mail', () => {
     const listed = await person('m-sato', 'GET', `/outbound/${draft.id}/recipients`)
     expect(pick(listed.body.data.recipients, 'typed', 'partner@third.example').ref).toBe(typed.body.data.recipient.ref)
     // Not offered for another draft's context (refs are per draft).
-    const ctx = await ai(token, 'POST', '/outbound-recipients', { minutesId })
+    const ctx = await ai(token, 'POST', '/outbound-recipients', { meetingId })
     expect(ctx.body.data.recipients.some((x: Json) => x.source === 'typed')).toBe(false)
   })
 
   it('an attendee removed from the calendar since drafting: nothing is sent', async () => {
     // A second draft to the calendar address (the first keeps the HubSpot one for the successful send).
     const made = await person('m-sato', 'POST', '/outbound', {
-      minutesId, toRefs: [pick(recipients, 'calendar', GOOGLE_SEED.customerYamaguchi).ref], subject: 'ご連絡', body: '本文',
+      meetingId, toRefs: [pick(recipients, 'calendar', GOOGLE_SEED.customerYamaguchi).ref], subject: 'ご連絡', body: '本文',
     })
     expect(made.status, made.text).toBe(201)
     google.changeEvent(GOOGLE_SEED.salesEvent, { removeAttendee: GOOGLE_SEED.customerYamaguchi })
@@ -396,22 +396,26 @@ describe('outbound mail', () => {
     // The interaction: channel email, the subject, domains only, Gmail's id; linked to the deal.
     const [interaction] = withRecordText(db, CO, db.prepare("SELECT r.id, r.title, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'interaction'").all(CO) as Json[])
     expect(interaction.title).toBe('本日はありがとうございました')
-    expect(JSON.parse(interaction.fields)).toMatchObject({ channel: 'email', counterpart: 'a-corp.example, div.example', source_ref: `gmail:${mail.id}` })
+    expect(JSON.parse(interaction.fields)).toMatchObject({ channel: 'email', counterpart_text: 'a-corp.example, div.example', source_ref: `gmail:${mail.id}` })
     expect(interaction.fields).not.toContain('suzuki')
-    const link = db.prepare("SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'deal'").get(CO, interaction.id) as Json
-    expect(link.target_id).toBe(dealId)
+    const link = db.prepare("SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'bundle'").get(CO, interaction.id) as Json
+    expect(link.target_id).toBe(bundleId)
+    // And the まとまり's 相手 (the deal's customer, a type implementing counterpart).
+    const customer = db.prepare("SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'customer'").get(CO, bundleId) as Json | undefined
+    const counterpart = db.prepare("SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'counterpart'").get(CO, interaction.id) as Json | undefined
+    expect(counterpart?.target_id ?? null).toBe(customer?.target_id ?? null)
     // Never twice.
     const again = await person('m-sato', 'POST', `/outbound/${draft.id}/send`, { hash: now.hash })
     expect([again.status, again.body.code]).toEqual([409, 'NOT_DRAFT'])
     expect(sentCount()).toBe(1)
     // The domain is no longer new.
-    const after = await ai(token, 'POST', '/outbound-recipients', { minutesId })
+    const after = await ai(token, 'POST', '/outbound-recipients', { meetingId })
     expect(pick(after.body.data.recipients, 'hubspot', GOOGLE_SEED.customerSuzuki).firstTime).toBe(false)
   })
 
   it('a lost answer: `unknown`, exactly one mail in Gmail, never re-sent; the person settles it', async () => {
     const made = await person('m-sato', 'POST', '/outbound', {
-      dealId, toRefs: [(await ai(token, 'POST', '/outbound-recipients', { dealId })).body.data.recipients.find((x: Json) => x.source === 'hubspot').ref],
+      bundleId, toRefs: [(await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot').ref],
       subject: '追ってのご連絡', body: '本文です',
     })
     expect(made.status, made.text).toBe(201)

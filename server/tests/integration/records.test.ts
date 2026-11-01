@@ -173,7 +173,7 @@ describe('the company map, end to end', () => {
     await services.records.refreshIndex(owner)
     expect(titles(await api('u-member', 'POST', '/query', {}))).toEqual(['A社', 'A社 提案'])
     const types = await api('u-member', 'GET', '/types')
-    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'minutes', 'outbound_message', 'task'])
+    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'meeting', 'outbound_message', 'task'])
     const detail = await api('u-member', 'GET', '/item/customer-cust0001')
     expect(detail.body.data?.links).toEqual([expect.objectContaining({ name: 'customer', direction: 'in', record: expect.objectContaining({ id: 'deal-deal0001' }) })])
   })
@@ -279,7 +279,7 @@ describe('the company map, end to end', () => {
     db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('dep-sales', CO, '営業部', '営業部', now, now)
     const before = git(['-C', bare, 'rev-parse', 'main']).trim()
     const made = await api('u-member', 'POST', '/decisions', {
-      folder: '営業部', title: 'A社に窓口を3つ出す', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', links: { deal: 'deal-deal0001' }, key: 'k-1',
+      folder: '営業部', title: 'A社に窓口を3つ出す', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', key: 'k-1',
     })
     expect(made.status).toBe(201)
     const id = (made.body.data?.record as { id: string }).id

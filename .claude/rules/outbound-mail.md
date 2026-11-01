@@ -18,7 +18,7 @@ paths:
   - "client/tests/ui/mail-draft-card.spec.ts"
 ---
 
-# Outbound mail (milestone 4 G8: お礼メールを確かめて送る)
+# Outbound mail (milestone 4 G8: お礼メールを確かめて送る; the type is 「送るもの」)
 
 The member's AI drafts a mail in the consultation; the app draws the draft as a card; the member
 presses 「確かめて送る」, sees everything once more and sends it from their own Gmail. Design 節目4
@@ -29,13 +29,15 @@ still at their source**.
 
 ## Verified recipients (`services/outbound-mail.ts` `collect`)
 
-A draft is about a minutes record and/or a deal record the member may read (a minutes' `deal` link
-is taken along). Its recipients come only from, read fresh on every call:
+A draft is about a meeting record (`meetingId`) and/or a まとまり (`bundleId`: a record of any type
+implementing `bundle`, e.g. a 案件) the member may read (a meeting's `bundle` link is taken along).
+The core names no business type (records.md "Core interfaces"). Its recipients come only from,
+read fresh on every call:
 
 | source | where | label |
 |---|---|---|
 | `calendar` | the meeting's attendees outside the company's domain (`minutes.meetingAttendees`, the minutes' calendar event re-read from Google with the member's own permission — only for the minutes' assignee or an attendee, `minutes.md`; internal = the Google client's domain + the author's) | カレンダーの参加者 |
-| `hubspot` | the deal's contacts: the connector's declared `get` of the deal with `associations=contacts`, then each contact's `get` (`plugin-import.ts` `dealContacts`; object `contact` in the declaration, HubSpot's `email` / `firstname` / `lastname`). Only for a deal the member may read, imported through the current connection, by a member in the connection's read scope (`plugins.readAllowed`). Nothing is stored | HubSpot の連絡先 |
+| `hubspot` | the まとまり's contacts in its outside system: the connector's declared `get` of the linked object with `associations=contacts`, then each contact's `get` (`plugin-import.ts` `recordContacts`; object `contact` in the declaration, HubSpot's `email` / `firstname` / `lastname`). Only for a deal the member may read, imported through the current connection, by a member in the connection's read scope (`plugins.readAllowed`). Nothing is stored | HubSpot の連絡先 |
 | `member` | the company's members (for CC), the author left out | ACB のメンバー |
 | `typed` | an address a **person** typed for this draft (`POST …/recipients`, session only; `normalizeEmail`, a name without line breaks or `<>"`) | あなたが入力 |
 
@@ -50,10 +52,13 @@ of the company went to (`outbound.sentDomains()`).
 
 ## Drafts and versions
 
-- Record `outbound_message` (server only, `records.md`), created / changed only through the
-  service writer; folder = the deal's (else the minutes') folder; `requested_by` / `assignee` =
-  the author; fields `subject`, `payload_hash`, `payload_version`, `channel: email`; links
-  `about` (deal), `minutes`.
+- Record `outbound_message` (「送るもの」, version 3; server only, `records.md`), created / changed
+  only through the service writer; folder = the まとまり's (else the meeting's) folder;
+  `requested_by` / `assignee` = the author; fields `subject`, `payload_hash`, `payload_version`,
+  `channel: email` (the type also offers `slack` for stage 3's Slack replies — one type for every
+  channel, no second type; nothing sends to Slack yet); links `bundle`, `meeting`. The outbound
+  tables keep their column names `minutes_id` / `deal_id` (the port calls them `meetingId` /
+  `bundleId`).
 - Every change is a new version: the canonical content (`mailContentCanonical` — From = the
   member's ACB email, which G3 requires the Google account to be; To / CC addresses, subject,
   body; NFC, `\n`; nothing trimmed) in `fixed_payloads` (owner kind `outbound_message`,
@@ -85,9 +90,9 @@ In this order, nothing sent unless all pass:
    (G3: writes are not retried; every Google switch is checked there: operator stop, company
    client off, vault, membership, grant, scope);
 7. 2xx → record `sent` (`sent_at`, `provider_message_id` = Gmail's id), the retention clock starts,
-   and an `interaction` (やりとり) on the deal (`SERVICE_RECEIPT_TYPES`: channel `email`, title /
-   summary = subject, counterpart = recipient **domains** only, `source_ref` `gmail:<id>`, folder
-   = the deal's). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
+   and an `interaction` (やりとり) on the まとまり (`SERVICE_RECEIPT_TYPES`: channel `email`, title /
+   summary = subject, `counterpart_text` = recipient **domains** only, `source_ref` `gmail:<id>`,
+   folder = the まとまり's; links `bundle` and, when the まとまり links a 相手, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
    `GOOGLE_UNAVAILABLE`). A lost answer or a 5xx → `unknown`
    「届いたか分かりません。Gmail の送信済みを確かめてください。」; ACB cannot read Gmail (no
    `gmail.readonly`), so the person answers `POST …/resolve { sent }`: true → `sent`, false →

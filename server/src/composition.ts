@@ -360,7 +360,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
 
   // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
-  // with the member's own permission; makes `minutes` records through the service writer.
+  // with the member's own permission; makes `meeting` records through the service writer.
   const minutes = createMinutesService({
     ...shared,
     writer: serviceRecords,
@@ -403,13 +403,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       })
     },
     // The meeting's attendees, re-read from Google now (minutes.md); unreadable → null (nothing offered).
-    meetingAttendees: async (companyId, userId, minutesId) => {
+    meetingAttendees: async (companyId, userId, meetingId) => {
       const role = access.memberOf(companyId, userId)?.role
       if (!role) return null
-      const r = await minutes.meetingAttendees(companyId, userId, role, minutesId)
+      const r = await minutes.meetingAttendees(companyId, userId, role, meetingId)
       return r.ok ? r.value : null
     },
-    dealContacts: (member, dealId) => pluginImport.dealContacts(member, dealId),
+    bundleContacts: (member, bundleId) => pluginImport.recordContacts(member, bundleId),
     gmailSend: (companyId, userId, raw) => googleClient.request(companyId, userId, {
       api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
     }),

@@ -19,8 +19,9 @@ A record whose current state has an action with `who` exactly `[ai]` is 「AI �
 Without a person pressing anything, the member's app runs it **on the member's own PC, in the main
 window's renderer**, as a hidden consultation that goes through the normal chat pipeline and the
 normal history saving (owner decisions 2026-11-01, 節目5 §3–§7). There is **no** AI on the server
-and **no** history-writing path in main. Today the one kind is minutes 「読む」 (received → reading →
-read, `minutes.md`); the 「議事録が届きました」 notice stays as the fallback (removing it is S11).
+and **no** history-writing path in main. Today the one kind is reading a meeting's minutes (a
+`meeting` record: received → reading → read, `minutes.md`); the 「議事録が届きました」 notice stays as
+the fallback (removing it is S11).
 
 ## Where it runs
 
@@ -46,7 +47,7 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
   member's own later messages in that consultation are normal turns). The chat server then gives
   no references, company files, review, web research, choice prompts, steering or suggestions,
   and only the record tools the step declares (`AI_TURN_STEPS` in `client/shared/ai-turns.ts`:
-  minutes reading = `minutes_read`, `minutes_link_deal`, the three minutes actions,
+  minutes reading = `minutes_read`, `minutes_link_bundle`, the three `meeting__…_reading` actions,
   `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
   `show`, and a business plugin's `…__update_deal` / `…__log_meeting`; anything else is filtered
   out and refused if called). Claude Code runs it with `settingSources: []` and
@@ -65,7 +66,8 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
 - `aiTurns:claim(companyId, recordId, expectedVersion, conversationId)` — main window only. Main
   first claims the server's **execution run** of the record's step (S10b, below); then it
   opens a record token for **that consultation** (`act`, the configured agent) and runs the type's
-  first AI action (`AI_TURN_CLAIM_ACTIONS`: minutes → `start_reading`) at the version the app saw:
+  first AI action (`AI_TURN_CLAIM_ACTIONS`: meeting → `start_reading`; a meeting's id is
+  `meeting-…`, or `minutes-…` for one made before the type was renamed) at the version the app saw:
   the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` → `taken`, never
   tried again at that version). The ledger records it as the AI's, pointing at the consultation.
   Refused without a call to the server (`not-allowed`): an agent without `recordActions` (Codex,
@@ -155,6 +157,6 @@ Codex claims nothing, shows the notice and hands the record over; a failed run s
 
 ## Not yet (S11 and later)
 
-The notice is not removed and the deal choice still waits for the member in the consultation
-(S11 moves 「どの案件か」 to あなたの番); other AI-turn kinds (each needs its claim action in
+The notice is not removed and the まとまり choice still waits for the member in the consultation
+(S11 moves 「どのまとまりの会議か」 to あなたの番); other AI-turn kinds (each needs its claim action in
 `AI_TURN_CLAIM_ACTIONS` and its first message); the company setting itself (S6); notifications (S5).

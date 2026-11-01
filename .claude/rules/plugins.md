@@ -727,7 +727,7 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   request (`approval-requested`: nothing made until a person approves; the AI cannot); `create_deal`'s tells the AI to look for similar records first.
 - The update tool's `note` is required for a `decision` operation; its description tells the AI to
   draft the reason from the consultation and cite the message it rests on (optional `basis {
-  minutesId, quote }` for the approval card), that one approval field makes the whole request an
+  meetingId, quote }` for the approval card), that one approval field makes the whole request an
   approval request, and **never to claim success unless the outcome is
   `applied`** (an `unknown` result is not re-sent; the member checks).
 - The outcome becomes a card in the reply (`client/shared/plugin-operations.ts`, data part

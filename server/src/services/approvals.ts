@@ -34,6 +34,7 @@
 import {
   APPROVER_LABELS, approvalPayloadCanonical, approvalReasonProblem, mayApprove, type ApproverRule, type PluginApprovalPayload,
 } from '../../shared/core/approvals'
+import { MEETING_TYPE } from '../../shared/core/minutes'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { externalToAcb } from '../../shared/core/plugins'
@@ -107,8 +108,10 @@ interface Loaded {
   fields: Record<string, LedgerValue>
   rule: ApproverRule
   requestedBy: string
+  /** The record the operation is on (from the fixed payload; null for a create). */
   about: string | null
-  minutes: string | null
+  /** The meeting it came from (its `meeting` link). */
+  meeting: string | null
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -167,7 +170,7 @@ export function createApprovalService(deps: ApprovalDeps) {
     })
   }
 
-  function parse(handle: CompanyData, row: RecordRow): Loaded | null {
+  function parse(companyId: string, handle: CompanyData, row: RecordRow): Loaded | null {
     const s = handle.records.states([row.id])[0]
     if (!s) return null
     let fields: Record<string, LedgerValue> = {}
@@ -176,7 +179,9 @@ export function createApprovalService(deps: ApprovalDeps) {
     const rule = (['self', 'dept_manager', 'admin'] as const).find(r => r === fields.approver_rule) ?? 'admin'
     return {
       row, state: s.state as ApprovalState, version: s.version, fields, rule, requestedBy: str(fields.requested_by) ?? '',
-      about: links.find(l => l.name === 'about')?.targetId ?? null, minutes: links.find(l => l.name === 'minutes')?.targetId ?? null,
+      // The record is the payload's (the `bundle` link holds it only when it is a まとまり).
+      about: payloadOf(companyId, row.id)?.payload.record?.id ?? null,
+      meeting: links.find(l => l.name === 'meeting')?.targetId ?? null,
     }
   }
 
@@ -187,7 +192,7 @@ export function createApprovalService(deps: ApprovalDeps) {
     const row = handle.records.byIds([id])[0]
     if (!row || row.type !== TYPE || row.removedAt !== null) return null
     if (!recordReader(member, handle.scopes.listWithRules()).record(row)) return null
-    const a = parse(handle, row)
+    const a = parse(member.companyId, handle, row)
     if (!a) return null
     const involved = a.requestedBy === member.userId || a.fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role) || qualifies(member, a)
     return involved ? a : null
@@ -243,7 +248,7 @@ export function createApprovalService(deps: ApprovalDeps) {
     const payloads = new Map(fixed.currentOf(viewer.companyId, 'approval', rows.map(r => r.id)).map(p => [p.ownerId, p]))
     const items: Array<ApprovalPrecedent & { sortAt: string }> = []
     for (const r of rows) {
-      const p = parse(handle, r)
+      const p = parse(viewer.companyId, handle, r)
       const fp = payloads.get(r.id)
       if (!p || !fp || fp.canonical === null) continue
       let earlier: PluginApprovalPayload
@@ -275,11 +280,11 @@ export function createApprovalService(deps: ApprovalDeps) {
   function materials(viewer: Member, handle: CompanyData, a: Loaded, payload: PluginApprovalPayload): ApprovalMaterial[] {
     const reader = recordReader(viewer, handle.scopes.listWithRules())
     const out: ApprovalMaterial[] = []
-    const ids = [...new Set([payload.record?.id, a.minutes ?? payload.basis.minutesId].filter((x): x is string => typeof x === 'string' && RECORD_ID_RE.test(x)))]
+    const ids = [...new Set([payload.record?.id, a.meeting ?? payload.basis?.meetingId].filter((x): x is string => typeof x === 'string' && RECORD_ID_RE.test(x)))]
     for (const r of handle.records.byIds(ids)) {
       if (r.removedAt !== null || !reader.record(r)) continue
-      const isMinutes = r.type === 'minutes'
-      out.push({ kind: isMinutes ? 'minutes' : 'record', recordId: r.id, title: r.title, version: !isMinutes && payload.record?.id === r.id ? payload.record.version : null })
+      const isMeeting = r.type === MEETING_TYPE
+      out.push({ kind: isMeeting ? 'meeting' : 'record', recordId: r.id, title: r.title, version: !isMeeting && payload.record?.id === r.id ? payload.record.version : null })
     }
     return out
   }
@@ -293,7 +298,8 @@ export function createApprovalService(deps: ApprovalDeps) {
     const def = typeOf(handle, payload.record?.id ?? null, plugin, payload.object)
     const reader = recordReader(viewer, handle.scopes.listWithRules())
     const aboutRow = payload.record ? handle.records.byIds([payload.record.id])[0] : undefined
-    const minutesRow = payload.basis.minutesId && RECORD_ID_RE.test(payload.basis.minutesId) ? handle.records.byIds([payload.basis.minutesId])[0] : undefined
+    const meetingId = payload.basis?.meetingId
+    const meetingRow = meetingId && RECORD_ID_RE.test(meetingId) ? handle.records.byIds([meetingId])[0] : undefined
     const { first, last } = requestOrigin(handle, a.row.id)
     let create: ApprovalView['create'] = null
     if (payload.create) {
@@ -320,9 +326,9 @@ export function createApprovalService(deps: ApprovalDeps) {
       recordTitle: aboutRow && reader.record(aboutRow) ? aboutRow.title : null,
       changes: fieldViews(payload, def), create, similar,
       basis: {
-        minutesId: minutesRow && reader.record(minutesRow) ? minutesRow.id : null,
-        minutesTitle: minutesRow && reader.record(minutesRow) ? minutesRow.title : null,
-        quote: payload.basis.quote,
+        meetingId: meetingRow && reader.record(meetingRow) ? meetingRow.id : null,
+        meetingTitle: meetingRow && reader.record(meetingRow) ? meetingRow.title : null,
+        quote: payload.basis?.quote ?? null,
       },
       precedents: precedents(viewer, handle, a, payload, def),
       materials: materials(viewer, handle, a, payload),
@@ -382,7 +388,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       return service.request(member, actor, pluginId, null, operation, body)
     },
 
-    /** Make (or find the identical pending) approval request for an operation. Body as the operation's, plus `basis?: { minutesId?, quote? }`. */
+    /** Make (or find the identical pending) approval request for an operation. Body as the operation's, plus `basis?: { meetingId?, quote? }`. */
     async request(member: Member, actor: ActorInput, pluginId: string, recordId: string | null, operation: string, body: unknown): Promise<Outcome<ApprovalRequested>> {
       // The AI emergency stop stops requests made by the AI too (people's still work; design §4-5):
       // prepareApproval refuses it (ACB_STOPPED), as the AI's token does as a whole.
@@ -390,14 +396,18 @@ export function createApprovalService(deps: ApprovalDeps) {
       if (!prepared.ok) return prepared
       const { payload, approver: rule, folder } = prepared.value
       const handle = companyData.forCompany(member.companyId)
-      // The basis must be a minutes record the requester may read (else it would point at what they cannot see).
-      const minutesId = payload.basis.minutesId
-      if (minutesId !== null) {
-        const m = RECORD_ID_RE.test(minutesId) ? handle.records.byIds([minutesId])[0] : undefined
-        if (!m || m.type !== 'minutes' || m.removedAt !== null || !recordReader(member, handle.scopes.listWithRules()).record(m)) {
-          return refuse('bad-request', 'basis.minutesId: a minutes record you can read', { code: 'BAD_LINK' })
+      // The basis must be a meeting record the requester may read (else it would point at what they cannot see).
+      const meetingId = payload.basis.meetingId
+      if (meetingId !== null) {
+        const m = RECORD_ID_RE.test(meetingId) ? handle.records.byIds([meetingId])[0] : undefined
+        if (!m || m.type !== MEETING_TYPE || m.removedAt !== null || !recordReader(member, handle.scopes.listWithRules()).record(m)) {
+          return refuse('bad-request', 'basis.meetingId: a meeting record you can read', { code: 'BAD_LINK' })
         }
       }
+      // The `bundle` link holds the record only when its type is a まとまり (a 案件, a 企画…): the core
+      // never names a business plugin's type, and an operation on another kind of record still works.
+      const recordRow = payload.record ? handle.records.byIds([payload.record.id])[0] : undefined
+      const isBundle = !!recordRow && currentTypes(handle.records).get(recordRow.type)?.definition.implements.includes('bundle') === true
       const canonical = approvalPayloadCanonical(payload)
       const proposed = isObj(body) && typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim().slice(0, 2000) : null
 
@@ -434,7 +444,7 @@ export function createApprovalService(deps: ApprovalDeps) {
               requested_by: member.userId, assignee: approver, next_actor: approver, approver_rule: rule, operation: opName,
               payload_hash: fixedNow.hash, payload_version: fixedNow.version, reason: proposed,
             },
-            links: { ...(payload.record ? { about: [payload.record.id] } : {}), ...(minutesId ? { minutes: [minutesId] } : {}) },
+            links: { ...(payload.record && isBundle ? { bundle: [payload.record.id] } : {}), ...(meetingId ? { meeting: [meetingId] } : {}) },
             actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null, runId: actor.runId ?? null },
             note: '承認をお願いしました',
           })
@@ -597,7 +607,7 @@ export function createApprovalService(deps: ApprovalDeps) {
 
   /**
    * 「決めたこと」 for an approval (design §1-7 step 22): important, decided by
-   * the approver, linked to the request and the record, in the department of
+   * the approver, linked to the request and — when it is a まとまり — the record, in the department of
    * the record's folder. When the decisions service refuses (the place…), the
    * approval stands and only the refusal's code is logged.
    */
@@ -606,9 +616,11 @@ export function createApprovalService(deps: ApprovalDeps) {
     const dept = departmentOf(handle, a.row.folder)
     if (!dept) return
     const aboutRow = a.about ? handle.records.byIds([a.about])[0] : undefined
+    const isBundle = !!aboutRow && currentTypes(handle.records).get(aboutRow.type)?.definition.implements.includes('bundle') === true
     const body = (why: string) => ({
       folder: dept.folder, title: `${a.row.title}を承認`.slice(0, 120), why, source: `承認のお願い（${a.row.id}）`.slice(0, 300),
-      links: { approval: a.row.id, ...(aboutRow?.type === 'deal' ? { deal: aboutRow.id } : {}) }, important: true, key: `${a.row.id}:decision`,
+      links: { approval: a.row.id, ...(isBundle && aboutRow ? { bundle: aboutRow.id } : {}), ...(a.meeting ? { meeting: a.meeting } : {}) },
+      important: true, key: `${a.row.id}:decision`,
     })
     void payload
     try {

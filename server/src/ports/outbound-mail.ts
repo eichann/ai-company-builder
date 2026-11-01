@@ -20,8 +20,10 @@ export interface OutboundMailRow {
   authorId: string
   /** The member's Google account / ACB email at drafting. */
   fromEmail: string
-  minutesId: string | null
-  dealId: string | null
+  /** The meeting the mail is about (column `minutes_id`, named before the type was renamed). */
+  meetingId: string | null
+  /** The まとまり (a record implementing `bundle`) it is about (column `deal_id`). */
+  bundleId: string | null
   createdAt: string
   /** When it became sent / discarded (the retention clock); null while draft / unknown. */
   finishedAt: string | null

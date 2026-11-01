@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
+import { migrateCompanyCoreInterfaceLinks } from '../adapters/sqlite/records'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -81,6 +82,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // After migratePluginTables (which may rebuild plugin_operations).
   migrateAiRunColumns(conn)
   migrateRecordTypeSources(conn)
+  // Core types link to interfaces, `minutes` became `meeting` (records.md "Core interfaces").
+  migrateCoreInterfaceLinks(conn)
   migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)
   migrateRecordContents(conn)
@@ -118,6 +121,19 @@ export function migrateRecordContents(conn: Database.Database): void {
     if (!done || done.content_store === 1) continue
     const { moved } = migrateCompanyContents(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] content store: moved ${moved} text(s) of company ${id}`)
+  }
+}
+
+/**
+ * Records made before the core types linked to interfaces (records.md "Core
+ * interfaces"): every company's staging rows carried over, idempotently
+ * (adapters/sqlite/records.ts `migrateCompanyCoreInterfaceLinks`). Here, not in
+ * schema/records.ts, because it runs an adapter (layering test).
+ */
+export function migrateCoreInterfaceLinks(conn: Database.Database): void {
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const { records, links } = migrateCompanyCoreInterfaceLinks(conn, id)
+    if ((records > 0 || links > 0) && conn === sqlite) console.log(`[records] core interfaces: ${records} meeting(s), ${links} link(s) carried over in company ${id}`)
   }
 }
 

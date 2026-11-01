@@ -47,11 +47,11 @@ export function createOperationApprovals(
       const b = isObj(input) ? input : null
       if (!b) return refuse('bad-request', 'The input must be an object')
       const basis = isObj(b.basis) ? b.basis : {}
-      const minutesId = typeof basis.minutesId === 'string' && basis.minutesId.length <= 100 ? basis.minutesId : null
+      const meetingId = typeof basis.meetingId === 'string' && basis.meetingId.length <= 100 ? basis.meetingId : null
       const quote = typeof basis.quote === 'string' && basis.quote.length <= 2000 ? basis.quote.normalize('NFC') : null
       const head = (plugin: ActivePlugin) => ({
         v: 1 as const, kind: 'plugin_operation' as const, plugin: { id: plugin.pluginId, version: plugin.version, fingerprint: plugin.fingerprint },
-        mappingVersion: plugin.mappingVersion, connectionId: plugin.connectionId, operation, basis: { minutesId, quote },
+        mappingVersion: plugin.mappingVersion, connectionId: plugin.connectionId, operation, basis: { meetingId, quote },
       })
 
       if (recordId === null) {

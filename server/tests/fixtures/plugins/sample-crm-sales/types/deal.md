@@ -1,6 +1,7 @@
 ---
 label: 案件
-version: 1
+version: 2
+implements: [bundle]
 storage: server
 fields:
   title:      { label: 件名, kind: text, source: file }
@@ -11,6 +12,8 @@ fields:
   amount:     { label: 金額, kind: number, source: server }
   closed:     { label: 受注, kind: boolean, source: server }
   assignee:   { label: 担当, kind: person, source: server }
+  owner:      { label: 責任者, kind: person, source: server }
+  purpose:    { label: なんのため, kind: text, source: server }
 links:
   customer:   { label: 顧客, target: customer, cardinality: one, inverse: deals }
 states: [open, won, lost]

@@ -37,7 +37,7 @@ test('a received minutes record runs by itself in a hidden consultation that is 
   expect(saved?.minutesId).toBe(MINUTES_ID)
   expect(saved?.title).toBe(`A社 商談 のあと（${day()}）`)
   expect(JSON.stringify(saved?.messages)).toContain('自動で始めた相談')
-  expect(JSON.stringify(saved?.messages)).toContain(`minutes_read で議事録 ${MINUTES_ID}`)
+  expect(JSON.stringify(saved?.messages)).toContain(`minutes_read で会議 ${MINUTES_ID} の議事録`)
 
   // It is listed as working, but the member's own tab stays in front, untouched.
   await expect(page.getByText(`A社 商談 のあと（${day()}）`).first()).toBeVisible()

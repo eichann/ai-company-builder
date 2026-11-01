@@ -268,8 +268,8 @@ export function autoMinutesFirstMessage(base: string): string {
     base,
     '',
     '自動で進めるときの決まり：',
-    '- 読み始めの印（minutes__start_reading）はアプリがつけました。もう一度つけないでください。',
-    '- 案件が決まらないときや私に聞きたいことがあるときは、作業を止めずに、最後に私へのお願いとしてまとめてください。',
-    '- 最後に必ず minutes__finish_reading（読めなかったときは minutes__fail_reading）にしてください。',
+    '- 読み始めの印（meeting__start_reading）はアプリがつけました。もう一度つけないでください。',
+    '- どのまとまり（案件など）の会議か決まらないときや私に聞きたいことがあるときは、作業を止めずに、最後に私へのお願いとしてまとめてください。',
+    '- 最後に必ず meeting__finish_reading（読めなかったときは meeting__fail_reading）にしてください。',
   ].join('\n')
 }

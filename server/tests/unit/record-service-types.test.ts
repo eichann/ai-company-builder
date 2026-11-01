@@ -4,7 +4,7 @@
  * company handles.
  *
  * Guards:
- * - the generic create refuses the service-owned types (minutes, approval,
+ * - the generic create refuses the service-owned types (meeting, approval,
  *   outbound_message, decision) for a person and for their AI;
  * - an approval / outbound message changes state through its service only:
  *   no generic action (even one a company's own definition adds) and no undo;
@@ -48,8 +48,11 @@ const owner = (co = 'a') => m('u-owner', co, 'owner')
 const HUMAN = { kind: 'human' as const }
 const AI = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
 
-const DEAL_TYPE = '---\nlabel: 案件\nversion: 1\nstorage: server\nlinks:\n  customer: { label: 顧客, target: customer, cardinality: one }\nstates: [open]\n---\n'
-const CUSTOMER_TYPE = '---\nlabel: 顧客\nversion: 1\nstorage: server\nstates: []\n---\n'
+/** A business plugin's 案件 (a まとまり) and 顧客 (a 相手), as corporate-sales has them. */
+const DEAL_TYPE = '---\nlabel: 案件\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 責任者, kind: person, source: server }\n  purpose: { label: なんのため, kind: text, source: server }\nlinks:\n  customer: { label: 顧客, target: customer, cardinality: one }\nstates: [open, won]\nfinal: [won]\n---\n'
+const CUSTOMER_TYPE = '---\nlabel: 顧客\nversion: 1\nstorage: server\nimplements: [counterpart]\nfields:\n  counterpart_kind: { label: 会社か人か, kind: choice, options: [company, person], source: server }\n  domain: { label: ドメイン, kind: text, source: server }\n  email: { label: メール, kind: text, source: server }\nstates: [active]\n---\n'
+/** Another line of work's まとまり (企画): a bundle link takes it as it takes a 案件. */
+const PLAN_TYPE = '---\nlabel: 企画\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 責任者, kind: person, source: server }\n  purpose: { label: なんのため, kind: text, source: server }\nstates: [planning, aired]\nfinal: [aired]\n---\n'
 
 function addType(co: string, name: string, text: string, version: number, src: 'file' | 'plugin' = 'plugin') {
   const r = parseTypeFile(name, text)
@@ -77,6 +80,7 @@ function company(id: string) {
   ensureCoreTypes(records, TS)
   addType(id, 'deal', DEAL_TYPE, 1)
   addType(id, 'customer', CUSTOMER_TYPE, 1)
+  addType(id, 'plan', PLAN_TYPE, 1)
 }
 
 function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
@@ -124,9 +128,9 @@ function newApproval(co = 'a') {
   return r.record
 }
 
-/** Minutes assigned to `assignee` (as the minutes intake will make them). */
+/** A meeting assigned to `assignee` (as the minutes intake makes them). */
 function newMinutes(assignee: string, folder: string | null = null, co = 'a') {
-  const r = writer.create(co, { type: 'minutes', title: '定例', folder, fields: { assignee, external_count: 2 }, actor: { id: assignee, kind: 'human', source: null } })
+  const r = writer.create(co, { type: 'meeting', title: '定例', folder, fields: { assignee, external_count: 2 }, actor: { id: assignee, kind: 'human', source: null } })
   if (!r.ok) throw new Error(r.reason)
   return r.record
 }
@@ -235,7 +239,7 @@ describe('decisions', () => {
     const d = deal()
     const minutes = newMinutes('u-bob')
     // Names are fine in a server record now (visibility is by the reader's permissions).
-    const r = ok(await decisions.record(m('u-alice'), AI, body({ title: '試験さんの案で窓口を3つにする', links: { deal: d.id, minutes: minutes.id } })))
+    const r = ok(await decisions.record(m('u-alice'), AI, body({ title: '試験さんの案で窓口を3つにする', links: { bundle: d.id, meeting: minutes.id } })))
     expect(r.created).toBe(true)
     expect(r.record).toMatchObject({
       type: 'decision', state: 'unconfirmed', title: '試験さんの案で窓口を3つにする', path: null,
@@ -279,12 +283,27 @@ describe('decisions', () => {
 
   it('links only to readable records of this company, of the type the link names', async () => {
     const theirs = deal('b')
-    const missing = await decisions.record(owner(), HUMAN, body({ links: { deal: 'deal-zzzzzzzz' } }))
-    expect(await decisions.record(owner(), HUMAN, body({ links: { deal: theirs.id } }))).toEqual(missing)
+    const missing = await decisions.record(owner(), HUMAN, body({ links: { bundle: 'deal-zzzzzzzz' } }))
+    expect(await decisions.record(owner(), HUMAN, body({ links: { bundle: theirs.id } }))).toEqual(missing)
     expect(missing).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
     const minutes = newMinutes('u-bob')
-    expect(await decisions.record(owner(), HUMAN, body({ links: { deal: minutes.id } }))).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
+    expect(await decisions.record(owner(), HUMAN, body({ links: { bundle: minutes.id } }))).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
+    expect(await decisions.record(owner(), HUMAN, body({ links: { meeting: deal().id } }))).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
+    // The old link names are gone: the core names no business type.
+    expect(await decisions.record(owner(), HUMAN, body({ links: { deal: deal().id } }))).toMatchObject({ ok: false, kind: 'bad-request' })
     expect(ok(service.query(owner(), { type: 'decision' })).total).toBe(0)
     expect(source.forCompany('b').records.linksTo([theirs.id])).toHaveLength(0)
+  })
+
+  it('a bundle link takes any まとまり — a 案件 or a 企画 — and nothing else', async () => {
+    const d = deal()
+    const plan = ok(engine.create(owner(), HUMAN, { type: 'plan', title: '秋の特番' })).record
+    const customer = ok(engine.create(owner(), HUMAN, { type: 'customer', title: '株式会社サンプル物産' })).record
+    const toDeal = ok(await decisions.record(owner(), HUMAN, body({ title: '案件で決めた', links: { bundle: d.id } })))
+    const toPlan = ok(await decisions.record(owner(), HUMAN, body({ title: '企画で決めた', links: { bundle: plan.id } })))
+    expect(source.forCompany('a').records.linksFrom([toDeal.record.id])).toMatchObject([{ name: 'bundle', targetId: d.id }])
+    expect(source.forCompany('a').records.linksFrom([toPlan.record.id])).toMatchObject([{ name: 'bundle', targetId: plan.id }])
+    // A 相手 is not a まとまり.
+    expect(await decisions.record(owner(), HUMAN, body({ links: { bundle: customer.id } }))).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
   })
 })

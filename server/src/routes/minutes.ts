@@ -3,13 +3,15 @@
  * /api/companies/:companyId. Contract: shared/types/minutes.ts; rules:
  * services/minutes.ts. The member's AI has its twins in routes/records-ai.ts.
  *
- *   GET|PUT /google/minutes-folder          owner/admin: the department folder minutes go to
- *                                            ({ folder: string | null }; never a private folder)
+ *   GET|PUT /google/minutes-folder          owner/admin: the department folder meetings go to
+ *                                            ({ folder?: string | null; never a private folder,
+ *                                            meetings?: 'external' | 'all' — which meetings are read })
  *   POST    /me/minutes/check               any member: look at my calendar now (the app calls
  *                                            it at start, every 10 minutes and on a button)
  *   GET     /me/minutes/item/:recordId/text      the assignee or an attendee: the minutes as outside
  *                                            text, read now from Google with my own permission
- *   POST    /me/minutes/item/:recordId/deal      the assignee or an admin: { dealId, expectedVersion? }
+ *   POST    /me/minutes/item/:recordId/bundle    the assignee or an admin: { bundleId, expectedVersion? }
+ *                                            (which まとまり the meeting belongs to)
  *
  * The text is never stored, logged or cached: `Cache-Control: no-store`.
  * Non-members get 404 like every company route.
@@ -65,8 +67,8 @@ minutesRoute.get('/me/minutes/item/:recordId/text', async (c) => {
   return member instanceof Response ? member : answer(c, await minutes.text(member, c.req.param('recordId')))
 })
 
-minutesRoute.post('/me/minutes/item/:recordId/deal', async (c) => {
+minutesRoute.post('/me/minutes/item/:recordId/bundle', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, minutes.linkDeal(member, { kind: 'human', source: null }, c.req.param('recordId'), await jsonBody(c)))
+  return answer(c, minutes.linkBundle(member, { kind: 'human', source: null }, c.req.param('recordId'), await jsonBody(c)))
 })

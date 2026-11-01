@@ -30,6 +30,7 @@ paths:
   - "server/src/adapters/record-files.ts"
   - "server/src/lib/record-files.ts"
   - "server/tests/unit/record-*.test.ts"
+  - "server/tests/unit/core-types-interfaces.test.ts"
   - "server/tests/integration/records.test.ts"
   - "server/tests/integration/record-links.test.ts"
   - "server/tests/unit/push-channel.test.ts"
@@ -53,7 +54,7 @@ paths:
 
 The core foundation of the light ontology (owner design 「段4 本体の土台」, decisions 0.18–0.23):
 types are defined in files; **record data lives only on the server** (owner decision 2026-11-01:
-tasks, decisions, deals, interactions, minutes, approvals, outbound mail — every core and plugin
+tasks, decisions, deals, interactions, meetings, approvals, outbound mail — every core and plugin
 type is `storage: server`), while what people write (quotes, plans, scripts, procedures) stays
 ordinary files that records link to by company path. Record files remain only for a company's own
 `.acb/types/` type with `storage: file` (the parser's default; no core or plugin type uses it). The
@@ -86,11 +87,12 @@ engine the day it is turned on.
   `states`, `initial`, `create_states` (states a create may start in instead — "Task version
   5"), `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK" — / links — record links
-  the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`: `request` needs
-  `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server; `bundle`
-  (まとまり) needs `owner` (person) and `purpose` (text) on the server; `prepared` (AI が用意したもの)
-  needs `requested_by` and `assignee` (person) — `outbound_message` v2 and `approval` v3
-  implement it), `storage`
+  the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
+  below: `request` needs `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the
+  server; `bundle` (まとまり) needs `owner` (person) and `purpose` (text) on the server and final
+  states; `counterpart` (相手) needs `counterpart_kind` (choice offering company and person),
+  `domain` and `email` (text) on the server; `prepared` (AI が用意したもの) needs `requested_by` and
+  `assignee` (person) — `outbound_message` and `approval` implement it; `interfaceProblems`), `storage`
   (`file` / `server` / `either`). Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
   same kind (an action sets them; nothing is computed).
@@ -292,6 +294,57 @@ Field kind `tags` — the one list-valued kind: short words (タグ) on a record
   normalization, contains never returns or counts an unreadable record, never another company's,
   never a non-tags field, equality refused), `record-types.test.ts` — mutation-checked.
 
+### Core interfaces (owner decision 2026-11-01 night: 本体は業務の型を名指ししない)
+
+The core never names a business plugin's type. Two interfaces stand for the things every company
+has, and core types link to them instead of to `deal` / `customer`:
+
+- **`bundle`** (まとまり — 案件・企画・取り組み): `owner` (person), `purpose` (text), and final
+  states (whether it is finished).
+- **`counterpart`** (相手 — 顧客・ゲスト・受講企業・応募者): the record's title is its display name;
+  `counterpart_kind` (choice offering at least `company` and `person`), `domain`, `email` (text;
+  the keys later 名寄せ uses — either may be empty).
+
+The set is fixed and small (`INTERFACES`, `shared/core/record-types.ts`): with `request` and
+`prepared` (turns, not things) these four are all there is. **No plugin or company type defines an
+interface** (no key for it; an unknown name in `implements` or `interface:` is a parser error) and
+there is no inheritance — an interface is only a promise of a few required fields, which the
+parser checks (`interfaceProblems`) wherever a definition is read: core, a plugin package on the
+shelf (`validatePluginPackage`), a company's `.acb/types/` file (the index reports it and keeps the
+last valid version).
+
+Core links (versions of 2026-11-01 night): task v6 `bundle`, `counterpart` (only for a task with
+no まとまり — it reaches its customer through its bundle; the `customer` link is gone); interaction
+v3 `bundle`, `counterpart` (its text field is `counterpart_text`); meeting v1 `bundle`,
+`counterpart`; approval v4 `bundle` (the record when it is a まとまり), `meeting`; outbound_message
+v3 `bundle`, `meeting`; decision v3 `bundle`, `meeting`, `approval`. Where-it-came-from is a
+`meeting` link (the one origin there is today) rather than a generic origin link: a link targets
+one type or one interface, and an origin interface would be a fifth one; stage 3's mail / Slack
+intake adds an `interaction` link the same way (additive).
+
+The business plugin 「法人営業」 (`acb-plugins`, corporate-sales 0.3.0) implements them: `deal` v3
+`implements: [bundle]` (adds `owner`, `purpose`; final won / lost), `customer` v3
+`implements: [counterpart]` (adds `counterpart_kind`, `email`; `domain` as before). Until a company
+moves to it, its deals are not まとまり (minutes candidates, approval / decision `bundle` links
+leave them out).
+
+**Migration** (staging only — production had no record data): at startup, every company,
+idempotently (`migrateCoreInterfaceLinks` in `db/index.ts` → `adapters/sqlite/records.ts`
+`migrateCompanyCoreInterfaceLinks`): `minutes` records become `meeting` (ids kept), the core link
+rows are renamed (`customer` → `counterpart`, `deal` / `about` → `bundle`, `minutes` → `meeting`),
+an interaction's `counterpart` field becomes `counterpart_text`, the stored core `minutes`
+definitions are dropped. The ledger is not rewritten (an old `links.deal` entry is history; undoing
+it answers `CHANGED_SINCE`). This is the one breaking reshape of core types so far (removed
+links); an older server build does not understand a migrated database.
+
+Tests: `server/tests/unit/core-types-interfaces.test.ts` (no core link targets a business type;
+the interface set is fixed; a plugin package or company file claiming an interface without its
+fields is refused; `bundle` takes a 案件 and a 企画 but not a 相手 or a memo, `counterpart` a 顧客
+and a guest but not a まとまり; unreadable / another company's / missing get one answer; the
+migration, once, per company), `record-types.test.ts` (each interface's fields, choice options,
+final states; no interface of one's own), `record-service-types.test.ts` (a decision's `bundle`
+takes any まとまり) — mutation-checked.
+
 ### Links to an interface (stage 2 S1, owner decision 2026-11-01: 取り組みを最初から)
 
 A link may target an interface instead of one type: `links: { bundle: { label: まとまり,
@@ -463,8 +516,9 @@ notify the reviewer, hand to them), send_back (note required, decision), assign 
 undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer, or the assignee
 stating whose OK it was — never AI; attach, decision, notifies the requester and the OK-giver),
 cancel (note required, decision), reopen (requested_by / ok_by / admin)) and
-`interaction` (やりとり: server only, no body — summary, channel, counterpart, pointer to the
-original; version 2 adds a `deal` link; outbound mail records one per sent mail, `outbound-mail.md`). Stored per company with source `core` by every index run
+`interaction` (やりとり: server only, no body — summary, channel, `counterpart_text`, pointer to the
+original; version 3 links `bundle` and `counterpart`, "Core interfaces"; outbound mail records one per sent mail, `outbound-mail.md`). Task version 6
+drops the `customer` link and adds `counterpart`. Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
 own `.acb/types/task.md` (higher version, additive only; a company file still saying `storage:
 either` is now a breaking change against the core version 2 and is reported, the core definition
@@ -475,38 +529,42 @@ copied into `next_actor`; only for types implementing `request`).
 
 Milestone 4 adds four (people by id in person fields):
 
-- `minutes` (議事録, server): `meeting_at`, `assignee` (organizer or first discoverer),
-  `attendees` (text: JSON array of member ids — no person-list kind exists), `external_count`,
-  `source_ref` (opaque pointer, no text), `doc_version`, `summary_text` (long_text; ≤ 300 is the
-  intake's rule); links `deal`, `customer`. received → reading → read / skipped / failed:
+- `meeting` (会議, server; was `minutes`): internal and external meetings — `meeting_at`, `assignee`
+  (organizer or first discoverer), `attendees` (text: JSON array of member ids — no person-list
+  kind exists), `external_count`, `source_ref` (opaque pointer to its minutes documents, no text),
+  `doc_version`, `summary_text` (long_text; ≤ 300 is the intake's rule); links `bundle`,
+  `counterpart`. The 議事録 is its content, read where it is. received → reading → read / skipped / failed:
   `start_reading`, `finish_reading` (arg `summary_text`), `fail_reading` are `who: [ai]` —
   received is the example of 「AI の番」 (no separate reader AI: the consultation AI reads, owner
   §11); `retry` (reading / failed → received, also for "reading > 30 min") and `skip` are
   assignee / admin.
 - `approval` (承認のお願い, server, implements `request` → the approver's 「あなたの番」):
   `approver_rule` [self, dept_manager, admin], `operation`, `payload_hash`, `payload_version`,
-  `reason`, `result_operation_id`; links `about` (target `deal`), `minutes`. pending → approved /
+  `reason`, `result_operation_id`; links `bundle` (version 4: the record when it is a まとまり),
+  `meeting`. pending → approved /
   sent_back / stale / withdrawn / failed; sent_back → withdrawn (version 2: `sent_back` is not
   final, so a sent-back request is the requester's turn again; version 3 implements `prepared`). **No actions.** Its service:
   `approvals.md`.
-- `outbound_message` (送るメール, server): `requested_by` / `assignee` (the author), `subject`,
-  `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email]; links
-  `about`, `minutes`. draft → sent / unknown / discarded; unknown → sent or back to draft
+- `outbound_message` (送るもの, server; version 3): `requested_by` / `assignee` (the author), `subject`,
+  `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email, slack —
+  one type for every channel; Slack is not sent yet]; links `bundle`, `meeting`. draft → sent /
+  unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
   the drafts its AI made).
-- `decision` (決めたこと, server — version 2; version 1 was a file, "Decisions" below):
+- `decision` (決めたこと, server — version 3; version 1 was a file, "Decisions" below):
   `recorded_by` [ai, human], `important`, `decided_by` (null when the AI recorded it), `owner`
-  (the linked minutes' assignee at creation, else the member — `who` cannot name "the minutes'
-  assignee"), `source_key`, `why` (long_text), `source`; links `deal`,
-  `minutes`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
+  (the linked meeting's assignee at creation, else the member — `who` cannot name "the meeting's
+  assignee"), `source_key`, `why` (long_text), `source`; links `bundle`,
+  `meeting`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
   (note required), both `who: [owner, dept_manager, admin]`, decisions.
 
-A link's `target` is a label, not a check: `deal` / `customer` come from a business plugin (「法人営業」) and may not
-exist in a company; the parser and the engine accept a link to a type that is not defined.
+A link's `target` (a type) is a label, not a check: the parser and the engine accept a link to a
+type that is not defined (a company's own types). Core types link only to core types, files and
+interfaces ("Core interfaces").
 
 ### Service-owned types (`SERVICE_OWNED_TYPES`, `shared/core/core-types.ts`)
 
-`minutes`, `approval`, `outbound_message`, `decision` are made only by the server's own services:
+`meeting`, `approval`, `outbound_message`, `decision` are made only by the server's own services:
 the generic create (`POST /records/item`, the AI's `records_create`) answers 400
 `TYPE_CREATED_BY_SERVICE`, and the app's `records_create` tool never offers them. Of those,
 `SERVICE_RECEIPT_TYPES` (`interaction`) the service writer may also create — a receipt of what a
@@ -857,8 +915,8 @@ Read only, with the member's session in main (`client/electron/features/record-v
 `recordViews:search` / `card` / `forFile`; shapes and wording in `client/shared/record-views.ts`).
 Main only reshapes the server's answers — nothing is filtered or added on the app's side.
 
-- **Kinds** people see (`recordKindOf`): 案件 (`deal`, any type implementing `bundle`), やること
-  (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `minutes`,
+- **Kinds** people see (`recordKindOf`): まとまり (any type implementing `bundle`: a 案件, a 企画),
+  やること (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `meeting`,
   `outbound_message`), そのほか; the type's own label is shown small. Core states have member words
   (`stateLabel`; definitions carry no state labels); machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
@@ -887,7 +945,7 @@ null = every non-final state), where the member is `assignee` or `next_actor`, r
 ## Decisions (`services/decisions.ts`, design §3-3)
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
-`decisions_record`): `{ folder, title, why, source, links?: { deal?, minutes?, approval? },
+`decisions_record`): `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
 important?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
 - A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
   row (`path` null, `folder` = the department folder) and its state `unconfirmed`, with `why` /
@@ -900,8 +958,9 @@ important?, key? }` → 201 `{ record, created: true }` (200 `created: false` fo
   place.
 - Names are allowed (the old `NAME_IN_DECISION` refusal protected the repository's history, which
   a server record does not have; visibility is by the reader's permissions).
-- Links: readable records of this company of the link's type (else 400 `BAD_LINK`).
-- `key` (e.g. `minutes-…:decision:2`): the id is derived from it (sha256) and it is stored in
+- Links: readable records of this company of the link's type — `bundle`: of any type implementing
+  it (a 案件, a 企画) — else 400 `BAD_LINK`.
+- `key` (e.g. `meeting-…:decision:2`): the id is derived from it (sha256) and it is stored in
   `source_key`; a known key answers the existing record, so the same item is written once even
   for two calls at once.
 

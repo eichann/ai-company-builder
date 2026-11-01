@@ -100,7 +100,7 @@ export interface AiTurnStepTools {
 export const AI_TURN_STEPS: Record<AiTurnStep, AiTurnStepTools> = {
   'minutes-reading': {
     recordTools: [
-      'minutes_read', 'minutes_link_deal', 'minutes__start_reading', 'minutes__finish_reading', 'minutes__fail_reading',
+      'minutes_read', 'minutes_link_bundle', 'meeting__start_reading', 'meeting__finish_reading', 'meeting__fail_reading',
       'records_create', 'decisions_record', 'mail_recipients', 'mail_draft_create', 'mail_draft_update', 'mail_draft_show',
     ],
     recordToolEndings: ['__update_deal', '__log_meeting'],
@@ -118,15 +118,16 @@ export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): bool
   return tools.recordTools.includes(name) || tools.recordToolEndings.some(ending => name.endsWith(ending) && name.length > ending.length)
 }
 
-const MINUTES_ID_RE = /^minutes-[0-9a-z]{6,32}$/
+/** A meeting record's id (`minutes-…` for one made before the type was renamed `meeting`). */
+const MEETING_ID_RE = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
 
-/** The record kinds the runner handles, and each one's claiming action. Today: minutes 「読む」. */
-export const AI_TURN_CLAIM_ACTIONS = { minutes: 'start_reading' } as const
+/** The record kinds the runner handles, and each one's claiming action. Today: reading a meeting's minutes. */
+export const AI_TURN_CLAIM_ACTIONS = { meeting: 'start_reading' } as const
 
 /** The step each kind runs: the server's execution run is per record and step (S10b). */
-export const AI_TURN_KIND_STEPS: Record<keyof typeof AI_TURN_CLAIM_ACTIONS, AiTurnStep> = { minutes: 'minutes-reading' }
+export const AI_TURN_KIND_STEPS: Record<keyof typeof AI_TURN_CLAIM_ACTIONS, AiTurnStep> = { meeting: 'minutes-reading' }
 
 /** A record id the runner may claim (only the kinds above). */
 export function aiTurnKindOf(recordId: string): keyof typeof AI_TURN_CLAIM_ACTIONS | null {
-  return MINUTES_ID_RE.test(recordId) ? 'minutes' : null
+  return MEETING_ID_RE.test(recordId) ? 'meeting' : null
 }

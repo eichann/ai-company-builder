@@ -135,7 +135,7 @@ installElectronAPI({
   },
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
   retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
-  linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
+  linkMinutesBundle: async (companyId, minutesId, bundleId) => { minutesLinks.push([companyId, minutesId, bundleId]); return { success: true } },
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
     windowChanges.emit({ windows: [{ companyId: 'preview-company', sessionId, status: { state: 'idle', line: '' } }] })
@@ -250,7 +250,7 @@ const control = {
   windows: windowCalls,
   /** What main tells the main window about the other windows (statuses, one that closed). */
   windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
-  /** 「どの案件の議事録ですか？」: what the card asked main to link (company, minutes, deal). */
+  /** 「どのまとまりの会議ですか？」: what the card asked main to link (company, meeting, まとまり). */
   minutesLinks,
   /** 「AI の番」 run automatically: the claims (company, record, version, conversation) and settles. */
   aiTurns,

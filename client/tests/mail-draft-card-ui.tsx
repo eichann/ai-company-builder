@@ -27,7 +27,7 @@ const draft: OutboundMailView = {
     { ref: `r${'4'.repeat(24)}`, email: 'partner@third.example', name: null, source: 'typed', firstTime: true },
   ],
   subject: '本日はありがとうございました', body: '鈴木様\n\n本日はありがとうございました。\n資料: https://example.com/doc\n',
-  bodyDeleted: false, linkCount: 1, minutesId: 'minutes-0123456789abcdef', dealId: null, sentAt: null, providerMessageId: null,
+  bodyDeleted: false, linkCount: 1, meetingId: 'meeting-0123456789abcdef', bundleId: null, sentAt: null, providerMessageId: null,
   lastChangedBy: 'ai', updatedAt: '2026-11-05T06:50:00Z',
 }
 const card: MailDraftCard = { id: 'card-1', companyId: 'co-preview', conversationId: 'conv-1', draft, byAi: true, at: '2026-11-05T06:50:00Z' }

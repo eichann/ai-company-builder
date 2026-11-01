@@ -38,7 +38,7 @@ export interface ApprovalPrecedent {
 
 /** A reference shown with the request (材料), re-checked for the viewer's access every time. */
 export interface ApprovalMaterial {
-  kind: 'record' | 'minutes'
+  kind: 'record' | 'meeting'
   recordId: string
   title: string
   /** The record's version the request was made on (record), else null. */
@@ -64,8 +64,8 @@ export interface ApprovalView {
   create: { title: string; fields: Array<{ label: string; shown: string }> } | null
   /** A create of a record: similar records already in ACB that the viewer may read (design §6-3), so a duplicate is noticed before approving; null when not a create or HubSpot could not be asked. */
   similar: Array<{ recordId: string; title: string | null }> | null
-  /** Where the request came from: the minutes' quote (when the viewer may read the minutes, its title too). */
-  basis: { minutesId: string | null; minutesTitle: string | null; quote: string | null }
+  /** Where the request came from: the quote of a meeting's minutes (when the viewer may read the meeting, its title too). */
+  basis: { meetingId: string | null; meetingTitle: string | null; quote: string | null }
   precedents: { total: number; items: ApprovalPrecedent[] }
   materials: ApprovalMaterial[]
   /** The AI's (or requester's) proposed reason: a draft for the approver, not authority. */

@@ -480,7 +480,7 @@ export interface IpcInvokeChannels {
   /** 「今は読まない」. */
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
-  'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
@@ -798,12 +798,12 @@ export interface ElectronAPI {
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
   // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
   getCalendarToday: Invoke<'calendar:today'>
-  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the deal choice.
+  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>
   getMinutesNotices: Invoke<'minutes:notices'>
   skipMinutes: Invoke<'minutes:skip'>
-  linkMinutesDeal: Invoke<'minutes:linkDeal'>
+  linkMinutesBundle: Invoke<'minutes:linkBundle'>
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「AI の番」 run automatically (the main window only).
   getAutoTurnSettings: Invoke<'aiTurns:settings'>

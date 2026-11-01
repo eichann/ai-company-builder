@@ -5,7 +5,7 @@ import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
-import { MINUTES_DEAL_CHOICE_PART_TYPE, readMinutesDealChoiceCard, type MinutesDealChoiceCard } from '../../../shared/minutes-app'
+import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 
@@ -27,7 +27,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const reviewRequests: ReviewRecord[] = []
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
-  const minutesDealChoices: MinutesDealChoiceCard[] = []
+  const minutesDealChoices: MinutesBundleChoiceCard[] = []
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
@@ -42,8 +42,8 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
       if (card && !pluginOperations.some(c => c.id === card.id)) { pluginOperations.push(card); cardOrder.push(`plugin-op-${card.id}`) }
       continue
     }
-    if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
-      const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
+    if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
+      const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)
       if (card && !minutesDealChoices.some(c => c.id === card.id)) { minutesDealChoices.push(card); cardOrder.push(`minutes-deal-${card.id}`) }
       continue
     }
@@ -136,8 +136,8 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     if (ref) cards.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
   }
   for (const stored of msg.minutesDealChoices || []) {
-    const card = readMinutesDealChoiceCard(stored)
-    if (card) cards.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card })
+    const card = readMinutesBundleChoiceCard(stored)
+    if (card) cards.push({ type: MINUTES_BUNDLE_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card })
   }
   for (const stored of msg.mailDrafts || []) {
     const card = readMailDraftCard(stored)

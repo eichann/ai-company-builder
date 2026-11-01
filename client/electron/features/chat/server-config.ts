@@ -130,9 +130,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, onOperationCard, onApprovalCard, onDealChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
-      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onDealChoice, onMailDraft }) : null
+      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({
