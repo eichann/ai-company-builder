@@ -99,15 +99,25 @@ export function readMailDraftCard(data: unknown): MailDraftCard | undefined {
   return { id: c.id, companyId: c.companyId, conversationId: typeof c.conversationId === 'string' ? c.conversationId : null, draft, byAi: c.byAi === true, at: c.at }
 }
 
-/** What the AI is told about a draft it made: the content, never a claim that anything was sent. */
-export function aiMailSummary(draft: OutboundMailView): Record<string, unknown> {
+/**
+ * What the AI is told about a draft it made, changed or showed again (`shown`): the content and
+ * its state, never a claim that the AI sent anything.
+ */
+export function aiMailSummary(draft: OutboundMailView, shown = false): Record<string, unknown> {
   return {
     id: draft.id, version: draft.version, state: draft.state,
     to: draft.to.map(r => ({ ref: r.ref, email: r.email, name: r.name, source: r.source })),
     cc: draft.cc.map(r => ({ ref: r.ref, email: r.email, name: r.name, source: r.source })),
     subject: draft.subject, body: draft.body,
-    instruction: 'The draft is shown to the member as a card. It is NOT sent: only the member sends it, from the card (「確かめて送る」). Never say it was sent. To change it, call mail_draft_update with this version as expectedVersion.',
+    instruction: shown ? SHOWN_INSTRUCTION[draft.state] : 'The draft is shown to the member as a card. It is NOT sent: only the member sends it, from the card (「確かめて送る」). Never say it was sent. To change it, call mail_draft_update with this version as expectedVersion.',
   }
+}
+
+const SHOWN_INSTRUCTION: Record<OutboundMailState, string> = {
+  draft: 'Shown again to the member as a new card here; nothing was changed. It is NOT sent: only the member sends it, from the card (「確かめて送る」). Never say it was sent. Change it only if the member asks (mail_draft_update with this version as expectedVersion).',
+  sent: 'Shown again to the member as a new card here; nothing was changed. The member sent this mail from the card earlier.',
+  unknown: 'Shown again to the member as a new card here; nothing was changed. Whether it arrived is unknown: the member checks Gmail\'s sent folder and answers on the card. Do not send or redraft it unless asked.',
+  discarded: 'Shown again to the member as a new card here; nothing was changed. The member discarded this mail; it cannot be sent.',
 }
 
 export const OUTBOUND_MAIL_OFFLINE_TEXT = 'サーバーに接続できないため、いまは操作できません（オフラインの可能性があります）。'

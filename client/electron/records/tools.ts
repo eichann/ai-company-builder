@@ -50,8 +50,8 @@ export interface RecordToolSpec {
   readOnly: boolean
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
   approvalCard?: boolean
-  /** A mail draft made or changed: the draft becomes a card in the reply (outbound-mail.md). */
-  mailCard?: boolean
+  /** A mail draft made or changed ('changed'), or shown again unchanged ('shown'): the draft becomes a new card in the reply (outbound-mail.md). */
+  mailCard?: 'changed' | 'shown'
   /** A connector's update or create: its outcome becomes a card in the reply. */
   card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>>; kind?: 'update' | 'create' }
   /** The server call for a validated input. */
@@ -204,9 +204,24 @@ export const MAIL_LOOKUP_TOOL: RecordToolSpec = {
   request: input => ({ method: 'POST', path: '/outbound-recipients', body: input }),
 }
 
+const mailId = z.string().regex(/^outbound_message-[0-9a-z]{6,32}$/)
+
+/**
+ * Show an existing draft again, unchanged: a new card with its current state at this point of the
+ * consultation (the earlier card stays as it was). Read only — so the AI never edits content just
+ * to put a card in front of the member.
+ */
+export const MAIL_SHOW_TOOL: RecordToolSpec = {
+  name: 'mail_draft_show', readOnly: true, mailCard: 'shown',
+  schema: z.object({ id: mailId }).strict(),
+  description: 'いまあるメールの下書きを、何も変えずに相談のいまの場所にもう一度カードで出す（いまの中身と状態。送った・捨てたメールはその状態で出る）。前に出したカードを見てもらいたいときはこれを使い、出し直すためだけに件名や本文を直さない。\n' +
+    'Show an existing mail draft again as a new card here, changing nothing (its current content and state; a sent / discarded mail shows as such). Use this to point the member at a draft — never edit a draft just to show it again.',
+  request: input => ({ method: 'GET', path: `/outbound/${enc(String(input.id))}` }),
+}
+
 export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
   {
-    name: 'mail_draft_create', readOnly: false, mailCard: true,
+    name: 'mail_draft_create', readOnly: false, mailCard: 'changed',
     schema: z.object({
       minutesId: recordRef('minutes').optional(), dealId: recordRef('deal').optional(),
       toRefs: z.array(mailRef).min(1).max(20).describe('mail_recipients の ref / refs from mail_recipients'),
@@ -218,14 +233,14 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
     request: input => ({ method: 'POST', path: '/outbound', body: input }),
   },
   {
-    name: 'mail_draft_update', readOnly: false, mailCard: true,
+    name: 'mail_draft_update', readOnly: false, mailCard: 'changed',
     schema: z.object({
-      id: z.string().regex(/^outbound_message-[0-9a-z]{6,32}$/),
+      id: mailId,
       expectedVersion: z.number().int().min(1).describe('下書きの version / the draft\'s version'),
       toRefs: z.array(mailRef).min(1).max(20).optional(), ccRefs: z.array(mailRef).max(20).optional(),
       subject: z.string().min(1).max(200).optional(), body: z.string().min(1).max(20000).optional(),
     }).strict(),
-    description: 'メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。\nChange a mail draft (a new version; NOT sent). Pass only what changes.',
+    description: 'メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。メンバーに頼まれた変更だけにする。前の下書きを見せたいだけなら mail_draft_show。\nChange a mail draft (a new version; NOT sent). Pass only what changes, and only what the member asked for; to just show a draft again use mail_draft_show.',
     request: input => {
       const { id, ...rest } = input
       return { method: 'PUT', path: `/outbound/${enc(String(id))}`, body: rest }
@@ -484,7 +499,7 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
-  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。`
+  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。`
 
 export interface RecordTools {
   specs: RecordToolSpec[]
@@ -531,7 +546,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     if (answer && Array.isArray(answer.plugins)) plugins = answer
   } catch { /* no plugin tools this turn */ }
   // Mail tools exist where outbound_message does; drafting needs an act token (Codex reads only).
-  const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, ...(access.scope === 'act' ? MAIL_ACTION_TOOLS : [])] : []
+  const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? MAIL_ACTION_TOOLS : [])] : []
   const specs = [...LOOKUPS, ...(types.some(t => t.name === 'minutes') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...mail]
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
@@ -554,7 +569,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
           const draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
           if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
           if (options.companyId) options.onMailDraft?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, draft, byAi: true, at: now().toISOString() })
-          return JSON.stringify(aiMailSummary(draft))
+          return JSON.stringify(aiMailSummary(draft, spec.mailCard === 'shown'))
         }
         const choice = spec.dealChoice && options.companyId && answer && typeof answer === 'object'
           ? dealChoiceFor(answer as Parameters<typeof dealChoiceFor>[0], { id: newId(), companyId: options.companyId }) : null

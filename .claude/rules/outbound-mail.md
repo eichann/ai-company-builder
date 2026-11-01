@@ -111,7 +111,7 @@ and ledger stay. The view says `bodyDeleted`.
 /api/companies/:companyId (session)        /api/records-ai (record token)
 POST /outbound-recipients                  POST /outbound-recipients   (read; mail_recipients)
 POST /outbound                             POST /outbound              (act; mail_draft_create)
-GET|PUT /outbound/:messageId               GET /outbound/:messageId (read), PUT (act; mail_draft_update)
+GET|PUT /outbound/:messageId               GET /outbound/:messageId (read; mail_draft_show), PUT (act; mail_draft_update)
 GET|POST /outbound/:messageId/recipients   —
 POST /outbound/:messageId/send             —   (no route: the AI cannot send)
 POST /outbound/:messageId/resolve          —
@@ -123,9 +123,17 @@ Hono change routers (`records.md`). Permission matrix rows + `CROSS` for every `
 
 ## The app
 
-- Tools on `acb_records` (where the type `outbound_message` exists): `mail_recipients` (read,
-  Codex too) and, with an act token, `mail_draft_create` / `mail_draft_update`; there is no send
-  tool. The AI is told the draft is NOT sent (`aiMailSummary`, `RECORDS_INSTRUCTIONS`).
+- Tools on `acb_records` (where the type `outbound_message` exists): `mail_recipients` and
+  `mail_draft_show` (read, Codex too) and, with an act token, `mail_draft_create` /
+  `mail_draft_update`; there is no send tool. The AI is told the draft is NOT sent
+  (`aiMailSummary`, `RECORDS_INSTRUCTIONS`).
+- `mail_draft_show { id }` changes nothing: it reads the member's own draft (the same 404 for
+  anyone else's) and adds a **new** card with its current version and state at this point of the
+  consultation — a sent / discarded mail shows in that state, without 「確かめて送る」. Earlier cards
+  stay as they were. The tool descriptions and `RECORDS_INSTRUCTIONS` tell the AI to use it to
+  point the member at an earlier draft and never to edit content just to get a new card (seen in
+  verification: the AI changed a subject only to re-show a draft far up a long consultation);
+  `mail_draft_update` is for changes the member asked for.
 - A draft becomes the data part `data-mail-draft` (`MailDraftCard`, stored with the message as
   `mailDrafts`), drawn by `src/features/chat/components/MailDraftCard.tsx`: From, To / CC with
   each source's label, subject, the **whole** body, 「本文にリンクが N つあります」,
@@ -153,5 +161,6 @@ interaction with domains only); a lost answer → `unknown`, exactly one mail, n
 no token in any answer, log or table, no content in logs; retention with a fake clock.
 `server/tests/unit/mail-message.test.ts` (encoding, no header injection).
 `client/tests/outbound-mail-tools.test.ts` (tools, refs only, token not session, the card stored,
+showing a draft again = a GET only and a new card,
 the send with the session and the shown hash). `client/tests/ui/mail-draft-card.spec.ts` (sources
 shown, confirm step, the shown hash sent). Permission matrix + `CROSS`, `company-scoped-sql.test.ts`.
