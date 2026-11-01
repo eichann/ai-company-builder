@@ -107,7 +107,9 @@ The execution state lives on the server; the AI still runs only here.
   (`minutes:notices`) does not list the absentee's items yet — not yet wired in the runner.
 
 - **Claim**: `aiTurns:claim` first asks `POST /ai-run-claims { recordId, step:
-  AI_TURN_KIND_STEPS[kind], deviceId, conversationId }` (session). `deviceId` = this app instance
+  AI_TURN_KIND_STEPS[kind], deviceId, conversationId }` (session; the request's
+  `X-ACB-Client-Version` names the build, which the server keeps as the run's procedure with the
+  plugins on then — `records.md` "Which procedure"). `deviceId` = this app instance
   (`app-<uuid>` per launch, `main.ts`). Another PC holding it, or a run waiting for a person or for
   reconciliation → `taken` (the record's action is not run). Then `start_reading` as before; if it
   does not start, the run is finished as temporary (given back for later).

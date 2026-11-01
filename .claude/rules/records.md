@@ -709,7 +709,9 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   `RUN_CLAIMED`. A claim lasts `AI_RUN_CLAIM_TTL_MS` (5 min) and is renewed while running.
   Every claim — a new run, or re-claiming one whose claim expired / was given back — raises the
   **generation**. The run keeps the device (app instance), the consultation, the member whose
-  authority it runs under, and the plugin / steps versions (for looking back).
+  authority it runs under, and which procedure the claim runs ("Which procedure", below; the
+  older self-reported `pluginVersion` / `stepsVersion` are still accepted and shown, nothing sends
+  them).
 - **Fencing**: `POST /me/record-tokens { …, run: { id, generation } }` binds the AI's token to
   the run (only the member's own run, claimed now at that generation for that consultation, else
   409 `RUN_SUPERSEDED`). `recordAiTokens.authenticate` refuses every call of a bound token once
@@ -747,12 +749,27 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   (`afterFailedRun`; minutes reading → `minutes.putBackAfterRun`, actor the member's AI with the
   run's id → `run`), and the 30-minute rule runs in `POST /me/minutes/check` as the server clock
   (`system`) (`minutes.md`).
+- **Which procedure** (owner decision 2026-11-01 「流れを測れる記録」): each claim stores
+  `ai_runs.procedure` (`AiRunProcedure`, `shared/core/ai-runs.ts`): `step`; `app` = the claiming
+  request's `X-ACB-Client-Version` (version + commit + date, kept only when
+  `parseClientVersion` reads it — the step's tools and first message are that build's code); and
+  `plugins` = every plugin install turned on for the company at the claim, `{ id, version }`,
+  **read by the server** (`plugins.installs()`), never taken from the app. Every ledger entry
+  written with a run-bound token **copies** it (`record_ledger.procedure`, filled by the records
+  adapter's `appendLedger` from the run in the same statement), so a later re-claim under a newer
+  app or plugin never changes what an earlier entry says. The history answers `procedure` on run
+  entries only; a person's or a consultation's entries have none (a consultation is the member's
+  own conversation). **No company Skill** is recorded: an unattended step loads none
+  (`ai-turns.md`, `settingSources: []`) — when a step starts using one, its name and the SKILL.md
+  version join the procedure. Additive, nullable columns (`migrateAiRunColumns`).
 - A run is its member's: anyone else, another company's id and a missing one get the same 404
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
 - Test: `server/tests/integration/ai-runs.test.ts` (two devices → one claim; the older
   generation refused and nothing written after a re-claim; the same key → one effect, no key
   refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
-  send until reconciled; each failure class's place; the ledger's cause; another member's /
+  send until reconciled; each failure class's place; the ledger's cause; which procedure each run
+  entry used, unchanged by a later re-claim, none on a person's or consultation's entry, a plugin
+  turned off or an unreadable app build left out; another member's /
   company's run missing — each guard mutation-checked).
 
 ## The content store (中身の箱, owner decision 2026-11-01)

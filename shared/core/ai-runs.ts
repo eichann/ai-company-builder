@@ -79,6 +79,37 @@ export const FAILURE_CODE_RE = /^[A-Z0-9_]{1,60}$/
 /** An app instance's id (random, kept by the app). */
 export const DEVICE_ID_RE = /^[A-Za-z0-9_-]{8,100}$/
 /** A step's name (`minutes-reading`, `task-prep`). */
+/**
+ * Which procedure an automated AI turn used (owner decision 2026-11-01 「流れを測れる記録」,
+ * records.md "Which procedure"): kept on the run at each claim and copied onto every ledger
+ * entry written in it. `step` is the app's step (its tools and instructions); `app` the desktop
+ * app build that ran it (`X-ACB-Client-Version`: version + commit — the step's definition and
+ * first message are that build's code); `plugins` the business / connector plugins turned on
+ * for the company then, with their versions (read by the server, not reported by the app).
+ * No company Skill: an unattended step loads none (ai-turns.md, `settingSources: []`).
+ */
+export interface AiRunProcedure {
+  step: string
+  app: string | null
+  plugins: Array<{ id: string; version: string }>
+}
+
+/** A stored procedure read back (null when absent or not one). */
+export function parseAiRunProcedure(raw: string | null | undefined): AiRunProcedure | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as Partial<AiRunProcedure>
+    if (typeof v?.step !== 'string' || !Array.isArray(v.plugins)) return null
+    return {
+      step: v.step,
+      app: typeof v.app === 'string' ? v.app : null,
+      plugins: v.plugins.filter((p): p is { id: string; version: string } => typeof p?.id === 'string' && typeof p?.version === 'string'),
+    }
+  } catch {
+    return null
+  }
+}
+
 export const AI_RUN_STEP_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
 
 /** What a person sees for each state (plain Japanese, no machinery). */

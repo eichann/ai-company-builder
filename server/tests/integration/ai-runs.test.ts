@@ -17,6 +17,10 @@
  *   without a person (temporary: only after its wait);
  * - the ledger says who caused a change: a person, their AI in a
  *   consultation, an automated run;
+ * - an automated run's entries say which procedure it used (the step, the app
+ *   build that claimed, the plugins on then — read by the server), copied when
+ *   written: a later re-claim under a newer app or plugin never changes an
+ *   earlier entry; a person's and a consultation's entries carry none;
  * - another member's or another company's run is a missing one.
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest'
@@ -51,9 +55,9 @@ const MINUTE = 60_000
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
 
-async function call(opts: { user?: string | null; token?: string; key?: string; method: string; path: string; body?: unknown }) {
+async function call(opts: { user?: string | null; token?: string; key?: string; method: string; path: string; body?: unknown; headers?: Record<string, string> }) {
   currentUser.id = opts.user ?? null
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...opts.headers }
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`
   if (opts.key) headers['Idempotency-Key'] = opts.key
   const res = await app.request(opts.path, { method: opts.method, headers, ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}) })
@@ -151,6 +155,49 @@ describe('fencing: a re-claim refuses the older generation', () => {
     expect((await ai(await runToken('u-bob', run), 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 2, args: { tags: ['見積'] } })).status).toBe(200)
     expect((await session('u-bob', 'POST', `/records/item/${id}/actions/take_over`, { expectedVersion: 3 })).status).toBe(200)
     expect((await ledger(id)).map(e => [e.action, e.cause])).toEqual([['create', 'person'], ['set_tags', 'ai'], ['set_tags', 'run'], ['take_over', 'person']])
+  })
+})
+
+describe('which procedure an automated run used', () => {
+  const plugin = (version: string, enabled = true) => db.prepare(`
+    INSERT INTO plugin_installs (company_id, plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since, key_id, mapping_version, updated_at, updated_by)
+    VALUES (?, 'corporate-sales', ?, 'fp', 'hubspot', 'conn-1', NULL, ?, NULL, NULL, 1, ?, 'u-owner')
+    ON CONFLICT(company_id, plugin_id) DO UPDATE SET version = excluded.version, enabled = excluded.enabled`).run(CO, version, enabled ? 1 : 0, ts())
+  const claimAs = (app: string, recordId: string, deviceId: string) => call({
+    user: 'u-bob', method: 'POST', path: `/api/companies/${CO}/ai-run-claims`, headers: { 'X-ACB-Client-Version': app },
+    body: { recordId, step: 'task-prep', deviceId, conversationId: `conv-${deviceId}` },
+  })
+
+  it('each entry names the step, the app build and the plugins of its claim; a re-claim never rewrites earlier entries', async () => {
+    plugin('0.3.0')
+    const id = await preparingTask('見積の下ごしらえ（手順）')
+    const consult = await session('u-bob', 'POST', '/me/record-tokens', { conversationId: 'consult-proc', agent: 'claude-code', scope: 'act' })
+    expect((await ai(consult.body.data.token, 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 1, args: { tags: ['相談'] } })).status).toBe(200)
+
+    const a = (await claimAs('0.0.1+abc1234.20261101120000', id, 'device-pppp')).body.data.run
+    expect(a.procedure).toEqual({ step: 'task-prep', app: '0.0.1+abc1234.20261101120000', plugins: [{ id: 'corporate-sales', version: '0.3.0' }] })
+    expect((await ai(await runToken('u-bob', a), 'POST', `/item/${id}/actions/set_tags`, { expectedVersion: 2, args: { tags: ['見積'] } })).status).toBe(200)
+
+    // The plugin is updated, the claim expires, a newer app takes it over.
+    plugin('0.4.0')
+    later(6 * MINUTE)
+    const b = (await claimAs('0.0.2+def5678.20261102120000', id, 'device-qqqq')).body.data.run
+    expect((await ai(await runToken('u-bob', b), 'POST', `/item/${id}/actions/hand_over`, { expectedVersion: 3, note: '情報が足りない' })).status).toBe(200)
+
+    const entries = await ledger(id)
+    expect(entries.map(e => [e.action, e.cause, e.procedure ?? null])).toEqual([
+      ['create', 'person', null],
+      ['set_tags', 'ai', null],
+      ['set_tags', 'run', { step: 'task-prep', app: '0.0.1+abc1234.20261101120000', plugins: [{ id: 'corporate-sales', version: '0.3.0' }] }],
+      ['hand_over', 'run', { step: 'task-prep', app: '0.0.2+def5678.20261102120000', plugins: [{ id: 'corporate-sales', version: '0.4.0' }] }],
+    ])
+  })
+
+  it('a plugin turned off is not part of it; an app build that does not parse is not kept', async () => {
+    plugin('0.4.0', false)
+    const id = await preparingTask('お礼状（手順）')
+    const run = (await claimAs('not a version; DROP', id, 'device-rrrr')).body.data.run
+    expect(run.procedure).toEqual({ step: 'task-prep', app: null, plugins: [] })
   })
 })
 

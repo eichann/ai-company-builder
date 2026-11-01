@@ -14,7 +14,7 @@
  * (`POST /me/record-tokens { …, run: { id, generation } }`) and an
  * `Idempotency-Key` header on every outside operation.
  */
-import type { AiRunFailureClass, AiRunOperationState, AiRunState } from '../core/ai-runs'
+import type { AiRunFailureClass, AiRunOperationState, AiRunProcedure, AiRunState } from '../core/ai-runs'
 
 export interface AiRunOperationView {
   key: string
@@ -42,6 +42,8 @@ export interface AiRunView {
   attempts: number
   pluginVersion: string | null
   stepsVersion: string | null
+  /** Which procedure the latest claim runs (step, app build, plugins; records.md "Which procedure"); null on runs claimed before. */
+  procedure: AiRunProcedure | null
   /** A person must act before it goes on (「もう一度」 or reconciling). */
   needsPerson: boolean
   operations: AiRunOperationView[]

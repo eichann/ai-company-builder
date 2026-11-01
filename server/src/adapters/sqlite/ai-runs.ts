@@ -8,21 +8,21 @@ import type Database from 'better-sqlite3'
 import type { AiRunOperationRow, AiRunRepository, AiRunRow } from '../../ports/ai-runs'
 
 const RUN_COLUMNS = `id, record_id, step, user_id, state, generation, device_id, conversation_id, claim_expires_at, failure_class, failure_code,
-  retry_at, attempts, plugin_version, steps_version, created_at, updated_at, closed_at`
+  retry_at, attempts, plugin_version, steps_version, procedure, created_at, updated_at, closed_at`
 type RunDbRow = {
   id: string; record_id: string; step: string; user_id: string; state: AiRunRow['state']; generation: number; device_id: string | null
   conversation_id: string | null; claim_expires_at: string | null; failure_class: AiRunRow['failureClass']; failure_code: string | null
-  retry_at: string | null; attempts: number; plugin_version: string | null; steps_version: string | null; created_at: string; updated_at: string
+  retry_at: string | null; attempts: number; plugin_version: string | null; steps_version: string | null; procedure: string | null; created_at: string; updated_at: string
   closed_at: string | null
 }
 const toRun = (r: RunDbRow): AiRunRow => ({
   id: r.id, recordId: r.record_id, step: r.step, userId: r.user_id, state: r.state, generation: r.generation, deviceId: r.device_id,
   conversationId: r.conversation_id, claimExpiresAt: r.claim_expires_at, failureClass: r.failure_class, failureCode: r.failure_code,
-  retryAt: r.retry_at, attempts: r.attempts, pluginVersion: r.plugin_version, stepsVersion: r.steps_version, createdAt: r.created_at,
+  retryAt: r.retry_at, attempts: r.attempts, pluginVersion: r.plugin_version, stepsVersion: r.steps_version, procedure: r.procedure, createdAt: r.created_at,
   updatedAt: r.updated_at, closedAt: r.closed_at,
 })
 const runValues = (r: AiRunRow) => [r.recordId, r.step, r.userId, r.state, r.generation, r.deviceId, r.conversationId, r.claimExpiresAt,
-  r.failureClass, r.failureCode, r.retryAt, r.attempts, r.pluginVersion, r.stepsVersion, r.createdAt, r.updatedAt, r.closedAt]
+  r.failureClass, r.failureCode, r.retryAt, r.attempts, r.pluginVersion, r.stepsVersion, r.procedure, r.createdAt, r.updatedAt, r.closedAt]
 
 const OP_COLUMNS = 'run_id, key, fingerprint, kind, state, generation, ref_kind, ref_id, status, reconciled_by, created_at, updated_at'
 type OpDbRow = {
@@ -53,12 +53,12 @@ export function sqliteAiRunRepository(conn: Database.Database, companyId: string
         .all(companyId, userId) as RunDbRow[]).map(toRun)
     },
     insert(row) {
-      conn.prepare(`INSERT INTO ai_runs (company_id, ${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      conn.prepare(`INSERT INTO ai_runs (company_id, ${RUN_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, row.id, ...runValues(row))
     },
     update(row, expected) {
       return conn.prepare(`UPDATE ai_runs SET record_id = ?, step = ?, user_id = ?, state = ?, generation = ?, device_id = ?, conversation_id = ?,
-          claim_expires_at = ?, failure_class = ?, failure_code = ?, retry_at = ?, attempts = ?, plugin_version = ?, steps_version = ?, created_at = ?,
+          claim_expires_at = ?, failure_class = ?, failure_code = ?, retry_at = ?, attempts = ?, plugin_version = ?, steps_version = ?, procedure = ?, created_at = ?,
           updated_at = ?, closed_at = ?
         WHERE company_id = ? AND id = ? AND generation = ? AND state = ?`)
         .run(...runValues(row), companyId, row.id, expected.generation, expected.state).changes === 1

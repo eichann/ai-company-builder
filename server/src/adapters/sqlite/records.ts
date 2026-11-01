@@ -7,6 +7,7 @@
  * builds SQL from values and never hits the bound-parameter limit.
  */
 import type Database from 'better-sqlite3'
+import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
 import type { ExternalReceipt, LedgerEntry } from '../../../shared/core/record-ledger'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
@@ -32,6 +33,7 @@ type LedgerRow = {
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
   proposed_by: string | null; conversation_id: string | null; receipt: string | null; on_behalf_of: string | null; run_id: string | null
+  procedure: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
@@ -40,6 +42,7 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   proposedBy: r.proposed_by === 'ai' ? 'ai' : null, conversationId: r.conversation_id,
   receipt: r.receipt ? JSON.parse(r.receipt) as ExternalReceipt : null,
   runId: r.run_id,
+  ...(r.run_id ? { procedure: parseAiRunProcedure(r.procedure) } : {}),
   ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
 })
 
@@ -252,7 +255,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     ledger(recordId) {
       const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
       return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
@@ -269,11 +272,15 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       const type = contents.typeOfRecord(entry.recordId)
       const b = contents.batch(entry.recordId, type)
       const e = contents.storeEntry(b, type, entry)
+      // An entry written in an execution run copies the run's procedure as it is now (records.md
+      // "Which procedure"): a later re-claim never changes what an earlier entry says.
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?))`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
-          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null)
+          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null,
+          companyId, e.runId ?? null)
       b.flush(e.at)
     },
 

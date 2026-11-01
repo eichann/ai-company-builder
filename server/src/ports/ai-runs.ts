@@ -26,6 +26,8 @@ export interface AiRunRow {
   attempts: number
   pluginVersion: string | null
   stepsVersion: string | null
+  /** JSON of AiRunProcedure as of the latest claim (records.md "Which procedure"); null on runs claimed before. */
+  procedure: string | null
   createdAt: string
   updatedAt: string
   closedAt: string | null
