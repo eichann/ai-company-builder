@@ -186,7 +186,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
 
   // The company map (light ontology 4-2): indexed from pushes, off per company by default.
-  const recordIndexer = createRecordIndexer({ ...shared, recordFiles: gitRecordFileSource() })
+  const recordFiles = gitRecordFileSource()
+  const recordIndexer = createRecordIndexer({ ...shared, recordFiles })
 
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
@@ -427,7 +428,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
-    records: createRecordService({ ...shared, indexer: recordIndexer }),
+    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
     recordEngine,
     decisions,
     recordAiTokens: createRecordAiTokenService({

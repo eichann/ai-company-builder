@@ -839,6 +839,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);
     CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
     CREATE INDEX IF NOT EXISTS idx_record_links_target ON record_links(company_id, target_id);
+    CREATE INDEX IF NOT EXISTS idx_record_links_path ON record_links(company_id, target_path);
     CREATE INDEX IF NOT EXISTS idx_record_ledger_company_at ON record_ledger(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_record_ai_tokens_member ON record_ai_tokens(company_id, user_id, expires_at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);

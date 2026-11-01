@@ -119,6 +119,12 @@ export interface RecordLinkView {
   record?: RecordSummary
   /** A file of the company folder (outgoing file links). */
   path?: string
+  /**
+   * With `path`: true when no file or folder is at that path now (deleted, or
+   * moved where the link could not follow) — 「つながりが切れています」. Absent
+   * when the server could not tell.
+   */
+  broken?: boolean
 }
 
 export interface RecordDetail {

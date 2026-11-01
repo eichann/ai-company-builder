@@ -25,6 +25,7 @@ paths:
   - "server/src/lib/record-files.ts"
   - "server/tests/unit/record-*.test.ts"
   - "server/tests/integration/records.test.ts"
+  - "server/tests/integration/record-links.test.ts"
   - "server/tests/unit/push-channel.test.ts"
 ---
 
@@ -116,6 +117,35 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   - **public → private links** are stored but never shown or followed, for anyone
     (`linkAllowed`): a record outside a private folder never reveals or reaches one inside it.
 - A removed file marks the record removed (`removed_at`); its state is kept.
+
+### Links to files (owner decision 10/29)
+
+- A link whose target is a file is stored as a company path (`record_links.target_path`). The
+  indexer reads each repository's diff with git's rename detection (`diff-tree -M`, any file
+  type, `lib/record-files.ts` `renames`) and points every link to a renamed or moved file at its
+  new path (`followRename` / `retargetFileLinks`) — after the record files of the same push, so a
+  record file re-read there (its own text may still name the old path) ends on the new one; the
+  next edit of that file restores what its text says (file records are a company's own types
+  only). Exact path matches only: a link to a folder follows a department rename (below), not
+  a member's folder move.
+- Never across a private folder's edge (`followRename`): both paths in the same place (company
+  repository or one private folder), and the new path one the source may link to at all
+  (`linkAllowed`) — a record outside a private folder never gets a path inside it (a rename
+  inside the folder leaves its link on the old path), and a move into or out of one is a delete
+  plus an add in two repositories anyway. Such a link stays and reads as broken.
+- A department renamed by the server (`services/departments.ts` update, same transaction as the
+  scopes): `records.moveFolder` moves server records' readers' `folder` (else they would take the
+  old path's rules), links to files at or under it and the minutes folder. Departments with a
+  private folder inside cannot be renamed, so nothing private moves.
+- A deleted file's link stays. The detail (`GET /records/item/:recordId`, the AI's `records_get`)
+  marks each file link it shows `broken: true | false` — whether a file or folder is at that path
+  on the shared branch now (`RecordFileSource.existing`, the private folder's own repository for a
+  path inside one; only paths already shown to the reader are looked up; absent when git could not
+  tell). The app says 「つながりが切れています」.
+- Tests: `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
+  folder for an outside record nor across its edge, department move with `_` in names,
+  cross-company), `tests/integration/record-links.test.ts` (real git rename detection, broken
+  flag, department rename through the service) — mutation-checked.
 
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 

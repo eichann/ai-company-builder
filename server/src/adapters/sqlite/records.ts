@@ -115,6 +115,23 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       return (conn.prepare('SELECT source_id, name, position, target_id, target_path FROM record_links WHERE company_id = ? AND target_id IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
         .all(companyId, JSON.stringify(ids)) as LinkRow[]).map(toLink)
     },
+    fileLinksTo(paths) {
+      if (paths.length === 0) return []
+      return (conn.prepare('SELECT source_id, name, position, target_id, target_path FROM record_links WHERE company_id = ? AND target_path IN (SELECT value FROM json_each(?)) ORDER BY source_id, name, position')
+        .all(companyId, JSON.stringify(paths)) as LinkRow[]).map(toLink)
+    },
+    retargetFileLinks(links) {
+      const update = conn.prepare('UPDATE record_links SET target_path = ? WHERE company_id = ? AND source_id = ? AND name = ? AND position = ? AND target_id IS NULL')
+      for (const l of links) update.run(l.targetPath, companyId, l.sourceId, l.name, l.position)
+    },
+    moveFolder(from, to) {
+      // At or under `from` without LIKE (folder names may hold _ and %).
+      const under = (col: string) => `(${col} = @from OR substr(${col}, 1, length(@from) + 1) = @from || '/')`
+      const moved = (col: string) => `@to || substr(${col}, length(@from) + 1)`
+      conn.prepare(`UPDATE records SET folder = ${moved('folder')} WHERE company_id = @company AND ${under('folder')}`).run({ company: companyId, from, to })
+      conn.prepare(`UPDATE record_links SET target_path = ${moved('target_path')} WHERE company_id = @company AND target_id IS NULL AND ${under('target_path')}`).run({ company: companyId, from, to })
+      conn.prepare('UPDATE record_settings SET minutes_folder = @to WHERE company_id = @company AND minutes_folder = @from').run({ company: companyId, from, to })
+    },
     replaceLinks(sourceId, links) {
       conn.prepare('DELETE FROM record_links WHERE company_id = ? AND source_id = ?').run(companyId, sourceId)
       const insert = conn.prepare('INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path) VALUES (?, ?, ?, ?, ?, ?)')

@@ -12,12 +12,20 @@ export interface RecordFileChange {
   text: string | null
 }
 
+/** A file renamed or moved (git's rename detection), paths inside that repository. */
+export interface RecordFileRename {
+  from: string
+  to: string
+}
+
 export interface RecordRepoRead {
   /** The tip that was read; null when the repository has no shared branch. */
   tip: string | null
   /** true: `changes` lists every candidate file (anything not listed is gone). */
   full: boolean
   changes: RecordFileChange[]
+  /** Files renamed or moved since the commit read last (links follow them); none on a full read. */
+  renames: RecordFileRename[]
 }
 
 /** The state engine's milestone line (4-3 duty 5), written as the server's own commit. */
@@ -34,6 +42,11 @@ export interface RecordFileWriter {
 export interface RecordFileSource {
   /** Changes since `since` (a commit indexed before), or every candidate when null / unknown. */
   read(companyId: string, repo: RecordFileRepo, since: string | null): Promise<RecordRepoRead>
+  /**
+   * Which of `paths` (inside `repo`) exist on its shared branch now, as a file
+   * or a folder; null when that cannot be told (no repository, git failed).
+   */
+  existing(companyId: string, repo: RecordFileRepo, paths: string[]): Promise<Set<string> | null>
 }
 
 /** A record file the server itself writes (decisions, records.md), as its own commit through the push checker. */

@@ -9,6 +9,7 @@
  * counted for someone who cannot read it. The handle is the caller's company
  * (`member.companyId`): another company's record id is a record that does not exist.
  */
+import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type {
@@ -17,9 +18,11 @@ import type {
 import { OLD_CONNECTION_LABEL } from '../../shared/types/records'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { RecordFileRepo, RecordFileSource } from '../ports/record-files'
 import type { RecordAccessRow, RecordCandidateFilter, RecordRepository, RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { requireFullAccess } from './access'
+import { logError } from '../lib/error-log'
 import { ok, refuse, type Outcome } from './outcome'
 import { linkAllowed, recordReader, type RecordReader } from './record-access'
 import { currentTypes, type RecordIndexer } from './record-index'
@@ -37,6 +40,44 @@ export interface RecordServiceDeps {
   companyData: CompanyDataSource
   clock: Clock
   indexer: RecordIndexer
+  /**
+   * Tells whether linked files still exist (the detail's `broken`). Without
+   * it (tests that read no repository) file links carry no `broken`.
+   */
+  recordFiles?: Pick<RecordFileSource, 'existing'>
+}
+
+/**
+ * Which of these company paths exist now: each read from the repository
+ * holding it (a private folder's own, else the company's). Paths in a
+ * repository that cannot be read are left out of both answers.
+ */
+async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId: string, paths: string[], scopes: ScopeWithRules[]): Promise<{ missing: Set<string>; known: Set<string> }> {
+  const groups = new Map<string, { repo: RecordFileRepo; prefix: string; paths: string[] }>()
+  for (const p of paths) {
+    const s = findPrivateScope(scopes, p)
+    const key = s ? `scope:${s.id}` : 'company'
+    const g = groups.get(key) ?? { repo: s ? { kind: 'scope', repoId: s.repoId as string } : { kind: 'company' }, prefix: s ? s.path : '', paths: [] }
+    g.paths.push(p)
+    groups.set(key, g)
+  }
+  const missing = new Set<string>()
+  const known = new Set<string>()
+  for (const g of groups.values()) {
+    const inside = (p: string) => (g.prefix === '' ? p : p.slice(g.prefix.length + 1))
+    let found: Set<string> | null = null
+    try {
+      found = await files.existing(companyId, g.repo, g.paths.filter(p => p !== g.prefix).map(inside))
+    } catch (err) {
+      logError('records', 'Checking linked files failed', err, { company: companyId })
+    }
+    if (found === null) continue
+    for (const p of g.paths) {
+      known.add(p)
+      if (p !== g.prefix && !found.has(inside(p))) missing.add(p)
+    }
+  }
+  return { missing, known }
 }
 
 type Scalar = RecordFieldValue
@@ -154,7 +195,8 @@ function neighbours(records: RecordRepository, reader: RecordReader, from: Recor
   return [...found.values()]
 }
 
-export function createRecordService({ companyData, clock, indexer }: RecordServiceDeps) {
+export function createRecordService(deps: RecordServiceDeps) {
+  const { companyData, clock, indexer } = deps
   const handleOf = (member: Member) => companyData.forCompany(member.companyId)
   /** Records of an earlier connection of an outside system (plugins.md "Connections"). */
   const oldConnectionIds = (member: Member): Set<string> => new Set(handleOf(member).plugins.oldConnectionRecordIds())
@@ -331,10 +373,11 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
       return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
     },
 
-    get(member: Member, recordId: string): Outcome<RecordDetail> {
+    async get(member: Member, recordId: string): Promise<Outcome<RecordDetail>> {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
-      const reader = recordReader(member, handleOf(member).scopes.listWithRules())
+      const scopes = handleOf(member).scopes.listWithRules()
+      const reader = recordReader(member, scopes)
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       const out = records.linksFrom([row.id])
@@ -353,9 +396,16 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
         if (s && linkAllowed(s, row) && reader.record(s)) { shown.set(s.id, s); links.push({ name: l.name, direction: 'in', id: s.id }) }
       }
       const sums = recordSummaries(records, [row, ...shown.values()], oldConnectionIds(member))
+      // Only paths already shown to this reader are looked up.
+      const filePaths = links.flatMap(l => (l.path !== undefined ? [l.path] : []))
+      const files = deps.recordFiles && filePaths.length > 0
+        ? await missingPaths(deps.recordFiles, member.companyId, filePaths, scopes)
+        : null
       return ok({
         record: sums.get(row.id)!,
-        links: links.map((l): RecordLinkView => (l.id ? { name: l.name, direction: l.direction, record: sums.get(l.id)! } : { name: l.name, direction: l.direction, path: l.path! })),
+        links: links.map((l): RecordLinkView => (l.id
+          ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
+          : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}) })),
       })
     },
   }
