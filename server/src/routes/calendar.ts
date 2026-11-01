@@ -11,21 +11,15 @@
  * company route.
  */
 import { Hono } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import { refusal } from './respond'
+import { companyMember } from './guards'
 
 export const calendarRoute = new Hono()
-const { access, calendar } = services
+const { calendar } = services
 
-calendarRoute.get('/me/calendar/today', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  const result = await calendar.today(member)
+calendarRoute.get('/me/calendar/today', companyMember, async (c) => {
+  const result = await calendar.today(c.var.member)
   c.header('Cache-Control', 'no-store')
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })

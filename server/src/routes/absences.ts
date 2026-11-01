@@ -11,48 +11,31 @@
  * to; anyone else 403. Non-members get 404 like every company route.
  */
 import { Hono } from 'hono'
-import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
+import { z } from 'zod'
 import { refusal } from './respond'
+import { companyMember, query, serviceBody } from './guards'
 
 export const absencesRoute = new Hono()
-const { access, absences } = services
+const { absences } = services
 
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
+const AbsencesQuery = z.object({ userId: z.string().optional() })
 
-absencesRoute.get('/absences', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  const userId = c.req.query('userId')
-  const result = absences.view(member, userId === undefined || userId === '' ? undefined : userId)
+absencesRoute.get('/absences', companyMember, query(AbsencesQuery), (c) => {
+  const { userId } = c.var.query
+  const result = absences.view(c.var.member, userId === undefined || userId === '' ? undefined : userId)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-absencesRoute.post('/absences', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  let body: unknown
-  try { body = await c.req.json() } catch { body = null }
-  const result = absences.create(member, body)
+absencesRoute.post('/absences', companyMember, serviceBody, (c) => {
+  const result = absences.create(c.var.member, c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, 201)
 })
 
-absencesRoute.delete('/absences/:absenceId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  const result = absences.remove(member, c.req.param('absenceId'))
+absencesRoute.delete('/absences/:absenceId', companyMember, (c) => {
+  const result = absences.remove(c.var.member, c.req.param('absenceId'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

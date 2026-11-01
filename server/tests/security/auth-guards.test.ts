@@ -9,6 +9,11 @@
  *
  * The only endpoints meant to be reachable without a session are listed in
  * PUBLIC_ENDPOINTS with their reason.
+ *
+ * Every endpoint also names one of src/routes/guards.ts's guards as its first
+ * handler (companyMember, signedIn, publicRoute), so a forgotten check cannot
+ * be written (server.md "Route guards"). Files still being moved onto the
+ * guards are in NOT_YET_GUARDED; that list only shrinks.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { readdirSync } from 'fs'
@@ -24,6 +29,7 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { Hono } from 'hono'
+import { guardKind } from '../../src/routes/guards'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
@@ -35,7 +41,22 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
   'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 
-interface Endpoint { file: string; method: string; path: string; app: Hono }
+/**
+ * Route files whose endpoints still check the session by hand. Moved file by
+ * file onto the guards; remove a file here when it is moved (the test fails
+ * while a listed file is fully guarded). Never add one.
+ */
+const NOT_YET_GUARDED = new Set([
+  'agent-events.ts', 'agent-sandbox.ts', 'agent-stops.ts', 'ai-runs.ts', 'approvals.ts',
+  'broker-relay.ts', 'companies.ts', 'company-files.ts', 'core-connectors.ts', 'departments.ts',
+  'folder-sizes.ts', 'git-http.ts', 'git.ts', 'google-drive.ts', 'google.ts', 'identities.ts',
+  'inbox.ts', 'invitations.ts', 'key-broker.ts', 'minutes.ts', 'oauth.ts', 'outbound-mail.ts',
+  'permission-rules.ts', 'permissions.ts', 'plugins.ts', 'private-folders.ts',
+  'records-ai-identities.ts', 'records-ai-inbox.ts', 'records-ai.ts', 'records.ts',
+  'slack-connection.ts',
+])
+
+interface Endpoint { file: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
 
 const endpoints: Endpoint[] = []
 
@@ -46,9 +67,14 @@ beforeAll(async () => {
     for (const value of Object.values(mod)) {
       if (!(value instanceof Hono)) continue
       const app = new Hono().route('/', value)
+      const seen = new Set<string>()
       for (const r of value.routes) {
         if (r.method === 'ALL') continue // middleware
-        endpoints.push({ file, method: r.method, path: r.path, app })
+        // `get(path, guard, …, handler)` lists one entry per handler: the first is the guard.
+        const key = `${r.method} ${r.path}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        endpoints.push({ file, method: r.method, path: r.path, app, guard: guardKind(r.handler) })
       }
     }
   }
@@ -93,5 +119,24 @@ describe('Authentication guards', () => {
     expect(violations, `These endpoints answer without a session:\n${violations.join('\n')}`).toEqual([])
     expect([...publicSeen].sort(), 'a listed public endpoint no longer exists: remove it from PUBLIC_ENDPOINTS')
       .toEqual(Object.keys(PUBLIC_ENDPOINTS).sort())
+  })
+
+  it('every endpoint starts with a route guard (companyMember, signedIn, publicRoute)', () => {
+    const missing: string[] = []
+    const wrongPublic: string[] = []
+    for (const e of endpoints) {
+      if (NOT_YET_GUARDED.has(e.file)) continue
+      const key = `${e.file} ${e.method} ${e.path}`
+      if (e.guard === null) missing.push(key)
+      else if ((e.guard === 'public') !== (key in PUBLIC_ENDPOINTS)) wrongPublic.push(`${key} (${e.guard})`)
+    }
+    expect(missing, 'Endpoints without a guard from src/routes/guards.ts as their first handler').toEqual([])
+    expect(wrongPublic, 'publicRoute(...) is for exactly the PUBLIC_ENDPOINTS, and they use it').toEqual([])
+  })
+
+  it('NOT_YET_GUARDED lists only files that still have an unguarded endpoint', () => {
+    const files = new Set(endpoints.map(e => e.file))
+    const stale = [...NOT_YET_GUARDED].filter(f => files.has(f) && endpoints.filter(e => e.file === f).every(e => e.guard !== null))
+    expect(stale, 'these files are fully guarded now: remove them from NOT_YET_GUARDED').toEqual([])
   })
 })

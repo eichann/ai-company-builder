@@ -14,7 +14,7 @@ access in `company-files.md`. Full text and incidents: `docs/architecture/server
 ## Layers (R5)
 
 ```
-routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service, map the answer
+routes/    HTTP only: a guard (routes/guards.ts), parsed input, call a service, map the answer
   → services/   business rules; authorization through services/access.ts (shared/core roles)
     → ports/    interfaces (CompanyDataSource = company handles, repositories, RepoStore, CompanyLock, Clock/IdGenerator,
                 AccountDirectory, SecretCipher, UpstreamClient, Transactions)
@@ -80,6 +80,35 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   and no `CROSS` row fails the test, unless it is in `NOT_OBJECT_IDS` with its reason (invitation
   link tokens, the relay, service names that set this company's own row). A new endpoint that
   takes an id gets its `CROSS` row in the same PR.
+
+## Route guards (2026-11-02, required before the next release)
+
+Every endpoint names, as its first handler, a guard from `src/routes/guards.ts`, so a forgotten
+sign-in or membership check cannot be written:
+
+```ts
+route.get('/things', companyMember, (c) => things.list(c.var.member))          // session + member of :companyId
+route.put('/things', companyMember, serviceBody, (c) => things.save(c.var.member, c.var.body))
+route.post('/x', companyMember, body(XInput), (c) => …c.var.body…)            // zod; bad input → 400 fixed text
+route.get('/', signedIn, (c) => …c.var.user…)                                   // session, no company
+route.post('/hook', publicRoute('what proves the caller'), (c) => …)            // + PUBLIC_ENDPOINTS
+```
+
+- `companyMember`: 401 `{ error: 'Unauthorized' }` without a session; 404 `Company not found or
+  access denied` for a non-member (same as a company that does not exist). The handler uses
+  `c.var.member` (company, user, role from the server) and never reads `companyId` from the URL.
+  Role checks stay in the services (their 403 texts are part of the API).
+- `body(schema, error?)` / `query(schema, error?)` (zod): the 400 answer is a fixed text, never
+  the request's values or zod's message. They run before the handler, so use them only where the
+  endpoint answered 400 before any role check; a service that checks the role first and then its
+  own `unknown` input gets `serviceBody` (null when not JSON), keeping who → body → rules.
+- Enforcement: `tests/security/auth-guards.test.ts` fails for an endpoint whose first handler is
+  not a guard, and for `publicRoute` outside `PUBLIC_ENDPOINTS`; `eslint.config.mjs` forbids
+  `getUserFromRequest`, `c.req.json()` and `c.req.param('companyId')` in `src/routes`
+  (`guards.ts` and the app-wide `client-activity-middleware.ts` excepted). Files not moved yet are
+  in `NOT_YET_GUARDED` (test and ESLint, warn only); the list only shrinks.
+- `guard-tags.ts` holds the guard registry and `publicRoute` without the session or composition
+  imports, so a public route factory (`slack.ts`) stays light.
 
 ## Lane markers (parallel lanes A connectors, B inbox, C plugins)
 
