@@ -45,6 +45,7 @@ import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { createDrivePicking } from './features/google/drive'
 import { registerCalendarIpc } from './features/calendar/ipc'
+import { registerTasksIpc } from './features/tasks/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
@@ -257,6 +258,8 @@ const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: se
 const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, window: createDrivePickerWindow(__dirname), google: googleApi })
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
 registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The task list (features/tasks): read and changed with the session here; the server decides who may.
+registerTasksIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Search hits, the record card and a file's 「つながっているもの」 (features/record-views).

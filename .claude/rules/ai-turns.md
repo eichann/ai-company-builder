@@ -146,8 +146,8 @@ usage pause, today's limit, a stop); `not-allowed` (no Claude Code, Codex, not s
 setting off); `failed` (the AI could not finish — handed to the person at once with the reason);
 `handed` (given to the person early). The runner reports them through `ChatPanel`'s
 `onAiTurnItems` (`AiTurnItemsView`: items + `retry` + `handOver`); AppShell passes them to the
-minutes notice, which shows the state and reason per record (the task list will take the same
-view). Anything stopped offers **「もう一度」** (`retried`: hand-off and today's attempts cleared, a
+minutes notice, which shows the state and reason per record, and to the task list's AI-turn rows
+(`tasks-ui.md`). Anything stopped offers **「もう一度」** (`retried`: hand-off and today's attempts cleared, a
 stop or pause lifted) and **「人に渡す」** (`handedOver`: the AI will not start it; the reason is
 kept). Handed early, without waiting for the AI's preparation: a failed run (`recordOutcome`), a
 record due within 2 hours that the AI has not started (`handUrgent`), and a running one whose AI

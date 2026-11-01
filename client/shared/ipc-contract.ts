@@ -41,6 +41,7 @@ import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
+import type { TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from './tasks'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
@@ -477,6 +478,11 @@ export interface IpcInvokeChannels {
   // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
   /** Not being able to read the calendar is an empty list with a reason (`data.reason`), not a failure. */
   'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
+  // The task list (tasks.ts): read and changed with the member's session in main; the server decides who may.
+  'tasks:list': { args: [companyId: string]; result: TaskListResult }
+  /** The list's one line: a task of the member's own (only they see it). */
+  'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
+  'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
   'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -808,6 +814,10 @@ export interface ElectronAPI {
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
   // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
   getCalendarToday: Invoke<'calendar:today'>
+  // The task list (やることの一覧).
+  getTaskList: Invoke<'tasks:list'>
+  createTask: Invoke<'tasks:create'>
+  actOnTask: Invoke<'tasks:act'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>
