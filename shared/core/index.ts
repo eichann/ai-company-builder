@@ -18,6 +18,7 @@
  *   core-types.ts         the core types task and interaction
  *   upstream-path.ts      the one check of a path sent to an outside service (relay, plugins)
  *   plugins.ts            connector plugins: declaration, mapping, field policies, value translation
+ *                         (re-exports the plugin-*.ts modules, one per responsibility)
  *   fixed-content.ts      canonical JSON of content a person approves or sends (the server hashes it)
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
