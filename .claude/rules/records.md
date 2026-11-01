@@ -1297,3 +1297,11 @@ entries say which procedure (or Skill) made them, copied as in "Which procedure"
 `RecordEngineDeps.afterAct(companyId, change)` runs after an action is committed (never throws
 into the engine; nothing is undone when it fails). One user: the inbox drops a 返事のお願い's reply
 drafts on the person's 「もう返した」 (`inbox.md`). Test: `server/tests/unit/inbox.test.ts`.
+
+## After an action: the reaction with its actor (plan C5)
+
+`recordEngine.useAfterAction(f)` (bound once, `composition/plugins.ts`): after an action's state and
+ledger are written (and after lane B's `afterAct` above), the engine awaits `f(member, actor, {
+recordId, type, action, toState })` — it needs the acting member and actor, which `afterAct` does not
+carry; a failure there never changes the action's answer. Today it moves a meeting's まとまり to its business
+plugin's step (`plugin-steps.md` "After a meeting is read").

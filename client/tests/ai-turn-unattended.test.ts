@@ -72,10 +72,11 @@ test('an agent that cannot honour an unattended step refuses it instead of runni
 
 test('minutes reading declares only its record tools', () => {
   for (const name of ['minutes_read', 'minutes_link_bundle', 'meeting__start_reading', 'meeting__finish_reading', 'meeting__fail_reading', 'records_create',
-    'decisions_record', 'mail_draft_create', 'mail_draft_update', 'mail_draft_show', 'mail_recipients', 'corporate-sales__update_deal', 'corporate-sales__log_meeting']) {
+    'decisions_record', 'mail_draft_create', 'mail_draft_update', 'mail_draft_show', 'mail_recipients']) {
     assert.ok(aiTurnStepAllowsRecordTool('minutes-reading', name), name)
   }
-  for (const name of ['records_query', 'records_link_file', 'records_my_turn', 'approvals_list', 'task__complete', '__update_deal', 'corporate-sales__create_deal', 'minutes__start_reading', 'meeting__skip']) {
+  // No business plugin's operation (the まとまり's part is the plugin's own step, plugin-steps.md).
+  for (const name of ['records_query', 'records_link_file', 'records_my_turn', 'approvals_list', 'task__complete', '__update_deal', 'corporate-sales__update_deal', 'corporate-sales__log_meeting', 'corporate-sales__create_deal', 'minutes__start_reading', 'meeting__skip']) {
     assert.ok(!aiTurnStepAllowsRecordTool('minutes-reading', name), name)
   }
 })

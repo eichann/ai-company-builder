@@ -42,7 +42,9 @@ export const minutesReading = {
       'minutes_read', 'minutes_link_bundle', 'meeting__start_reading', 'meeting__finish_reading', 'meeting__fail_reading',
       'records_create', 'decisions_record', 'mail_recipients', 'mail_draft_create', 'mail_draft_update', 'mail_draft_show',
     ],
-    recordToolEndings: ['__update_deal', '__log_meeting'],
+    // No business plugin's operations: the まとまり's part (a deal's fields, its meeting log) is the business
+    // plugin's own step once the meeting is read (plugin-steps.md "After a meeting is read"; the core names none).
+    recordToolEndings: [],
     builtinTools: [],
   },
   consultationTitle: c => minutesConsultationTitle({ title: c.title, meetingAt: meetingAt(c) }),

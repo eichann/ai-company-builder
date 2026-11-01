@@ -56,14 +56,14 @@ test('the queue: received minutes from main\'s check, other kinds only when thei
   assert.deepEqual(aiTurnQueue({ minutes: [], tasks: [item('meeting-bbbbbbbb', 'ai')] }), [])
 })
 
-test('a meeting read without a まとまり, one chosen later: its まとまり\'s part runs from the task list, with only the deal and log tools', () => {
+test('a meeting read without a まとまり, one chosen later: its まとまり\'s part runs from the task list, confirms and finishes (no business plugin\'s tool)', () => {
   assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'received')?.step, 'minutes-reading')
   assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'bundle_waiting')?.step, 'minutes-bundle')
   assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'bundle_working')?.step, 'minutes-bundle')
   const queue = aiTurnQueue({ minutes: [], tasks: [item('meeting-dddddddd', 'ai', { state: 'bundle_waiting' }), item('meeting-eeeeeeee', 'mine', { state: 'read' })] })
   assert.deepEqual(queue.map(c => [c.id, c.state]), [['meeting-dddddddd', 'bundle_waiting']])
-  for (const tool of ['meeting__finish_bundle_work', 'minutes_read', 'hubspot__update_deal', 'hubspot__log_meeting']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), true, tool)
-  for (const tool of ['records_create', 'decisions_record', 'mail_draft_create', 'meeting__finish_reading', 'minutes_link_bundle', 'records_get']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), false, tool)
+  for (const tool of ['meeting__finish_bundle_work', 'minutes_read']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), true, tool)
+  for (const tool of ['hubspot__update_deal', 'hubspot__log_meeting', 'records_create', 'decisions_record', 'mail_draft_create', 'meeting__finish_reading', 'minutes_link_bundle', 'records_get']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), false, tool)
   const message = minutesBundleFirstMessage({ id: 'meeting-dddddddd', title: 'A社 商談' }, 6)
   assert.match(message, /会議：meeting-dddddddd/)
   assert.match(message, /version は 6/)

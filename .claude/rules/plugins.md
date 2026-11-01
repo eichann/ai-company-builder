@@ -871,12 +871,15 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   declare (`mail.read` as is, or a bare `mail` for all its operations), while the plugin is
   installed here, on, on the shelf and not stopped by the operator. No AI route uses a role yet —
   lanes A / B call it when they add theirs.
+- **A core step's run** (minutes reading…, plan C5): a business plugin's reads only — any other
+  operation is refused (`NOT_IN_STEP`) and the tool list shows reads only; what a まとまり gets
+  from a meeting is the business plugin's own step (`plugin-steps.md` "After a meeting is read").
 - Every refusal is one answer, 403 `NOT_IN_STEP` 「この手順では使えない操作です」, checked before
   anything else: it does not tell another plugin, another company's, a stopped one or an
   undeclared operation apart, and nothing is asked outside.
 - **The AI's tool list** (`GET /api/records-ai/plugins`, `aiTools(member, scope, runId)`): a token
   bound to such a run lists only its plugin's operations its step allows (`stepAllowsOperation`,
-  the gate's own rule; a run that cannot be read lists none); a consultation or a core step as
+  the gate's own rule; a run that cannot be read lists none; a core step's run, reads only); a consultation as
   before. The gate still decides each call.
 - **Roles in an operation's `who`** (`mayRunAt(…, { pluginId, recordId })`): `role:<name>` is the
   plugin's role held on the operation's record (its まとまり's override, else the company's; a
@@ -890,7 +893,7 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   (`moves_money`) never direct and only a request in a step, a `prior` write of an operation that
   does not ask first only with the step's `approvals`, the tool list per step, `role:` in an
   operation's `who` (company / まとまり / delegate), the step's
-  roles only, the switch and the operator stop, a consultation and a core step unchanged) —
+  roles only, the switch and the operator stop, a consultation unchanged, a core step reads only) —
   mutation-checked.
 
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)

@@ -17,7 +17,7 @@ import { refuse, type Outcome } from '../outcome'
 import { recordReader, type RecordReader } from '../record-access'
 import { recordSummaries } from '../records'
 import { bad } from './refusals'
-import type { ActorInput, RecordChange, RecordEngineDeps, RoleHolders } from './types'
+import type { ActorInput, AfterActionListener, RecordChange, RecordEngineDeps, RoleHolders } from './types'
 
 export function engineContext(deps: RecordEngineDeps) {
   const { companyData, transactions, clock } = deps
@@ -25,6 +25,12 @@ export function engineContext(deps: RecordEngineDeps) {
   let roleHolders: RoleHolders | null = null
   const roles = () => roleHolders
   const useRoles = (r: RoleHolders) => { roleHolders = r }
+  /** Bound once by the plugins lane (`useAfterAction`, plan C5); nothing until then. */
+  let afterActionListener: AfterActionListener | null = null
+  const useAfterAction = (f: AfterActionListener) => { afterActionListener = f }
+  const afterAction: AfterActionListener = async (member, actor, done) => {
+    try { await afterActionListener?.(member, actor, done) } catch { /* the action stands; the reaction is best effort */ }
+  }
 
   function open(member: Member): { records: RecordRepository; reader: RecordReader } | null {
     const handle = companyData.forCompany(member.companyId)
@@ -91,7 +97,7 @@ export function engineContext(deps: RecordEngineDeps) {
 
   const summaryOf = (records: RecordRepository, id: string) => recordSummaries(records, records.byIds([id])).get(id) as RecordSummary
 
-  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, tell, summaryOf, roles, useRoles }
+  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, tell, summaryOf, roles, useRoles, afterAction, useAfterAction }
 }
 
 export type EngineContext = ReturnType<typeof engineContext>

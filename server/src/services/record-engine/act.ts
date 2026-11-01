@@ -264,6 +264,8 @@ export function acting(ctx: EngineContext) {
       try { deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the follow-up is the service's; the action stands */ }
       // Duty 5: the milestone line.
       if (action.historyLine) historyLine(member, row, action.label, actor, note, at)
+      // A lane's reaction to the action (plan C5), after it was written.
+      await ctx.afterAction(member, actor, { recordId: row.id, type: row.type, action: actionName, toState: nextState })
       return ok({ record: summaryOf(records, row.id), entry })
     },
   }

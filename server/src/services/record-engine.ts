@@ -68,6 +68,8 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     ...ledgerReading(ctx),
     /** Bound once by the plugins lane (composition/plugins.ts): the business roles' holders for `role:<name>`. */
     useRoles: ctx.useRoles,
+    /** Bound once by the plugins lane (composition/plugins.ts, plan C5): a reaction after an action. */
+    useAfterAction: ctx.useAfterAction,
   }
 }
 
