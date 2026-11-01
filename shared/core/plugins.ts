@@ -29,6 +29,13 @@
  * `base_url`, a key value, approval rights or a computed value — unknown keys
  * make the whole package unusable.
  *
+ * Contract 2 (stages 4a / 4b, `plugin-flow-declaration.ts`) adds to a business
+ * plugin its `roles`, `settings` (parameters only), `steps` (instructions under `steps/`, run on the
+ * member's PC — never on the server), `ui` (frames under `ui/`, with the
+ * bridge version) and `upgrade`, and to every package the signature slot and
+ * fingerprint v2 (`plugin-fingerprint.ts`). `scripts/` is refused. Contract 1
+ * packages are read exactly as before.
+ *
  * Owner rules (§8, 2026-10-31):
  * 1. The declaration does not grow into a language: no conditions, loops,
  *    expressions or templating beyond `{id}`. A system it cannot describe
@@ -52,18 +59,32 @@
  *   plugin-manifest.ts               parsePluginManifest (common keys, then the role's part)
  *   plugin-connector-declaration.ts  a connector's part: destination, calls, operations
  *   plugin-business-declaration.ts   a business plugin's part: types, `connector`, its use, field policy defaults
+ *   plugin-flow-declaration.ts       contract 2: a business plugin's roles, steps, ui, upgrade
+ *   plugin-settings.ts               contract 2: a business plugin's settings (parameters only), settingValueProblem
+ *   plugin-fingerprint.ts            fingerprint v2 and the signature slot (signature.yaml)
  *   plugin-package.ts                validatePluginPackage, combineUse
  *   plugin-mapping.ts                the mapping: parsePluginMapping, checkMappingAgainstProperties
  *   plugin-policies.ts               approverFor, effectiveFieldPolicy, effectiveOperationPolicy
  *   plugin-values.ts                 externalToAcb, acbToExternal
  */
 export {
-  CREATE_CONTENT_SLOTS, FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_ENDPOINTS, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
+  CREATE_CONTENT_SLOTS, FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_ENDPOINTS, ROLE_WHO_PREFIX, roleOfWho, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
   comparePluginVersions, connectorName, pluginAvailableTo,
   type ConnectorUse, type CreateContentSlot, type FieldPolicy, type OperationKind, type OperationReach, type OperationUse, type PluginEndpoint,
   type PluginEndpointName, type PluginKind, type PluginManifest, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
-  type PluginRole, type UndoKind,
+  PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, noFlow,
+  type FlowPart, type PluginSetting,
+  type PluginRole, type PluginRoleDeclaration, type PluginStatePoint, type PluginStep, type PluginStepProcedure, type PluginStepProcedurePin, type PluginStepStart, type PluginUi, type PluginUpgrade, type UndoKind,
 } from './plugin-declaration'
+export {
+  CONNECTOR_ROLE_NAME_RE, FLOW_KEYS, PLUGIN_BRIDGE_VERSIONS, PLUGIN_PEEK_STATE_GROUPS, PLUGIN_STEP_TOOLS, STEP_FILE_RE, UI_ENTRY_RE,
+  companySkillOverrideProblem, stepToolsFor,
+} from './plugin-flow-declaration'
+export {
+  PLUGIN_FINGERPRINT_V2_HEADER, PLUGIN_SIGNATURE_FILE, parsePluginSignature, pluginFingerprintV2, pluginFingerprintV2Listing, pluginSignedMessage,
+  type PluginSignature,
+} from './plugin-fingerprint'
+export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'

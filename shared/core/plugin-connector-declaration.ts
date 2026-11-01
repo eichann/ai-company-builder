@@ -6,7 +6,7 @@
  */
 import { builtinBrokerService, isValidBrokerServiceName, parseRelayBaseUrl } from './key-broker'
 import {
-  CREATE_CONTENT_SLOTS, PLUGIN_ENDPOINTS,
+  CREATE_CONTENT_SLOTS, PLUGIN_ENDPOINTS, noFlow,
   type CommonPart, type CreateContentSlot, type OperationReach, type PluginEndpoint, type PluginEndpointName, type PluginManifest,
   type PluginObject, type PluginOperation, type UndoKind,
 } from './plugin-declaration'
@@ -176,6 +176,6 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
 
   return {
     ...common, role: 'connector', service: raw.service as string, baseUrl, scopes: scopes ?? [], operationScopes,
-    types: [], objects, operations, fieldPolicyDefaults: {}, uses: null, accountInfo,
+    types: [], objects, operations, fieldPolicyDefaults: {}, uses: null, accountInfo, ...noFlow(),
   }
 }

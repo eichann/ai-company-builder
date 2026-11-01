@@ -7,7 +7,7 @@
  */
 import { CORE_TYPE_FILES } from './core-types'
 import {
-  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
+  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
   type CommonPart, type ConnectorUse, type FieldPolicy, type PluginManifest,
 } from './plugin-declaration'
 import { strList, typeNameLayerProblem, unknownKeys } from './plugin-declaration-rules'
@@ -72,7 +72,9 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
       if (!isYamlMap(op)) { err(`${where}は { who, … } の形で書いてください`); continue }
       unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy'], err)
       const who = strList(op.who)
-      if (!who || who.length === 0 || !who.every(w => ONTOLOGY_NAME_RE.test(w))) err(`${where}の who は人の欄の名前か ${PLUGIN_ACTORS.join(' / ')} で書いてください`)
+      // `role:<name>` (a declared role) only from contract 2 on; parseFlow checks the name is declared.
+      const whoNameOk = (w: string) => ONTOLOGY_NAME_RE.test(w) || (common.contract >= PLUGIN_CONTRACT_V2 && w.startsWith(ROLE_WHO_PREFIX) && ONTOLOGY_NAME_RE.test(w.slice(ROLE_WHO_PREFIX.length)))
+      if (!who || who.length === 0 || !who.every(whoNameOk)) err(`${where}の who は人の欄の名前か ${PLUGIN_ACTORS.join(' / ')} で書いてください`)
       else if (who.includes('anyone')) err(`${where}の who に anyone は書けません。記録を読める人なら viewer です`)
       const decision = op.decision ?? false
       if (typeof decision !== 'boolean') err(`${where}の decision は true か false です`)
@@ -100,6 +102,6 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
 
   return {
     ...common, role: 'business', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
-    types: types ?? [], objects: {}, operations: {}, fieldPolicyDefaults, uses, accountInfo: null,
+    types: types ?? [], objects: {}, operations: {}, fieldPolicyDefaults, uses, accountInfo: null, ...noFlow(),
   }
 }

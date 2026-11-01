@@ -19,8 +19,16 @@ export interface PluginPackageFiles {
   /** Type name → the text of `types/<name>.md`. */
   types: Record<string, string>
   mapping: string | null
-  /** sha256 over every file of the package (names and contents), hex. */
+  /** Contract 2: `steps/<file>.md` → its text (empty otherwise). */
+  steps: Record<string, string>
+  /** Contract 2: the paths of the files under `ui/` (their bytes count in `fingerprintV2`). */
+  ui: string[]
+  /** The signature slot (`signature.yaml`) as written, or null. Not verified. */
+  signature: string | null
+  /** v1: sha256 over every file of the package (names and contents), hex — the fingerprint of a contract-1 package. */
   fingerprint: string
+  /** v2 (`shared/core/plugin-fingerprint.ts`): the fingerprint of a contract-2 package. */
+  fingerprintV2: string
 }
 
 export interface PluginShelfScan {

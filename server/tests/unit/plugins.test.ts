@@ -125,8 +125,10 @@ describe('a declaration is data only', () => {
   })
 
   it('refuses a contract this build does not know', () => {
-    expect(manifestErrors(crmWith('contract: 1', 'contract: 2')).join()).toContain('contract')
-    expect(manifestErrors(salesWith('contract: 1', 'contract: 2')).join()).toContain('contract')
+    for (const bad of ['contract: 3', 'contract: 0', 'contract: "2"']) {
+      expect(manifestErrors(crmWith('contract: 1', bad)).join()).toContain('contract')
+      expect(manifestErrors(salesWith('contract: 1', bad)).join()).toContain('contract')
+    }
   })
 
   it('sends only to one https host: no http, IP, localhost, port, query, or another host for a built-in service', () => {

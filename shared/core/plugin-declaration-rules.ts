@@ -38,6 +38,11 @@ const FORBIDDEN_KEY_REASONS: Record<string, string> = {
   key: '鍵の値は書けません（鍵は「API キー」の金庫に入れます）', api_key: '鍵の値は書けません（鍵は「API キー」の金庫に入れます）',
   token: '鍵の値は書けません（鍵は「API キー」の金庫に入れます）', secret: '鍵の値は書けません（鍵は「API キー」の金庫に入れます）',
   approve: '承認する権限は書けません', approver: '承認する権限は書けません', approvers: '承認する権限は書けません',
+  // Contract 2 (plan C1): nothing of a plugin runs on the server; steps run on the member's PC, started by a record's state.
+  runs_on: 'サーバーで動かす指定はありません（手順は必ずメンバーの PC で動きます）', run_on: 'サーバーで動かす指定はありません（手順は必ずメンバーの PC で動きます）',
+  runtime: 'サーバーで動かす指定はありません（手順は必ずメンバーの PC で動きます）', on_server: 'サーバーで動かす指定はありません（手順は必ずメンバーの PC で動きます）',
+  server: 'サーバーで動かす指定はありません（手順は必ずメンバーの PC で動きます）',
+  schedule: 'きっかけは記録の状態（steps の for）だけです', cron: 'きっかけは記録の状態（steps の for）だけです',
 }
 
 export const isStr = (v: YamlValue | undefined): v is string => typeof v === 'string' && v.trim() !== ''

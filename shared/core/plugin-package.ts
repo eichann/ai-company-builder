@@ -3,9 +3,10 @@
  * files and the place of its mapping) and what runs for a business plugin
  * (`combineUse`: its use of one connector version, combined).
  */
+import { coreTypeDefinitions } from './core-types'
 import {
-  PLUGIN_ACTORS, comparePluginVersions, externalFieldWriters,
-  type PluginManifest, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
+  PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, comparePluginVersions, externalFieldWriters, roleOfWho,
+  type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
 } from './plugin-declaration'
 import { parsePluginManifest } from './plugin-manifest'
 import { parseTypeFile, type TypeDefinition } from './record-types'
@@ -17,11 +18,26 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
  * used with (`combineUse`, then `parsePluginMapping`), so here only its place
  * is: a connector has none, nor does a business plugin without `connector`.
  */
-export function validatePluginPackage(input: { manifest: string; types: Record<string, string>; mapping?: string | null }): PluginParsed<PluginPackage> {
+export function validatePluginPackage(input: {
+  manifest: string
+  types: Record<string, string>
+  mapping?: string | null
+  /** Contract 2: `steps/<file>.md` → its text. */
+  steps?: Record<string, string>
+  /** Contract 2: the paths of the files under `ui/` (`ui/index.html`, `ui/app.js`…). */
+  ui?: readonly string[]
+}): PluginParsed<PluginPackage> {
   const m = parsePluginManifest(input.manifest)
   if (!m.ok) return m
   const manifest = m.value
   const errors: string[] = []
+  const stepFiles = Object.keys(input.steps ?? {})
+  const uiFiles = input.ui ?? []
+  if (manifest.contract < PLUGIN_CONTRACT_V2 || manifest.role === 'connector') {
+    const why = manifest.role === 'connector' ? 'つなぎ先のプラグインには' : `contract: ${manifest.contract} の包みには`
+    if (stepFiles.length > 0) errors.push(`${why}手順書（steps/）は置けません`)
+    if (uiFiles.length > 0) errors.push(`${why}画面（ui/）は置けません`)
+  }
   if (manifest.role === 'connector') {
     if (Object.keys(input.types).length > 0) errors.push('つなぎ先のプラグインは型（types/）を持ちません。型は業務のプラグインが持ちます')
     if (input.mapping != null) errors.push('つなぎ先のプラグインに読み替え表（mapping.yaml）は置けません。読み替えは、つなぎ先を使う業務のプラグインが持ちます')
@@ -48,11 +64,56 @@ export function validatePluginPackage(input: { manifest: string; types: Record<s
     for (const [opname, use] of Object.entries(manifest.uses?.operations ?? {})) {
       const persons = new Set(Object.values(owned).flatMap(t => Object.entries(t.fields).filter(([, f]) => f.kind === 'person').map(([n]) => n)))
       for (const w of use.who) {
-        if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w)) errors.push(`操作「${opname}」の who「${w}」は人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
+        if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w) && !declaredRole(manifest, w)) errors.push(`操作「${opname}」の who「${w}」は人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
       }
     }
+    errors.push(...flowProblems(manifest, owned, stepFiles, uiFiles))
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned } }
+}
+
+/** `role:<name>` naming a role the business plugin declares (contract 2). */
+function declaredRole(manifest: Pick<PluginManifest, 'roles'>, who: string): boolean {
+  const role = roleOfWho(who)
+  return role !== null && Object.prototype.hasOwnProperty.call(manifest.roles, role)
+}
+
+/**
+ * Contract 2's checks that need the types and the files: a step's (or an
+ * upgrade point's) type is the plugin's own or a core type and its state a
+ * non-final state of it; each step's default procedure is in `steps/` and
+ * `steps/` holds exactly the files the steps name; each frame's entry is a
+ * file under `ui/`, and `ui/` exists only with a `ui` declaration.
+ */
+function flowProblems(manifest: PluginManifest, owned: Record<string, TypeDefinition>, stepFiles: string[], uiFiles: readonly string[]): string[] {
+  const errors: string[] = []
+  const core = Object.fromEntries(coreTypeDefinitions().map(t => [t.name, t]))
+  const typeOf = (name: string): TypeDefinition | undefined =>
+    Object.prototype.hasOwnProperty.call(owned, name) ? owned[name] : Object.prototype.hasOwnProperty.call(core, name) ? core[name] : undefined
+  const point = (where: string, p: PluginStatePoint) => {
+    const t = typeOf(p.type)
+    if (!t) errors.push(`${where}: 型「${p.type}」は、このプラグインの types にも本体の型にもありません`)
+    else if (!t.states.includes(p.state)) errors.push(`${where}: 状態「${p.state}」は型「${p.type}」の states にありません`)
+    else if (t.final.includes(p.state)) errors.push(`${where}: 状態「${p.state}」は終わりの状態です`)
+  }
+  const named = new Set<string>()
+  for (const [name, step] of Object.entries(manifest.steps)) {
+    point(`手順「${name}」`, step.for)
+    // The plugin's own procedure is always there, also when a company may use its Skill instead.
+    if (!stepFiles.includes(step.procedure.default)) errors.push(`手順「${name}」の手順書 ${step.procedure.default} が包みにありません`)
+    named.add(step.procedure.default)
+    if (step.tools.includes('plugin_operations') && !manifest.uses) errors.push(`手順「${name}」: plugin_operations は、つなぎ先を使う業務のプラグイン（connector のあるもの）だけの道具です`)
+  }
+  for (const f of stepFiles) if (!named.has(f)) errors.push(`${f} はどの手順（steps）からも使われていません`)
+  for (const [i, p] of (manifest.upgrade?.at ?? []).entries()) point(`upgrade の at の ${i + 1} 番目`, p)
+  const ui = manifest.ui
+  if (!ui && uiFiles.length > 0) errors.push('画面（ui/）を置くときは、宣言に ui を書いてください')
+  if (ui) {
+    const entries = [...(ui.tab ? [ui.tab.entry] : []), ...ui.recordSections.map(s => s.entry)]
+    for (const e of entries) if (e && !uiFiles.includes(e)) errors.push(`画面のファイル ${e} が包みにありません`)
+    for (const s of ui.recordSections) if (!typeOf(s.type)) errors.push(`ui の record_sections: 型「${s.type}」は、このプラグインの types にも本体の型にもありません`)
+  }
+  return errors
 }
 
 /**
@@ -102,7 +163,7 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
     const type = types[recordObject.recordType]
     const persons = new Set(Object.entries(type?.fields ?? {}).filter(([, f]) => f.kind === 'person').map(([n]) => n))
     for (const w of use.who) {
-      if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w)) errors.push(`${where}の who「${w}」は型「${recordObject.recordType}」の人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
+      if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w) && !declaredRole(b, w)) errors.push(`${where}の who「${w}」は型「${recordObject.recordType}」の人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
     }
     if (use.decision && op.kind === 'read') errors.push(`${where}: 読む操作は decision にできません`)
     if (use.policy !== null && op.kind !== 'create') errors.push(`${where}: policy は作る操作だけに書けます（書き換えの決まりは欄ごと：field_policy_defaults と読み替え表）`)
