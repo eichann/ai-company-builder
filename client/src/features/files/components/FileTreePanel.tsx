@@ -30,8 +30,6 @@ interface FileTreePanelProps {
   onCreateFile?: () => void
   /** A private folder was created on the server: sync so it reaches this computer. */
   onPrivateFolderCreated?: () => void
-  /** 「やることにつなぐ…」 in the right-click menu: the file or folder's absolute path. Absent: no item. */
-  onLinkToTask?: (path: string) => void
 }
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -43,7 +41,6 @@ export function FileTreePanel({
   onSelectFile,
   onDoubleClickFile,
   onPrivateFolderCreated,
-  onLinkToTask,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
@@ -211,12 +208,7 @@ export function FileTreePanel({
             contextMenu.entry,
             contextMenu.entry?.isDirectory ? contextMenu.entry.path : contextMenu.parentPath,
             contextMenu.selectedSnapshot,
-            {
-              ...ops,
-              download: entry => { void notDownloaded.downloadFolder(entry) },
-              closeContextMenu: menu.close,
-              linkToTask: onLinkToTask ? entry => onLinkToTask(entry.path) : undefined,
-            },
+            { ...ops, download: entry => { void notDownloaded.downloadFolder(entry) }, closeContextMenu: menu.close },
             t,
           )}
           position={contextMenu.position}

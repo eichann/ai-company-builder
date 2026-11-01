@@ -131,9 +131,6 @@ contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
-contract.invoke tasks:available
-contract.invoke tasks:linkFile
-contract.invoke tasks:open
 contract.invoke tool-approval-response
 contract.invoke tools:start
 contract.invoke tools:stop
@@ -282,7 +279,6 @@ contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:stat
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
-contract.type ElectronAPI.getOpenTasks = getOpenTasks: Invoke<'tasks:open'>
 contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMail:get'>
 contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
@@ -290,7 +286,6 @@ contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreate
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
-contract.type ElectronAPI.getTasksAvailable = getTasksAvailable: Invoke<'tasks:available'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
 contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
@@ -307,7 +302,6 @@ contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<
 contract.type ElectronAPI.gitShowCommit = gitShowCommit: Invoke<'git:showCommit'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
-contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFile'>
 contract.type ElectronAPI.linkMinutesDeal = linkMinutesDeal: Invoke<'minutes:linkDeal'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
@@ -609,9 +603,6 @@ contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
-contract.type IpcInvokeChannels.'tasks:available' = 'tasks:available': { args: [companyId: string]; result: boolean }
-contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, taskId: string, companyPath: string, seenVersion: number]; result: LinkFileResult }
-contract.type IpcInvokeChannels.'tasks:open' = 'tasks:open': { args: [companyId: string]; result: OpenTasksResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
 contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
@@ -814,9 +805,6 @@ main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFo
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
-main.handle tasks:available @ features/tasks/ipc.ts (companyId)
-main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, taskId, companyPath, seenVersion)
-main.handle tasks:open @ features/tasks/ipc.ts (companyId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
 main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
@@ -931,8 +919,6 @@ preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
-preload getOpenTasks -> invoke tasks:open($0)
-preload getOpenTasks : (companyId: string) => Promise<OpenTasksResult>
 preload getOutboundMail -> invoke outboundMail:get($0, $1)
 preload getOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload getOutboundMailRecipients -> invoke outboundMail:recipients($0, $1)
@@ -947,8 +933,6 @@ preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
 preload getStats -> invoke fs:stat($0)
 preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
-preload getTasksAvailable -> invoke tasks:available($0)
-preload getTasksAvailable : (companyId: string) => Promise<boolean>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
 preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
 preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)
@@ -981,8 +965,6 @@ preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
-preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
-preload linkFileToTask : (companyId: string, taskId: string, companyPath: string, seenVersion: number) => Promise<LinkFileResult>
 preload linkMinutesDeal -> invoke minutes:linkDeal($0, $1, $2)
 preload linkMinutesDeal : (companyId: string, minutesId: string, dealId: string) => Promise<MinutesActionResult>
 preload listChatWindows -> invoke chatWindow:list()
