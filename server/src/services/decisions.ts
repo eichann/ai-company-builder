@@ -144,7 +144,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
           owner, source_key: key ?? null, why, source,
         },
         links: Object.fromEntries(Object.entries(links).map(([k, v]) => [k, [v]])),
-        actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null },
+        actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null, runId: actor.runId ?? null },
       }
       const made = writer.create(member.companyId, input)
       if (made.ok) return ok({ record: made.record, created: true })

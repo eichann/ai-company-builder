@@ -126,7 +126,7 @@ const windowCalls = { opened: [] as string[], focused: [] as string[] }
 const minutesLinks: Array<[string, string, string]> = []
 const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
 const autoTurn = params.get('autoturn')
-const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[] }
+const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[] }
 installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
@@ -134,6 +134,7 @@ installElectronAPI({
     return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true }
   },
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
+  retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
   linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)

@@ -23,6 +23,7 @@
  * in tests/unit/company-scoped-sql.test.ts, which fails on any new statement
  * that touches a company's rows without a company condition.
  */
+import type { AiRunRepository } from './ai-runs'
 import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
 import type { FixedPayloadRepository } from './fixed-payloads'
@@ -60,6 +61,8 @@ export interface CompanyData {
   readonly notifications: NotificationRepository
   /** Task settings (task list departments, reply 目安, auto-run) and department membership (ports/task-settings.ts). */
   readonly tasks: TaskSettingsRepository
+  /** Execution runs of 「AI の番」 and their outside operations by idempotency key (ports/ai-runs.ts, S10b). */
+  readonly aiRuns: AiRunRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

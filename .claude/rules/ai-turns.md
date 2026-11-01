@@ -10,6 +10,7 @@ paths:
   - "client/tests/ai-turn-unattended.test.ts"
   - "client/tests/ui/ai-turns.spec.ts"
   - "client/src/features/minutes/components/MinutesNotices.tsx"
+  - "client/electron/records/runs.ts"
 ---
 
 # 「AI の番」 run automatically (stage 2 S10)
@@ -62,6 +63,7 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
 ## Claiming and settling (main, `electron/features/ai-turns/`)
 
 - `aiTurns:claim(companyId, recordId, expectedVersion, conversationId)` — main window only. Main
+  first claims the server's **execution run** of the record's step (S10b, below); then it
   opens a record token for **that consultation** (`act`, the configured agent) and runs the type's
   first AI action (`AI_TURN_CLAIM_ACTIONS`: minutes → `start_reading`) at the version the app saw:
   the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` → `taken`, never
@@ -71,12 +73,37 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
   in the table, a malformed conversation id.
 - `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
   `failed` / `skipped` → failed, still `reading` → `retry` (the assignee's own action) so it is not
-  stuck for 30 minutes.
+  stuck for 30 minutes. It also finishes the run (below).
+- `aiTurns:retry(companyId, recordId)` — 「もう一度」 also gives the server's run back
+  (`POST /ai-runs/:runId/retry`); the runner forgets that it saw the record taken.
 - `aiTurns:settings(companyId)` — the company's 「自動で進める」: `autoRun` of S6's task settings
   (`GET /task-settings` with the session; `shared/core/task-settings.ts`: enabled, daily limit,
   stop after N failures in a row). `readAutoTurnSettings` checks each value against S6's limits;
   not readable (offline, an older server) or missing → **off**: nothing starts on a guess. The
   company default is on (owner decision); an admin turns it off in the admin console 「やることの一覧」.
+
+## Execution runs on the server (S10b, records.md "Execution runs")
+
+The execution state lives on the server; the AI still runs only here.
+
+- **Claim**: `aiTurns:claim` first asks `POST /ai-run-claims { recordId, step:
+  AI_TURN_KIND_STEPS[kind], deviceId, conversationId }` (session). `deviceId` = this app instance
+  (`app-<uuid>` per launch, `main.ts`). Another PC holding it, or a run waiting for a person or for
+  reconciliation → `taken` (the record's action is not run). Then `start_reading` as before; if it
+  does not start, the run is finished as temporary (given back for later).
+- **The run binds the consultation's tokens**: the claim puts `{ runId, generation }` in the run
+  registry (`electron/records/runs.ts`, shared with the records API); `records/api.ts` `openTurn`
+  binds every record token of that consultation to the run (the chat server's turns included), so
+  the server refuses them once another PC re-claims (fencing, `RUN_SUPERSEDED`). Every write with a
+  bound token carries `Idempotency-Key: operationKeyOf(method, path, body)` — the same request
+  (a retry, or another PC redoing the step) gets the same key, and the server answers what the
+  first one made; the API reads that back (`replayReadPath`: the draft, record, approval or
+  plugin operation) so the tools see the same answer, never a second effect.
+- **Renewal**: every minute while the run is held (`renewEveryMs`); a 409 (taken over) stops it.
+- **Finish** (in `settle`): read → done; the AI's `fail_reading` → `bad-input` (`waiting_person`:
+  a person looks); still reading → `temporary` (`UNFINISHED`, retried later; the server sends it
+  to a person after three); not readable → temporary. A run with an unknown outside result goes
+  to `waiting_reconcile` whatever main says (the server decides).
 
 ## The rules (`aiTurns.ts`, per member and company in localStorage `aiTurns:<company>:<user>`)
 
@@ -117,11 +144,14 @@ daily limit, attempts per record, stop after failures and resume, usage pause, s
 `tests/ai-turn-unattended.test.ts` (an unattended run's Claude options: no settings layers, strict
 MCP config, no built-in tools, shell / web / write denied, only the record server, everything else
 refused even in bypass; a normal turn unchanged; Codex refuses; the minutes step's tool list; the
-step rides on one request only), `tests/ai-turn-claims.test.ts` (two PCs → one claim; Codex / API key / closed window / stop →
+step rides on one request only), `tests/ai-turn-claims.test.ts` (two PCs → one claim, decided by the server's run, the
+winner's token bound to it; writes carry an idempotency key made from the request; a replayed
+write is read back, not redone; a run held for a person is not started and 「もう一度」 gives it back;
+the run finished with its class; Codex / API key / closed window / stop →
 no server call; minutes only; settle puts an unfinished reading back), `tests/ui/ai-turns.spec.ts`
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
 its title and `minutesId`, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
-Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 claims again).
+Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again).
 
 ## Not yet (S11 and later)
 

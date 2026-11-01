@@ -31,7 +31,7 @@ export interface ExternalRecordInput {
    */
   expectedVersion?: number
   /** P6: the member (and kind) on whose behalf the plugin wrote; default: the outside system. */
-  actor?: { id: string; kind: 'human' | 'ai'; source: string | null; conversationId: string | null; proposedBy?: 'ai' | null }
+  actor?: { id: string; kind: 'human' | 'ai'; source: string | null; conversationId: string | null; proposedBy?: 'ai' | null; runId?: string | null }
   /** P6: the operation is a decision (`decision: true`): the note is its reason, kept in the entry. */
   decision?: boolean
   /**
@@ -95,6 +95,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
           actorSource: actor.source, at, note: input.note ?? '', changes, attachments: [],
           decision: input.decision ? { reason: input.note ?? '', materials: [], policyVersion: null, precedents: [], supersedes: null } : null, isDecision: input.decision === true,
           typeVersion: def.version, reversesVersion: null, proposedBy: null, conversationId: actor.conversationId, receipt: input.receipt,
+          runId: 'runId' in actor && actor.kind === 'ai' ? actor.runId ?? null : null,
         }
         deps.transactions.run(() => {
           records.upsert({
@@ -142,6 +143,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         decision: input.decision ? { reason: input.note ?? '', materials: [], policyVersion: null, precedents: [], supersedes: null } : null,
         isDecision: input.decision === true, typeVersion: row.typeVersion, reversesVersion: null,
           proposedBy: 'proposedBy' in actor && actor.kind === 'human' && actor.proposedBy === 'ai' ? 'ai' : null, conversationId: actor.conversationId, receipt: input.receipt,
+          runId: 'runId' in actor && actor.kind === 'ai' ? actor.runId ?? null : null,
       }
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false

@@ -4,6 +4,7 @@ import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
+import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders } from './schema/connectors'
@@ -23,6 +24,7 @@ export { migratePluginInstallKeyReference, migratePluginOperationCreates, migrat
 export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
+export { migrateAiRunColumns } from './schema/ai-runs'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -57,6 +59,7 @@ const SCHEMA = [
   contentStoreSchema,
   outboundMailSchema,
   notificationSchema,
+  aiRunSchema,
 ]
 
 // Initialize application tables (separate from Better Auth tables).
@@ -75,6 +78,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migratePluginInstallKeyReference(conn)
   migratePluginOperationCreates(conn)
   migratePluginTables(conn)
+  // After migratePluginTables (which may rebuild plugin_operations).
+  migrateAiRunColumns(conn)
   migrateRecordTypeSources(conn)
   migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)

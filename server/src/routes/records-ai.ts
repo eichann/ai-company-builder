@@ -33,12 +33,19 @@
  *   There is deliberately no send, resolve, discard or typed address here
  *   (outbound-mail.md): sending reaches outside and is a person's, with their session.
  *
+ * Execution runs (S10b, records.md "Execution runs"): a token bound to a run is
+ * refused as soon as the run is claimed again (its generation is old) — fencing,
+ * in recordAiTokens.authenticate; and every create / outside operation made with
+ * it needs an `Idempotency-Key` header (keyedWrite): the same key never repeats
+ * the effect, and an answer that was lost leaves the run waiting for a person.
+ *
  * No undo, no 「もう一度作る」 and nothing it can approve, send back or withdraw for
  * the AI: a person does those (their app's screens; routes/approvals.ts, session
  * only). A create is never re-sent.
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { services } from '../composition'
 import type { Outcome } from '../services/outcome'
 import type { RecordTokenHolder } from '../services/record-ai-tokens'
@@ -46,7 +53,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals, minutes, outboundMail } = services
+const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals, minutes, outboundMail, aiRuns } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -58,8 +65,27 @@ function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Respon
   return auth.value
 }
 
-// The conversation comes from the token, never the body (a body's proposedBy / conversationId is ignored here).
-const aiActor = (h: RecordTokenHolder) => ({ kind: 'ai' as const, source: h.agent, conversationId: h.conversationId })
+// The conversation and the execution run come from the token, never the body (a body's proposedBy / conversationId is ignored here).
+const aiActor = (h: RecordTokenHolder) => ({ kind: 'ai' as const, source: h.agent, conversationId: h.conversationId, runId: h.run?.id ?? null })
+
+/**
+ * An outside operation (or a create) made within an execution run (S10b,
+ * records.md "Execution runs"): it needs an `Idempotency-Key` header, and the
+ * same key never repeats the effect (services/ai-runs.ts `keyed`). A
+ * consultation's token (no run) is unchanged.
+ */
+async function keyedWrite(c: Context, h: RecordTokenHolder, kind: string, body: unknown, write: () => Promise<Response>): Promise<Response> {
+  if (!h.run) return write()
+  const answer = await aiRuns.keyed(
+    { companyId: h.member.companyId, userId: h.member.userId, runId: h.run.id, generation: h.run.generation },
+    c.req.header('Idempotency-Key'), { method: c.req.method, path: c.req.path, body }, kind,
+    async () => {
+      const res = await write()
+      return { status: res.status, body: await res.json().catch(() => null) }
+    },
+  )
+  return c.json(answer.body as object, answer.status as ContentfulStatusCode)
+}
 
 async function jsonBody(c: Context): Promise<unknown> {
   try { return await c.req.json() } catch { return null }
@@ -88,8 +114,11 @@ recordsAiRoute.get('/ai-turn', (c) => {
 recordsAiRoute.post('/decisions', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
-  const result = await decisions.record(h.member, aiActor(h), await jsonBody(c))
-  return answer(c, result, result.ok && result.value.created ? 201 : 200)
+  const body = await jsonBody(c)
+  return keyedWrite(c, h, 'decision', body, async () => {
+    const result = await decisions.record(h.member, aiActor(h), body)
+    return answer(c, result, result.ok && result.value.created ? 201 : 200)
+  })
 })
 
 recordsAiRoute.get('/minutes/:recordId/text', async (c) => {
@@ -102,8 +131,8 @@ recordsAiRoute.get('/minutes/:recordId/text', async (c) => {
 recordsAiRoute.post('/minutes/:recordId/deal', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
-  const { kind, source, conversationId } = aiActor(h)
-  return answer(c, minutes.linkDeal(h.member, { kind, source, conversationId }, c.req.param('recordId'), await jsonBody(c)))
+  const { kind, source, conversationId, runId } = aiActor(h)
+  return answer(c, minutes.linkDeal(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), await jsonBody(c)))
 })
 
 recordsAiRoute.post('/query', async (c) => {
@@ -123,7 +152,9 @@ recordsAiRoute.get('/item/:recordId/history', (c) => {
 
 recordsAiRoute.post('/item', async (c) => {
   const h = holderOf(c, 'act')
-  return h instanceof Response ? h : answer(c, recordEngine.create(h.member, aiActor(h), await jsonBody(c)), 201)
+  if (h instanceof Response) return h
+  const body = await jsonBody(c)
+  return keyedWrite(c, h, 'record-create', body, async () => answer(c, recordEngine.create(h.member, aiActor(h), body), 201))
 })
 
 recordsAiRoute.post('/item/:recordId/actions/:action', async (c) => {
@@ -152,13 +183,19 @@ recordsAiRoute.get('/plugins', async (c) => {
 recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', async (c) => {
   const h = holderOf(c, 'read')
   if (h instanceof Response) return h
-  if (h.scope !== 'act' && services.plugins.operationKind(h.member.companyId, c.req.param('pluginId'), c.req.param('operation')) !== 'read') {
+  const reads = services.plugins.operationKind(h.member.companyId, c.req.param('pluginId'), c.req.param('operation')) === 'read'
+  if (h.scope !== 'act' && !reads) {
     return c.json({ error: 'この AI は読むことだけができます', code: 'READ_ONLY_TOKEN' }, 403)
   }
-  // Needing approval: the request is made (202) — the AI asks, a person approves (routes/approvals.ts, session only).
-  const r = await approvals.runOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c))
-  const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
-  return answer(c, r, requested ? 202 : 200)
+  const body = await jsonBody(c)
+  const run = async () => {
+    // Needing approval: the request is made (202) — the AI asks, a person approves (routes/approvals.ts, session only).
+    const r = await approvals.runOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body)
+    const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
+    return answer(c, r, requested ? 202 : 200)
+  }
+  // A read changes nothing outside: no key needed.
+  return reads ? run() : keyedWrite(c, h, 'plugin-operation', body, run)
 })
 
 // Approval requests, read only: the AI lists and shows them (「承認待ちを見せて」); it has no way to approve.
@@ -176,9 +213,12 @@ recordsAiRoute.get('/approvals/:approvalId', async (c) => {
 recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
-  const r = await approvals.createOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), await jsonBody(c))
-  const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
-  return answer(c, r, requested ? 202 : 200)
+  const body = await jsonBody(c)
+  return keyedWrite(c, h, 'plugin-create', body, async () => {
+    const r = await approvals.createOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), body)
+    const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
+    return answer(c, r, requested ? 202 : 200)
+  })
 })
 
 recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
@@ -194,7 +234,9 @@ recordsAiRoute.post('/outbound-recipients', async (c) => {
 
 recordsAiRoute.post('/outbound', async (c) => {
   const h = holderOf(c, 'act')
-  return h instanceof Response ? h : answer(c, await outboundMail.create(h.member, aiActor(h), await jsonBody(c)), 201)
+  if (h instanceof Response) return h
+  const body = await jsonBody(c)
+  return keyedWrite(c, h, 'mail-draft', body, async () => answer(c, await outboundMail.create(h.member, aiActor(h), body), 201))
 })
 
 recordsAiRoute.get('/outbound/:messageId', (c) => {
@@ -204,5 +246,7 @@ recordsAiRoute.get('/outbound/:messageId', (c) => {
 
 recordsAiRoute.put('/outbound/:messageId', async (c) => {
   const h = holderOf(c, 'act')
-  return h instanceof Response ? h : answer(c, await outboundMail.update(h.member, aiActor(h), c.req.param('messageId'), await jsonBody(c)))
+  if (h instanceof Response) return h
+  const body = await jsonBody(c)
+  return keyedWrite(c, h, 'mail-draft-version', body, async () => answer(c, await outboundMail.update(h.member, aiActor(h), c.req.param('messageId'), body)))
 })

@@ -487,6 +487,8 @@ export interface IpcInvokeChannels {
   'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
   /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
   'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
+  /** 「もう一度」: give the record's execution run the server holds for a person back to the AI (S10b). */
+  'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
   // The title bar's 「あなたの番」 and bell (notifications.md): read with the member's session in main.
   /** The company on screen (null: none); starts the 5-minute check. */
   'notifications:watch': { args: [companyId: string | null]; result: void }
@@ -807,6 +809,7 @@ export interface ElectronAPI {
   getAutoTurnSettings: Invoke<'aiTurns:settings'>
   claimAiTurn: Invoke<'aiTurns:claim'>
   settleAiTurn: Invoke<'aiTurns:settle'>
+  retryAiTurn: Invoke<'aiTurns:retry'>
   watchNotifications: Invoke<'notifications:watch'>
   getNotificationsState: Invoke<'notifications:state'>
   markNotificationsRead: Invoke<'notifications:markRead'>

@@ -81,6 +81,29 @@ export interface LedgerEntry {
    * system, or one the plugin wrote there). Absent / null otherwise.
    */
   receipt?: ExternalReceipt | null
+  /**
+   * The execution run (S10b, `shared/core/ai-runs.ts`) the AI acted in: set
+   * when the AI's record token was bound to a run — an automated run under the
+   * member's authority, not a consultation the member was typing in. Absent /
+   * null otherwise.
+   */
+  runId?: string | null
+}
+
+/**
+ * Who caused a change (owner decision 2026-11-01): a person's click, the
+ * member's AI in a consultation, an automated run under the person's authority,
+ * the server itself (its clock) or an outside system (seen there).
+ */
+export type LedgerCause = 'person' | 'ai' | 'run' | 'system' | 'outside'
+
+/** The server's own actors (the server clock): `acb:` ids never belong to a member or an outside system. */
+export const SYSTEM_ACTOR_PREFIX = 'acb:'
+
+export function ledgerCause(entry: Pick<LedgerEntry, 'actorKind' | 'actorId' | 'runId'>): LedgerCause {
+  if (entry.actorKind === 'human') return 'person'
+  if (entry.actorKind === 'ai') return entry.runId ? 'run' : 'ai'
+  return entry.actorId.startsWith(SYSTEM_ACTOR_PREFIX) ? 'system' : 'outside'
 }
 
 /** Evidence of an exchange with an outside system, kept on the ledger entry it explains. */

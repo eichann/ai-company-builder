@@ -297,7 +297,7 @@ export type AutoTurnSettingsReads = ElectronPort<'getAutoTurnSettings'>
  * Taking a record's AI turn and settling it afterwards: changes the shared record (one PC wins
  * the claim; an unfinished one goes back to 「AI の番」), with the AI's token or the session in main.
  */
-export type AiTurnWrites = ElectronPort<'claimAiTurn' | 'settleAiTurn'>
+export type AiTurnWrites = ElectronPort<'claimAiTurn' | 'settleAiTurn' | 'retryAiTurn'>
 
 export function getAutoTurnSettings(companyId: string, reads: AutoTurnSettingsReads = window.electronAPI) {
   return reads.getAutoTurnSettings(companyId)
@@ -309,4 +309,9 @@ export function claimAiTurn(companyId: string, recordId: string, expectedVersion
 
 export function settleAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
   return writes.settleAiTurn(companyId, recordId)
+}
+
+/** 「もう一度」 on the server's execution run (S10b): a run held for a person goes back to the AI. */
+export function retryAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.retryAiTurn(companyId, recordId)
 }

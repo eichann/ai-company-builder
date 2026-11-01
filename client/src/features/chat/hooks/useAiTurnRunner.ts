@@ -5,7 +5,7 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
-import { claimAiTurn, getAutoTurnSettings, settleAiTurn } from '../api'
+import { claimAiTurn, getAutoTurnSettings, retryAiTurn, settleAiTurn } from '../api'
 import {
   AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, autoMinutesFirstMessage, handUrgent, handedOver, logForToday,
   nextAiTurn, recordOutcome, recordStarted, resumed, retried, usageLimitReached, usagePauseUntil, type AiTurnLog, type AiTurnOutcome,
@@ -120,7 +120,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
   const retry = useCallback((recordId: string) => {
     saveLog(retried(loadLog(Date.now()), recordId))
     published.current = ''
-  }, [loadLog, saveLog])
+    // The server's run may be waiting for a person too (S10b): give it back, and let this PC try the record again.
+    for (const k of [...taken.current]) if (k.startsWith(`${recordId}@`)) taken.current.delete(k)
+    const companyId = latest.current.companyId
+    if (companyId) void retryAiTurn(companyId, recordId).catch(() => undefined)
+  }, [latest, loadLog, saveLog])
   const handOver = useCallback((recordId: string) => {
     const shown = published.current ? JSON.parse(published.current) as AiTurnItemView[] : []
     saveLog(handedOver(loadLog(Date.now()), recordId, shown.find(i => i.recordId === recordId)?.reason ?? ''))

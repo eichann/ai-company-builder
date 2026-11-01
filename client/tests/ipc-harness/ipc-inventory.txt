@@ -17,6 +17,7 @@ contract.events writeAccess:changed
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
 contract.invoke aiTurns:claim
+contract.invoke aiTurns:retry
 contract.invoke aiTurns:settings
 contract.invoke aiTurns:settle
 contract.invoke api:createCompany
@@ -364,6 +365,7 @@ contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'pri
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
+contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
@@ -510,6 +512,7 @@ contract.type IpcInvokeChannels = export interface IpcInvokeChannels { }
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
 contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
+contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
 contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
 contract.type IpcInvokeChannels.'aiTurns:settle' = 'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
 contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { args: [name: string]; result: CompanyResult }
@@ -723,6 +726,7 @@ contract.type ToolInfo.startCommand = startCommand?: string
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
 main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId)
+main.handle aiTurns:retry @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle aiTurns:settings @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:settle @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle api:createCompany @ features/auth/ipc.ts (name: string)
@@ -1110,6 +1114,8 @@ preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
 preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
 preload respondToolApproval -> invoke tool-approval-response($0, $1)
 preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
+preload retryAiTurn -> invoke aiTurns:retry($0, $1)
+preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
 preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
 preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)

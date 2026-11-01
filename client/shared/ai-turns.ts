@@ -123,6 +123,9 @@ const MINUTES_ID_RE = /^minutes-[0-9a-z]{6,32}$/
 /** The record kinds the runner handles, and each one's claiming action. Today: minutes 「読む」. */
 export const AI_TURN_CLAIM_ACTIONS = { minutes: 'start_reading' } as const
 
+/** The step each kind runs: the server's execution run is per record and step (S10b). */
+export const AI_TURN_KIND_STEPS: Record<keyof typeof AI_TURN_CLAIM_ACTIONS, AiTurnStep> = { minutes: 'minutes-reading' }
+
 /** A record id the runner may claim (only the kinds above). */
 export function aiTurnKindOf(recordId: string): keyof typeof AI_TURN_CLAIM_ACTIONS | null {
   return MINUTES_ID_RE.test(recordId) ? 'minutes' : null
