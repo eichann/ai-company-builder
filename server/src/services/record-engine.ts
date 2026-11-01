@@ -22,7 +22,7 @@
 import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
-import { isDateValue, OK_FIELDS, type ActionDef, type FieldKind, type TypeDefinition } from '../../shared/core/record-types'
+import { INTERFACES, isDateValue, normalizeTagsValue, OK_FIELDS, type ActionDef, type FieldKind, type LinkDef, type TypeDefinition } from '../../shared/core/record-types'
 import {
   replayRecordState, type DecisionMaterial, type ExternalReceipt, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry,
   type LedgerValue, type ReplayedState, type VersionOrigin,
@@ -139,8 +139,31 @@ function checkValue(kind: FieldKind, value: unknown, options: string[] | undefin
     case 'choice': return typeof value === 'string' && (options ?? []).includes(value) ? value : { error: `${(options ?? []).join(' / ')} のどれかです` }
     case 'person': return typeof value === 'string' && value.length <= 200 && isMember(value) ? value : { error: 'この会社のメンバーの id で入れてください' }
     case 'record': return typeof value === 'string' && RECORD_ID_RE.test(value) ? value : { error: '記録の id で入れてください' }
+    case 'tags': return normalizeTagsValue(value)
   }
 }
+
+/**
+ * A link whose target is an interface (`interface: bundle`) holds only live
+ * records of this company whose type implements it — and, when `readable` is
+ * given, that the caller may read. The targets it may not hold (empty for a
+ * link to a type or file: those targets are labels, records.md).
+ */
+function interfaceLinkMisses(records: RecordRepository, link: LinkDef, targets: string[], readable?: (r: RecordAccessRow) => boolean): string[] {
+  if (!link.targetIsInterface || targets.length === 0) return []
+  const types = currentTypes(records)
+  const fit = new Set(records.byIds(targets)
+    .filter(r => types.get(r.type)?.definition.implements.includes(link.target) && (!readable || readable(r)))
+    .map(r => r.id))
+  return targets.filter(t => !fit.has(t))
+}
+
+/** One answer whether the record does not exist, cannot be read or is of another kind (nothing about it leaks). */
+const interfaceLinkRefusal = (name: string, link: LinkDef) => ({
+  error: `つながり「${link.label}」には、あなたが見られる「${INTERFACES[link.target]?.label ?? link.target}」の記録だけをつなげます`,
+  code: 'BAD_LINK',
+  link: name,
+})
 
 /** May `member` (acting as `actor`) do an action whose `who` is this, on a record with these values? */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean): boolean {
@@ -390,10 +413,18 @@ export function createRecordEngine(deps: RecordEngineDeps) {
           } else {
             if (typeof t !== 'string' || !RECORD_ID_RE.test(t)) return bad(`${name}: a record id`)
             // A live record the member reads: someone else's owner-only record, a private one and a
-            // missing one get the same answer (none of them is named or confirmed).
-            if (!records.byIds([t]).some(r => reader.record(r))) return bad(LINK_TARGET_NOT_FOUND.error, LINK_TARGET_NOT_FOUND.code)
+            // missing one get the same answer (none of them is named or confirmed). An interface link
+            // is answered by its own check below (BAD_LINK, also one answer for missing / unreadable /
+            // of another kind), so each link has exactly one refusal for an unseen target.
+            if (!l.targetIsInterface && !records.byIds([t]).some(r => reader.record(r))) {
+              return bad(LINK_TARGET_NOT_FOUND.error, LINK_TARGET_NOT_FOUND.code)
+            }
             links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
           }
+        }
+        if (interfaceLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
+          const r = interfaceLinkRefusal(name, l)
+          return refuse('bad-request', r.error, { code: r.code })
         }
       }
       const at = clock.now()
@@ -868,8 +899,13 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
       }
       const at = deps.clock.now()
       const actor = input.actor ?? { id: input.source, kind: 'external' as const, source: input.source, conversationId: null }
-      const linkRows = (id: string): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) =>
-        targets.filter(t => RECORD_ID_RE.test(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null })))
+      const linkRows = (id: string): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) => {
+        const valid = targets.filter(t => RECORD_ID_RE.test(t))
+        // An interface link (`interface: bundle`) keeps only records implementing it, as every other writer.
+        const link = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
+        const misses = link ? interfaceLinkMisses(records, link, valid) : []
+        return valid.filter(t => !misses.includes(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
+      })
       const tellAbout = (values: Record<string, LedgerValue>) => {
         const to = [...new Set([values.assignee, values.next_actor].filter((u): u is string => typeof u === 'string'))]
         if (to.length > 0) { try { deps.notify(companyId, to) } catch { /* the app's own check catches up */ } }
@@ -1090,6 +1126,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
         links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
       }
+      if (interfaceLinkMisses(records, l, targets).length > 0) return fail('bad-value', `${name}: records implementing ${l.target}`)
     }
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
@@ -1176,6 +1213,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
           if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
           newLinks.push({ sourceId: row.id, name, position: 0, targetId: t, targetPath: null })
         }
+        if (interfaceLinkMisses(records, l, targets).length > 0) return fail('bad-value', `${name}: records implementing ${l.target}`)
         const before = currentLinks.filter(x => x.name === name).map(x => x.targetId).join(',') || null
         const after = targets.join(',') || null
         if (before !== after) changes.push({ field: `links.${name}`, before, after })

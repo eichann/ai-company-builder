@@ -190,6 +190,13 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         if (f.values.includes(null)) { parts.push('json_extract(s.fields, ?) IS NULL'); params.push(`$.${f.name}`) }
         where.push(parts.length > 0 ? `(${parts.join(' OR ')})` : '0')
       }
+      for (const c of filter.contains ?? []) {
+        // A tags value is the JSON text of an array of strings; anything else holds no tag.
+        where.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(json_extract(s.fields, ?)) AND json_type(json_extract(s.fields, ?)) = 'array'
+          THEN json_extract(s.fields, ?) ELSE '[]' END) t WHERE t.type = 'text' AND t.value = ?)`)
+        const at = `$.${c.name}`
+        params.push(at, at, at, c.tag)
+      }
       if (filter.text) {
         where.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\')")
         params.push(likeAnywhere(filter.text), likeAnywhere(filter.text))

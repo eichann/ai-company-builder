@@ -12,11 +12,17 @@
  * - removing or renaming anything is a breaking change; a changed definition
  *   needs a higher version;
  * - a record file's frontmatter holds id / type / links only: a `state:`
- *   written there is ignored (and reported), never read as the state.
+ *   written there is ignored (and reported), never read as the state;
+ * - tags (kind `tags`) live on the server only and a tag value is
+ *   normalized (NFC, spaces) and bounded (count, length, no control
+ *   characters); a link to an interface names one that exists, and the
+ *   `bundle` interface needs `owner` / `purpose` on the server; adding either
+ *   is not a breaking change, switching a link between a type and an
+ *   interface is.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
-import { compareTypeDefinitions, parseTypeFile, type TypeDefinition } from '../../../shared/core/record-types'
+import { compareTypeDefinitions, normalizeTagsValue, parseTagsValue, parseTypeFile, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type TypeDefinition } from '../../../shared/core/record-types'
 import { newRecordId, parseRecordFile } from '../../../shared/core/records'
 
 const TASK = `---
@@ -174,5 +180,74 @@ describe('record files', () => {
   it('new ids have the record id shape', () => {
     expect(newRecordId('task', '3F2A9C0B')).toBe('task-3f2a9c0b')
     expect(() => newRecordId('task', 'ab')).toThrow()
+  })
+})
+
+describe('tags and links to an interface (stage 2 S1)', () => {
+  const reviewer = '  reviewer:     { label: レビューする人, kind: person, source: server }\n'
+  const withField = (line: string) => parseTypeFile('task', withYaml(y => y.replace(reviewer, `${reviewer}  ${line}\n`)))
+  const withLink = (line: string) => parseTypeFile('task', withYaml(y => y.replace(/( {2}files: .*\n)/, `$1  ${line}\n`)))
+
+  it('a tags field lives on the server only and takes no options or target', () => {
+    const r = withField('tags: { label: タグ, kind: tags, source: server }')
+    expect(r.ok && r.definition.fields.tags).toEqual({ label: 'タグ', kind: 'tags', source: 'server' })
+    expect(withField('tags: { label: タグ, kind: tags }').ok).toBe(true)
+    expect(withField('tags: { label: タグ, kind: tags, source: file }').ok).toBe(false)
+    expect(withField('tags: { label: タグ, kind: tags, source: server, options: [a] }').ok).toBe(false)
+    expect(withField('tags: { label: タグ, kind: tags, source: server, target: task }').ok).toBe(false)
+  })
+
+  it('a tag value is normalized and bounded', () => {
+    const nfd = 'か\u3099'  // が written as NFD (a Mac)
+    expect(normalizeTagsValue([` ${nfd}  急ぎ `, 'が 急ぎ', '見積'])).toBe(JSON.stringify(['が 急ぎ', '見積']))
+    expect(normalizeTagsValue([])).toBeNull()
+    expect(normalizeTagsValue(null)).toBeNull()
+    for (const bad of [
+      '急ぎ', ['急ぎ', 3], [''], ['   '], ['a\u0000b'], ['a\u202Fb\u2028'], ['x'.repeat(TAG_MAX_LENGTH + 1)],
+      Array.from({ length: TAGS_MAX_COUNT + 1 }, (_, i) => `t${i}`), { 0: 'a' },
+    ]) expect(normalizeTagsValue(bad), JSON.stringify(bad)).toMatchObject({ error: expect.any(String) })
+    expect(normalizeTagsValue(['x'.repeat(TAG_MAX_LENGTH)])).toBe(JSON.stringify(['x'.repeat(TAG_MAX_LENGTH)]))
+    expect(parseTagsValue(normalizeTagsValue(['a', 'b']))).toEqual(['a', 'b'])
+    expect(parseTagsValue('not json')).toEqual([])
+  })
+
+  it('a link may target an interface that exists, by its own key', () => {
+    const r = withLink('bundle: { label: まとまり, interface: bundle, cardinality: one }')
+    expect(r.ok && r.definition.links.bundle).toEqual({ label: 'まとまり', target: 'bundle', cardinality: 'one', targetIsInterface: true })
+    expect(withLink('bundle: { label: まとまり, interface: project, cardinality: one }').ok).toBe(false)
+    expect(withLink('bundle: { label: まとまり, interface: toString, cardinality: one }').ok).toBe(false)
+    expect(withLink('bundle: { label: まとまり, interface: bundle, target: deal }').ok).toBe(false)
+    // A type target stays a label (a plugin's type may not exist): unchanged.
+    expect(withLink('deal: { label: 案件, target: deal }').ok).toBe(true)
+  })
+
+  it('the bundle interface needs an owner and a purpose on the server', () => {
+    const bundle = (fields: string) => parseTypeFile('effort', `---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n${fields}states: [active, done]\n---\n`)
+    const owner = '  owner: { label: 持ち主, kind: person, source: server }\n'
+    const purpose = '  purpose: { label: 目的, kind: text, source: server }\n'
+    expect(bundle(owner + purpose).ok).toBe(true)
+    expect(bundle(owner).ok).toBe(false)
+    expect(bundle(purpose).ok).toBe(false)
+    expect(bundle(owner + '  purpose: { label: 目的, kind: long_text, source: server }\n').ok).toBe(false)
+  })
+
+  it('adding tags or an interface link is not breaking; switching a link to or from an interface is', () => {
+    const prev = task()
+    const next = (edit: (y: string) => string) => {
+      const r = parseTypeFile('task', withYaml(y => edit(y).replace('version: 1', 'version: 2')))
+      if (!r.ok) throw new Error(r.errors.join('\n'))
+      return r.definition
+    }
+    const added = next(y => y
+      .replace(reviewer, `${reviewer}  tags: { label: タグ, kind: tags, source: server }\n`)
+      .replace(/( {2}files: .*\n)/, '$1  bundle: { label: まとまり, interface: bundle, cardinality: one }\n'))
+    expect(compareTypeDefinitions(prev, added)).toMatchObject({ changed: true, breaking: [], versionProblem: null })
+    // Same name, other meaning: a type called "bundle" vs every type implementing the interface.
+    const typeNamedBundle = next(y => y.replace('customer: { label: 顧客, target: customer', 'customer: { label: 顧客, target: bundle'))
+    const toInterface = next(y => y.replace('customer: { label: 顧客, target: customer', 'customer: { label: 顧客, interface: bundle'))
+    expect(compareTypeDefinitions(typeNamedBundle, { ...toInterface, version: 3 }).breaking.length).toBeGreaterThan(0)
+    expect(compareTypeDefinitions(toInterface, { ...typeNamedBundle, version: 3 }).breaking.length).toBeGreaterThan(0)
+    const tagsToText = next(y => y.replace(reviewer, `${reviewer}  tags: { label: タグ, kind: tags, source: server }\n`))
+    expect(compareTypeDefinitions(tagsToText, next(y => y.replace(reviewer, `${reviewer}  tags: { label: タグ, kind: text, source: server }\n`).replace('version: 1', 'version: 3'))).breaking.length).toBeGreaterThan(0)
   })
 })

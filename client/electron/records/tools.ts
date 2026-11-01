@@ -24,7 +24,7 @@
  */
 import { z, type ZodTypeAny } from 'zod'
 import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
-import { DATE_VALUE_RE, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
+import { DATE_VALUE_RE, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
 import { CREATE_CONTENT_LABELS, aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
@@ -77,6 +77,7 @@ export function kindSchema(kind: FieldKind, options?: string[]): ZodTypeAny {
     case 'choice': return options && options.length > 0 ? z.enum(options as [string, ...string[]]) : z.string()
     case 'person': return z.string().min(1).max(200).describe('メンバーの id / member id')
     case 'record': return id
+    case 'tags': return z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT).describe('タグ（短い言葉の並び） / tags: short words')
   }
 }
 
@@ -98,7 +99,8 @@ const LOOKUPS: RecordToolSpec[] = [
     schema: z.object({
       type: z.string().max(40).optional(), implements: z.string().max(40).optional(),
       state: z.array(z.string().max(40)).max(20).optional(),
-      fields: z.record(z.string(), z.union([scalar, z.object({ in: z.array(scalar).max(50) })])).optional(),
+      fields: z.record(z.string(), z.union([scalar, z.object({ in: z.array(scalar).max(50) }), z.object({ contains: z.string().min(1).max(TAG_MAX_LENGTH) }).strict()]))
+        .optional().describe('欄の値。タグの欄は { contains: "タグ" } / field values; a tags field takes { contains: "tag" }'),
       linkedTo: z.object({ id, hops: z.union([z.literal(1), z.literal(2)]).optional() }).optional(),
       text: z.string().max(100).optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).max(10000).optional(),
       countOnly: z.boolean().optional(),
@@ -286,7 +288,8 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
       name: 'records_create', readOnly: false,
       schema: z.object({
         type: z.enum(creatable as [string, ...string[]]), title: z.string().min(1).max(200), summary: z.string().max(300).optional(),
-        fields: z.record(z.string(), scalar).optional(), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
+        fields: z.record(z.string(), z.union([scalar, z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT)])).optional()
+          .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
         personal: z.boolean().optional().describe('true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ） / owner-only: only the member sees it, admins included; no other assignee'),
       }).strict(),
       description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。` +

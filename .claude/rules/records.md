@@ -60,10 +60,13 @@ engine the day it is turned on.
   keys or prototype keys — every reader (server, push checker, app) gets the same meaning.
 - A definition can say only what the engine does (案 B, ontology §17.7): `fields` (kind,
   `source: file | server`; a choice may add `option_labels: { <option>: <shown as> }` — display
-  only, values stay the options), `links` (target type or `file`, cardinality, inverse label),
+  only, values stay the options; kind `tags` is server-only, "Tags" below), `links` (target type
+  or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
+  cardinality, inverse label),
   `states`, `initial`, `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK"), `implements` (interfaces, `INTERFACES`: `request` needs
-  `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server), `storage`
+  `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server; `bundle`
+  (まとまり) needs `owner` (person) and `purpose` (text) on the server), `storage`
   (`file` / `server` / `either`). Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
   same kind (an action sets them; nothing is computed).
@@ -239,6 +242,53 @@ Task: `complete` has `ok_from: [assignee]`, `notify: [requested_by, ok_by]`; `re
   refused, requester unchanged, OK-giver told and reopening, cleared on reopen, cross-company,
   v4 additive — mutation-checked).
 
+### Tags (stage 2 S1, owner decision 2026-11-01: 「何個も値を持てる項目」を1つ足す)
+
+Field kind `tags` — the one list-valued kind: short words (タグ) on a record.
+
+- Definition: `source: server` only (a file-sourced one is a parser error; record files hold id /
+  type / links only), no `options` / `target`. An action's `args` may set one (same kind).
+  Adding a tags field is additive; changing a field to or from `tags` is a kind change (breaking).
+- Value (`normalizeTagsValue`, `shared/core/record-types.ts`; the engine's `checkValue` for every
+  writer: create, action args, service and external writers): an array of strings; each NFC,
+  trimmed, inner whitespace one space, 1–`TAG_MAX_LENGTH` (40) characters, no control or line
+  separator characters; repeats dropped (first kept, order kept); at most `TAGS_MAX_COUNT` (20).
+  Anything else → 400 `BAD_VALUE`, nothing written. Stored — and in the ledger, before / after —
+  as the **JSON text** of the array (`["急ぎ","見積"]`; none = null), so every record value stays
+  one scalar (replay, undo and equality unchanged). `RecordSummary.fields` carries that text;
+  readers use `parseTagsValue`. The app's tools take a list (`kindSchema`).
+- Query: `fields: { <tags field>: { contains: "<tag>" } }` (one tag, normalized like a stored one).
+  Only types whose field of that name is `tags` are searched (another type's text field of the same
+  name never is); with `type`, a non-tags field → 400, and equality / `in` on a tags field → 400.
+  It narrows the SQL candidates like any filter; read access is applied afterwards as always, so
+  records and `total` (also `countOnly`) hold only what the caller reads, and the company handle
+  keeps it inside the company.
+- A plugin mapping cannot map a tags field (`plugins.md`).
+- Test: `server/tests/unit/record-tags-bundle.test.ts` (bad values refused with nothing written,
+  normalization, contains never returns or counts an unreadable record, never another company's,
+  never a non-tags field, equality refused), `record-types.test.ts` — mutation-checked.
+
+### Links to an interface (stage 2 S1, owner decision 2026-11-01: 取り組みを最初から)
+
+A link may target an interface instead of one type: `links: { bundle: { label: まとまり,
+interface: bundle, cardinality: one } }` — any record whose type implements it (a core 取り組み
+— S9 —, a business plugin's 案件 or 企画). `LinkDef` keeps `target: <interface name>` plus
+`targetIsInterface: true` (absent on every other link, so stored definitions compare equal).
+
+- Parser: `interface` and `target` exclude each other; an interface not in `INTERFACES` is an
+  error (a type target stays a label that may name an undefined type). Switching a link between a
+  type and an interface is breaking, even for the same name.
+- Engine (unlike type targets, which are labels): an interface link holds only live records of
+  this company whose type implements it. The generic create also requires the creator to read the
+  target; a record of another type, an unreadable one, another company's and a missing id all get
+  the same 400 `BAD_LINK` (nothing about the target leaks). The service writer (create /
+  transition) refuses (`bad-value`); the external writer drops such a target. A company's own
+  record file's links are stored as its text says, as every file link (the read side filters).
+- `POST /records/query { implements: bundle }` finds every bundle, whatever its type.
+- Test: `server/tests/unit/record-tags-bundle.test.ts` "a link to an interface",
+  `record-types.test.ts` (unknown interface refused, `bundle` needs its fields, breaking
+  changes) — mutation-checked.
+
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 
 ```
@@ -248,7 +298,7 @@ POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
-POST    /records/query             any member: { type?, implements?, state?, fields?, linkedTo?: { id, hops: 1|2 },
+POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains }), linkedTo?: { id, hops: 1|2 },
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
 ```
@@ -263,7 +313,7 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   (`fromOldConnection`, `notice`) and left out of the query unless `includeOldConnection: true`
   and out of 「あなたの番」 (`plugins.md` "Connections").
 - Fixed shape only — no free SQL (0.23-1): type or interface, states, server-field equality (`{
-  in: [...] }`), links up to 2 hops (traversal passes only through readable records), substring of
+  in: [...] }`), a tag (`{ contains }`, "Tags"), links up to 2 hops (traversal passes only through readable records), substring of
   title / summary. With `type`, field names must be server fields of it.
 - Cross-company: the handle is `member.companyId`; another company's record id is a record that
   does not exist (permission matrix `CROSS` row, `tests/unit/record-index.test.ts`).
@@ -293,6 +343,9 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
 - **Links**: a record link on the generic create must name a live record the creator reads, else
   400 `LINK_TARGET_NOT_FOUND` — the same answer for a missing id, someone's owner-only record and
   an unreadable private one (this check is new with owner-only records; before, any id was stored).
+  An interface link (`bundle`) is answered by its own check instead (400 `BAD_LINK`, one answer for
+  missing / unreadable — owner-only included — / of another kind), so no link has two refusals
+  that would tell an unseen record from a missing one.
   Links from an owner-only record to a shared one are shown to the owner only (the other side's
   readers never see the owner-only end).
 - **Share** 「部署に出す／案件につなぐ」: `POST /records/item/:recordId/share { folder,
@@ -601,6 +654,7 @@ folder, key, links — each mutation-checked),
 where the type lets it, unreadable and private-folder files refused alike without a place,
 cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
+`server/tests/unit/record-tags-bundle.test.ts` (tags and links to an interface, above),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
