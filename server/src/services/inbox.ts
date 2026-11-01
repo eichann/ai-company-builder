@@ -27,10 +27,9 @@
 import { INBOX_ACTIONS, INBOX_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { ConnectorRole, RoleResolution } from '../../shared/core/connector-roles'
 import {
-  chatThreadOf, companyDomains, defaultIntakeSettings, mailIdOf, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
-  THREAD_READ_MAX, THREAD_TEXT_FOOTER, THREAD_TEXT_HEADER, type IntakeSettings, type RoutedParty,
+  companyDomains, defaultIntakeSettings, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
+  type IntakeSettings, type RoutedParty,
 } from '../../shared/core/intake-settings'
-import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { normalizeEmail } from '../../shared/core/mail'
 import { findPrivateScope } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
@@ -39,13 +38,12 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import { replyTarget, type TaskSettings } from '../../shared/core/task-settings'
 import {
   INBOX_CHANNELS, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
-  type InboxSettingsView, type InboxStatus, type InboxThreadMessage, type InboxThreadView, type IntakeOutcome, type SetAsideItem, type SetAsideList,
+  type InboxSettingsView, type InboxStatus, type IntakeOutcome, type SetAsideItem, type SetAsideList,
 } from '../../shared/types/inbox'
 import type { RecordSummary } from '../../shared/types/records'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { InboxSource } from '../ports/inbox'
-import type { MailReader } from '../ports/mail'
 import type { RecordRow } from '../ports/records'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
@@ -95,18 +93,6 @@ export interface InboxDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Which connector serves a core role now (services/connector-roles.ts); absent until lane A wires it. */
   roles?: { resolve(companyId: string, role: ConnectorRole, operation?: string | null): Promise<RoleResolution> }
-  /** メールを読む (the role, routed: connector-role-providers.ts): the AI's thread read (B4), on demand. */
-  mailReader?: Pick<MailReader, 'getMessage'>
-  /** チャットを受け取る (the `chat` role's reading, lane A's A4); absent until wired: a chat thread then reads `stopped`. */
-  chatReader?: InboxChatReader
-}
-
-/** The `chat` role's thread read as the inbox uses it (structurally lane A's `ChatReader`, ports/chat.ts). */
-export interface InboxChatReader {
-  thread(companyId: string, userId: string, ref: { channelId: string; threadTs: string }): Promise<
-    | { ok: true; value: { messages: Array<{ mine: boolean; at: string | null; authorName: string | null; text: string; truncated: boolean }>; more: boolean } }
-    | { ok: false; reason: InboxThreadView['read'] }
-  >
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
@@ -222,11 +208,6 @@ export function createInboxService(deps: InboxDeps) {
       .filter(r => r.state !== 'closed' && r.state !== 'dropped')
   }
 
-  /** The members' own addresses (a message from one of them is the company's). */
-  function memberAddressSet(companyId: string): Set<string> {
-    return new Set(deps.memberAddresses(companyId).map(a => normalizeEmail(a.email)).filter((e): e is string => !!e))
-  }
-
   /** The interaction itself, or a 返事のお願い's interaction — both read by the member; else null. */
   function interactionFor(member: Member, handle: CompanyData, recordId: string): RecordRow | null {
     const own = readable(member, recordId, 'interaction')
@@ -265,8 +246,8 @@ export function createInboxService(deps: InboxDeps) {
     return lastOver >= 0 && lastOver > lastWait
   }
 
-  /** What a 返事のお願い is in the AI's turn for (B5): the thread view tells the PC's AI. */
-  function requestView(handle: CompanyData, id: string): NonNullable<InboxThreadView['request']> {
+  /** What a 返事のお願い is in the AI's turn for (B5): the item view tells the PC's AI. */
+  function requestView(handle: CompanyData, id: string): NonNullable<InboxItemView['request']> {
     const { state, version, fields } = fieldsOf(handle, id)
     const purpose = state === 'checking' ? 'check_reply' : state === 'preparing' ? (followingUp(handle, id) ? 'follow_up' : 'draft') : 'none'
     return {
@@ -582,69 +563,15 @@ export function createInboxService(deps: InboxDeps) {
       return ok({ record: r.record })
     },
 
-    /** The pointers the AI reads a thread by (no body): only an interaction the member reads. */
+    /** What the AI judges by (no body; the thread itself is A4's `GET /api/records-ai/threads/:recordId`). */
     item(member: Member, recordId: string): Outcome<InboxItemView> {
       const handle = handleOf(member.companyId)
       if (!handle.records.settings().enabled) return disabled()
-      const found = readable(member, recordId, 'interaction')
-      if (!found) return notFound()
-      return ok(itemView(member, handle, found.row))
-    },
-
-    /**
-     * The thread read now through the role with the member's own permission
-     * (B4: the AI on the member's PC judges by it). An interaction the member
-     * reads, or a 返事のお願い and its interaction. The text is answered, never
-     * stored or logged; at most the newest THREAD_READ_MAX messages.
-     */
-    async thread(member: Member, recordId: string): Promise<Outcome<InboxThreadView>> {
-      const handle = handleOf(member.companyId)
-      if (!handle.records.settings().enabled) return disabled()
+      // The interaction itself, or a 返事のお願い and its interaction (B5: with why it is the AI's turn).
       const row = interactionFor(member, handle, recordId)
       if (!row) return notFound()
-      const item = itemView(member, handle, row)
-      const request = row.id !== recordId ? requestView(handle, recordId) : undefined
-      const answer = (read: InboxThreadView['read'], messages: InboxThreadMessage[] = [], more = false): InboxThreadView => ({
-        item, ...(request ? { request } : {}), read, header: THREAD_TEXT_HEADER, messages, footer: THREAD_TEXT_FOOTER, more,
-        instructionLike: findInstructionLikeText(messages.map(m => m.text).join('\n')).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
-      })
-      if (item.channel === 'chat') {
-        const ref = chatThreadOf(item.threadRef)
-        if (!ref) return ok(answer('not-found'))
-        if (!deps.chatReader) return ok(answer('stopped'))
-        let r: Awaited<ReturnType<InboxChatReader['thread']>>
-        try { r = await deps.chatReader.thread(member.companyId, member.userId, ref) } catch { r = { ok: false, reason: 'unavailable' } }
-        if (!r.ok) return ok(answer(r.reason))
-        const kept = r.value.messages.slice(-THREAD_READ_MAX)
-        return ok(answer('ok', kept.map(m => ({
-          direction: m.mine ? 'out' as const : 'in' as const, at: m.at, from: m.authorName, to: [], cc: [], subject: null, text: m.text, truncated: m.truncated, automated: false,
-        })), r.value.more || r.value.messages.length > kept.length))
-      }
-      if (!deps.mailReader) return ok(answer('stopped'))
-      // Each message the inbox saw, by its own pointer (rows from before B4: the interaction's first pointer).
-      const seen = handle.inbox.messagesOf(row.id)
-      const pointers = seen.map((m, i) => mailIdOf(m.sourceRef ?? (i === 0 ? item.sourceRef : null))).filter((id): id is string => id !== null)
-      if (pointers.length === 0) return ok(answer('not-found'))
-      const newest = pointers.slice(-THREAD_READ_MAX)
-      const own = memberAddressSet(member.companyId)
-      const messages: InboxThreadMessage[] = []
-      for (const id of newest) {
-        let r: Awaited<ReturnType<MailReader['getMessage']>>
-        try { r = await deps.mailReader.getMessage(member.companyId, member.userId, id) } catch { r = { ok: false, reason: 'unavailable' } }
-        if (!r.ok) {
-          // One message gone (deleted in the mailbox) leaves the others; the connection's trouble ends the read.
-          if (r.reason === 'not-found') continue
-          return ok(answer(r.reason))
-        }
-        const v = r.value
-        messages.push({
-          direction: v.from && own.has(v.from.email) ? 'out' : 'in', at: v.receivedAt,
-          from: v.from ? (v.from.name ? `${v.from.name} <${v.from.email}>` : v.from.email) : null,
-          to: v.to.map(a => a.email), cc: v.cc.map(a => a.email), subject: v.subject, text: v.text, truncated: v.truncated, automated: v.automated,
-        })
-      }
-      if (messages.length === 0) return ok(answer('not-found'))
-      return ok(answer('ok', messages, pointers.length > newest.length))
+      const view = itemView(member, handle, row)
+      return ok(row.id !== recordId ? { ...view, request: requestView(handle, recordId) } : view)
     },
 
     /**

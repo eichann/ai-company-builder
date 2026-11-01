@@ -500,7 +500,6 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     taskSettings: companyId => taskSettings.settingsOf(companyId),
     roles: connectorsLane.connectorRoles,
-    mailReader: connectorsLane.mailReader,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
   })
   // lane C ▼
