@@ -7,8 +7,6 @@ import globals from 'globals';
 // One file per line, so lanes removing different files do not conflict.
 const NOT_YET_GUARDED = [
   'ai-runs.ts',
-  'google.ts',
-  'slack-connection.ts',
 ];
 
 export default tseslint.config(
