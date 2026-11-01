@@ -114,8 +114,8 @@ had none.
 `GET /items/:recordId/thread` (read; B4): the thread read **now** through the role with the
 member's own permission — mail: `mailReader.getMessage` per message pointer (`mailIdOf`: the part
 after the connector prefix), at most `THREAD_READ_MAX` (5) newest; chat: the `chat` role's reader
-(`InboxChatReader`, structurally lane A's `ChatReader`; until A4 wires it a chat thread reads
-`stopped`) by `chatThreadOf(thread_ref)`. A 返事のお願い's id reads its interaction's thread.
+(lane A's `ChatReader`, `composition.ts` `chatReader`: Slack `conversations.replies` with the
+member's own token; `InboxChatReader` is its shape) by `chatThreadOf(thread_ref)`. A 返事のお願い's id reads its interaction's thread.
 Answers `InboxThreadView`: `read` (`ok` or the role's failure word, never guessed around), the
 messages between `THREAD_TEXT_HEADER` / `FOOTER` (outside text: data, not instructions) and the
 instruction-like flags. **Nothing of it is stored or logged.** A business plugin's run may use it
@@ -129,8 +129,10 @@ server's execution run alone picks the PC; left in `received` the run is given b
 `handled` / `excluded` / `unsure`. Tools, nothing else: `inbox_read`, `inbox_judge`
 (`client/electron/features/inbox/tools.ts`, provider under lane B in
 `records/tool-providers.ts`; `inbox_judge` only with an act token), `records_create` (the task),
-`reply_request__finish_prep` (the reply's draft as `prep_summary`, the other side's text not
-quoted) and `reply_request__hand_over`. It never sends. Tests: `client/tests/ai-turn-steps.test.ts`,
+`mail_recipients` / `mail_draft_create` with `interactionId` (the reply in the 連絡's own thread,
+`outbound-mail.md` "Replies": mail to the thread's people by ref, Slack body only; the other
+side's text not quoted), `reply_request__finish_prep` (`links.prepared` = the draft, a short
+`prep_summary`) and `reply_request__hand_over`. The member checks and sends it from the card. It never sends. Tests: `client/tests/ai-turn-steps.test.ts`,
 `client/tests/ai-turn-claims.test.ts` (no start mark).
 
 ## Following up (追いかけ, B5: `follow-up`)
@@ -147,14 +149,15 @@ quoted) and `reply_request__hand_over`. It never sends. Tests: `client/tests/ai-
 - **The PC's step** `client/shared/ai-turn-steps/follow-up.ts`: a `reply_request` in `preparing` or
   `checking` (no start mark; `claim.from` lists both). `inbox_read` with the request's id answers
   `request.purpose` — `draft`, `follow_up`, `check_reply` — and the AI acts: the draft or nudge as
-  `prep_summary` (`finish_prep`), `ai_close` (answered / sent / accepted), `await_reply` (+
+  a reply in the thread (`mail_draft_create { interactionId }`, linked by `finish_prep`'s
+  `links.prepared`), `ai_close` (answered / sent / accepted), `await_reply` (+
   `set_wait_until` for a promise such as 「明日送ります」: the clock follows it up), or `hand_over`
   (still the member's).
 - **A promise in the reply** (「明日送ります」, owner decision 2026-11-02): the same reply request goes
   back to 返事待ち with the promised time as `wait_until` — no separate promise-wait record — and
   the clock follows it up like any 返事の見込み.
-- **The draft** is text in `prep_summary` (「AIが用意したこと」) until A4's reply draft lands; the
-  steps then switch to A4's tools (owner decision 2026-11-02). Its only tools: `inbox_read` and those six `reply_request__…` actions.
+- Its only tools: `inbox_read`, `mail_recipients`, `mail_draft_create` and those six
+  `reply_request__…` actions.
 - Tests: `server/tests/unit/inbox.test.ts` ("B5"), `client/tests/ai-turn-steps.test.ts`,
   `client/tests/ai-turn-claims.test.ts`.
 
@@ -213,10 +216,7 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (A4).
 - A task's own wait (`WAIT_OVER.task` → `preparing`) has no PC step yet: lane C covers it.
-- The reply's draft is text in `prep_summary` until A4's reply draft (`outbound_message` v4,
-  replying to the interaction, with the sender as a recipient source) lands; the step then names
-  A4's draft tools instead. The chat thread read waits for A4's `ChatReader` (one line in
-  `composition.ts`: `chatReader`). 「もう返した」 by the engine does not discard a prepared draft
-  yet (the member's reply seen by the inbox does).
+- 「もう返した」 by the engine does not discard a prepared draft yet (the member's reply seen by
+  the inbox does).
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no
   assignee (nobody's turn); A4 may create them `handled`.

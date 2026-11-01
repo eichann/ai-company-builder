@@ -143,11 +143,11 @@ test('an incoming message (interaction) runs under inbox-triage from the task li
   assert.equal(aiTurnStepForRecord('interaction-abcdef12')?.step, 'inbox-triage')
   const queue = aiTurnQueue({ minutes: [], tasks: [item('interaction-aaaaaaaa', 'ai', { due: null }), item('interaction-bbbbbbbb', 'mine')] })
   assert.deepEqual(queue.map(q => q.id), ['interaction-aaaaaaaa'])
-  for (const name of ['inbox_read', 'inbox_judge', 'records_create', 'reply_request__finish_prep', 'reply_request__hand_over']) {
+  for (const name of ['inbox_read', 'inbox_judge', 'records_create', 'mail_recipients', 'mail_draft_create', 'reply_request__finish_prep', 'reply_request__hand_over']) {
     assert.ok(aiTurnStepAllowsRecordTool('inbox-triage', name), name)
   }
   // Least privilege: no sending, no other record's actions, no look-ups beyond its message, no Drive.
-  for (const name of ['records_get', 'records_query', 'interaction__set_aside', 'interaction__handle', 'mail_draft_create', 'drive_read', 'reply_request__ai_close', 'meeting__finish_reading']) {
+  for (const name of ['records_get', 'records_query', 'interaction__set_aside', 'interaction__handle', 'mail_draft_update', 'mail_draft_show', 'drive_read', 'reply_request__ai_close', 'meeting__finish_reading']) {
     assert.ok(!aiTurnStepAllowsRecordTool('inbox-triage', name), name)
   }
 })
@@ -182,10 +182,10 @@ test('the inbox tools: the thread is read through the server as outside text; a 
 
 test('a 返事のお願い (準備中 / 確かめ中) runs under follow-up with only its own actions: it can end only its own request, never send', () => {
   assert.equal(aiTurnStepForRecord('reply_request-abcdef12')?.step, 'follow-up')
-  for (const name of ['inbox_read', 'reply_request__finish_prep', 'reply_request__hand_over', 'reply_request__ai_close', 'reply_request__await_reply', 'reply_request__set_wait_until']) {
+  for (const name of ['inbox_read', 'mail_recipients', 'mail_draft_create', 'reply_request__finish_prep', 'reply_request__hand_over', 'reply_request__ai_close', 'reply_request__await_reply', 'reply_request__set_wait_until']) {
     assert.ok(aiTurnStepAllowsRecordTool('follow-up', name), name)
   }
-  for (const name of ['inbox_judge', 'records_create', 'records_get', 'reply_request__close', 'reply_request__drop', 'mail_draft_create', 'task__complete']) {
+  for (const name of ['inbox_judge', 'records_create', 'records_get', 'reply_request__close', 'reply_request__drop', 'mail_draft_update', 'task__complete']) {
     assert.ok(!aiTurnStepAllowsRecordTool('follow-up', name), name)
   }
   // Several from-states only without a start mark.

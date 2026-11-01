@@ -501,6 +501,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     taskSettings: companyId => taskSettings.settingsOf(companyId),
     roles: connectorsLane.connectorRoles,
     mailReader: connectorsLane.mailReader,
+    // チャットの連絡を受け取る (A4's Slack thread read): the AI's thread read of a chat 連絡 (inbox.md).
+    chatReader: connectorsLane.chatReader,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
   })
   // lane C ▼
