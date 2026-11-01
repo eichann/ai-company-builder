@@ -9,7 +9,7 @@ import type { PluginAiField, PluginAiOperation, PluginAiTools } from '../../shar
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
-import { parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
+import { boundStepOf, parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -27,11 +27,11 @@ import type { PluginShelf } from './plugin-shelf'
 export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'> & { shelf: Pick<PluginShelf, 'find' | 'isStopped'>; runStepOf?: RunStepOf }) {
   const { companyData, shelf } = deps
   return {
-    async allowsConnectorRole(member: Member, runId: string | null, role: string): Promise<boolean> {
-      if (!runId) return true
+    async allowsConnectorRole(member: Member, runId: string | null, role: string, conversationId: string | null = null): Promise<boolean> {
       const handle = companyData.forCompany(member.companyId)
-      const run = handle.aiRuns.byId(runId)
-      if (!run) return false
+      const run = boundStepOf(handle, member.userId, { runId, conversationId })
+      if (run === null) return true
+      if (run === 'missing') return false
       const bound = parsePluginRunStep(run.step)
       if (!bound) return true
       const install = handle.plugins.install(bound.pluginId)
@@ -67,15 +67,13 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
      * the gate's own rule — the gate still decides each call); a run that
      * cannot be read sees none. A consultation or a core step: as before.
      */
-    async aiTools(member: Member, scope: 'read' | 'act', runId: string | null = null): Promise<Outcome<PluginAiTools>> {
+    async aiTools(member: Member, scope: 'read' | 'act', runId: string | null = null, conversationId: string | null = null): Promise<Outcome<PluginAiTools>> {
       const out: PluginAiTools['plugins'] = []
       const handle = companyData.forCompany(member.companyId)
       let bound: { pluginId: string; step: string } | null = null
-      if (runId) {
-        const run = handle.aiRuns.byId(runId)
-        if (!run) return ok({ plugins: [] })
-        bound = parsePluginRunStep(run.step)
-      }
+      const run = boundStepOf(handle, member.userId, { runId, conversationId })
+      if (run === 'missing') return ok({ plugins: [] })
+      if (run) bound = parsePluginRunStep(run.step)
       for (const install of handle.plugins.installs()) {
         if (bound && install.pluginId !== bound.pluginId) continue
         const evaluated = await evaluation.evaluate(member.companyId, install)

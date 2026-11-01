@@ -6,7 +6,7 @@
  * them. Not IPC: the address and token come over IPC (`chat-server:getInfo` /
  * `chat-server:info`, `ChatServerInfo` in ipc-contract.ts).
  */
-import type { PluginRunStep } from './ai-turn-steps/plugin'
+import type { PluginPersonStep, PluginRunStep } from './ai-turn-steps/plugin'
 import type { AiTurnStep } from './ai-turn-steps/registry'
 import type { AgentSession, AuthMode } from './agent'
 import type { RateLimitSnapshot } from './rate-limits'
@@ -55,6 +55,11 @@ export interface ChatRequestOptions {
    * A business plugin's step is `<pluginId>__<step>` (plugin-steps.md): its tools are what main's claim holds.
    */
   aiTurnStep?: AiTurnStep | PluginRunStep
+  /**
+   * The business plugin's person step this consultation was started from (plugin-steps.md): main
+   * binds the consultation to it on the server before the turn (its AI's plugin power is that step's).
+   */
+  pluginStep?: PluginPersonStep
 }
 
 export interface SteerRequest { appSessionId: string; text: string }

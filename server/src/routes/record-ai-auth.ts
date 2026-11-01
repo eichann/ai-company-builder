@@ -33,7 +33,7 @@ export function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder |
  * refusal is the gate's one answer (403 `NOT_IN_STEP`), naming nothing.
  */
 export async function connectorRoleRefusal(c: Context, h: RecordTokenHolder, role: string): Promise<Response | null> {
-  if (await pluginRunGate.allowsConnectorRole(h.member, h.run?.id ?? null, role)) return null
+  if (await pluginRunGate.allowsConnectorRole(h.member, h.run?.id ?? null, role, h.conversationId)) return null
   return c.json({ error: NOT_IN_STEP.error, code: NOT_IN_STEP.code }, 403)
 }
 

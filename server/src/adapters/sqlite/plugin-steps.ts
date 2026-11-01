@@ -53,6 +53,15 @@ export function sqlitePluginStepRepository(conn: Database.Database, companyId: s
         .all(companyId, pluginId) as Array<{ step: string; skill: string }>
       return Object.fromEntries(rows.map(r => [r.step, r.skill]))
     },
+    consultationStep(userId, conversationId) {
+      const r = conn.prepare('SELECT record_id, plugin_id, step FROM plugin_step_consultations WHERE company_id = ? AND user_id = ? AND conversation_id = ?')
+        .get(companyId, userId, conversationId) as { record_id: string; plugin_id: string; step: string } | undefined
+      return r ? { recordId: r.record_id, pluginId: r.plugin_id, step: r.step } : null
+    },
+    bindConsultation(row) {
+      return conn.prepare(`INSERT OR IGNORE INTO plugin_step_consultations (company_id, user_id, conversation_id, record_id, plugin_id, step, bound_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`).run(companyId, row.userId, row.conversationId, row.recordId, row.pluginId, row.step, row.at).changes === 1
+    },
     setStepSkill(pluginId, step, skill, at, by) {
       if (skill === null) {
         conn.prepare('DELETE FROM plugin_step_skills WHERE company_id = ? AND plugin_id = ? AND step = ?').run(companyId, pluginId, step)

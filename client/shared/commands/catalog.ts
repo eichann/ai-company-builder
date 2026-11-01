@@ -23,6 +23,12 @@ export const COMMANDS = defineCommands([
       minutesId: z.string().regex(/^minutes-[0-9a-z]{6,32}$/).optional()
         .describe('The minutes record it reads (「<件名> のあと」): kept with the conversation; only an agent with record actions starts it'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+      pluginStep: z.object({
+        recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/),
+        pluginId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/).max(40),
+        step: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+      }).optional()
+        .describe('A business plugin\'s person step it was started from (plugin-steps.md): its AI\'s plugin power stays that step\'s'),
     }),
     target: { arg: 'pane', area: 'chat' },
   },

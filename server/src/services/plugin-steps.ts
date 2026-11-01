@@ -331,6 +331,36 @@ export function createPluginStepService(deps: PluginStepDeps) {
     },
 
     /**
+     * POST /me/plugin-steps/consultations { conversationId, recordId, pluginId, step } — the
+     * member's consultation opened from a person's start (coordinator decision 2026-11-02): its
+     * AI keeps the member's ordinary consultation tools, but its plugin power is that step's —
+     * the C4 gate treats every token of this consultation like the step's run (its plugin's
+     * operations the step allows, its connector roles, narrowed by the pinned version; a company
+     * Skill never widens it). For good: a consultation is bound once and never unbound or rebound.
+     * Only a `start: person` step whose work was started (pinned) on a record the member reads.
+     */
+    bindConsultation(member: Member, body: unknown): Outcome<{ bound: true }> {
+      const b = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : null
+      const conversationId = b?.conversationId
+      if (typeof conversationId !== 'string' || conversationId.length === 0 || conversationId.length > 200 || /[\u0000-\u001f\u007f]/.test(conversationId)) { // eslint-disable-line no-control-regex
+        return refuse('bad-request', 'conversationId is required (1–200 characters)')
+      }
+      if (typeof b?.recordId !== 'string' || typeof b.pluginId !== 'string' || typeof b.step !== 'string') return refuse('bad-request', 'recordId, pluginId and step are names')
+      const { recordId, pluginId, step } = b as { recordId: string; pluginId: string; step: string }
+      const rec = readable(member, recordId)
+      if (!rec) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      const inst = installedStep(member.companyId, pluginId, step)
+      const r = repo(member.companyId)
+      if (!inst || inst.step.start !== 'person' || !r.pin(recordId, pluginId, step)) {
+        return refuse('not-found', PLUGIN_STEP_NOT_FOUND.error, { code: PLUGIN_STEP_NOT_FOUND.code })
+      }
+      if (r.bindConsultation({ userId: member.userId, conversationId, recordId, pluginId, step, at: clock.now() })) return ok({ bound: true })
+      const was = r.consultationStep(member.userId, conversationId)
+      if (was && was.recordId === recordId && was.pluginId === pluginId && was.step === step) return ok({ bound: true })
+      return refuse('conflict', 'この相談はもう別の手順のための相談です', { code: 'CONSULTATION_BOUND' })
+    },
+
+    /**
      * Versions some open work of the company is pinned to (C2's
      * `pinnedVersions`): pins whose record still exists and is not in a final
      * state of its type.

@@ -102,7 +102,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
-  useCommandHandler('chat.newConsultation', ({ message, title, minutesId }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId }), { target: paneId })
+  useCommandHandler('chat.newConsultation', ({ message, title, minutesId, pluginStep }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId, pluginStep }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
   useCommandHandler('chat.consultAbout', async ({ recordId, title }) => {

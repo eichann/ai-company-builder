@@ -70,7 +70,7 @@ import { registerSlackIpc } from './features/slack/ipc'
 // lane B ▲
 // lane C ▼
 import { createProcedureReader } from './features/ai-turns/procedures'
-import { registerPluginStepsIpc } from './features/plugin-steps/ipc'
+import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
 // lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -436,7 +436,12 @@ app.whenReady().then(async () => {
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
-    const result = await startChatServer({ ...serverConfig, pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step) })
+    const result = await startChatServer({
+      ...serverConfig,
+      pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step),
+      // A person step's consultation: its AI's plugin power is that step's (plugin-steps.md).
+      bindPluginStep: createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies }),
+    })
     chatServerInfo = { port: result.port, authToken: result.authToken }
     chatTurns = result.turns
   } catch (err) {

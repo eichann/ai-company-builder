@@ -29,4 +29,8 @@ export interface PluginStepRepository {
   stepSkills(pluginId: string): Record<string, string>
   /** Set (a Skill name) or remove (null) the company's Skill for a step. */
   setStepSkill(pluginId: string, step: string, skill: string | null, at: string, by: string): void
+  /** The step a member's consultation was started from (a `start: person` step), or null. */
+  consultationStep(userId: string, conversationId: string): { recordId: string; pluginId: string; step: string } | null
+  /** Bind a member's consultation to a step for good: false when it is bound already (nothing changed). */
+  bindConsultation(row: { userId: string; conversationId: string; recordId: string; pluginId: string; step: string; at: string }): boolean
 }

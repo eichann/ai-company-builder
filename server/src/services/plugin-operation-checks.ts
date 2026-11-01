@@ -11,6 +11,7 @@ import { PLUGIN_ID_RE, asksFirst, effectiveFieldPolicy, effectiveOperationPolicy
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
+import type { CompanyData } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { refuse } from './outcome'
@@ -108,6 +109,24 @@ export type OperationRoleHolds = (companyId: string, pluginId: string, recordId:
  */
 export type RunStepOf = (companyId: string, run: { step: string; procedure: string | null }) => Promise<PluginStep | null | false>
 
+/**
+ * The step an AI's call is bound to (plan C4 / C5): its execution run's, or — for a consultation
+ * started from a `start: person` step (plugin-steps.md) — that step, as a run would name it, with
+ * the work's pin. null: not bound (a member's ordinary consultation, a core step's run is its own
+ * run); 'missing': a run that cannot be read (nothing passes).
+ */
+export function boundStepOf(
+  handle: Pick<CompanyData, 'aiRuns' | 'pluginSteps'>, userId: string, actor: { runId?: string | null; conversationId?: string | null },
+): { step: string; procedure: string | null } | null | 'missing' {
+  if (actor.runId) return handle.aiRuns.byId(actor.runId) ?? 'missing'
+  if (!actor.conversationId) return null
+  const bound = handle.pluginSteps.consultationStep(userId, actor.conversationId)
+  if (!bound) return null
+  const step = `${bound.pluginId}${PLUGIN_RUN_STEP_SEPARATOR}${bound.step}`
+  const pin = handle.pluginSteps.pin(bound.recordId, bound.pluginId, bound.step)?.pin
+  return { step, procedure: pin ? JSON.stringify({ step, app: null, plugins: [], pin }) : null }
+}
+
 export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyData' | 'plugins' | 'roleOf' | 'managedFolders' | 'aiStopped'>) {
   const { companyData, plugins } = deps
   let roleHolds: OperationRoleHolds | null = null
@@ -185,10 +204,11 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
    * plugin's step may call only that plugin's declared operations its step
    * allows, while the plugin runs. A consultation or a core step: null.
    */
-  async function stepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId'>, pluginId: string, operation: string) {
-    if (actor.kind !== 'ai' || !actor.runId) return null
-    const run = companyData.forCompany(member.companyId).aiRuns.byId(actor.runId)
-    if (!run) return notInStep()
+  async function stepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, operation: string) {
+    if (actor.kind !== 'ai') return null
+    const run = boundStepOf(companyData.forCompany(member.companyId), member.userId, actor)
+    if (run === null) return null
+    if (run === 'missing') return notInStep()
     const bound = parsePluginRunStep(run.step)
     if (!bound) return null
     if (bound.pluginId !== pluginId) return notInStep()
