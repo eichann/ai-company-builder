@@ -99,6 +99,32 @@ export type RecordStorage = 'file' | 'server' | 'either'
 /** Approval tiers (0.3-4): none (recorded only), undoable later, prior approval. */
 export type ApprovalTier = 'none' | 'undoable' | 'prior'
 
+/**
+ * Where an action (or a business plugin's operation) may be called from (plan 4b §5-13,
+ * `.claude/rules/plugin-frame.md`): `screen` = the core app's own screens and the member's
+ * consultation, `plugin` = a plugin's screen through its bridge, `run` = an automated run
+ * (S10b) under the member's authority. Approving and sending are never any of these: they
+ * stay on the core's cards (their own services).
+ */
+export const ACTION_VIA = ['screen', 'plugin', 'run'] as const
+export type ActionVia = typeof ACTION_VIA[number]
+/** Without `via`: the core's screens and automated runs, never a plugin's screen. */
+export const DEFAULT_ACTION_VIA: readonly ActionVia[] = ['screen', 'run']
+/** Where this action / operation may be called from (`via`, else the default). */
+export const viaOf = (a: { via?: ActionVia[] }): readonly ActionVia[] => a.via ?? DEFAULT_ACTION_VIA
+
+/**
+ * Parse a `via` list: a non-empty list of `ACTION_VIA` without repeats. A string is the
+ * problem (Japanese, naming `where`).
+ */
+export function parseVia(v: unknown, where: string): ActionVia[] | string {
+  const l = Array.isArray(v) ? v : typeof v === 'string' ? [v] : null
+  if (!l || l.length === 0 || !l.every(x => typeof x === 'string' && (ACTION_VIA as readonly string[]).includes(x)) || new Set(l).size !== l.length) {
+    return `${where}の via は ${ACTION_VIA.join(' / ')} の並びで書いてください（同じものは1回だけ）`
+  }
+  return l as ActionVia[]
+}
+
 export interface FieldDef {
   label: string
   kind: FieldKind
@@ -186,6 +212,12 @@ export interface ActionDef {
    * of the link's type (or implementing its interface). Absent = none.
    */
   links?: string[]
+  /**
+   * YAML `via`: where the action may be called from (`ACTION_VIA`). Absent =
+   * `DEFAULT_ACTION_VIA` (left out of the definition then, so existing stored
+   * JSON compares equal). `plugin` is refused on an action with `approval: prior`.
+   */
+  via?: ActionVia[]
 }
 
 export interface TypeDefinition {
@@ -469,7 +501,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'links']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'links', 'via']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -534,6 +566,14 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         if (!l || l.length === 0 || !l.every(n => typeof n === 'string' && links[n] !== undefined && links[n].target !== 'file')) err(`操作「${aname}」の links は記録へのつながり（file でないもの）の名前で書いてください`)
         else actionLinks = [...new Set(l as string[])]
       }
+      let via: ActionVia[] | undefined
+      if (a.via !== undefined && a.via !== null) {
+        const v = parseVia(a.via, `操作「${aname}」`)
+        if (typeof v === 'string') err(v)
+        // A plugin's screen can only ask (an approval request); an action that needs prior approval is the core's.
+        else if (v.includes('plugin') && approval === 'prior') err(`操作「${aname}」は承認が要る（approval: prior）ため、via に plugin は書けません。承認は本体の画面だけです`)
+        else via = v
+      }
       if (to === null && Object.keys(args).length === 0 && !actionLinks) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かつながりを決める（links）かのどれかが要ります`)
       actions[aname] = {
         label: isStr(a.label) ? a.label : aname,
@@ -550,6 +590,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         handTo,
         ...(okFrom ? { okFrom } : {}),
         ...(actionLinks ? { links: actionLinks } : {}),
+        ...(via ? { via } : {}),
       }
     }
   }

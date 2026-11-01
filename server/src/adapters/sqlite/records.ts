@@ -8,7 +8,7 @@
  */
 import type Database from 'better-sqlite3'
 import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
-import type { ExternalReceipt, LedgerEntry } from '../../../shared/core/record-ledger'
+import type { ExternalReceipt, LedgerEntry, LedgerVia } from '../../../shared/core/record-ledger'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
@@ -36,7 +36,7 @@ type LedgerRow = {
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
   proposed_by: string | null; conversation_id: string | null; receipt: string | null; on_behalf_of: string | null; run_id: string | null
-  procedure: string | null; skills: string | null
+  procedure: string | null; skills: string | null; via: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
@@ -48,7 +48,16 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   ...(r.run_id ? { procedure: parseAiRunProcedure(r.procedure) } : {}),
   ...(r.skills ? { skills: parseSkillUses(r.skills) } : {}),
   ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
+  ...(r.via ? { via: parseLedgerVia(r.via) } : {}),
 })
+
+/** A stored `via` (`{ plugin, version }`), or null when it is not that shape. */
+function parseLedgerVia(text: string): LedgerVia | null {
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>
+    return v && typeof v.plugin === 'string' && typeof v.version === 'string' ? { plugin: v.plugin, version: v.version } : null
+  } catch { return null }
+}
 
 /** Where the content id starts in a reference (`acb-content:<id>:…`, 1-based for substr). */
 const CONTENT_ID_AT = CONTENT_REF_PREFIX.length + 1
@@ -294,7 +303,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     ledger(recordId) {
       const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
       return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
@@ -315,12 +324,13 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       // "Which procedure"): a later re-claim never changes what an earlier entry says.
       // The AI's entry copies the Skills its consultation had used by now (records.md "Which Skill").
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?)`)
+          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?, ?)`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
           e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null,
-          companyId, e.runId ?? null, e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null)
+          companyId, e.runId ?? null, e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null,
+          e.via ? JSON.stringify({ plugin: e.via.plugin, version: e.via.version }) : null)
       b.flush(e.at)
     },
 

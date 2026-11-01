@@ -503,6 +503,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     taskSettings: companyId => taskSettings.settingsOf(companyId),
     roles: connectorsLane.connectorRoles,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
+    bridge: {
+      // Lane C's list (built below; called only after construction): what the company's apps may keep now.
+      listed: companyId => pluginsLane.pluginDistribution.pluginsFor(companyId),
+      shelf: pluginShelf,
+      records: { query: (m, b) => records.query(m, b), get: (m, id) => records.get(m, id) },
+      act: (m, actor, recordId, action, b) => recordEngine.act(m, actor, recordId, action, b),
+      requestApproval: (m, actor, pluginId, recordId, operation, b) => approvals.request(m, actor, pluginId, recordId, operation, b),
+    },
   })
   // lane C ▼
   const pluginsLane = wirePluginsLane({

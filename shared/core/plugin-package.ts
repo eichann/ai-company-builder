@@ -183,7 +183,7 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
     if (use.movesMoney && op.kind === 'read') errors.push(`${where}: 読む操作はお金を動かしません（moves_money は書く操作だけです）`)
     if (use.movesMoney && policy === 'auto') errors.push(`${where}: お金が動く操作は「自動」にできません`)
     if (op.createsRecord && policy === 'auto') errors.push(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
-    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy, movesMoney: use.movesMoney }
+    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy, movesMoney: use.movesMoney, ...(use.via ? { via: [...use.via] } : {}) }
   }
   if (errors.length === 0) {
     for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {

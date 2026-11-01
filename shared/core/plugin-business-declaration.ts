@@ -11,7 +11,7 @@ import {
   type CommonPart, type ConnectorUse, type FieldPolicy, type PluginManifest,
 } from './plugin-declaration'
 import { strList, typeNameLayerProblem, unknownKeys } from './plugin-declaration-rules'
-import { ONTOLOGY_NAME_RE, type NoteRule } from './record-types'
+import { ONTOLOGY_NAME_RE, parseVia, type ActionVia, type NoteRule } from './record-types'
 import { isYamlMap, type YamlValue } from './yaml-lite'
 
 export const BUSINESS_KEYS: readonly string[] = ['types', 'connector', 'objects', 'operations', 'field_policy_defaults']
@@ -70,7 +70,7 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
       const where = `操作「${opname}」`
       if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(op)) { err(`${where}は { who, … } の形で書いてください`); continue }
-      unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy', 'moves_money'], err)
+      unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy', 'moves_money', 'via'], err)
       const who = strList(op.who)
       // `role:<name>` (a declared role) only from contract 2 on; parseFlow checks the name is declared.
       const whoNameOk = (w: string) => ONTOLOGY_NAME_RE.test(w) || (common.contract >= PLUGIN_CONTRACT_V2 && w.startsWith(ROLE_WHO_PREFIX) && ONTOLOGY_NAME_RE.test(w.slice(ROLE_WHO_PREFIX.length)))
@@ -89,7 +89,15 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
       const movesMoney = op.moves_money ?? false
       if (typeof movesMoney !== 'boolean') err(`${where}の moves_money は true か false です`)
       else if (movesMoney && common.contract < PLUGIN_CONTRACT_V2) err(`${where}の moves_money は contract: ${PLUGIN_CONTRACT_V2} の包みだけに書けます`)
-      operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy, movesMoney: movesMoney === true }
+      // `via` (contract 2, plan 4b §5-13): where it may be called from; absent = [screen, run].
+      let via: ActionVia[] | undefined
+      if (op.via !== undefined && op.via !== null) {
+        const v = parseVia(op.via, where)
+        if (typeof v === 'string') err(v)
+        else if (common.contract < PLUGIN_CONTRACT_V2) err(`${where}の via は contract: ${PLUGIN_CONTRACT_V2} の包みだけに書けます`)
+        else via = v
+      }
+      operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy, movesMoney: movesMoney === true, ...(via ? { via } : {}) }
     }
     if (Object.keys(operations).length === 0 && Object.keys(objects).length === 0) err('connector を書いたら、使う objects か operations を書いてください')
     if (connector) uses = { connector, objects, operations }

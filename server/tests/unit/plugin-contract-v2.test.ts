@@ -297,6 +297,14 @@ describe('an operation that moves money (moves_money)', () => {
     expect(autoDefault(flowWith([DEFAULTS, '']))).toBe('')
   })
 
+  it("an operation's via (plan 4b §5-13): contract 2 only, a list of screen / plugin / run, copied into the combined use", () => {
+    const VIA = '    via: [screen, plugin]\n'
+    expect(combined(flowWith([DECISION, DECISION + VIA])).operations.update_deal.via).toEqual(['screen', 'plugin'])
+    expect(combined(flowWith()).operations.update_deal).not.toHaveProperty('via')
+    expect(flowErrors([DECISION, `${DECISION}    via: [elsewhere]\n`])).toMatch(/via は screen \/ plugin \/ run の並び/)
+    expect(errors({ ...SALES, manifest: SALES.manifest.replace('    note: optional\n    decision: true\n', `    note: optional\n    decision: true\n${VIA}`) })).toMatch(/via は contract: 2 の包みだけ/)
+  })
+
   it('only on a contract-2 business operation that writes; a boolean', () => {
     expect(flowErrors([DECISION, `${DECISION}    moves_money: maybe\n`])).toMatch(/moves_money は true か false です/)
     expect(errors({ ...SALES, manifest: SALES.manifest.replace('    note: optional\n    decision: true\n', `    note: optional\n    decision: true\n${MONEY}`) })).toMatch(/moves_money は contract: 2 の包みだけ/)

@@ -49,6 +49,7 @@ import { identitiesRoute } from './routes/identities'
 import { recordsAiIdentitiesRoute } from './routes/records-ai-identities'
 import { inboxRoute } from './routes/inbox'
 import { recordsAiInboxRoute } from './routes/records-ai-inbox'
+import { pluginBridgeRoute } from './routes/plugin-bridge'
 // lane B ▲
 // lane C ▼
 import { pluginStepsRoute } from './routes/plugin-steps'
@@ -173,6 +174,8 @@ app.route('/api/records-ai/identities', recordsAiIdentitiesRoute)
 // Messages that came in (来た連絡, inbox.md): a member's own; the AI judges by its record token.
 app.route('/api/companies/:companyId', inboxRoute)
 app.route('/api/records-ai/inbox', recordsAiInboxRoute)
+// A plugin screen's bridge (plugin-frame.md): the member's session, the overlap of their rights, the company's grant and the op's scope.
+app.route('/api/companies/:companyId', pluginBridgeRoute)
 // lane B ▲
 // lane C ▼
 app.route('/api/companies/:companyId', pluginStepsRoute)

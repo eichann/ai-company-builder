@@ -5,7 +5,7 @@
  * reads (contract, actors, the fixed endpoints, `available_to`). Parsing is in
  * `plugin-manifest.ts`; the overview and owner rules are in `plugins.ts`.
  */
-import { isMoneyField, type NoteRule, type TypeDefinition } from './record-types'
+import { isMoneyField, type ActionVia, type NoteRule, type TypeDefinition } from './record-types'
 
 /**
  * Who may run a plugin operation, besides the record type's person fields
@@ -145,6 +145,8 @@ export interface PluginOperation {
    * in a step's run only an approval request. False on a connector's own.
    */
   movesMoney: boolean
+  /** The business plugin's `via` for its use of the operation (absent: `[screen, run]`; never on a connector's own). */
+  via?: ActionVia[]
 }
 
 /** Never runs without a person's approval: it reaches people outside, moves money, or creates a record (統合版: never `ok_from`, never direct). */
@@ -201,6 +203,12 @@ export interface OperationUse {
   policy: FieldPolicy | null
   /** `moves_money: true` (contract 2): the operation moves money; it asks first like one reaching outside. */
   movesMoney: boolean
+  /**
+   * `via` (contract 2, plan 4b §5-13): where the operation may be called from
+   * (`ACTION_VIA`; absent = `[screen, run]`). From a plugin's screen it only ever
+   * becomes an approval request (the bridge has no direct run).
+   */
+  via?: ActionVia[]
 }
 
 /**

@@ -483,6 +483,8 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/inbox/items/:recordId/claim', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/claim`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/inbox/items/:recordId', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/inbox/items/:recordId/judgement', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/judgement', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // A plugin screen's bridge (plugin-frame.md): any member's session; a plugin nobody granted is the bridge's one 403.
+  r('POST /api/companies/:companyId/plugin-bridge', w => ({ path: `${C(w)}/plugin-bridge`, body: { pluginId: 'no-such-plugin', version: '0.1.0', op: 'records.query', args: { type: 'deal' } } }), [403, 403, 403, 403, 404, 401]),
   // lane B ▲
   // lane C ▼
   // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
