@@ -207,8 +207,11 @@ readable by the member, never a private folder's file for a task outside it (one
   instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
   picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already
   reads, with the runner's state; AppShell gives each its buttons (まとまりを選ぶ → `BundleChooser`,
-  自分で読み取る / 今は読まない, もう一度 / 人に渡す). The minutes first message tells the AI, when none is linked, to leave the まとまり's
-  fields and the meeting log and finish the rest.
+  自分で読み取る / 今は読まない for a received meeting only, もう一度 / 人に渡す). The minutes first message
+  tells the AI, when none is linked, to leave the まとまり's fields and the meeting log and finish the
+  rest; choosing the まとまり afterwards gives just that part back to the AI once (`minutes.md` "A
+  まとまり chosen later"; the row is 「AI の番」 again, without 「自分で読み取る」 / 「今は読まない」, which are
+  only for a received meeting).
 
 ## Tests
 

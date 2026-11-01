@@ -294,7 +294,7 @@ export function AppShell() {
   const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? []).map(m => {
     const actions: MeetingTurnRow['actions'] = []
     if (m.kind === 'bundle') actions.push({ label: 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
-    if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available) {
+    if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
       actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
       actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
     }

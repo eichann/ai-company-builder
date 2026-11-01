@@ -150,10 +150,16 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   const { companyData, writer, meetings } = deps
 
   /** A meeting still 「読んでいる」 back to 「届いた」 (the type's `retry`), with the actor that caused it. */
+  /** An AI step that stopped half way goes back to wait for the AI: the reading, or the まとまり's part. */
+  const PUT_BACK: Record<string, { action: string; to: string }> = {
+    reading: { action: 'retry', to: 'received' },
+    bundle_working: { action: 'retry_bundle_work', to: 'bundle_waiting' },
+  }
   function putBack(companyId: string, recordId: string, actor: ServiceActor, note: string): boolean {
     const now = fieldsOf(companyData.forCompany(companyId).records, recordId)
-    if (now.state !== 'reading') return false
-    return writer.transition(companyId, { recordId, action: 'retry', expectedVersion: now.version, to: 'received', actor, note }).ok
+    const back = now.state ? PUT_BACK[now.state] : undefined
+    if (!back) return false
+    return writer.transition(companyId, { recordId, action: back.action, expectedVersion: now.version, to: back.to, actor, note }).ok
   }
   const disabled = () => refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
   const notFound = () => refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
@@ -305,7 +311,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
 
       // The member's own meetings whose minutes are stuck in 「読んでいる」: put back to 「届いた」 here,
       // as the server clock (the ledger says no person did it), not by the app with the member's session.
-      const stale = records.candidates({ types: [MEETING_TYPE], states: ['reading'], fields: [{ name: 'assignee', values: [member.userId] }] }, 200)
+      const stale = records.candidates({ types: [MEETING_TYPE], states: Object.keys(PUT_BACK), fields: [{ name: 'assignee', values: [member.userId] }] }, 200)
         .filter(r => reader.record(r))
         .filter(r => {
           const at = Date.parse(fieldsOf(records, r.id).updatedAt ?? '')
@@ -505,8 +511,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (!bundleRow) return refuse('bad-request', 'bundleId: a まとまり (bundle) record you can read', { code: 'BAD_LINK' })
       const counterpart = counterpartOf(handle, bundleRow.id)
       const expected = typeof b.expectedVersion === 'number' ? b.expectedVersion : now.version
+      // Read without a まとまり: its AI left the まとまり's part (the deal's fields, the meeting log).
+      // Choosing one now gives exactly that part back to the AI, once (minutes.md "A まとまり chosen later").
+      const hadBundle = records.linksFrom([row.id]).some(l => l.name === 'bundle' && l.targetId)
       const r = writer.transition(member.companyId, {
-        recordId: row.id, action: 'link_bundle', expectedVersion: expected, to: null,
+        recordId: row.id, action: 'link_bundle', expectedVersion: expected, to: now.state === 'read' && !hadBundle ? 'bundle_waiting' : null,
         links: { bundle: [bundleRow.id], counterpart: counterpart ? [counterpart] : [] },
         actor: { id: member.userId, ...actor },
       })

@@ -76,6 +76,23 @@ access itself: `google-connector.md` (G3).
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote
    check (`quoteAppearsIn`) is not wired (owner §11: optional).
 
+### A まとまり chosen later (meeting version 3, owner 2026-11-02)
+
+Read without a まとまり, the AI leaves the まとまり's part (the deal's fields, the meeting log). When a
+person then chooses one (`POST …/minutes/…/bundle` on a `read` meeting that had **no** `bundle`
+link), the same transition moves it `read → bundle_waiting` (`SERVICE_TRANSITIONS.meeting`): 「AI
+の番」 again, for that part only. The app's step `minutes-bundle` (`ai-turns.md` "Steps") claims
+the run (`step: 'minutes-bundle'`, one run per record and step), starts it with
+`start_bundle_work` (→ `bundle_working`) and has only `minutes_read`, the plugin's
+`…__update_deal` / `…__log_meeting` and `finish_bundle_work` / `fail_bundle_work` (both → `read`;
+the reason in the ledger's note). `retry_bundle_work` (bundle_working → bundle_waiting) is the
+put-back — after a failed run (`afterFailedRun`) and in the 30-minute rule — and
+`skip_bundle_work` (bundle_waiting → read) a person's 「しない」. **Once**: choosing again when a
+まとまり was already linked changes only the link; a finished part leaves the meeting `read` (not
+an AI turn, so no run can be claimed); the run's operation keys keep a redo within one run from a
+second effect. Test: `server/tests/integration/minutes.test.ts` 「read without a まとまり, one chosen
+afterwards…」, `client/tests/ai-turn-steps.test.ts`, `ai-turn-claims.test.ts`.
+
 ## The text
 
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin

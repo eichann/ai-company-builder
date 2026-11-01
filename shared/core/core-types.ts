@@ -174,7 +174,7 @@ actions:
 `,
   meeting: `---
 label: 会議
-version: 2
+version: 3
 implements: [outside_event]
 storage: server
 fields:
@@ -189,7 +189,7 @@ fields:
 links:
   bundle:         { label: まとまり, interface: bundle, cardinality: one, inverse: meetings }
   counterpart:    { label: 相手, interface: counterpart, cardinality: one, inverse: meetings }
-states: [received, reading, read, skipped, failed]
+states: [received, reading, read, skipped, failed, bundle_waiting, bundle_working]
 initial: received
 final: [read, skipped]
 actions:
@@ -198,11 +198,17 @@ actions:
   fail_reading:   { label: 議事録を読めなかった, from: [reading], to: failed, who: [ai], note: optional }
   retry:          { label: もう一度読む, from: [reading, failed], to: received, who: [assignee, admin], note: optional }
   skip:           { label: 読まない, from: [received, failed], to: skipped, who: [assignee, admin], note: optional }
+  start_bundle_work:  { label: まとまりの分を始める, from: [bundle_waiting], to: bundle_working, who: [ai] }
+  finish_bundle_work: { label: まとまりの分を終える, from: [bundle_working], to: read, who: [ai], note: optional }
+  fail_bundle_work:   { label: まとまりの分をできなかった, from: [bundle_working], to: read, who: [ai], note: optional }
+  retry_bundle_work:  { label: まとまりの分をやり直す, from: [bundle_working], to: bundle_waiting, who: [assignee, admin], note: optional }
+  skip_bundle_work:   { label: まとまりの分はしない, from: [bundle_waiting], to: read, who: [assignee, admin], note: optional }
 ---
 # 会議
 
 社内・社外の会議の記録（日時・出席したメンバー・社外の参加者の数）。議事録は会議の中身で、元の文書に置いたまま（本文は持たず、議事録への目印と要約だけを持ちます）。
 「届いた」は AI の番です（AI が議事録を読んで、タスクや決めたことにします）。どの会議を読むかは会社の設定で決まります（最初は社外の人が出た会議だけ）。
+まとまり（案件など）が決まらないまま読んだ会議は、あとで人がまとまりを選ぶと「まとまりの分を待つ」になり、AI がそのまとまりの分（案件の欄の変化・商談の記録）だけを進めます。
 `,
   approval: `---
 label: 承認のお願い
@@ -381,6 +387,9 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['reading'], to: 'failed' },
     { from: ['reading', 'failed'], to: 'received' },
     { from: ['received', 'failed'], to: 'skipped' },
+    // Read without a まとまり, one chosen afterwards: the AI does just the まとまり's part once.
+    { from: ['read'], to: 'bundle_waiting' },
+    { from: ['bundle_working'], to: 'bundle_waiting' },
   ],
   approval: [
     { from: ['pending'], to: 'approved' },

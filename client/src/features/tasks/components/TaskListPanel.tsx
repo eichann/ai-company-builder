@@ -97,7 +97,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
     const ai = i.turn === 'ai' ? aiOf(i.id) : null
     const extra: Array<{ label: string; run: () => void }> = []
     if (i.needsBundle) extra.push({ label: 'まとまりを選ぶ', run: () => setChoosing(i) })
-    if (i.type === 'meeting' && i.turn === 'ai' && meetingActions && ai?.state !== 'running') {
+    if (i.type === 'meeting' && i.turn === 'ai' && i.state === 'received' && meetingActions && ai?.state !== 'running') {
       extra.push({ label: '自分で読み取る', run: () => meetingActions.read(i.id) })
       extra.push({ label: '今は読まない', run: () => void meetingActions.skip(i.id).then(e => { setMessage(e); list.reload() }) })
     }

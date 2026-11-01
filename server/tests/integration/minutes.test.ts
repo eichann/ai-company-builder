@@ -424,6 +424,37 @@ describe('stuck reading and the switches', () => {
     expect([last.action, last.cause, last.runId]).toEqual(['retry', 'run', run.id])
   })
 
+  it('read without a まとまり, one chosen afterwards: the まとまり\'s part waits for the AI once (its own step), and choosing again moves nothing', async () => {
+    // The reading happened while no まとまり was linked (the AI left the deal's fields and the meeting log).
+    db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name IN ('bundle', 'counterpart')").run(CO, salesId)
+    const versionOf = async () => (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}`)).body.data.record.version as number
+    const token = await tokenFor('mn-sato')
+    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: await versionOf() }, token)).status).toBe(200)
+    const read = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/finish_reading`, { expectedVersion: await versionOf(), args: { summary_text: '要約' } }, token)
+    expect(read.status, read.text).toBe(200)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
+    // Not the AI's turn while read: no run can be claimed.
+    expect((await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-bundle', deviceId: 'app-device-b', conversationId: 'conv-bundle' })).body.code).toBe('NOT_AI_TURN')
+
+    const deal = dealIdOf('研修導入（株式会社サンプル）')
+    const linked = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })
+    expect(linked.status, linked.text).toBe(200)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('bundle_waiting')
+    const claimed = await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-bundle', deviceId: 'app-device-b', conversationId: 'conv-bundle' })
+    expect(claimed.status, claimed.text).toBeLessThan(300)
+    const run = claimed.body.data.run
+    const runToken = (await call('mn-sato', 'POST', `${C()}/me/record-tokens`, { conversationId: 'conv-bundle', agent: 'claude-code', scope: 'act', run: { id: run.id, generation: run.generation } })).body.data.token
+    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_bundle_work`, { expectedVersion: await versionOf() }, runToken)).status).toBe(200)
+    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/finish_bundle_work`, { expectedVersion: await versionOf() }, runToken)).status).toBe(200)
+    expect((await call('mn-sato', 'POST', `${C()}/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'done' })).status).toBe(200)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
+
+    // A まとまり was there when it was chosen again: nothing goes back to the AI (no second deal update or log).
+    const other = dealIdOf('生成AI研修 2期（株式会社サンプル）')
+    expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: other })).status).toBe(200)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
+  })
+
   it('Google stopped for the company: discovery and the text refuse from the next call; no permission → not connected', async () => {
     expect((await call('mn-owner', 'PUT', `${C()}/google/enabled`, { enabled: false })).status).toBe(200)
     const before = google.requests.length
