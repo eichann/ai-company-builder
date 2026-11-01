@@ -559,12 +559,13 @@ Milestone 4 adds four (people by id in person fields):
   unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
   the drafts its AI made).
-- `decision` (決めたこと, server — version 3; version 1 was a file, "Decisions" below):
-  `recorded_by` [ai, human], `important`, `decided_by` (null when the AI recorded it), `owner`
+- `decision` (決めたこと, server — version 4; version 1 was a file, "Decisions" below):
+  `recorded_by` [ai, human], `important`, `exception` (例外（この件だけ）, version 4), `decided_by` (null when the AI recorded it), `owner`
   (the linked meeting's assignee at creation, else the member — `who` cannot name "the meeting's
   assignee"), `source_key`, `why` (long_text), `source`; links `bundle`,
   `meeting`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
-  (note required), both `who: [owner, dept_manager, admin]`, decisions.
+  (note required), both `who: [owner, dept_manager, admin]`, decisions; `set_exception` (args
+  `exception: boolean`, no state change, same `who` — never the AI).
 
 A link's `target` (a type) is a label, not a check: the parser and the engine accept a link to a
 type that is not defined (a company's own types). Core types link only to core types, files and
@@ -998,7 +999,7 @@ mailbox, never their role.
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
 `decisions_record`): `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-important?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
+important?, exception?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
 - A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
   row (`path` null, `folder` = the department folder) and its state `unconfirmed`, with `why` /
   `source` as server fields (the summary is the start of `why`, what text search reads). Earlier
@@ -1012,6 +1013,14 @@ important?, key? }` → 201 `{ record, created: true }` (200 `created: false` fo
   a server record does not have; visibility is by the reader's permissions).
 - Links: readable records of this company of the link's type — `bundle`: of any type implementing
   it (a 案件, a 企画) — else 400 `BAD_LINK`.
+- 例外（この件だけ） (owner decision 2026-11-01): `exception: true` marks a judgement that applies
+  only to its linked thing (「今回の見積は特別に20%値引きしてよい」) and must never be generalized.
+  Set at creation (person or AI) or changed later with `set_exception` by those who may confirm /
+  retract (the AI cannot). Every summary of such a decision (`recordSummaries`: get, query, the
+  turn lists — what the AI reads) carries `exceptionNotice` (`DECISION_EXCEPTION_NOTICE`,
+  `shared/types/records.ts`), and `RECORDS_INSTRUCTIONS` / the tool description tell the AI never
+  to apply it as a precedent to other cases and to mark one-off judgements it records
+  (`server/tests/integration/records.test.ts` 「例外（この件だけ）」).
 - `key` (e.g. `meeting-…:decision:2`): the id is derived from it (sha256) and it is stored in
   `source_key`; a known key answers the existing record, so the same item is written once even
   for two calls at once.

@@ -106,6 +106,13 @@ export interface RecordQuery {
 /** What a record imported through an earlier connection is called on screen and for the AI. */
 export const OLD_CONNECTION_LABEL = '前のつなぎ先から取り込んだもの（いまは使われていません）'
 
+/**
+ * A 「決めたこと」 marked 例外（この件だけ） (its `exception` field): a judgement
+ * for its linked thing only, never a precedent for another case. Carried as
+ * `exceptionNotice` so the AI reading past decisions sees it in words.
+ */
+export const DECISION_EXCEPTION_NOTICE = '例外（この件だけ）：つながった件だけの判断です。ほかの件の前例にしないでください。'
+
 export interface RecordSummary {
   id: string
   type: string
@@ -133,6 +140,11 @@ export interface RecordSummary {
   fromOldConnection?: true
   /** With `fromOldConnection`: `OLD_CONNECTION_LABEL`, to show as is. */
   notice?: string
+  /**
+   * A decision marked 例外（この件だけ） (`fields.exception: true`):
+   * `DECISION_EXCEPTION_NOTICE`. Absent for every other record.
+   */
+  exceptionNotice?: string
   /**
    * Owner-only (「持ち主だけ」, records.md "Owner-only records"): only the member
    * reading it sees it — it reaches nobody else, owners and admins included.

@@ -12,6 +12,8 @@
  *   folder decides who may read the decision (those who can read it);
  * - links name a まとまり (`bundle`: any type implementing it), the meeting and
  *   the approval request it came from — never a business plugin's type;
+ * - `exception` (例外（この件だけ）): a judgement for its linked thing only, never
+ *   a precedent; set here or later by the `set_exception` action (who may confirm);
  * - an optional idempotency `key` (`meeting-…:decision:2`) records the same
  *   item once: the id is derived from it and it is kept in the `source_key` field.
  */
@@ -70,7 +72,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
   return {
     /**
      * Record a decision: `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-     * important?, key? }`. The person's own call (session) or their AI's (record token, `actor.kind: ai`).
+     * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
      */
     async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean }>> {
       const handle = companyData.forCompany(member.companyId)
@@ -78,7 +80,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
-      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'key']
+      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key']
       for (const k of Object.keys(b)) if (!known.includes(k)) return bad(`Unknown key: ${k}`)
       const title = line(b.title, TITLE_MAX, true)
       if (!title) return bad(`title: 1–${TITLE_MAX} characters on one line`)
@@ -88,6 +90,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       const source = line(b.source, SOURCE_MAX, true)
       if (!source) return bad(`source: 1–${SOURCE_MAX} characters`)
       if (b.important !== undefined && typeof b.important !== 'boolean') return bad('important: true or false')
+      if (b.exception !== undefined && typeof b.exception !== 'boolean') return bad('exception: true or false')
       const key = line(b.key, KEY_MAX, false)
       if (key === null) return bad(`key: up to ${KEY_MAX} characters`)
       if (typeof b.folder !== 'string') return bad('folder: a department folder')
@@ -150,7 +153,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         // The summary is what text search reads: the start of why.
         type: 'decision', id, title, summary: why.slice(0, SUMMARY_MAX), folder,
         fields: {
-          recorded_by: actor.kind === 'ai' ? 'ai' : 'human', important: b.important === true, decided_by: actor.kind === 'ai' ? null : member.userId,
+          recorded_by: actor.kind === 'ai' ? 'ai' : 'human', important: b.important === true, exception: b.exception === true, decided_by: actor.kind === 'ai' ? null : member.userId,
           owner, source_key: key ?? null, why, source,
         },
         links: Object.fromEntries(Object.entries(links).map(([k, v]) => [k, [v]])),

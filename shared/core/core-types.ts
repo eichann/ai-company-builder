@@ -218,7 +218,7 @@ final: [sent, discarded]
 `,
   decision: `---
 label: 決めたこと
-version: 3
+version: 4
 storage: server
 fields:
   title:       { label: 件名, kind: text, source: file }
@@ -226,6 +226,7 @@ fields:
   source:      { label: 元, kind: text, source: server }
   recorded_by: { label: 記録したもの, kind: choice, options: [ai, human], source: server }
   important:   { label: 大事, kind: boolean, source: server }
+  exception:   { label: 例外（この件だけ）, kind: boolean, source: server }
   decided_by:  { label: 決めた人, kind: person, source: server }
   owner:       { label: 確かめる人, kind: person, source: server }
   source_key:  { label: 元の項目の目印, kind: text, source: server }
@@ -239,10 +240,12 @@ final: [confirmed, retracted]
 actions:
   confirm: { label: 確かめる, from: [unconfirmed], to: confirmed, who: [owner, dept_manager, admin], note: optional, decision: true }
   retract: { label: 取り消す, from: [unconfirmed, confirmed], to: retracted, who: [owner, dept_manager, admin], note: required, decision: true }
+  set_exception: { label: 例外（この件だけ）を切り替える, from: [unconfirmed, confirmed], who: [owner, dept_manager, admin], args: { exception: boolean }, note: optional }
 ---
 # 決めたこと
 
 商談などで決まったことの記録。サーバーだけが持ち（ファイルにはしません）、置いた部署のフォルダを読める人だけが見られます。
+「例外（この件だけ）」の決めたことは、つながった件だけの判断です（例「今回の見積は特別に20%値引きしてよい」）。ほかの件の前例にはしません。
 `,
 }
 
