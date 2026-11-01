@@ -11,7 +11,7 @@
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { normalizeTag, ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
-import { RECORD_ID_RE } from '../../shared/core/records'
+import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -91,6 +91,8 @@ interface ParsedQuery {
   /** `{ contains: tag }` on a tags field. */
   contains: Array<{ name: string; tag: string }>
   linkedTo?: { id: string; hops: 1 | 2 }
+  /** Records linking to this company path (a file or folder). */
+  linkedToFile?: string
   text?: string
   limit: number
   offset: number
@@ -101,7 +103,7 @@ interface ParsedQuery {
 function parseQuery(body: unknown): ParsedQuery | string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The query must be an object'
   const b = body as Record<string, unknown>
-  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
+  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
   const q: ParsedQuery = { fields: [], contains: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
@@ -143,6 +145,12 @@ function parseQuery(body: unknown): ParsedQuery | string {
     if (typeof l !== 'object' || l === null || typeof l.id !== 'string' || !RECORD_ID_RE.test(l.id)) return 'linkedTo.id must be a record id'
     if (l.hops !== undefined && l.hops !== 1 && l.hops !== 2) return 'linkedTo.hops is 1 or 2'
     q.linkedTo = { id: l.id, hops: (l.hops as 1 | 2 | undefined) ?? 1 }
+  }
+  if (b.linkedToFile !== undefined) {
+    if (q.linkedTo) return 'linkedTo and linkedToFile cannot be used together'
+    const p = typeof b.linkedToFile === 'string' && b.linkedToFile.length <= 1000 ? fileLinkPath(b.linkedToFile) : null
+    if (!p) return 'linkedToFile must be a path inside the company folder'
+    q.linkedToFile = p
   }
   if (b.text !== undefined) {
     if (typeof b.text !== 'string') return 'text must be a string'
@@ -318,6 +326,15 @@ export function createRecordService(deps: RecordServiceDeps) {
         if (q.linkedTo.hops === 2) for (const r of neighbours(records, reader, hop1)) reached.set(r.id, r)
         reached.delete(q.linkedTo.id)
         filter.ids = [...reached.keys()]
+      }
+      if (q.linkedToFile) {
+        // Only for a file the caller reads; a link into a private folder counts only from inside that folder
+        // (linkAllowed). Otherwise the answer is the same empty one as for a file nothing links to.
+        const path = q.linkedToFile
+        if (!reader.file(path)) return ok({ total: 0, records: [] })
+        const target = { scopeId: findPrivateScope(handleOf(member).scopes.listWithRules(), path)?.id ?? null }
+        const sourceIds = [...new Set(records.fileLinksTo([path]).map(l => l.sourceId))].slice(0, MAX_NEIGHBOURS)
+        filter.ids = records.byIds(sourceIds).filter(r => linkAllowed(r, target)).map(r => r.id)
       }
       if (filter.types?.length === 0 || filter.ids?.length === 0) return ok({ total: 0, records: [] })
 

@@ -71,6 +71,12 @@ export interface RecordQuery {
   fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] } | { contains: string }>
   /** Records linked to this one (either direction), up to `hops` (1 or 2, default 1). */
   linkedTo?: { id: string; hops?: 1 | 2 }
+  /**
+   * Records with a file link to exactly this company path (「つながっているもの」 of
+   * a file). Empty when the caller cannot read the file; a record outside a
+   * private folder never counts for a path inside one. Not with `linkedTo`.
+   */
+  linkedToFile?: string
   /** Substring of the title or summary (0.23-1: not the full text). */
   text?: string
   /** 1–200, default 50. */

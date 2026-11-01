@@ -32,7 +32,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
   editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
-  (git:preview, diffs, revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
+  (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
   the member's own API keys, and `brokerKeys:moveFromEnv`, which reads a `.env` key in main, sends
@@ -44,7 +44,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
   (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
-  「議事録が届きました」 checked with the session in main, `minutes.md` "The app"). No `tasks`
+  「議事録が届きました」 checked with the session in main, `minutes.md` "The app"), `record-views`
+  (recordViews:search / card / forFile: search hits, the record card and a file's
+  「つながっているもの」, read with the session; `records.md` "The app's views"). No `tasks`
   channels: the file tree's 「やることにつなぐ…」 will come from the task plugin (`records.md`
   "Linking files later").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
@@ -165,7 +167,7 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 ## Guards on what the renderer hands main (keep them)
 
 - Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `env:*`,
-  `git:*` incl. sync / log / showCommit / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
+  `git:*` incl. sync / log / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
   goes through `AllowedRoots.validate` (`client/electron/allowed-roots.ts`): inside a registered
   company root **by name and by real location** — every symlink resolved (`realpathSync.native`;
   for a missing path its deepest existing ancestor, dangling links followed), compared in NFC
