@@ -53,6 +53,8 @@ import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
 import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
+import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
+import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
@@ -95,9 +97,11 @@ export function AppShell() {
   // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
   const taskList = useTaskList(currentCompany?.id)
   // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
+  // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
+  const pluginTurns = usePluginStepTurns(currentCompany?.id)
   const aiTurns = useMemo(
-    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [] }),
-    [minutes.available, minutes.notices, taskList.data],
+    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns }),
+    [minutes.available, minutes.notices, taskList.data, pluginTurns],
   )
   const { isReadOnly } = useWriteAccess()
   // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list).
@@ -278,7 +282,8 @@ export function AppShell() {
     if (recordId.startsWith('task-')) {
       return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onConsult={consultAbout} onChanged={taskList.reload} />
     }
-    const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
+    // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
+    const readOnly = <div key={recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>

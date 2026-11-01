@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AiTurnItemsView, AiTurnItemView, AutoTurnSettings } from '../../../../shared/ai-turns'
+import { pluginStepConsultationTitle } from '../../../../shared/ai-turn-steps/plugin'
 import { aiTurnStepForRecord } from '../../../../shared/ai-turn-steps/registry'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import { useInterval } from '../../../shared/hooks/useInterval'
@@ -30,6 +31,8 @@ interface Running {
 
 export interface AiTurnRunnerOptions {
   companyId: string
+  /** The company folder (a company Skill pinned as a plugin step's procedure is read there). */
+  companyRoot?: string
   userId: string
   /** Records waiting for the member's AI (「AI の番」) whose kind has a step (`aiTurnQueue`, ai-turn-steps/registry.ts). */
   queue: readonly AiTurnCandidate[]
@@ -89,8 +92,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
 
   const start = useCallback((notice: AiTurnCandidate, now: number) => {
     const o = latest.current
-    const step = aiTurnStepForRecord(notice.id)
-    if (!step) return
+    // A business plugin's step (plugin-steps.md): main's claim makes its first message from the pinned procedure.
+    const pluginStep = notice.pluginStep ?? null
+    const step = pluginStep ? null : aiTurnStepForRecord(notice.id)
+    const stepName = step?.step ?? pluginStep
+    if (!stepName) return
     const tabId = o.openBackgroundTab()
     const run: Running = { recordId: notice.id, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false }
     running.current = run
@@ -98,11 +104,11 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     pass.current.started += 1
     o.deliver(tabId, {
       kind: 'aiTurn',
-      step: step.step,
-      title: step.consultationTitle(notice),
-      ...(step.linksMinutes ? { minutesId: notice.id } : {}),
+      step: stepName,
+      title: step ? step.consultationTitle(notice) : pluginStepConsultationTitle(notice.title),
+      ...(step?.linksMinutes ? { minutesId: notice.id } : {}),
       claim: async (conversationId: string) => {
-        const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
+        const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId, o.companyRoot).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
         if (running.current !== run) return null
         if (!result.claimed) {
           if (result.reason === 'taken') taken.current.add(`${notice.id}@${notice.version}`)
@@ -114,7 +120,9 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         run.phase = 'running'
         run.since = Date.now()
         // The message names the version the claim left the record at (the AI cannot look it up).
-        return { message: step.firstMessage(notice, result.version) }
+        const message = step ? step.firstMessage(notice, result.version) : result.message
+        if (!message) { running.current = null; latest.current.closeTab(tabId); return null }
+        return { message }
       },
     })
   }, [latest, loadLog, saveLog])

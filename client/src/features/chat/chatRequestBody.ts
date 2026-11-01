@@ -1,5 +1,6 @@
 import type { AgentSession, AuthMode } from '../../../shared/agent'
 import type { ChatRequestOptions } from '../../../shared/chat-server-api'
+import type { PluginRunStep } from '../../../shared/ai-turn-steps/plugin'
 import type { AiTurnStep } from '../../../shared/ai-turn-steps/registry'
 
 type Ref<T> = { current: T }
@@ -22,7 +23,7 @@ export interface ChatRequestSources {
   pendingImages: Ref<Array<{ mediaType: string; data: string }>>
   pendingFilePaths: Ref<string[]>
   /** An unattended 「AI の番」 step: consumed by the one automatic request (ai-turns.md). */
-  aiTurnStep?: Ref<AiTurnStep | null>
+  aiTurnStep?: Ref<AiTurnStep | PluginRunStep | null>
   /** Which conversation the hand-off memo of this turn belongs to (read in onFinish). */
   handoffRequest: Ref<{ companyId: string; sessionId: string; provider: AuthMode } | null>
 }

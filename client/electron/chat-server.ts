@@ -54,6 +54,11 @@ export interface ChatServerConfig extends AgentHost {
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
   /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
+  /**
+   * A business plugin's step run (plugin-steps.md): the tool ceiling main's claim holds for this
+   * consultation and step; null when main holds none (the run is then refused, never widened).
+   */
+  pluginStepTools?: (conversationId: string, step: string) => { allowsRecordTool(name: string): boolean; builtinTools: string[] } | null
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
@@ -265,7 +270,11 @@ export async function startChatServer(config: ChatServerConfig) {
     const connection = createAgentConnection(authMode, host)
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
-    const aiTurnStep = requestedStep === undefined ? undefined : isAiTurnStep(requestedStep) ? requestedStep : null
+    // A step's tool ceiling: a declared kind's (ai-turn-steps/), or a business plugin step's that main's claim holds.
+    const aiTurnStep = requestedStep === undefined ? undefined
+      : isAiTurnStep(requestedStep)
+        ? { allowsRecordTool: (name: string) => aiTurnStepAllowsRecordTool(requestedStep, name), builtinTools: [...aiTurnStepDefinition(requestedStep).tools.builtinTools] }
+        : (appSessionId && config.pluginStepTools?.(appSessionId, requestedStep)) || null
     if (aiTurnStep === null || (aiTurnStep && (!connection.ownsConversation || !can.recordActions))) {
       return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
     }
@@ -359,8 +368,8 @@ export async function startChatServer(config: ChatServerConfig) {
     // An unattended step sees only the record tools it declares, and cannot call any other.
     const records = allRecords && aiTurnStep ? {
       ...allRecords,
-      specs: allRecords.specs.filter(spec => aiTurnStepAllowsRecordTool(aiTurnStep, spec.name)),
-      execute: (name: string, input: unknown) => aiTurnStepAllowsRecordTool(aiTurnStep, name)
+      specs: allRecords.specs.filter(spec => aiTurnStep.allowsRecordTool(spec.name)),
+      execute: (name: string, input: unknown) => aiTurnStep.allowsRecordTool(name)
         ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具は使えません。'),
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
@@ -405,7 +414,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStepDefinition(aiTurnStep).tools.builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

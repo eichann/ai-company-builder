@@ -14,6 +14,8 @@ paths:
   - "client/tests/ui/ai-turns.spec.ts"
   - "client/src/features/minutes/startReading.ts"
   - "client/electron/records/runs.ts"
+  - "client/src/features/plugin-steps/**"
+  - "client/tests/plugin-step-turns.test.ts"
 ---
 
 # 「AI の番」 run automatically (stage 2 S10)
@@ -204,6 +206,49 @@ also: after earlier put-backs (version > 2) an unattended run finishes without `
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
 its title, `minutesId` and the claim's version in the first message, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
 Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again).
+
+## A business plugin's steps (plan C5; server side: `plugin-steps.md`)
+
+A step a contract-2 business plugin declares with `start: ai_turn` is a kind made from the server's
+answers, not a file of this folder (`client/shared/ai-turn-steps/plugin.ts`: parsers, the tool
+ceiling, the first message).
+
+- **Queue**: `usePluginStepTurns` (`src/features/plugin-steps/`) reads `aiTurns:pluginTurns` on
+  mount and every minute (main: `GET /me/plugin-step-turns`, remembered per company for the claim);
+  AppShell passes them to `aiTurnQueue` (`plugins`), each a candidate with `pluginStep`
+  (`<pluginId>__<step>`). An older server or offline: the last list (none at first).
+- **Claim** (`claims.ts` `claimPluginStep`): the server's run of `<pluginId>__<step>` is the claim
+  (no type action); the claim's `run.procedure.pin` names the pinned procedure; `GET
+  /me/plugin-steps/records/:id` gives the step it runs (tools narrowed by the pinned version, the
+  procedure file). The text is read on this PC (`procedures.ts`): the pinned package's
+  `steps/<name>.md` inside `pluginPackages.folderOf` (only a version this company lists now), or the
+  company Skill's `SKILL.md` from the pinned tree (`cat-file blob <tree>:SKILL.md`, no lazy fetch;
+  the company folder comes with the claim, validated by `AllowedRoots`). Not on this PC → the run
+  is finished `temporary` `PROCEDURE_NOT_HERE` (tried later) and nothing is sent. The claim answers
+  `message` (the first message); the runner sends it.
+- **Only the step's tools**: main holds the ceiling for that consultation and step
+  (`pluginStepTools`); the chat server asks it for a `__` step (`ChatServerConfig.pluginStepTools`)
+  and answers 400 `AI_TURN_NOT_SUPPORTED` when main holds none — never unrestricted. The mapping
+  (`pluginStepToolAccess`): `records` → the record tools and the record's own type's actions,
+  `plugin_operations` → that plugin's operations only, `approvals` / `outbound_draft` → their record
+  tools, `web_research` / `files_read` / `files_write` → Claude Code's built-in tools (the rest stay
+  denied). The server's C4 gate decides each call too.
+- **Settle**: the record left the state it was at when claimed → `done`; still there → `temporary`
+  `UNFINISHED` (the server retries later, then a person).
+- **A person's start** (`start: person`): a record's card (AppShell, above `RecordCard`) shows
+  `PersonStepButtons` (`src/features/plugin-steps/`) for the steps at its state
+  (`pluginSteps:onRecord` → `GET /me/plugin-steps/records/:id`, person steps only). Pressing one:
+  `pluginSteps:start` (`electron/features/plugin-steps/ipc.ts`; the company folder validated by
+  `AllowedRoots` before any server call) → `POST …/start` pins the work's procedure (its first run)
+  → main reads the pinned text (`procedures.ts`) → `chat.newConsultation` with that first
+  message. It is the member's own consultation: their tools and rights, no run, no ceiling (the
+  ceiling binds the AI's unattended run); not on this PC → 「まだこの PC にありません」.
+- Test: `client/tests/plugin-step-turns.test.ts` (the person steps offered, a person's start's
+  message with the pinned procedure, an outside company folder refused before any call, the turns parsed strictly, the claim runs the
+  plugin step with the pinned procedure and no type action, the ceiling for that consultation and
+  step only, the mapping, a procedure not here gives the run back, the emergency stop calls
+  nothing, settle, the procedure file only inside the pinned package / a Skill from the pinned
+  tree, the chat server refusing a step main does not hold) — mutation-checked.
 
 ## Not yet
 
