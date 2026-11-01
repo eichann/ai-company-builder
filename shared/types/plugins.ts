@@ -291,8 +291,15 @@ export interface PluginStepView {
   step: string
   label: string
   start: PluginStepStart
+  /** The plugin procedure's file in the package (`steps/<name>.md`), of the version the work runs. */
+  procedure: string
   tools: string[]
   connectorRoles: string[]
+}
+
+/** GET …/me/plugin-steps/records/:recordId: a step at the record's state, with the work's pin (null before its first run). */
+export interface PluginStepOnRecord extends PluginStepView {
+  pin: PluginStepProcedurePin | null
 }
 
 /** GET …/me/plugin-step-turns: one record waiting at a `start: ai_turn` step (the member's 「AI の番」). */

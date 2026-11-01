@@ -58,7 +58,9 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   `STEP_SKILL_MISSING`). Unreadable at a first run → 409 `STEP_SKILL_MISSING` (never a silent
   fall-back).
 - **A person's start**: `GET /me/plugin-steps/records/:recordId` (the steps at the record's state,
-  for its card), `POST /me/plugin-steps/records/:recordId/:pluginId/:step/start` (only a `start:
+  for its card; each with the work's `pin` — null before its first run — and the step it runs:
+  `procedure` file and tools of the pinned version, narrowed; the app's automatic run reads it after
+  its claim), `POST /me/plugin-steps/records/:recordId/:pluginId/:step/start` (only a `start:
   person` step, 404 otherwise; the record at the step's state, else 409 `NOT_AT_STEP`): pins and
   answers `{ pin, tools, connectorRoles, … }` (`PluginStepStartView`). A consultation started this
   way is the member's own (no run): its ledger entries have no procedure (a Skill it loads through

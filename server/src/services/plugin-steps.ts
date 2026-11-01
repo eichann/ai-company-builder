@@ -31,7 +31,7 @@ import {
   type PluginManifest, type PluginStep, type PluginStepProcedurePin,
 } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import type { PluginStepStartView, PluginStepSkillsView, PluginStepTurn } from '../../shared/types/plugins'
+import type { PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
@@ -176,9 +176,18 @@ export function createPluginStepService(deps: PluginStepDeps) {
     return depth < 2 ? pinFor(member, rec, pluginId, stepName, depth + 1) : refuse('conflict', PROCEDURE_UNAVAILABLE.error, { code: PROCEDURE_UNAVAILABLE.code })
   }
 
-  const stepView = (pluginId: string, name: string, step: PluginStep) => ({
-    pluginId, step: name, label: step.label, start: step.start, tools: [...step.tools], connectorRoles: [...step.connectorRoles],
+  const stepView = (pluginId: string, name: string, step: PluginStep): PluginStepView => ({
+    pluginId, step: name, label: step.label, start: step.start, procedure: step.procedure.default, tools: [...step.tools], connectorRoles: [...step.connectorRoles],
   })
+
+  /** A record's pin of a step (none before its first run) and the step it runs: the installed one narrowed by the pinned version's. */
+  function pinnedOn(companyId: string, recordId: string, pluginId: string, name: string, installed: PluginStep): { pin: PluginStepProcedurePin | null; step: PluginStep } {
+    const pin = repo(companyId).pin(recordId, pluginId, name)?.pin ?? null
+    if (!pin || pin.source !== 'plugin') return { pin, step: installed }
+    const found = shelf.find(companyId, pin.pluginId, pin.version)
+    const pinned = found && found.fingerprint === pin.fingerprint ? stepOf(found.pkg.manifest, name) : null
+    return { pin, step: narrowed(installed, pinned) }
+  }
 
   /** GET /plugins/:pluginId/step-skills — owner / admin: each step, whether it is overridable, the company's Skill. */
   function stepSkills(member: Member, pluginId: string): Outcome<PluginStepSkillsView> {
@@ -280,17 +289,25 @@ export function createPluginStepService(deps: PluginStepDeps) {
       return ok({ turns: turns.slice(0, TURNS_SHOWN) })
     },
 
-    /** GET /me/plugin-steps/records/:recordId — the steps that apply to a record now (its card's buttons). */
-    stepsOn(member: Member, recordId: string): Outcome<{ steps: ReturnType<typeof stepView>[] }> {
+    /**
+     * GET /me/plugin-steps/records/:recordId — the steps that apply to a record now (its card's
+     * buttons; the app's automatic run reads its step here after the claim): each with the work's
+     * pin (null before its first run) and the step it runs (narrowed by the pinned version).
+     */
+    stepsOn(member: Member, recordId: string): Outcome<{ steps: PluginStepOnRecord[] }> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const rec = readable(member, recordId)
       if (!rec) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
-      const out: ReturnType<typeof stepView>[] = []
+      const out: PluginStepOnRecord[] = []
       for (const i of companyData.forCompany(member.companyId).plugins.installs()) {
         if (!i.enabled) continue
         const m = shelf.find(member.companyId, i.pluginId, i.version)?.pkg.manifest
         if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2) continue
-        for (const [name, step] of Object.entries(m.steps)) if (atStep(rec, step)) out.push(stepView(i.pluginId, name, step))
+        for (const [name, step] of Object.entries(m.steps)) {
+          if (!atStep(rec, step)) continue
+          const on = pinnedOn(member.companyId, recordId, i.pluginId, name, step)
+          out.push({ ...stepView(i.pluginId, name, on.step), pin: on.pin })
+        }
       }
       return ok({ steps: out })
     },

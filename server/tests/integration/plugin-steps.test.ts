@@ -223,6 +223,9 @@ describe('a step’s work is pinned at its first run', () => {
     expect(await refresh(again.value.run.id, a)).toEqual(NOT_IN_STEP)
     const roles = await services.pluginRunGate.allowsConnectorRole(member, again.value.run.id, 'mail.read')
     expect(roles).toBe(true)
+    // What the app reads after its claim: the work's pin and the step it runs (narrowed by the pinned version).
+    const work = (services.pluginSteps.stepsOn(member, a).value.steps as Json[]).find(st => st.step === 'work')
+    expect(work).toMatchObject({ pin: { version: '0.1.0' }, tools: ['records'], procedure: 'steps/work.md' })
 
     // A work whose first run comes now runs 0.2.0, and may.
     const b = recordOf('1000000002')
