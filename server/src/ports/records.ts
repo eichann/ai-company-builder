@@ -75,6 +75,8 @@ export interface RecordCandidateFilter {
   states?: string[]
   /** Server field (validated name) → accepted values (JSON scalars). */
   fields?: Array<{ name: string; values: Array<string | number | boolean | null> }>
+  /** Tags field (kind `tags`, validated name) → a tag the stored list must hold (already normalized). */
+  contains?: Array<{ name: string; tag: string }>
   /** Matched against title and summary (substring, A–Z case-insensitive). */
   text?: string
   ids?: string[]

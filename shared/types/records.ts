@@ -63,8 +63,12 @@ export interface RecordQuery {
   /** Records of every type implementing this interface (e.g. `request`). */
   implements?: string
   state?: string[]
-  /** Server-sourced field → one value or several (`{ in: [...] }`). */
-  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] }>
+  /**
+   * Server-sourced field → one value or several (`{ in: [...] }`); a field of
+   * kind `tags` → `{ contains: tag }` (records whose tags hold it, normalized
+   * as stored; only types where that field holds tags are searched).
+   */
+  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] } | { contains: string }>
   /** Records linked to this one (either direction), up to `hops` (1 or 2, default 1). */
   linkedTo?: { id: string; hops?: 1 | 2 }
   /** Substring of the title or summary (0.23-1: not the full text). */
@@ -94,7 +98,11 @@ export interface RecordSummary {
   /** Company path of the record's file; null = it lives on the server only. */
   path: string | null
   state: string | null
-  /** Server-sourced field values. */
+  /**
+   * Server-sourced field values. A field of kind `tags` holds the JSON text
+   * of its list (`["急ぎ","見積"]`, null = none): `parseTagsValue` in
+   * `shared/core/record-types.ts` reads it.
+   */
   fields: Record<string, RecordFieldValue>
   /** Changes made through the state engine (0 = none yet). */
   version: number
