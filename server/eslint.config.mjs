@@ -4,13 +4,32 @@ import globals from 'globals';
 
 // Route files still checking the session by hand: the same list as
 // tests/security/auth-guards.test.ts NOT_YET_GUARDED (server.md "Route guards").
+// One file per line, so lanes removing different files do not conflict.
 const NOT_YET_GUARDED = [
-  'agent-events.ts', 'agent-sandbox.ts', 'agent-stops.ts', 'ai-runs.ts', 'approvals.ts',
-  'broker-relay.ts', 'companies.ts', 'company-files.ts', 'core-connectors.ts', 'departments.ts',
-  'folder-sizes.ts', 'git-http.ts', 'git.ts', 'google-drive.ts', 'google.ts', 'identities.ts',
-  'inbox.ts', 'invitations.ts', 'key-broker.ts', 'minutes.ts', 'oauth.ts', 'outbound-mail.ts',
-  'permission-rules.ts', 'permissions.ts', 'plugins.ts', 'private-folders.ts',
-  'records-ai-identities.ts', 'records-ai-inbox.ts', 'records-ai.ts', 'records.ts',
+  'agent-events.ts',
+  'ai-runs.ts',
+  'broker-relay.ts',
+  'companies.ts',
+  'company-files.ts',
+  'departments.ts',
+  'folder-sizes.ts',
+  'git-http.ts',
+  'git.ts',
+  'google-drive.ts',
+  'google.ts',
+  'identities.ts',
+  'inbox.ts',
+  'invitations.ts',
+  'oauth.ts',
+  'outbound-mail.ts',
+  'permission-rules.ts',
+  'permissions.ts',
+  'plugins.ts',
+  'private-folders.ts',
+  'records-ai-identities.ts',
+  'records-ai-inbox.ts',
+  'records-ai.ts',
+  'records.ts',
   'slack-connection.ts',
 ];
 
