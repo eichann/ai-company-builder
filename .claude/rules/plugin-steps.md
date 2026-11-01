@@ -17,3 +17,7 @@ Ready from C2 (`plugins.md` "Handing packages to the app"): the app keeps each l
 `<userData>/plugins/<id>@<version>/` (`pluginPackages.folderOf`); C5 binds
 `createPluginDistribution`'s `pinnedVersions` (in `composition/plugins.ts`) with its stored pins
 so a pinned older version stays listed and kept — the operator's stop still removes it.
+
+Ready from C4 (`plugins.md` "The gate of a step's run"): claim a step's run as
+`<pluginId>__<step>` (`parsePluginRunStep`; `AI_RUN_STEP_RE` allows 40 characters); the server then
+lets its tokens call only that plugin's operations the step allows and the step's connector roles.

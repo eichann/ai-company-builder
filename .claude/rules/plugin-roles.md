@@ -59,7 +59,7 @@ per まとまり, who holds which role. The core roles 本人 (`self`), 部署�
   absentee hold it?" for whom a delegate covers, so a delegate stands in for any holder of the
   role (not only the one asked).
 - Not yet: a plugin **operation's** `who` with `role:` (`plugin-operation-checks.ts`) still matches
-  no one (fails closed) — C4 passes the resolver there. The notice `role_unassigned` (reserved in
+  no one (fails closed) — the resolver is not passed there yet (not part of C4). The notice `role_unassigned` (reserved in
   `NOTIFICATION_KINDS`) is not sent yet; an unassigned role's approval goes to an owner / admin.
 
 ## Routes (`routes/plugins.ts`)

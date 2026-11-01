@@ -9,7 +9,41 @@ import type { PluginAiField, PluginAiOperation, PluginAiTools } from '../../shar
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
+import { parsePluginRunStep, stepAllowsConnectorRole, stepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
+import type { PluginShelf } from './plugin-shelf'
+
+/**
+ * The connector-role half of the business × operation gate (plan C4,
+ * plugins.md "The gate of a step's run"): an AI whose token is bound to a run
+ * of a business plugin's step may use only the connector roles (`mail.read`,
+ * `calendar.read`…) that step declares, and only while the plugin is installed
+ * here, on, on the shelf and not stopped by the operator. A consultation (no
+ * run) or a core step (minutes reading) keeps what it had. Fails closed: a
+ * run that cannot be read, or anything unknown, is refused. Lanes A / B call
+ * it through `routes/record-ai-auth.ts` `connectorRoleRefusal` before an AI
+ * route uses a role.
+ */
+export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'> & { shelf: Pick<PluginShelf, 'find' | 'isStopped'> }) {
+  const { companyData, shelf } = deps
+  return {
+    async allowsConnectorRole(member: Member, runId: string | null, role: string): Promise<boolean> {
+      if (!runId) return true
+      const handle = companyData.forCompany(member.companyId)
+      const run = handle.aiRuns.byId(runId)
+      if (!run) return false
+      const bound = parsePluginRunStep(run.step)
+      if (!bound) return true
+      const install = handle.plugins.install(bound.pluginId)
+      if (!install?.enabled) return false
+      const manifest = shelf.find(member.companyId, bound.pluginId, install.version)?.pkg.manifest
+      if (!manifest || manifest.role !== 'business' || await shelf.isStopped(bound.pluginId, install.version)) return false
+      const step = stepOf(manifest, bound.step)
+      return step !== null && stepAllowsConnectorRole(step, role)
+    },
+  }
+}
+export type PluginRunGate = ReturnType<typeof createPluginRunGate>
 
 export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'> & { evaluation: Pick<PluginEvaluation, 'evaluate'> }) {
   const { companyData, evaluation } = deps

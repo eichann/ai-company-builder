@@ -13,6 +13,7 @@ import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { AgentPolicyService } from '../services/agent-policy'
 import type { ApprovalRoleHolders } from '../services/approvals'
+import { createPluginRunGate } from '../services/plugin-ai-tools'
 import { createPluginDistribution } from '../services/plugin-distribution'
 import { createPluginRoleService } from '../services/plugin-roles'
 import type { PluginShelf } from '../services/plugin-shelf'
@@ -41,5 +42,8 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   })
   deps.recordEngine.useRoles(pluginRoles.resolver)
   deps.approvals.useRoles(pluginRoles.resolver)
-  return { pluginDistribution, pluginRoles }
+  // C4 「業務×操作の関所」: a step's run uses only the connector roles its step declares
+  // (its operations are gated in plugin-operation-checks.ts, through the plugins service).
+  const pluginRunGate = createPluginRunGate({ companyData: deps.companyData, shelf: deps.pluginShelf })
+  return { pluginDistribution, pluginRoles, pluginRunGate }
 }
