@@ -48,6 +48,11 @@ export function sqliteAiRunRepository(conn: Database.Database, companyId: string
         .get(companyId, recordId, step) as RunDbRow | undefined
       return r ? toRun(r) : null
     },
+    liveOtherStep(recordId, step, nowIso) {
+      return conn.prepare(`SELECT 1 FROM ai_runs WHERE company_id = ? AND record_id = ? AND step <> ? AND closed_at IS NULL
+          AND state = 'running' AND claim_expires_at > ? LIMIT 1`)
+        .get(companyId, recordId, step, nowIso) !== undefined
+    },
     openOf(userId) {
       return (conn.prepare(`SELECT ${RUN_COLUMNS} FROM ai_runs WHERE company_id = ? AND user_id = ? AND closed_at IS NULL ORDER BY created_at DESC, id LIMIT 500`)
         .all(companyId, userId) as RunDbRow[]).map(toRun)

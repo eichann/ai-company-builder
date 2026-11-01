@@ -58,6 +58,8 @@ export interface AiRunRepository {
   byId(runId: string): AiRunRow | null
   /** The open (not closed) run of a record's step, if any. */
   openRun(recordId: string, step: string): AiRunRow | null
+  /** Whether another step of the record has a run claimed now (running, its claim not expired at `nowIso`). */
+  liveOtherStep(recordId: string, step: string, nowIso: string): boolean
   /** Runs of the member not closed yet, newest first. */
   openOf(userId: string): AiRunRow[]
   insert(row: AiRunRow): void
