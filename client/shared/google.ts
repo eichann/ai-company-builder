@@ -24,6 +24,7 @@ export const GOOGLE_OFFLINE_TEXT = 'サーバーに接続できませんでし�
 export const GOOGLE_FEATURE_LABEL: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
   mail: 'メールを送る',
+  drive: 'Drive で選んだものを読む・置く',
 }
 
 export const GOOGLE_UNAVAILABLE_TEXT: Record<GoogleUnavailableReason, string> = {

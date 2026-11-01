@@ -19,7 +19,7 @@ export interface GoogleDeps {
   log?: Pick<Console, 'warn'>
 }
 
-const FEATURES: readonly GoogleFeature[] = ['minutes', 'mail']
+const FEATURES: readonly GoogleFeature[] = ['minutes', 'mail', 'drive']
 const offline = { success: false, offline: true, error: GOOGLE_OFFLINE_TEXT } as const
 const invalid = { success: false, offline: false, error: '入力が正しくありません。' } as const
 
@@ -77,7 +77,7 @@ export function createGoogleApi(deps: GoogleDeps) {
   }
 }
 
-export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): void {
+export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnType<typeof createGoogleApi> {
   const api = createGoogleApi(deps)
   ipc.handle('google:status', async (_, companyId: string) => {
     if (typeof companyId !== 'string' || !companyId) return invalid
@@ -92,4 +92,5 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): void {
     if (typeof companyId !== 'string' || !companyId) return invalid
     return api.disconnect(companyId)
   })
+  return api
 }

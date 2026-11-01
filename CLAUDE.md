@@ -32,7 +32,7 @@ data/     SQLite databases and repositories at runtime (gitignored)
 ```
 
 Area rules (load automatically when you touch matching files):
-ai-turns, sync, sync-guards, sync-testing, download-choices, push-check, private-folders,
+ai-turns, sync, sync-guards, sync-testing, download-choices, push-check, private-folders, google-drive,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
 web-research, tasks, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, records, notifications, google-connector, minutes, calendar,
@@ -101,7 +101,7 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - **`shared/core` depends on nothing** (no Node built-ins, packages, Electron, React, Hono,
   database or git), so the server, app and admin apply one copy of each rule. A rule change is
   made there. → `shared-core.md`
-- **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`,
+- **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`, `picker-preload.ts`,
   `electron-adapter.ts`, `voice-input.ts`); features and services get ports injected, so another
   desktop shell can replace it. ESLint enforces this. → `ipc-and-main-process.md`
 - **App modules point one way too** (`client/tests/architecture-boundaries.test.ts`, over the

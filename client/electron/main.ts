@@ -22,7 +22,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createDrivePickerWindow, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
@@ -43,6 +43,7 @@ import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
+import { createDrivePicking } from './features/google/drive'
 import { registerCalendarIpc } from './features/calendar/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
@@ -251,7 +252,9 @@ const writeAccessStore = createWriteAccessStore({
 // The key broker's tokens, the member's own keys and skills' tools (features/broker).
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
 // 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
-registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+// Google Drive (google-drive.md): the person picks in Google Picker's own window; the session stays here.
+const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, window: createDrivePickerWindow(__dirname), google: googleApi })
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
 registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
@@ -383,6 +386,8 @@ app.whenReady().then(async () => {
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,
       brokerTokens,
+      drivePicking,
+      paths: allowedRoots,
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
     })

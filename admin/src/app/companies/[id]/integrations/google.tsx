@@ -30,6 +30,7 @@ import { MinutesFolderSection } from './minutes-folder'
 export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
   mail: 'メールを送る',
+  drive: 'Drive で選んだものを読む・置く',
 }
 
 const GRANT_STATUS_TEXT: Record<GoogleGrantSummary['status'], string> = {
@@ -80,6 +81,69 @@ function GoogleBadge({ view }: { view: GoogleAdminView }) {
   if (!view.configured) return <Badge variant="outline">まだつないでいません</Badge>
   if (view.operatorStopped) return <Badge variant="outline">止まっています</Badge>
   return view.enabled ? <Badge>動いています</Badge> : <Badge variant="outline">オフ</Badge>
+}
+
+/**
+ * Google Drive's file picking (google-drive.md): Google Picker needs an API key
+ * and the Cloud project's number. Members then choose, in Google's own screen,
+ * which Drive files the AI may read and which folder it may put proposals in —
+ * ACB sees nothing else in Drive.
+ */
+function DrivePickerSection({ companyId, view, onView }: { companyId: string; view: GoogleAdminView; onView: (v: GoogleAdminView) => void }) {
+  const [apiKey, setApiKey] = useState('')
+  const [appId, setAppId] = useState(view.picker.appId ?? '')
+  const [busy, setBusy] = useState(false)
+
+  async function save(remove = false) {
+    setBusy(true)
+    try {
+      const next = await googleApi.savePicker(companyId, remove ? { appId: null } : { appId: appId.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) })
+      setApiKey('')
+      if (remove) setAppId('')
+      onView(next)
+      toast.success(remove ? 'Drive のファイル選びを止めました。' : '保存しました。')
+    } catch (err) {
+      toast.error(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="space-y-2" data-testid="google-drive-picker">
+      <h3 className="text-sm font-medium">Google Drive のファイル選び</h3>
+      <p className="text-xs text-muted-foreground">
+        設定すると、メンバーが AI への相談の中で、Google の画面から「読ませるファイル」と「提案書を置くフォルダ」を選べます。
+        ACB が使えるのは、メンバーが選んだファイルとフォルダ、ACB が置いたファイルだけです。
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-picker-page">{view.picker.pageUrl}</code>
+        <Button variant="outline" size="sm" aria-label="ファイル選びのページをコピー"
+          onClick={async () => { if (await copyText(view.picker.pageUrl)) toast.success('コピーしました') }}>
+          <Copy size={14} /> コピー
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Google Cloud で「Google Picker API」と「Google Drive API」を有効にし、API キーを作って「ウェブサイトの制限」にこのページを足してください（使える API も Picker に絞ります）。
+      </p>
+      <div className="grid max-w-xl gap-3">
+        <div className="grid gap-1">
+          <Label htmlFor="google-picker-key">API キー</Label>
+          <Input id="google-picker-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="new-password"
+            placeholder={view.picker.apiKeyLast4 ? `登録済み（末尾 ${view.picker.apiKeyLast4}）。取り替えるときだけ入れてください` : ''} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="google-picker-app">プロジェクト番号</Label>
+          <Input id="google-picker-app" value={appId} onChange={(e) => setAppId(e.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} />
+          <p className="text-xs text-muted-foreground">Google Cloud の「プロジェクト情報」に出ている数字です（クライアント ID と同じプロジェクト）。</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => save()} disabled={busy || !appId.trim() || (!view.picker.configured && !apiKey.trim())}>ファイル選びの設定を保存</Button>
+          {view.picker.configured && <Button variant="outline" onClick={() => save(true)} disabled={busy}>ファイル選びを止める</Button>}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function GoogleBody({ companyId, view, onView, nameOf }: {
@@ -202,6 +266,8 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
         )}
         <p className="text-xs text-muted-foreground">「API キー」の「すべての鍵を止める」でも、全員の Google の許可が止まります。</p>
       </section>
+
+      {view.configured && <DrivePickerSection companyId={companyId} view={view} onView={onView} />}
 
       <MinutesFolderSection companyId={companyId} />
 

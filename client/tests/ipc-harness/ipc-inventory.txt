@@ -919,7 +919,7 @@ preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
-preload connectGoogle : (companyId: string, features: ("minutes" | "mail")[]) => Promise<GoogleConnectResult>
+preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive")[]) => Promise<GoogleConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload createCompany -> invoke api:createCompany($0)

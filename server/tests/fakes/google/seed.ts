@@ -75,11 +75,29 @@ export interface SeedDoc {
   modifiedTime: string
 }
 
+/** A file or folder in someone's Drive that Meet did not make (google-drive.md): reachable with `drive.file` only once picked or made by the app. */
+export interface SeedDriveFile {
+  id: string
+  name: string
+  mimeType: string
+  owner: string
+  /** Everyone who may open it, owner included. */
+  readers: string[]
+  /** Folders: who may add files (the owner and writers). */
+  writers?: string[]
+  parents?: string[]
+  /** Text of a Google Doc / Slides / Sheet (exported), or a file's bytes as text (PDF, plain text). */
+  content: string
+  /** The sharing setting (`permissions.list`). */
+  permissions: Array<{ type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }>
+}
+
 export interface GoogleSeed {
   users: SeedUser[]
   events: SeedEvent[]
   conferences: SeedConference[]
   docs: SeedDoc[]
+  driveFiles?: SeedDriveFile[]
 }
 
 export const GOOGLE_SEED = {
@@ -106,6 +124,12 @@ export const GOOGLE_SEED = {
   followUpTranscriptDoc: 'fake-doc-transcript-sales-0002',
   /** A document 佐藤 made by hand: `drive.meet.readonly` must not reach it. */
   plainDoc: 'fake-doc-plain-0001',
+  // Drive (google-drive.md): reachable with drive.file only once picked.
+  proposalsFolder: 'fake-folder-proposals-0001',
+  sharedOutsideFolder: 'fake-folder-shared-outside-0001',
+  pastProposalDoc: 'fake-doc-past-proposal-0001',
+  pastProposalSlides: 'fake-slides-past-proposal-0001',
+  handNotesPdf: 'fake-pdf-hand-notes-0001',
 } as const
 
 const S = GOOGLE_SEED
@@ -232,5 +256,28 @@ export function defaultGoogleSeed(): GoogleSeed {
     meetDoc(S.followUpTranscriptDoc, '研修導入のご相談 2回目（株式会社サンプル） - 2026/11/12 14:00 JST - 文字起こし', FOLLOW_UP_TRANSCRIPT, '2026-11-12T05:51:00.000Z'),
     { id: S.plainDoc, name: '営業メモ', owner: S.member, readers: [S.member], createdByMeet: false, text: PLAIN_DOC, version: 3, modifiedTime: '2026-10-20T00:00:00.000Z' },
   ]
-  return { users, events, conferences, docs }
+  const owner = (email: string) => ({ type: 'user' as const, role: 'owner', emailAddress: email })
+  const driveFiles: SeedDriveFile[] = [
+    {
+      id: S.proposalsFolder, name: '提案書', mimeType: 'application/vnd.google-apps.folder', owner: S.member, readers: [S.member, S.colleague], writers: [S.member],
+      content: '', permissions: [owner(S.member), { type: 'domain', role: 'reader', domain: S.internalDomain }],
+    },
+    {
+      id: S.sharedOutsideFolder, name: '共有：株式会社サンプル', mimeType: 'application/vnd.google-apps.folder', owner: S.member, readers: [S.member, S.customerSuzuki], writers: [S.member],
+      content: '', permissions: [owner(S.member), { type: 'user', role: 'writer', emailAddress: S.customerSuzuki }],
+    },
+    {
+      id: S.pastProposalDoc, name: '過去の提案書（株式会社テスト）', mimeType: 'application/vnd.google-apps.document', owner: S.member, readers: [S.member],
+      content: '生成AI研修のご提案\n対象：営業部 30名\n金額：90万円（3回）\n', permissions: [owner(S.member)],
+    },
+    {
+      id: S.pastProposalSlides, name: '過去の提案スライド', mimeType: 'application/vnd.google-apps.presentation', owner: S.member, readers: [S.member],
+      content: '研修の進め方\n第1回 基礎\n第2回 実践\n第3回 定着\n', permissions: [owner(S.member)],
+    },
+    {
+      id: S.handNotesPdf, name: '手書きメモ.pdf', mimeType: 'application/pdf', owner: S.member, readers: [S.member],
+      content: '%PDF-1.4\n% fake hand-written notes\n%%EOF\n', permissions: [owner(S.member)],
+    },
+  ]
+  return { users, events, conferences, docs, driveFiles }
 }

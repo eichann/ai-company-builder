@@ -87,6 +87,18 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
         addHistory(change)
       })()
     },
+    picker() {
+      const r = conn.prepare('SELECT picker_api_key, picker_app_id FROM google_oauth_clients WHERE company_id = ?').get(companyId) as
+        { picker_api_key: string | null; picker_app_id: string | null } | undefined
+      return r?.picker_api_key && r.picker_app_id ? { apiKey: r.picker_api_key, appId: r.picker_app_id } : null
+    },
+    savePicker(value, at, by, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE google_oauth_clients SET picker_api_key = ?, picker_app_id = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
+          .run(value?.apiKey ?? null, value?.appId ?? null, at, by, companyId)
+        addHistory(change)
+      })()
+    },
 
     grants(provider) {
       return (conn.prepare(`SELECT ${GRANT_COLUMNS} FROM connector_grants WHERE company_id = ? AND provider = ? ORDER BY created_at, rowid`)

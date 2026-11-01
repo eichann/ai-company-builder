@@ -30,6 +30,7 @@ const ROUTES_DIR = join(__dirname, '../../src/routes')
 /** `<file> <METHOD> <path>` → why it needs no session. */
 const PUBLIC_ENDPOINTS: Record<string, string> = {
   'invitations.ts GET /invitations/:token': 'the sign-up page validates an invitation link before an account exists',
+  'google-drive.ts GET /': 'the static Google Picker page (google-drive.md): it holds no secret; the token reaches it only from the app\'s own Picker window',
   'oauth.ts GET /:provider/callback': 'the provider (Google) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 

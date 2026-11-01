@@ -25,6 +25,7 @@ import { absencesRoute } from './routes/absences'
 import { recordsRoute } from './routes/records'
 import { aiRunsRoute } from './routes/ai-runs'
 import { recordsAiRoute } from './routes/records-ai'
+import { googleDriveAiRoute, googleDriveRoute, googlePickerPageRoute } from './routes/google-drive'
 import { outboundMailRoute } from './routes/outbound-mail'
 import { pluginsRoute } from './routes/plugins'
 import { approvalsRoute } from './routes/approvals'
@@ -119,6 +120,8 @@ app.route('/api/companies/:companyId', aiRunsRoute)
 app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)
+// Google Drive through the Google connection (google-drive.md).
+app.route('/api/companies/:companyId', googleDriveRoute)
 app.route('/api/companies/:companyId', minutesRoute)
 // The member's notices (知らせ, notifications.md).
 app.route('/api/companies/:companyId', notificationsRoute)
@@ -127,7 +130,9 @@ app.route('/api/companies/:companyId', calendarRoute)
 app.route('/api/oauth', oauthRoute)
 // Approval requests: a person's session only (no AI or admin-API route; approvals.md).
 app.route('/api/companies/:companyId', approvalsRoute)
+app.route('/api/records-ai/google/drive', googleDriveAiRoute)
 app.route('/api/records-ai', recordsAiRoute)
+app.route('/api/google-picker', googlePickerPageRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)

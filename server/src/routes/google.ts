@@ -8,6 +8,7 @@
  *                                       the redirect URI to register, members' grants, history
  *   PUT    /google/client               { clientId, clientSecret?, domain } (the secret: sent once, never answered)
  *   PUT    /google/enabled              { enabled }
+ *   PUT    /google/picker               { apiKey?, appId } Google Picker (Drive, google-drive.md); appId null removes it
  *   DELETE /google/grants/:userId       stop a member's permission (revoked at Google too)
  *
  * Any member (the desktop app's 設定 → Google):
@@ -65,6 +66,12 @@ googleRoute.put('/google/enabled', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, await googleConnector.setEnabled(member, await jsonBody(c)))
+})
+
+googleRoute.put('/google/picker', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await googleConnector.savePicker(member, await jsonBody(c)))
 })
 
 googleRoute.delete('/google/grants/:userId', async (c) => {

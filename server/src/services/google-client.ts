@@ -26,7 +26,8 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow } from '../ports/connectors'
 import type { Clock } from '../ports/clock'
@@ -50,6 +51,8 @@ export type GoogleStopReason =
   | 'operator-stopped' | 'not-configured' | 'off' | 'vault-off' | 'not-member'
   | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted'
   | 'practice-real-secret' | 'bad-path' | 'token-refused' | 'token-unavailable'
+  /** Google answered the Picker's token with more than `drive.file`: it is not handed out. */
+  | 'picker-scope-too-wide'
 
 export interface GoogleRequest {
   api: Exclude<GoogleApi, 'oauth' | 'userinfo'>
@@ -59,6 +62,10 @@ export interface GoogleRequest {
   query?: Record<string, string | string[]>
   /** JSON body (writes). */
   body?: unknown
+  /** A body that is not JSON (Drive's multipart upload): sent as is with this content type. */
+  rawBody?: { contentType: string; bytes: Uint8Array }
+  /** The answer is a file (Drive `alt=media`): `bytes` is set and nothing is decoded. */
+  binary?: boolean
   /** The scope this call needs; the call is refused unless the member granted it. */
   scope: string
   /** A short name for the record (`calendar.events.list`, `gmail.send`); never content. */
@@ -73,6 +80,8 @@ export type GoogleResult =
     json: unknown
     /** The answer as text when it is not JSON (Drive export). */
     text: string | null
+    /** The answer's bytes, only for a `binary` request. */
+    bytes?: Uint8Array
   }
   | {
     ok: false
@@ -330,6 +339,47 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     revoke,
 
     /**
+     * Google Picker's token (google-drive.md): a fresh access token from the
+     * member's refresh token, asked for `drive.file` only (a subset of the
+     * grant: RFC 6749 §6) and handed out only when Google's answer carries
+     * exactly that scope — never the cached token, which holds every granted
+     * scope (Calendar, Gmail…). Every switch, the grant and `drive.file`
+     * first. Not cached, not logged; one AI-action-log line without it.
+     */
+    async pickerToken(companyId: string, userId: string): Promise<{ ok: true; accessToken: string; expiresAtMs: number } | { ok: false; reason: GoogleStopReason | UpstreamFailure | 'answer-too-large' }> {
+      const off = await switchesOff(companyId, userId)
+      if (off) return { ok: false, reason: off }
+      const connectors = deps.companyData.forCompany(companyId).connectors
+      const grant = connectors.grant('google', userId)
+      const stop = grantStop(grant)
+      if (stop) return { ok: false, reason: stop }
+      if (!grant!.scopes.includes(GOOGLE_SCOPE.driveFile)) return { ok: false, reason: 'scope-not-granted' }
+      const stored = connectors.refreshToken('google', userId)
+      if (!stored || stored.grantId !== grant!.grantId) return { ok: false, reason: 'grant-revoked' }
+      const creds = await clientCredentials(companyId)
+      if ('stop' in creds) return { ok: false, reason: creds.stop }
+      const refreshToken = await deps.brokerVault.openConnector(grantSealContext('google', companyId, stored.grantId), stored.sealed)
+      if (deps.practiceGoogle && !isPracticeGoogleSecret(refreshToken)) return { ok: false, reason: 'practice-real-secret' }
+      const answer = await postForm('/token', {
+        grant_type: 'refresh_token', refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.secret, scope: GOOGLE_SCOPE.driveFile,
+      })
+      const host = GOOGLE_API_HOSTS.oauth
+      if ('failure' in answer) {
+        deps.record(companyId, userId, { operation: 'drive.picker.token', api: 'oauth', host, status: null, ok: false })
+        return { ok: false, reason: answer.failure }
+      }
+      connectors.touchGrant('google', userId, deps.clock.now())
+      const tokens = answer.status >= 200 && answer.status < 300 ? tokensOf(answer.json) : null
+      const narrow = tokens !== null && isDrivePickerTokenScope(tokens.scopes)
+      deps.record(companyId, userId, { operation: 'drive.picker.token', api: 'oauth', host, status: answer.status, ok: narrow })
+      if (!tokens) return { ok: false, reason: answer.status === 400 || answer.status === 401 ? 'token-refused' : 'token-unavailable' }
+      if (!narrow) return { ok: false, reason: 'picker-scope-too-wide' }
+      if (deps.practiceGoogle && !isPracticeGoogleSecret(tokens.accessToken)) return { ok: false, reason: 'practice-real-secret' }
+      const lifetime = Math.min(tokens.expiresInSeconds * 1000 - ACCESS_TOKEN_MARGIN_MS, ACCESS_TOKEN_MAX_MS)
+      return { ok: true, accessToken: tokens.accessToken, expiresAtMs: deps.clock.nowMs() + Math.max(lifetime, 0) }
+    },
+
+    /**
      * One API call on a member's behalf — the entry point for later features
      * (minutes: Calendar / Meet / Drive; mail: Gmail). Every switch is checked
      * first; then the access token; then the call through the way out.
@@ -341,7 +391,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       const path = pathWithQuery(req)
       if (!path) return notSent('bad-path')
       const isRead = req.method === 'GET'
-      const body = req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
+      const body = req.rawBody ? req.rawBody.bytes : req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
+      const contentType = req.rawBody ? req.rawBody.contentType : 'application/json'
       let retriedAfter401 = false
       for (let attempt = 0; ; attempt++) {
         // Every switch, before every attempt (a stop during a wait applies to the retry too).
@@ -357,7 +408,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         if ('failure' in token) return { ok: false, kind: 'not-sent', reason: token.failure }
 
         const headers: Record<string, string> = { authorization: `Bearer ${token.token}`, accept: 'application/json', 'accept-encoding': 'identity' }
-        if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = String(body.byteLength) }
+        if (body) { headers['content-type'] = contentType; headers['content-length'] = String(body.byteLength) }
         const sent = await deps.upstream.send({
           host, method: req.method, path, headers,
           body: body ? (async function* () { yield body })() : null,
@@ -378,6 +429,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           if (!bytes) return { ok: false, kind: isRead ? 'server-error' : 'unknown', reason: 'answer-too-large', status }
           const json = parseJson(bytes)
           if (status >= 200 && status < 300) {
+            if (req.binary) return { ok: true, status, json: null, text: null, bytes }
             return { ok: true, status, json: json === undefined ? null : json, text: json === undefined ? new TextDecoder().decode(bytes) : null }
           }
           if (status === 401 && !retriedAfter401) {

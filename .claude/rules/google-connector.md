@@ -28,8 +28,9 @@ are the provider-neutral `services/member-oauth.ts` (`member-oauth.md`); Google 
 provider (`createGoogleConnector` registers the descriptor). Design: 節目4 設計案 §2-2 N1, §3-2, §3-8, §4-5, §4-6, §5-2, §9 q10.
 Owner decisions: the member allows it themselves; the Google account must be **the member's own
 ACB email** (case-insensitive), verified, in the company's Workspace domain (no private Gmail);
-ask only for what a feature needs, when first needed; never `drive.readonly`, `gmail.compose`,
-`gmail.readonly`, `gmail.metadata` or domain-wide delegation.
+ask only for what a feature needs, when first needed; never `drive`, `drive.readonly`,
+`gmail.compose`, `gmail.readonly`, `gmail.metadata` or domain-wide delegation
+(`GOOGLE_NEVER_SCOPES`). Drive (`drive.file` + Google Picker): `google-drive.md`.
 
 ## What is stored where (all behind the company handle, `connectors`)
 
@@ -46,6 +47,8 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
   use (`DELETE … RETURNING`); a member's new start removes their earlier ones.
 - `connector_history`: every change (client, on/off, grant new / replaced / added, stopped,
   revoked, stop-all) as JSON without any secret.
+- `google_oauth_clients.picker_api_key` / `picker_app_id`: Google Picker's registration
+  (`google-drive.md`); `google_drive_picks` / `google_drive_puts` (Drive's picks and receipts).
 - The **access token** lives only in `google-client.ts`'s memory (per company, member and grant),
   until Google's expiry minus a minute and never more than 1 hour. It is dropped when a grant
   ends, the client or switch changes, or Google answers 401.
@@ -57,7 +60,8 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
 ## Scopes (`shared/core/google.ts`)
 
 `minutes` (予定と議事録を読む) = `calendar.events.readonly`, `meetings.space.readonly`,
-`drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; both with `openid email`.
+`drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
+= `drive.file` (`google-drive.md`); each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
 `normalizeGrantedScopes` (Google's report → allowed long forms only).
 
@@ -113,7 +117,7 @@ grant** (a refresh token comes only with a consent).
 ## `google-client.ts`: the one place that talks to Google
 
 `googleClient.request(companyId, userId, { api: 'calendar'|'meet'|'drive'|'gmail', method, path,
-query?, body?, scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
+query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
 is not JSON, e.g. Drive export) or `{ ok: false, kind: 'not-sent'|'refused'|'rate-limited'|
 'server-error'|'unknown', reason, status?, googleReason? }`. `googleReason` is Google's short code
 only (never its message). Hosts: calendar / drive / userinfo `www.googleapis.com`, meet
@@ -138,7 +142,11 @@ Google in the background) · the member's 「許可をやめる」 · the operat
 removed · Google refusing the token. A stopped / revoked grant is resumed only by the member's
 「Google で許可」 again.
 
-Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`) and
+`pickerToken(companyId, userId)`: the Picker's own `drive.file`-only token (`google-drive.md`),
+after the same switches and the grant's `drive.file`.
+
+Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`), Drive
+(`google-drive.md`) and
 「今日の予定」 (`calendar.md`, `services/google-calendar.ts`: `calendar.events.list` of `primary`
 for today; no answer is an error there — a stop becomes an empty list with a reason).
 
@@ -173,7 +181,9 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
   system browser through the shell's `openExternal` only when it is
   `https://accounts.google.com/o/oauth2/v2/auth` (or the practice Google on `127.0.0.1` /
   `localhost` / `[::1]`, same path: `isGoogleSignInUrl`) and **never returns the URL** to the
-  renderer. There is no Google token on the client at all. Shows the account and
+  renderer. The only Google token on the client is Google Picker's: `drive.file` only, fetched
+  by main with the session and handed to the Picker's own window, never stored
+  (`google-drive.md`). Shows the account and
   予定と議事録を読む / メールを送る; 「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail),
   「許可をやめる」 (confirmation); after opening the browser 「ブラウザで Google の画面を開きました。
   許可したらこの画面に戻ってください。」 and a check every 3 s for up to 2 minutes. The first status

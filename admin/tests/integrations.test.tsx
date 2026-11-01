@@ -118,7 +118,8 @@ const googleGrant: GoogleGrantSummary = {
 const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
   vaultEnabled: true, configured: true, clientId: '123-abc.apps.googleusercontent.com', secretLast4: GOOGLE_SECRET.slice(-4), domain: 'example.com',
   enabled: true, redirectUri: 'https://acb.example.com/api/oauth/google/callback', practice: false, operatorStopped: false,
-  updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [], ...over,
+  updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [],
+  picker: { configured: false, appId: null, apiKeyLast4: null, pageUrl: 'https://acb.example.com/api/google-picker' }, ...over,
 })
 
 type Reply = { status?: number; body: unknown }
@@ -409,5 +410,29 @@ describe('つなぎ先 → Google', () => {
 
     const text = document.body.textContent ?? ''
     for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', 'オントロジー']) expect(text).not.toContain(word)
+  })
+  it('Drive の ファイル選び: shows the page to allow, sends the API key once (password field), keeps it when left empty', async () => {
+    const saves: Call[] = []
+    const registered = googleView({ picker: { configured: true, appId: '123456789012', apiKeyLast4: 'wxyz', pageUrl: 'https://acb.example.com/api/google-picker' } })
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView()) },
+      [`PUT ${base}/google/picker`]: (call) => { saves.push(call); return { body: ok(registered) } },
+    })
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByTestId('google-picker-page')).toHaveTextContent('https://acb.example.com/api/google-picker')
+    const key = screen.getByLabelText('API キー')
+    expect(key).toHaveAttribute('type', 'password')
+    const KEY = 'AIzaFAKE-NOT-REAL-picker-key-0000wxyz'
+    await userEvent.type(key, KEY)
+    await userEvent.type(screen.getByLabelText('プロジェクト番号'), '123456789012')
+    await userEvent.click(screen.getByRole('button', { name: 'ファイル選びの設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ appId: '123456789012', apiKey: KEY })
+    await waitFor(() => expect(key).toHaveValue(''))
+    expect(document.body.innerHTML).not.toContain(KEY)
+    expect(key).toHaveAttribute('placeholder', expect.stringContaining('末尾 wxyz'))
+    await userEvent.click(screen.getByRole('button', { name: 'ファイル選びの設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves[1].body).toEqual({ appId: '123456789012' })
   })
 })

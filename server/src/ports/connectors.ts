@@ -73,6 +73,10 @@ export interface ConnectorRepository {
   /** Insert or replace; `secret` null keeps the stored one (and its last 4). */
   saveClient(row: { clientId: string; domain: string; at: string; by: string }, secret: { sealed: SealedSecret; last4: string } | null, change: ConnectorChangeRow): void
   setClientEnabled(enabled: boolean, at: string, by: string, change: ConnectorChangeRow): void
+  /** Google Picker's API key and app id on the client (google-drive.md); null when not registered. */
+  picker(): { apiKey: string; appId: string } | null
+  /** Sets (or with null, removes) the Picker's registration; the client must exist. */
+  savePicker(value: { apiKey: string; appId: string } | null, at: string, by: string, change: ConnectorChangeRow): void
 
   // Members' grants.
   grants(provider: ConnectorProvider): ConnectorGrantRow[]

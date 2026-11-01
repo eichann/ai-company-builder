@@ -800,7 +800,9 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   replayed: true, operationKey, ref }` without running anything; another request with that key →
   409 `OPERATION_KEY_REUSED`; one still in flight → 409 `OPERATION_IN_PROGRESS`; a refused
   request (4xx, a plugin write `failed`) frees the key. A consultation's token (no run) is
-  unchanged. HubSpot's `acb_operation_id` and outbound mail's states stay underneath.
+  unchanged. HubSpot's `acb_operation_id` and outbound mail's states stay underneath. A Google
+  Drive put (`POST /google/drive/put`, `google-drive.md`) is keyed too: its `drivePut.state`
+  `unknown` counts as unknown, ref kind `drive-put`.
 - **「結果が分からない」**: an answer ≥ 500, a thrown handler, a plugin write `sent-unknown`, or an
   operation still in flight when another PC re-claims → `unknown`. While any is unknown the run
   cannot be resumed: a re-claim moves it to `waiting_reconcile` (409 `RUN_NEEDS_RECONCILE`), a
