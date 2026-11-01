@@ -459,6 +459,7 @@ const MATRIX: Row[] = [
   r('POST /api/slack/events/:companyId', w => ({ path: `/api/slack/events/${w.co}`, body: {} }), [401, 401, 401, 401, 401, 401], 'public: Slack signs with the company\'s own signing secret; unsigned → 401'),
   // The card's 元のスレッド (outbound-mail.md "Replies"): any member, only a record they read; a missing one is 404.
   r('GET /api/companies/:companyId/threads/:recordId', w => ({ path: `${C(w)}/threads/interaction-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/threads/:recordId', () => ({ path: '/api/records-ai/threads/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // lane A ▲
   // lane B ▼
   // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
@@ -669,6 +670,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   // lane A ▼
   'PUT /api/companies/:companyId/connector-roles/:role': 'a role name (connector-roles.ts): sets this company\'s own choice for it',
   'PUT /api/companies/:companyId/connectors/:connectorId/enabled': 'a built-in connector name (builtin-connectors.ts): switches this company\'s own connection',
+  'GET /api/records-ai/threads/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/integration/threads.test.ts)',
   // lane A ▲
   // lane B ▼
   'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',

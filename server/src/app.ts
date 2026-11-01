@@ -42,7 +42,7 @@ import { oauthRoute } from './routes/oauth'
 // lane A ▼
 import { coreConnectorsRoute } from './routes/core-connectors'
 import { slackEventsRoute, slackRoute } from './routes/slack-connection'
-import { threadsRoute } from './routes/threads'
+import { recordsAiThreadsRoute, threadsRoute } from './routes/threads'
 // lane A ▲
 // lane B ▼
 import { identitiesRoute } from './routes/identities'
@@ -164,6 +164,7 @@ app.route('/api/companies/:companyId', slackRoute)
 app.route('/api/slack', slackEventsRoute)
 // The card's 元のスレッド (outbound-mail.md "Replies"): read now with the caller's own permission, never stored.
 app.route('/api/companies/:companyId', threadsRoute)
+app.route('/api/records-ai/threads', recordsAiThreadsRoute)
 // lane A ▲
 // lane B ▼
 // Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.
