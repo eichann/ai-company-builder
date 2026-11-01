@@ -16,6 +16,8 @@
  *   POST    /records/item         any member: a server-only record (state engine, 4-3)
  *   POST    /records/item/:recordId/actions/:action   run an action of the record's type
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
+ *   POST    /records/item/:recordId/file-links        { path, link?, expectedVersion, note? } link a file later
+ *   POST    /records/item/:recordId/file-links/remove { path, link?, expectedVersion, note? } remove that link
  *   GET     /records/item/:recordId/history           the ledger
  *   GET     /records/item/:recordId/versions/:version the server values at that version
  *   POST    /me/record-tokens     any member: a record token for their AI (one chat turn;
@@ -143,6 +145,20 @@ recordsRoute.post('/records/item/:recordId/undo', async (c) => {
   if (member instanceof Response) return member
   const body = await jsonBody(c)
   return answer(c, recordEngine.undo(member, humanWith(body), c.req.param('recordId'), body))
+})
+
+recordsRoute.post('/records/item/:recordId/file-links', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const body = await jsonBody(c)
+  return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'link', body))
+})
+
+recordsRoute.post('/records/item/:recordId/file-links/remove', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const body = await jsonBody(c)
+  return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'unlink', body))
 })
 
 recordsRoute.get('/records/item/:recordId/history', async (c) => {

@@ -27,6 +27,23 @@ export const ONTOLOGY_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
 
 export const FIELD_KINDS = ['text', 'long_text', 'number', 'date', 'datetime', 'boolean', 'person', 'choice', 'record'] as const
 export type FieldKind = typeof FIELD_KINDS[number]
+
+/**
+ * A value of kind `date`: a day (`2026-11-05`) or a day with a time of day
+ * (`2026-11-05T15:00`, the company's own clock, no zone — a due 「15時まで」).
+ * Both sort correctly as text (a day before its own times), so existing
+ * date-only values stay valid and ordered.
+ */
+export const DATE_VALUE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T([01]\d|2[0-3]):([0-5]\d))?$/
+
+export function isDateValue(value: unknown): value is string {
+  if (typeof value !== 'string') return false
+  const m = DATE_VALUE_RE.exec(value)
+  if (!m) return false
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const day = new Date(Date.UTC(y, mo - 1, d))
+  return day.getUTCFullYear() === y && day.getUTCMonth() === mo - 1 && day.getUTCDate() === d
+}
 export type FieldSource = 'file' | 'server'
 export type NoteRule = 'none' | 'optional' | 'required'
 /** Where a type's records live: always a file, never (server only), or server first and a file once there is content (0.6). */

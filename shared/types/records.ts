@@ -13,13 +13,17 @@
  *   POST /records/item       any member    CreateRecordRequest → 201 { record, entry } (server-only record)
  *   POST /records/item/:recordId/actions/:action   ActionRequest → { record, entry }
  *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
+ *   POST /records/item/:recordId/file-links        FileLinkRequest → FileLinkResult (link a file later)
+ *   POST /records/item/:recordId/file-links/remove FileLinkRequest → FileLinkResult (remove that link)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState
  *
  * The state engine's refusals carry a `code`: VERSION_CONFLICT (409, with the
  * current `version`), ACTION_NOT_ALLOWED_IN_STATE (409), NOT_ALLOWED (403),
  * NOTE_REQUIRED / ARG_REQUIRED / BAD_VALUE / BAD_ATTACHMENT / BAD_MATERIAL
- * (400), ATTACHMENT_NOT_SYNCED (409: push the file first), CHANGED_SINCE (409, undo).
+ * (400), ATTACHMENT_NOT_SYNCED (409: push the file first), CHANGED_SINCE (409, undo),
+ * FILE_NOT_LINKABLE (400: a file the caller cannot read, or one the record may
+ * not reach — never says which or where), LINK_NOT_FOUND (404, removing).
  *
  * While the feature is off for the company, every route but the settings
  * answers 404 `RECORDS_DISABLED`. Answers, counts and link lists hold only
@@ -27,7 +31,7 @@
  * is exactly a record that does not exist.
  */
 import type { TypeDefinition } from '../core/record-types'
-import type { DecisionMaterial } from '../core/record-ledger'
+import type { DecisionMaterial, LedgerEntry } from '../core/record-ledger'
 
 export interface RecordSettings {
   enabled: boolean
@@ -186,4 +190,26 @@ export interface UndoRequest {
   expectedVersion: number
   note?: string
   actor?: RecordActor
+}
+
+/**
+ * Link a file to a record after it was made, or remove that link (any type
+ * with a `file` link; records.md "Linking files later").
+ */
+export interface FileLinkRequest {
+  /** Company path of the file or folder (as in the company folder, e.g. `営業部/提案書/見積.md`). */
+  path: string
+  /** The link's name; may be left out when the type has one file link (task: `files`). */
+  link?: string
+  expectedVersion: number
+  note?: string
+  proposedBy?: 'ai'
+  conversationId?: string
+}
+
+export interface FileLinkResult {
+  record: RecordSummary
+  /** The ledger entry (`link_file` / `unlink_file`); null when nothing changed (already linked). */
+  entry: LedgerEntry | null
+  changed: boolean
 }

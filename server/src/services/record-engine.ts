@@ -22,7 +22,7 @@
 import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
-import type { ActionDef, FieldKind, TypeDefinition } from '../../shared/core/record-types'
+import { isDateValue, type ActionDef, type FieldKind, type TypeDefinition } from '../../shared/core/record-types'
 import {
   replayRecordState, type DecisionMaterial, type ExternalReceipt, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry,
   type LedgerValue, type ReplayedState, type VersionOrigin,
@@ -37,7 +37,7 @@ import type { Transactions } from '../ports/transactions'
 import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { recordReader, type RecordReader } from './record-access'
+import { linkAllowed, recordReader, type RecordReader } from './record-access'
 import { currentTypes } from './record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED, recordSummaries } from './records'
 
@@ -123,7 +123,7 @@ function checkValue(kind: FieldKind, value: unknown, options: string[] | undefin
     }
     case 'number': return typeof value === 'number' && Number.isFinite(value) ? value : { error: '数で入れてください' }
     case 'boolean': return typeof value === 'boolean' ? value : { error: 'true か false で入れてください' }
-    case 'date': return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) ? value : { error: 'YYYY-MM-DD の日付で入れてください' }
+    case 'date': return isDateValue(value) ? value : { error: 'YYYY-MM-DD の日付か、YYYY-MM-DDTHH:MM の日時で入れてください' }
     case 'datetime': return typeof value === 'string' && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? new Date(value).toISOString() : { error: '日時で入れてください' }
     case 'choice': return typeof value === 'string' && (options ?? []).includes(value) ? value : { error: `${(options ?? []).join(' / ')} のどれかです` }
     case 'person': return typeof value === 'string' && value.length <= 200 && isMember(value) ? value : { error: 'この会社のメンバーの id で入れてください' }
@@ -159,6 +159,49 @@ function parseMaterials(raw: unknown): DecisionMaterial[] | string {
 }
 
 const REF_RE = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}@[1-9]\d{0,9}$/
+
+/** Most targets one link holds (as on create). */
+const MAX_LINK_TARGETS = 50
+
+/**
+ * Linking a file to a record that may not reach it (a file the member cannot
+ * read, or one inside a private folder for a record outside it): one answer
+ * for both, naming no place (a private folder's name never leaks).
+ */
+export const FILE_NOT_LINKABLE = {
+  error: 'このファイルはこの記録につなげません。あなたが見られないファイルか、この記録を見る人には見せられない場所のファイルです。',
+  code: 'FILE_NOT_LINKABLE',
+}
+
+/**
+ * A link's targets as one ledger value (`links.<name>` before / after):
+ * file links as a JSON array of company paths (a path may hold a comma),
+ * record links as ids joined with commas (the service writer's form); null = none.
+ */
+export function linkLedgerValue(target: string, rows: RecordLinkRow[]): LedgerValue {
+  const values = rows.map(r => (target === 'file' ? r.targetPath : r.targetId)).filter((v): v is string => typeof v === 'string')
+  if (values.length === 0) return null
+  return target === 'file' ? JSON.stringify(values) : values.join(',')
+}
+
+function linkTargetsOf(target: string, value: LedgerValue): string[] | null {
+  if (value === null) return []
+  if (typeof value !== 'string') return null
+  if (target !== 'file') return value.split(',').filter(v => RECORD_ID_RE.test(v))
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Array.isArray(parsed) && parsed.every(p => typeof p === 'string') ? parsed as string[] : null
+  } catch {
+    return null
+  }
+}
+
+/** Every link row of a record with `name` replaced by these targets (positions renumbered). */
+function withLinkTargets(sourceId: string, current: RecordLinkRow[], name: string, target: string, targets: string[]): RecordLinkRow[] {
+  const others = current.filter(l => l.name !== name)
+  const mine = targets.map(t => ({ sourceId, name, position: 0, targetId: target === 'file' ? null : t, targetPath: target === 'file' ? t : null }))
+  return [...others, ...mine].map((l, i) => ({ ...l, position: i }))
+}
 
 export function createRecordEngine(deps: RecordEngineDeps) {
   const { companyData, transactions, clock } = deps
@@ -273,6 +316,10 @@ export function createRecordEngine(deps: RecordEngineDeps) {
           if (l.target === 'file') {
             const p = typeof t === 'string' ? fileLinkPath(t) : null
             if (!p) return bad(`${name}: a company path`)
+            // As linking later: a file the member reads, never inside a private folder (the record is outside every one).
+            if (!reader.file(p) || findPrivateScope(companyData.forCompany(member.companyId).scopes.listWithRules(), p)) {
+              return bad(FILE_NOT_LINKABLE.error, FILE_NOT_LINKABLE.code)
+            }
             links.push({ sourceId: id, name, position: links.length, targetId: null, targetPath: p })
           } else {
             if (typeof t !== 'string' || !RECORD_ID_RE.test(t)) return bad(`${name}: a record id`)
@@ -455,16 +502,36 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const latest = ledger.length > 0 ? ledger[ledger.length - 1].version : 0
       if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       const now = replayRecordState(ledger, latest)
-      const valueOf = (field: string) => (field === 'state' ? now.state : now.fields[field] ?? null)
+      // `links.<name>` changes (a file linked, the minutes' deal) are compared with and restored to
+      // the link rows themselves: a rename the indexer followed changed them without an entry.
+      const def = currentTypes(records).get(row.type)?.definition
+      const currentLinks = records.linksFrom([row.id])
+      const linkOf = (field: string) => {
+        const name = field.slice('links.'.length)
+        const l = def && Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
+        return l ? { name, target: l.target } : null
+      }
+      const valueOf = (field: string): LedgerValue | undefined => {
+        if (field === 'state') return now.state
+        if (!field.startsWith('links.')) return now.fields[field] ?? null
+        const l = linkOf(field)
+        return l ? linkLedgerValue(l.target, currentLinks.filter(x => x.name === l.name)) : undefined
+      }
       if (target.changes.some(c => valueOf(c.field) !== c.after)) {
         return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
       }
       const changes = target.changes.map(c => ({ field: c.field, before: c.after, after: c.before }))
-      const nextFields = { ...now.fields }
+      const nextFields = Object.fromEntries(Object.entries(now.fields).filter(([k]) => !k.startsWith('links.')))
       let nextState = now.state
+      let nextLinks: RecordLinkRow[] | null = null
       for (const c of changes) {
         if (c.field === 'state') nextState = typeof c.after === 'string' ? c.after : null
-        else nextFields[c.field] = c.after
+        else if (c.field.startsWith('links.')) {
+          const l = linkOf(c.field) as { name: string; target: string }
+          const targets = linkTargetsOf(l.target, c.after)
+          if (targets === null) return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
+          nextLinks = withLinkTargets(row.id, nextLinks ?? currentLinks, l.name, l.target, targets)
+        } else nextFields[c.field] = c.after
       }
       const at = clock.now()
       const entry: LedgerEntry = {
@@ -474,12 +541,88 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       }
       const written = transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
+        if (nextLinks) records.replaceLinks(row.id, nextLinks)
         records.appendLedger(entry)
         return true
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
       tell(member, [nextFields.next_actor])
       return ok({ record: summaryOf(records, row.id), entry })
+    },
+
+    /**
+     * Link a file to a record after it was made, or remove that link
+     * (records.md "Linking files later"). Any type with a `file` link; the
+     * caller must read the record and the file, and the link must be one the
+     * record may have at all (`linkAllowed`: never into a private folder from
+     * outside it). The member's AI only on types that let the AI act at all
+     * (an action whose `who` lists `ai`). A ledger entry `link_file` /
+     * `unlink_file` with `links.<name>` before / after, so it can be undone.
+     */
+    fileLink(member: Member, actor: ActorInput, recordId: string, op: 'link' | 'unlink', body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; changed: boolean }> {
+      const opened = open(member)
+      if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const { records, reader } = opened
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
+      if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
+      const def = currentTypes(records).get(row.type)?.definition
+      if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
+      if (actor.kind === 'ai' && !Object.values(def.actions).some(a => a.who.includes('ai'))) {
+        return refuse('forbidden', 'この記録のつながりは AI からは変えられません。本人が画面から行ってください', { code: 'NOT_ALLOWED' })
+      }
+      // A file record's links are its text (the next index of the file would overwrite them).
+      if (row.path !== null) return bad('この記録のつながりはファイルに書かれています。ファイルを直してください', 'FILE_RECORD')
+
+      const b = body as Record<string, unknown> | null
+      if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
+      const fileLinks = Object.entries(def.links).filter(([, l]) => l.target === 'file').map(([name]) => name)
+      if (fileLinks.length === 0) return bad('この種類の記録にはファイルをつなげません', 'NO_FILE_LINK')
+      const name = b.link === undefined && fileLinks.length === 1 ? fileLinks[0] : b.link
+      if (typeof name !== 'string' || !fileLinks.includes(name)) return bad(`link: one of ${fileLinks.join(', ')}`, 'BAD_LINK')
+      const path = typeof b.path === 'string' ? fileLinkPath(b.path) : null
+      if (!path) return bad('path: a path inside the company folder', 'BAD_PATH')
+      if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
+      const note = b.note === undefined ? '' : b.note
+      if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)
+
+      // The member must read the file, and the record may hold a link to it at all: one answer, no place named.
+      const priv = findPrivateScope(companyData.forCompany(member.companyId).scopes.listWithRules(), path)
+      if (!reader.file(path) || !linkAllowed(row, { scopeId: priv?.id ?? null })) {
+        return bad(FILE_NOT_LINKABLE.error, FILE_NOT_LINKABLE.code)
+      }
+
+      const current = stateOf(records, row, def)
+      const expected = b.expectedVersion as number
+      if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
+      const allLinks = records.linksFrom([row.id])
+      const mine = allLinks.filter(l => l.name === name)
+      const before = mine.map(l => l.targetPath).filter((p): p is string => p !== null)
+      let after: string[]
+      if (op === 'link') {
+        if (before.includes(path)) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
+        after = def.links[name].cardinality === 'one' ? [path] : [...before, path]
+        if (after.length > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} files per link`, 'TOO_MANY_LINKS')
+      } else {
+        if (!before.includes(path)) return refuse('not-found', 'このファイルはこの記録につながっていません', { code: 'LINK_NOT_FOUND' })
+        after = before.filter(p => p !== path)
+      }
+      const nextLinks = withLinkTargets(row.id, allLinks, name, 'file', after)
+      const at = clock.now()
+      const entry: LedgerEntry = {
+        recordId: row.id, version: current.version + 1, action: op === 'link' ? 'link_file' : 'unlink_file', fromState: current.state, toState: current.state,
+        actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note,
+        changes: [{ field: `links.${name}`, before: linkLedgerValue('file', mine), after: linkLedgerValue('file', nextLinks.filter(l => l.name === name)) }],
+        attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
+      }
+      const written = transactions.run(() => {
+        if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
+        records.replaceLinks(row.id, nextLinks)
+        records.appendLedger(entry)
+        return true
+      })
+      if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
+      return ok({ record: summaryOf(records, row.id), entry, changed: true })
     },
 
     history(member: Member, recordId: string): Outcome<{ entries: LedgerEntry[] }> {

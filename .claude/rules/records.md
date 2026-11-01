@@ -15,6 +15,9 @@ paths:
   - "server/src/services/record-ai-tokens.ts"
   - "server/src/routes/records-ai.ts"
   - "client/electron/records/**"
+  - "client/electron/features/tasks/**"
+  - "client/shared/task-links.ts"
+  - "client/src/features/tasks/**"
   - "client/shared/record-actions.ts"
   - "client/tests/records-tools.test.ts"
   - "server/tests/integration/record-tokens.test.ts"
@@ -147,15 +150,70 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   scopes): `records.moveFolder` moves server records' readers' `folder` (else they would take the
   old path's rules), links to files at or under it and the minutes folder. Departments with a
   private folder inside cannot be renamed, so nothing private moves.
+- Linking later (below) keeps the same rule: a server record never gets a path inside a private
+  folder.
 - A deleted file's link stays. The detail (`GET /records/item/:recordId`, the AI's `records_get`)
   marks each file link it shows `broken: true | false` — whether a file or folder is at that path
   on the shared branch now (`RecordFileSource.existing`, `lib/repo-paths.ts`; the private folder's own repository for a
   path inside one; only paths already shown to the reader are looked up; absent when git could not
   tell). The app says 「つながりが切れています」.
-- Tests: `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
+- Tests: `tests/unit/record-file-links.test.ts` (linking later, below), `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
   folder for an outside record nor across its edge, department move with `_` in names,
   cross-company), `tests/integration/record-links.test.ts` (real git rename detection, broken
   flag, department rename through the service) — mutation-checked.
+
+### Linking files later (owner decision 2026-11-01)
+
+`POST /records/item/:recordId/file-links` (session) and `POST /api/records-ai/item/:recordId/file-links`
+(act token, tool `records_link_file`) `{ path, link?, expectedVersion, note? }` link a file or folder
+to a record after it was made; `…/file-links/remove` (tool `records_unlink_file`) removes the link.
+Engine `fileLink` (`services/record-engine.ts`), generic: any type with a `file` link (`link` may
+be left out when the type has one; task: `files`). Contract `FileLinkRequest` / `FileLinkResult`.
+
+- Who: anyone who reads the record (as reading it) and **reads the file** (`reader.file`). The
+  member's **AI** only on types whose definition lets the AI act at all (some action's `who` lists
+  `ai`: task yes; a type with only `anyone` actions no) — no new type syntax. Codex's read tokens
+  get 403 `READ_ONLY_TOKEN`. Not on `SERVICE_STATE_TYPES` (403 `STATE_CHANGED_BY_SERVICE`) nor on
+  a company's own file record (400 `FILE_RECORD`: its links are its text).
+- **Never into a private folder from outside it** (`linkAllowed`, a server record is outside every
+  private folder): a file the member cannot read and a file inside a private folder answer the same
+  400 `FILE_NOT_LINKABLE`, naming no place. The same check now runs on a create's file links.
+- Ledger: action `link_file` / `unlink_file`, state unchanged, one change `links.<name>` whose
+  before / after are the link's whole target list (file links: a JSON array of company paths;
+  record links keep the service writer's comma-joined ids; null = none). The version goes up
+  (`expectedVersion` → 409 `VERSION_CONFLICT`); a file already linked answers `changed: false` with
+  no entry; removing one not linked → 404 `LINK_NOT_FOUND`. Nobody is notified.
+- Undo (people only, as every undo) restores the link rows: a `links.*` change is compared with
+  the current rows (not the replay — a rename the indexer followed changed them without an entry,
+  so such an undo answers `CHANGED_SINCE`) and never lands in the server fields. A replay
+  (`versions/:version`) shows `links.<name>` as of that version.
+- No existence check: a path not synced yet links and reads `broken` until it arrives.
+- The app's entrance (milestone 5 brings the task card): the file tree's right-click item
+  「やることにつなぐ…」 (`src/features/files/contextMenuItems.tsx`, shown when `FileTreePanel` gets
+  `onLinkToTask`; `src/app/FilesPanel.tsx` composes) opens `src/features/tasks/components/LinkToTaskDialog.tsx`
+  (`hooks/useLinkToTask.ts`): the member's open tasks — non-final states, where they are
+  assignee, requester, reviewer or next actor — searched by title, soonest due first; choosing one
+  links the file's company path and shows 「「<file>」を「<task>」につなぎました。」. IPC `tasks:open` /
+  `tasks:linkFile` (`client/electron/features/tasks/`, with the session in main; one retry at the
+  server's version on `VERSION_CONFLICT`), pure parts `client/shared/task-links.ts`. UI test:
+  `client/tests/ui/file-tree.spec.ts` 「やることにつなぐ…」.
+- The consultation AI: no consultation is linked to a task in the app yet (only a minutes
+  consultation stores `minutesId`, `minutes.md`). `records_get` returns the file links (`path`,
+  `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked
+  files there and read the ones it needs with its normal file tools — names only, never contents,
+  through the API.
+
+### Due with a time (task version 3)
+
+A value of kind `date` is `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (the company's clock, no zone;
+`isDateValue` / `DATE_VALUE_RE` in `shared/core/record-types.ts`, used by the engine and the app's
+tool schemas). Both sort correctly as text, so stored date-only values stay valid; the kind did not
+change (no breaking change). `set_due` is 「延ばす」: the ledger keeps the earlier value (before /
+after), and since task version 3 it has `notify: requested_by` — the requester is told through the
+push channel (kind + version only) unless they did it themselves. Who may set it is unchanged
+(`requested_by`, `assignee`, `ai`). The push signal only makes the app re-ask; a screen that shows
+the requester the change comes with milestone 5. A plugin's own `date` fields still write
+date-only values outside (`shared/core/plugins.ts`).
 
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 
@@ -164,6 +222,7 @@ GET|PUT /records/settings          owner/admin
 GET     /records/problems          owner/admin (paths may be private: owners/admins read all)
 POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
+POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/query             any member: { type?, implements?, state?, fields?, linkedTo?: { id, hops: 1|2 },
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
@@ -189,7 +248,8 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 ## Core types (4-5, `shared/core/core-types.ts`)
 
 `task` (タスク: implements `request`; storage `server` — version 2 (2026-11-01; version 1 was
-`either`, a file adopted once it had content, 0.6-1), `purpose` a server field; the content
+`either`, a file adopted once it had content, 0.6-1), version 3 (2026-11-01: `set_due` notifies
+the requester; the due may carry a time, above), `purpose` a server field; the content
 people write is an ordinary file linked through `files`; states todo / in_progress / review /
 waiting / done / cancelled, final done / cancelled; actions start, request_review (attach files,
 notify the reviewer, hand to them), send_back (note required, decision), assign (note required,
@@ -368,7 +428,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 - `api.ts`: the token per turn (above). `tools.ts`: MCP server `acb_records`, generated from the
   company's type definitions at the start of each turn — look-ups (`records_my_turn`,
   `records_ai_turn`, `records_query`, `records_get`, `records_history`, `records_types`) and,
-  with an `act` token, `records_create` (not for service-owned types), `decisions_record`, and
+  with an `act` token, `records_create` (not for service-owned types), `decisions_record`,
+  `records_link_file` / `records_unlink_file` (types with a file link that let the AI act), and
   one tool per type × action (none for `SERVICE_STATE_TYPES`) (`task__request_review`: `id`,
   `expectedVersion`, `note` — required where the type says —, the action's arguments). Wired like
   the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
@@ -469,6 +530,9 @@ choices), `server/tests/unit/record-service-types.test.ts` (service-owned types 
 create, no generic action / undo on approvals, the writer's transition table and CAS, 「AI の番」
 own + readable only, decisions: a server record readable by its folder's readers only, private
 folder, key, links — each mutation-checked),
+`server/tests/unit/record-file-links.test.ts` (linking a file later: ledger, undo, the AI only
+where the type lets it, unreadable and private-folder files refused alike without a place,
+cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named

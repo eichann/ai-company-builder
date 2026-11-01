@@ -24,7 +24,7 @@
  */
 import { z, type ZodTypeAny } from 'zod'
 import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
-import type { FieldKind, TypeDefinition } from '../../../shared/core/record-types'
+import { DATE_VALUE_RE, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
 import { CREATE_CONTENT_LABELS, aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
@@ -72,7 +72,7 @@ export function kindSchema(kind: FieldKind, options?: string[]): ZodTypeAny {
     case 'long_text': return z.string().max(5000)
     case 'number': return z.number()
     case 'boolean': return z.boolean()
-    case 'date': return z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+    case 'date': return z.string().regex(DATE_VALUE_RE).describe('日付（YYYY-MM-DD）。時刻もあれば YYYY-MM-DDTHH:MM（会社の時刻、時差なし） / a day, or a day and time of day (company clock, no offset)')
     case 'datetime': return z.string().max(40)
     case 'choice': return options && options.length > 0 ? z.enum(options as [string, ...string[]]) : z.string()
     case 'person': return z.string().min(1).max(200).describe('メンバーの id / member id')
@@ -109,7 +109,7 @@ const LOOKUPS: RecordToolSpec[] = [
   },
   {
     name: 'records_get', readOnly: true, schema: z.object({ id }).strict(),
-    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。ファイルへのつながりの broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow).',
+    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。links のうち path を持つものはつながったファイル（会社のフォルダの中のパス。名前だけで中身は入っていない）：中身が要るときは、ふだんの道具でそのファイルを読む（メンバーが見られるものだけ）。broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. Links with a `path` are linked files (company paths — names only, never contents): when you need what is in one, read it with your normal file tools (only what the member can read). A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow).',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
   },
   {
@@ -233,6 +233,34 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
   },
 ]
 
+/** Link a file to a record, or remove that link (records.md "Linking files later"). */
+function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
+  const schema = z.object({
+    id,
+    path: z.string().min(1).max(500).describe('会社のフォルダの中のパス（例「営業部/提案書/見積.md」）。ファイルかフォルダ / company path of a file or folder, e.g. 営業部/提案書/見積.md'),
+    link: z.string().max(40).optional().describe('つながりの名前。型にファイルのつながりが1つなら省く（task は files） / the link name; leave out when the type has one file link'),
+    expectedVersion: z.number().int().min(0).describe('records_get で見た version / the version you read'),
+    note: z.string().max(2000).optional(),
+  }).strict()
+  const body = (input: Record<string, unknown>) => ({
+    path: input.path, expectedVersion: input.expectedVersion,
+    ...(input.link !== undefined ? { link: input.link } : {}), ...(input.note !== undefined ? { note: input.note } : {}),
+  })
+  return [
+    {
+      name: 'records_link_file', readOnly: false, schema,
+      description: `記録（${typeNames.join(', ')}）にファイルをつなぐ（作ったあとからでも）。メンバーが見られるファイルだけ。非公開フォルダの中のファイルは、外の記録にはつなげない。台帳に残り、人が取り消せる。\n` +
+        `Link a file to a record (${typeNames.join(', ')}) after it was made. Only files the member can read; never a file inside a private folder from a record outside it. Kept in the ledger; a person can undo it.`,
+      request: input => ({ method: 'POST', path: `/item/${enc(String(input.id))}/file-links`, body: body(input) }),
+    },
+    {
+      name: 'records_unlink_file', readOnly: false, schema,
+      description: '記録からファイルへのつながりを外す（ファイルそのものは消さない）。\nRemove a file link from a record (the file itself stays).',
+      request: input => ({ method: 'POST', path: `/item/${enc(String(input.id))}/file-links/remove`, body: body(input) }),
+    },
+  ]
+}
+
 /** The state-changing tools for these types (one per action, and creating server-only records). */
 export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
@@ -274,6 +302,10 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
       })
     }
   }
+  // Linking files later: types with a `file` link whose definition lets the AI act (the server checks again).
+  const linkable = types.filter(t => !SERVICE_STATE_TYPES.includes(t.name) && Object.values(t.links).some(l => l.target === 'file')
+    && Object.values(t.actions).some(a => a.who.includes('ai')))
+  if (linkable.length > 0) specs.push(...fileLinkTools(linkable.map(t => t.name)))
   if (types.some(t => t.name === 'decision')) specs.push(DECISION_TOOL)
   if (types.some(t => t.name === 'minutes')) specs.push(MINUTES_LINK_DEAL_TOOL)
   return specs
@@ -444,7 +476,7 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
   },
 ]
 
-export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます。担当などの人の欄は id で指定します。` +
+export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。`

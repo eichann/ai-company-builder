@@ -13,6 +13,9 @@ import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
+import { LinkToTaskDialog } from '../src/features/tasks/components/LinkToTaskDialog'
+import { useLinkToTask } from '../src/features/tasks/hooks/useLinkToTask'
+import { linkedMessage, type TaskChoice } from '../shared/task-links'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import type { MyPrivateFolder } from '../shared/private-folder-ui'
 
@@ -49,6 +52,11 @@ const FOLDERS: MyPrivateFolder[] = [{
     { userId: 'u_admin', name: '鈴木 一郎', role: 'admin' },
   ],
 }]
+
+const TASKS: TaskChoice[] = [
+  { id: 'task-aaaaaa01', title: 'A社の提案書を仕上げる', state: 'in_progress', due: '2026-11-05T15:00', version: 4 },
+  { id: 'task-aaaaaa02', title: '見積の確認', state: 'todo', due: null, version: 1 },
+]
 
 const calls: unknown[][] = []
 const selected: string[] = []
@@ -104,6 +112,13 @@ installElectronAPI({
   // A name a private folder this member cannot read already uses (the server knows).
   reservedPathRefusal: async p => (split(p)[1] === '人事評価' ? '「人事評価」という名前は使えません。別の名前にしてください。' : null),
   getMyPrivateFolders: async () => ({ success: true, folders: FOLDERS }),
+  // 「やることにつなぐ…」: the member's open tasks and the link (main asks the server).
+  getOpenTasks: async () => ({ success: true, tasks: TASKS }),
+  linkFileToTask: async (companyId, taskId, companyPath, seenVersion) => {
+    calls.push(['linkFileToTask', companyId, taskId, companyPath, seenVersion])
+    const task = TASKS.find(t => t.id === taskId)!
+    return { success: true, message: linkedMessage(companyPath, task.title, false) }
+  },
 })
 
 useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
@@ -111,6 +126,8 @@ useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '
 
 function Preview() {
   const [open, setOpen] = useState<string | null>(null)
+  // As src/app/FilesPanel.tsx composes the tree and the chooser.
+  const link = useLinkToTask('demo')
   return (
     <main className="flex h-screen bg-white dark:bg-zinc-950">
       <div className="w-72">
@@ -119,12 +136,14 @@ function Preview() {
           departmentFolder="営業部"
           selectedFilePath={open}
           onSelectFile={p => { selected.push(p); setOpen(p) }}
+          onLinkToTask={p => link.open(p.slice(ROOT.length + 1))}
         />
       </div>
       <div className="flex-1 p-8 text-sm text-gray-500 dark:text-zinc-400">
         表示確認用の人工データです（営業部、「機密」は非公開フォルダ）。
         <output aria-label="開いているファイル" className="block mt-4">{open ?? ''}</output>
       </div>
+      {link.state && <LinkToTaskDialog key={link.state.companyPath} companyPath={link.state.companyPath} phase={link.state.phase} onChoose={link.choose} onClose={link.close} />}
     </main>
   )
 }

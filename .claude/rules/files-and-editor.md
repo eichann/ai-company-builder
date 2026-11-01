@@ -80,7 +80,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
   `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
-  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
+  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The menu's 「やることにつなぐ…」 shows
+  only when the panel gets `onLinkToTask` (`src/app/FilesPanel.tsx` composes the `tasks` feature's
+  chooser; `records.md` "Linking files later").
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted

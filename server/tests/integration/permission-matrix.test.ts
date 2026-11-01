@@ -254,6 +254,11 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/records/item/:recordId/actions/:action', w => ({ path: `${C(w)}/records/item/deal-nosuch01/actions/start`, body: { expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/undo', w => ({ path: `${C(w)}/records/item/deal-nosuch01/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId/history', w => ({ path: `${C(w)}/records/item/deal-nosuch01/history` }), [404, 404, 404, 404, 404, 401]),
+  // Linking a file later: any member who reads the record and the file (a missing record → 404 for all).
+  r('POST /api/companies/:companyId/records/item/:recordId/file-links', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/item/:recordId/file-links', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', w => ({ path: `${C(w)}/me/record-tokens/no-such-token` }), [404, 404, 404, 404, 404, 401]),
   // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
@@ -428,6 +433,8 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/records/item/:recordId/actions/:action', (w, id) => ({ path: `${C(w)}/records/item/${id}/actions/start`, body: { expectedVersion: 0 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/undo', (w, id) => ({ path: `${C(w)}/records/item/${id}/undo`, body: { version: 1, expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/history', (w, id) => ({ path: `${C(w)}/records/item/${id}/history` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/file-links', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
 
   x('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/record-tokens/${id}` }), w => w.other.recordToken),
@@ -490,6 +497,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
+  'POST /api/records-ai/item/:recordId/file-links': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: record-tokens.test.ts)',
+  'POST /api/records-ai/item/:recordId/file-links/remove': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'POST /api/records-ai/plugins/:pluginId/create/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
