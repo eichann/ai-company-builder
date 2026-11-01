@@ -8,6 +8,9 @@ paths:
   - "shared/types/plugins.ts"
   - "server/src/ports/plugins.ts"
   - "server/src/adapters/plugin-shelf.ts"
+  - "server/src/adapters/plugin-collect.ts"
+  - "server/src/cli/collect-plugins.ts"
+  - "server/tests/unit/plugin-collect.test.ts"
   - "server/src/adapters/sqlite/plugins.ts"
   - "server/src/services/plugin-shelf.ts"
   - "server/src/services/plugins.ts"
@@ -464,7 +467,7 @@ Company fields are never dropped. Test: `tests/integration/plugin-distribution.t
 ## The shelf (P4, `adapters/plugin-shelf.ts`, `services/plugin-shelf.ts`)
 
 - `PLUGINS_DIR` (`lib/config.ts`; outside `DATA_DIR`; unset = empty shelf), put there by the
-  operator (div): one folder per package named `<id>@<version>` of its declaration, holding
+  operator (div) with `cli/collect-plugins.ts` ("Where packages come from"): one folder per package named `<id>@<version>` of its declaration, holding
   exactly `plugin.yaml`, optional `mapping.yaml`, `types/<name>.md` (contract 2 also `steps/`,
   `ui/`, `signature.yaml`; `scripts/` refused by name). Read at startup
   (`index.ts` logs what was loaded and, per refused folder, its name and the rule's sentence —
@@ -489,6 +492,42 @@ Company fields are never dropped. Test: `tests/integration/plugin-distribution.t
 - Connectors and business plugins are read **on their own** (`services/plugin-shelf.ts`): a business
   plugin whose connector is not on the shelf is still used (inside ACB); its combination is
   checked when it runs. Old connector shapes are refused with the reason ("Two roles").
+
+## Where packages come from (owner, 2026-11-02)
+
+The real packages are not in this public repository. Each lives in a **private repository per
+visibility boundary** (who may read it), one folder per version `<id>@<version>/` (exactly what the
+shelf holds) and a tag `<id>@<version>` per published version:
+
+- `eichann/acb-connectors` — connectors (`hubspot@*`), shared by every business plugin;
+- `eichann/acb-plugin-corporate-sales` — 「法人営業」 (`corporate-sales@*`);
+- `eichann/acb-plugin-program-planning` — 「番組企画」 (`program-planning@*`).
+
+A new business plugin gets its own `acb-plugin-<id>` (owner approves merges there). `eichann/acb-plugins`
+(the first, shared one) is archived. A published version's folder never changes; a fix is a new
+version.
+
+The operator fills `PLUGINS_DIR` with `server/src/cli/collect-plugins.ts`
+(`adapters/plugin-collect.ts`), run where `git` and `gh` can read those repositories (not in the api
+container), then restarts the api:
+
+```bash
+cd server && node --import tsx src/cli/collect-plugins.ts --lock <plugins.lock> --dir <PLUGINS_DIR> [--prune]
+cd server && node --import tsx src/cli/collect-plugins.ts --fingerprint <package folder>   # for a new lock line
+```
+
+- `plugins.lock` (the operator's file, not in this repository): `<repo> <id>@<version> <fingerprint v2>`
+  per line, `#` comments; `<repo>` is `owner/name` on GitHub (cloned with `gh auth git-credential`)
+  or a git URL / path.
+- All or nothing: every package is fetched at its tag and its fingerprint v2 (the shelf's,
+  `pluginFingerprintV2` over every file) compared with the lock before anything is written; a
+  mismatch, a missing folder or a version already on the shelf with other content refuses the
+  whole run. Written through a dot folder in the shelf (skipped by the shelf) and renamed into place.
+- Other folders stay; `--prune` removes only `<id>@<version>` folders the lock does not list (never
+  `stopped` or anything else). Output is names and fingerprints only.
+- Test: `server/tests/unit/plugin-collect.test.ts` (tag content byte for byte and the shelf's own
+  fingerprint, refusal on a differing fingerprint with nothing written, no replacing a version,
+  prune only unlisted packages, strict lock).
 
 ## A company's install, mapping and history (P4, `services/plugins.ts`)
 
@@ -1006,8 +1045,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
 P9
 staging (compose wiring of `PLUGINS_DIR`). Milestone 4: approval requests and their card (G6, on
 the seam above), the 「もう一度作る」 button and similar deals on a screen. `add_note` runs like
-`log_meeting` (an attached create) but div does not use it. The real packages live in the
-private `acb-plugins` repository (§6-6): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
+`log_meeting` (an attached create) but div does not use it. The real packages live in
+private repositories ("Where packages come from"): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
 (「法人営業」: deal / customer, `connector: hubspot >= 0.3.0`, its recommended mapping). Its flows
 (screens, actions) come with milestone 5. A business plugin uses one connector; a second one (Google
 for 法人営業) would need `connector` to become a list — not before it is needed.

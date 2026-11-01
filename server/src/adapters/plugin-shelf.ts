@@ -37,7 +37,8 @@ const TYPE_FILE_RE = /^([a-z][a-z0-9_]{0,39})\.md$/
 const STEP_FILE_RE = /^[a-z0-9][a-z0-9_-]{0,63}\.md$/
 const UI_DIR_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 const UI_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\.(?:html|js|mjs|css|json|svg|png|jpg|jpeg|gif|webp|woff|woff2)$/
-const PACKAGE_DIR_RE = /^[a-z][a-z0-9-]{0,39}@\d{1,4}\.\d{1,5}\.\d{1,6}$/
+/** A shelf folder's name: `<id>@<version>` (also what collect-plugins writes). */
+export const PACKAGE_DIR_RE = /^[a-z][a-z0-9-]{0,39}@\d{1,4}\.\d{1,5}\.\d{1,6}$/
 
 class ShelfProblem extends Error {}
 

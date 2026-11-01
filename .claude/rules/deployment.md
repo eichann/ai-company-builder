@@ -68,6 +68,11 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
   never prints a URL or query (`lib/request-log.ts`, `server.md` "Request log"), so no relay
   token in `?key=` either.
+- Plugin packages (`PLUGINS_DIR`, read-only for the api, outside `DATA_DIR`; the compose files do not
+  mount it yet) come from private repositories through `server/src/cli/collect-plugins.ts`, run on
+  the host or the operator's machine with `gh` signed in, against the operator's `plugins.lock`
+  (fingerprint v2 per package; refuses on any mismatch). Then restart the api. Details: `plugins.md`
+  "Where packages come from".
 - `OPERATOR_USER_IDS` (comma-separated user ids; a signed-in operator sees theirs at
   `/api/me`) and `COMPANY_CREATION_POLICY` (`operator`) decide who creates companies after the
   first one (`server.md` "Accounts and roles"); passed through by both compose files.
