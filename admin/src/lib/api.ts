@@ -1024,7 +1024,7 @@ export type {
   GooglePickerView,
 } from '../../../shared/types/google'
 
-import type { GoogleAdminView, GoogleClientSave, GooglePickerSave } from '../../../shared/types/google'
+import type { GoogleAdminView, GoogleClientSave, GoogleFeature, GooglePickerSave } from '../../../shared/types/google'
 
 export const googleApi = {
   get: (companyId: string) => getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google`),
@@ -1033,6 +1033,9 @@ export const googleApi = {
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/client`, { method: 'PUT', body: save }),
   setEnabled: (companyId: string, enabled: boolean) =>
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/enabled`, { method: 'PUT', body: { enabled } }),
+  /** A feature on / off for the whole company (never asked of members while off). */
+  setFeature: (companyId: string, feature: GoogleFeature, on: boolean) =>
+    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/features`, { method: 'PUT', body: { feature, on } }),
   /** Google Picker (Drive, google-drive.md): the API key (left out = keep) and the project number; `appId: null` removes it. */
   savePicker: (companyId: string, save: GooglePickerSave) =>
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/picker`, { method: 'PUT', body: save }),

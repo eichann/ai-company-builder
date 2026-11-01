@@ -16,6 +16,7 @@
  *   GET    /me/slack                    my permission
  *   POST   /me/slack/connect            { features } → { authorizeUrl } (opened in the system browser)
  *   PUT    /me/slack/features           { feature, on } — e.g. 知らせの DM off / on
+ *   PUT    /me/slack/seen               「仕事の道具をつなぐ」 showed Slack (「Slack でつなぐ」 or 「あとで」)
  *   DELETE /me/slack                    「許可をやめる」 (revoked at Slack too)
  *
  * `slackEventsRoute`, mounted at /api/slack: `POST /events/:companyId` —
@@ -30,6 +31,7 @@ import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
+import { companyMember } from './guards'
 import { refusal } from './respond'
 import { createSlackRoute } from './slack'
 
@@ -99,6 +101,8 @@ slackRoute.put('/me/slack/features', async (c) => {
   if (member instanceof Response) return member
   return answer(c, await slackConnector.setFeature(member, await jsonBody(c)))
 })
+
+slackRoute.put('/me/slack/seen', companyMember, async (c) => answer(c, await slackConnector.markSeen(c.var.member)))
 
 slackRoute.delete('/me/slack', async (c) => {
   const member = await authAndAuthorize(c)

@@ -119,7 +119,8 @@ const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
   vaultEnabled: true, configured: true, clientId: '123-abc.apps.googleusercontent.com', secretLast4: GOOGLE_SECRET.slice(-4), domain: 'example.com',
   enabled: true, redirectUri: 'https://acb.example.com/api/oauth/google/callback', practice: false, operatorStopped: false,
   updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [],
-  picker: { configured: false, appId: null, apiKeyLast4: null, pageUrl: 'https://acb.example.com/api/google-picker' }, ...over,
+  picker: { configured: false, appId: null, apiKeyLast4: null, pageUrl: 'https://acb.example.com/api/google-picker' },
+  featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'], ...over,
 })
 
 const SLACK_SECRET = 'fake-slack-secret-NOT-REAL-admin-5678'
@@ -445,7 +446,7 @@ describe('つなぎ先 → Google', () => {
     renderInCompany(<IntegrationsPage />)
     expect(await screen.findByTestId('google-redirect-uri')).toHaveTextContent('https://acb.example.com/api/oauth/google/callback')
     expect(screen.getByText(/練習用の Google につながっています/)).toBeInTheDocument()
-    expect(screen.getByText(/予定と議事録を読む/)).toBeInTheDocument()
+    expect(screen.getByTestId('google-grant-u_member')).toHaveTextContent('予定と議事録を読む')
 
     // A typed secret is sent once, in the PUT, and the field is emptied.
     const secret = screen.getByLabelText('クライアント シークレット')
@@ -474,6 +475,21 @@ describe('つなぎ先 → Google', () => {
 
     const text = document.body.textContent ?? ''
     for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', 'オントロジー']) expect(text).not.toContain(word)
+  })
+  it('会社で使うもの: one switch per feature, sent as { feature, on }', async () => {
+    const saves: Call[] = []
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView()) },
+      [`PUT ${base}/google/features`]: (call) => { saves.push(call); return { body: ok(googleView({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })) } },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const list = await screen.findByTestId('google-company-features')
+    expect(list).toHaveTextContent('オン（下の「ファイル選び」を設定すると使えます）')
+    const inbox = within(list).getByText('受信を読む').closest('li')!
+    await userEvent.click(within(inbox).getByRole('button', { name: 'オフにする' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ feature: 'inbox', on: false })
+    expect(await within(inbox).findByRole('button', { name: 'オンにする' })).toBeInTheDocument()
   })
   it('Drive の ファイル選び: shows the page to allow, sends the API key once (password field), keeps it when left empty', async () => {
     const saves: Call[] = []

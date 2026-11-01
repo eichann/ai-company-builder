@@ -185,6 +185,13 @@ describe('a member\'s 「Slack で許可」', () => {
     const other = await connector.saveApp(member('c1', 'a1'), { teamId: 'T0DIV', clientId: '1111.2222', botToken: fake.seed.apps[1].botToken })
     expect(other).toMatchObject({ ok: false, body: { code: 'BOT_TOKEN_REJECTED' } })
   })
+
+  it('「仕事の道具をつなぐ」 offers Slack once: seen is the member\'s own, in their company only', async () => {
+    expect(await connector.my(member('c1', 'u2'))).toMatchObject({ ok: true, value: { seen: [] } })
+    expect(await connector.markSeen(member('c1', 'u2'))).toMatchObject({ ok: true, value: { seen: ['read', 'notices'] } })
+    expect(await connector.my(member('c1', 'u1'))).toMatchObject({ ok: true, value: { seen: [] } })
+    expect(await connector.my(member('c2', 'u2'))).toMatchObject({ ok: true, value: { seen: [] } })
+  })
 })
 
 describe('the chat role', () => {

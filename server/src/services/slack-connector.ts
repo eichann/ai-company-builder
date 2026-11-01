@@ -16,7 +16,7 @@
  */
 import { BUILTIN_CONNECTORS } from '../../shared/core/builtin-connectors'
 import { sameEmail } from '../../shared/core/google'
-import { isPracticeSlackSecret, PRACTICE_SLACK_CLIENT_SECRET_PREFIX, PRACTICE_SLACK_SIGNING_SECRET_PREFIX } from '../../shared/core/slack'
+import { isPracticeSlackSecret, PRACTICE_SLACK_CLIENT_SECRET_PREFIX, PRACTICE_SLACK_SIGNING_SECRET_PREFIX, SLACK_SETUP_FEATURES } from '../../shared/core/slack'
 import type { MySlack, SlackAdminView, SlackUnavailableReason } from '../../shared/types/slack'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -132,6 +132,7 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       features: grant?.status === 'active' ? slackFeaturesOf(grant.scopes) : [],
       featuresOff: grant?.status === 'active' ? slackFeaturesOf(grant.scopes).filter(f => grant.featuresOff.includes(f)) : [],
       practice: deps.practiceSlack === true,
+      seen: SLACK_FEATURES.filter(f => companyData.forCompany(member.companyId).connectors.setupSeen('slack', member.userId).includes(f)),
     }
   }
 
@@ -306,6 +307,17 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       }
       const r = memberOAuth.setFeatureOff('slack', member, body.feature, !body.on)
       if (!r.ok) return refuse('conflict', 'まだ Slack で許可していません。', { code: 'SLACK_NOT_CONNECTED' })
+      return ok(await myView(member))
+    },
+
+    /**
+     * PUT …/me/slack/seen: 「仕事の道具をつなぐ」 showed Slack to the member (「Slack でつなぐ」
+     * or 「あとで」); the screen does not offer it again.
+     */
+    async markSeen(member: Member): Promise<Outcome<MySlack>> {
+      if (await unavailableReason(member.companyId) === null) {
+        companyData.forCompany(member.companyId).connectors.addSetupSeen('slack', member.userId, [...SLACK_SETUP_FEATURES], clock.now())
+      }
       return ok(await myView(member))
     },
 

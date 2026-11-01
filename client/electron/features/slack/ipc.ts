@@ -61,6 +61,8 @@ export function createSlackApi(deps: SlackDeps) {
     disconnect: (companyId: string) => view(companyId, 'DELETE'),
     /** The member turns an allowed feature off / on (知らせの DM). */
     setFeature: (companyId: string, feature: SlackFeature, on: boolean) => view(companyId, 'PUT', '/features', { feature, on }),
+    /** 「仕事の道具をつなぐ」 showed Slack (「Slack でつなぐ」 or 「あとで」): not offered there again. */
+    markSeen: (companyId: string) => view(companyId, 'PUT', '/seen'),
     async connect(companyId: string, features: SlackFeature[]): Promise<SlackConnectResult> {
       const r = await send(companyId, 'POST', '/connect', { features })
       if (!r) return offline
@@ -96,6 +98,10 @@ export function registerSlackIpc(ipc: IpcRegistrar, deps: SlackDeps): ReturnType
   ipc.handle('slack:disconnect', async (_, companyId: string) => {
     if (typeof companyId !== 'string' || !companyId) return invalid
     return api.disconnect(companyId)
+  })
+  ipc.handle('slack:markSeen', async (_, companyId: string) => {
+    if (typeof companyId !== 'string' || !companyId) return invalid
+    return api.markSeen(companyId)
   })
   ipc.handle('slack:setFeature', async (_, companyId: string, feature: SlackFeature, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || !FEATURES.includes(feature) || typeof on !== 'boolean') return invalid

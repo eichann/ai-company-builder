@@ -29,7 +29,7 @@ export interface GoogleGrantSummary {
   lastUsedAt: string | null
 }
 
-export type GoogleChangeAction = 'client' | 'enabled' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
+export type GoogleChangeAction = 'client' | 'enabled' | 'features' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -68,6 +68,16 @@ export interface GoogleAdminView {
   history: GoogleChange[]
   /** Google Picker (Drive: 選んだファイルを読む・置く, google-drive.md): the API key's last 4 and the project number. */
   picker: GooglePickerView
+  /** Features the admin turned off for the whole company: never asked of members, refused from the next call. */
+  featuresOff: GoogleFeature[]
+  /** What members are asked for in one consent (on, and Drive only with the Picker registered). */
+  companyFeatures: GoogleFeature[]
+}
+
+/** PUT /api/companies/:id/google/features — the admin turns one feature off / on for the company. */
+export interface GoogleCompanyFeatureSwitch {
+  feature: GoogleFeature
+  on: boolean
 }
 
 export interface GooglePickerView {
@@ -115,6 +125,10 @@ export interface MyGoogle {
   /** The domain the account must belong to (shown so the member picks the right account). */
   domain: string | null
   practice: boolean
+  /** What the company offers (asked together by 「Google でつなぐ」); empty while unavailable. */
+  companyFeatures: GoogleFeature[]
+  /** Features already shown to the member on 「仕事の道具をつなぐ」 (connected, declined or 「あとで」). */
+  seen: GoogleFeature[]
 }
 
 /** PUT /api/companies/:id/me/google/features — the member turns one allowed feature on or off. */
@@ -123,10 +137,12 @@ export interface GoogleFeatureSwitch {
   on: boolean
 }
 
-/** POST /api/companies/:id/me/google/connect */
-export interface GoogleConnectRequest {
-  features: GoogleFeature[]
-}
+/**
+ * POST /api/companies/:id/me/google/connect: some features (asked when first
+ * used), or `all` — every feature the company offers, in one consent
+ * (「仕事の道具をつなぐ」; also marks them seen).
+ */
+export type GoogleConnectRequest = { features: GoogleFeature[] } | { all: true }
 
 export interface GoogleConnectStart {
   /** Open in the system browser. Valid for 10 minutes, once. */

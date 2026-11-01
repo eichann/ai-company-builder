@@ -22,6 +22,7 @@ import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { slackSchema } from './schema/slack'
+import { migrateGoogleCompanyFeatures } from './schema/connectors'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -126,6 +127,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRuleAndManagerCompanies(conn)
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // The Google features the admin turned off for the company (google-connector.md).
+  migrateGoogleCompanyFeatures(conn)
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)

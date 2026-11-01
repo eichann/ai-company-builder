@@ -19,6 +19,8 @@ export interface OAuthClientRow {
   secretLast4: string
   domain: string
   enabled: boolean
+  /** Google features the admin turned off for the whole company (never asked, refused from the next call). */
+  featuresOff: string[]
   createdAt: string
   createdBy: string
   updatedAt: string
@@ -73,6 +75,8 @@ export interface ConnectorRepository {
   /** Insert or replace; `secret` null keeps the stored one (and its last 4). */
   saveClient(row: { clientId: string; domain: string; at: string; by: string }, secret: { sealed: SealedSecret; last4: string } | null, change: ConnectorChangeRow): void
   setClientEnabled(enabled: boolean, at: string, by: string, change: ConnectorChangeRow): void
+  /** The company-level turned-off features (the client must exist). */
+  setClientFeaturesOff(featuresOff: string[], at: string, by: string, change: ConnectorChangeRow): void
   /** Google Picker's API key and app id on the client (google-drive.md); null when not registered. */
   picker(): { apiKey: string; appId: string } | null
   /** Sets (or with null, removes) the Picker's registration; the client must exist. */
@@ -107,6 +111,11 @@ export interface ConnectorRepository {
   prunePending(now: string, userId?: string): void
 
   history(provider: ConnectorProvider, limit: number): ConnectorChangeRow[]
+
+  // 「仕事の道具をつなぐ」: the provider's features the app already showed the member.
+  setupSeen(provider: ConnectorProvider, userId: string): string[]
+  /** Adds features to the member's seen list (kept across 「許可をやめる」). */
+  addSetupSeen(provider: ConnectorProvider, userId: string, features: string[], at: string): void
 
   // The admin's choice of which core connector serves a role, when two could
   // (connector-roles.md; asked once, only when both exist).

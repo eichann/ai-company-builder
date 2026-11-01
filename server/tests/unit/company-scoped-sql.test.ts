@@ -110,6 +110,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   member_absences: ['adapters/sqlite/task-settings.ts'],
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // 「仕事の道具をつなぐ」: features already shown to a member (google-connector.md).
+  connector_setup_seen: ['adapters/sqlite/connectors.ts'],
   // The admin's choice of a core connector per role (connector-roles.md).
   connector_role_choices: ['adapters/sqlite/connectors.ts'],
   // lane A ▲

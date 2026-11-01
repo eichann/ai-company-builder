@@ -436,6 +436,10 @@ const MATRIX: Row[] = [
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // 「仕事の道具をつなぐ」 (google-connector.md): the admin's company-level feature switch; a member's 「あとで」.
+  r('PUT /api/companies/:companyId/google/features', w => ({ path: `${C(w)}/google/features`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/me/google/seen', w => ({ path: `${C(w)}/me/google/seen` }), MEMBERS, 'the member\'s own seen list (nothing offered while Google is not set up)'),
+  r('PUT /api/companies/:companyId/me/slack/seen', w => ({ path: `${C(w)}/me/slack/seen` }), MEMBERS, 'the member\'s own seen list (nothing offered while Slack is not set up)'),
   // 「つないでいるサービス」 (connector-roles.md): owners / admins; a role or connector name is not an object.
   r('GET /api/companies/:companyId/connectors', w => ({ path: `${C(w)}/connectors` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/connector-roles/:role', w => ({ path: `${C(w)}/connector-roles/calendar`, body: {} }), [400, 400, 403, 403, 404, 401]),

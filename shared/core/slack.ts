@@ -19,6 +19,13 @@
 export const SLACK_FEATURES = ['read', 'reply', 'notices'] as const
 export type SlackFeature = typeof SLACK_FEATURES[number]
 
+/**
+ * What 「Slack でつなぐ」 on 「仕事の道具をつなぐ」 asks for (and the settings'
+ * first 「Slack で許可」): reading DMs and mentions, and the notice DMs.
+ * 返事を送る is added later from the settings, when the member wants it.
+ */
+export const SLACK_SETUP_FEATURES: readonly SlackFeature[] = ['read', 'notices']
+
 export const isSlackFeature = (v: unknown): v is SlackFeature => (SLACK_FEATURES as readonly unknown[]).includes(v)
 
 /** The one Slack host: the Web API, OAuth and the browser's sign-in page. */

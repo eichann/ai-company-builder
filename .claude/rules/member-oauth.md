@@ -43,6 +43,9 @@ API calls (Google: `google-connector.md`, `services/google-connector.ts` registe
   `unavailable` and its client's per-call checks.
 - **History**: `grant` (`consent` new / replaced / added), `grant-revoked`, `grant-stopped`,
   `stop-all`, with `revokedAt<Label>` (Google's rows: `revokedAtGoogle`), never a secret.
+- **Seen by the app's 「仕事の道具をつなぐ」** (`connector_setup_seen`, per provider; `setupSeen` /
+  `addSetupSeen`): which features the screen already showed the member, so it opens by itself only
+  for new ones (google-connector.md "One consent"). Kept across 「許可をやめる」.
 - **Feature toggles inside a grant** (owner decision 2026-11-01, e.g. Google 予定と議事録を読む /
   メールを送る / 受信を読む): `connector_grants.features_off` (JSON list, default `[]`, kept across a
   re-consent, gone with 「許可をやめる」). The member sets it (`memberOAuth.setFeatureOff(provider,

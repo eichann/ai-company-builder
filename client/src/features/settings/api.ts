@@ -140,3 +140,21 @@ export function disconnectSlack(companyId: string, outbound: SlackOutbound = win
 export function setSlackFeature(companyId: string, feature: SlackFeature, on: boolean, outbound: SlackOutbound = window.electronAPI) {
   return outbound.setSlackFeature(companyId, feature, on)
 }
+
+/**
+ * 「仕事の道具をつなぐ」: one Google consent for every feature the company offers (main opens
+ * Google's page; the URL never comes here), and 「あとで」 per service (marks what is offered as shown).
+ */
+export type ConnectToolsOutbound = ElectronPort<'connectGoogleAll' | 'markGoogleSeen' | 'markSlackSeen'>
+
+export function connectGoogleAll(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.connectGoogleAll(companyId)
+}
+
+export function markGoogleSeen(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.markGoogleSeen(companyId)
+}
+
+export function markSlackSeen(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.markSlackSeen(companyId)
+}
