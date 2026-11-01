@@ -21,6 +21,7 @@ import { sqliteTaskSettingsRepository } from './task-settings'
 // lane A ▼
 // lane A ▲
 // lane B ▼
+import { sqliteIdentityRepository } from './identities'
 // lane B ▲
 // lane C ▼
 // lane C ▲
@@ -54,6 +55,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         // lane A ▼
         // lane A ▲
         // lane B ▼
+        identities: sqliteIdentityRepository(conn, companyId),
         // lane B ▲
         // lane C ▼
         // lane C ▲

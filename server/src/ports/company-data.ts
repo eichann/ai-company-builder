@@ -43,6 +43,7 @@ import type { TaskSettingsRepository } from './task-settings'
 // lane A ▼
 // lane A ▲
 // lane B ▼
+import type { IdentityRepository } from './identities'
 // lane B ▲
 // lane C ▼
 // lane C ▲
@@ -80,6 +81,8 @@ export interface CompanyData {
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  /** Matching people and companies (名寄せ): identities, proposals, history (ports/identities.ts, identity.md). */
+  readonly identities: IdentityRepository
   // lane B ▲
   // lane C ▼
   // lane C ▲

@@ -112,6 +112,11 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  // Matching people and companies (identity.md).
+  identities: ['adapters/sqlite/identities.ts'],
+  identity_members: ['adapters/sqlite/identities.ts'],
+  identity_proposals: ['adapters/sqlite/identities.ts'],
+  identity_history: ['adapters/sqlite/identities.ts'],
   // lane B ▲
   // lane C ▼
   // lane C ▲
@@ -123,6 +128,7 @@ const HANDLE_FACTORIES = [
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  'sqliteIdentityRepository',
   // lane B ▲
   // lane C ▼
   // lane C ▲

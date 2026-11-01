@@ -438,6 +438,16 @@ const MATRIX: Row[] = [
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
+  // an unreadable or missing 相手 / proposal is one answer (404).
+  r('GET /api/companies/:companyId/identities/records/:recordId', w => ({ path: `${C(w)}/identities/records/customer-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/identities/records/:recordId/split', w => ({ path: `${C(w)}/identities/records/customer-nosuch01/split` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/identities/proposals', w => ({ path: `${C(w)}/identities/proposals` }), MEMBERS),
+  r('POST /api/companies/:companyId/identities/proposals', w => ({ path: `${C(w)}/identities/proposals`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('POST /api/companies/:companyId/identities/proposals/:proposalId/approve', w => ({ path: `${C(w)}/identities/proposals/no-such-proposal/approve` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/identities/proposals/:proposalId/reject', w => ({ path: `${C(w)}/identities/proposals/no-such-proposal/reject` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/identities/proposals', () => ({ path: '/api/records-ai/identities/proposals', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/identities/records/:recordId', () => ({ path: '/api/records-ai/identities/records/customer-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // lane B ▲
   // lane C ▼
   // lane C ▲
@@ -546,6 +556,12 @@ const CROSS: CrossRow[] = [
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  x('GET /api/companies/:companyId/identities/records/:recordId', (w, id) => ({ path: `${C(w)}/identities/records/${id}` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/identities/records/:recordId/split', (w, id) => ({ path: `${C(w)}/identities/records/${id}/split` }), w => w.other.record, 'deal-nosuch01'),
+  // The world seeds no proposal of the other company (its seed is outside the lane markers): another
+  // company's real proposal, decided by this company's owner, is missing there: tests/unit/identities.test.ts.
+  x('POST /api/companies/:companyId/identities/proposals/:proposalId/approve', (w, id) => ({ path: `${C(w)}/identities/proposals/${id}/approve` }), () => 'identity-proposal-other'),
+  x('POST /api/companies/:companyId/identities/proposals/:proposalId/reject', (w, id) => ({ path: `${C(w)}/identities/proposals/${id}/reject` }), () => 'identity-proposal-other'),
   // lane B ▲
   // lane C ▼
   // lane C ▲
@@ -590,6 +606,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',
   // lane B ▲
   // lane C ▼
   // lane C ▲

@@ -9,12 +9,22 @@
  * line in composition.ts.
  */
 import type Database from 'better-sqlite3'
+import type { Clock, IdGenerator } from '../ports/clock'
+import type { CompanyDataSource } from '../ports/company-data'
+import type { Transactions } from '../ports/transactions'
+import { createIdentityService } from '../services/identities'
 
 export interface InboxLaneDeps {
   conn: Database.Database
+  companyData: CompanyDataSource
+  transactions: Transactions
+  clock: Clock
+  ids: IdGenerator
 }
 
 export function wireInboxLane(deps: InboxLaneDeps) {
-  void deps // nothing wired yet
-  return {}
+  return {
+    // Matching people and companies (名寄せ, identity.md).
+    identities: createIdentityService(deps),
+  }
 }
