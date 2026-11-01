@@ -79,7 +79,9 @@ turns").
   may read them; `ai-turn` = the task list's 「AI の番」, `turn: 'ai'`), main's `claim` (action, from
   state) and `settle` states (done / couldNot / closed / working, `putBack`), the consultation's
   title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
-  `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`). A type with no start mark
+  `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`), `follow-up.ts` (lane B,
+  B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
+  start mark, `claimStates`). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).

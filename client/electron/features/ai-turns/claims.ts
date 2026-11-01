@@ -19,6 +19,7 @@
 import type { AgentId } from '../../../shared/agents/registry'
 import { agentCan } from '../../../shared/agents/registry'
 import { aiTurnStepForRecord } from '../../../shared/ai-turn-steps/registry'
+import { claimStates } from '../../../shared/ai-turn-steps/types'
 import { readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
@@ -224,7 +225,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       if (!step) return { claimed: false, reason: 'not-allowed' }
       const now = await recordOf(companyId, recordId)
       // No longer waiting for the AI (another PC read it, a person skipped it): nothing to claim.
-      if (now && now.state !== step.claim.from) {
+      if (now && !claimStates(step).includes(now.state)) {
         deps.recordMovedOn?.(companyId)
         return { claimed: false, reason: 'taken' }
       }
@@ -317,9 +318,9 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       // Finishing the run puts the reading back (the ledger names the run, not the member).
       const ran = held.has(heldKey(companyId, recordId))
       await finishRun(companyId, recordId, { class: 'temporary', code: 'UNFINISHED' })
-      if (record.state !== settle.working) return { outcome: 'unknown' }
+      if (record.state !== settle.working && !claimStates(step).includes(record.state)) return { outcome: 'unknown' }
       const after = ran ? await recordOf(companyId, recordId) : record
-      if (after && after.state === step.claim.from) return { outcome: 'put-back' }
+      if (after && claimStates(step).includes(after.state)) return { outcome: 'put-back' }
       if (!after || after.state !== settle.working || settle.putBack === null) return { outcome: 'unknown' }
       // An older server leaves it reading: put it back with the member's session, as before.
       const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(settle.putBack)}`, { expectedVersion: after.version })

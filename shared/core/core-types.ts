@@ -418,6 +418,9 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     // Someone of the company replied in the thread: the AI checks the reply, or (company setting) it is over.
     { from: ['preparing', 'open'], to: 'checking' },
     { from: ['preparing', 'open', 'waiting_reply'], to: 'closed' },
+    // The server clock's 「見込みの日時が過ぎた」 (WAIT_OVER, B5): the AI's nudge draft, or the assignee.
+    { from: ['waiting_reply'], to: 'preparing' },
+    { from: ['waiting_reply'], to: 'open' },
   ],
   // Not service-owned: only the server clock's 「見込みの日時が過ぎた」 (WAIT_OVER below), a state
   // change only — the writer refuses a field-only change of a type that is not service-owned.
@@ -440,6 +443,8 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
  */
 export const WAIT_OVER: Readonly<Record<string, { field: string; from: string; aiTurn: string; personTurn: string }>> = {
   task: { field: 'wait_until', from: 'waiting', aiTurn: 'preparing', personTurn: 'todo' },
+  // 追いかけ (B5): their reply did not come by 返事の見込み — the AI drafts the nudge (準備中), never before.
+  reply_request: { field: 'wait_until', from: 'waiting_reply', aiTurn: 'preparing', personTurn: 'open' },
 }
 
 /**

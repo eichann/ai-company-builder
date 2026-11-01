@@ -6,6 +6,7 @@
 import type { MinutesNotice } from '../minutes-app'
 import type { TaskListItem } from '../tasks'
 import { inboxTriage } from './inbox-triage'
+import { followUp } from './follow-up'
 import { minutesReading } from './minutes-reading'
 // lane C ▼
 import { pluginTurnCandidate, type PluginStepTurn } from './plugin'
@@ -19,6 +20,7 @@ const STEPS = [
   // lane A ▲
   // lane B ▼
   inboxTriage,
+  followUp,
   // lane B ▲
   // lane C ▼
   // lane C ▲
@@ -43,6 +45,7 @@ export function checkAiTurnSteps(steps: readonly AiTurnStepDefinition[]): string
     if (names.has(s.step)) return `${s.step}: the step is listed twice`
     names.add(s.step)
     if (s.recordId.test('')) return `${s.step}: its record id pattern matches any id`
+    if (typeof s.claim.from !== 'string' && (s.claim.action !== null || s.claim.from.length === 0)) return `${s.step}: several from-states only without a start mark`
     const bad = s.tools.recordTools.find(n => !TOOL_NAME.test(n))
       ?? s.tools.recordToolEndings.find(e => !TOOL_ENDING.test(e))
       ?? s.tools.builtinTools.find(n => !TOOL_NAME.test(n))

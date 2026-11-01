@@ -12,6 +12,7 @@ const COMPANY = 'acme'
 const RECORD = 'minutes-0a1b2c3d4e5f6071'
 const MINUTES = RECORD
 const INTERACTION = 'interaction-0a1b2c3d4e5f6071'
+const REPLY_REQUEST = 'reply_request-0a1b2c3d4e5f6071'
 
 function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES) {
   const record = { ...initial }
@@ -250,4 +251,20 @@ test('a kind without a start mark (an incoming message in 届いた): the server
   assert.equal((await pc.claim(COMPANY, INTERACTION, 2, 'conversation-cccc')).claimed, true)
   again.record.state = 'handled'
   assert.deepEqual(await pc.settle(COMPANY, INTERACTION), { outcome: 'done' })
+})
+
+test('a 返事のお願い is claimed from 準備中 or 確かめ中 (no start mark); finished elsewhere, nothing is claimed', async () => {
+  for (const state of ['preparing', 'checking']) {
+    const server = fakeServer({ state, version: 4 }, undefined, REPLY_REQUEST)
+    const pc = claimsFor(server)
+    assert.deepEqual(await pc.claim(COMPANY, REPLY_REQUEST, 4, 'conversation-aaaa'), { claimed: true, version: 4 })
+    // Stopped without a move: given back; handed to the person (open): done.
+    assert.deepEqual(await pc.settle(COMPANY, REPLY_REQUEST), { outcome: 'put-back' })
+    assert.equal((await pc.claim(COMPANY, REPLY_REQUEST, 4, 'conversation-bbbb')).claimed, true)
+    server.record.state = 'open'
+    assert.deepEqual(await pc.settle(COMPANY, REPLY_REQUEST), { outcome: 'done' })
+  }
+  const waitingReply = fakeServer({ state: 'waiting_reply', version: 4 }, undefined, REPLY_REQUEST)
+  assert.deepEqual(await claimsFor(waitingReply).claim(COMPANY, REPLY_REQUEST, 4, 'conversation-cccc'), { claimed: false, reason: 'taken' })
+  assert.equal(waitingReply.calls.filter(c => c.endsWith('/ai-run-claims')).length, 0)
 })
