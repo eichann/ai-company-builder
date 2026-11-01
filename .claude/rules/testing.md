@@ -92,7 +92,7 @@ baselines (macOS)" (not part of `tests/*.test.ts`). They hold earlier wins: one 
 handle for a 15k-file company and a first file-tree view of one ~55 KB read (#151); search of
 「の」 over ~6.5k files capped at 500 matches / < 1 MB, folder `git log` (#153); autosave of an
 ~8 MB history returning at once, summaries < 500 KB, the 564-message conversation rendering only
-its latest window (#154); the renderer bundle ≤ 2.3 MiB JS (raised from 2.2 on 2026-11-02, reason in the script).
+its latest window (#154); the renderer bundle ≤ 2.5 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; reasons in the script).
 
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.
