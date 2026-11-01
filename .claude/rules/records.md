@@ -1233,6 +1233,9 @@ important?, exception?, key? }` → 201 `{ record, created: true }` (200 `create
 
 The plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
+A money field (`money: true`) of a company's own type is written only by a plugin operation
+(through an approval request): the engine has no approval path of its own, so no action or create
+writes it (coordinator decision 2026-11-02: acceptable for now).
 
 ## Tests
 
