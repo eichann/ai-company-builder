@@ -48,8 +48,6 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
  */
 const NOT_YET_GUARDED = new Set([
   'ai-runs.ts',
-  'google.ts',
-  'slack-connection.ts',
 ])
 
 interface Endpoint { file: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
