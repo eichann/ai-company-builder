@@ -280,6 +280,10 @@ describe('an operation that moves money (moves_money)', () => {
     expect(n.operations.add_note.policy).toBe('prior')
     expect(effectiveOperationPolicy(n, 'add_note', { policy: { add_note: 'auto' } })).toBe('prior')
     expect(combineErrors(withNote('    policy: auto\n'))).toMatch(/お金が動く操作は「自動」にできません/)
+    // A field it writes cannot default to auto either (as with an operation reaching outside).
+    const autoDefault = (files: Files) => combineErrors({ ...files, manifest: files.manifest.replace('roles:\n', 'field_policy_defaults:\n  next_step: auto\nroles:\n') })
+    expect(autoDefault(FLOW)).toMatch(/欄「next_step」: 社外の人に届くか、お金が動く書き換えの操作があるため/)
+    expect(autoDefault(flowWith([MONEY, '']))).toBe('')
   })
 
   it('only on a contract-2 business operation that writes; a boolean', () => {

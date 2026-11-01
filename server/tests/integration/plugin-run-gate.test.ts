@@ -141,9 +141,10 @@ beforeAll(async () => {
   putSampleHub(shelfDir)
   // The business plugin as contract 2 with three steps.
   const pkg = join(shelfDir, 'sample-sales@0.1.0')
-  // update_deal moves money; add_note is the deal reviewer's (a business role).
+  // update_deal moves money (so no field it writes may default to auto); add_note is the deal reviewer's (a business role).
   const manifest = readFileSync(join(pkg, 'plugin.yaml'), 'utf8').replace('contract: 1', 'contract: 2')
     .replace('    note: optional\n    decision: true\n', '    note: optional\n    decision: true\n    moves_money: true\n')
+    .replace(/^( {2}[a-z_]+): auto$/gm, '$1: prior')
     .replace('  add_note:\n    who: [assignee, dept_manager, admin, ai]', '  add_note:\n    who: [role:deal_reviewer]')
   expect(manifest).toContain('moves_money: true')
   expect(manifest).toContain('who: [role:deal_reviewer]')
@@ -181,7 +182,7 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  const saved = await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ['next_step'] })
+  const saved = await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING })
   expect(saved.ok, JSON.stringify(saved)).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['rg-member'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
@@ -292,7 +293,10 @@ describe('an operation that moves money asks first, like one reaching outside', 
   const body = () => ({ expectedVersion: versionOf(recordOf('1000000001')), fields: { next_step: '見積の送付' }, note: '先方の依頼' })
   const update = (actor: Json) => services.pluginOperations.run(member, actor, 'sample-sales', recordOf('1000000001'), 'update_deal', body())
 
-  it("never direct: a person (or a consultation's AI) is told to ask for approval, though the company chose auto", async () => {
+  it("never direct: a person (or a consultation's AI) is told to ask for approval; the company cannot make its fields auto", async () => {
+    const autoNext = await services.plugins.saveMapping(owner, 'sample-sales', { text: `${MAPPING}policy:\n  next_step: auto\n`, acknowledgeAuto: ['next_step'] })
+    expect(autoNext, JSON.stringify(autoNext)).toMatchObject({ ok: false })
+    expect(JSON.stringify(autoNext)).toContain('お金が動く操作で書かれる欄は「自動」にできません')
     const before = outsideCalls()
     expect(await update({ kind: 'human' })).toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
     expect(await update(aiIn(null))).toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
