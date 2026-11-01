@@ -14,10 +14,15 @@ export interface RecordActionChoice {
   noteRequired: boolean
   /** Arguments the member must give (each sets the server field of the same name). */
   args: string[]
+  /**
+   * Person fields whose holder may also run it by saying whose OK it was
+   * (`ok_from`; the task's assignee completing): the screen asks for `ok`.
+   */
+  okFrom: string[]
 }
 
 export function recordActionChoices(def: TypeDefinition, state: string | null): RecordActionChoice[] {
   return Object.entries(def.actions)
     .filter(([, a]) => a.from === null || (state !== null && a.from.includes(state)))
-    .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args) }))
+    .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args), okFrom: a.okFrom ?? [] }))
 }

@@ -12,12 +12,14 @@
  * - the chat write guard: `.acb/types/` only for owners/admins; a record
  *   file's frontmatter cannot get state & co., and an existing record's id /
  *   type cannot change; editing its text is fine;
- * - screens are offered only the actions that can start from the state.
+ * - screens are offered only the actions that can start from the state;
+ * - completing a task: the AI is told the member may do it on someone's OK
+ *   and that it may only suggest it; its tool takes no OK statement.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
-import { createRecordTools } from '../electron/records/tools'
+import { actionToolSpecs, createRecordTools } from '../electron/records/tools'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { decideRecordEdit } from '../electron/write-guard'
 import { AGENTS } from '../shared/agents/registry'
@@ -163,6 +165,14 @@ test('screens are offered only the actions that can start from the record\'s sta
   assert.ok(titles('review').includes('complete'))
   assert.ok(!titles('todo').includes('complete'))
   assert.equal(recordActionChoices(TASK, 'review').find(c => c.action === 'send_back')!.noteRequired, true)
+})
+
+test('task completion: the AI may suggest it to the member, never do it, and cannot pass an OK statement', () => {
+  const complete = actionToolSpecs(TYPES).find(s => s.name === 'task__complete')!
+  assert.match(complete.description, /AI からはできない/)
+  assert.match(complete.description, /OK/)
+  assert.match(complete.description, /suggest it, never do it/)
+  assert.equal(complete.schema.safeParse({ id: 'task-abcdef12', expectedVersion: 3, ok: { by: 'u-carol' } }).success, false)
 })
 
 test('minutes_read hands the minutes over as outside text: the header above, the footer below, the flags and parts after', async () => {

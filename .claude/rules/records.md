@@ -65,7 +65,7 @@ engine the day it is turned on.
   `source: file | server`; a choice may add `option_labels: { <option>: <shown as> }` — display
   only, values stay the options), `links` (target type or `file`, cardinality, inverse label),
   `states`, `initial`, `actions` (from / to / who / notify / attach / note / history_line /
-  decision / approval / args), `implements` (interfaces, `INTERFACES`: `request` needs
+  decision / approval / args / ok_from — "Completing on someone's OK"), `implements` (interfaces, `INTERFACES`: `request` needs
   `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server), `storage`
   (`file` / `server` / `either`). Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
@@ -217,6 +217,36 @@ push channel (kind + version only) unless they did it themselves. Who may set it
 the requester the change comes with milestone 5. A plugin's own `date` fields still write
 date-only values outside (`shared/core/plugins.ts`).
 
+### Completing on someone's OK (task version 4, owner decision 2026-11-01)
+
+Creative work is done when the boss (or a customer) said OK, and making the boss press 完了 is a
+burden: the **assignee** may complete a task themselves, saying whose OK it was. Generic syntax
+(no type-specific code in the engine): an action's `ok_from: [<person fields>]` lets the holder of
+one of those fields **also** run it when they are not already in `who`, with a body `ok: { by?,
+note? }` — `by` a member id, `note` (≤ 500 characters) for an OK from outside ACB (「先方からメールで
+了承」, where it came from); at least one. The type must have server fields `ok_by` (person) and
+`ok_note` (text) (`OK_FIELDS`, parser error otherwise); the engine writes the statement into them.
+Task: `complete` has `ok_from: [assignee]`, `notify: [requested_by, ok_by]`; `reopen`'s `who` is
+`[requested_by, ok_by, admin]` — reopen is the OK-giver's 「取り消す」 (no new action).
+
+- Refusals (`services/record-engine.ts` `act`): no statement → 400 `OK_REQUIRED`; `ok.by` the actor
+  → 400 `OK_BY_SELF`; `ok.by` someone who cannot read the task **or not a member of this company**
+  → one answer, 400 `OK_BY_CANNOT_READ`, naming no place; a statement where none is needed (the
+  requester / reviewer, who complete as before) → 400 `OK_NOT_EXPECTED`.
+- **Never the AI**: the OK path is for a person's session only; the AI's tool has no `ok` and its
+  description says the member may do it on someone's OK and the AI may suggest it, never do it.
+- Ledger: the `complete` entry is a decision (`decision: true`) whose changes carry `ok_by` /
+  `ok_note` (before / after) — the OK-giver is in the ledger. The OK-giver is told through the
+  push channel (as every `notify`), never the actor.
+- An OK belongs to the state change it was given for: **any other action that changes the state
+  clears `ok_by` / `ok_note`** (a reopen; in the ledger as before / after), so an earlier OK-giver
+  cannot reopen a task completed or cancelled later.
+- Screens: `recordActionChoices` gives each action's `okFrom`; command `records.runAction` takes
+  `ok`. Version 4 only adds (two fields, `ok_from`, a wider `notify` / `who`): tasks indexed under
+  version 3 stay valid. Test: `server/tests/unit/record-task-ok.test.ts` (each refusal, AI
+  refused, requester unchanged, OK-giver told and reopening, cleared on reopen, cross-company,
+  v4 additive — mutation-checked).
+
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 
 ```
@@ -251,12 +281,14 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 `task` (タスク: implements `request`; storage `server` — version 2 (2026-11-01; version 1 was
 `either`, a file adopted once it had content, 0.6-1), version 3 (2026-11-01: `set_due` notifies
-the requester; the due may carry a time, above), `purpose` a server field; the content
+the requester; the due may carry a time, above), version 4 (2026-11-01: the assignee completes on
+someone's OK, above; fields `ok_by`, `ok_note`), `purpose` a server field; the content
 people write is an ordinary file linked through `files`; states todo / in_progress / review /
 waiting / done / cancelled, final done / cancelled; actions start, request_review (attach files,
 notify the reviewer, hand to them), send_back (note required, decision), assign (note required,
-undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer only — not AI;
-attach, decision), cancel (note required, decision), reopen) and
+undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer, or the assignee
+stating whose OK it was — never AI; attach, decision, notifies the requester and the OK-giver),
+cancel (note required, decision), reopen (requested_by / ok_by / admin)) and
 `interaction` (やりとり: server only, no body — summary, channel, counterpart, pointer to the
 original; version 2 adds a `deal` link; outbound mail records one per sent mail, `outbound-mail.md`). Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
@@ -339,7 +371,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `dept_manager` (manages the department holding the record's path or folder), `anyone`. Roles do
   not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
   member who qualifies on their own (or any member when `who` is `[ai]` alone) — so the AI cannot
-  complete a task. Whether it is the AI is decided by the credential (next section), never by the
+  complete a task. `ok_from` widens `who` for a person who states whose OK it was (above), never
+  for the AI. Whether it is the AI is decided by the credential (next section), never by the
   request body (an `actor` field there is ignored). `external` is reserved for server-side
   integrations.
 - **Concurrency**: every request carries `expectedVersion`; a stale one → 409 `VERSION_CONFLICT`
@@ -535,6 +568,7 @@ folder, key, links — each mutation-checked),
 `server/tests/unit/record-file-links.test.ts` (linking a file later: ledger, undo, the AI only
 where the type lets it, unreadable and private-folder files refused alike without a place,
 cross-company; due with a time, the requester told — each mutation-checked),
+`server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
