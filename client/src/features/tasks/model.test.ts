@@ -1,0 +1,78 @@
+// The list's placing rules (model.ts, tasks-ui.md). Guards: "today" is the company's day, not
+// the PC's; a time today that has passed counts as overdue; the far future folds and only the
+// member's own turn folds (nothing waiting for others hides); meetings to come sit with today's
+// work and meetings over with today's done; the list shows only where the company setting says.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { TaskListItem } from '../../../shared/tasks'
+import { companyNow, dueText, dueWhen, listEvents, listSections, listShownFor, filterByTag } from './model'
+
+// Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
+const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
+
+function item(id: string, turn: TaskListItem['turn'], due: string | null, tags: string[] = []): TaskListItem {
+  return { id, type: 'task', typeLabel: 'タスク', title: id, state: 'todo', stateLabel: '未着手', version: 1, due, tags, turn, waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null }
+}
+
+test('today is the company\'s day: 00:30 in Tokyo is already the next day there', () => {
+  const n = companyNow(Date.parse('2026-11-04T15:30:00.000Z'))
+  assert.equal(n.date, '2026-11-05')
+  assert.equal(n.weekday, 4)
+})
+
+test('a due reads from today: a passed time today is overdue, the week ends on Sunday', () => {
+  assert.equal(dueWhen('2026-11-05T15:00', NOW), 'overdue')
+  assert.equal(dueWhen('2026-11-05T17:00', NOW), 'today')
+  assert.equal(dueWhen('2026-11-05', NOW), 'today')
+  assert.equal(dueWhen('2026-11-04', NOW), 'overdue')
+  assert.equal(dueWhen('2026-11-08', NOW), 'week')
+  assert.equal(dueWhen('2026-11-09', NOW), 'later')
+  // On a Sunday, tomorrow is not the far future.
+  assert.equal(dueWhen('2026-11-02', companyNow(Date.parse('2026-11-01T03:00:00.000Z'))), 'week')
+  assert.equal(dueText('2026-11-06T09:00', NOW), '明日 09:00')
+  assert.equal(dueText('2026-11-10', NOW), '11/10（火）')
+  assert.equal(dueText('2027-01-15', NOW), '2027/1/15（金）')
+})
+
+test('by turn: only the member\'s own far future folds; meetings to come join their turn, meetings over join today\'s done', () => {
+  const events = listEvents([
+    { id: 'e1', title: '定例', start: '2026-11-05T01:00:00.000Z', end: '2026-11-05T01:30:00.000Z', allDay: false, online: false, attendeeCount: 4, hasExternalAttendees: false },
+    { id: 'e2', title: 'B社', start: '2026-11-05T08:00:00.000Z', end: '2026-11-05T08:30:00.000Z', allDay: false, online: true, attendeeCount: 3, hasExternalAttendees: true },
+  ], NOW)
+  const sections = listSections([
+    item('soon', 'mine', '2026-11-06'), item('far', 'mine', '2026-12-10'), item('far-other', 'others', '2026-12-10'),
+    item('acc', 'acceptance', null), item('done', 'done', null),
+  ], events, 'turn', NOW)
+  const by = Object.fromEntries(sections.map(s => [s.key, s]))
+  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'done'])
+  assert.deepEqual(by.mine.items.map(i => i.id), ['soon'])
+  assert.deepEqual(by.mine.events.map(e => e.event.id), ['e2'])
+  assert.equal(by.mine.events[0].start, '17:00')
+  assert.deepEqual(by.later.items.map(i => i.id), ['far'])
+  assert.equal(by.later.foldable, true)
+  assert.deepEqual(by.others.items.map(i => i.id), ['far-other'])
+  assert.deepEqual(by.done.events.map(e => e.event.id), ['e1'])
+})
+
+test('by date: overdue, today, this week, later (folded), no due — whoever holds it', () => {
+  const sections = listSections([
+    item('late', 'others', '2026-11-03'), item('today', 'mine', '2026-11-05T18:00'), item('week', 'ai', '2026-11-07'),
+    item('later', 'mine', '2026-11-20'), item('none', 'mine', null),
+  ], [], 'date', NOW)
+  assert.deepEqual(sections.map(s => [s.key, s.items.map(i => i.id)]), [
+    ['overdue', ['late']], ['today', ['today']], ['week', ['week']], ['later', ['later']], ['none', ['none']],
+  ])
+  assert.equal(sections.find(s => s.key === 'later')?.foldable, true)
+})
+
+test('a tag keeps only items carrying it', () => {
+  assert.deepEqual(filterByTag([item('a', 'mine', null, ['営業']), item('b', 'mine', null, ['経理'])], '営業').map(i => i.id), ['a'])
+})
+
+test('the list shows only for the departments the company setting names (null = all; 全社 when any shows it)', () => {
+  assert.equal(listShownFor('d1', null), true)
+  assert.equal(listShownFor('d1', ['d2']), false)
+  assert.equal(listShownFor('d2', ['d2']), true)
+  assert.equal(listShownFor(null, []), false)
+  assert.equal(listShownFor(null, ['d2']), true)
+})

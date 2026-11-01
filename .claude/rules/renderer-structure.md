@@ -36,8 +36,8 @@ Planned features: `workspace` (department tabs, left panel tabs, panel layout, d
 choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a document),
 `chat`, `sync`, `history` (a file's 「前の版」), `search`, `records` (the read-only record card and a
 file's 「つながっているもの」), `settings`, `auth` (server address, sign-in, session),
-`company` (choosing a company and setting its folder up: the company selector), `tasks` (やること;
-so far only `api.ts` with 「今日の予定」, `calendar.md`; the file tree's 「やることにつなぐ…」 will come from the task plugin, `records.md`),
+`company` (choosing a company and setting its folder up: the company selector), `tasks` (やること:
+the task list tab, `tasks-ui.md`),
 `notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `absences` (the settings'
 「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"). Only create what you need; add a feature
 folder when the code has no home among these.

@@ -17,6 +17,7 @@ import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
 import type { MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
+import type { TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
@@ -142,6 +143,9 @@ const api: ElectronAPI = {
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
   getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
+  getTaskList: (companyId: string) => invoke('tasks:list', companyId),
+  createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),
+  actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),
   getMinutesNotices: (companyId: string) => invoke('minutes:notices', companyId),

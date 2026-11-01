@@ -494,8 +494,8 @@ under version 6 keep it and never wait (`since: 7`).
   reads that meeting's `attendees`.
 - The requester hears `request_accepted`; still waiting a business day later →
   `acceptance_waiting` (`notifications.md`). Screens: state label 「引き受け待ち」
-  (`client/shared/record-views.ts`); the requester's line 「〇〇さんに頼んだ・引き受け待ち」 comes with
-  the task list (S7b).
+  (`client/shared/record-views.ts`); the requester's line 「〇〇さんに頼んだ・引き受け待ち」 is the task list's
+  (`tasks-ui.md`).
 - Test: `server/tests/unit/record-task-acceptance.test.ts` (only the assignee — or their delegate
   only during the absence — accepts, never the requester or any AI; the AI's hand-over is not an
   acceptance; each automatic case follows its setting and is off when it is off; reassigning asks
@@ -1227,7 +1227,7 @@ important?, exception?, key? }` → 201 `{ record, created: true }` (200 `create
 
 ## Not yet
 
-The task screens (milestone 5; the read-only views above exist), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
+The task card with actions (S7c; the list is `tasks-ui.md`), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 
 ## Tests

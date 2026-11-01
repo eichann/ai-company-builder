@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { refreshFileVersions } from '../features/history/refresh'
 import { RecordCard } from '../features/records/components/RecordCard'
@@ -49,6 +49,9 @@ import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckB
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
+import { useTaskList } from '../features/tasks/hooks/useTaskList'
+import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { listShownFor } from '../features/tasks/model'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -75,6 +78,8 @@ export function AppShell() {
   const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
   // 「あなたの番」 and the bell (features/notifications): main reads them with the session.
   const notices = useNotices(currentCompany?.id)
+  // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
+  const taskList = useTaskList(currentCompany?.id)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -280,6 +285,20 @@ export function AppShell() {
             : undefined}
         />
       ),
+    },
+    {
+      // Shown for the departments the company setting names (tasks-ui.md); records off → no tab.
+      id: 'tasks', title: 'やること', icon: ListChecks, mount: 'once-opened', className: 'flex',
+      visible: !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds),
+      badgeCount: taskList.data?.items.filter(i => i.turn === 'mine' || i.turn === 'acceptance').length ?? null,
+      render: () => currentCompany && rootPath ? (
+        <TaskListPanel
+          companyId={currentCompany.id}
+          list={taskList}
+          aiTurns={aiTurnItems}
+          renderCard={recordId => <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />}
+        />
+      ) : null,
     },
     {
       id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened',

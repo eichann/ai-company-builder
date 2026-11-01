@@ -147,6 +147,9 @@ contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
+contract.invoke tasks:act
+contract.invoke tasks:create
+contract.invoke tasks:list
 contract.invoke tool-approval-response
 contract.invoke tools:start
 contract.invoke tools:stop
@@ -252,6 +255,7 @@ contract.type EditorBackupResult.error = error?: string
 contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
 contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
@@ -270,6 +274,7 @@ contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompa
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
 contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
 contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
+contract.type ElectronAPI.createTask = createTask: Invoke<'tasks:create'>
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
@@ -312,6 +317,7 @@ contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordV
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
+contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
 contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
@@ -648,6 +654,9 @@ contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
 contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
@@ -865,6 +874,9 @@ main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFo
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
+main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
+main.handle tasks:list @ features/tasks/ipc.ts (companyId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
 main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
@@ -894,6 +906,8 @@ main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
+preload actOnTask -> invoke tasks:act($0, $1, $2)
+preload actOnTask : (companyId: string, recordId: string, input: TaskActInput) => Promise<TaskWriteResult>
 preload addAbsence -> invoke absences:add($0, $1)
 preload addAbsence : (companyId: string, input: AbsenceAddInput) => Promise<AbsenceAddResult>
 preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
@@ -930,6 +944,8 @@ preload createFile -> invoke fs:createFile($0, $1)
 preload createFile : (path: string, content: string) => Promise<FileOpResult>
 preload createPrivateFolder -> invoke privateFolders:create($0, $1)
 preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
+preload createTask -> invoke tasks:create($0, $1)
+preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
 preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)
 preload deleteChatSession : (companyId: string, sessionId: string) => Promise<boolean>
 preload deleteItem -> invoke fs:delete($0)
@@ -1014,6 +1030,8 @@ preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
 preload getStats -> invoke fs:stat($0)
 preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
+preload getTaskList -> invoke tasks:list($0)
+preload getTaskList : (companyId: string) => Promise<TaskListResult>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
 preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
 preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)
