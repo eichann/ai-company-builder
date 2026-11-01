@@ -95,7 +95,6 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'git:showCommit': { folderPath: 'a repository pathspec' },
   'git:setupCompanyRemote': { selectedPaths: 'department folder names to download' },
   'git:folderSizes': { folder: 'a repository folder sent to the server' },
-  'tasks:linkFile': { companyPath: 'a company-relative path sent to the server (records.md); nothing local is read or written' },
   'git:sparseUncommittedChanges': { folders: 'repository folders (git pathspecs)' },
   'privateFolders:createContext': { parentPath: 'a company-relative folder sent to the server' },
   'skills:list': { departmentFolder: 'relative to the checked root: absolute / .. refused, the joined path validated and kept under that root (ipc-app.test.ts)' },

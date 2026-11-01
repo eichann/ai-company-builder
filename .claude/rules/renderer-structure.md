@@ -35,8 +35,8 @@ client/src/
 Planned features: `workspace` (department tabs, left panel tabs, panel layout, department
 choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a document),
 `chat`, `sync`, `history`, `search`, `settings`, `auth` (server address, sign-in, session),
-`company` (choosing a company and setting its folder up: the company selector), `tasks` (やること:
-today the chooser behind the file tree's 「やることにつなぐ…」, `records.md`). Only create what you need; add a feature
+`company` (choosing a company and setting its folder up: the company selector), `tasks` (やること;
+none today: the file tree's 「やることにつなぐ…」 will come from the task plugin, `records.md`). Only create what you need; add a feature
 folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do

@@ -37,7 +37,6 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
-import type { LinkFileResult, OpenTasksResult } from './task-links'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
@@ -481,13 +480,6 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
-  // 「やることにつなぐ…」 (records.md "Linking files later"): with the member's session in main.
-  /** Whether the company uses tasks (records on, a `task` type); false offline or unsure. */
-  'tasks:available': { args: [companyId: string]; result: boolean }
-  /** The member's open tasks (they request, do or review it, or it is their turn). */
-  'tasks:open': { args: [companyId: string]; result: OpenTasksResult }
-  /** Link a company path (relative to the company folder) to a task; `seenVersion` is the task's version as listed. */
-  'tasks:linkFile': { args: [companyId: string, taskId: string, companyPath: string, seenVersion: number]; result: LinkFileResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -782,10 +774,6 @@ export interface ElectronAPI {
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
-  // 「やることにつなぐ…」 from the file tree.
-  getTasksAvailable: Invoke<'tasks:available'>
-  getOpenTasks: Invoke<'tasks:open'>
-  linkFileToTask: Invoke<'tasks:linkFile'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>

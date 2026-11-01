@@ -11,8 +11,8 @@ const row = (page: Page, name: string | RegExp) => page.getByRole('button', { na
 const calls = (page: Page) => page.evaluate(() => (window as unknown as { __acbCalls: unknown[][] }).__acbCalls)
 const tree = (page: Page) => page.locator('main > div').first()
 
-async function open(page: Page, query: Record<string, string> = {}) {
-  const state = await openPreview(page, 'file-tree', query)
+async function open(page: Page) {
+  const state = await openPreview(page, 'file-tree')
   await expect(row(page, '提案書')).toBeVisible()
   return state
 }
@@ -205,28 +205,4 @@ test('when some items of a multi-delete fail, the rest are deleted and the faile
   await expect(row(page, 'ロゴ.png')).toHaveCount(0)
   await expect(row(page, 'README.md')).toBeVisible()
   await expect(row(page, 'README.md')).toHaveClass(/bg-accent\/20/) // still selected
-})
-
-test('「やることにつなぐ…」 links the right-clicked file, as a company path, to the task chosen by title', async ({ page }) => {
-  const state = await open(page)
-  await row(page, '見積.xlsx').click({ button: 'right' })
-  await page.getByRole('button', { name: 'やることにつなぐ…' }).click()
-  const dialog = page.getByRole('dialog', { name: 'やることにつなぐ' })
-  await expect(dialog.getByRole('button', { name: /A社の提案書を仕上げる/ })).toContainText('期限 11/5 15:00')
-  await dialog.getByRole('textbox', { name: '件名で探す' }).fill('見積')
-  await expect(dialog.getByRole('button', { name: /A社の提案書/ })).toHaveCount(0)
-  await dialog.getByRole('button', { name: '見積の確認' }).click()
-  await expect(dialog.getByRole('status')).toHaveText('「見積.xlsx」を「見積の確認」につなぎました。')
-  expect((await calls(page)).filter(c => c[0] === 'linkFileToTask')).toEqual([['linkFileToTask', 'demo', 'task-aaaaaa02', '営業部/提案書/見積.xlsx', 1]])
-  await dialog.getByRole('button', { name: '閉じる' }).click()
-  await expect(dialog).toHaveCount(0)
-  expectNoPageErrors(state)
-})
-
-test('in a company that does not use tasks (records off), the menu has no 「やることにつなぐ…」', async ({ page }) => {
-  const state = await open(page, { tasks: 'off' })
-  await row(page, '見積.xlsx').click({ button: 'right' })
-  await expect(page.getByRole('button', { name: /^名前を変更/ })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'やることにつなぐ…' })).toHaveCount(0)
-  expectNoPageErrors(state)
 })
