@@ -21,6 +21,7 @@ import { publishChatPane, showInOtherChatPane } from '../chatPanes'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import type { MinutesNotice } from '../../../../shared/minutes-app'
+import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
 import { AiTurnNotice } from './AiTurnNotice'
 
@@ -39,6 +40,8 @@ interface ChatPanelProps {
    * pane only: its runner starts them automatically in hidden consultations (ai-turns.md).
    */
   aiTurnQueue?: readonly MinutesNotice[]
+  /** Each waiting record's state and the member's 「もう一度」 / 「人に渡す」 (shown by the screens that list them). */
+  onAiTurnItems?: (view: AiTurnItemsView) => void
 }
 
 const NO_AI_TURNS: readonly MinutesNotice[] = []
@@ -50,7 +53,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -113,6 +116,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     openBackgroundTab,
     closeTab,
     deliver: (tabId, request) => setAiTurnRequest({ tabId, request }),
+    onItems: onAiTurnItems,
   })
   const aiTurnNotice = aiTurns.notice && <AiTurnNotice text={aiTurns.notice} canResume={aiTurns.canResume} onResume={aiTurns.resume} />
 

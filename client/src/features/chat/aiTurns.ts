@@ -3,7 +3,7 @@
 // and what the per-member log (runs today, failures in a row, the usage pause)
 // becomes after a run. The hook (hooks/useAiTurnRunner.ts) only carries them out.
 import { agentCan } from '../../../shared/agents/registry'
-import type { AutoTurnSettings } from '../../../shared/ai-turns'
+import type { AiTurnItemView, AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RateLimitSnapshot } from '../../../shared/rate-limits'
 
 /** A record waiting for the member's AI (today: received minutes). */
@@ -29,6 +29,14 @@ export interface AiTurnLog {
   stopped: boolean
   /** Claude's usage limit: nothing starts before this time (epoch ms). */
   pausedUntil: number | null
+  /** Records given to the person (not run again until 「もう一度」), with why. Kept across days. */
+  handed: Record<string, HandOff>
+}
+
+/** Why a record went to the person instead of the AI. */
+export interface HandOff {
+  kind: 'failed' | 'urgent' | 'by-member'
+  reason: string
 }
 
 /** At most this many records are started in one pass; the next pass comes `AI_TURN_PASS_INTERVAL_MS` later. */
@@ -36,6 +44,8 @@ export const AI_TURN_PASS_CAP = 3
 export const AI_TURN_PASS_INTERVAL_MS = 10 * 60_000
 /** A record that failed twice today waits for a person (its notice stays). */
 export const MAX_ATTEMPTS_PER_RECORD = 2
+/** A record due within this time is handed to the person rather than waiting for the AI. */
+export const URGENT_WITHIN_MS = 2 * 60 * 60_000
 /** No usable reset time from Claude: try again after an hour. */
 const USAGE_PAUSE_FALLBACK_MS = 60 * 60_000
 
@@ -62,7 +72,7 @@ export function localDay(now: number): string {
 }
 
 export function freshLog(now: number): AiTurnLog {
-  return { day: localDay(now), runs: 0, attempts: {}, failuresInARow: 0, stopped: false, pausedUntil: null }
+  return { day: localDay(now), runs: 0, attempts: {}, failuresInARow: 0, stopped: false, pausedUntil: null, handed: {} }
 }
 
 /** The stored log for today (another day: counts start again; a stop and a pause carry over). */
@@ -72,10 +82,15 @@ export function logForToday(stored: unknown, now: number): AiTurnLog {
   const stopped = s.stopped === true
   const pausedUntil = typeof s.pausedUntil === 'number' && s.pausedUntil > now ? s.pausedUntil : null
   const failuresInARow = typeof s.failuresInARow === 'number' && s.failuresInARow >= 0 ? s.failuresInARow : 0
-  if (s.day !== base.day) return { ...base, stopped, pausedUntil, failuresInARow }
+  const handed: Record<string, HandOff> = {}
+  for (const [id, h] of Object.entries(s.handed && typeof s.handed === 'object' ? s.handed : {})) {
+    const x = h as Partial<HandOff> | null
+    if (x && (x.kind === 'failed' || x.kind === 'urgent' || x.kind === 'by-member') && typeof x.reason === 'string') handed[id] = { kind: x.kind, reason: x.reason.slice(0, 300) }
+  }
+  if (s.day !== base.day) return { ...base, stopped, pausedUntil, failuresInARow, handed }
   const attempts: Record<string, number> = {}
   for (const [id, n] of Object.entries(s.attempts && typeof s.attempts === 'object' ? s.attempts : {})) if (typeof n === 'number') attempts[id] = n
-  return { ...base, runs: typeof s.runs === 'number' && s.runs >= 0 ? s.runs : 0, attempts, stopped, pausedUntil, failuresInARow }
+  return { ...base, runs: typeof s.runs === 'number' && s.runs >= 0 ? s.runs : 0, attempts, stopped, pausedUntil, failuresInARow, handed }
 }
 
 const time = (iso: string | null | undefined): number => {
@@ -93,7 +108,7 @@ export function orderAiTurns(queue: readonly AiTurnCandidate[]): AiTurnCandidate
 export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate } | { wait: AiTurnWait } {
   const { settings, log, now } = input
   if (!settings || !settings.enabled) return { wait: 'off' }
-  const waiting = orderAiTurns(input.queue).filter(c => (log.attempts[c.id] ?? 0) < MAX_ATTEMPTS_PER_RECORD)
+  const waiting = orderAiTurns(input.queue).filter(c => !log.handed[c.id] && (log.attempts[c.id] ?? 0) < MAX_ATTEMPTS_PER_RECORD)
   if (waiting.length === 0) return { wait: 'empty' }
   // Codex and the API key cannot take the record's AI actions (registry recordActions).
   if (!agentCan(input.agent, 'recordActions')) return { wait: 'needs-claude' }
@@ -111,19 +126,98 @@ export function recordStarted(log: AiTurnLog, recordId: string): AiTurnLog {
   return { ...log, runs: log.runs + 1, attempts: { ...log.attempts, [recordId]: (log.attempts[recordId] ?? 0) + 1 } }
 }
 
-export type AiTurnOutcome = 'done' | 'failed' | 'usage-limit'
+/** `failed`: the AI said it could not; `unfinished`: the turn ended (or broke) before the record was done. */
+export type AiTurnOutcome = 'done' | 'failed' | 'unfinished' | 'usage-limit'
 
-/** After a run: success clears the failures; N failures in a row stop; Claude's limit pauses (not a failure). */
-export function recordOutcome(log: AiTurnLog, outcome: AiTurnOutcome, settings: AutoTurnSettings, pauseUntil: number): AiTurnLog {
+export const FAILED_REASON = 'AI が「読み取れない」と判断しました。理由は「AIへの相談」に残っています。'
+export const UNFINISHED_REASON = 'AI が最後まで終えられませんでした。理由は「AIへの相談」に残っています。'
+
+/**
+ * After a run of `recordId`: success clears the failures; a failure hands the record to the
+ * person at once with the reason (never left silently in 「AI の番」) and N in a row stop the
+ * runner; Claude's limit pauses (not a failure, the record waits).
+ */
+export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pauseUntil: number): AiTurnLog {
   if (outcome === 'done') return { ...log, failuresInARow: 0 }
   if (outcome === 'usage-limit') return { ...log, pausedUntil: pauseUntil }
   const failuresInARow = log.failuresInARow + 1
-  return { ...log, failuresInARow, stopped: log.stopped || failuresInARow >= settings.stopAfterFailures }
+  const reason = outcome === 'failed' ? FAILED_REASON : UNFINISHED_REASON
+  return {
+    ...log, failuresInARow, stopped: log.stopped || failuresInARow >= settings.stopAfterFailures,
+    handed: { ...log.handed, [recordId]: { kind: 'failed', reason } },
+  }
 }
 
 /** The member pressed 「もう一度自動で進める」. */
 export function resumed(log: AiTurnLog): AiTurnLog {
   return { ...log, stopped: false, failuresInARow: 0, pausedUntil: null }
+}
+
+/** 「もう一度」 on one record: back to the AI (its hand-off and today's attempts cleared, a stop or pause lifted). */
+export function retried(log: AiTurnLog, recordId: string): AiTurnLog {
+  const handed = { ...log.handed }
+  delete handed[recordId]
+  const attempts = { ...log.attempts }
+  delete attempts[recordId]
+  return { ...resumed(log), handed, attempts }
+}
+
+/** 「人に渡す」: the member takes it (the AI will not start it), keeping why it stopped. */
+export function handedOver(log: AiTurnLog, recordId: string, reason: string): AiTurnLog {
+  return { ...log, handed: { ...log.handed, [recordId]: { kind: 'by-member', reason: reason ? `あなたが引き取りました（${reason}）` : 'あなたが引き取りました。' } } }
+}
+
+/**
+ * Hand early: a record due soon that the AI has not started goes to the person now, rather than
+ * waiting for the AI's preparation (its turn, a pause, a limit).
+ */
+export function handUrgent(log: AiTurnLog, queue: readonly AiTurnCandidate[], runningId: string | null, now: number): AiTurnLog {
+  let handed: Record<string, HandOff> | null = null
+  for (const c of queue) {
+    if (c.id === runningId || log.handed[c.id]) continue
+    const due = time(c.dueAt)
+    if (due - now > URGENT_WITHIN_MS) continue
+    handed ??= { ...log.handed }
+    handed[c.id] = { kind: 'urgent', reason: '期限が近いため、AI の準備を待たずにお渡しします。' }
+  }
+  return handed ? { ...log, handed } : log
+}
+
+/**
+ * Each waiting record's state for the screens (`AiTurnItemView`). `running` is the record whose
+ * hidden consultation works now; `runningNeedsYou`: that AI waits for the member's answer.
+ */
+export function aiTurnItems(input: {
+  queue: readonly AiTurnCandidate[]
+  log: AiTurnLog
+  wait: AiTurnWait | null
+  noticeText: string | null
+  running: { id: string; needsYou: boolean } | null
+}): AiTurnItemView[] {
+  const { log, wait, noticeText, running } = input
+  return orderAiTurns(input.queue).map((c): AiTurnItemView => {
+    const handed = log.handed[c.id]
+    if (handed) return { recordId: c.id, state: handed.kind === 'failed' ? 'failed' : 'handed', reason: handed.reason, canRetry: true, canHand: false }
+    if (running?.id === c.id) {
+      return running.needsYou
+        ? { recordId: c.id, state: 'handed', reason: 'AI があなたの答えを待っています（「AIへの相談」のあなたの番）。', canRetry: false, canHand: false }
+        : { recordId: c.id, state: 'running', reason: '', canRetry: false, canHand: false }
+    }
+    if ((log.attempts[c.id] ?? 0) >= MAX_ATTEMPTS_PER_RECORD) return { recordId: c.id, state: 'failed', reason: UNFINISHED_REASON, canRetry: true, canHand: true }
+    switch (wait) {
+      case 'off':
+        return { recordId: c.id, state: 'not-allowed', reason: '会社の設定で、AI の番は自動では進めません。', canRetry: false, canHand: true }
+      case 'needs-claude':
+      case 'not-ready':
+        return { recordId: c.id, state: 'not-allowed', reason: noticeText ?? '', canRetry: true, canHand: true }
+      case 'paused-usage':
+      case 'stopped':
+      case 'daily-limit':
+        return { recordId: c.id, state: 'waiting', reason: noticeText ?? '', canRetry: true, canHand: true }
+      default:
+        return { recordId: c.id, state: 'waiting', reason: 'AI が順番に進めます。', canRetry: false, canHand: true }
+    }
+  })
 }
 
 /** Claude's usage limit is reached (the account's snapshot says rejected). */

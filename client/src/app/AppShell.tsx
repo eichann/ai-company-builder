@@ -42,6 +42,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
+import type { AiTurnItemsView } from '../../shared/ai-turns'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -64,6 +65,8 @@ export function AppShell() {
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
   // 「議事録が届きました」: main checks while Google may read the member's minutes (features/minutes).
   const minutes = useMinutesNotices(currentCompany?.id)
+  // Where each of them stands with the automatic 「AI の番」 (the chat's runner reports it).
+  const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -289,7 +292,7 @@ export function AppShell() {
         showNotDownloadedNote={isCompanyWide && sparseCheckout.enabled && !!unsyncedFolders && unsyncedFolders.size > 0}
         onOpenSettings={() => setShowSettings(true)}
       />
-      {minutes.available && currentCompany && <MinutesNotices companyId={currentCompany.id} notices={minutes.notices} />}
+      {minutes.available && currentCompany && <MinutesNotices companyId={currentCompany.id} notices={minutes.notices} aiTurns={aiTurnItems} />}
 
       {/* Main Content: the split tree (features/workspace/layoutTree.ts); the chat is one pane */}
       <SplitView
@@ -319,6 +322,7 @@ export function AppShell() {
             slashCommands={slashCommands}
             paneId={paneId}
             aiTurnQueue={minutes.available ? minutes.notices : undefined}
+            onAiTurnItems={setAiTurnItems}
           />
         ) : (
         <>

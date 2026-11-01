@@ -47,7 +47,35 @@ export type AiTurnClaimResult =
  */
 export type AiTurnSettleResult = { outcome: 'done' | 'failed' | 'put-back' | 'unknown' }
 
-const MINUTES_ID_RE = /^minutes-[0-9a-z]{6,32}$/
+/**
+ * Where one record of 「AI の番」 stands on this PC, for every screen that lists it (the minutes
+ * notice today, the task list later). Never silent: each state has a reason the member can read.
+ * - `running`: the AI works on it now (a hidden consultation).
+ * - `waiting`: it will start by itself (its turn, Claude's usage pause, today's limit, a stop).
+ * - `not-allowed`: it cannot start here (no Claude Code, Codex, not signed in, the setting off).
+ * - `failed`: the AI could not finish; handed to the person with the reason.
+ * - `handed`: given to the person early (due soon, the AI waits for an answer, or the member chose).
+ * `canRetry` offers 「もう一度」 (back to the AI), `canHand` offers 「人に渡す」.
+ */
+export type AiTurnItemState = 'running' | 'waiting' | 'not-allowed' | 'failed' | 'handed'
+
+export interface AiTurnItemView {
+  recordId: string
+  state: AiTurnItemState
+  /** Plain Japanese, for the member (empty only while running). */
+  reason: string
+  canRetry: boolean
+  canHand: boolean
+}
+
+/** What the runner exposes: each waiting record's state, and the member's two choices. */
+export interface AiTurnItemsView {
+  items: readonly AiTurnItemView[]
+  retry: (recordId: string) => void
+  handOver: (recordId: string) => void
+}
+
+const MINUTES_ID_RE =/^minutes-[0-9a-z]{6,32}$/
 
 /** The record kinds the runner handles, and each one's claiming action. Today: minutes 「読む」. */
 export const AI_TURN_CLAIM_ACTIONS = { minutes: 'start_reading' } as const

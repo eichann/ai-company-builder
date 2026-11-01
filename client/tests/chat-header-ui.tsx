@@ -1,4 +1,6 @@
 import { createRoot } from 'react-dom/client'
+import { useState } from 'react'
+import type { AiTurnItemsView } from '../shared/ai-turns'
 import { markAgentLogNoticeSeen } from '../src/shared/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
@@ -36,7 +38,7 @@ import type { MinutesNotice } from '../shared/minutes-app'
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
 //                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
-//                  ?autoturn=taken: another PC wins the claim
+//                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
 //   ?minutes=1     「議事録が届きました」 above the chat (one received minutes record);
 //                  the deal choice card's links are recorded in __acbChat.minutesLinks
 
@@ -131,7 +133,7 @@ installElectronAPI({
     aiTurns.claims.push([companyId, recordId, version, conversationId])
     return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true }
   },
-  settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: 'done' } },
+  settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
   linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
@@ -312,6 +314,14 @@ Object.assign(window, { __acbCommands: { run: runCommand } })
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
+// ?autoturn: the minutes notice with the runner's states, as AppShell composes them.
+let showAiTurns: (view: AiTurnItemsView) => void = () => {}
+function AutoTurnNotices() {
+  const [view, setView] = useState<AiTurnItemsView | null>(null)
+  showAiTurns = setView
+  return <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} aiTurns={view} />
+}
+
 const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
@@ -320,9 +330,10 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
     </div>
   : <div className="h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
       {params.get('minutes') === '1' && <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} />}
+      {autoTurn && <AutoTurnNotices />}
       <div className="min-h-0 flex-1 flex justify-end">
         <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-          <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} />
+          <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined} />
         </div>
       </div>
     </div>,
