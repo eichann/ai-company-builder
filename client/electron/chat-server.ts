@@ -1,3 +1,4 @@
+import { AI_TURN_STEPS, aiTurnStepAllowsRecordTool, isAiTurnStep } from '../shared/ai-turns'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
@@ -219,6 +220,7 @@ export async function startChatServer(config: ChatServerConfig) {
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
       promptSuggestions,
+      aiTurnStep: requestedStep,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -229,6 +231,11 @@ export async function startChatServer(config: ChatServerConfig) {
     if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
     const connection = createAgentConnection(authMode, config)
     const can = AGENTS[authMode].capabilities
+    // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
+    const aiTurnStep = requestedStep === undefined ? undefined : isAiTurnStep(requestedStep) ? requestedStep : null
+    if (aiTurnStep === null || (aiTurnStep && (!connection.ownsConversation || !can.recordActions))) {
+      return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
+    }
     // The emergency stop (agent-stop.md): a stopped AI never starts a turn.
     const turnStop = companyId ? await Promise.resolve(config.prepareAgentStop?.(companyId)).catch(() => undefined) : undefined
     if (turnStop?.refused) return c.json({ error: turnStop.refused, code: 'AI_STOPPED' }, 403)
@@ -265,7 +272,7 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
-    const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
+    const references = !aiTurnStep && connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
     const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
     // What this conversation has read from private folders (private-read-guard.ts).
@@ -277,7 +284,7 @@ export async function startChatServer(config: ChatServerConfig) {
       privateState.seeded = true
       try { seedFromMessages(privateContext, privateState, messages, workingDirectory) } catch { /* best effort */ }
     }
-    const createdCompanyFiles = connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
+    const createdCompanyFiles = !aiTurnStep && connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
     const companyFiles = createdCompanyFiles && {
       ...createdCompanyFiles,
       tools: {
@@ -290,7 +297,7 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     // The per-conversation limit needs a conversation id; a request without one counts on its own.
-    const webResearch = connection.ownsConversation && can.webReader
+    const webResearch = !aiTurnStep && connection.ownsConversation && can.webReader
       ? config.createWebResearch?.({ agent: authMode, conversationId: appSessionId || crypto.randomUUID(), signal: c.req.raw.signal }) : undefined
     if (webResearch) finalSystemPrompt = (finalSystemPrompt || '') + webResearch.instructions
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
@@ -298,13 +305,13 @@ export async function startChatServer(config: ChatServerConfig) {
     const injector = createChunkInjector()
     // 「確認をお願いする」 (review/tools.ts): the AI hands its work to the member and
     // stops; the accepted request becomes a part of the reply (the card, stored with it).
-    const review = connection.ownsConversation && workingDirectory
+    const review = !aiTurnStep && connection.ownsConversation && workingDirectory
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
-    const records = connection.ownsConversation && can.recordsMcp && companyId
+    const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions,
         onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
@@ -316,11 +323,18 @@ export async function startChatServer(config: ChatServerConfig) {
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
+    // An unattended step sees only the record tools it declares, and cannot call any other.
+    const records = allRecords && aiTurnStep ? {
+      ...allRecords,
+      specs: allRecords.specs.filter(spec => aiTurnStepAllowsRecordTool(aiTurnStep, spec.name)),
+      execute: (name: string, input: unknown) => aiTurnStepAllowsRecordTool(aiTurnStep, name)
+        ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具は使えません。'),
+    } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
-    const askUser = connection.ownsConversation && can.choicePrompts
+    const askUser = !aiTurnStep && connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
-    const turn = appSessionId && connection.ownsConversation && (can.steering || can.promptSuggestions)
+    const turn = !aiTurnStep && appSessionId && connection.ownsConversation && (can.steering || can.promptSuggestions)
       ? chatTurns.open(appSessionId, injector, { suggestions: can.promptSuggestions && promptSuggestions !== false }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
@@ -358,7 +372,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: AI_TURN_STEPS[aiTurnStep].builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

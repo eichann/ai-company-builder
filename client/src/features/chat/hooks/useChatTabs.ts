@@ -36,6 +36,14 @@ export function useChatTabs(companyId: string, paneId: string, newChatTitle: str
     setActiveTabId(newTab.id)
   }, [newChatTitle])
 
+  /** A new consultation behind the shown one (an automatic AI turn); its tab id. */
+  const openBackgroundTab = useCallback(() => {
+    const tab = newChatTab(newChatTitle)
+    tabsRef.current = [...tabsRef.current, tab]
+    setTabs(tabsRef.current)
+    return tab.id
+  }, [newChatTitle])
+
   /** `activate: false` adds it behind the shown one (a consultation back from its own window). */
   const openSession = useCallback((sessionId: string, { activate = true }: { activate?: boolean } = {}) => {
     const existing = tabsRef.current.find(tab => tab.sessionId === sessionId)
@@ -119,5 +127,5 @@ export function useChatTabs(companyId: string, paneId: string, newChatTitle: str
     safeWriteChatTabs(storageId, persistedChatTabs(tabs, activeTabId))
   }, [storageId, tabs, activeTabId])
 
-  return { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks }
+  return { tabs, activeTabId, setActiveTabId, createNewTab, openBackgroundTab, openSession, detachSession, closeTab, tabCallbacks }
 }

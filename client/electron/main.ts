@@ -48,6 +48,8 @@ import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createAiTurnClaims } from './features/ai-turns/claims'
+import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
 import { registerNotificationsIpc } from './features/notifications/ipc'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
@@ -261,6 +263,19 @@ registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookie
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
+// 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
+// window; main only claims the record by its version and settles it afterwards.
+registerAiTurnsIpc(ipc, {
+  claims: createAiTurnClaims({
+    baseUrl: getServerApiUrl,
+    cookies: session.cookies,
+    records: recordsApi,
+    agent: () => config.authMode(),
+    windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
+    aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+  }),
+  isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+})
 
 registerAuthIpc(ipc, {
   session,

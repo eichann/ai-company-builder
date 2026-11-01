@@ -1,3 +1,4 @@
+import type { AiTurnStep } from '../../../../shared/ai-turns'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
@@ -83,6 +84,11 @@ export interface ChatPanelChatProps {
 export type ChatInputRequest =
   | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string }
   | { kind: 'insertText'; text: string }
+  /**
+   * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
+   * record with this tab's conversation id; only when that wins, send the first message.
+   */
+  | { kind: 'aiTurn'; step: AiTurnStep; message: string; title: string; minutesId: string; claim: (conversationId: string) => Promise<boolean> }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
@@ -115,6 +121,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const attachments = useMessageAttachments()
   const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
 
+  // The automatic 「AI の番」 send (aiTurn request below): its one request runs only that step's tools.
+  const aiTurnStepRef = useRef<AiTurnStep | null>(null)
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
     agentSession: agentSessionRef,
@@ -130,6 +138,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     pendingImages: pendingImagesRef,
     pendingFilePaths: pendingFilePathsRef,
     handoffRequest: handoffRequestRef,
+    aiTurnStep: aiTurnStepRef,
   })
 
   // Next-prompt suggestion and messages sent while the AI works. Declared
@@ -302,6 +311,24 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   useEffect(() => {
     if (isShown && inputRequest?.kind === 'insertText') {
       if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
+      return
+    }
+    // Not shown on purpose: the tab is fresh, so its own conversation id is the one the claim names.
+    if (inputRequest?.kind === 'aiTurn') {
+      if (!historyReadyRef.current) return
+      const { step, message, title, minutesId, claim } = inputRequest
+      onInputRequestConsumed?.()
+      const conversationId = appSessionIdRef.current
+      if (!conversationId || !agentCan(authMode, 'recordActions')) { void claim(''); return }
+      void claim(conversationId).then(claimed => {
+        if (!claimed || appSessionIdRef.current !== conversationId) return
+        customTitleRef.current = { title, auto: false }
+        titleGenerationDoneRef.current = true
+        onTitleChange?.(title)
+        minutesIdRef.current = minutesId
+        aiTurnStepRef.current = step
+        void handleSend(message)
+      })
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return

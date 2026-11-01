@@ -40,6 +40,12 @@ export interface ClaudeConnectionConfig extends AgentHostConfig {
 /** Claude Code's own web tools, denied when the app's web research is given. */
 export const CLAUDE_BUILTIN_WEB_TOOLS = ['WebFetch', 'WebSearch'] as const
 
+/** Built-in shell, web, file-write and delegation tools an unattended step never gets unless it declares them. */
+export const CLAUDE_UNATTENDED_DENIED_TOOLS: readonly string[] = [
+  'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent',
+]
+const UNATTENDED_REFUSAL = 'この自動の作業では、この道具は使えません。決められた道具だけで進め、できないことは最後にまとめて伝えてください。'
+
 const DANGEROUS_PATTERNS: RegExp[] = [
   // Direct deletion commands
   /\brm\s/,                          // rm (file deletion)
@@ -151,7 +157,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, records, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, records, webResearch: givenWebResearch, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended }) {
+      // An unattended step (ai-turns.md) gets only its record tools: nothing else the app adds, nobody to ask.
+      const references = unattended ? undefined : givenReferences
+      const companyFiles = unattended ? undefined : givenCompanyFiles
+      const review = unattended ? undefined : givenReview
+      const webResearch = unattended ? undefined : givenWebResearch
+      const askUser = unattended ? undefined : givenAskUser
+      const steering = unattended ? undefined : givenSteering
+      const onPromptSuggestion = unattended ? undefined : givenSuggestion
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -367,7 +381,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         }, 'member-denied')
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canUseToolFn: any = approvals || askUser
+      const canUseToolFn: any = unattended
+        // Unattended: what allowedTools does not list is refused, never asked (nobody is there).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
+            const decided = verdict({ behavior: 'deny' as const, message: UNATTENDED_REFUSAL }, 'guard-denied')
+            recordCanUseTool(toolEvents, toolName, toolInput, options?.toolUseID, decided)
+            return decided.result
+          }
+        : approvals || askUser
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
             const decided = await decideCanUseTool(toolName, toolInput, options)
@@ -440,7 +462,9 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             ...turnEnv,
             ...(onPromptSuggestion ? { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : {}),
           },
-          settingSources: ['user', 'project'],
+          // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
+          settingSources: unattended ? [] : ['user', 'project'],
+          ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),
           // With the app's web research, the CLI's own web tools are off for the
           // whole session, subagents included (a deny beats any allow, in every
           // permission mode; WebFetch / WebSearch also bypass the sandbox's
@@ -448,7 +472,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // `disallowedTools`: the provider ignores it whenever allowedTools is set.
           // Under the company sandbox the same flag settings also deny reading its secret places
           // (the sandbox covers only Bash; the Read tool needs these rules).
-          ...(webResearch || sandboxed ? { settings: { permissions: { deny: [...new Set([...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []), ...(sandboxed && enforced ? enforced.permissionsDeny : [])])] } } } : {}),
+          ...(webResearch || sandboxed || unattended ? { settings: { permissions: { deny: [...new Set([
+            ...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []),
+            ...(sandboxed && enforced ? enforced.permissionsDeny : []),
+            // Unattended: shell, web and file writes denied too, unless the step declares them.
+            ...(unattended ? CLAUDE_UNATTENDED_DENIED_TOOLS.filter(name => !unattended.builtinTools.includes(name)) : []),
+          ])] } } } : {}),
           // The company sandbox (agent-sandbox.md): --settings layer, so the company
           // repository's .claude/settings.json cannot loosen it (strictAllowlist,
           // allowUnsandboxedCommands: false). failIfUnavailable: a CLI that cannot

@@ -40,6 +40,7 @@ import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
+import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
@@ -480,6 +481,12 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
+  'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
+  /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
+  'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
+  /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
+  'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
   // The title bar's 「あなたの番」 and bell (notifications.md): read with the member's session in main.
   /** The company on screen (null: none); starts the 5-minute check. */
   'notifications:watch': { args: [companyId: string | null]; result: void }
@@ -796,6 +803,10 @@ export interface ElectronAPI {
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
+  // 「AI の番」 run automatically (the main window only).
+  getAutoTurnSettings: Invoke<'aiTurns:settings'>
+  claimAiTurn: Invoke<'aiTurns:claim'>
+  settleAiTurn: Invoke<'aiTurns:settle'>
   watchNotifications: Invoke<'notifications:watch'>
   getNotificationsState: Invoke<'notifications:state'>
   markNotificationsRead: Invoke<'notifications:markRead'>

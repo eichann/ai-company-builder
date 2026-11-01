@@ -67,6 +67,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   request)` (「Web で調べる」's reader, `web-research.md`).
   `client/tests/agent-registry-factories.test.ts`: every capability-gated factory an agent claims
   exists, and none it does not.
+- An unattended 「AI の番」 step (`unattended` on `createChatModel`, `ai-turns.md`): Claude Code
+  runs it with `settingSources: []`, `strictMcpConfig: true`, only the step's built-in tools and
+  record tools, refusing everything else; Codex and the API key throw on it.
 - Role profiles (`AgentProfile`: role, allowedTools, settingSources, sandbox, cwd) on a chat
   connection: no agent implements one, so any set field throws — a caller can never believe a
   restriction is in force when it is not. Implement a profile inside the agent's factory;

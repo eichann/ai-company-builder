@@ -290,3 +290,23 @@ export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
 export function listOwnBrokerKeys(companyId: string, reads: OwnKeyStatusReads = window.electronAPI) {
   return reads.listOwnBrokerKeys(companyId)
 }
+
+/** The company's 「自動で進める」 and its limits (AI turns run automatically: ai-turns.md). */
+export type AutoTurnSettingsReads = ElectronPort<'getAutoTurnSettings'>
+/**
+ * Taking a record's AI turn and settling it afterwards: changes the shared record (one PC wins
+ * the claim; an unfinished one goes back to 「AI の番」), with the AI's token or the session in main.
+ */
+export type AiTurnWrites = ElectronPort<'claimAiTurn' | 'settleAiTurn'>
+
+export function getAutoTurnSettings(companyId: string, reads: AutoTurnSettingsReads = window.electronAPI) {
+  return reads.getAutoTurnSettings(companyId)
+}
+
+export function claimAiTurn(companyId: string, recordId: string, expectedVersion: number, conversationId: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.claimAiTurn(companyId, recordId, expectedVersion, conversationId)
+}
+
+export function settleAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.settleAiTurn(companyId, recordId)
+}
