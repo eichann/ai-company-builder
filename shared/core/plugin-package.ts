@@ -5,7 +5,7 @@
  */
 import { coreTypeDefinitions } from './core-types'
 import {
-  PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, comparePluginVersions, externalFieldWriters, roleOfWho,
+  PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, comparePluginVersions, priorFieldWriters, roleOfWho,
   type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
 } from './plugin-declaration'
 import { parsePluginManifest } from './plugin-manifest'
@@ -185,7 +185,7 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
   }
   if (errors.length === 0) {
     for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {
-      if (p === 'auto' && externalFieldWriters({ operations }).length > 0) errors.push(`欄「${f}」: 社外の人に届く書き換えの操作があるため、欄の決まりを「自動」にできません`)
+      if (p === 'auto' && priorFieldWriters({ operations }).length > 0) errors.push(`欄「${f}」: 社外の人に届くか、お金が動く書き換えの操作があるため、欄の決まりを「自動」にできません`)
     }
   }
   if (errors.length > 0) return { ok: false, errors }

@@ -361,10 +361,14 @@ export const noFlow = (): FlowPart => ({ roles: {}, settings: {}, steps: {}, ui:
 export const ROLE_WHO_PREFIX = 'role:'
 export const roleOfWho = (w: string): string | null => w.startsWith(ROLE_WHO_PREFIX) ? w.slice(ROLE_WHO_PREFIX.length) : null
 
-/** Update operations reaching people outside the company (they write mapped fields), optionally of one object. */
-export function externalFieldWriters(manifest: Pick<PluginManifest, 'operations'>, objectName?: string): string[] {
+/**
+ * Operations writing mapped fields that reach people outside the company or
+ * move money (`moves_money`), optionally of one object: a field they write is
+ * never `auto` — refused when declared or chosen, not only held at run time.
+ */
+export function priorFieldWriters(manifest: Pick<PluginManifest, 'operations'>, objectName?: string): string[] {
   return Object.entries(manifest.operations)
-    .filter(([, op]) => op.reaches === 'external' && op.fields === 'mapped' && (objectName === undefined || op.object === objectName))
+    .filter(([, op]) => (op.reaches === 'external' || op.movesMoney) && op.fields === 'mapped' && (objectName === undefined || op.object === objectName))
     .map(([n]) => n)
 }
 

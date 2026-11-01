@@ -248,9 +248,11 @@ upgrade:                                 # where work pinned to an older version
 - **Money** (`moves_money: true` on a business operation that writes; contract 2 only, refused on
   a connector — the business says what its use of an operation means): the operation asks first
   exactly like one with `reaches: external` (`asksFirst` in `plugin-declaration.ts`): its fields
-  and its create policy are never `auto` whatever the mapping or `field_policy_defaults` say
-  (`effectiveFieldPolicy` / `effectiveOperationPolicy` hold them to `prior`), a create's default
-  is `prior` and a declared `policy: auto` is refused; in a step's run it is only an approval
+  and its create policy are never `auto`: written that way it is refused (owner: make the mistake
+  impossible to write) — a field it writes as `auto` in `field_policy_defaults` (`combineUse`) or
+  in the mapping's `policy` (`parsePluginMapping`, via `priorFieldWriters`), a declared create
+  `policy: auto`; a create's default is `prior`; and `effectiveFieldPolicy` /
+  `effectiveOperationPolicy` still hold them to `prior` at run time. In a step's run it is only an approval
   request. The connector's `reaches` stays the one place for "outside"; money is the business's.
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
