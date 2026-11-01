@@ -50,6 +50,8 @@ import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 // lane A ▼
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
 import type { RecordThreadResult } from './threads'
+import type { PluginBridgeAnswer } from './plugin-bridge-ops'
+import type { PluginPackageRef } from './plugin-bridge'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -648,6 +650,8 @@ export interface IpcInvokeChannels {
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
+  // One call a plugin's screen made on its bridge (plugin-frame.md): the host names the plugin, main adds the session.
+  'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -969,6 +973,7 @@ export interface ElectronAPI {
   markGoogleSeen: Invoke<'google:markSeen'>
   markSlackSeen: Invoke<'slack:markSeen'>
   getRecordThread: Invoke<'threads:get'>
+  callPluginBridge: Invoke<'plugins:bridge'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

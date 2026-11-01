@@ -405,7 +405,7 @@ test('env:update: sets, replaces and removes names in place; refuses bad input; 
 
 test('local-file:// serves files inside the allowed roots only, never cached', async () => {
   await h.startApp()
-  assert.deepEqual(h.fake.privilegedSchemes, [{ scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } }])
+  assert.deepEqual(h.fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'local-file'), { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } })
   const serve = h.fake.protocolHandlers.get('local-file')!
   writeFiles(root, { '画像/図 1.png': 'png-bytes' })
   const ok = await serve(new Request(`local-file://${encodeURI(path.join(root, '画像', '図 1.png'))}?v=3`))

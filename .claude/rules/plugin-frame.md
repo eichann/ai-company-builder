@@ -7,15 +7,113 @@ paths:
   - "server/src/services/plugin-bridge.ts"
   - "shared/types/plugin-bridge.ts"
   - "server/tests/integration/plugin-bridge.test.ts"
+  - "client/electron/features/plugins/bridge-ipc.ts"
+  - "client/shared/plugin-bridge-ops.ts"
 ---
+
 
 # A plugin's screen in a frame and its bridge (stage 4b, lanes A and B: A5 / A6 / B6)
 
-Reserved for A5, A6 and B6. A plugin's `ui/` runs in a frame served by `acb-plugin://` with a CSP
-that allows no network; it never reaches `window.electronAPI` or storage. It talks only through
-a narrow bridge handed over once; every bridge call is limited to the overlap of the person's
-permission, what the company allowed and the operation's own scope (`via`). Approving and sending
-happen only on the core app's cards. Write the rules here as these items are built.
+A plugin's `ui/` runs in a frame served by `acb-plugin://` with a CSP that allows no network; it
+never reaches `window.electronAPI` or storage. It talks only through a narrow bridge handed over
+once; every bridge call is limited to the overlap of the person's permission, what the company
+allowed and the operation's own scope (`via`). Approving and sending happen only on the core
+app's cards. A5 (this file's first part) built the mechanism; A6 places frames (tab, record
+section, file menu); B6 is the server's check.
+
+## The frame: an iframe, not a WebContentsView
+
+`client/src/features/plugins/components/PluginFrame.tsx`: `<iframe sandbox="allow-scripts"
+allow="" referrerPolicy="no-referrer">` in the main window. Chosen over a `WebContentsView`
+(design 節目5 §2-3): the core app's popups (peek, menus) stay on top, no size syncing, and the
+isolation needed holds in an iframe — measured in Electron 45: the frame runs in **its own
+renderer process** (site isolation for the custom scheme), its origin is opaque (no
+`allow-same-origin`): `localStorage`, `indexedDB`, `document.cookie`, `parent.document`,
+`parent.electronAPI` all throw `SecurityError`; the preload runs only in the main frame
+(no `nodeIntegrationInSubFrames`), so the frame has no `electronAPI` of its own; popups and top
+navigation are refused by the sandbox. Never add `allow-same-origin` (with `allow-scripts` it can
+remove its own sandbox), `allow-popups`, `allow-forms`, `allow-top-navigation*` or
+`allow-downloads`. Revisit a `WebContentsView` only for third-party plugins.
+
+- **One frame per page.** `PluginFrame` keys the frame by its address; a new plugin or entry
+  mounts a new frame. A frame showing a plugin's page navigates nowhere — not even within its
+  package (`pluginFrameNavigationAllowed`, wired in `electron-adapter.ts`
+  `keepAppPageInWindow` on `will-frame-navigate`); its `window.open` is denied without opening
+  the browser; `will-navigate` to `acb-plugin:` is refused.
+- **Permissions**: `permission-policy.ts` grants nothing to any page but the app's own, so the
+  frame gets no device, clipboard or notification (`ipc-permissions.test.ts`).
+- The app's CSP (`client/index.html`) allows `frame-src acb-plugin:`.
+
+## `acb-plugin://<id>/<version>/ui/<file>`
+
+`client/electron/features/plugins/protocol.ts` (no Electron; the shell's `servePluginFiles`
+calls `protocol.handle`). The version is the first path segment: `<id>@<version>` in the host
+is URL user-info (`acb-plugin://a@1.2.3/` has host `1.2.3`), and a dotted host reads as IPv4.
+
+- Scheme privileges (`registerLocalFileScheme`, one list with `local-file`): `standard`,
+  `secure`, `corsEnabled` (module scripts load in CORS mode from the opaque origin; the answer
+  says `Access-Control-Allow-Origin: null`). Never `bypassCSP`, `supportFetchAPI`, `stream`,
+  `allowServiceWorkers`.
+- Served: only a `ui/` file a package may hold (`parsePluginFrameUrl`: no `%` escapes, `\`,
+  `..`, user-info, other folders — `plugin.yaml`, `steps/`, `types/` are never served), of a
+  package a company of the signed-in account lists now and the store kept
+  (`store.ts` `keptPackage`). Everything else is 404.
+- **Verified before serving**: the first time a package is served in a run, its whole folder is
+  checked against the fingerprint it was kept with (v2: only regular files, no links, only
+  package paths). Every answer is the bytes just read, hashed and compared with that listing: a
+  file changed after the check is refused and the package is checked again from scratch.
+- **CSP on every answer** (`pluginFrameCsp`): `default-src 'none'`, no `connect-src` (fetch,
+  XHR, WebSocket, EventSource, beacons refused); `script-src` / `style-src` / `img-src` /
+  `font-src` only this version's `ui/` base (not `'self'`, which would cover every version of
+  the plugin); inline styles allowed, inline scripts not; `frame-src`, `child-src`,
+  `worker-src`, `object-src`, `form-action`, `base-uri` `'none'`. Plus `nosniff`, `no-store`,
+  `no-referrer`.
+
+## The bridge (`bridge: 1`)
+
+- **Handed once**: the host (`client/src/features/plugins/bridge-host.ts`) makes one
+  `MessageChannel` on the frame's first `load` and posts one end with
+  `{ type: 'acb-bridge', bridge: 1 }` (target `*`: the origin is opaque). A second load gets
+  nothing. The host reads only that port; nothing listens to the window's `message` events, so
+  `parent.postMessage` reaches nothing.
+- **Messages**: `{ id, op, args }` and nothing else (`parseBridgeMessage`); answers
+  `{ id, ok: true, data } | { id, ok: false, error: { code, message } }`. At most 8 calls in
+  flight per frame (`BUSY`).
+- **Ops**: the server's `PLUGIN_BRIDGE_OPS` (`shared/types/plugin-bridge.ts`, B6: `records.query`,
+  `records.get`, `records.act`, `approvals.request` — asking only, approving is not on the bridge)
+  plus `ui.open` (record, file or the record's consultation; opened by the core screen, never sent
+  to the server). The app reads each op's arguments with exactly the keys B6's service takes
+  (`client/shared/plugin-bridge-ops.ts` `parseBridgeCall`: no actor, provenance, attachments,
+  `via` or plugin name). Adding an op is a reasoned, one-at-a-time decision made on both ends
+  (reading a linked deliverable's pinned version comes with C7, server first). Not on the
+  bridge: files, network, keys, other plugins, approving, sending, running the AI,
+  notifications, settings.
+- **Main** (`features/plugins/bridge-ipc.ts`, `plugins:bridge`, main window only) reads the call
+  again, refuses a package the app does not keep for that company now, and sends B6's
+  `PluginBridgeRequest` — `{ pluginId, version, op, args }` — to
+  `POST /api/companies/:companyId/plugin-bridge` with the member's session. `pluginId` /
+  `version` are the frame the host created: the frame never names itself. Server codes and words
+  (`PLUGIN_BRIDGE_REFUSED`, `VERSION_CONFLICT`…) reach the frame as they are; a 5xx or no server
+  is a generic `FAILED` / `OFFLINE`. Nothing of a call's arguments or answer is logged.
+
+## Tests
+
+- `client/tests/plugin-frame-protocol.test.ts` — only `ui/` files of a listed, verified
+  package; traversal / escapes / other plugin or version refused; a folder or file that no
+  longer matches its fingerprint (or a link) never served; the CSP's directives; `keptPackage`.
+- `client/tests/plugin-bridge.test.ts` — the app's ops are exactly the server's plus `ui.open`;
+  unknown ops and extra keys refused; main sends B6's request with the session and refuses
+  before the server (package not kept for the company, `ui.open`, bad args); `PLUGIN_BRIDGE_REFUSED`
+  reaches the frame; navigation rule.
+- `client/src/features/plugins/bridge-host.test.ts` — port handed once; only bridge ops reach
+  main; `ui.open` stays local.
+- `client/tests/ui/plugin-frame.spec.ts` (Chromium, page `tests/plugin-frame-ui.html`) — with
+  the real CSP and sandbox: fetch / XHR / WebSocket / beacon / outside image reach nothing,
+  storage / cookies / `parent.electronAPI` throw, inline and other-version scripts do not run;
+  one port; window messages reach nothing. Mutation-checked (CSP `default-src *`, adding
+  `allow-same-origin`).
+- `ipc-window-links.test.ts` (scheme privileges, frame navigation, popups),
+  `ipc-permissions.test.ts` (a plugin page gets no permission).
 
 ## The server end (B6 「橋の関所」, `services/plugin-bridge.ts`)
 

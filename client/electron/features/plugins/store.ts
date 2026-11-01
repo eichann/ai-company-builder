@@ -157,6 +157,25 @@ export function createPluginPackageStore(deps: PluginStoreDeps) {
       if (!index.listed[`${user}\0${companyId}`]?.includes(name) || index.kept[name] === undefined) return null
       return path.join(deps.dir(), name)
     },
+    /**
+     * A kept package with the fingerprint it was verified against, when a
+     * company of the signed-in account lists it now (`companyId`: that
+     * company only), else null — for the plugin screens' protocol and bridge
+     * (A5, plugin-frame.md), which verify the folder against the fingerprint
+     * again before serving anything from it.
+     */
+    keptPackage(pluginId: string, version: string, companyId?: string): { folder: string; fingerprint: string } | null {
+      const user = deps.userId()
+      if (!user) return null
+      const name = pluginPackageName({ id: pluginId, version })
+      if (!PLUGIN_PACKAGE_DIR_RE.test(name)) return null
+      const index = readIndex()
+      const fingerprint = index.kept[name]
+      if (fingerprint === undefined) return null
+      const listed = Object.entries(index.listed).some(([key, names]) =>
+        (companyId === undefined ? key.startsWith(`${user}\0`) : key === `${user}\0${companyId}`) && names.includes(name))
+      return listed ? { folder: path.join(deps.dir(), name), fingerprint } : null
+    },
   }
 }
 

@@ -8,6 +8,8 @@ import { pathToFileURL } from 'url'
 import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
+import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
+import type { PluginFileServer } from './features/plugins/protocol'
 import { allowPermission, isAppPage, type AppPage } from './permission-policy'
 import { webLinkForBrowser } from './external-url'
 import type { DesktopShell, DrivePickerOutcome, DrivePickerWindow, WindowPort } from './features/ports'
@@ -107,14 +109,20 @@ export function keepAppPageInWindow(contents: WebContents, page: AppPage): void 
     const link = webLinkForBrowser(url)
     if (link) void shell.openExternal(link).catch(() => { /* no browser: nothing to do */ })
   }
-  contents.setWindowOpenHandler(({ url }) => {
-    openInBrowser(url)
+  contents.setWindowOpenHandler(({ url, referrer }) => {
+    // A plugin's screen opens nothing, not even in the browser (its sandbox refuses popups too).
+    if (!isPluginAddress(url) && !isPluginAddress(referrer?.url)) openInBrowser(url)
     return { action: 'deny' }
   })
   contents.on('will-navigate', event => {
     if (isAppPage(event.url, page)) return
     event.preventDefault()
-    openInBrowser(event.url)
+    if (!isPluginAddress(event.url)) openInBrowser(event.url)
+  })
+  // A frame showing a plugin's page navigates nowhere; only the app's own frames load one (plugin-frame.md).
+  contents.on('will-frame-navigate', event => {
+    if (event.isMainFrame) return
+    if (!pluginFrameNavigationAllowed(event.frame?.url, event.url)) event.preventDefault()
   })
 }
 
@@ -423,11 +431,26 @@ export function guardEverySession(page: AppPage): void {
   void app.whenReady().then(() => denyUnexpectedPermissions(session.defaultSession, page))
 }
 
-/** Register the local-file:// scheme (must run before app.whenReady()). */
+/**
+ * Register the app's schemes (must run before app.whenReady(); Electron takes
+ * one list): local-file:// and acb-plugin:// (a plugin's screen,
+ * plugin-frame.md). acb-plugin is `standard` (relative paths resolve inside
+ * the package) and `secure`; `corsEnabled` only so the frame's module scripts
+ * load (its origin is opaque). Never `bypassCSP`, `supportFetchAPI`,
+ * `allowServiceWorkers` or `stream`: the frame's CSP must hold.
+ */
 export function registerLocalFileScheme(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
+    { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
   ])
+}
+
+/** Serve acb-plugin:// from the verified packages only (`features/plugins/protocol.ts`), once the app is ready. */
+export function servePluginFiles(files: PluginFileServer): void {
+  void app.whenReady().then(() => {
+    protocol.handle(PLUGIN_SCHEME, request => files.serve({ url: request.url, method: request.method }))
+  })
 }
 
 /**
