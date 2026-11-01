@@ -1,4 +1,5 @@
-// What the admin checks in the server's answers before rendering them (api.ts getData).
+// What the admin checks in the server's answers before rendering them (api.ts getData: every
+// call passes one of these; there is no unchecked path).
 //
 // The server is the authority, but a proxy's error page, an older or newer server, or a bug
 // can answer with a different shape; rendering that as if it were right shows broken or
@@ -10,16 +11,55 @@
 
 import * as z from 'zod/mini'
 
+import type { AbsenceCreated, MemberAbsencesView } from '../../../shared/types/absences'
+import type {
+  AgentEventPage,
+  AgentEventRetentionPreview,
+  AgentEventSettings,
+  AgentEventSummary,
+  AgentEventViewers,
+  SandboxImpact,
+} from '../../../shared/types/agent-events'
+import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
+import type { AgentStopView } from '../../../shared/types/agent-stop'
+import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
+import type { GoogleAdminView } from '../../../shared/types/google'
+import type { InboxSettingsView } from '../../../shared/types/inbox'
+import type { BrokerView } from '../../../shared/types/key-broker'
+import type { MinutesFolderSetting } from '../../../shared/types/minutes'
+import type {
+  ImportReport,
+  PluginDetail,
+  PluginListItem,
+  PluginMappingCheck,
+  PluginRolesView,
+  PluginStepSkillsView,
+} from '../../../shared/types/plugins'
+import type { SlackAdminView } from '../../../shared/types/slack'
+import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
 import type {
   Capabilities,
   ClientActivity,
   Company,
+  CreatedInvitation,
+  DeletePrivateFolderResult,
   Department,
+  DepartmentManager,
+  EffectiveAccess,
+  Invitation,
   Member,
+  OrphanedScope,
   Overview,
   OverviewMember,
   OrphanedScopeSummary,
+  PermissionScope,
+  PrivateFolderDetail,
+  PrivateFolderSummary,
   PushRejection,
+  PushRejectionPage,
+  RepoFolder,
+  Role,
+  ScopeRulesResult,
   User,
 } from './api'
 
@@ -147,3 +187,123 @@ export const departmentSchema: z.ZodMiniType<Department> = z.looseObject({
 })
 
 export const departmentsSchema = z.array(departmentSchema)
+
+// ---------------------------------------------------------------------------
+// The other answers: every top-level field is checked for its kind (text, number, yes/no, list,
+// object, or missing/null where the type allows it). What is inside a list or object is not
+// checked here; those shapes come from shared/types and the server's real answers are held to
+// them by server/tests/integration/admin-contract.test.ts. `topLevel` makes the compiler insist
+// on every field of the type, so a field added to the type cannot be left unchecked.
+// ---------------------------------------------------------------------------
+
+type Kind<V> = V extends string ? string
+  : V extends number ? number
+  : V extends boolean ? boolean
+  : V extends null ? null
+  : V extends undefined ? undefined
+  : V extends readonly unknown[] ? unknown[]
+  : object
+
+type TopLevel<T> = { [K in keyof T]-?: z.ZodMiniType<Kind<T[K]>> }
+
+function topLevel<T extends object>(shape: TopLevel<T>): z.ZodMiniType<T> {
+  // The compiler has checked `shape` against every field of T; the nested parts are T's own.
+  return z.looseObject(shape as Record<string, z.ZodMiniType>) as unknown as z.ZodMiniType<T>
+}
+
+const num = z.number()
+const bool = z.boolean()
+const list = z.array(z.unknown())
+const obj = z.looseObject({})
+const nullableObj = z.nullable(obj)
+const optionalList = z.optional(list)
+
+// Members, roles and invitations
+export const memberRoleSchema = topLevel<{ userId: string; companyId: string; role: Role }>({ userId: str, companyId: str, role })
+export const invitationValidateSchema = topLevel<{ companyName: string; role: Role; expiresAt: string }>({ companyName: str, role, expiresAt: str })
+export const invitationAcceptSchema = topLevel<{ companyId: string; companyName: string; role: Role }>({ companyId: str, companyName: str, role })
+export const invitationsSchema = z.array(topLevel<Invitation>({
+  id: str, companyId: str, companyName: str, token: str, role, createdBy: str,
+  createdByName: nullableStr, createdByEmail: nullableStr,
+  usedBy: nullableStr, usedByName: nullableStr, usedByEmail: nullableStr, usedAt: nullableStr,
+  expiresAt: str, createdAt: str, isExpired: bool, isUsed: bool,
+}))
+export const createdInvitationSchema = topLevel<CreatedInvitation>({
+  id: str, token: str, companyId: str, companyName: str, role, expiresAt: str, createdAt: str,
+})
+
+// Permissions
+export const permissionsSchema = topLevel<{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }>({ scopes: list, orphanedScopes: optionalList })
+export const scopeRulesResultSchema = topLevel<ScopeRulesResult>({ scope: nullableObj, rules: list })
+export const scopeMoveSchema = topLevel<{ moved: number; toPath: string; scopeId: string | null }>({ moved: num, toPath: str, scopeId: nullableStr })
+export const scopeResetSchema = topLevel<{ removed: number }>({ removed: num })
+export const effectiveAccessSchema = topLevel<EffectiveAccess>({ path: str, governingScope: nullableObj, readRestrictionEnforced: bool, members: list })
+export const repoFoldersSchema = topLevel<{ path: string; folders: RepoFolder[] }>({ path: str, folders: list })
+export const pushRejectionPageSchema = topLevel<PushRejectionPage>({ total: num, markers: list, rejections: list })
+
+// Private folders
+const privateFolderFields = {
+  scopeId: str, path: str, departmentId: nullableStr, viewerCount: num, editorCount: num,
+  createdAt: str, createdBy: nullableStr, createdByName: nullableStr,
+}
+export const privateFoldersSchema = z.array(topLevel<PrivateFolderSummary>(privateFolderFields))
+export const privateFolderSchema = topLevel<PrivateFolderDetail>({ ...privateFolderFields, members: list })
+export const makePublicSchema = topLevel<{ path: string; commit: string }>({ path: str, commit: str })
+export const deletePrivateFolderSchema = topLevel<DeletePrivateFolderResult>({ path: str, archived: bool })
+
+// Departments
+export const departmentStatsSchema = topLevel<{ files: number; folders: number; exists: boolean }>({ files: num, folders: num, exists: bool })
+export const managersSchema = topLevel<{ managers: DepartmentManager[] }>({ managers: list })
+export const departmentMembersSchema = topLevel<DepartmentMembersView>({ members: list, canEdit: bool })
+
+// The AI action log, sandbox and emergency stop
+export const agentEventPageSchema = topLevel<AgentEventPage>({ events: list, nextCursor: nullableStr })
+export const agentEventSummarySchema = topLevel<AgentEventSummary>({ from: str, to: str, tzOffsetMinutes: num, days: list, members: list })
+export const agentEventSettingsSchema = topLevel<AgentEventSettings>({
+  updatedAt: nullableStr, updatedBy: nullableStr, history: list, retentionDays: num, viewers: str,
+})
+export const agentEventRetentionPreviewSchema = topLevel<AgentEventRetentionPreview>({ days: num, olderThan: str, wouldDelete: num })
+export const agentEventViewersSchema = topLevel<AgentEventViewers>({ mode: str, viewers: list })
+export const sandboxImpactSchema = topLevel<SandboxImpact>({
+  from: str, to: str, byHost: list, bySkill: list, byPlace: list, total: num, truncated: bool,
+})
+export const agentSandboxSchema = topLevel<AgentSandboxView>({
+  settings: obj, defaultAllowedDomains: list, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list,
+})
+export const agentStopSchema = topLevel<AgentStopView>({ active: list, history: list, unsupported: list, keys: obj })
+
+// Tasks, inbox and absences
+export const taskSettingsSchema = topLevel<TaskSettingsView>({
+  settings: obj, canEdit: bool, updatedAt: nullableStr, updatedBy: nullableStr, updatedByName: nullableStr,
+})
+export const inboxSettingsSchema = topLevel<InboxSettingsView>({ settings: obj, canEdit: bool, updatedAt: nullableStr, updatedBy: nullableStr })
+export const memberAbsencesSchema = topLevel<MemberAbsencesView>({ userId: str, absences: list, canEdit: bool, covering: list, today: str })
+export const absenceCreatedSchema = topLevel<AbsenceCreated>({ absence: obj, delegateCannotRead: num })
+export const absenceRemovedSchema = topLevel<{ removed: true }>({ removed: bool })
+
+// API keys, plugins and connectors
+export const brokerSchema = topLevel<BrokerView>({
+  status: obj, settings: obj, services: list, keys: list, departments: list, history: list, check: z.optional(obj),
+})
+export const pluginListSchema = topLevel<{ plugins: PluginListItem[] }>({ plugins: list })
+export const pluginSchema = topLevel<PluginDetail>({
+  plugin: obj, mapping: nullableObj, mappingVersions: list, policies: list, labels: obj,
+  mappingErrors: list, autoAcknowledgements: list, history: list, readScope: obj,
+})
+export const pluginMappingCheckSchema = topLevel<PluginMappingCheck>({ reachable: bool, reason: nullableStr, objects: obj, checkedAt: str })
+export const importReportSchema = topLevel<ImportReport>({ status: str, reason: nullableStr, objects: obj, startedAt: str, finishedAt: str })
+export const connectionRenewSchema = topLevel<{ connectionId: string }>({ connectionId: str })
+export const pluginRolesSchema = topLevel<PluginRolesView>({ pluginId: str, label: str, roles: list, overrides: list, history: list })
+export const pluginStepSkillsSchema = topLevel<PluginStepSkillsView>({ steps: list })
+export const googleSchema = topLevel<GoogleAdminView>({
+  vaultEnabled: bool, configured: bool, clientId: nullableStr, secretLast4: nullableStr, domain: nullableStr,
+  enabled: bool, redirectUri: str, practice: bool, operatorStopped: bool, updatedAt: nullableStr,
+  updatedBy: nullableStr, grants: list, history: list, picker: obj, featuresOff: list, companyFeatures: list,
+})
+export const slackSchema = topLevel<SlackAdminView>({
+  vaultEnabled: bool, configured: bool, teamId: nullableStr, clientId: nullableStr, clientSecretLast4: nullableStr,
+  hasBotToken: bool, enabled: bool, operatorStopped: bool, practice: bool, redirectUri: str, eventsUrl: str,
+  grants: list, history: list,
+})
+export const coreConnectorsSchema = topLevel<CoreConnectorsView>({ connectors: list, roles: list })
+export const minutesFolderSchema = topLevel<MinutesFolderSetting>({ folder: nullableStr, choices: list, meetings: str })
