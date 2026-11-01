@@ -218,11 +218,12 @@ steps:
     procedure: { default: steps/proposal.md, overridable: true }
     tools: [records, plugin_operations, files_read, files_write]
     connector_roles: [mail.read]
-ui:                                      # parsed and checked only; nothing shows it before 4b
+ui:                                      # shown by the app's four slots (4b A6, plugin-frame.md)
   bridge: 1
   tab: { label: 案件, icon: Briefcase, entry: ui/index.html }
   peek: { implements: request, state_group: mine }
   record_sections: [{ type: deal, label: 提案の材料, entry: ui/deal.html }]
+  file_actions: [{ label: 案件の資料にする, entry: ui/attach.html, kinds: [pdf, document] }]
 upgrade:                                 # where work pinned to an older version may move here
   from: 0.1.0
   at: [{ type: deal, state: open }]
@@ -279,7 +280,12 @@ upgrade:                                 # where work pinned to an older version
   request. The connector's `reaches` stays the one place for "outside"; money is the business's.
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
-  `preload` refused (the frame has no network and is given nothing).
+  `preload` refused (the frame has no network and is given nothing). `file_actions` (added with
+  A6, owner decision 節目5 §40: 「やることにつなぐ…」 is the task plugin's): at most
+  `MAX_PLUGIN_FILE_ACTIONS` (3) right-click items, each `{ label (≤ 30), entry, kinds }`; `kinds`
+  are the core's file kinds (`shared/core/plugin-file-kinds.ts`: `file`, `folder`, `markdown`,
+  `text`, `pdf`, `image`, `spreadsheet`, `document`, `slides`), never extensions or paths; the
+  menu, its icon and which file is which kind are the core's (`fileActionApplies`).
 - **Where an operation may be called from** (`via: [screen, plugin, run]` on a business
   operation use, contract 2 only; absent = `[screen, run]`; copied by `combineUse`; plan 4b B6):
   the operation checks refuse another caller with 403 `NOT_VIA`; from a plugin's screen (the

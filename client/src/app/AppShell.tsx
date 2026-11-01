@@ -67,6 +67,9 @@ import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
 import { RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
+import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
+import { PluginFileActionDialog } from '../features/plugins/components/PluginSlots'
+import { pluginSlots, type FileActionOpen } from './pluginSlots'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -108,6 +111,7 @@ export function AppShell() {
   const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
+  const [fileAction, setFileAction] = useState<FileActionOpen | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -275,15 +279,18 @@ export function AppShell() {
   const shareFolders = rootPath ? departments.filter(d => d.folder && !isReadOnly(`${rootPath}/${d.folder}`)).map(d => ({ folder: d.folder, name: d.name })) : []
   // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
   const consultAbout = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title }).catch(() => {}) }
+  // Business plugins' four slots (plugin-frame.md "The four slots"): only verified packages the company lists now.
+  const pluginScreens = usePluginScreens(currentCompany?.id)
+  const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
   const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
     }
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /></div>
+    const readOnly = <div key={recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
@@ -347,6 +354,7 @@ export function AppShell() {
           onCloseFile={handleCloseFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
           onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
+          extraMenuItems={plugins.fileMenuItems}
           navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
           overlay={places.recordId && currentCompany && rootPath
             ? recordCard(places.recordId)
@@ -390,6 +398,7 @@ export function AppShell() {
       onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
       render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
     },
+    ...plugins.tabs,
   ]
 
   return (
@@ -501,6 +510,17 @@ export function AppShell() {
             return r.success ? null : r.error
           }}
           onClose={() => setLinkingFile(null)}
+        />
+      )}
+      {/* Hidden as soon as its plugin is no longer listed (turned off, stopped). */}
+      {fileAction && currentCompany && pluginScreens.screens.some(s => s.plugin.id === fileAction.action.plugin.id && s.plugin.version === fileAction.action.plugin.version) && (
+        <PluginFileActionDialog
+          companyId={currentCompany.id}
+          action={fileAction.action}
+          companyPath={fileAction.companyPath}
+          isFolder={fileAction.isFolder}
+          onOpen={target => { setFileAction(null); return plugins.openFromPlugin(target) }}
+          onClose={() => setFileAction(null)}
         />
       )}
       <AppDialogs

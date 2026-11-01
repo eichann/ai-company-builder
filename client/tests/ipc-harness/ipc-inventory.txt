@@ -9,6 +9,7 @@ contract.events fs:changes
 contract.events handoff:changed
 contract.events minutes:changed
 contract.events notifications:changed
+contract.events plugins:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
@@ -141,6 +142,7 @@ contract.invoke pluginOperations:undo
 contract.invoke pluginSteps:onRecord
 contract.invoke pluginSteps:start
 contract.invoke plugins:bridge
+contract.invoke plugins:screens
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
@@ -336,6 +338,7 @@ contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMai
 contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
 contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => string
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
+contract.type ElectronAPI.getPluginScreens = getPluginScreens: Invoke<'plugins:screens'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
 contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
 contract.type ElectronAPI.getRecordThread = getRecordThread: Invoke<'threads:get'>
@@ -387,6 +390,7 @@ contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromCha
 contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
 contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minutes:changed'>
 contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
+contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -555,6 +559,7 @@ contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChange
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
 contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
+contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
@@ -688,6 +693,7 @@ contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo
 contract.type IpcInvokeChannels.'pluginSteps:onRecord' = 'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
 contract.type IpcInvokeChannels.'pluginSteps:start' = 'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
 contract.type IpcInvokeChannels.'plugins:bridge' = 'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
+contract.type IpcInvokeChannels.'plugins:screens' = 'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
@@ -928,6 +934,7 @@ main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId
 main.handle pluginSteps:onRecord @ features/plugin-steps/ipc.ts (companyId, recordId)
 main.handle pluginSteps:start @ features/plugin-steps/ipc.ts (companyId, recordId, pluginId, step, companyRoot)
 main.handle plugins:bridge @ features/plugins/bridge-ipc.ts (companyId, plugin, op, args)
+main.handle plugins:screens @ features/plugins/screens.ts (companyId)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
@@ -981,6 +988,7 @@ main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
 main.send minutes:changed @ main.ts
 main.send notifications:changed @ main.ts
+main.send plugins:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
@@ -1108,6 +1116,8 @@ preload getPathForFile -> (no IPC)
 preload getPathForFile : (file: File) => string
 preload getPermissionMode -> invoke config:getPermissionMode()
 preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
+preload getPluginScreens -> invoke plugins:screens($0)
+preload getPluginScreens : (companyId: string) => Promise<PluginScreensResult>
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
 preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
 preload getRecordCard -> invoke recordViews:card($0, $1)
@@ -1210,6 +1220,8 @@ preload onMinutesChanged -> on minutes:changed(<fn>) ; removeListener minutes:ch
 preload onMinutesChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onNotificationsChanged -> on notifications:changed(<fn>) ; removeListener notifications:changed(<fn>)
 preload onNotificationsChanged : (callback: (data: { companyId: string; }) => void) => () => void
+preload onPluginsChanged -> on plugins:changed(<fn>) ; removeListener plugins:changed(<fn>)
+preload onPluginsChanged : (callback: (change: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)

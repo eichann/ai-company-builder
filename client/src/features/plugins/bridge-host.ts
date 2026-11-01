@@ -16,7 +16,7 @@
  * - At most `maxInFlight` calls at once (`BUSY` beyond).
  */
 import { BRIDGE_ERROR, type BridgeUiOpenArgs, type PluginBridgeAnswer } from '../../../shared/plugin-bridge-ops'
-import { bridgeHello, parseBridgeMessage, type BridgeCallId, type BridgeReply } from '../../../shared/plugin-bridge'
+import { bridgeHello, parseBridgeMessage, type BridgeCallId, type BridgeFrameContext, type BridgeReply } from '../../../shared/plugin-bridge'
 
 /** What the host needs of the frame's window: only `postMessage`. */
 export interface FrameTarget {
@@ -28,6 +28,8 @@ export interface BridgeHostDeps {
   call: (op: string, args: unknown) => Promise<PluginBridgeAnswer>
   /** `ui.open`: the core app opens it, only what the person may open. */
   open: (target: BridgeUiOpenArgs) => PluginBridgeAnswer | Promise<PluginBridgeAnswer>
+  /** Where the frame is shown, handed once in the hello (A6). */
+  context?: BridgeFrameContext
   maxInFlight?: number
 }
 
@@ -76,7 +78,7 @@ export function createBridgeHost(deps: BridgeHostDeps) {
       port.onmessage = (event: MessageEvent) => { void onMessage(event.data) }
       // The frame's origin is opaque (sandboxed without allow-same-origin): `*` is the only target
       // that reaches it. What is sent is the hello and the port, nothing of the app's.
-      frame.postMessage(bridgeHello(), '*', [channel.port2])
+      frame.postMessage(bridgeHello(deps.context), '*', [channel.port2])
       return true
     },
     /** The frame is gone: no more answers; the port is closed. */

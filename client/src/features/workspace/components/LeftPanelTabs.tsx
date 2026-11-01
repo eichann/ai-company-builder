@@ -15,6 +15,8 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
   // Panels opened at least once stay mounted (hidden), so switching tabs keeps their state.
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set(activeId ? [activeId] : []))
   if (activeId && !visited.has(activeId)) setVisited(new Set([...visited, activeId]))
+  // The tab whose peek is open (pointer on the tab or its peek, or focus on the tab).
+  const [peeking, setPeeking] = useState<string | null>(null)
 
   return (
     <>
@@ -22,10 +24,10 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
         {shown.map(panel => {
           const active = panel.id === activeId
           const Icon = panel.icon
-          return (
+          const tab = (
             <button
               key={panel.id}
-              onClick={() => { onSelect(panel.id); panel.onOpen?.() }}
+              onClick={() => { setPeeking(null); onSelect(panel.id); panel.onOpen?.() }}
               className={`
                 flex items-center gap-2 px-4 py-2.5 text-sm font-medium
                 border-b-2 transition-colors
@@ -43,6 +45,16 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
                 </span>
               ) : null}
             </button>
+          )
+          if (!panel.peek) return tab
+          return (
+            <div key={panel.id} className="relative flex" data-peek-for={panel.id}
+              onMouseEnter={() => setPeeking(panel.id)} onMouseLeave={() => setPeeking(p => (p === panel.id ? null : p))}
+              onFocus={() => setPeeking(panel.id)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPeeking(null) }}
+              onKeyDown={e => { if (e.key === 'Escape') setPeeking(null) }}>
+              {tab}
+              {peeking === panel.id && <div className="absolute left-0 top-full z-40 pt-1">{panel.peek()}</div>}
+            </div>
           )
         })}
       </div>

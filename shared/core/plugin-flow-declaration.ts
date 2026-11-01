@@ -25,6 +25,8 @@
  *   peek: { implements: request, state_group: mine }
  *   record_sections:
  *     - { type: program_plan, label: 構成, entry: ui/plan.html }
+ *   file_actions:                     # the file list's right-click menu (stage 4b A6)
+ *     - { label: 企画の資料にする, entry: ui/attach.html, kinds: [markdown, pdf] }
  * upgrade:
  *   from: 0.1.0
  *   at: [{ type: program_plan, state: drafting }]
@@ -43,6 +45,7 @@ import {
   type FlowPart, type PluginRoleDeclaration, type PluginStatePoint, type PluginStep, type PluginStepStart, type PluginUi, type PluginUpgrade,
 } from './plugin-declaration'
 import { isStr, strList, unknownKeys } from './plugin-declaration-rules'
+import { PLUGIN_FILE_KINDS } from './plugin-file-kinds'
 import { parseSettings } from './plugin-settings'
 import { INTERFACES, ONTOLOGY_NAME_RE } from './record-types'
 import { isYamlMap, type YamlValue } from './yaml-lite'
@@ -70,6 +73,9 @@ export const PLUGIN_BRIDGE_VERSIONS: readonly number[] = [1]
 
 /** What the core's peek can list (design 節目5 §2-1 ②): the member's turn, what they wait on, the AI's turn. */
 export const PLUGIN_PEEK_STATE_GROUPS: readonly string[] = ['mine', 'waiting', 'ai_turn']
+
+/** At most this many right-click items per plugin (the menu is the core's and stays short). */
+export const MAX_PLUGIN_FILE_ACTIONS = 3
 
 /** `steps/<file>.md`: one level, plain names. */
 export const STEP_FILE_RE = /^steps\/[a-z0-9][a-z0-9_-]{0,63}\.md$/
@@ -166,8 +172,8 @@ function parseEntry(where: string, v: YamlValue | undefined, err: (m: string) =>
 
 function parseUi(v: YamlValue | undefined, err: (m: string) => void): PluginUi | null {
   if (v === undefined) return null
-  if (!isYamlMap(v)) { err('ui は { bridge, tab, peek, record_sections } の形で書いてください'); return null }
-  unknownKeys('ui: ', v, ['bridge', 'tab', 'peek', 'record_sections'], err, {
+  if (!isYamlMap(v)) { err('ui は { bridge, tab, peek, record_sections, file_actions } の形で書いてください'); return null }
+  unknownKeys('ui: ', v, ['bridge', 'tab', 'peek', 'record_sections', 'file_actions'], err, {
     csp: '画面の枠の決まり（通信なし）は本体が決めます', connect: '画面の枠から外へは通信できません（本体への橋だけです）',
     permissions: '画面の枠には権限（カメラ・マイクなど）を渡しません', preload: '画面の枠には何も渡しません',
   })
@@ -203,8 +209,27 @@ function parseUi(v: YamlValue | undefined, err: (m: string) => void): PluginUi |
     if (!isStr(sec.label)) err(`${where}の label（欄の名前）を書いてください`)
     recordSections.push({ type: String(sec.type), label: typeof sec.label === 'string' ? sec.label : '', entry: parseEntry(where, sec.entry, err) })
   })
-  if (!tab && !peek && recordSections.length === 0) err('ui を書いたら、tab・peek・record_sections のどれかを書いてください')
-  return { bridge: typeof v.bridge === 'number' ? v.bridge : 0, tab, peek, recordSections }
+  const fileActions: PluginUi['fileActions'] = []
+  const rawActions = v.file_actions ?? []
+  if (!Array.isArray(rawActions)) err('ui の file_actions は { label, entry, kinds } の並びです')
+  else {
+    if (rawActions.length > MAX_PLUGIN_FILE_ACTIONS) err(`ui の file_actions は ${MAX_PLUGIN_FILE_ACTIONS} つまでです（右クリックのメニューは本体が描き、短く保ちます）`)
+    rawActions.forEach((act, i) => {
+      const where = `ui の file_actions の ${i + 1} 番目`
+      if (!isYamlMap(act)) { err(`${where}は { label, entry, kinds } の形で書いてください`); return }
+      unknownKeys(`${where}: `, act, ['label', 'entry', 'kinds'], err, {
+        extensions: '拡張子ではなく、ファイルの種類（kinds）で書きます', paths: '出す場所は書けません。どのファイルに出すかは種類（kinds）で決まります',
+        icon: '右クリックの項目の印は本体が決めます', shortcut: '右クリックの項目にキーは割り当てられません',
+      })
+      if (!isStr(act.label) || String(act.label).length > 30) err(`${where}の label（メニューに出す名前、30文字まで）を書いてください`)
+      const kinds = strList(act.kinds)
+      if (!kinds || kinds.length === 0) err(`${where}の kinds（出すファイルの種類：${PLUGIN_FILE_KINDS.join(' / ')}）を書いてください`)
+      else for (const k of kinds) if (!(PLUGIN_FILE_KINDS as readonly string[]).includes(k)) err(`${where}の kinds の「${k}」は知らない種類です（${PLUGIN_FILE_KINDS.join(' / ')}）`)
+      fileActions.push({ label: typeof act.label === 'string' ? act.label : '', entry: parseEntry(where, act.entry, err), kinds: kinds ?? [] })
+    })
+  }
+  if (!tab && !peek && recordSections.length === 0 && fileActions.length === 0) err('ui を書いたら、tab・peek・record_sections・file_actions のどれかを書いてください')
+  return { bridge: typeof v.bridge === 'number' ? v.bridge : 0, tab, peek, recordSections, fileActions }
 }
 
 function parseUpgrade(v: YamlValue | undefined, version: unknown, err: (m: string) => void): PluginUpgrade | null {

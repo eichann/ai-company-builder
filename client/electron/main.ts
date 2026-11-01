@@ -68,6 +68,7 @@ import { registerSlackIpc } from './features/slack/ipc'
 import { registerThreadsIpc } from './features/threads/ipc'
 import { registerPluginBridgeIpc } from './features/plugins/bridge-ipc'
 import { createPluginFileServer } from './features/plugins/protocol'
+import { registerPluginScreensIpc } from './features/plugins/screens'
 import { servePluginFiles } from './electron-adapter'
 // lane A ▲
 // lane B ▼
@@ -222,6 +223,7 @@ const agentControl = wireAgentControl({
   serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle,
   onRecords: companyId => recordsSignal(companyId),
   onNotifications: companyId => noticesSignal(companyId),
+  onPluginsChanged: companyId => appWindow.send('plugins:changed', { companyId }),
 })
 // 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
 const minutes = createMinutesChecker({
@@ -337,10 +339,18 @@ registerAiTurnsIpc(ipc, {
 registerSlackIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
 registerThreadsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // A plugin's screen (plugin-frame.md): acb-plugin:// from the verified packages only, and its bridge.
-servePluginFiles(createPluginFileServer({ packages: { keptPackage: (id, version) => agentControl.pluginPackages.keptPackage(id, version) } }))
+const pluginFiles = createPluginFileServer({ packages: { keptPackage: (id, version, companyId) => agentControl.pluginPackages.keptPackage(id, version, companyId) } })
+servePluginFiles(pluginFiles)
 registerPluginBridgeIpc(ipc, {
   baseUrl: getServerApiUrl, cookies: session.cookies, isMainWindow: senderId => mainWindowHost.isWindow(senderId),
   keeps: (id, version, companyId) => agentControl.pluginPackages.keptPackage(id, version, companyId) !== null,
+})
+// The four slots' screens (A6): only verified packages the company lists now.
+registerPluginScreensIpc(ipc, {
+  listed: async companyId => (agentControl.policy.get(companyId) ?? await agentControl.policy.refresh(companyId, { timeoutMs: 5_000 }))?.plugins ?? null,
+  settled: () => agentControl.pluginPackages.idle(),
+  declaration: (companyId, ref) => pluginFiles.declaration(companyId, ref),
+  isMainWindow: senderId => mainWindowHost.isWindow(senderId),
 })
 // lane A ▲
 // lane B ▼

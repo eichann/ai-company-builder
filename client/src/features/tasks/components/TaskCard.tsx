@@ -24,6 +24,8 @@ interface Props {
   renderPrepared: (record: RecordViewSummary) => ReactNode
   /** The task's source (the original mail or Slack thread), drawn by the screen (`app/recordSource.tsx`). */
   renderSource: (record: RecordViewSummary) => ReactNode
+  /** Business plugins' sections for this record's type (plugin-frame.md "The four slots"), drawn by the screen. */
+  renderSections?: (record: RecordViewSummary) => ReactNode
   /** The departments the member can write to, offered by 「部署に出す」 on an owner-only task. */
   shareFolders?: ShareFolder[]
   /** 「相談する」: the member's latest consultation about this task, else a new one (AppShell: `chat.consultAbout`). */
@@ -44,7 +46,7 @@ function when(at: string): string {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onConsult, tagsInUse = [], onChanged }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], onChanged }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -83,7 +85,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     ? <TagSuggestions companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} busy={busy}
       onSet={tags => runSteps(card)([{ action: 'set_tags', args: { tags } }])} />
     : null
-  return <CardBody card={result.card} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
+  return <CardBody card={result.card} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps(result.card)}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -95,6 +97,7 @@ interface BodyProps {
   busy: boolean
   renderPrepared: (record: RecordViewSummary) => ReactNode
   renderSource: (record: RecordViewSummary) => ReactNode
+  renderSections?: (record: RecordViewSummary) => ReactNode
   onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => Promise<string | null>
   onRetry: (runId: string) => Promise<string | null>
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
@@ -107,7 +110,7 @@ interface BodyProps {
   tagSuggestions: ReactNode
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -200,6 +203,7 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, o
             ))}
           </dl>
         )}
+        {renderSections?.(record)}
         {card.history.length > 0 && (
           <section aria-label="経緯">
             <h2 className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold"><Clock size={13} className="text-accent" />経緯</h2>

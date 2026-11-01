@@ -34,6 +34,17 @@ test('the port is handed once, with the hello and nothing else', () => {
   host.close()
 })
 
+test('a slot\'s frame gets only its place in the hello: the record id, or the chosen company path (A6)', () => {
+  for (const context of [{ slot: 'record_section' as const, recordId: REC }, { slot: 'file_action' as const, path: '企画/台本.pdf', isFolder: false }]) {
+    const host = createBridgeHost({ call: async () => ({ ok: true, data: null }), open: () => ({ ok: true, data: null }), context })
+    const f = frame()
+    host.handOver(f.target)
+    assert.deepEqual(f.posts[0].message, { type: 'acb-bridge', bridge: 1, context })
+    f.posts[0].ports[0].close()
+    host.close()
+  }
+})
+
 test('a known server op goes to main; an unknown op or bad args are answered without reaching it; ui.open stays in the app', async () => {
   const calls: Array<[string, unknown]> = []
   const opened: unknown[] = []

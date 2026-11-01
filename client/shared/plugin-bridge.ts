@@ -105,10 +105,22 @@ export function pluginFrameNavigationAllowed(frameUrl: string | undefined | null
 // ---------------------------------------------------------------------------
 // The bridge's envelope (frame ⇄ core app over the one MessagePort)
 
+/**
+ * Where a frame is shown and what it is about (A6, the four slots), handed in
+ * the hello: a record section gets only the record's id (it reads the record
+ * with `records.get`), a file action only the chosen company path. Nothing
+ * else of the core screen reaches the frame.
+ */
+export type BridgeFrameContext =
+  | { slot: 'tab' }
+  | { slot: 'record_section'; recordId: string }
+  | { slot: 'file_action'; path: string; isFolder: boolean }
+
 /** The message the core app posts to the frame once, with the port. */
 export const BRIDGE_HELLO_TYPE = 'acb-bridge'
-export interface BridgeHello { type: typeof BRIDGE_HELLO_TYPE; bridge: number }
-export const bridgeHello = (): BridgeHello => ({ type: BRIDGE_HELLO_TYPE, bridge: APP_BRIDGE_VERSION })
+export interface BridgeHello { type: typeof BRIDGE_HELLO_TYPE; bridge: number; context?: BridgeFrameContext }
+export const bridgeHello = (context?: BridgeFrameContext): BridgeHello =>
+  ({ type: BRIDGE_HELLO_TYPE, bridge: APP_BRIDGE_VERSION, ...(context ? { context } : {}) })
 
 /** The caller's id of a call (echoed in the answer). */
 export type BridgeCallId = string | number

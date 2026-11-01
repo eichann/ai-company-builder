@@ -241,7 +241,11 @@ export function createTasksApi(deps: TasksDeps) {
       }
       const [mine, ai, askedList, done1, done2] = lists as RecordSummary[][]
       const typeLabels: Record<string, string> = {}
-      for (const t of (types?.status === 200 ? (types.json?.data as { types?: RecordTypeView[] }).types ?? [] : [])) typeLabels[t.definition.name] = t.definition.label
+      const typeImplements: Record<string, string[]> = {}
+      for (const t of (types?.status === 200 ? (types.json?.data as { types?: RecordTypeView[] }).types ?? [] : [])) {
+        typeLabels[t.definition.name] = t.definition.label
+        if (t.definition.implements?.length) typeImplements[t.definition.name] = t.definition.implements
+      }
       const ids = (settings?.status === 200 ? (settings.json?.data as { settings?: { taskListDepartmentIds?: unknown } }).settings?.taskListDepartmentIds : null)
       const doneToday = [...done1, ...done2]
       // A meeting asks for its まとまり only where the company has some to choose from.
@@ -255,7 +259,7 @@ export function createTasksApi(deps: TasksDeps) {
           available: true,
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
           items: classifyTasks({
-            me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, people: names, bundles: linked,
+            me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
             // Only meetings whose link could be read: one not looked up never asks.
             meetingsWithoutBundle: readMeetings.filter(m => bundleCache.get(`${companyId}:${m.id}@${m.version}`) === null),
           }),

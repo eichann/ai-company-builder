@@ -38,6 +38,15 @@ test('each record is placed once: 引き受け待ち, the member\'s turn, a repl
   assert.equal(items.find(i => i.id === 'task-todo01')?.bundle?.title, 'AI の仕組みづくり')
 })
 
+test('each item carries the interfaces its type implements (a plugin\'s peek lists by them, A6)', () => {
+  const items = classifyTasks(src({
+    typeImplements: { task: ['request'] },
+    myTurn: [rec('task-req001', 'todo'), rec('meeting-ab1234', 'read', {}, { type: 'meeting' })],
+  }))
+  assert.deepEqual(items.find(i => i.id === 'task-req001')?.implements, ['request'])
+  assert.equal(items.find(i => i.id === 'meeting-ab1234')?.implements, undefined)
+})
+
 test('only a task the member asked of themselves may be finished from the list', () => {
   const items = classifyTasks(src({ myTurn: [rec('task-own001', 'todo'), rec('task-from01', 'todo', { requested_by: 'u-tanaka' })] }))
   assert.equal(items.find(i => i.id === 'task-own001')?.own, true)
