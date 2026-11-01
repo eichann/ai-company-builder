@@ -10,16 +10,20 @@
  * The run is named `<pluginId>__<step>` (the server's C4 gate allows its tokens only that
  * plugin's operations the step declares, and the connector roles it declares).
  */
-import { isValidSkillName } from '../../../shared/core/names'
-import { PLUGIN_ID_RE, PLUGIN_VERSION_RE } from '../../../shared/core/plugin-declaration'
+import { PLUGIN_ID_RE } from '../../../shared/core/plugin-declaration'
 import { STEP_FILE_RE } from '../../../shared/core/plugin-flow-declaration'
 import { ONTOLOGY_NAME_RE as STEP_NAME_RE } from '../../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../../shared/core/records'
+import { parseProcedurePin } from '../../../shared/core/ai-runs'
+import type { PluginStepProcedurePin } from '../../../shared/core/plugin-declaration'
+import type { PluginStepOnRecord } from '../../../shared/types/plugins'
 import type { AiTurnCandidate } from './types'
+
+export { parseProcedurePin }
+export type { PluginStepOnRecord, PluginStepProcedurePin }
 
 /** `<pluginId>__<step>`: a plugin id has no `_`, a step name no `-`; at most 40 characters (the server's run step). */
 export type PluginRunStep = `${string}__${string}`
-const TREE_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
 
 export function pluginRunStep(pluginId: string, step: string): PluginRunStep | null {
   const name = `${pluginId}__${step}`
@@ -32,26 +36,8 @@ export function isPluginRunStep(value: unknown): value is PluginRunStep {
   return at > 0 && pluginRunStep(value.slice(0, at), value.slice(at + 2)) === value
 }
 
-/** What a work is pinned to (the server's `PluginStepProcedurePin`). */
-export type PluginProcedurePin =
-  | { source: 'plugin'; pluginId: string; version: string; fingerprint: string }
-  | { source: 'company_skill'; skill: string; fingerprint: string }
-
-export function parseProcedurePin(v: unknown): PluginProcedurePin | null {
-  if (typeof v !== 'object' || v === null) return null
-  const p = v as Record<string, unknown>
-  if (p.source === 'plugin' && typeof p.pluginId === 'string' && PLUGIN_ID_RE.test(p.pluginId)
-    && typeof p.version === 'string' && PLUGIN_VERSION_RE.test(p.version) && typeof p.fingerprint === 'string' && /^[0-9a-f]{64}$/.test(p.fingerprint)) {
-    return { source: 'plugin', pluginId: p.pluginId, version: p.version, fingerprint: p.fingerprint }
-  }
-  if (p.source === 'company_skill' && typeof p.skill === 'string' && p.skill.length <= 64 && isValidSkillName(p.skill) && typeof p.fingerprint === 'string' && TREE_RE.test(p.fingerprint)) {
-    return { source: 'company_skill', skill: p.skill, fingerprint: p.fingerprint }
-  }
-  return null
-}
-
-/** One record waiting at a `start: ai_turn` step (`GET /me/plugin-step-turns`). */
-export interface PluginStepTurn {
+/** One record waiting at a `start: ai_turn` step (`GET /me/plugin-step-turns`, the contract's `PluginStepTurn`), as the runner's queue keeps it. */
+export interface QueuedPluginStep {
   recordId: string
   version: number
   pluginId: string
@@ -63,10 +49,10 @@ export interface PluginStepTurn {
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
 
 /** The answer's turns, each checked (a malformed one is left out); null when the answer is not one. */
-export function parsePluginStepTurns(data: unknown): PluginStepTurn[] | null {
+export function parsePluginStepTurns(data: unknown): QueuedPluginStep[] | null {
   const turns = typeof data === 'object' && data !== null ? (data as { turns?: unknown }).turns : undefined
   if (!Array.isArray(turns)) return null
-  const out: PluginStepTurn[] = []
+  const out: QueuedPluginStep[] = []
   for (const t of turns.slice(0, 500)) {
     if (typeof t !== 'object' || t === null) continue
     const v = t as Record<string, unknown>
@@ -77,19 +63,6 @@ export function parsePluginStepTurns(data: unknown): PluginStepTurn[] | null {
     out.push({ recordId: v.recordId, version: v.version, pluginId: v.pluginId, step: v.step, runStep, label: v.label })
   }
   return out
-}
-
-/** A step at a record's state as the server answers it (`GET /me/plugin-steps/records/:id`). */
-export interface PluginStepOnRecord {
-  pluginId: string
-  step: string
-  label: string
-  start: 'ai_turn' | 'person'
-  /** The plugin procedure's file (`steps/<name>.md`) of the version the work runs. */
-  procedure: string
-  tools: string[]
-  connectorRoles: string[]
-  pin: PluginProcedurePin | null
 }
 
 export function parsePluginStepsOn(data: unknown): PluginStepOnRecord[] | null {
@@ -150,7 +123,7 @@ export function recordTypeOf(recordId: string): string | null {
 }
 
 /** The queue's entry for a turn. */
-export function pluginTurnCandidate(turn: PluginStepTurn): AiTurnCandidate {
+export function pluginTurnCandidate(turn: QueuedPluginStep): AiTurnCandidate {
   return { id: turn.recordId, title: turn.label, version: turn.version, pluginStep: turn.runStep }
 }
 
@@ -164,7 +137,7 @@ export function pluginStepConsultationTitle(label: string, now = new Date()): st
  * (the plugin's file, or the company Skill's SKILL.md at the pinned version) as the instructions.
  */
 export function pluginStepFirstMessage(input: {
-  label: string; recordId: string; version: number | null; procedure: string; source: PluginProcedurePin['source']
+  label: string; recordId: string; version: number | null; procedure: string; source: PluginStepProcedurePin['source']
 }): string {
   return [
     '（アプリが AI の番として自動で始めた相談です。私はいま画面を見ていません。）',
@@ -198,7 +171,7 @@ export type PluginStepStartResult = { ok: true; title: string; message: string }
  * The first message of a consultation a person starts from a step (the member's own message, made
  * by the app): the step, the record and the pinned procedure to follow together.
  */
-export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginProcedurePin['source'] }): string {
+export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginStepProcedurePin['source'] }): string {
   return [
     `手順「${input.label}」を、記録 ${input.recordId} について一緒に進めたいです。まず records_get で記録を確かめてから、次の${input.source === 'company_skill' ? '会社の手順書（スキル）' : '手順書'}に沿って進めてください。`,
     '',

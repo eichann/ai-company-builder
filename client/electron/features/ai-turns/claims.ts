@@ -26,7 +26,7 @@ import type { RunRegistry } from '../../records/runs'
 // lane C ▼
 import {
   isPluginRunStep, parsePluginStepTurns, parsePluginStepsOn, parseProcedurePin, pluginStepFirstMessage, pluginStepToolAccess,
-  type PluginProcedurePin, type PluginStepToolAccess, type PluginStepTurn,
+  type PluginStepProcedurePin, type PluginStepToolAccess, type QueuedPluginStep,
 } from '../../../shared/ai-turn-steps/plugin'
 // lane C ▲
 
@@ -59,7 +59,7 @@ export interface AiTurnClaimsDeps {
    * version's file (`<userData>/plugins/<id>@<version>/<file>`, kept by C2), or of the company
    * Skill's SKILL.md at the pinned tree in the member's company folder. null = not on this PC.
    */
-  readProcedure?: (companyId: string, pin: PluginProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
+  readProcedure?: (companyId: string, pin: PluginStepProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
   // lane C ▲
 }
 
@@ -74,7 +74,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   const heldKey = (companyId: string, recordId: string) => `${companyId}\n${recordId}`
   // lane C ▼
   /** The member's records at a plugin's ai_turn step, as last listed (company → record → turn). */
-  const pluginTurns = new Map<string, Map<string, PluginStepTurn>>()
+  const pluginTurns = new Map<string, Map<string, QueuedPluginStep>>()
   /** Plugin step runs this app holds: record → the state it started at (settle: moved on = done). */
   const pluginStarts = new Map<string, string>()
   /** The tool ceiling of each plugin step's consultation (the chat server asks it). */
@@ -145,7 +145,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
    * (the package C2 keeps, or the company Skill at the pinned tree); the step's tools — narrowed
    * by the pinned version on the server — are the consultation's ceiling.
    */
-  async function claimPluginStep(companyId: string, turn: PluginStepTurn, conversationId: string, companyRoot: string | null): Promise<AiTurnClaimResult> {
+  async function claimPluginStep(companyId: string, turn: QueuedPluginStep, conversationId: string, companyRoot: string | null): Promise<AiTurnClaimResult> {
     const { recordId } = turn
     const now = await recordOf(companyId, recordId)
     if (!now) return { claimed: false, reason: 'unavailable' }
@@ -181,7 +181,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * /me/plugin-step-turns`), remembered for the claim. Not readable (offline, an older server):
      * the last list.
      */
-    async pluginTurns(companyId: string): Promise<PluginStepTurn[]> {
+    async pluginTurns(companyId: string): Promise<QueuedPluginStep[]> {
       if (!COMPANY.test(companyId)) return []
       const r = await session(companyId, 'GET', '/me/plugin-step-turns')
       const turns = r?.status === 200 ? parsePluginStepTurns(r.data) : null

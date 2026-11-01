@@ -14,7 +14,7 @@ import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
 import { registerPluginStepsIpc } from '../electron/features/plugin-steps/ipc'
 import type { IpcRegistrar } from '../electron/ipc/registrar'
-import { parsePluginStepTurns, pluginStepToolAccess, type PluginProcedurePin } from '../shared/ai-turn-steps/plugin'
+import { parsePluginStepTurns, pluginStepToolAccess, type PluginStepProcedurePin } from '../shared/ai-turn-steps/plugin'
 
 const COMPANY = 'acme'
 const DEAL = 'deal-0a1b2c3d4e5f'
@@ -152,13 +152,13 @@ test('the procedure on this PC: the pinned package file only inside its folder; 
       folderOf: (c, id, v) => (c === COMPANY && id === 'sample-sales' && v === '0.1.0' ? folder : null),
       git: async (_root, args) => { gitCalls.push(args); return '# 会社の手順（固定した版）\n' },
     })
-    const pin = PLUGIN_PIN as PluginProcedurePin
+    const pin = PLUGIN_PIN as PluginStepProcedurePin
     assert.equal(await read(COMPANY, pin, 'steps/work.md', null), '# 0.1.0 の手順\n')
     assert.equal(await read(COMPANY, pin, 'steps/../../secret.md', null), null)
     assert.equal(await read(COMPANY, pin, '../secret.md', null), null)
     // Another version (not the pinned one listed for this company) is not here.
-    assert.equal(await read(COMPANY, { ...pin, version: '0.2.0' } as PluginProcedurePin, 'steps/work.md', null), null)
-    const skill: PluginProcedurePin = { source: 'company_skill', skill: 'deal-proposal', fingerprint: TREE }
+    assert.equal(await read(COMPANY, { ...pin, version: '0.2.0' } as PluginStepProcedurePin, 'steps/work.md', null), null)
+    const skill: PluginStepProcedurePin = { source: 'company_skill', skill: 'deal-proposal', fingerprint: TREE }
     assert.equal(await read(COMPANY, skill, 'steps/work.md', '/company'), '# 会社の手順（固定した版）\n')
     assert.deepEqual(gitCalls, [['cat-file', 'blob', `${TREE}:SKILL.md`]])
     assert.equal(await read(COMPANY, skill, 'steps/work.md', null), null)
@@ -190,7 +190,7 @@ test('the chat server refuses a plugin step whose ceiling main does not hold (ne
 })
 
 // A person's start (`start: person` steps on the record's card).
-function personIpc(opts: { pin?: unknown; readProcedure?: (pin: PluginProcedurePin) => string | null } = {}) {
+function personIpc(opts: { pin?: unknown; readProcedure?: (pin: PluginStepProcedurePin) => string | null } = {}) {
   const calls: string[] = []
   const handlers = new Map<string, (...args: unknown[]) => unknown>()
   const ipc = { handle: (channel: string, fn: (...args: unknown[]) => unknown) => { handlers.set(channel, fn) } } as unknown as IpcRegistrar

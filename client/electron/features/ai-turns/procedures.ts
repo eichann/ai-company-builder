@@ -12,7 +12,7 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { isValidSkillName } from '../../../../shared/core/names'
 import { STEP_FILE_RE } from '../../../../shared/core/plugin-flow-declaration'
-import type { PluginProcedurePin } from '../../../shared/ai-turn-steps/plugin'
+import type { PluginStepProcedurePin } from '../../../shared/ai-turn-steps/plugin'
 
 /** The longest procedure handed to the AI (a procedure is a page of instructions, not a document store). */
 const PROCEDURE_MAX_BYTES = 200_000
@@ -25,7 +25,7 @@ export interface ProcedureReaderDeps {
 }
 
 export function createProcedureReader(deps: ProcedureReaderDeps) {
-  return async function readProcedure(companyId: string, pin: PluginProcedurePin, file: string, companyRoot: string | null): Promise<string | null> {
+  return async function readProcedure(companyId: string, pin: PluginStepProcedurePin, file: string, companyRoot: string | null): Promise<string | null> {
     if (pin.source === 'plugin') {
       if (!STEP_FILE_RE.test(file)) return null
       const folder = deps.folderOf(companyId, pin.pluginId, pin.version)

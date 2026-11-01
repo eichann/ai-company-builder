@@ -9,7 +9,7 @@ import { inboxTriage } from './inbox-triage'
 import { followUp } from './follow-up'
 import { minutesReading } from './minutes-reading'
 // lane C ▼
-import { pluginTurnCandidate, type PluginStepTurn } from './plugin'
+import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
 // lane C ▲
 import type { AiTurnCandidate, AiTurnStepDefinition } from './types'
 
@@ -84,7 +84,7 @@ export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): bool
  * minutes from main's check (`listedBy: 'minutes'`), the rest from the task list's 「AI の番」
  * (`turn: 'ai'`).
  */
-export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly PluginStepTurn[] }): AiTurnCandidate[] {
+export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[] }): AiTurnCandidate[] {
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
   for (const n of input.minutes) {
