@@ -249,6 +249,34 @@ describe('the member\'s AI reads the thread with its record token (B4 / B5)', ()
     expect(other.body.code).toBe('THREAD_NOT_FOUND')
     expect((await call('th-sato', 'GET', `/api/records-ai/threads/${mailInteraction}`)).status).toBe(401)
   })
+
+  it('inside a step\'s run the role is asked first: refused → 403 NOT_IN_STEP and nothing read; the role asked follows the channel', async () => {
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const runOf = (id: string, step: string, recordId: string) => {
+      const at = new Date().toISOString()
+      sqliteCompanyData(db).forCompany(CO).aiRuns.insert({
+        id, recordId, step, userId: 'th-sato', state: 'running', generation: 1, deviceId: 'device-th-0001', conversationId: `conv-${id}`,
+        claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0,
+        pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
+      })
+      return id
+    }
+    const member = { companyId: CO, userId: 'th-sato', role: 'member' }
+    const asked: string[] = []
+    // The route's gate (record-ai-auth connectorRoleRefusal → pluginRunGate): a business step that does not declare the role.
+    const gated = (runId: string) => (r: string) => { asked.push(r); return services.pluginRunGate.allowsConnectorRole(member, runId, r) }
+    const before = google.requests.length
+    const refused = await services.threads.thread(member, mailInteraction, gated(runOf('th-run-1', 'sample-sales__work', mailInteraction)))
+    expect(refused).toMatchObject({ ok: false, body: { code: 'NOT_IN_STEP' } })
+    expect(asked).toEqual(['mail.read'])
+    expect(google.requests.length).toBe(before)
+    const chat = await services.threads.thread(member, chatInteraction, gated('th-run-1'))
+    expect(chat).toMatchObject({ ok: false, body: { code: 'NOT_IN_STEP' } })
+    expect(asked).toEqual(['mail.read', 'chat.receive'])
+    // A core step's run (not a business plugin's) keeps what it had.
+    const core = await services.threads.thread(member, mailInteraction, gated(runOf('th-run-2', 'inbox-triage', mailInteraction)))
+    expect(core.ok).toBe(true)
+  })
 })
 
 describe('a mail reply into the member\'s own conversation', () => {
