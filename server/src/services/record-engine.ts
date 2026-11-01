@@ -19,7 +19,7 @@
  * one. Every entry carries before/after values of each field it changed, so
  * any version of a record can be replayed (shared/core/record-ledger.ts).
  */
-import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
+import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
 import { aiTurnStates, INTERFACES, isDateValue, normalizeTagsValue, OK_FIELDS, type ActionDef, type FieldKind, type LinkDef, type TypeDefinition } from '../../shared/core/record-types'
@@ -1239,7 +1239,8 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       if (!records.settings().enabled) return fail('records-off')
       const row = RECORD_ID_RE.test(input.recordId) ? records.byIds([input.recordId])[0] : undefined
       if (!row || row.removedAt !== null) return fail('not-found')
-      if (!SERVICE_OWNED_TYPES.includes(row.type)) return fail('not-service-owned')
+      // Another type (task) only along its listed state changes: the server clock's move (core-types.ts WAIT_OVER).
+      if (!SERVICE_OWNED_TYPES.includes(row.type) && (input.to === null || !Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, row.type))) return fail('not-service-owned')
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return fail('type-unknown')
       const s = records.states([row.id])[0]

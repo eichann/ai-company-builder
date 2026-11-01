@@ -367,6 +367,17 @@ All git in request handlers is async (`execFile`, `lib/git-exec.ts`).
 in `server/src` outside an allow-list (today only startup-time `configureBareRepo` in
 `lib/git-server/index.ts`). Spawned searches are queued and bounded (`company-files.md`).
 
+## Jobs on a timer
+
+Started once per process by `index.ts` (never by `composition.ts`, which tests import), timers
+unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
+**server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
+clock"). A new time-based job goes into the server clock rather than a timer of its own, and
+keeps its rules: never runs the AI, writes records only through the engine's writers, takes
+each company through its own handle with a per-company limit and a yield between companies,
+refuses to overlap itself, and derives everything from stored rows (a restart or a second run
+changes nothing more).
+
 ## Database and data
 
 - SQLite through better-sqlite3 (no ORM): `data/app.sqlite` (app) and `data/auth.sqlite`

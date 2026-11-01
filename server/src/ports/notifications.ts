@@ -23,8 +23,8 @@ export interface NotificationRow {
 }
 
 export interface NotificationRepository {
-  /** Insert these notices; a row whose dedupe key the member already has is skipped. */
-  insert(rows: NotificationRow[]): void
+  /** Insert these notices; a row whose dedupe key the member already has is skipped. The ids written. */
+  insert(rows: NotificationRow[]): string[]
   /** The member's newest notices (newest first), at most `limit`. */
   list(userId: string, limit: number): NotificationRow[]
   /** Mark the member's notices read (`ids` null = all of them); the number changed. */

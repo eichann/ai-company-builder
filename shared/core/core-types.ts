@@ -293,7 +293,37 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['unconfirmed'], to: 'confirmed' },
     { from: ['unconfirmed', 'confirmed'], to: 'retracted' },
   ],
+  // Not service-owned: only the server clock's 「見込みの日時が過ぎた」 (WAIT_OVER below), a state
+  // change only — the writer refuses a field-only change of a type that is not service-owned.
+  task: [
+    { from: ['waiting'], to: 'preparing' },
+    { from: ['waiting'], to: 'todo' },
+  ],
 }
+
+/**
+ * The server clock (server/src/services/server-clock.ts, notifications.md
+ * "The server clock"): when a record of `type` is still in `from` after its
+ * `field` (a date, day or day + time) has passed — the reply or delivery did
+ * not come — the clock moves it so 追いかけ (following up) can happen: to
+ * `aiTurn` when the company's 自動で進める is on and that state is an AI turn of
+ * the type (the AI drafts the follow-up, then 「用意ができた」 / 「先に渡す」
+ * as for any preparation), else to `personTurn` (the assignee's turn), and the
+ * assignee is told. The AI never runs on the server: the clock only moves the
+ * turn. Each move is one of `SERVICE_TRANSITIONS`.
+ */
+export const WAIT_OVER: Readonly<Record<string, { field: string; from: string; aiTurn: string; personTurn: string }>> = {
+  task: { field: 'wait_until', from: 'waiting', aiTurn: 'preparing', personTurn: 'todo' },
+}
+
+/** The ledger action of the clock's move (no action of the type: nobody else can run it). */
+export const WAIT_OVER_ACTION = 'wait_over'
+
+/**
+ * The server clock as a ledger actor: kind `external` (server-side, never a
+ * member, never the AI), this id, and a source the history shows as is.
+ */
+export const CLOCK_ACTOR = Object.freeze({ id: 'acb:clock', kind: 'external' as const, source: 'ACB の時計' })
 
 /** May the service writer move a record of `type` from `from` to `to`? */
 export function serviceTransitionAllowed(type: string, from: string | null, to: string): boolean {

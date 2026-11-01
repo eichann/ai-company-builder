@@ -22,11 +22,14 @@ export function sqliteNotificationRepository(conn: Database.Database, companyId:
       const stmt = conn.prepare(
         `INSERT OR IGNORE INTO notifications (company_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
+      const written: string[] = []
       conn.transaction(() => {
         for (const r of rows) {
-          stmt.run(companyId, r.id, r.userId, r.kind, r.recordId, r.recordVersion, r.action, r.actorId, r.actorKind, r.dedupeKey, r.createdAt, r.readAt)
+          const run = stmt.run(companyId, r.id, r.userId, r.kind, r.recordId, r.recordVersion, r.action, r.actorId, r.actorKind, r.dedupeKey, r.createdAt, r.readAt)
+          if (run.changes > 0) written.push(r.id)
         }
       })()
+      return written
     },
     list(userId, limit) {
       const rows = conn.prepare(

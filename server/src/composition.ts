@@ -20,6 +20,7 @@ import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
+import { sqliteRecordContentEraser } from './adapters/sqlite/record-contents'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
@@ -60,6 +61,7 @@ import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createNotificationService } from './services/notifications'
+import { createServerClock } from './services/server-clock'
 import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
@@ -199,11 +201,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
+  const taskSettings = createTaskSettingsService({ ...repos, ...shared })
   const notifications = createNotificationService({
     ...shared,
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
     // No per-company zone yet (calendar.md): the one place a setting would replace.
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
   })
   /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
@@ -229,6 +233,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
   })
+  // The content store's eraser: only the server clock's retention run here (no route; records.md).
+  const contentEraser = sqliteRecordContentEraser(conn)
   const decisions = createDecisionService({
     ...shared,
     writer: serviceRecords,
@@ -430,7 +436,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
-    taskSettings: createTaskSettingsService({ ...repos, ...shared }),
+    taskSettings,
+    // The server clock (notifications.md "The server clock"): started once per process by index.ts.
+    serverClock: createServerClock({
+      ...shared,
+      companyIds: () => repos.companies.allIds(),
+      writer: serviceRecords,
+      notifications,
+      taskSettings: companyId => taskSettings.settingsOf(companyId),
+      timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+      // The content store's retention (records.md "The content store"): reason `retention`, per company.
+      expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
+      yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
+    }),
     permissionViews,
     permissionEditor: createPermissionEditorService({
       ...repos,

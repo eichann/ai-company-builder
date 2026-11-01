@@ -10,9 +10,11 @@
  *   actor. No value, title or note is stored.
  * - The text is built when the member reads, and only for a record they can
  *   read NOW (`recordReader`): a member who lost access sees nothing of it.
- * - Overdue (A-2: to the requester, once per due) and a stuck AI turn (C-18:
- *   24 h, to the requester, once per version) are computed when the member
- *   reads — there is no timer on the server.
+ * - Overdue (A-2: to the requester, once per due, the next business morning
+ *   in company time) and a stuck AI turn (C-18: 24 h, to the requester, once
+ *   per version) are written by the server clock (`sweep`, services/
+ *   server-clock.ts); the same rule runs when the member reads, as a safety
+ *   net — the dedupe keys make the two meet once.
  * - The push channel carries only `{ kind: 'notifications', version }`, a
  *   fresh value: the app asks again; it never acts on the signal.
  */
@@ -20,12 +22,14 @@ import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICA
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerValue } from '../../shared/core/record-ledger'
-import type { TypeDefinition } from '../../shared/core/record-types'
+import { aiTurnStates, type TypeDefinition } from '../../shared/core/record-types'
+import { addDays, isBusinessDay } from '../../shared/core/business-days'
+import { CLOCK_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { NotificationRow } from '../ports/notifications'
-import type { RecordRow } from '../ports/records'
+import type { RecordAccessRow, RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
@@ -43,6 +47,34 @@ export interface NotificationServiceDeps {
   roleOf: (companyId: string, userId: string) => string | null
   /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
   timeZoneOf?: (companyId: string) => string
+  /** The company's own days off (`YYYY-MM-DD`, task settings): an overdue notice waits for a business morning. */
+  holidaysOf?: (companyId: string) => string[]
+  /**
+   * Stage 3 (E-26): Slack DMs for important notices plug in here — called with
+   * the notices just written (no text: kind, record, member). Not wired yet.
+   */
+  outside?: (companyId: string, rows: NotificationRow[]) => void
+}
+
+/** An overdue notice is written from this hour (company time) of the first business day after the due's day (A-2). */
+export const OVERDUE_NOTICE_HOUR = 9
+
+/**
+ * The latest business morning that has begun (`YYYY-MM-DD`): today when it is
+ * a business day and OVERDUE_NOTICE_HOUR has come, else the business day
+ * before. A due whose day is before it has had its morning: notify (A-2,
+ * 「翌朝」 — after a Friday or before a holiday, the next business day's).
+ */
+export function overdueMorning(nowMs: number, timeZone: string, holidays: string[]): string {
+  const now = companyNow(nowMs, timeZone)
+  let day = now.slice(0, 10)
+  if (isBusinessDay(day, holidays) && Number(now.slice(11, 13)) >= OVERDUE_NOTICE_HOUR) return day
+  // A year has at most ~130 days off; 400 steps cannot be reached by valid input.
+  for (let i = 0; i < 400; i++) {
+    day = addDays(day, -1)
+    if (isBusinessDay(day, holidays)) return day
+  }
+  return day
 }
 
 /** Notices older than this are forgotten (when the member next reads). */
@@ -70,12 +102,6 @@ export function companyNow(nowMs: number, timeZone: string): string {
   return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}`
 }
 
-/** Has this due passed? A date-only due passes when its day is over; one with a time, at that minute. */
-export function duePassed(due: string, nowMs: number, timeZone: string = DEFAULT_COMPANY_TIME_ZONE): boolean {
-  const now = companyNow(nowMs, timeZone)
-  return due.length === 10 ? due < now.slice(0, 10) : due < now
-}
-
 /** `2026-11-05` → 11月5日, `2026-11-05T15:00` → 11月5日 15:00. */
 function dueText(due: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(due)
@@ -99,6 +125,8 @@ function pastTense(label: string): string | null {
 export function noticeKind(userId: string, change: RecordChange, final: ReadonlySet<string>): NotificationKind {
   const { entry, fields, type } = change
   const stateChanged = entry.fromState !== entry.toState
+  // The server clock moved a wait that is over to the follow-up's turn (on by default).
+  if (entry.action === WAIT_OVER_ACTION && entry.actorId === CLOCK_ACTOR.id) return 'wait_over'
   if (type === 'approval' && stateChanged && entry.fromState !== null && str(fields.requested_by) === userId) return 'approval_result'
   if (stateChanged && entry.toState !== null && final.has(entry.toState)) {
     if (entry.changes.some(c => c.field === 'ok_by' && c.after === userId)) return 'ok_completed'
@@ -125,42 +153,81 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     return kinds
   }
 
-  /** Overdue requests and stuck AI turns of what the member asked for, as notices (once each). */
-  function computeDue(member: Member, handle: CompanyData, reader: ReturnType<typeof recordReader>) {
-    const records = handle.records
-    const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
-    if (types.length === 0) return
-    const defs = new Map(types.map(([n, t]) => [n, t.definition]))
-    const candidates = records.candidates({ types: [...defs.keys()], fields: [{ name: 'requested_by', values: [member.userId] }] }, MAX_COMPUTED_CANDIDATES)
-      .filter(r => reader.record(r))
-    if (candidates.length === 0) return
+  /**
+   * Overdue requests (A-2) and stuck AI turns (C-18) among `candidates`, as
+   * notice rows for their requester — only a requester who can read the
+   * record now (an owner-only record's requester is its owner, and a notice
+   * goes to nobody else). One rule for the server clock's sweep and the
+   * read-time safety net; the dedupe keys make the two meet once.
+   */
+  function dueRowsOf(companyId: string, handle: CompanyData, candidates: RecordAccessRow[], defs: Map<string, TypeDefinition>, requester: string | null): NotificationRow[] {
+    if (candidates.length === 0) return []
     const nowMs = clock.nowMs()
     const now = clock.now()
-    const timeZone = deps.timeZoneOf?.(member.companyId) ?? DEFAULT_COMPANY_TIME_ZONE
+    const timeZone = deps.timeZoneOf?.(companyId) ?? DEFAULT_COMPANY_TIME_ZONE
+    const morning = overdueMorning(nowMs, timeZone, deps.holidaysOf?.(companyId) ?? [])
+    const byId = new Map(candidates.map(r => [r.id, r]))
+    const scopes = handle.scopes.listWithRules()
+    const readers = new Map<string, ReturnType<typeof recordReader> | null>()
+    const readerOf = (userId: string) => {
+      if (!readers.has(userId)) {
+        const role = deps.roleOf(companyId, userId)
+        readers.set(userId, role === null ? null : recordReader({ companyId, userId, role }, scopes))
+      }
+      return readers.get(userId) ?? null
+    }
     const rows: NotificationRow[] = []
-    for (const s of records.states(candidates.map(r => r.id))) {
-      const def = defs.get(candidates.find(r => r.id === s.recordId)?.type ?? '') as TypeDefinition
-      if (!def || s.state === null || def.final.includes(s.state)) continue
+    for (const s of handle.records.states(candidates.map(r => r.id))) {
+      const rec = byId.get(s.recordId)
+      const def = rec ? defs.get(rec.type) : undefined
+      if (!rec || !def || s.state === null || def.final.includes(s.state)) continue
       let fields: Record<string, LedgerValue> = {}
       try { fields = JSON.parse(s.fields) as Record<string, LedgerValue> } catch { continue }
+      const requestedBy = str(fields.requested_by)
       const assignee = str(fields.assignee)
+      if (requestedBy === null || (requester !== null && requestedBy !== requester)) continue
       // What the member asked of someone else: their own work is already on their own list.
-      if (assignee === null || assignee === member.userId) continue
-      const base = { userId: member.userId, recordId: s.recordId, recordVersion: s.version, action: '', actorId: null, actorKind: null, createdAt: now, readAt: null }
+      if (assignee === null || assignee === requestedBy) continue
+      if (!readerOf(requestedBy)?.record(rec)) continue
+      const base = { userId: requestedBy, recordId: s.recordId, recordVersion: s.version, action: '', actorId: null, actorKind: null, createdAt: now, readAt: null }
       const due = str(fields.due)
-      if (due !== null && duePassed(due, nowMs, timeZone)) {
+      if (due !== null && due.slice(0, 10) < morning) {
         rows.push({ ...base, id: deps.ids.newId(), kind: 'overdue', dedupeKey: `overdue:${s.recordId}:${due}` })
       }
-      const aiOnly = Object.values(def.actions).some(a => a.who.length === 1 && a.who[0] === 'ai' && (a.from ?? def.states).includes(s.state as string))
-      if (aiOnly && nowMs - Date.parse(s.updatedAt) >= AI_TURN_STUCK_MS) {
+      if (aiTurnStates(def).has(s.state) && nowMs - Date.parse(s.updatedAt) >= AI_TURN_STUCK_MS) {
         rows.push({ ...base, id: deps.ids.newId(), kind: 'ai_turn_stuck', dedupeKey: `ai_turn_stuck:${s.recordId}:${s.version}` })
       }
     }
-    if (rows.length > 0) handle.notifications.insert(rows)
+    return rows
+  }
+
+  function requestTypes(handle: CompanyData): Map<string, TypeDefinition> {
+    return new Map([...currentTypes(handle.records)].filter(([, t]) => t.definition.implements.includes('request')).map(([n, t]) => [n, t.definition]))
+  }
+
+  /** Write computed rows (a dedupe key already there is skipped); signal the members who got a new one with its kind on. */
+  function writeComputed(companyId: string, handle: CompanyData, rows: NotificationRow[]): number {
+    if (rows.length === 0) return 0
+    const written = new Set(handle.notifications.insert(rows))
+    const fresh = rows.filter(r => written.has(r.id))
+    if (fresh.length === 0) return 0
+    const told = [...new Set(fresh.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId))]
+    if (told.length > 0) { try { deps.push(companyId, told) } catch { /* their own check catches up */ } }
+    try { deps.outside?.(companyId, fresh) } catch { /* never fails the notices */ }
+    return fresh.length
+  }
+
+  /** The read-time safety net: what the member asked for, by the clock's rule (no duplicates: same keys). */
+  function computeDue(member: Member, handle: CompanyData, reader: ReturnType<typeof recordReader>) {
+    const defs = requestTypes(handle)
+    if (defs.size === 0) return
+    const candidates = handle.records.candidates({ types: [...defs.keys()], fields: [{ name: 'requested_by', values: [member.userId] }] }, MAX_COMPUTED_CANDIDATES)
+      .filter(r => reader.record(r))
+    writeComputed(member.companyId, handle, dueRowsOf(member.companyId, handle, candidates, defs, member.userId))
   }
 
   function actorText(row: NotificationRow, names: Map<string, { email: string; name: string | null }>): string {
-    if (row.actorKind === 'external') return 'つないでいるサービス'
+    if (row.actorKind === 'external') return row.actorId === CLOCK_ACTOR.id ? 'ACB' : 'つないでいるサービス'
     const a = row.actorId ? names.get(row.actorId) : undefined
     const who = a ? `${a.name || a.email}さん` : 'だれか'
     return row.actorKind === 'ai' ? `${who}の AI` : who
@@ -201,6 +268,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       }
       case 'ai_turn_stuck':
         return `${t}の AI の番が 24 時間以上進んでいません。担当の人のアプリが閉じているかもしれません`
+      case 'wait_over': {
+        const to = entry()?.toState
+        const ai = to !== undefined && to !== null && def !== undefined && aiTurnStates(def).has(to)
+        return `${t}の返事・届く見込みの日時が過ぎました。${ai ? 'AI が追いかけを用意します' : '追いかけてください'}`
+      }
       default: {
         if (row.action === 'create') return `${actor}が${t}であなたを担当にしました`
         if (row.action === 'undo') return `${actor}が${t}の変更を取り消しました`
@@ -245,6 +317,28 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       handle.notifications.insert(rows)
       const told = rows.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId)
       if (told.length > 0) deps.push(companyId, told)
+      try { deps.outside?.(companyId, rows) } catch { /* never fails the engine's write */ }
+    },
+
+    /**
+     * The server clock's job (services/server-clock.ts): overdue and stuck-AI-turn
+     * notices of one company, at most `limit` records looked at per kind (so one
+     * company's backlog cannot hold up the others). Newest dues first: a due that
+     * just had its morning is always within the limit. Returns the notices written.
+     */
+    sweep(companyId: string, limit: number): number {
+      const handle = companyData.forCompany(companyId)
+      if (!handle.records.settings().enabled) return 0
+      const defs = requestTypes(handle)
+      if (defs.size === 0) return 0
+      const types = [...defs.keys()]
+      const morning = overdueMorning(clock.nowMs(), deps.timeZoneOf?.(companyId) ?? DEFAULT_COMPANY_TIME_ZONE, deps.holidaysOf?.(companyId) ?? [])
+      const open = [...new Set([...defs.values()].flatMap(d => d.states.filter(s => !d.final.includes(s))))]
+      const overdue = handle.records.candidates({ types, states: open, ranges: [{ name: 'due', lt: morning }], sort: { field: 'due', order: 'desc' } }, limit)
+      const aiTurn = [...new Set([...defs.values()].flatMap(d => [...aiTurnStates(d)]))]
+      const stuck = aiTurn.length > 0 ? handle.records.candidates({ types, states: aiTurn }, limit) : []
+      const seen = new Map([...overdue, ...stuck].map(r => [r.id, r]))
+      return writeComputed(companyId, handle, dueRowsOf(companyId, handle, [...seen.values()], defs, null))
     },
 
     /** `GET /me/notifications`: the member's notices they may see now, newest first. */

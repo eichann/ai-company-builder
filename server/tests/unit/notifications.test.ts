@@ -298,11 +298,15 @@ describe('notices from the engine', () => {
 })
 
 describe('notices computed when read', () => {
-  it('overdue: once per due, to the requester only, after the day (company clock)', async () => {
+  it('overdue: once per due, to the requester only, the next business morning (company clock)', async () => {
     await startedTask({ due: '2026-11-02' })
     // 2026-11-02 10:00 in Japan: the day is not over.
     expect(list('u-alice').items).toEqual([])
-    nowMs = Date.parse('2026-11-02T15:00:00.000Z') // 11-03 00:00 in Japan
+    nowMs = Date.parse('2026-11-02T15:00:00.000Z') // 11-03 00:00 in Japan (文化の日: no business morning yet)
+    expect(list('u-alice').items).toEqual([])
+    nowMs = Date.parse('2026-11-03T23:59:00.000Z') // 11-04 08:59 in Japan
+    expect(list('u-alice').items).toEqual([])
+    nowMs = Date.parse('2026-11-04T00:00:00.000Z') // 11-04 09:00 in Japan
     expect(list('u-alice').items.map(i => [i.kind, i.text])).toEqual([['overdue', '「提案書を作る」が期限（11月2日）を過ぎています']])
     expect(list('u-alice').items).toHaveLength(1)
     expect(list('u-bob').items).toEqual([])

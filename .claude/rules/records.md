@@ -310,7 +310,9 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
 `server/tests/helpers/task-v4.ts` keeps the version 4 text). Adds:
 
 - Fields `tags` (kind `tags`, "Tags"), `wait_until` (kind `date`, day or day + time: when a reply
-  or delivery is expected — what 追いかけ will look at), `prep_summary` (long text: what the AI
+  or delivery is expected — what 追いかけ looks at: the server clock moves a `waiting` task whose
+  `wait_until` passed to the AI's or the assignee's turn, `notifications.md` "The server
+  clock"), `prep_summary` (long text: what the AI
   checked and made). Links `bundle` (`interface: bundle`, one) and `prepared` (`interface:
   prepared`, many: the mail drafts / approval requests the AI made — 「AI が用意したもの」).
   Actions `set_tags`, `set_wait_until`, `set_bundle` (requester / assignee / AI; an action
@@ -522,14 +524,19 @@ every person field set must be able to read the record (`assignee-cannot-read`, 
 place), state + ledger in one transaction with a compare-and-set (`stale`), the ledger actor is
 the one passed (human / ai / external), assignee / next actor / `notify` told (kind + version
 only). Results `{ ok: true, record, entry }` or `{ ok: false, reason }`. Whether that actor may
-do it (the approver approving) is the calling service's rule.
+do it (the approver approving) is the calling service's rule. A type that is **not**
+service-owned (`task`) changes only along its `SERVICE_TRANSITIONS` rows, state changes only (a
+field-only change → `not-service-owned`): the server clock's 「見込みの日時が過ぎた」 moves (waiting →
+preparing / todo, ledger action `wait_over`, actor `CLOCK_ACTOR` = kind `external`, id
+`acb:clock`; `notifications.md` "The server clock").
 
 ## The state engine (4-3, `services/record-engine.ts`)
 
 Exactly five duties (ontology §17.7): (1) the action's `from` states, (2) its `who`, (3) state and
 ledger written in one transaction, (4) tell whom it names, (5) a milestone line. Nothing else:
 arguments are copied into the server fields of the same name, `hand_to` copies one person into
-`next_actor`; no expressions, cascades, timers or outside sends.
+`next_actor`; no expressions, cascades, timers or outside sends (time-based moves are the server
+clock's, a separate service writing through the service writer: `notifications.md`).
 
 - **Who**: a person field of the record whose value is the member, `admin` (owner/admin role),
   `dept_manager` (manages the department holding the record's path or folder), `anyone`. Roles do
@@ -631,8 +638,9 @@ erase it without rewriting history. Table `record_contents` (behind the company 
   `interaction` (owner decision G-33: 3 years). A copy of such a text of at least 20 characters
   stored for another record of the company (same hash) inherits the original's expiry.
   `services/record-contents.ts` `eraseExpired()` erases what has expired in every company
-  (reason `retention`); nothing schedules it yet — the future server clock (or the operator,
-  `erase-content.ts expired`) runs it.
+  (reason `retention`); the server clock runs the eraser's `eraseExpired` per company every 5
+  minutes (`notifications.md` "The server clock"); the operator can too (`erase-content.ts
+  expired`).
 - **Migration**: at startup (`db/index.ts` `migrateRecordContents`) every company not yet marked
   (`record_settings.content_store`) gets its older titles, summaries, content fields, notes and
   reasons moved in; values already referencing their own content are skipped, so it is idempotent.
