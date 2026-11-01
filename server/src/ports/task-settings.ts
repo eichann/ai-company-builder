@@ -13,6 +13,17 @@ export interface StoredTaskSettings {
   updatedBy: string | null
 }
 
+/** One stored absence (代わりの人, records.md "Absence and the delegate"). */
+export interface StoredAbsence {
+  id: string
+  userId: string
+  from: string
+  until: string
+  delegateId: string
+  setBy: string
+  setAt: string
+}
+
 export interface TaskSettingsRepository {
   /** null while the company never changed the defaults. */
   get(): StoredTaskSettings | null
@@ -24,6 +35,12 @@ export interface TaskSettingsRepository {
   replaceDepartmentMembers(departmentId: string, userIds: string[], createdBy: string, at: string): void
   /** The departments the user belongs to (the member left the company → removeMember). */
   departmentIdsOf(userId: string): string[]
-  /** The user left the company: they belong to no department of it any more. */
+  /** The user left the company: they belong to no department of it any more, and their absences (and those they cover) go. */
   removeMember(userId: string): void
+
+  /** Every absence of the company that has not ended before `day` (`until >= day`), soonest first. */
+  absencesFrom(day: string): StoredAbsence[]
+  addAbsence(absence: StoredAbsence): void
+  /** Remove one absence; false when there is none with that id here. */
+  removeAbsence(id: string): boolean
 }

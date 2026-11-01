@@ -21,6 +21,7 @@ import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { taskSettingsRoute } from './routes/task-settings'
+import { absencesRoute } from './routes/absences'
 import { recordsRoute } from './routes/records'
 import { recordsAiRoute } from './routes/records-ai'
 import { outboundMailRoute } from './routes/outbound-mail'
@@ -109,6 +110,7 @@ app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', taskSettingsRoute)
+app.route('/api/companies/:companyId', absencesRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)

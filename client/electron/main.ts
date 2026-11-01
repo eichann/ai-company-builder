@@ -46,6 +46,7 @@ import { registerCalendarIpc } from './features/calendar/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
+import { registerAbsencesIpc } from './features/absences/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
@@ -255,6 +256,8 @@ registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.co
 registerRecordViewsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.
+registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).
 registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays

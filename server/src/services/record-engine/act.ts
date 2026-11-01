@@ -60,9 +60,22 @@ export function acting(ctx: EngineContext) {
       }
       // Duty 2: who?
       const place = row.path ?? row.folder ?? ''
-      const managesPlace = action.who.includes('dept_manager') && deps.managedFolders(member.companyId, member.userId).some(f => isSameOrAncestorPath(f, place))
+      const manages = (userId: string) => action.who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
+      let byWho = mayAct(action.who, member, actor, current.fields, manages(member.userId))
+      // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
+      // or department they stand in for — never the absentee's role (no admin powers), and every
+      // read check above and below stays the delegate's own.
+      let onBehalfOf: string | null = null
+      if (!byWho) {
+        for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
+          if (mayAct(action.who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee))) {
+            byWho = true
+            onBehalfOf = absentee
+            break
+          }
+        }
+      }
       // …or, for a person `ok_from` names (never the AI), with a statement of whose OK it was.
-      const byWho = mayAct(action.who, member, actor, current.fields, managesPlace)
       const withOk = !byWho && actor.kind === 'human' && (action.okFrom ?? []).some(w => current.fields[w] === member.userId)
       if (!byWho && !withOk) {
         return refuse('forbidden', actor.kind === 'ai' && !action.who.includes('ai')
@@ -208,6 +221,7 @@ export function acting(ctx: EngineContext) {
         recordId: row.id, version: current.version + 1, action: actionName, fromState: current.state, toState: nextState,
         actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note, changes, attachments,
         decision, isDecision: action.decision, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
+        ...(onBehalfOf ? { onBehalfOf } : {}),
       }
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number

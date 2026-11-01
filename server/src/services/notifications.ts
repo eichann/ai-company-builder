@@ -21,7 +21,7 @@
 import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX } from '../../shared/types/notifications'
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
-import type { LedgerValue } from '../../shared/core/record-ledger'
+import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay } from '../../shared/core/business-days'
 import { CLOCK_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
@@ -30,11 +30,13 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { NotificationRow } from '../ports/notifications'
 import type { RecordAccessRow, RecordRow } from '../ports/records'
+import type { AbsenceCover } from '../../shared/core/absences'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
 import type { RecordChange } from './record-engine'
 import { currentTypes } from './record-index'
+import { waitingFor } from './records'
 
 export interface NotificationServiceDeps {
   companyData: CompanyDataSource
@@ -54,7 +56,19 @@ export interface NotificationServiceDeps {
    * the notices just written (no text: kind, record, member). Not wired yet.
    */
   outside?: (companyId: string, rows: NotificationRow[]) => void
+  /**
+   * Absence and the delegate (records.md "Absence and the delegate";
+   * services/absences.ts, the one resolution point): who covers an absentee
+   * today, whom a stop is told to (the managers of their departments) and
+   * today's absences (the clock's check). Nobody is absent without them.
+   */
+  coverOf?: (companyId: string, userId: string) => AbsenceCover | null
+  managersOf?: (companyId: string, userId: string) => string[]
+  activeAbsences?: (companyId: string) => Array<{ userId: string; delegateId: string }>
 }
+
+/** Why an absentee's item reaches nobody (a `delegate_stopped` notice's dedupe key ends with it). */
+type StopReason = 'cannot-read' | 'delegate-absent'
 
 /** An overdue notice is written from this hour (company time) of the first business day after the due's day (A-2). */
 export const OVERDUE_NOTICE_HOUR = 9
@@ -153,6 +167,53 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     return kinds
   }
 
+  /** Read checks of several members in one company (each their own reader, built once). */
+  function readersIn(companyId: string, handle: CompanyData) {
+    const scopes = handle.scopes.listWithRules()
+    const readers = new Map<string, ReturnType<typeof recordReader> | null>()
+    return (userId: string, rec: RecordAccessRow): boolean => {
+      if (!readers.has(userId)) {
+        const role = deps.roleOf(companyId, userId)
+        readers.set(userId, role === null ? null : recordReader({ companyId, userId, role }, scopes))
+      }
+      return readers.get(userId)?.record(rec) ?? false
+    }
+  }
+
+  /**
+   * An absentee's item that reaches nobody — their delegate cannot read it
+   * (「権限が足りない」) or is absent too (no chains) — told once to the
+   * managers of the absentee's departments who can read it.
+   */
+  function stopRows(companyId: string, mayRead: (userId: string, rec: RecordAccessRow) => boolean, rec: RecordAccessRow, version: number, absenteeId: string, reason: StopReason): NotificationRow[] {
+    const now = clock.now()
+    return (deps.managersOf?.(companyId, absenteeId) ?? []).filter(m => mayRead(m, rec)).map(m => ({
+      id: deps.ids.newId(), userId: m, kind: 'delegate_stopped', recordId: rec.id, recordVersion: version, action: '',
+      actorId: null, actorKind: null, dedupeKey: `delegate_stopped:${rec.id}:${absenteeId}:${reason}`, createdAt: now, readAt: null, forUserId: absenteeId,
+    }))
+  }
+
+  /**
+   * The absentee's waiting items (their 「あなたの番」, read as them) that
+   * their delegate cannot read now; with `tell`, the stop notices for them
+   * (and for every item when the delegate is absent too).
+   */
+  function coverCheck(companyId: string, absenteeId: string, cover: AbsenceCover, tell: boolean, countFor: string = absenteeId): { cannotRead: number; written: number } {
+    const handle = companyData.forCompany(companyId)
+    if (!handle.records.settings().enabled) return { cannotRead: 0, written: 0 }
+    const mayRead = readersIn(companyId, handle)
+    const waiting = waitingFor(handle.records, [absenteeId], new Set(handle.plugins.oldConnectionRecordIds()))
+      .filter(w => mayRead(absenteeId, w.row))
+      .slice(0, MAX_COMPUTED_CANDIDATES)
+    const versions = new Map(handle.records.states(waiting.map(w => w.row.id)).map(s => [s.recordId, s.version]))
+    const blocked = cover.kind === 'stopped' ? waiting : waiting.filter(w => !mayRead(cover.delegateId, w.row))
+    const cannotRead = blocked.filter(w => mayRead(countFor, w.row)).length
+    if (!tell) return { cannotRead, written: 0 }
+    const reason: StopReason = cover.kind === 'stopped' ? 'delegate-absent' : 'cannot-read'
+    const rows = blocked.flatMap(w => stopRows(companyId, mayRead, w.row, versions.get(w.row.id) ?? 0, absenteeId, reason))
+    return { cannotRead, written: writeComputed(companyId, handle, rows) }
+  }
+
   /**
    * Overdue requests (A-2) and stuck AI turns (C-18) among `candidates`, as
    * notice rows for their requester — only a requester who can read the
@@ -226,6 +287,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     writeComputed(member.companyId, handle, dueRowsOf(member.companyId, handle, candidates, defs, member.userId))
   }
 
+  const personText = (id: string | null | undefined, names: Map<string, { email: string; name: string | null }>) => {
+    const a = id ? names.get(id) : undefined
+    return a ? `${a.name || a.email}さん` : 'だれか'
+  }
+
   function actorText(row: NotificationRow, names: Map<string, { email: string; name: string | null }>): string {
     if (row.actorKind === 'external') return row.actorId === CLOCK_ACTOR.id ? 'ACB' : 'つないでいるサービス'
     const a = row.actorId ? names.get(row.actorId) : undefined
@@ -237,6 +303,17 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     const t = `「${rec.title}」`
     const actor = actorText(row, names)
     const entry = () => handle.records.ledger(rec.id).find(e => e.version === row.recordVersion)
+    if (row.kind === 'delegate_stopped') {
+      const who = personText(row.forUserId, names)
+      return row.dedupeKey?.endsWith(':delegate-absent')
+        ? `${who}も代わりの人も不在のため、${t}を受け持つ人がいません`
+        : `${who}の不在中、代わりの人が${t}を見られないため止まっています（権限が足りない）`
+    }
+    const text = textFor(row, t, actor, def, entry)
+    return row.forUserId ? `（${personText(row.forUserId, names)}の代わり）${text}` : text
+  }
+
+  function textFor(row: NotificationRow, t: string, actor: string, def: TypeDefinition | undefined, entry: () => LedgerEntry | undefined): string {
     switch (row.kind as NotificationKind) {
       case 'approval_result': {
         const to = entry()?.toState
@@ -305,14 +382,30 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const role = deps.roleOf(companyId, userId)
         return rec !== undefined && role !== null && recordReader({ companyId, userId, role }, scopes).record(rec)
       }
-      for (const userId of new Set(userIds)) {
+      const recipients = new Set(userIds)
+      const stops: NotificationRow[] = []
+      const readerOf = readersIn(companyId, handle)
+      for (const userId of recipients) {
         if (userId === change.entry.actorId || !mayRead(userId)) continue
-        rows.push({
-          id: deps.ids.newId(), userId, kind: noticeKind(userId, change, final), recordId: change.entry.recordId,
-          recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+        const kind = noticeKind(userId, change, final)
+        const base = {
+          recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
           actorKind: change.entry.actorKind, dedupeKey: null, createdAt: now, readAt: null,
-        })
+        }
+        rows.push({ id: deps.ids.newId(), userId, kind, ...base })
+        // An absentee's notice also goes to their delegate (their own read check), or the stop to the managers.
+        const cover = deps.coverOf?.(companyId, userId) ?? null
+        if (!cover || rec === undefined) continue
+        if (cover.kind === 'delegate' && mayRead(cover.delegateId)) {
+          if (cover.delegateId !== change.entry.actorId && !recipients.has(cover.delegateId)) {
+            rows.push({ id: deps.ids.newId(), userId: cover.delegateId, kind, ...base, forUserId: userId })
+          }
+        } else if (change.fields.next_actor === userId || (change.fields.next_actor == null && change.fields.assignee === userId)) {
+          // Only an item that now waits for the absentee is stuck.
+          stops.push(...stopRows(companyId, readerOf, rec, change.entry.version, userId, cover.kind === 'stopped' ? 'delegate-absent' : 'cannot-read'))
+        }
       }
+      if (stops.length > 0) writeComputed(companyId, handle, stops)
       if (rows.length === 0) return
       handle.notifications.insert(rows)
       const told = rows.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId)
@@ -338,7 +431,25 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const aiTurn = [...new Set([...defs.values()].flatMap(d => [...aiTurnStates(d)]))]
       const stuck = aiTurn.length > 0 ? handle.records.candidates({ types, states: aiTurn }, limit) : []
       const seen = new Map([...overdue, ...stuck].map(r => [r.id, r]))
-      return writeComputed(companyId, handle, dueRowsOf(companyId, handle, [...seen.values()], defs, null))
+      let written = writeComputed(companyId, handle, dueRowsOf(companyId, handle, [...seen.values()], defs, null))
+      // Absences that began (or whose delegate became absent): what waits for the absentee and reaches nobody.
+      for (const a of (deps.activeAbsences?.(companyId) ?? []).slice(0, limit)) {
+        const cover = deps.coverOf?.(companyId, a.userId)
+        if (cover) written += coverCheck(companyId, a.userId, cover, true).written
+      }
+      return written
+    },
+
+    /**
+     * After an absence was set (services/absences.ts): how many of the
+     * absentee's waiting items the delegate cannot read now; when the absence
+     * has begun, the managers are told at once (else the clock tells them
+     * when it begins).
+     */
+    delegateCannotRead(companyId: string, absenteeId: string, delegateId: string, setterId: string): number {
+      const cover = deps.coverOf?.(companyId, absenteeId) ?? null
+      const active = cover !== null && cover.delegateId === delegateId
+      return coverCheck(companyId, absenteeId, active ? cover : { kind: 'delegate', delegateId }, active, setterId).cannotRead
     },
 
     /** `GET /me/notifications`: the member's notices they may see now, newest first. */
@@ -358,13 +469,15 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       })
       const shown = visible.slice(0, NOTIFICATION_LIST_MAX)
       const types = currentTypes(handle.records)
-      const names = deps.accounts.byIds([...new Set(shown.flatMap(r => (r.actorId && r.actorKind !== 'external' ? [r.actorId] : [])))])
+      const names = deps.accounts.byIds([...new Set(shown.flatMap(r => [
+        ...(r.actorId && r.actorKind !== 'external' ? [r.actorId] : []), ...(r.forUserId ? [r.forUserId] : []),
+      ]))])
       const items: NotificationItem[] = shown.map(r => {
         const rec = recs.get(r.recordId) as RecordRow
         return {
           id: r.id, kind: r.kind as NotificationKind, recordId: rec.id, recordType: rec.type, recordTitle: rec.title,
           version: r.recordVersion, text: textOf(r, rec, types.get(rec.type)?.definition, handle, names),
-          createdAt: r.createdAt, read: r.readAt !== null,
+          createdAt: r.createdAt, read: r.readAt !== null, ...(r.forUserId ? { forUserId: r.forUserId } : {}),
         }
       })
       return ok({ available: true, unread: visible.filter(r => r.readAt === null).length, items })

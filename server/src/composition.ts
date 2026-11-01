@@ -48,6 +48,7 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createTaskSettingsService } from './services/task-settings'
+import { createAbsenceService } from './services/absences'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
 import { createPushChannel } from './services/push-channel'
@@ -202,8 +203,20 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // The state engine (4-3): the only writer of record_state / record_ledger.
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
   const taskSettings = createTaskSettingsService({ ...repos, ...shared })
+  // Absence and the delegate (代わりの人, records.md): the ONE resolution of who acts for whom
+  // today, handed to my-turn / AI turn, the engine's `who`, approvals and the notices below.
+  const absences = createAbsenceService({
+    ...repos, ...shared,
+    // No per-company zone yet (calendar.md): the one place a setting would replace.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    delegateCannotRead: (companyId, absenteeId, delegateId, setterId) => notifications.delegateCannotRead(companyId, absenteeId, delegateId, setterId),
+  })
+  const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
   const notifications = createNotificationService({
     ...shared,
+    coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
+    managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
+    activeAbsences: companyId => absences.activeToday(companyId),
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
     // No per-company zone yet (calendar.md): the one place a setting would replace.
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
@@ -223,6 +236,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
+    actsFor,
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -298,6 +312,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     admins: companyId => repos.memberships.listByCompany(companyId).filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.user_id),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    actsFor,
     plugin: async (companyId, pluginId) => {
       const r = await plugins.active(companyId, pluginId, { collectingFacts: true })
       return r.ok ? r.plugin : null
@@ -485,7 +500,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
-    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
+    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor }),
+    absences,
     recordEngine,
     notifications,
     decisions,

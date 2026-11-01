@@ -92,6 +92,9 @@ const TYPES: Record<string, string> = {
   Managers: '{ managers: DepartmentManager[] }',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
+  Absences: 'MemberAbsencesView',
+  AbsenceCreated: 'AbsenceCreated',
+  AbsenceRemoved: '{ removed: true }',
   Success: '{ success: boolean }',
   DepartmentDelete: '{ success: boolean; deletedFiles?: number; deletedFolders?: number }',
   DepartmentSync: '{ success: boolean; added: number; removed: number }',
@@ -241,6 +244,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/absences')).absencesRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
@@ -286,6 +290,13 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)
     await expectShape('DepartmentSync', USERS.owner, 'POST', `${base}/departments/sync`, undefined, false)
     await expectShape('DepartmentDelete', USERS.owner, 'DELETE', `${base}/departments/${created.id}`, undefined, false)
+  })
+
+  it('不在・代わりの人 (absences)', async () => {
+    const today = (await expectShape('Absences', USERS.owner, 'GET', `${base}/absences?userId=${USERS.member}`)).today as string
+    const created = await expectShape('AbsenceCreated', USERS.owner, 'POST', `${base}/absences`, { userId: USERS.member, from: today, until: today, delegateId: USERS.admin })
+    await expectShape('Absences', USERS.member, 'GET', `${base}/absences?userId=${USERS.member}`)
+    await expectShape('AbsenceRemoved', USERS.owner, 'DELETE', `${base}/absences/${created.absence.id}`)
   })
 
   it('permissions: read, edit, effective access, folders, the outdated-apps refusal', async () => {

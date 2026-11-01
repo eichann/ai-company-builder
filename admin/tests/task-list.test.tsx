@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import TaskListSettingsPage from '@/app/companies/[id]/task-list/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
-import type { Capabilities, DepartmentMembersView, TaskSettingsView } from '@/lib/api'
+import type { AbsenceCreated, Capabilities, DepartmentMembersView, MemberAbsencesView, TaskSettingsView } from '@/lib/api'
 import { defaultTaskSettings } from '../../shared/core/task-settings'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { departments, managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -90,5 +90,34 @@ describe('やることの一覧の設定', () => {
     expect(screen.getByText('入力を直してから保存してください')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
     expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  it('不在・代わりの人: only where the server allows, for that member, and the delegate’s blind spots are told', async () => {
+    const tanaka = { userId: 'u_member', name: '田中 太郎', email: 'tanaka@example.com' }
+    const suzuki = { userId: 'u_admin', name: '鈴木 一郎', email: 'suzuki@example.com' }
+    const absences: MemberAbsencesView = { userId: 'u_member', absences: [], canEdit: true, covering: [], today: '2026-11-02' }
+    const created: AbsenceCreated = {
+      absence: { id: 'ab1', userId: 'u_member', from: '2026-11-02', until: '2026-11-06', delegateId: 'u_owner', delegateName: '佐藤 花子', active: true, setBy: 'u_member', setAt: '2026-11-01T00:00:00.000Z' },
+      delegateCannotRead: 2,
+    }
+    const calls = stubApi(managerCapabilities, (id) => ({ members: id === 'd_sales' ? [tanaka] : [suzuki], canEdit: id === 'd_sales' }), {
+      [`GET ${base}/absences?userId=u_member`]: { body: ok(absences) },
+      [`POST ${base}/absences`]: { status: 201, body: ok(created) },
+    })
+    renderInCompany(<TaskListSettingsPage />)
+    const list = await screen.findByRole('list', { name: '部署に所属する人' })
+    await waitFor(() => expect(within(list).getAllByRole('button', { name: /不在・代わりの人/ })).toHaveLength(1))
+    expect(within(list).queryByRole('button', { name: '鈴木 一郎さんの不在・代わりの人' })).not.toBeInTheDocument()
+
+    await userEvent.click(within(list).getByRole('button', { name: '田中 太郎さんの不在・代わりの人' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('これからの不在は、まだありません。')
+    expect(within(dialog).queryByRole('option', { name: '田中 太郎' })).not.toBeInTheDocument()
+    await userEvent.type(within(dialog).getByLabelText('終わりの日'), '2026-11-06')
+    await userEvent.selectOptions(within(dialog).getByLabelText('代わりの人'), 'u_owner')
+    await userEvent.click(within(dialog).getByRole('button', { name: '追加' }))
+
+    expect(await within(dialog).findByText('代わりの人が見られないものが 2 件あります。部署の責任者に知らせました。')).toBeInTheDocument()
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ userId: 'u_member', from: '2026-11-02', until: '2026-11-06', delegateId: 'u_owner' })
   })
 })

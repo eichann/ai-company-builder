@@ -139,6 +139,12 @@ export interface RecordSummary {
    * Absent for every other record.
    */
   personal?: true
+  /**
+   * 「あなたの番」 and 「AI の番」 only: the absent member this item waits for,
+   * when it is in the caller's list as their delegate (代わりの人,
+   * records.md "Absence and the delegate"). Absent otherwise.
+   */
+  actingFor?: string
 }
 
 export interface RecordQueryResult {

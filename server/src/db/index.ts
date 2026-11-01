@@ -9,7 +9,7 @@ import { companySchema, migrateInvitationClaims } from './schema/company'
 import { connectorSchema, migrateConnectorProviders } from './schema/connectors'
 import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
-import { notificationSchema } from './schema/notifications'
+import { migrateNotificationsForUser, notificationSchema } from './schema/notifications'
 import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
@@ -79,6 +79,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)
   migrateRecordContents(conn)
+  migrateNotificationsForUser(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
 

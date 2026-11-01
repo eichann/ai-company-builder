@@ -22,6 +22,8 @@ export interface ServiceActor {
   source: string | null
   conversationId?: string | null
   proposedBy?: 'ai' | null
+  /** The absent member a delegate stood in for (「代わりに（本来は X）」); the calling service decides it. */
+  onBehalfOf?: string | null
 }
 
 /** A new record of a service-owned type (`SERVICE_OWNED_TYPES`). */
@@ -257,6 +259,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         decision: isDecision ? { reason: input.decisionReason as string, materials: [], policyVersion: null, precedents: [], supersedes: null } : null,
         isDecision, typeVersion: row.typeVersion, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
+        ...(input.actor.onBehalfOf ? { onBehalfOf: input.actor.onBehalfOf } : {}),
       }
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false

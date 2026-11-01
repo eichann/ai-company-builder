@@ -36,6 +36,7 @@ import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
+import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
@@ -465,6 +466,11 @@ export interface IpcInvokeChannels {
   'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
   'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
   'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  // Settings → 「不在と代わりの人」: the member's own absences, read and changed with their session.
+  /** The member's view (absences, whom they cover today) and the company's members for the picker. */
+  'absences:get': { args: [companyId: string]; result: AbsencesResult }
+  'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
+  'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
   /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
   'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
   // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
@@ -786,6 +792,10 @@ export interface ElectronAPI {
   approveApproval: Invoke<'approvals:approve'>
   sendBackApproval: Invoke<'approvals:sendBack'>
   withdrawApproval: Invoke<'approvals:withdraw'>
+  // Settings → 「不在と代わりの人」.
+  getAbsences: Invoke<'absences:get'>
+  addAbsence: Invoke<'absences:add'>
+  removeAbsence: Invoke<'absences:remove'>
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
   // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
   getCalendarToday: Invoke<'calendar:today'>

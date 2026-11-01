@@ -22,6 +22,7 @@ export const NOTIFICATION_KINDS = [
   'overdue',
   'ai_turn_stuck',
   'wait_over',
+  'delegate_stopped',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -39,6 +40,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   overdue: '頼んだことが期限を過ぎた',
   ai_turn_stuck: '頼んだことの AI の番が 24 時間進んでいない',
   wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
+  delegate_stopped: '不在の人の代わりが受け持てないもの（部署の責任者へ）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -52,6 +54,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   overdue: true,
   ai_turn_stuck: true,
   wait_over: true,
+  delegate_stopped: true,
   others: false,
 }
 
@@ -67,6 +70,11 @@ export interface NotificationItem {
   version: number
   /** Japanese, built when read. */
   text: string
+  /**
+   * The absent member it concerns (代わりの人): on a delegate's copy of the
+   * absentee's notice, and on a stop told to a department manager.
+   */
+  forUserId?: string
   createdAt: string
   read: boolean
 }

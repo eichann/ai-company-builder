@@ -48,7 +48,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (recordViews:search / card / forFile: search hits, the record card and a file's
   「つながっているもの」, read with the session; `records.md` "The app's views"),
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
-  `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`). No `tasks`
+  `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `absences`
+  (absences:get / add / remove: the member's own absences and delegate, with the session;
+  `records.md` "Absence and the delegate"). No `tasks`
   channels: the file tree's 「やることにつなぐ…」 will come from the task plugin (`records.md`
   "Linking files later").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:

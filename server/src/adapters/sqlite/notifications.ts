@@ -9,23 +9,25 @@ import type { NotificationRepository, NotificationRow } from '../../ports/notifi
 type Row = {
   id: string; user_id: string; kind: string; record_id: string; record_version: number; action: string
   actor_id: string | null; actor_kind: NotificationRow['actorKind']; dedupe_key: string | null; created_at: string; read_at: string | null
+  for_user_id: string | null
 }
 const toRow = (r: Row): NotificationRow => ({
   id: r.id, userId: r.user_id, kind: r.kind, recordId: r.record_id, recordVersion: r.record_version, action: r.action,
   actorId: r.actor_id, actorKind: r.actor_kind, dedupeKey: r.dedupe_key, createdAt: r.created_at, readAt: r.read_at,
+  forUserId: r.for_user_id,
 })
-const COLUMNS = 'id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at'
+const COLUMNS = 'id, user_id, kind, record_id, record_version, action, actor_id, actor_kind, dedupe_key, created_at, read_at, for_user_id'
 
 export function sqliteNotificationRepository(conn: Database.Database, companyId: string): NotificationRepository {
   return {
     insert(rows) {
       const stmt = conn.prepare(
-        `INSERT OR IGNORE INTO notifications (company_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO notifications (company_id, ${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       const written: string[] = []
       conn.transaction(() => {
         for (const r of rows) {
-          const run = stmt.run(companyId, r.id, r.userId, r.kind, r.recordId, r.recordVersion, r.action, r.actorId, r.actorKind, r.dedupeKey, r.createdAt, r.readAt)
+          const run = stmt.run(companyId, r.id, r.userId, r.kind, r.recordId, r.recordVersion, r.action, r.actorId, r.actorKind, r.dedupeKey, r.createdAt, r.readAt, r.forUserId ?? null)
           if (run.changes > 0) written.push(r.id)
         }
       })()

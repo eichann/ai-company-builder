@@ -81,6 +81,12 @@ export interface LedgerEntry {
    * system, or one the plugin wrote there). Absent / null otherwise.
    */
   receipt?: ExternalReceipt | null
+  /**
+   * 「代わりに（本来は X）」 (absence and the delegate, stage 2 S4): the absent
+   * member the actor stood in for — set only when the actor could do it only
+   * as that member's delegate. Absent / null otherwise.
+   */
+  onBehalfOf?: string | null
 }
 
 /** Evidence of an exchange with an outside system, kept on the ledger entry it explains. */

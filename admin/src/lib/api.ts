@@ -850,6 +850,27 @@ export const taskSettingsApi = {
 }
 
 // ---------------------------------------------------------------------------
+// Absence and the delegate (不在・代わりの人): shapes from shared/types/absences.ts,
+// rules in shared/core/absences.ts. The member, owner/admin, or a manager of a
+// department the member belongs to.
+// ---------------------------------------------------------------------------
+
+export type { AbsenceCreated, AbsenceCreateRequest, AbsenceView, CoveringView, MemberAbsencesView } from '../../../shared/types/absences'
+
+import type { AbsenceCreated, AbsenceCreateRequest, MemberAbsencesView } from '../../../shared/types/absences'
+
+export const absencesApi = {
+  /** Absences of `userId` that have not ended yet, soonest first. */
+  list: (companyId: string, userId: string) =>
+    getData<MemberAbsencesView>(`/api/companies/${enc(companyId)}/absences?userId=${enc(userId)}`),
+  /** 400 / 409 carry a Japanese `error` meant to be shown as is. */
+  create: (companyId: string, body: AbsenceCreateRequest & { userId: string }) =>
+    getData<AbsenceCreated>(`/api/companies/${enc(companyId)}/absences`, { method: 'POST', body }),
+  remove: (companyId: string, absenceId: string) =>
+    getData<{ removed: true }>(`/api/companies/${enc(companyId)}/absences/${enc(absenceId)}`, { method: 'DELETE' }),
+}
+
+// ---------------------------------------------------------------------------
 // API keys (key broker, 「API キー」): shapes from shared/types/key-broker.ts.
 // Write-only: a key's value is sent to the server and never comes back.
 // ---------------------------------------------------------------------------

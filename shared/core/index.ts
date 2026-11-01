@@ -26,6 +26,7 @@
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
  *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget
+ *   absences.ts           absence and the delegate (代わりの人): the one resolution of who acts for whom today
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -55,3 +56,4 @@ export * from './minutes'
 export * from './calendar'
 export * from './business-days'
 export * from './task-settings'
+export * from './absences'

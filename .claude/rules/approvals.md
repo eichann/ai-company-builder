@@ -106,8 +106,10 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   admin-API or rule route. Tests: `approvals.test.ts` (an AI token on both route sets), the
   permission matrix rows.
 - Approve, in order: readable (else 404) → **qualifies** (`mayApprove` with requester / manager of
-  the department holding the request's folder / owner-admin, from the server's data; 403
-  `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
+  the department holding the request's folder / owner-admin, from the server's data — or, as the
+  delegate of an absent member they cover today (`actsFor`, `records.md` "Absence and the
+  delegate"), that member's request (`self`), department (`dept_manager`) or a request asked of
+  them, never their admin role; 403 `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
   → the hash is the newest version's (409 `CONTENT_CHANGED` 「内容が変わりました。もう一度確かめて
   ください」) → `executeApproved` (plugins.md). **Used once**: approve / send back / withdraw of one
   request are serialised in this server and every state change is a compare-and-set
@@ -127,6 +129,9 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   - anything else (the plugin stopped or off, the requester no longer a member or allowed, the AI
     stopped for an AI's request) → the refusal as is; the request **stays pending** and can be
     approved after a resume.
+- A delegate's approve / send back is written with `onBehalfOf` = the absentee (ledger and the
+  view's `outcome.onBehalfOf`; the card: 「Aさん（代わりに承認・本来は Bさん）」). The delegate
+  reads with their own permissions: a request in a folder they cannot read is the same 404.
 - Send back: the approver, a reason required → `sent_back`, `next_actor` = the requester (their
   「あなたの番」; `sent_back` is not final in the type's version 2). Withdraw: the requester only,
   while pending or sent back → `withdrawn`.
@@ -168,7 +173,8 @@ version; a create is never re-sent anyway); retention of approval texts (G8 deci
 mutation-checked: no AI route and a token is no session, wrong / old hash, no reason, HubSpot
 changed → stale, not the requester / not another department's manager, used once → one PATCH,
 readers, precedents readable incl. counts (record and request separately), dedupe, AI stop,
-retention clears only the text, CROSS), `server/tests/integration/plugin-operations.test.ts`
+retention clears only the text, CROSS, an absent approver's delegate only during the absence and
+only what they read, recorded 代わりに), `server/tests/integration/plugin-operations.test.ts`
 (prior → 202), permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`,
 `client/tests/approval-tools.test.ts`, `client/tests/ui/approval-card.spec.ts` (the shown hash
 is sent; no approve button for a non-approver).
