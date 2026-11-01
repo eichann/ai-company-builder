@@ -14,6 +14,11 @@
  * people, ± per-person exceptions). `usableBy` lists dial ②; dial ① is
  * decided per consultation. Own keys: the owner.
  *
+ * Which company key a service uses (「このサービスは、この鍵を使う」): with several
+ * company keys for one service the admin chooses one (`setDefaultKey`); a chosen
+ * key that is stopped or deleted stops being chosen (the admin is asked again,
+ * never another key picked silently). Tokens decide with `chosenKeyId`.
+ *
  * Generic services (K9, `PUT …/broker/relay-services/:service`): an
  * owner/admin names the one https host (and base path) and the header the key
  * travels in; every key for the service — company or own — may go to that
@@ -60,6 +65,7 @@ import { pathKey } from '../../shared/core/paths'
 import type {
   BrokerChange,
   BrokerChangeDetail,
+  BrokerKeyRef,
   BrokerKeySnapshot,
   BrokerKeySummary,
   BrokerKeyUser,
@@ -200,6 +206,24 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     return { category, rule, ownKeyHosts }
   }
 
+  /** The chosen company key of the service when it is still an active company key of it; else null (none chosen). */
+  function chosenKey(stored: StoredBrokerService | undefined, service: string, rows: BrokerKeyRow[]): BrokerKeyRow | null {
+    const id = stored?.defaultKeyId
+    if (!id) return null
+    return rows.find(r => r.id === id && r.scope === 'company' && r.service === service && r.status === 'active') ?? null
+  }
+
+  const keyRef = (row: BrokerKeyRow): BrokerKeyRef => ({ keyId: row.id, displayName: row.displayName, last4: row.last4 })
+
+  /** The key was stopped or is being deleted: if it was the service's chosen key, nothing is chosen any more (recorded). */
+  function forgetChoiceOf(member: Member, row: BrokerKeyRow, at: string, because: 'stopped' | 'deleted') {
+    if (row.scope !== 'company') return
+    const stored = serviceSettings(member.companyId).get(row.service)
+    if (stored?.defaultKeyId !== row.id) return
+    brokerKeys.saveService(member.companyId, { ...stored, defaultKeyId: null, updatedAt: at, updatedBy: member.userId },
+      changeRow(member, at, row.id, { action: 'default-key', service: row.service, before: keyRef(row), after: null, because }))
+  }
+
   function view(companyId: string): BrokerView {
     const rows = brokerKeys.list(companyId)
     const usage = brokerKeys.usageByKey(companyId, deps.brokerDay ? deps.brokerDay() : clock.now().slice(0, 10))
@@ -260,6 +284,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         defaultHosts: builtin ? [...builtin.defaultHosts] : relay ? [relay.host] : [],
         relay,
         readOnly: stored.get(service)?.readOnly ?? false,
+        defaultKeyId: chosenKey(stored.get(service), service, rows)?.id ?? null,
         practice: deps.practiceServices?.includes(service) ?? false,
         companyKeys: rows.filter(r => r.service === service && r.scope === 'company').length,
         userKeys: rows.filter(r => r.service === service && r.scope === 'user').length,
@@ -312,7 +337,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const at = clock.now()
     brokerKeys.saveService(member.companyId, {
       service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
-      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, updatedAt: at, updatedBy: member.userId,
+      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, defaultKeyId: stored?.defaultKeyId ?? null, updatedAt: at, updatedBy: member.userId,
     }, changeRow(member, at, null, { action: 'service', service, before, after }))
   }
 
@@ -480,6 +505,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         brokerKeys.update(member.companyId, keyId, changes, at, member.userId, changeRow(member, at, keyId, {
           action: 'update', service: row.service, displayName: after.displayName, before: b, after: a,
         }))
+        if (changes.status === 'disabled') forgetChoiceOf(member, row, at, 'stopped')
       }
       return ok(view(member.companyId))
     },
@@ -498,6 +524,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         brokerKeys.update(member.companyId, row.id, { status: 'disabled' }, at, member.userId, changeRow(member, at, row.id, {
           action: 'update', service: row.service, displayName: row.displayName, before: { status: 'active' }, after: { status: 'disabled' },
         }))
+        forgetChoiceOf(member, row, at, 'stopped')
       }
       deps.onStopAll?.(member.companyId, member.userId)
       return ok(view(member.companyId))
@@ -510,6 +537,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const row = brokerKeys.find(member.companyId, keyId)
       if (!row) return refuse('not-found', 'API key not found')
       const at = clock.now()
+      forgetChoiceOf(member, row, at, 'deleted')
       brokerKeys.delete(member.companyId, keyId, changeRow(member, at, keyId, { action: 'delete', key: snapshot(row) }))
       return ok(view(member.companyId))
     },
@@ -581,9 +609,44 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const at = clock.now()
       brokerKeys.saveService(member.companyId, {
         service, category: setting.category, rule: setting.rule, ownKeyHosts: JSON.stringify(setting.ownKeyHosts),
-        relay: stored?.relay ?? null, readOnly: body.readOnly, updatedAt: at, updatedBy: member.userId,
+        relay: stored?.relay ?? null, readOnly: body.readOnly, defaultKeyId: stored?.defaultKeyId ?? null, updatedAt: at, updatedBy: member.userId,
       }, changeRow(member, at, null, { action: 'read-only', service, before, after: body.readOnly }))
       return ok(view(member.companyId))
+    },
+
+    /**
+     * PUT …/broker/services/:service/default-key { keyId } — 「このサービスは、この鍵を使う」:
+     * which of the service's company keys is used when several exist (`keyId: null` =
+     * none chosen). Only an active company key of this company and service (another
+     * company's key, an own key or another service's → 404; a stopped one → 400
+     * `KEY_STOPPED`). History action `default-key` (key name and last 4 only).
+     */
+    setDefaultKey(member: Member, service: string, body: unknown): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isValidBrokerServiceName(service)) return refuse('bad-request', 'service must be a lower-case ASCII name (a-z, 0-9, -, _)')
+      if (!isObject(body) || !(body.keyId === null || (typeof body.keyId === 'string' && body.keyId.length > 0 && body.keyId.length <= 100))) {
+        return refuse('bad-request', 'keyId must be a key id or null')
+      }
+      const rows = brokerKeys.list(member.companyId)
+      const key = body.keyId === null ? null : rows.find(r => r.id === body.keyId && r.scope === 'company' && r.service === service) ?? null
+      if (body.keyId !== null && !key) return refuse('not-found', 'API key not found')
+      if (key && key.status !== 'active') return refuse('bad-request', '止めている鍵は選べません。先に再開してください。', { code: 'KEY_STOPPED' })
+      const stored = serviceSettings(member.companyId).get(service)
+      const before = chosenKey(stored, service, rows)
+      if ((stored?.defaultKeyId ?? null) === (key?.id ?? null)) return ok(view(member.companyId))
+      const setting = serviceSettingOf(stored, service)
+      const at = clock.now()
+      brokerKeys.saveService(member.companyId, {
+        service, category: setting.category, rule: setting.rule, ownKeyHosts: JSON.stringify(setting.ownKeyHosts),
+        relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, defaultKeyId: key?.id ?? null, updatedAt: at, updatedBy: member.userId,
+      }, changeRow(member, at, key?.id ?? before?.id ?? null, { action: 'default-key', service, before: before ? keyRef(before) : null, after: key ? keyRef(key) : null }))
+      return ok(view(member.companyId))
+    },
+
+    /** The service's chosen company key (active, of this company and service), or null — for tokens. */
+    chosenKeyId(companyId: string, service: string, rows: BrokerKeyRow[] = brokerKeys.list(companyId)): string | null {
+      return chosenKey(serviceSettings(companyId).get(service), service, rows)?.id ?? null
     },
 
     /** The relay forwards only reads for this service (the company's switch). */
@@ -631,6 +694,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         ownKeyHosts: JSON.stringify((setting?.ownKeyHosts ?? []).filter(h => h === after.host)),
         relay: JSON.stringify(after),
         readOnly: stored?.readOnly ?? false,
+        defaultKeyId: stored?.defaultKeyId ?? null,
         updatedAt: at,
         updatedBy: member.userId,
       }, changeRow(member, at, null, { action: 'relay-service', service, before, after }))

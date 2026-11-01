@@ -47,6 +47,8 @@ function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
 }
 
 const DEAL_TYPE = '---\nlabel: 案件\nversion: 1\nstorage: server\nstates: [open]\n---\n'
+/** A company's own bundle type (implements `bundle`; task v5 links one with `set_bundle`). */
+const EFFORT_TYPE = '---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\n  purpose: { label: 目的, kind: text, source: server }\nstates: [active, done]\n---\n'
 
 function company(id: string) {
   conn.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, id, 'u-owner', TS, TS)
@@ -65,6 +67,9 @@ function company(id: string) {
   const deal = parseTypeFile('deal', DEAL_TYPE)
   if (!deal.ok) throw new Error(deal.errors.join())
   records.insertTypeVersion({ name: 'deal', version: 1, definition: canonicalTypeJson(deal.definition), source: 'plugin', commitSha: null, createdAt: TS })
+  const effort = parseTypeFile('effort', EFFORT_TYPE)
+  if (!effort.ok) throw new Error(effort.errors.join())
+  records.insertTypeVersion({ name: 'effort', version: 1, definition: canonicalTypeJson(effort.definition), source: 'file', commitSha: null, createdAt: TS })
 }
 
 /** Alice's own task (assigned to herself), started once so it has a later entry. */
@@ -184,6 +189,41 @@ describe('an owner-only record is its owner’s alone', () => {
     expect(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'x', personal: 'yes' }))
       .toMatchObject({ ok: false, kind: 'bad-request' })
     expect(ok(service.query(m('u-alice'), {})).total).toBe(0)
+  })
+})
+
+describe('the task list’s lookups (bundle links, finished, sorted) apply it too', () => {
+  it('nobody else can put a task into an owner-only bundle, nor list a bundle’s tasks by it', async () => {
+    const bundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '自分の取り組み', personal: true })).record
+    const missingBundle = 'effort-0000000000000000'
+    for (const who of ['u-bob', 'u-admin', 'u-owner']) {
+      const t = ok(engine.create(m(who), HUMAN, { type: 'task', title: `${who} のタスク` })).record
+      const into = await engine.act(m(who), HUMAN, t.id, 'set_bundle', { expectedVersion: 1, links: { bundle: bundle.id } })
+      const intoMissing = await engine.act(m(who), HUMAN, t.id, 'set_bundle', { expectedVersion: 1, links: { bundle: missingBundle } })
+      expect(into).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'BAD_LINK' } })
+      expect(into).toEqual(intoMissing)
+      const byLink = service.query(m(who), { link: { name: 'bundle', id: bundle.id } })
+      expect(byLink).toMatchObject({ ok: false, body: { code: 'RECORD_NOT_FOUND' } })
+      expect(byLink).toEqual(service.query(m(who), { link: { name: 'bundle', id: missingBundle } }))
+    }
+    // Its owner does both.
+    const mine = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分の段取り', personal: true, fields: { assignee: 'u-alice' } })).record
+    ok(await engine.act(m('u-alice'), HUMAN, mine.id, 'set_bundle', { expectedVersion: 1, links: { bundle: bundle.id } }))
+    expect(ok(service.query(m('u-alice'), { link: { name: 'bundle', id: bundle.id } })).records.map(r => r.id)).toEqual([mine.id])
+  })
+
+  it('finished-since and sorted queries leave it out for everyone else', async () => {
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分の片付け', personal: true, fields: { assignee: 'u-alice', due: '2026-11-03' } })).record
+    ok(await engine.act(m('u-alice'), HUMAN, t.id, 'start', { expectedVersion: 1 }))
+    ok(await engine.act(m('u-alice'), HUMAN, t.id, 'complete', { expectedVersion: 2 }))
+    const finished = { finishedSince: '2026-01-01T00:00:00.000Z' }
+    const sorted = { type: 'task', sort: { field: 'due' }, fields: { due: { gte: '2026-11-01' } } }
+    for (const who of ['u-bob', 'u-admin', 'u-owner']) {
+      expect(ok(service.query(m(who), finished)).total).toBe(0)
+      expect(ok(service.query(m(who), sorted)).total).toBe(0)
+    }
+    expect(ok(service.query(m('u-alice'), finished)).records.map(r => r.id)).toEqual([t.id])
+    expect(ok(service.query(m('u-alice'), sorted)).records.map(r => r.id)).toEqual([t.id])
   })
 })
 

@@ -63,7 +63,7 @@ export interface BrokerChangeRow {
   changedBy: string
   /** The key concerned, when the change is about one. */
   keyId: string | null
-  /** create | replace | update | delete | service | relay-service | read-only | settings */
+  /** create | replace | update | delete | service | relay-service | read-only | default-key | settings */
   action: string
   /** JSON of the change, never containing a secret. */
   change: string
@@ -81,6 +81,11 @@ export interface StoredBrokerService {
   relay: string | null
   /** The relay forwards only reads for this service (`brokerRelayReadOnlyAllows`). */
   readOnly: boolean
+  /**
+   * The company key the admin chose for this service (「このサービスは、この鍵を使う」) when
+   * several exist, or null. Cleared when that key is stopped or deleted.
+   */
+  defaultKeyId: string | null
   updatedAt: string
   updatedBy: string
 }

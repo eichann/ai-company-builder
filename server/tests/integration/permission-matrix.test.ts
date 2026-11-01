@@ -281,6 +281,7 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/broker/services/:service', w => ({ path: `${C(w)}/broker/services/gemini`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/services/:service/own-keys', w => ({ path: `${C(w)}/broker/services/gemini/own-keys`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/services/:service/read-only', w => ({ path: `${C(w)}/broker/services/hubspot/read-only`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/broker/services/:service/default-key', w => ({ path: `${C(w)}/broker/services/gemini/default-key`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/relay-services/:service', w => ({ path: `${C(w)}/broker/relay-services/matrix-svc`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('DELETE /api/companies/:companyId/broker/relay-services/:service', w => ({ path: `${C(w)}/broker/relay-services/no-such-service` }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/settings', w => ({ path: `${C(w)}/broker/settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
@@ -378,7 +379,10 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/deal`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
-  r('GET /api/oauth/google/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
+  r('GET /api/oauth/:provider/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
+  // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
+  // another person); Google is not set up here, so the answer is an empty list with a reason.
+  r('GET /api/companies/:companyId/me/calendar/today', w => ({ path: `${C(w)}/me/calendar/today` }), MEMBERS, 'Google not set up: an empty list and `stopped`, nothing read'),
 
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
@@ -481,6 +485,7 @@ const CROSS: CrossRow[] = [
  * other route with a parameter beyond the company must have a CROSS row.
  */
 const NOT_OBJECT_IDS: Record<string, string> = {
+  'GET /api/oauth/:provider/callback': 'a provider name, not an object: the company comes from the state, found only inside it (member-oauth.test.ts)',
   'GET /api/invitations/:token': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'POST /api/invitations/:token/accept': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'GET /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
@@ -491,6 +496,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'PUT /api/companies/:companyId/broker/services/:service': 'a service name: sets this company\'s own settings row for it',
   'PUT /api/companies/:companyId/broker/services/:service/own-keys': 'a service name: sets this company\'s own settings row for it',
   'PUT /api/companies/:companyId/broker/services/:service/read-only': 'a service name: sets this company\'s own settings row for it',
+  'PUT /api/companies/:companyId/broker/services/:service/default-key': 'a service name: sets this company\'s own settings row for it; the key must be this company\'s (404 otherwise, broker-key-choice.test.ts)',
   'PUT /api/companies/:companyId/broker/relay-services/:service': 'a service name this company defines for itself (creates its own row)',
   'PUT /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
   'DELETE /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',

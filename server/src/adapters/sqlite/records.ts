@@ -197,9 +197,32 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         const at = `$.${c.name}`
         params.push(at, at, at, c.tag)
       }
+      for (const r of filter.ranges ?? []) {
+        if (r.gte !== undefined) { where.push('json_extract(s.fields, ?) >= ?'); params.push(`$.${r.name}`, r.gte) }
+        if (r.lt !== undefined) { where.push('json_extract(s.fields, ?) < ?'); params.push(`$.${r.name}`, r.lt) }
+      }
+      if (filter.finishedSince) {
+        // Now in a final state of its type, entered (from another state) at or after `since`.
+        where.push(`r.type || ' ' || s.state IN (SELECT json_extract(value, '$.type') || ' ' || json_extract(value, '$.state') FROM json_each(?))`)
+        params.push(JSON.stringify(filter.finishedSince.finals))
+        where.push(`EXISTS (SELECT 1 FROM record_ledger l WHERE l.company_id = r.company_id AND l.record_id = r.id AND l.to_state = s.state
+          AND (l.from_state IS NULL OR l.from_state <> l.to_state) AND l.at >= ?)`)
+        params.push(filter.finishedSince.since)
+      }
+      if (filter.link) {
+        where.push('EXISTS (SELECT 1 FROM record_links k WHERE k.company_id = r.company_id AND k.source_id = r.id AND k.name = ? AND k.target_id = ?)')
+        params.push(filter.link.name, filter.link.id)
+      }
       if (filter.text) {
         where.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\')")
         params.push(likeAnywhere(filter.text), likeAnywhere(filter.text))
+      }
+      let order = 'r.updated_at DESC, r.id'
+      if (filter.sort) {
+        // The field name is bound; only the direction is spliced, from a closed set. Empty values last.
+        const dir = filter.sort.order === 'desc' ? 'DESC' : 'ASC'
+        order = `json_extract(s.fields, ?) IS NULL, json_extract(s.fields, ?) ${dir}, ${order}`
+        params.push(`$.${filter.sort.field}`, `$.${filter.sort.field}`)
       }
       params.push(limit)
       const extra = where.map(w => ` AND ${w}`).join('')
@@ -207,7 +230,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner FROM records r
         LEFT JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
         WHERE r.company_id = ? AND r.removed_at IS NULL${extra}
-        ORDER BY r.updated_at DESC, r.id LIMIT ?
+        ORDER BY ${order} LIMIT ?
       `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null }>)
         .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner }))
     },
