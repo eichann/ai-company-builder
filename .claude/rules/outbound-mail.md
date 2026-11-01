@@ -21,6 +21,13 @@ paths:
   - "shared/types/threads.ts"
   - "server/src/ports/chat.ts"
   - "server/tests/integration/threads.test.ts"
+  - "client/shared/threads.ts"
+  - "client/electron/features/threads/**"
+  - "client/src/features/threads/**"
+  - "client/src/app/recordSource.tsx"
+  - "client/tests/threads-ipc.test.ts"
+  - "client/tests/record-thread-ui.*"
+  - "client/tests/ui/record-thread.spec.ts"
 ---
 
 # Outbound mail (milestone 4 G8: お礼メールを確かめて送る; the type is 「送るもの」)
@@ -151,13 +158,23 @@ the card without the server keeping it.
   inbox the company's own message in that thread (`replyAsIncoming`, `composition/connectors.ts`;
   `outgoing`, references = the 連絡's own message id), which moves its 返事のお願い as for any
   reply of ours (`inbox.md` "The thread went on").
-- Not yet: an AI route to read the thread (B4 needs one with a record-token guard), the app's
-  panel (`RecordSourcePanel`) and the AI tools' `interactionId`.
+- **The app**: the task card's source slot (`src/app/recordSource.tsx`, lane A) draws
+  `RecordThreadPanel` (`src/features/threads/`) for an `interaction`, `reply_request` or `task`:
+  `threads:get` (main, `electron/features/threads/ipc.ts`: the session stays in main; anything
+  but a record id never leaves; the server's 404 → `none`, the panel draws nothing) — the thread
+  (who wrote what, the member's own marked 「あなた」) or why it cannot be read, then each reply
+  draft through the mail card (`PreparedMailCard`). The card draws a Slack draft as body only
+  (「元の Slack のスレッドに、あなたとして返します。」; editing changes the body only; no recipients
+  or subject). The AI's `mail_recipients` / `mail_draft_create` take `interactionId` (`toRefs`
+  and `subject` only for a mail).
+- Not yet: an AI route to read the thread (B4 needs one with a record-token guard).
 
 Tests: `server/tests/integration/threads.test.ts` (fake Google + fake Slack: owner-only, the
 switch, the Gmail thread / headers / recipients, the Slack thread_ts and 返事を送る off, nothing
 stored or logged), `server/tests/unit/mail-message.test.ts` (reply headers, injection, old hashes,
-v4 additive), permission matrix + `CROSS`.
+v4 additive), permission matrix + `CROSS`; `client/tests/threads-ipc.test.ts` (ids, the 404 shows
+nothing), `client/tests/ui/record-thread.spec.ts` (the thread, a Slack reply body-only, confirm
+then the hash shown, an unseen 連絡 shows nothing).
 
 ## Retention (§9 q9)
 

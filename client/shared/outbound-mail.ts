@@ -27,6 +27,9 @@ export interface MailDraftCard {
 }
 
 export const MAIL_WORDS = {
+  slackDraft: 'Slack の返事の下書き',
+  slackWhere: '元の Slack のスレッドに、あなたとして返します。',
+  slackSent: 'Slack に返事を送りました。',
   sendButton: '確かめて送る',
   confirmTitle: '送る前に、もう一度確かめてください',
   confirmNote: '中身が変わっていないことを確かめて送ります。送ったメールは取り消せません。',

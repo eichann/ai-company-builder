@@ -242,6 +242,8 @@ function mailDetail(input: Record<string, unknown>): string | undefined {
   const n = countOf(input.toRefs)
   return n > 0 ? `宛先 ${n} 人` : undefined
 }
+/** The 来た連絡 a reply answers in its own thread (outbound-mail.md "Replies"). */
+const interactionRef = () => z.string().regex(/^interaction-[0-9a-z]{6,32}$/).describe('返事をする来た連絡（interaction）の id。同じスレッドに返す / the interaction to answer in its own thread')
 
 /**
  * Outbound mail (milestone 4 G8, outbound-mail.md): the AI looks up the verified recipients and
@@ -250,7 +252,7 @@ function mailDetail(input: Record<string, unknown>): string | undefined {
 export const MAIL_LOOKUP_TOOL: RecordToolSpec = {
   name: 'mail_recipients', readOnly: true,
   display: { label: '宛先の候補を調べました', running: '宛先の候補を調べています', many: '宛先の候補を {n} 回調べました' },
-  schema: z.object({ meetingId: meetingRef().optional(), bundleId: bundleRef().optional() }).strict(),
+  schema: z.object({ meetingId: meetingRef().optional(), bundleId: bundleRef().optional(), interactionId: interactionRef().optional() }).strict(),
   description: 'お礼メールなどの宛先の候補（確かめた宛先）：その会議のカレンダーの社外の参加者、まとまり（案件など）の外のシステム（HubSpot など）の連絡先、ACB のメンバー（CC 用）。それぞれ ref と出どころつき。宛先はこの ref でしか指定できない（アドレスを書いても使われない）。\n' +
     'Verified recipients for a mail about a meeting / bundle (a deal…): the meeting\'s outside attendees, the bundle\'s contacts in its outside system (HubSpot…), members (for CC), each with a `ref` and its source. Drafts take these refs only — an address you write is never used.',
   request: input => ({ method: 'POST', path: '/outbound-recipients', body: input }),
@@ -277,13 +279,14 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
     name: 'mail_draft_create', readOnly: false, mailCard: 'changed',
     display: { label: 'メールの下書きを作りました', running: 'メールの下書きを作っています', many: 'メールの下書きを {n} 件作りました', describe: mailDetail },
     schema: z.object({
-      meetingId: meetingRef().optional(), bundleId: bundleRef().optional(),
-      toRefs: z.array(mailRef).min(1).max(20).describe('mail_recipients の ref / refs from mail_recipients'),
+      meetingId: meetingRef().optional(), bundleId: bundleRef().optional(), interactionId: interactionRef().optional(),
+      toRefs: z.array(mailRef).min(1).max(20).optional().describe('mail_recipients の ref（メールでは必須。Slack への返事にはない） / refs from mail_recipients (required for a mail; none for a Slack reply)'),
       ccRefs: z.array(mailRef).max(20).optional(),
-      subject: z.string().min(1).max(200), body: z.string().min(1).max(20000).describe('テキストだけ（添付なし） / plain text only, no attachments'),
+      subject: z.string().min(1).max(200).optional().describe('メールの件名（Slack への返事にはない） / a mail\'s subject (none for a Slack reply)'),
+      body: z.string().min(1).max(20000).describe('テキストだけ（添付なし） / plain text only, no attachments'),
     }).strict(),
-    description: 'メールの下書きを作る（送らない）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。\n' +
-      'Create a mail draft (NOT sent). It appears as a card; only the member sends it from the card. Never say it was sent.',
+    description: 'メールの下書きを作る（送らない）。来た連絡への返事は interactionId を渡す：メールなら同じスレッドへの返信（宛先は mail_recipients のスレッドの相手から）、Slack ならそのスレッドへの返事（本文だけ）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。\n' +
+      'Create a mail draft (NOT sent). To answer an incoming message pass interactionId: a mail replies in its thread (recipients from mail_recipients\' thread), a Slack message gets a reply in its thread (body only). It appears as a card; only the member sends it from the card. Never say it was sent.',
     request: input => ({ method: 'POST', path: '/outbound', body: input }),
   },
   {

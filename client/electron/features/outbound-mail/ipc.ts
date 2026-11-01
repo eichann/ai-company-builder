@@ -24,6 +24,8 @@ export interface OutboundMailDeps {
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const REF = /^r[0-9a-f]{24}$/
+/** 503s whose sentence is the server's own (a connector stopped), not an outage. */
+const SAID_BY_SERVER = new Set(['GOOGLE_UNAVAILABLE', 'SLACK_UNAVAILABLE'])
 const BAD: OutboundMailResult = { success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 
 type Data = { draft?: OutboundMailView; outcome?: 'sent' | 'unknown'; message?: string; recipient?: MailRecipientView } & Partial<MailRecipientsView>
@@ -62,8 +64,8 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
     const code = typeof json?.code === 'string' ? json.code : null
     log.warn(`[outbound-mail] ${suffix || 'draft'}: answered ${res.status}${code ? ` ${code}` : ''}`)
     return {
-      success: false, offline: res.status >= 500 && code !== 'GOOGLE_UNAVAILABLE', code,
-      error: typeof json?.error === 'string' && (res.status < 500 || code === 'GOOGLE_UNAVAILABLE') ? json.error : `サーバーでエラーが起きました（HTTP ${res.status}）。`,
+      success: false, offline: res.status >= 500 && !SAID_BY_SERVER.has(code ?? ''), code,
+      error: typeof json?.error === 'string' && (res.status < 500 || SAID_BY_SERVER.has(code ?? '')) ? json.error : `サーバーでエラーが起きました（HTTP ${res.status}）。`,
       ...(json?.needsGoogleConsent === 'mail' ? { needsGoogleConsent: 'mail' as const } : {}),
       ...(json?.draft ? { draft: json.draft } : {}),
     }

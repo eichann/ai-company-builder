@@ -168,6 +168,7 @@ contract.invoke tasks:retryRun
 contract.invoke tasks:share
 contract.invoke tasks:suggestTags
 contract.invoke tasks:unlinkFile
+contract.invoke threads:get
 contract.invoke tool-approval-response
 contract.invoke tools:start
 contract.invoke tools:stop
@@ -335,6 +336,7 @@ contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => strin
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
 contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
+contract.type ElectronAPI.getRecordThread = getRecordThread: Invoke<'threads:get'>
 contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
@@ -711,6 +713,7 @@ contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [co
 contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'threads:get' = 'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
 contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
@@ -949,6 +952,7 @@ main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
 main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
 main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
+main.handle threads:get @ features/threads/ipc.ts (companyId, recordId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
 main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
@@ -1102,6 +1106,8 @@ preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0,
 preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
 preload getRecordCard -> invoke recordViews:card($0, $1)
 preload getRecordCard : (companyId: string, recordId: string) => Promise<RecordCardResult>
+preload getRecordThread -> invoke threads:get($0, $1)
+preload getRecordThread : (companyId: string, recordId: string) => Promise<RecordThreadResult>
 preload getRecordsForFile -> invoke recordViews:forFile($0, $1)
 preload getRecordsForFile : (companyId: string, companyPath: string) => Promise<RecordListResult>
 preload getServerUrl -> invoke config:getServerUrl()
