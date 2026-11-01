@@ -9,6 +9,9 @@
  *   record, and nothing crosses into or out of a private folder by id;
  * - a type definition change that removes something, or does not raise the
  *   version, leaves the definition in force;
+ * - a file claiming a server-only type (task, decision: every core type) is
+ *   not a record: reported, nothing indexed, a server record with that id
+ *   untouched (owner decision 2026-11-01);
  * - answers AND counts hold only what the caller may read: a private
  *   folder's records do not exist for a member who cannot read it;
  * - a link from outside a private folder into it is never shown or followed,
@@ -22,7 +25,7 @@ import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 import type { CompanyDataSource } from '../../src/ports/company-data'
 import type { RecordFileChange } from '../../src/ports/record-files'
-import { applyRecordChanges } from '../../src/services/record-index'
+import { applyRecordChanges, ensureCoreTypes } from '../../src/services/record-index'
 import { createRecordService, type RecordService } from '../../src/services/records'
 import type { Member } from '../../src/services/access'
 
@@ -162,6 +165,22 @@ describe('index: type definitions', () => {
     if (!types.ok) throw new Error('types')
     expect(types.value.types.find(t => t.definition.name === 'deal')!.versions).toEqual([1, 2])
     expect(source.forCompany('a').records.find('deal-adeal01')!.typeVersion).toBe(1)
+  })
+})
+
+describe('index: server-only types never come from files', () => {
+  it('a file claiming task or decision is reported and not indexed; the server record with that id is untouched', () => {
+    const records = source.forCompany('a').records
+    ensureCoreTypes(records, TS)
+    records.upsert({ id: 'task-srv00001', type: 'task', typeVersion: 2, scopeId: null, path: null, folder: '営業部', title: '見積を出す', summary: '', createdAt: TS, updatedAt: TS, removedAt: null })
+    push('a', {
+      '営業部/タスク/見積.md': record('task-srv00001', 'task', '別の件名'),
+      '営業部/意思決定/窓口.md': record('decision-file0001', 'decision', '窓口を3つにする'),
+    })
+    expect(records.find('task-srv00001')).toMatchObject({ path: null, folder: '営業部', title: '見積を出す', removedAt: null })
+    expect(records.find('decision-file0001')).toBeNull()
+    expect(records.problems(50).filter(p => p.kind === 'server_only_type').map(p => p.path).sort())
+      .toEqual(['営業部/タスク/見積.md', '営業部/意思決定/窓口.md'].sort())
   })
 })
 

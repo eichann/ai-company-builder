@@ -217,7 +217,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
   return {
     /**
      * A record that lives on the server (types with storage `server` or
-     * `either`; a file-backed record is created by writing its file).
+     * `either`; a company's own file-backed type is created by writing its file).
      */
     create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
       const opened = open(member)
@@ -678,13 +678,8 @@ export interface ServiceCreateInput {
   id?: string
   title: string
   summary?: string
-  /** A server-only record's readers' folder (null = everyone); never a private folder. */
+  /** The record's readers' folder (null = everyone); never a private folder. Service records are server only. */
   folder?: string | null
-  /**
-   * A file record (storage `file` / `either`): the company path of the file
-   * the caller has committed (company repository; never inside a private folder).
-   */
-  path?: string | null
   /** Server fields, checked by the type's kinds; every person named must be able to read the record. */
   fields?: Record<string, LedgerValue>
   /** Link name → record ids. */
@@ -779,15 +774,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     if (title === '' || title.length > 200) return fail('bad-value', 'title: 1–200 characters')
     const summary = (input.summary ?? '').normalize('NFC').slice(0, 300)
     const scopes = companyData.forCompany(companyId).scopes.listWithRules()
-    let path: string | null = null
+    if (def.storage === 'file') return fail('bad-place', 'records of this type are files')
     let folder: string | null = null
-    if (input.path !== undefined && input.path !== null) {
-      if (def.storage === 'server') return fail('bad-place', 'this type is server only')
-      path = fileLinkPath(input.path)
-      if (!path || findPrivateScope(scopes, path)) return fail('bad-place')
-    } else if (def.storage === 'file') return fail('bad-place', 'records of this type are files: pass the committed path')
     if (input.folder !== undefined && input.folder !== null) {
-      if (path) return fail('bad-place', 'a file record has no folder')
       folder = normalizeRepoPath(input.folder)
       if (folder === null || findPrivateScope(scopes, folder)) return fail('bad-place')
     }
@@ -800,7 +789,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const id = input.id ?? newRecordId(def.name, deps.ids.newToken().slice(0, 16))
     if (!RECORD_ID_RE.test(id) || !id.startsWith(`${def.name}-`)) return fail('bad-value', 'id')
-    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path, folder }
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder }
     if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const links: RecordLinkRow[] = []
     for (const [name, targets] of Object.entries(input.links ?? {})) {
@@ -813,11 +802,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
-    return { ok: true as const, records, def, id, title, summary, path, folder, values, links }
+    return { ok: true as const, records, def, id, title, summary, folder, values, links }
   }
 
   return {
-    /** Would `create` accept this now? (A caller committing a file asks first, so nothing is left half-made.) */
+    /** Would `create` accept this now? (A caller with outside work to do first asks, so nothing is left half-made.) */
     check(companyId: string, input: ServiceCreateInput): ServiceWriteFailed | null {
       const p = prepare(companyId, input)
       return p.ok ? null : p
@@ -838,13 +827,12 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
       }
-      // The indexer may already hold a just-committed file (a row without state): the state decides.
       const existing = records.find(id)
       let written = false
       try {
         written = deps.transactions.run(() => {
           records.upsert({
-            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: p.path, folder: p.folder,
+            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder,
             title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
           })
           records.replaceLinks(id, links)

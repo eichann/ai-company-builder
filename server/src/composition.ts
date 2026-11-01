@@ -23,7 +23,7 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
-import { gitRecordFileCreator, gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
+import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
@@ -210,10 +210,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const decisions = createDecisionService({
     ...shared,
     writer: serviceRecords,
-    files: gitRecordFileCreator(),
     tokenDigest: sha256TokenDigest,
-    memberNames: companyId => [...shared.accounts.byIds(repos.memberships.listByCompany(companyId).map(m => m.user_id)).values()]
-      .flatMap(a => (a.name ? [a.name] : [])),
   })
 
   // Connector plugins (milestone 3): the shelf is shared and read only; installs are behind the company handle.

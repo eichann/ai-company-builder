@@ -38,7 +38,7 @@ export interface RecordIndexProblem {
   /** 'company' or 'scope:<scope id>'. */
   repo: string
   path: string
-  /** duplicate_id, invalid_record, invalid_type, type_version, breaking_type_change, type_file_removed, unknown_type, ignored_keys, blocked_link, moved_across_folders */
+  /** duplicate_id, invalid_record, invalid_type, type_version, breaking_type_change, type_file_removed, unknown_type, ignored_keys, blocked_link, moved_across_folders, server_only_type */
   kind: string
   detail: string
   foundAt: string

@@ -142,7 +142,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   consultation titled 「<件名> のあと（M/D）」 (kept, not generated), stores `minutesId` with the
   conversation, and sends the app-composed first message as the member's (`minutesFirstMessage`,
   `client/shared/minutes-app.ts`): read minutes `<id>` with `minutes_read`, mark start / finish /
-  fail, make tasks (attending member ids only), decisions (no names), the deal update (approval
+  fail, make tasks (attending member ids only), decisions (in the minutes folder), the deal update (approval
   fields become requests), the HubSpot meeting and the thank-you draft (recipients only from
   `mail_recipients`), each with the quoted basis, never claiming a send or an approval. It holds
   the record's id and title only — **the app never has the minutes text**. An agent without

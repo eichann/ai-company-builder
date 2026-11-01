@@ -13,9 +13,12 @@
  * - for owners too, a definition change that removes a state is refused
  *   (reason line under the path); adding one with a higher version, and
  *   deleting a definition, are accepted;
- * - a decision is written by the server as its own commit through the push
- *   checker and indexed with its server state kept; one naming the linked
- *   customer is refused and nothing is committed; the same key commits once.
+ * - a task is a server record: an attached file version is checked against
+ *   the repository; a company's own file-backed type gets its milestone line
+ *   committed through the push checker;
+ * - a decision is a server record: nothing is committed, the same key
+ *   records once, and a file claiming `type: decision` stays an ordinary
+ *   file (reported, not indexed).
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
@@ -230,16 +233,11 @@ describe('the company map, end to end', () => {
     expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '.acb/types/customer.md', kind: 'type_file_removed' }))
   })
 
-  it('a task through the engine: attached version checked against the repository, the milestone line committed through the push checker', async () => {
-    // A server-only task (0.6), then its file once it has content: the index adopts it.
-    const created = await api('u-owner', 'POST', '/item', { type: 'task', title: '提案書の見直し', fields: { assignee: 'u-member' } })
+  it('a task through the engine: attached version checked against the repository; a file type’s milestone line committed through the push checker', async () => {
+    const created = await api('u-owner', 'POST', '/item', { type: 'task', title: '提案書の見直し', fields: { assignee: 'u-member' }, links: { files: ['営業部/商談/提案書.md'] } })
     expect(created.status).toBe(201)
     const id = (created.body.data?.record as { id: string }).id
-    resetToRemote()
-    write('営業部/タスク/見直し.md', `---\nid: ${id}\ntype: task\nlinks:\n  files: [営業部/商談/提案書.md]\n---\n# 提案書の見直し\n\n第2章を直す。\n`)
-    commit('task file')
-    expect(pushAs('owner').ok).toBe(true)
-    await services.records.refreshIndex(owner)
+    expect(created.body.data?.record).toMatchObject({ path: null })
     const tip = git(['-C', bare, 'rev-parse', 'main']).trim()
 
     expect((await api('u-member', 'POST', `/item/${id}/actions/start`, { expectedVersion: 1 })).status).toBe(200)
@@ -252,43 +250,55 @@ describe('the company map, end to end', () => {
     })
     expect(review.status).toBe(200)
     expect((await api('u-owner', 'GET', '/my-turn')).body.data?.records).toEqual([expect.objectContaining({ id, state: 'review' })])
-
     expect((await api('u-owner', 'POST', `/item/${id}/actions/complete`, { expectedVersion: 3, note: '問題なし' })).status).toBe(200)
-    let text = ''
-    for (let i = 0; i < 200 && !text.includes('## 経緯'); i++) {
-      try { text = git(['-C', bare, 'show', `main:営業部/タスク/見直し.md`]) } catch { text = '' }
-      if (!text.includes('## 経緯')) await new Promise(r => setTimeout(r, 100))
-    }
-    expect(text).toMatch(/## 経緯\n\n- \d{4}-\d{2}-\d{2} 完了にする（u-owner）：問題なし\n/)
-    expect(git(['-C', bare, 'log', '-1', '--format=%an'])).toContain('AI Company Builder')
+    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(tip) // a server record: nothing committed
     const history = await api('u-member', 'GET', `/item/${id}/history`)
     expect((history.body.data?.entries as Array<{ action: string }>).map(e => e.action)).toEqual(['create', 'start', 'request_review', 'complete'])
     expect((await api('u-member', 'GET', `/item/${id}/versions/2`)).body.data).toMatchObject({ version: 2, state: 'in_progress' })
+
+    // A company's own file-backed type: its milestone line is the server's own commit.
+    resetToRemote()
+    write('.acb/types/memo.md', '---\nlabel: メモ\nversion: 1\nstorage: file\nstates: [open, closed]\nactions:\n  close: { label: 閉じる, from: [open], to: closed, who: [anyone], note: required, history_line: true }\n---\n')
+    write('営業部/メモ/見直し.md', record('memo-memo0001', 'memo', '見直しのメモ'))
+    commit('memo type and file')
+    expect(pushAs('owner').ok).toBe(true)
+    await services.records.refreshIndex(owner)
+    expect((await api('u-member', 'POST', '/item/memo-memo0001/actions/close', { expectedVersion: 0, note: '問題なし' })).status).toBe(200)
+    let text = ''
+    for (let i = 0; i < 200 && !text.includes('## 経緯'); i++) {
+      try { text = git(['-C', bare, 'show', 'main:営業部/メモ/見直し.md']) } catch { text = '' }
+      if (!text.includes('## 経緯')) await new Promise(r => setTimeout(r, 100))
+    }
+    expect(text).toMatch(/## 経緯\n\n- \d{4}-\d{2}-\d{2} 閉じる（u-member）：問題なし\n/)
+    expect(git(['-C', bare, 'log', '-1', '--format=%an'])).toContain('AI Company Builder')
   })
 
-  it('a decision: the server commits its file through the push checker; the index keeps its state; a customer name is refused', async () => {
+  it('a decision: a server record, nothing committed; the same key records once; a decision file stays an ordinary file', async () => {
     const { db } = await import('../../src/db')
     const now = new Date().toISOString()
     db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('dep-sales', CO, '営業部', '営業部', now, now)
     const before = git(['-C', bare, 'rev-parse', 'main']).trim()
-    const named = await api('u-member', 'POST', '/decisions', { folder: '営業部', title: 'A社に窓口を3つ出す', why: '要望があった', source: '商談', links: { deal: 'deal-deal0001' } })
-    expect(named).toMatchObject({ status: 400, body: { code: 'NAME_IN_DECISION' } })
-    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(before)
-
     const made = await api('u-member', 'POST', '/decisions', {
-      folder: '営業部', title: '対象の窓口を3つにする', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', links: { deal: 'deal-deal0001' }, key: 'k-1',
+      folder: '営業部', title: 'A社に窓口を3つ出す', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', links: { deal: 'deal-deal0001' }, key: 'k-1',
     })
     expect(made.status).toBe(201)
     const id = (made.body.data?.record as { id: string }).id
-    const text = git(['-C', bare, 'show', `main:営業部/意思決定/${id}.md`])
-    expect(text).toContain(`id: ${id}\ntype: decision\nlinks:\n  deal: deal-deal0001\n---\n# 対象の窓口を3つにする`)
-    expect(git(['-C', bare, 'log', '-1', '--format=%an'])).toContain('AI Company Builder')
-    await services.records.refreshIndex(owner)
+    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(before)
     const detail = await api('u-owner', 'GET', `/item/${id}`)
-    expect(detail.body.data?.record).toMatchObject({ id, path: `営業部/意思決定/${id}.md`, state: 'unconfirmed', version: 1, fields: { recorded_by: 'human', decided_by: 'u-member' } })
+    expect(detail.body.data?.record).toMatchObject({ id, path: null, state: 'unconfirmed', version: 1, fields: { recorded_by: 'human', decided_by: 'u-member', why: 'チャット窓口も最初から入れたいとの要望' } })
     // Again with the same key: nothing new.
-    const tip = git(['-C', bare, 'rev-parse', 'main']).trim()
-    expect((await api('u-member', 'POST', '/decisions', { folder: '営業部', title: '対象の窓口を3つにする', why: '同じ', source: '同じ', key: 'k-1' })).status).toBe(200)
-    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(tip)
+    const again = await api('u-member', 'POST', '/decisions', { folder: '営業部', title: '対象の窓口を3つにする', why: '同じ', source: '同じ', key: 'k-1' })
+    expect(again).toMatchObject({ status: 200, body: { data: { created: false, record: { id } } } })
+
+    // A decision file pushed by a member (as an older build wrote): reported, not a record.
+    git(['fetch', '-q', bare, 'main'], clone) // the server's own history-line commit
+    resetToRemote()
+    write('営業部/意思決定/decision-old00001.md', record('decision-old00001', 'decision', '古い決めたこと'))
+    commit('an old decision file')
+    expect(pushAs('member').ok).toBe(true)
+    await services.records.refreshIndex(owner)
+    expect((await api('u-owner', 'GET', '/item/decision-old00001')).status).toBe(404)
+    const problems = await api('u-owner', 'GET', '/problems')
+    expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '営業部/意思決定/decision-old00001.md', kind: 'server_only_type' }))
   })
 })

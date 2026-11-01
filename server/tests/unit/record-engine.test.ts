@@ -75,6 +75,33 @@ function replayed<T extends { origin: unknown }>(r: { ok: true; value: T } | { o
   return rest as Omit<T, 'origin'>
 }
 
+/**
+ * A company's own file-backed type (core types are server only): the
+ * milestone line and records inside a private folder's repository need a file.
+ */
+const MEMO_TYPE = `---
+label: メモ
+version: 1
+storage: file
+fields:
+  assignee: { label: 担当, kind: person, source: server }
+states: [open, closed]
+initial: open
+actions:
+  assign: { label: 担当を決める, who: [anyone], args: { assignee: person }, note: required }
+  close:  { label: 閉じる, from: [open], to: closed, who: [anyone], note: required, history_line: true }
+  reopen: { label: 開け直す, from: [closed], to: open, who: [anyone] }
+---
+`
+
+/** Index files of company `co`'s repository (or of its private folder's: `scope`). */
+function index(co: string, changes: Record<string, string>, scope?: { id: string; prefix: string }) {
+  sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany(co).records, {
+    repoKey: scope ? `scope:${scope.id}` : 'company', scopeId: scope?.id ?? null, prefix: scope?.prefix ?? '', full: false, tip: 'a'.repeat(40), at: at(),
+    scopes: source.forCompany(co).scopes.listWithRules(), changes: Object.entries(changes).map(([path, text]) => ({ path, text })),
+  }))
+}
+
 /** A task requested by alice, assigned to bob. */
 function newTask(co = 'a', extra: Record<string, unknown> = {}) {
   return ok(create(m('u-alice', co), { type: 'task', title: '提案書を作る', fields: { assignee: 'u-bob' }, ...extra })).record
@@ -216,16 +243,12 @@ describe('duties 4 and 5: whom to tell, the milestone line', () => {
     const t = newTask()
     ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
     ok(await act(m('u-alice'), t.id, 'complete', { expectedVersion: 2 }))
-    expect(lines).toEqual([]) // server-only: no file to write to
-    // The task gets its file (0.6): the index adopts it.
-    sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany('a').records, {
-      repoKey: 'company', scopeId: null, prefix: '', full: false, tip: 'a'.repeat(40), at: at(), scopes: source.forCompany('a').scopes.listWithRules(),
-      changes: [{ path: '営業部/タスク/提案書.md', text: `---\nid: ${t.id}\ntype: task\n---\n# 提案書を作る\n` }],
-    }))
-    ok(await act(m('u-alice'), t.id, 'reopen', { expectedVersion: 3 }))
-    expect(lines).toEqual([]) // reopen is not a milestone
-    ok(await act(m('u-alice'), t.id, 'cancel', { expectedVersion: 4, note: '不要になった' }))
-    expect(lines).toEqual([{ companyId: 'a', path: '営業部/タスク/提案書.md', line: expect.stringMatching(/^2026-11-01 中止する（u-alice）：不要になった$/) }])
+    expect(lines).toEqual([]) // tasks are server only: no file to write to
+    index('a', { '.acb/types/memo.md': MEMO_TYPE, '営業部/メモ/提案書.md': '---\nid: memo-memo0001\ntype: memo\n---\n# 提案書のメモ\n' })
+    ok(await act(m('u-alice'), 'memo-memo0001', 'close', { expectedVersion: 0, note: '不要になった' }))
+    ok(await act(m('u-alice'), 'memo-memo0001', 'reopen', { expectedVersion: 1 }))
+    // reopen is not a milestone
+    expect(lines).toEqual([{ companyId: 'a', path: '営業部/メモ/提案書.md', line: expect.stringMatching(/^2026-11-01 閉じる（u-alice）：不要になった$/) }])
   })
 })
 
@@ -292,12 +315,10 @@ describe('an assignee must be able to see the record', () => {
     expect(refused).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'ASSIGNEE_CANNOT_READ' } })
     expect(ok(create(owner(), { type: 'task', title: '経理の締め', folder: '経理', fields: { assignee: 'u-bob' } })).record.fields.assignee).toBe('u-bob')
 
-    // A task whose file is in the private folder (indexed from its repository).
-    const id = 'task-priv0001'
-    sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany('a').records, {
-      repoKey: 'scope:a-priv', scopeId: 'a-priv', prefix: '営業部/評価', full: false, tip: 'b'.repeat(40), at: at(),
-      scopes: source.forCompany('a').scopes.listWithRules(), changes: [{ path: '評価.md', text: `---\nid: ${id}\ntype: task\n---\n# 評価のまとめ\n` }],
-    }))
+    // A record whose file is in the private folder (indexed from its repository).
+    const id = 'memo-priv0001'
+    index('a', { '.acb/types/memo.md': MEMO_TYPE })
+    index('a', { '評価.md': `---\nid: ${id}\ntype: memo\n---\n# 評価のまとめ\n` }, { id: 'a-priv', prefix: '営業部/評価' })
     const r = await act(owner(), id, 'assign', { expectedVersion: 0, args: { assignee: 'u-bob' }, note: '担当を決める' })
     expect(r).toMatchObject({ ok: false, body: { code: 'ASSIGNEE_CANNOT_READ' } })
     // The answer never names where the record is.

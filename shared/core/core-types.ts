@@ -5,9 +5,10 @@
  * `core`) when the company map is turned on; a company may extend one with
  * its own `.acb/types/<name>.md` (a higher version that only adds).
  *
- * task (タスク): the first type implementing `request` (依頼). Small tasks
- * live on the server only; one gets a file once it has content worth keeping
- * (storage `either`, 0.6-1).
+ * task (タスク): the first type implementing `request` (依頼). Server only
+ * (owner decision 2026-11-01: record data lives only on the server; what
+ * people write — a quote, a plan — stays an ordinary file the task links to).
+ * Version 1 was storage `either` (a file once it had content, 0.6-1).
  *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
@@ -27,12 +28,12 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 1
+version: 2
 implements: [request]
-storage: either
+storage: server
 fields:
   title:        { label: 件名, kind: text, source: file }
-  purpose:      { label: 目的, kind: long_text, source: file }
+  purpose:      { label: 目的, kind: long_text, source: server }
   requested_by: { label: 依頼した人, kind: person, source: server }
   assignee:     { label: 担当, kind: person, source: server }
   next_actor:   { label: 次に動く人, kind: person, source: server }
@@ -53,13 +54,13 @@ actions:
   assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, note: optional, approval: undoable }
-  complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], notify: requested_by, attach: [files], note: optional, history_line: true, decision: true }
-  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, history_line: true, decision: true }
+  complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], notify: requested_by, attach: [files], note: optional, decision: true }
+  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
   reopen:         { label: やり直す, from: [done, cancelled], to: in_progress, who: [requested_by, admin], notify: assignee, note: optional, hand_to: assignee }
 ---
 # タスク
 
-ACB に最初からある「依頼」の形。状態・担当・期限はサーバーが持ち、ファイルには書きません。
+ACB に最初からある「依頼」の形。記録はサーバーだけが持ちます（ファイルにはしません）。見積や計画などの中身はふつうのファイルに書き、「関係するファイル」でつなぎます。
 `,
   interaction: `---
 label: やりとり
@@ -169,10 +170,12 @@ final: [sent, discarded]
 `,
   decision: `---
 label: 決めたこと
-version: 1
-storage: file
+version: 2
+storage: server
 fields:
   title:       { label: 件名, kind: text, source: file }
+  why:         { label: なぜ, kind: long_text, source: server }
+  source:      { label: 元, kind: text, source: server }
   recorded_by: { label: 記録したもの, kind: choice, options: [ai, human], source: server }
   important:   { label: 大事, kind: boolean, source: server }
   decided_by:  { label: 決めた人, kind: person, source: server }
@@ -191,7 +194,7 @@ actions:
 ---
 # 決めたこと
 
-商談などで決まったことの記録（部署の「意思決定」フォルダのファイル）。件名と本文に人や顧客の名前は書かず、つながり（案件・議事録）で示します。
+商談などで決まったことの記録。サーバーだけが持ち（ファイルにはしません）、置いた部署のフォルダを読める人だけが見られます。
 `,
 }
 
