@@ -93,7 +93,8 @@ turns").
   tool that is not one exact tool (an ending must be a whole `__operation`; no wildcard).
 - A step gets only its own tools: connectors' tools (`electron/records/tool-providers.ts`, one
   provider per connector, under the lane markers; `createRecordTools` merges them, none
-  replacing a record tool or an earlier provider's, a failing one costs only its own) reach an
+  replacing a record tool or an earlier provider's, a failing one costs only its own; each tool
+  declares its plain-Japanese `display`, `chat-ui-and-history.md` 「Tool rows」) reach an
   unattended run only when its step names them. Test: `tests/ai-turn-steps.test.ts`.
 
 ## Claiming and settling (main, `electron/features/ai-turns/`)

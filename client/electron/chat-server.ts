@@ -25,6 +25,7 @@ import {
   type UIMessage,
 } from 'ai'
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
+import { acbToolDisplays, toolDisplayTransform } from './tool-display-stream'
 import type { AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
 import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatform, type SandboxHost } from '../shared/agents/sandbox-policy'
 import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
@@ -559,6 +560,7 @@ export async function startChatServer(config: ChatServerConfig) {
     return limitedUIMessageStreamResponse(result, {
       ownsConversation: connection.ownsConversation,
       inject: injector,
+      label: toolDisplayTransform(acbToolDisplays(records), companyRootPath || workingDirectory || undefined),
       onError: error => error instanceof Error ? error.message : 'AIとの接続でエラーが発生しました。',
     })
   })

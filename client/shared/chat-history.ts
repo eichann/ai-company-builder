@@ -6,6 +6,7 @@ import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { MinutesBundleChoiceCard } from './minutes-app'
 import type { MailDraftCard } from './outbound-mail'
+import type { StoredToolLine } from './tool-display'
 export interface ChatSession {
   id: string
   companyId: string
@@ -35,6 +36,8 @@ export interface ChatSession {
     cardOrder?: string[]
     /** Mail drafts the AI made in this reply, drawn by the app with 「確かめて送る」 (outbound-mail.ts); shown after its text. */
     mailDrafts?: MailDraftCard[]
+    /** Plain-Japanese labels of the app's tools this reply called, by tool name (tool-display.ts; the calls stay `[Tool: name]` markers in `content`). */
+    toolLines?: Record<string, StoredToolLine>
   }>
   createdAt: string
   updatedAt: string

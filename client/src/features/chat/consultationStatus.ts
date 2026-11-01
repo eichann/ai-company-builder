@@ -4,6 +4,7 @@ import { getToolDisplayName, isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } fr
 import type { buildConversationRows } from './conversationRows'
 import { pendingReviewOf } from './reviewRequest'
 import { REVIEW_TOOL_ID } from '../../../shared/review-request'
+import { toolLineOf, type ToolLine } from '../../../shared/tool-display'
 
 /**
  * Whose turn a conversation is and what its AI is doing (the 「AIへの相談」
@@ -72,7 +73,7 @@ function host(url: string): string {
 }
 
 /** What a tool call is doing, in plain Japanese (no tool names, no command text). */
-export function toolActivity(toolName: string, input: unknown, rootPath?: string): string {
+export function toolActivity(toolName: string, input: unknown, rootPath?: string, line?: ToolLine): string {
   const inp = parsedInput(input)
   const file = text(inp.file_path) || text(inp.notebook_path) || text(inp.path)
   const at = (verb: string, target: string) => target ? `${verb}：${target}` : verb
@@ -89,7 +90,8 @@ export function toolActivity(toolName: string, input: unknown, rootPath?: string
   if (toolName === 'TodoWrite') return '作業の段取りを立てています'
   if (toolName === REVIEW_TOOL_ID) return '確認のお願いを出しています'
   if (toolName === 'Skill') return at('スキルを使っています', text(inp.skill) || text(inp.command))
-  return `${getToolDisplayName(toolName)}を使っています`
+  // The app's own tools carry their line (tool-display.ts); never a raw tool id.
+  return line ? line.running : toolLineOf(toolName, inp).running
 }
 
 /** The running subagent call of the latest message (whose progress line to show). */
@@ -108,7 +110,7 @@ function workingLine(message: UIMessage | undefined, progressLine: string | unde
   for (let i = message.parts.length - 1; i >= 0; i--) {
     const part = message.parts[i]
     const row = toolRowOf(part)
-    if (row) return isRunningState(row.state) ? toolActivity(row.toolName, row.input, rootPath) : '考えています'
+    if (row) return isRunningState(row.state) ? toolActivity(row.toolName, row.input, rootPath, row.line) : '考えています'
     if (part.type === 'text') return part.state === 'streaming' ? '返事を書いています' : '考えています'
     if (part.type === 'reasoning') return '考えています'
   }

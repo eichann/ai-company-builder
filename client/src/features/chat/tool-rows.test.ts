@@ -13,7 +13,9 @@ import {
   type AgentItem,
   type PlanItem,
   type RunItem,
+  type SameItem,
 } from './toolRows'
+import { manyLine } from '../../../shared/tool-display'
 
 type Part = UIMessage['parts'][number]
 
@@ -41,7 +43,8 @@ function bookTurn(running = 1): Part[] {
   }
   for (let i = 0; i < 69; i++) {
     if (i % 23 === 0) parts.push(text(`途中経過 ${i}`), text(''))
-    parts.push(tool(`main-${i}`, 'Bash', 'output-available', { input: { command: `ls ${i}` } }))
+    // Alternating tools, so the calls do not merge into one 「… {n} 回」 row.
+    parts.push(tool(`main-${i}`, i % 2 ? 'Bash' : 'Grep', 'output-available', { input: { command: `ls ${i}` } }))
   }
   return parts
 }
@@ -81,13 +84,14 @@ test('a 1,000-tool message renders a bounded number of rows by default', () => {
 })
 
 test('runs collapse only above the threshold and keep the tail and running rows visible', () => {
-  const short = Array.from({ length: RUN_COLLAPSE_THRESHOLD }, (_, i) => tool(`t${i}`, 'Bash', 'output-available'))
+  // Alternating tools: consecutive calls of one tool would share a row (tested below).
+  const short = Array.from({ length: RUN_COLLAPSE_THRESHOLD }, (_, i) => tool(`t${i}`, i % 2 ? 'Bash' : 'Read', 'output-available'))
   const shortPlan = planParts(short)
   assert.equal(shortPlan.length, 1)
   assert.equal((shortPlan[0] as RunItem).collapsible, false)
   assert.equal((shortPlan[0] as RunItem).items.length, RUN_COLLAPSE_THRESHOLD)
 
-  const long = Array.from({ length: 40 }, (_, i) => tool(`t${i}`, 'Bash', i === 5 ? 'input-available' : 'output-available'))
+  const long = Array.from({ length: 40 }, (_, i) => tool(`t${i}`, i % 2 ? 'Bash' : 'Read', i === 5 ? 'input-available' : 'output-available'))
   const plan = planParts(long)
   assert.equal(plan.length, 1)
   const run = plan[0] as RunItem
@@ -111,11 +115,12 @@ test('Codex / api-key messages without parent metadata stay flat and in order', 
   const run = plan[1] as RunItem
   assert.equal(run.collapsible, false)
   assert.deepEqual(run.items.map(i => [i.kind, i.row.toolCallId]), [['tool', 'c1'], ['tool', 'c2']])
-  assert.equal(run.items[0].row.inputSummary, 'ls')
+  assert.equal(run.items[0].row.line.label, 'コマンドを実行しました')
+  assert.equal(run.items[0].row.line.detail, undefined, 'never the command text')
   // Static tool parts (api-key mode) keep their name from the part type.
   const row = toolRowOf({ type: 'tool-readFile', toolCallId: 'x', state: 'input-available', input: { path: 'a.md' } } as Part)
   assert.equal(row?.toolName, 'readFile')
-  assert.equal(row?.inputSummary, 'a.md')
+  assert.equal(row?.line.detail, 'a.md')
 })
 
 test('a run of only subagent groups never collapses (nothing would be hidden)', () => {
@@ -148,7 +153,7 @@ test('memo equality: finished rows are equal across fresh clones; changes that s
   assert.equal(toolRowPropsEqual({ row: done }, { row: clone }), true)
   const streaming = toolRowOf(tool('r', 'Read', 'input-streaming', { input: { path: 'a' } }))!
   assert.equal(toolRowPropsEqual({ row: streaming }, { row: structuredClone(streaming) }), true)
-  assert.equal(toolRowPropsEqual({ row: streaming }, { row: { ...streaming, inputSummary: 'ab' } }), false)
+  assert.equal(toolRowPropsEqual({ row: streaming }, { row: { ...streaming, line: { ...streaming.line, detail: 'ab' } } }), false)
   assert.equal(toolRowPropsEqual({ row: streaming }, { row: done }), false)
   assert.equal(toolRowPropsEqual({ row: done }, { row: { ...clone, toolCallId: 'other' } }), false)
 })
@@ -178,4 +183,40 @@ test('the subagent parent is read from whichever provider reports it (agent-agno
   assert.equal(toolRowOf(part({ 'claude-code': { parentToolCallId: '' } }))?.parentToolCallId, undefined)
   assert.equal(toolRowOf(part({ x: null, y: 'str' }))?.parentToolCallId, undefined)
   assert.equal(toolRowOf(part(undefined))?.parentToolCallId, undefined)
+})
+
+test('consecutive finished calls of one tool share a row that counts them; running and refused calls keep their own', () => {
+  const decision = (id: string, state = 'output-available', output: unknown = 'ok') => ({
+    type: 'dynamic-tool', toolCallId: id, toolName: 'mcp__acb_records__decisions_record', state, input: {},
+    callProviderMetadata: { acb: { display: { label: '決めたことを残しました', running: '決めたことを残しています', many: '決めたことを {n} 件残しました' } } },
+    ...(state === 'output-available' ? { output } : {}),
+  } as unknown as Part)
+  const plan = planParts([decision('d1'), decision('d2'), tool('r1', 'Read', 'output-available'), decision('d3'), decision('d4', 'input-available')])
+  const items = runs(plan)[0].items
+  assert.deepEqual(items.map(i => i.kind), ['same', 'tool', 'tool', 'tool'])
+  const same = items[0] as SameItem
+  assert.deepEqual(same.rows.map(r => r.toolCallId), ['d1', 'd2'])
+  assert.equal(manyLine(same.row.line, same.rows.length), '決めたことを 2 件残しました')
+  assert.equal(runs(plan)[0].key, 'run:d1', 'the run keeps the key of its first call')
+
+  // A refusal (the app's `{ error }` answer) is never folded into the successes, and says why in the app's words.
+  const refused = decision('d6', 'output-available', [{ type: 'text', text: JSON.stringify({ error: 'この部署には書けません。', code: 'FORBIDDEN' }) }])
+  const plan2 = planParts([decision('d5'), refused])
+  assert.deepEqual(runs(plan2)[0].items.map(i => i.kind), ['tool', 'tool'])
+  assert.deepEqual(runs(plan2)[0].items[1].row.failure, { reason: 'この部署には書けません。' })
+})
+
+test('a row never shows a raw tool id: the stream\'s line, else the built-in one, else the muted 「道具を使いました」', () => {
+  const live = toolRowOf({
+    type: 'dynamic-tool', toolCallId: 'a', toolName: 'mcp__acb_records__records_create', state: 'output-available', input: {}, output: 'ok',
+    callProviderMetadata: { acb: { display: { label: '記録を作りました', running: '記録を作っています', many: '記録を {n} 件作りました', detail: 'タスク「修正見積」' } } },
+  } as unknown as Part)!
+  assert.equal(live.line.label, '記録を作りました')
+  assert.equal(live.line.detail, 'タスク「修正見積」')
+  const own = toolRowOf(tool('b', 'mcp__my_crm__find_customer', 'output-available'))!
+  assert.equal(own.line.label, '道具を使いました（my_crm・find_customer）')
+  assert.equal(own.line.muted, true)
+  assert.equal(toolRowOf(tool('s', 'Skill', 'output-available', { input: { skill: 'proposal' } }))!.line.detail, 'proposal')
+  const errored = toolRowOf(tool('c', 'Read', 'output-error', { errorText: 'ENOENT: no such file /Users/x/.ssh/id_rsa' }))!
+  assert.deepEqual(errored.failure, { reason: undefined }, 'a raw English error is never shown as the reason')
 })
