@@ -470,7 +470,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // lane A ▼
   const connectorsLane = wireConnectorsLane({ conn })
   // lane B ▼
-  const inboxLane = wireInboxLane({ conn })
+  const inboxLane = wireInboxLane({ conn, ...shared })
   // lane C ▼
   const pluginsLane = wirePluginsLane({ conn })
   // lanes ▲

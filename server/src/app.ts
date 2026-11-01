@@ -42,6 +42,8 @@ import { oauthRoute } from './routes/oauth'
 // lane A ▼
 // lane A ▲
 // lane B ▼
+import { identitiesRoute } from './routes/identities'
+import { recordsAiIdentitiesRoute } from './routes/records-ai-identities'
 // lane B ▲
 // lane C ▼
 // lane C ▲
@@ -150,6 +152,9 @@ app.route('/api', invitationsRoute)
 // lane A ▼
 // lane A ▲
 // lane B ▼
+// Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.
+app.route('/api/companies/:companyId', identitiesRoute)
+app.route('/api/records-ai/identities', recordsAiIdentitiesRoute)
 // lane B ▲
 // lane C ▼
 // lane C ▲

@@ -23,6 +23,7 @@ import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 // lane A ▼
 // lane A ▲
 // lane B ▼
+import { identitySchema } from './schema/identities'
 // lane B ▲
 // lane C ▼
 // lane C ▲
@@ -76,6 +77,7 @@ const SCHEMA = [
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  identitySchema,
   // lane B ▲
   // lane C ▼
   // lane C ▲
