@@ -74,6 +74,7 @@ const STATE_LABELS: Record<string, string> = {
   pending: '承認待ち', approved: '承認済み', sent_back: '差し戻し', stale: '古くなった', withdrawn: '取り下げ',
   draft: '下書き', sent: '送った', unknown: '送れたか不明', discarded: '捨てた',
   unconfirmed: '未確認', confirmed: '確かめ済み', retracted: '取り消し',
+  preparing: 'AI が用意している', declined: '受けられない', awaiting_acceptance: '引き受け待ち',
 }
 export const stateLabel = (state: string | null): string | null => (state === null ? null : STATE_LABELS[state] ?? state)
 

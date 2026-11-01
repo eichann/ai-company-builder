@@ -64,6 +64,7 @@ import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createServerClock } from './services/server-clock'
+import { createTaskAcceptance } from './services/task-acceptance'
 import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
@@ -230,6 +231,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     if (!change) return
     try { notifications.recordChange(companyId, userIds, change) } catch (err) { logError('notifications', 'Writing notices failed', err, { company: companyId }) }
   }
+  // Acceptance (引き受け, records.md "Acceptance"): the company's setting decides when a request waits.
+  const taskAcceptance = createTaskAcceptance({ ...shared, settingsOf: companyId => taskSettings.settingsOf(companyId) })
   const recordEngine = createRecordEngine({
     ...shared,
     files: gitRecordFileWriter(),
@@ -238,6 +241,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
     actsFor,
+    autoAccepts: taskAcceptance.autoAccepts,
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,

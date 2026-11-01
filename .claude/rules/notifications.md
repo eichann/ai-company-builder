@@ -50,7 +50,9 @@ a plugin can never draw a notice (§2-2).
   delegate who became absent), and so does adding an absence that has begun.
 - Kinds (`shared/types/notifications.ts`, `noticeKind`; generic over types — final states and the
   `request` fields decide, plus the core `approval` type):
-  `approval_result` (an approval's state changed, to its requester), `ok_completed` (completed on
+  `approval_result` (an approval's state changed, to its requester), `request_accepted` (what you
+  asked left 引き受け待ち for the assignee's work — 「引き受ける」 or a change that accepted it; task v7,
+  `records.md` "Acceptance"), `acceptance_waiting` (the server clock, below), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
   (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below),
@@ -72,6 +74,11 @@ a plugin can never draw a notice (§2-2).
   changed for 24 h; once per version. Types without `requested_by` (meeting) give no stuck
   notice. Only a requester who can read the record now gets either (an owner-only record's
   requester is its owner).
+- `acceptance_waiting` (on by default): a request still in 引き受け待ち one business day after it
+  began to wait — from the same time of day on the first business day after that day, company time,
+  weekends and holidays skipped (`acceptanceReminderAt`) — to the requester (who can read it),
+  once per wait (`acceptance_waiting:<record>:<version of the entry that began it>`). The sweep
+  looks at up to `limit` waiting records per company; the read-time safety net uses the same rule.
 - `wait_over` (on by default): the clock moved a wait that is over to the follow-up's turn — to
   the assignee (「…見込みの日時が過ぎました。追いかけてください」 / 「AI が追いかけを用意します」).
 - `outside` (dependency of the service, not wired): where stage 3's Slack DMs (E-26) plug in —
@@ -156,6 +163,8 @@ carry on. The app never acts on the signal itself: it only asks the server again
 cross-company; the push is kind + version only, to the told members, never the actor; gone when
 access is lost; read state shared by two service instances = two PCs; default kinds and switches;
 overdue once, the next business morning, only for the requester; stuck AI turn after 24 h),
+`server/tests/unit/record-task-acceptance.test.ts` (accepted → the requester told; still waiting
+a business day later → told once, not before, nobody else),
 `server/tests/unit/absences.test.ts` (the delegate's copy only when they can read; the stops to
 the manager; no chains),
 `server/tests/unit/server-clock.test.ts` (nothing moves before its time; a second run does

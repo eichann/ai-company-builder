@@ -10,6 +10,8 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
+import { acceptanceOf } from '../../../shared/core/core-types'
+import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
 import { ASSIGNEE_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
@@ -60,6 +62,8 @@ export function creating(ctx: EngineContext) {
       for (const [name, value] of Object.entries(rawFields)) {
         const f = def.fields[name]
         if (!f || f.source !== 'server') return bad(`${name} is not a server field of ${def.name}`)
+        // Who accepted is the engine's to write (records.md "Acceptance"), never a create's.
+        if (name === acceptanceOf(def.name)?.acceptedBy) return bad(`${name} is set by accepting`, 'BAD_VALUE')
         const v = checkValue(f.kind, value, f.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v
@@ -114,6 +118,14 @@ export function creating(ctx: EngineContext) {
           return refuse('bad-request', r.error, { code: r.code })
         }
       }
+      // Acceptance (records.md "Acceptance"): asked of someone else → 引き受け待ち unless the setting accepts it.
+      const origin = acceptanceOf(def.name)?.origin
+      initial = applyAcceptance(deps, {
+        companyId: member.companyId, type: def.name, typeVersion: def.version, personal: personalOwner !== null, state: initial, fields,
+        // The creator is the one asking (a `requested_by` in the body never makes it the assignee's own).
+        assigneeChanged: true, memberId: member.userId, actorKind: actor.kind, onBehalfOf: null,
+        originIds: links.filter(l => l.name === origin && l.targetId !== null).map(l => l.targetId as string), records,
+      })
       const at = clock.now()
       const changes: LedgerChange[] = [
         { field: 'state', before: null, after: initial },

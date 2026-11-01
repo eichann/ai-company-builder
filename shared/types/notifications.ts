@@ -11,10 +11,13 @@
  * The kinds of notice. A member turns each on or off; `NOTIFICATION_DEFAULTS`
  * is the owner's first setting (E-25: completion of what you asked, approval
  * results and a due pushed back are on; others' affairs are off). What you asked
- * coming back to you (受けられない, task v5) counts as its result: on.
+ * coming back to you (受けられない, task v5) counts as its result: on. What you
+ * asked being accepted (引き受ける, task v7) and still waiting for acceptance
+ * after a business day (the server clock) are on too (owner decision 2026-11-01).
  */
 export const NOTIFICATION_KINDS = [
   'request_done',
+  'request_accepted',
   'ok_completed',
   'request_returned',
   'approval_result',
@@ -22,6 +25,7 @@ export const NOTIFICATION_KINDS = [
   'overdue',
   'ai_turn_stuck',
   'wait_over',
+  'acceptance_waiting',
   'delegate_stopped',
   'others',
 ] as const
@@ -33,6 +37,7 @@ export const isNotificationKind = (value: unknown): value is NotificationKind =>
 /** What each kind is called in the member's settings. */
 export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   request_done: '頼んだことが終わった・中止になった',
+  request_accepted: '頼んだことを引き受けてもらえた',
   ok_completed: 'あなたの OK で完了になった',
   request_returned: '頼んだことが受けられないと戻ってきた',
   approval_result: '承認のお願いの結果（承認・差し戻しなど）',
@@ -40,6 +45,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   overdue: '頼んだことが期限を過ぎた',
   ai_turn_stuck: '頼んだことの AI の番が 24 時間進んでいない',
   wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
+  acceptance_waiting: '頼んだことが 1 営業日たっても引き受けられていない',
   delegate_stopped: '不在の人の代わりが受け持てないもの（部署の責任者へ）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
@@ -47,6 +53,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
 /** The owner's first setting (E-25). */
 export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   request_done: true,
+  request_accepted: true,
   ok_completed: true,
   request_returned: true,
   approval_result: true,
@@ -54,6 +61,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   overdue: true,
   ai_turn_stuck: true,
   wait_over: true,
+  acceptance_waiting: true,
   delegate_stopped: true,
   others: false,
 }

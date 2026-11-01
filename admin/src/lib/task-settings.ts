@@ -24,6 +24,7 @@ export function cloneSettings(s: TaskSettings): TaskSettings {
     taskListDepartmentIds: s.taskListDepartmentIds ? [...s.taskListDepartmentIds] : null,
     reply: { ...s.reply },
     autoRun: { ...s.autoRun },
+    acceptance: { ...s.acceptance },
     companyHolidays: s.companyHolidays.map((h) => ({ ...h })),
   }
 }

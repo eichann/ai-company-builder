@@ -131,7 +131,8 @@ describe('受けられない (decline)', () => {
     expect(ids(ok(service.myTurn(m('u-bob'))))).toEqual([])
     notified = []
     const again = ok(await engine.act(m('u-alice'), HUMAN, t.id, 'assign', { expectedVersion: 3, note: '代わりにお願いします', args: { assignee: 'u-owner' } }))
-    expect(again.record).toMatchObject({ state: 'declined', fields: { assignee: 'u-owner', next_actor: 'u-owner' } })
+    // Someone new assigned after 受けられない is asked like a new request (records.md "Acceptance"): their turn.
+    expect(again.record).toMatchObject({ state: 'todo', fields: { assignee: 'u-owner', next_actor: 'u-owner', accepted_by: 'u-owner' } })
     expect(notified).toEqual([['a', ['u-owner']]])
   })
 })

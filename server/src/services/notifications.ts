@@ -23,8 +23,8 @@ import type { NotificationItem, NotificationKind, NotificationList, Notification
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, type TypeDefinition } from '../../shared/core/record-types'
-import { addDays, isBusinessDay } from '../../shared/core/business-days'
-import { CLOCK_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
+import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
+import { acceptanceOf, CLOCK_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -91,6 +91,17 @@ export function overdueMorning(nowMs: number, timeZone: string, holidays: string
   return day
 }
 
+/**
+ * When a request still waiting for acceptance is reported to its requester:
+ * the same time of day on the first business day after the day it began to
+ * wait (company time; weekends, Japanese holidays and the company's own days
+ * off skipped) — 「1営業日たっても引き受けられていない」. `waitingSince` is the
+ * company's local `YYYY-MM-DDTHH:MM`; so is the answer (they compare as text).
+ */
+export function acceptanceReminderAt(waitingSince: string, holidays: string[]): string {
+  return `${nextBusinessDay(waitingSince.slice(0, 10), new Set(holidays))}T${waitingSince.slice(11, 16)}`
+}
+
 /** Notices older than this are forgotten (when the member next reads). */
 export const NOTIFICATION_KEEP_DAYS = 90
 /** An AI turn that has not moved for this long is reported to the requester (C-18). */
@@ -142,6 +153,10 @@ export function noticeKind(userId: string, change: RecordChange, final: Readonly
   // The server clock moved a wait that is over to the follow-up's turn (on by default).
   if (entry.action === WAIT_OVER_ACTION && entry.actorId === CLOCK_ACTOR.id) return 'wait_over'
   if (type === 'approval' && stateChanged && entry.fromState !== null && str(fields.requested_by) === userId) return 'approval_result'
+  // What the member asked was accepted (引き受ける, or accepted by itself on a change): the assignee's turn now.
+  const acceptance = acceptanceOf(type)
+  if (acceptance && stateChanged && entry.fromState === acceptance.state && entry.toState !== null && acceptance.working.includes(entry.toState) &&
+    str(fields.requested_by) === userId && str(fields.assignee) !== userId) return 'request_accepted'
   if (stateChanged && entry.toState !== null && final.has(entry.toState)) {
     if (entry.changes.some(c => c.field === 'ok_by' && c.after === userId)) return 'ok_completed'
     if (str(fields.requested_by) === userId) return 'request_done'
@@ -226,7 +241,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     const nowMs = clock.nowMs()
     const now = clock.now()
     const timeZone = deps.timeZoneOf?.(companyId) ?? DEFAULT_COMPANY_TIME_ZONE
-    const morning = overdueMorning(nowMs, timeZone, deps.holidaysOf?.(companyId) ?? [])
+    const holidays = deps.holidaysOf?.(companyId) ?? []
+    const morning = overdueMorning(nowMs, timeZone, holidays)
     const byId = new Map(candidates.map(r => [r.id, r]))
     const scopes = handle.scopes.listWithRules()
     const readers = new Map<string, ReturnType<typeof recordReader> | null>()
@@ -254,6 +270,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const due = str(fields.due)
       if (due !== null && due.slice(0, 10) < morning) {
         rows.push({ ...base, id: deps.ids.newId(), kind: 'overdue', dedupeKey: `overdue:${s.recordId}:${due}` })
+      }
+      // Still not accepted a business day after it began to wait: told once per wait (the entry that began it).
+      if (s.state === acceptanceOf(rec.type)?.state) {
+        const ledger = handle.records.ledger(rec.id)
+        const began = [...ledger].reverse().find(e => e.toState === s.state && e.fromState !== s.state)
+        if (began && companyNow(nowMs, timeZone) >= acceptanceReminderAt(companyNow(Date.parse(began.at), timeZone), holidays)) {
+          rows.push({ ...base, id: deps.ids.newId(), kind: 'acceptance_waiting', dedupeKey: `acceptance_waiting:${s.recordId}:${began.version}` })
+        }
       }
       if (aiTurnStates(def).has(s.state) && nowMs - Date.parse(s.updatedAt) >= AI_TURN_STUCK_MS) {
         rows.push({ ...base, id: deps.ids.newId(), kind: 'ai_turn_stuck', dedupeKey: `ai_turn_stuck:${s.recordId}:${s.version}` })
@@ -324,6 +348,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (to === 'failed') return `${t}は承認されましたが、実行できませんでした`
         return `${t}の状態が変わりました`
       }
+      case 'request_accepted':
+        return entry()?.action === 'accept' ? `${actor}が${t}を引き受けました` : `${t}は担当の人が受け持つことになりました（${actor}）`
+      case 'acceptance_waiting':
+        return `${t}は、頼んでから 1 営業日たってもまだ引き受けられていません。担当の人に声をかけるか、ほかの人に頼んでください`
       case 'ok_completed':
         return `${actor}が${t}を、あなたの OK で完了にしました`
       case 'request_done': {
@@ -351,6 +379,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `${t}の返事・届く見込みの日時が過ぎました。${ai ? 'AI が追いかけを用意します' : '追いかけてください'}`
       }
       default: {
+        // Asked and waiting for the member's 「引き受ける」.
+        if ((row.action === 'create' || row.action === 'assign') && entry()?.toState === acceptanceOf(def?.name ?? '')?.state) {
+          return `${actor}から${t}を頼まれました。引き受けるか、受けられないかを決めてください`
+        }
         if (row.action === 'create') return `${actor}が${t}であなたを担当にしました`
         if (row.action === 'undo') return `${actor}が${t}の変更を取り消しました`
         const label = def?.actions[row.action]?.label
@@ -430,7 +462,9 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const overdue = handle.records.candidates({ types, states: open, ranges: [{ name: 'due', lt: morning }], sort: { field: 'due', order: 'desc' } }, limit)
       const aiTurn = [...new Set([...defs.values()].flatMap(d => [...aiTurnStates(d)]))]
       const stuck = aiTurn.length > 0 ? handle.records.candidates({ types, states: aiTurn }, limit) : []
-      const seen = new Map([...overdue, ...stuck].map(r => [r.id, r]))
+      const awaiting = [...new Set(types.map(t => acceptanceOf(t)?.state).filter((x): x is string => x !== undefined))]
+      const unaccepted = awaiting.length > 0 ? handle.records.candidates({ types: types.filter(t => acceptanceOf(t)), states: awaiting }, limit) : []
+      const seen = new Map([...overdue, ...stuck, ...unaccepted].map(r => [r.id, r]))
       let written = writeComputed(companyId, handle, dueRowsOf(companyId, handle, [...seen.values()], defs, null))
       // Absences that began (or whose delegate became absent): what waits for the absentee and reaches nobody.
       for (const a of (deps.activeAbsences?.(companyId) ?? []).slice(0, limit)) {

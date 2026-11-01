@@ -115,9 +115,18 @@ describe('parseTaskSettings', () => {
       taskListDepartmentIds: null,
       reply: { rule: 'next-business-day', sameDayCutoff: '17:00' },
       autoRun: { enabled: true, dailyLimit: 30, stopAfterFailures: 3 },
+      acceptance: { sameDepartment: true, managerToMember: true, meetingHomework: true },
       companyHolidays: [],
     })
     expect(parseTaskSettings(defaultTaskSettings())).toEqual({ value: DEFAULT_TASK_SETTINGS })
+  })
+
+  it('a document saved before 引き受け keeps its other answers (the acceptance defaults are added); a bad switch is refused', () => {
+    const before: Record<string, unknown> = { ...defaultTaskSettings(), autoRun: { enabled: false, dailyLimit: 9, stopAfterFailures: 2 } }
+    delete before.acceptance
+    expect(parseTaskSettings(before)).toEqual({ value: { ...before, acceptance: DEFAULT_TASK_SETTINGS.acceptance } })
+    expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: 'yes', managerToMember: true, meetingHomework: true } })).toHaveProperty('error')
+    expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: true, managerToMember: true } })).toHaveProperty('error')
   })
 
   it('sorts holidays and trims their names', () => {
