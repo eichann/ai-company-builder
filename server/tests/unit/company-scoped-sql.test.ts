@@ -110,6 +110,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   member_absences: ['adapters/sqlite/task-settings.ts'],
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // The admin's choice of a core connector per role (connector-roles.md).
+  connector_role_choices: ['adapters/sqlite/connectors.ts'],
   // lane A ▲
   // lane B ▼
   // Matching people and companies (identity.md).

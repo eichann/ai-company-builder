@@ -466,7 +466,7 @@ describe('retention (fake clock)', () => {
       clock: { nowMs: () => nowMs, now: () => new Date(nowMs).toISOString() },
       ids: { newId: () => 'x', newToken: () => 'x' },
       writer: null as never, digest: () => '', members: () => [], meetingAttendees: async () => null,
-      dealContacts: async () => ({ ok: false, reason: 'x' }), gmailSend: async () => ({ ok: false, kind: 'not-sent', reason: 'x' }),
+      dealContacts: async () => ({ ok: false, reason: 'x' }), mail: { senderAccount: async () => ({ ok: false, reason: 'unavailable' }), send: async () => ({ ok: false, kind: 'not-sent', reason: 'x' }) },
       companyIds: () => [CO, OTHER],
       payloads: createFixedPayloads({ companyData, clock: { nowMs: () => nowMs, now: () => new Date(nowMs).toISOString() } }),
     })

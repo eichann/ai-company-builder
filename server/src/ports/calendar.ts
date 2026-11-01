@@ -1,8 +1,9 @@
 /**
  * Reading a member's own calendar (stage 2 S7a, `.claude/rules/calendar.md`).
  * Provider-neutral: Google implements it today (`services/google-calendar.ts`);
- * the core role 「予定を読む」 (stage 3) will put another provider behind the
- * same seam without touching the service or the route.
+ * the core role 「予定を読む」 routes each call to the company's connector
+ * (`services/connector-role-providers.ts`) without the service or the route
+ * knowing which.
  */
 import type { CalendarEvent, CalendarTodayReason } from '../../shared/core/calendar'
 

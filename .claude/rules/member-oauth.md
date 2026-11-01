@@ -45,9 +45,12 @@ API calls (Google: `google-connector.md`, `services/google-connector.ts` registe
   `stop-all`, with `revokedAt<Label>` (Google's rows: `revokedAtGoogle`), never a secret.
 - **Feature toggles inside a grant** (owner decision 2026-11-01, e.g. Google 予定と議事録を読む /
   メールを送る / 受信を読む): `connector_grants.features_off` (JSON list, default `[]`, kept across a
-  re-consent, gone with 「許可をやめる」) is stored and read (`ConnectorGrantRow.featuresOff`) but
-  not yet settable or enforced. When toggles are built: the member sets it, and the provider's
-  client must refuse a call whose feature is off, like a scope not granted.
+  re-consent, gone with 「許可をやめる」). The member sets it (`memberOAuth.setFeatureOff(provider,
+  member, feature, off)`: only the descriptor's features, only their own grant; history
+  `grant-features`; Google's route `PUT /me/google/features`), and the provider's client refuses
+  a call whose feature is off like a scope not granted (Google: `feature-off`,
+  `google-connector.md`). The app's switch needs an IPC channel (after stage 2's screens merge);
+  until then the server and the admin view carry it.
 
 ## Adding a provider
 

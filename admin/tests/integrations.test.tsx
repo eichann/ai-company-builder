@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import IntegrationsPage from '@/app/companies/[id]/integrations/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
-import type { BrokerKeySummary, BrokerView, Capabilities, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem } from '@/lib/api'
+import type { BrokerKeySummary, BrokerView, Capabilities, CoreConnectorsView, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem } from '@/lib/api'
 import { changeMappingField, mappingRows, mappingToYaml } from '@/lib/integrations'
 import { parseYamlLite } from '../../shared/core/yaml-lite'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -113,7 +113,7 @@ const broker = (practice: boolean): BrokerView => ({
 const GOOGLE_SECRET = 'fake-google-secret-NOT-REAL-admin-1234'
 const googleGrant: GoogleGrantSummary = {
   userId: 'u_member', memberEmail: 'tanaka@example.com', memberName: '田中 太郎', googleEmail: 'tanaka@example.com',
-  features: ['minutes'], scopes: [], status: 'active', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', lastUsedAt: null,
+  features: ['minutes'], featuresOff: [], scopes: [], status: 'active', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', lastUsedAt: null,
 }
 const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
   vaultEnabled: true, configured: true, clientId: '123-abc.apps.googleusercontent.com', secretLast4: GOOGLE_SECRET.slice(-4), domain: 'example.com',
@@ -121,6 +121,28 @@ const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
   updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [],
   picker: { configured: false, appId: null, apiKeyLast4: null, pageUrl: 'https://acb.example.com/api/google-picker' }, ...over,
 })
+
+const coreView = (over: { enabled?: boolean; candidates?: string[]; choice?: string | null } = {}): CoreConnectorsView => {
+  const enabled = over.enabled ?? true
+  const candidates = over.candidates ?? (enabled ? ['google'] : [])
+  const choiceNeeded = candidates.length > 1 && !over.choice
+  const served = choiceNeeded ? null : over.choice ?? candidates[0] ?? null
+  return {
+    connectors: [{
+      id: 'google', label: 'Google Workspace', summary: 'メンバーが自分で許可すると、予定・メール・Meet の議事録を ACB が読みます。', status: enabled ? 'on' : 'off',
+      configured: true, enabled, operatorStopped: false,
+      roles: [
+        { role: 'calendar', label: '予定を読む', operations: ['read'], capabilities: [] },
+        { role: 'mail', label: 'メールを読む・送る', operations: ['read', 'send'], capabilities: [] },
+      ],
+      capabilities: [{ id: 'drive', label: 'Drive で選んだものを読む・置く' }],
+    }],
+    roles: [
+      { role: 'calendar', label: '予定を読む', candidates, choice: over.choice ?? null, servedBy: served, choiceNeeded },
+      { role: 'chat', label: 'チャットの連絡を受け取る・返す', candidates: [], choice: null, servedBy: null, choiceNeeded: false },
+    ],
+  }
+}
 
 type Reply = { status?: number; body: unknown }
 function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call) => Reply)> = {}, practice = false, plugins: PluginListItem[] = [item]) {
@@ -131,6 +153,7 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
     [`GET ${base}/plugins/corporate-sales`]: { body: ok(salesDetail) },
     [`GET ${base}/broker`]: { body: ok(broker(practice)) },
     [`GET ${base}/google`]: { body: ok(googleView({ configured: false, clientId: null, secretLast4: null, domain: null, enabled: false, grants: [] })) },
+    [`GET ${base}/connectors`]: { body: ok(coreView()) },
     ...extra,
   } as Record<string, Reply | ((call: Call) => Reply)>
   const calls: Call[] = []
@@ -434,5 +457,46 @@ describe('つなぎ先 → Google', () => {
     await userEvent.click(screen.getByRole('button', { name: 'ファイル選びの設定を保存' }))
     await waitFor(() => expect(saves).toHaveLength(2))
     expect(saves[1].body).toEqual({ appId: '123456789012' })
+  })
+})
+
+describe('つなぎ先 → つないでいるサービス', () => {
+  it('shows Google with what it does and its state, switches it with its own switch, and uses no jargon', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/connectors/google/enabled`]: { body: ok(coreView({ enabled: false })) },
+      [`GET ${base}/google`]: { body: ok(googleView({ grants: [{ ...googleGrant, features: ['minutes', 'inbox'], featuresOff: ['inbox'] }] })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const row = await screen.findByTestId('connected-service-google')
+    expect(row).toHaveTextContent('Google Workspace')
+    expect(row).toHaveTextContent('動いています')
+    expect(row).toHaveTextContent('予定を読む・メールを読む・送る・Drive で選んだものを読む・置く')
+    expect(screen.getByTestId('connected-role-calendar')).toHaveTextContent('Google Workspace')
+    expect(screen.getByTestId('connected-role-chat')).toHaveTextContent('つないでいるサービスがありません')
+    // The admin sees which member turned 受信を読む off themselves.
+    expect(await screen.findByTestId('google-grant-u_member')).toHaveTextContent('受信を読む（本人がオフ）')
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Google Workspace をオフにする' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT' && c.url === `${base}/connectors/google/enabled`)).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT' && c.url === `${base}/connectors/google/enabled`)!.body).toEqual({ enabled: false })
+    expect(await within(screen.getByTestId('connected-service-google')).findByText('オフ')).toBeInTheDocument()
+    expect(screen.getByTestId('connected-role-calendar')).toHaveTextContent('つないでいるサービスがありません')
+
+    const text = screen.getByTestId('connected-services').textContent ?? ''
+    for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', '役目', 'ロール', 'connector']) expect(text).not.toContain(word)
+  })
+
+  it('only when two services could do the same job, the admin is asked which one; the choice is sent by id', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/connectors`]: { body: ok(coreView({ candidates: ['google', 'microsoft365'] })) },
+      [`PUT ${base}/connector-roles/calendar`]: { body: ok(coreView({ candidates: ['google', 'microsoft365'], choice: 'google' })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const select = await screen.findByLabelText('予定を読むに使うサービス')
+    expect(select).toHaveValue('')
+    expect(screen.queryByLabelText('チャットの連絡を受け取る・返すに使うサービス')).toBeNull()
+    await userEvent.selectOptions(select, 'google')
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT' && c.url === `${base}/connector-roles/calendar`)).toBe(true))
+    expect(calls.find((c) => c.url === `${base}/connector-roles/calendar`)!.body).toEqual({ connectorId: 'google' })
   })
 })

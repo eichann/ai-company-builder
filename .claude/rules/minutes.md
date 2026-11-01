@@ -36,7 +36,9 @@ access itself: `google-connector.md` (G3).
    start, every 10 minutes and on a button (q5: no server timer; a closed app finds them next
    time). Only the member's **own** grant is used (`googleClient.request`, so every Google switch
    applies from the next call). Steps (`services/minutes.ts` `check`, Google calls in
-   `services/google-meetings.ts`):
+   `services/google-meetings.ts`, reached through the role 会議の記録を読む — `ports/meeting-records.ts`,
+   `connector-roles.md`; no usable connector → `GOOGLE_STOPPED`, 予定と議事録を読む turned off by the
+   member → `GOOGLE_NOT_CONNECTED` with its own sentence):
    - calendar events of the last 3 days → now (`singleEvents`, by start time, ≤ 4 pages);
    - keep events with a Meet conference (`conferenceData` `hangoutsMeet`) that **the company's
      setting reads** ("Which meetings" below; default: at least one attendee outside the company's

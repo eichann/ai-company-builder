@@ -1,8 +1,8 @@
 /**
  * 「今日の予定」 (stage 2 S7a, `.claude/rules/calendar.md`): the member's own
  * meetings today, for the task list. Provider-neutral — the reader behind the
- * `CalendarReader` port is Google today (`google-calendar.ts`) and the core
- * role 「予定を読む」 later.
+ * `CalendarReader` port is the core role 「予定を読む」, served by Google today
+ * (`google-calendar.ts`, `connector-roles.md`).
  *
  * - Only the signed-in member's own calendar: the member comes from the
  *   session, and nothing in the request can name another person.

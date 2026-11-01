@@ -69,3 +69,15 @@ test('a refusal or an offline server answers a sentence built from the status on
   assert.equal(o.success, false)
   assert.ok(!JSON.stringify(o).includes(STATE) && !off.logs.join('\n').includes(STATE))
 })
+
+test('受信を読む is offered only to a connected member without it, and a feature the member turned off says so', async () => {
+  const { googleSectionView } = await import('../shared/google')
+  const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false }
+  const without = googleSectionView({ ...base, features: ['minutes', 'mail'], featuresOff: [] })
+  assert.equal(without.canAddInbox, true)
+  assert.deepEqual(without.allowed, ['予定と議事録を読む', 'メールを送る'])
+  const off = googleSectionView({ ...base, features: ['minutes', 'inbox'], featuresOff: ['inbox'] })
+  assert.equal(off.canAddInbox, false)
+  assert.deepEqual(off.allowed, ['予定と議事録を読む', '受信を読む（オフにしています）'])
+  assert.equal(googleSectionView({ ...base, connected: false, status: null, features: [], featuresOff: [] }).canAddInbox, false)
+})

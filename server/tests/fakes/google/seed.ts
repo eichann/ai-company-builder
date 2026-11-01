@@ -92,12 +92,33 @@ export interface SeedDriveFile {
   permissions: Array<{ type: 'user' | 'group' | 'domain' | 'anyone'; role: string; emailAddress?: string; domain?: string }>
 }
 
+/** A received mail in an account's Gmail (受信を読む, gmail.readonly). */
+export interface SeedMail {
+  id: string
+  threadId: string
+  /** The mailbox it is in (lower case). */
+  account: string
+  /** Header lines as written (From, To, Cc, Subject, Date, Message-ID, List-Unsubscribe, …). */
+  headers: Record<string, string>
+  /** Gmail's labels (INBOX, CATEGORY_PROMOTIONS, SPAM, SENT…). */
+  labelIds: string[]
+  /** When Gmail received it (RFC 3339). */
+  receivedAt: string
+  /** The text/plain body (absent: only `html`). */
+  text?: string
+  /** A text/html body (with or without `text`). */
+  html?: string
+  /** The text body's bytes (base64) in another charset than UTF-8 (e.g. ISO-2022-JP); `text` is then what it reads as. */
+  textBytesBase64?: string
+}
+
 export interface GoogleSeed {
   users: SeedUser[]
   events: SeedEvent[]
   conferences: SeedConference[]
   docs: SeedDoc[]
   driveFiles?: SeedDriveFile[]
+  mails?: SeedMail[]
 }
 
 export const GOOGLE_SEED = {
@@ -279,5 +300,37 @@ export function defaultGoogleSeed(): GoogleSeed {
       content: '%PDF-1.4\n% fake hand-written notes\n%%EOF\n', permissions: [owner(S.member)],
     },
   ]
-  return { users, events, conferences, docs, driveFiles }
+  const mails: SeedMail[] = [
+    {
+      id: 'fakemail0001', threadId: 'fakethread0001', account: S.member, labelIds: ['INBOX', 'UNREAD', 'CATEGORY_PERSONAL'], receivedAt: '2026-11-06T01:10:00.000Z',
+      headers: {
+        From: '"鈴木 一郎" <suzuki@a-corp.example>', To: '佐藤 健 <sato@div.example>', Cc: 'yamaguchi@a-corp.example',
+        Subject: '=?UTF-8?B?44GK6KaL56mN44KC44KK44Gu44GU55u46KuH?=', Date: 'Fri, 06 Nov 2026 10:10:00 +0900', 'Message-ID': '<fake-0001@a-corp.example>',
+      },
+      text: '佐藤様\n\n先日はありがとうございました。研修のお見積もりを来週金曜までにいただけますでしょうか。\n\n鈴木\n',
+    },
+    {
+      id: 'fakemail0002', threadId: 'fakethread0002', account: S.member, labelIds: ['INBOX', 'CATEGORY_PROMOTIONS'], receivedAt: '2026-11-06T02:00:00.000Z',
+      headers: {
+        From: 'ニュース <news@shop.example>', To: 'sato@div.example', Subject: '今週のおすすめ', Date: 'Fri, 06 Nov 2026 11:00:00 +0900',
+        'Message-ID': '<fake-0002@shop.example>', 'List-Unsubscribe': '<https://shop.example/unsubscribe>',
+      },
+      html: '<html><body><p>今週の<b>おすすめ</b>です。</p><p>配信停止はこちら</p></body></html>',
+    },
+    {
+      id: 'fakemail0003', threadId: 'fakethread0001', account: S.member, labelIds: ['INBOX'], receivedAt: '2026-11-06T03:00:00.000Z',
+      headers: {
+        From: 'yamaguchi@a-corp.example', To: 'sato@div.example', Subject: 'Re: お見積もりのご相談', Date: 'Fri, 06 Nov 2026 12:00:00 +0900',
+        'Message-ID': '<fake-0003@a-corp.example>', 'In-Reply-To': '<fake-0001@a-corp.example>', 'Content-Type': 'text/plain; charset=ISO-2022-JP',
+      },
+      text: '山口です。補足です。対象は営業部の30名です。\n',
+      textBytesBase64: 'GyRCOzM4fSRHJDkhI0pkQi0kRyQ5ISNCUD5dJE8xRDZISXQkThsoQjMwGyRCTD4kRyQ5ISMbKEIK',
+    },
+    {
+      id: 'fakemail0004', threadId: 'fakethread0004', account: S.colleague, labelIds: ['INBOX'], receivedAt: '2026-11-06T03:30:00.000Z',
+      headers: { From: 'suzuki@a-corp.example', To: 'tanaka@div.example', Subject: '田中さんだけへの連絡', Date: 'Fri, 06 Nov 2026 12:30:00 +0900', 'Message-ID': '<fake-0004@a-corp.example>' },
+      text: '田中さんの受信箱にだけある連絡です。\n',
+    },
+  ]
+  return { users, events, conferences, docs, driveFiles, mails }
 }

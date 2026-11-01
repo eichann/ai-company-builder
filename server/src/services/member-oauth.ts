@@ -18,7 +18,7 @@
  * Secrets (the refresh token, the verifier, codes, access tokens) are never
  * answered, logged or stored in plain text.
  */
-import { sameEmail } from '../../shared/core/google'
+import { normalizeEmail } from '../../shared/core/mail'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -28,13 +28,19 @@ import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import type { BrokerVault, ConnectorSecretContext } from './broker-vault'
 
+/** Emails compared as ACB stores them (`normalizeEmail`); an unreadable one matches nothing. Provider-neutral. */
+function sameEmail(a: string, b: string): boolean {
+  const x = normalizeEmail(a)
+  return x !== null && x === normalizeEmail(b)
+}
+
 export const PENDING_MINUTES = 10
 
 /** A state as the server makes it: `<companyId>.<64 hex>`. */
 const STATE_RE = /^([A-Za-z0-9_-]{1,100})\.([0-9a-f]{64})$/
 
 /** History actions of grants (the provider's own client / switch actions are its own). */
-export type GrantChangeAction = 'grant' | 'grant-revoked' | 'grant-stopped' | 'stop-all'
+export type GrantChangeAction = 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
 
 /** Where the provider sends the browser back (Google's is registered in each company's Google Cloud client). */
 export function oauthCallbackPath(provider: ConnectorProvider): string {
@@ -224,6 +230,26 @@ export function createMemberOAuth(deps: MemberOAuthDeps) {
         p.forget(companyId, userId)
       }
       return true
+    },
+
+    /**
+     * The member turns one feature of their own grant on or off (owner decision
+     * 2026-11-01, e.g. Google 受信を読む): kept in `features_off`, enforced by the
+     * provider's client from the next call, kept across a re-consent, gone with
+     * 「許可をやめる」. Nothing is asked of the provider. `no-grant` when the member
+     * has no grant; an unknown feature is the caller's to refuse (`bad-feature`).
+     */
+    setFeatureOff(provider: ConnectorProvider, member: Member, feature: string, off: boolean): { ok: true; featuresOff: string[] } | { ok: false; reason: 'no-grant' | 'bad-feature' } {
+      const p = descriptor(provider)
+      if (!p.features.includes(feature)) return { ok: false, reason: 'bad-feature' }
+      const connectors = connectorsOf(member.companyId)
+      const grant = connectors.grant(provider, member.userId)
+      if (!grant) return { ok: false, reason: 'no-grant' }
+      const was = grant.featuresOff.includes(feature)
+      if (was === off) return { ok: true, featuresOff: grant.featuresOff }
+      const next = p.features.filter(f => (f === feature ? off : grant.featuresOff.includes(f)))
+      connectors.setFeaturesOff(provider, member.userId, next, clock.now(), change(provider, 'grant-features', member.userId, member.userId, { feature, off }))
+      return { ok: true, featuresOff: next }
     },
 
     /** The member's 「許可をやめる」: revoked at the provider too (best effort), then nothing kept. */

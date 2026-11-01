@@ -8,6 +8,7 @@
 // sentence built from status codes only. Logged: the method and the status.
 
 import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleStatusResult, type MyGoogle } from '../../../shared/google'
+import { GOOGLE_FEATURES } from '../../../../shared/core/google'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell } from '../ports'
 
@@ -19,7 +20,7 @@ export interface GoogleDeps {
   log?: Pick<Console, 'warn'>
 }
 
-const FEATURES: readonly GoogleFeature[] = ['minutes', 'mail', 'drive']
+const FEATURES: readonly GoogleFeature[] = GOOGLE_FEATURES
 const offline = { success: false, offline: true, error: GOOGLE_OFFLINE_TEXT } as const
 const invalid = { success: false, offline: false, error: '入力が正しくありません。' } as const
 

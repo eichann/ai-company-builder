@@ -27,6 +27,8 @@
  *                                 POST /upload/drive/v3/files?uploadType=multipart
  *   apis.google.com               GET  /js/api.js — a stand-in Google Picker (staging only; picks through /__picker/*)
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
+ *                                 GET  /gmail/v1/users/{userId}/messages (q `after:<seconds>`, labelIds, maxResults, pageToken)
+ *                                 GET  /gmail/v1/users/{userId}/messages/{id} (format minimal | metadata | full)
  *
  * Practice values only, recognisable at a glance: client secrets start with
  * `fake-google-secret-`, access tokens `ya29.fake-`, refresh tokens
@@ -45,7 +47,7 @@
  */
 import { createHash, randomBytes } from 'crypto'
 import { Hono, type Context } from 'hono'
-import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile } from './seed'
+import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile, type SeedMail } from './seed'
 
 export const FAKE_GOOGLE_SECRET_PREFIX = 'fake-google-secret-'
 export const FAKE_ACCESS_TOKEN_PREFIX = 'ya29.fake-'
@@ -61,6 +63,7 @@ export const GOOGLE_SCOPES = {
   driveMeetReadonly: 'https://www.googleapis.com/auth/drive.meet.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
   driveFile: 'https://www.googleapis.com/auth/drive.file',
+  gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
 } as const
 
 /** The scopes milestone 4 asks for (design §5-2). */
@@ -78,7 +81,7 @@ const KNOWN_SCOPES = new Set<string>([
   `${AUTH}calendar`, `${AUTH}calendar.readonly`, `${AUTH}calendar.events`,
   `${AUTH}meetings.space.created`,
   `${AUTH}drive`, `${AUTH}drive.readonly`,
-  `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/',
+  `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, `${AUTH}gmail.metadata`, 'https://mail.google.com/',
 ])
 /** Any one of these lets a call through (each method's "Authorization scopes" list). */
 const NEEDS = {
@@ -86,6 +89,7 @@ const NEEDS = {
   meet: [GOOGLE_SCOPES.meetReadonly, `${AUTH}meetings.space.created`],
   drive: [GOOGLE_SCOPES.driveMeetReadonly, GOOGLE_SCOPES.driveFile, `${AUTH}drive.readonly`, `${AUTH}drive`],
   gmailSend: [GOOGLE_SCOPES.gmailSend, `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
+  gmailRead: [GOOGLE_SCOPES.gmailReadonly, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
 }
 /** Drive scopes that reach every file the account can open (not only Meet's). */
 const DRIVE_FULL = new Set([`${AUTH}drive.readonly`, `${AUTH}drive`])
@@ -162,6 +166,8 @@ export interface FakeGoogle {
   setArtifactState(conferenceId: string, kind: 'smartNotes' | 'transcripts', artifactId: string, state: ArtifactState): void
   /** Every message Gmail "sent", oldest first. */
   sent: SentMessage[]
+  /** A mail arrives in an account's Gmail (受信を読む). */
+  deliver(mail: SeedMail): void
   /** A document's current version (null when unknown); for assertions. */
   doc(id: string): { text: string; version: number; modifiedTime: string } | null
   /** Live refresh tokens of an account (for the 100-per-account limit). */
@@ -250,6 +256,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   const conferences = seed.conferences.map(c => ({ ...c, smartNotes: c.smartNotes.map(a => ({ ...a })), transcripts: c.transcripts.map(a => ({ ...a })) }))
   const docs = new Map(seed.docs.map(d => [d.id, { ...d }]))
   const sent: SentMessage[] = []
+  const mails: SeedMail[] = (seed.mails ?? []).map(m => ({ ...m, headers: { ...m.headers }, labelIds: [...m.labelIds] }))
   const requests: FakeGoogleRequestLog[] = []
 
   // ---- faults ----
@@ -873,6 +880,58 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return c.json({ id, threadId, labelIds: ['SENT'] })
   })
 
+  // Received mail (gmail.readonly): only the token's own mailbox; Gmail's message resource shapes.
+  const mailboxOf = (c: Context, a: AccessGrant): string => {
+    const userId = decodeURIComponent(c.req.param('userId') ?? '')
+    if (userId !== 'me' && userId.toLowerCase() !== a.email.toLowerCase()) throw apiError(403, 'Delegation denied for ' + a.email, 'forbidden')
+    return a.email.toLowerCase()
+  }
+  const b64urlText = (buf: Buffer) => buf.toString('base64url')
+
+  app.get('/gmail/v1/users/:userId/messages', c => {
+    const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    const q = c.req.query('q') ?? ''
+    const after = /(?:^|\s)after:(\d+)(?:\s|$)/.exec(q)?.[1]
+    const labels = c.req.queries('labelIds') ?? []
+    const max = Math.min(Math.max(Number(c.req.query('maxResults') ?? '100') || 100, 1), 500)
+    const start = Number(c.req.query('pageToken') ?? '0') || 0
+    const found = mails
+      .filter(m => m.account.toLowerCase() === box)
+      .filter(m => after === undefined || Date.parse(m.receivedAt) >= Number(after) * 1000)
+      .filter(m => labels.every(l => m.labelIds.includes(l)))
+      .sort((x, y) => Date.parse(y.receivedAt) - Date.parse(x.receivedAt))
+    const page = found.slice(start, start + max)
+    return c.json({
+      ...(page.length > 0 ? { messages: page.map(m => ({ id: m.id, threadId: m.threadId })) } : {}),
+      ...(start + max < found.length ? { nextPageToken: String(start + max) } : {}),
+      resultSizeEstimate: found.length,
+    })
+  })
+
+  app.get('/gmail/v1/users/:userId/messages/:id', c => {
+    const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    const m = mails.find(x => x.id === c.req.param('id') && x.account.toLowerCase() === box)
+    if (!m) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    const format = c.req.query('format') ?? 'full'
+    const wanted = (c.req.queries('metadataHeaders') ?? []).map(h => h.toLowerCase())
+    const allHeaders = Object.entries(m.headers).map(([name, value]) => ({ name, value }))
+    const base = { id: m.id, threadId: m.threadId, labelIds: m.labelIds, snippet: (m.text ?? '').slice(0, 100), internalDate: String(Date.parse(m.receivedAt)), sizeEstimate: 1000 }
+    if (format === 'minimal') return c.json(base)
+    if (format === 'metadata') {
+      const headers = wanted.length === 0 ? allHeaders : allHeaders.filter(h => wanted.includes(h.name.toLowerCase()))
+      return c.json({ ...base, payload: { mimeType: 'multipart/alternative', headers } })
+    }
+    const textBytes = m.textBytesBase64 ? Buffer.from(m.textBytesBase64, 'base64') : Buffer.from(m.text ?? '', 'utf8')
+    const charset = /charset=([^;\s]+)/i.exec(m.headers['Content-Type'] ?? '')?.[1] ?? 'UTF-8'
+    const parts = [
+      ...(m.text !== undefined ? [{ partId: '0', mimeType: 'text/plain', filename: '', headers: [{ name: 'Content-Type', value: `text/plain; charset=${charset}` }], body: { size: textBytes.length, data: b64urlText(textBytes) } }] : []),
+      ...(m.html !== undefined ? [{ partId: '1', mimeType: 'text/html', filename: '', headers: [{ name: 'Content-Type', value: 'text/html; charset=UTF-8' }], body: { size: Buffer.byteLength(m.html), data: b64urlText(Buffer.from(m.html, 'utf8')) } }] : []),
+    ]
+    return c.json({ ...base, payload: { partId: '', mimeType: 'multipart/alternative', filename: '', headers: allHeaders, body: { size: 0 }, parts } })
+  })
+
   /** The send happened; the answer does not arrive. */
   function dropAnswer(c: Context): Promise<Response> {
     const env = c.env as { incoming?: { socket?: { destroy(): void } } } | undefined
@@ -971,6 +1030,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       return client
     },
     signIn,
+    deliver(mail) { mails.push({ ...mail, headers: { ...mail.headers }, labelIds: [...mail.labelIds] }) },
     revokeAllFor,
     changeEvent,
     changeDoc,

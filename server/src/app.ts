@@ -40,6 +40,7 @@ import { calendarRoute } from './routes/calendar'
 import { oauthRoute } from './routes/oauth'
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import { coreConnectorsRoute } from './routes/core-connectors'
 // lane A ▲
 // lane B ▼
 import { identitiesRoute } from './routes/identities'
@@ -150,6 +151,8 @@ app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+// 「つないでいるサービス」: the core connectors and the roles they serve (connector-roles.md).
+app.route('/api/companies/:companyId', coreConnectorsRoute)
 // lane A ▲
 // lane B ▼
 // Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.

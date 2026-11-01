@@ -18,8 +18,10 @@ export interface GoogleGrantSummary {
   memberName: string | null
   /** The Google account that was allowed (the member's own ACB email by rule). */
   googleEmail: string
-  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く. */
+  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く, inbox = 受信を読む. */
   features: GoogleFeature[]
+  /** Allowed features the member turned off themselves (not used until they turn them on again). */
+  featuresOff: GoogleFeature[]
   scopes: string[]
   status: GoogleGrantStatus
   createdAt: string
@@ -27,7 +29,7 @@ export interface GoogleGrantSummary {
   lastUsedAt: string | null
 }
 
-export type GoogleChangeAction = 'client' | 'enabled' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'stop-all'
+export type GoogleChangeAction = 'client' | 'enabled' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -106,10 +108,19 @@ export interface MyGoogle {
   connected: boolean
   status: GoogleGrantStatus | null
   googleEmail: string | null
+  /** The features allowed in the grant (on or off). */
   features: GoogleFeature[]
+  /** Of those, the ones the member turned off (e.g. 受信を読む): ACB does not use them until turned on. */
+  featuresOff: GoogleFeature[]
   /** The domain the account must belong to (shown so the member picks the right account). */
   domain: string | null
   practice: boolean
+}
+
+/** PUT /api/companies/:id/me/google/features — the member turns one allowed feature on or off. */
+export interface GoogleFeatureSwitch {
+  feature: GoogleFeature
+  on: boolean
 }
 
 /** POST /api/companies/:id/me/google/connect */

@@ -34,8 +34,8 @@ export interface ConnectorGrantRow {
   scopes: string[]
   /**
    * The provider's features the member turned off inside this grant (owner
-   * decision 2026-11-01: e.g. Google メールを送る off). Stored now; setting
-   * and enforcing it come with the feature toggles.
+   * decision 2026-11-01: e.g. Google 受信を読む off). Set by the member
+   * (`memberOAuth.setFeatureOff`), enforced by the provider's client.
    */
   featuresOff: string[]
   status: 'active' | 'revoked' | 'stopped'
@@ -96,6 +96,8 @@ export interface ConnectorRepository {
   /** Deletes the member's grant row (the member's 「許可をやめる」). */
   deleteGrant(provider: ConnectorProvider, userId: string, change: ConnectorChangeRow): void
   touchGrant(provider: ConnectorProvider, userId: string, at: string): void
+  /** The member's turned-off features of the grant (the row must exist); kept across a re-consent. */
+  setFeaturesOff(provider: ConnectorProvider, userId: string, featuresOff: string[], at: string, change: ConnectorChangeRow): void
 
   // Pending starts (single use).
   putPending(row: OAuthPendingRow): void
@@ -105,4 +107,11 @@ export interface ConnectorRepository {
   prunePending(now: string, userId?: string): void
 
   history(provider: ConnectorProvider, limit: number): ConnectorChangeRow[]
+
+  // The admin's choice of which core connector serves a role, when two could
+  // (connector-roles.md; asked once, only when both exist).
+  /** The chosen connector's id for the role, null when none was chosen. */
+  roleChoice(role: string): string | null
+  /** Sets (or with null, clears) the choice; a history line (`connector_history`, provider `roles`) is written in the same transaction. */
+  setRoleChoice(role: string, connectorId: string | null, at: string, by: string, historyId: string): void
 }

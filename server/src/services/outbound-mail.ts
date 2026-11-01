@@ -33,12 +33,12 @@ import {
   countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS, normalizeEmail,
   type RecipientSource,
 } from '../../shared/core/mail'
-import { GOOGLE_SCOPE, sameEmail } from '../../shared/core/google'
 import { MEETING_TYPE } from '../../shared/core/minutes'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 import type { Clock, IdGenerator } from '../ports/clock'
+import type { MailSendResult, MailSender } from '../ports/mail'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { OutboundMailRow, OutboundRecipientRow } from '../ports/outbound-mail'
 import type { RecordRow } from '../ports/records'
@@ -60,12 +60,11 @@ const CLEANUP_CHUNK = 500
 
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
+const MAIL_UNAVAILABLE = 'いまは Google でメールを送れません（止められているか、つながりません）。何も送っていません。'
+const MAIL_TURNED_OFF = '「メールを送る」をオフにしています。アプリの「設定」→「Google」でオンにしてから、もう一度押してください。何も送っていません。'
 const UNVERIFIABLE = 'いまは宛先の出どころ（カレンダー・HubSpot）を読めず、宛先を確かめられないため送れません。少し待ってから、もう一度「確かめて送る」を押してください。'
 
-/** Gmail's send as the Google client makes it (services/google-client.ts `request`). */
-export type MailSendResult =
-  | { ok: true; status: number; json: unknown }
-  | { ok: false; kind: 'not-sent' | 'refused' | 'rate-limited' | 'server-error' | 'unknown'; reason: string; status?: number; googleReason?: string }
+export type { MailSendResult }
 
 /** Fixed content (services/fixed-payloads.ts, shared with approvals): mail is owner kind `outbound_message`. */
 export type MailPayloadStore = Pick<FixedPayloadService, 'fix' | 'current' | 'clearBodies'>
@@ -86,8 +85,8 @@ export interface OutboundMailDeps {
   meetingAttendees: (companyId: string, userId: string, meetingId: string) => Promise<Array<{ email: string; name: string | null; organizer: boolean }> | null>
   /** The まとまり's contacts in its outside system, read now through the plugin connector (plugin-import.ts `recordContacts`). */
   bundleContacts: (member: Member, bundleId: string) => Promise<{ ok: true; contacts: Array<{ email: string | null; name: string | null }> } | { ok: false; reason: string }>
-  /** Gmail `users.messages.send` with the member's own grant; never retried. */
-  gmailSend: (companyId: string, userId: string, raw: string) => Promise<MailSendResult>
+  /** The core role メールを送る (connector-roles.md): the member's own permission at the company's mail connector; never retried. */
+  mail: MailSender
   /** Every company (the retention run opens each one's handle). */
   companyIds: () => string[]
 }
@@ -333,12 +332,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
     let content: { from: string; to: string[]; cc: string[]; subject: string; body: string }
     try { content = JSON.parse(payload.canonical) as typeof content } catch { return notFound() }
-    // 2. Google: the member's permission to send mail, from the account the draft names.
-    const grant = handle.connectors.grant('google', member.userId)
-    if (!grant || grant.status !== 'active' || !grant.scopes.includes(GOOGLE_SCOPE.gmailSend)) {
+    // 2. The member's permission to send mail (the role メールを送る), from the account the draft names.
+    const sender = await deps.mail.senderAccount(member.companyId, member.userId)
+    if (!sender.ok && sender.reason === 'consent-needed') {
       return refuse('conflict', 'メールを送るには、Google で「メールを送る許可」が要ります。', { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'mail' })
     }
-    if (!sameEmail(grant.accountEmail, content.from)) {
+    if (!sender.ok && sender.reason === 'turned-off') return refuse('conflict', MAIL_TURNED_OFF, { code: 'GOOGLE_FEATURE_OFF', feature: 'mail' })
+    if (!sender.ok) return refuse('unavailable', MAIL_UNAVAILABLE, { code: 'GOOGLE_UNAVAILABLE', reason: 'no-connector' })
+    const fromAccount = normalizeEmail(sender.account)
+    if (fromAccount === null || fromAccount !== normalizeEmail(content.from)) {
       return refuse('conflict', '差出人の Google アカウントが下書きと違います。下書きを作り直してください。', { code: 'FROM_CHANGED' })
     }
     // 3. Every recipient is still at its source right now.
@@ -361,7 +363,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     let result: MailSendResult
     try {
       const raw = gmailRaw(buildMailMessage({ from: content.from, to: content.to, cc: content.cc, subject: content.subject, body: content.body, date: new Date(deps.clock.nowMs()) }))
-      result = await deps.gmailSend(member.companyId, member.userId, raw)
+      result = await deps.mail.send(member.companyId, member.userId, raw)
     } catch (err) {
       // Whether it left is not known (the build cannot fail for a stored version; a throw in the call can be after sending).
       logError('outbound-mail', 'send threw', err, { message: d.mail.messageId })
@@ -379,7 +381,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
         return refuse('conflict', 'メールを送るには、Google で「メールを送る許可」が要ります。', { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'mail' })
       }
-      if (result.kind === 'not-sent') return refuse('unavailable', 'いまは Google でメールを送れません（止められているか、つながりません）。何も送っていません。', { code: 'GOOGLE_UNAVAILABLE', reason: result.reason })
+      if (result.kind === 'not-sent' && result.reason === 'feature-off') return refuse('conflict', MAIL_TURNED_OFF, { code: 'GOOGLE_FEATURE_OFF', feature: 'mail' })
+      if (result.kind === 'not-sent') return refuse('unavailable', MAIL_UNAVAILABLE, { code: 'GOOGLE_UNAVAILABLE', reason: result.reason })
       return refuse('conflict', 'Gmail が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED', ...(result.googleReason ? { googleReason: result.googleReason } : {}) })
     }
     // A lost answer or a 5xx: it may have been sent. Never re-sent; the person checks Gmail.

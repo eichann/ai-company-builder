@@ -1019,6 +1019,27 @@ export const googleApi = {
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),
 }
 
+// 「つないでいるサービス」 (stage 3, connector-roles.md): the core connectors built into ACB (Google),
+// the roles they serve and the admin's choice when two could serve one. Shapes from shared/types/core-connectors.ts.
+export type {
+  CoreConnectorStatus,
+  CoreConnectorView,
+  CoreConnectorsView,
+  CoreRoleView,
+} from '../../../shared/types/core-connectors'
+
+import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
+
+export const coreConnectorsApi = {
+  get: (companyId: string) => getData<CoreConnectorsView>(`/api/companies/${enc(companyId)}/connectors`),
+  /** The connector's own on / off (Google: the same switch as 「Google」's 「オンにする / オフにする」). */
+  setEnabled: (companyId: string, connectorId: string, enabled: boolean) =>
+    getData<CoreConnectorsView>(`/api/companies/${enc(companyId)}/connectors/${enc(connectorId)}/enabled`, { method: 'PUT', body: { enabled } }),
+  /** Which connector serves a role when two could (null clears the choice). */
+  chooseRole: (companyId: string, role: string, connectorId: string | null) =>
+    getData<CoreConnectorsView>(`/api/companies/${enc(companyId)}/connector-roles/${enc(role)}`, { method: 'PUT', body: { connectorId } }),
+}
+
 // The minutes folder (「つなぎ先」→「Google」, milestone 4 G7, minutes.md): the department folder
 // meeting records go to (never a private folder), and which meetings are read. Shapes from
 // shared/types/minutes.ts and shared/core/minutes.ts.
