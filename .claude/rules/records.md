@@ -16,6 +16,11 @@ paths:
   - "server/src/routes/records-ai.ts"
   - "client/electron/records/**"
   - "client/shared/record-actions.ts"
+  - "client/shared/record-views.ts"
+  - "client/electron/features/record-views/**"
+  - "client/src/features/records/**"
+  - "client/src/features/search/components/RecordHits.tsx"
+  - "server/tests/unit/record-linked-to-file.test.ts"
   - "client/tests/records-tools.test.ts"
   - "server/tests/integration/record-tokens.test.ts"
   - "server/src/ports/records.ts"
@@ -346,7 +351,7 @@ GET     /records/types             any member: definitions in force + stored ver
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
-                                   link?: { name, id }, sort?: { field, order? }, finishedSince?,
+                                   link?: { name, id }, linkedToFile?, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
 ```
@@ -374,6 +379,12 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   like `linkedTo`) and a link that may not be followed (public → private) never matches. All of
   them narrow the SQL candidates; read access is applied afterwards as always, so records and
   `total` (also `countOnly`) hold only what the caller reads.
+- `linkedToFile` (a company path, `fileLinkPath`-checked; not with `linkedTo`): records with a file
+  link to exactly that path — 「つながっているもの」 of a file. A file the caller cannot read answers
+  `{ total: 0, records: [] }`, the same as a file nothing links to; a record outside a private
+  folder never counts for a path inside it (`linkAllowed`: the link is stored but never shown),
+  one inside shows to that folder's readers only. Test: `tests/unit/record-linked-to-file.test.ts`
+  (each guard mutation-checked).
 - Cross-company: the handle is `member.companyId`; another company's record id is a record that
   does not exist (permission matrix `CROSS` row, `tests/unit/record-index.test.ts`).
 - The detail route is `/records/item/:recordId`, not `/records/:recordId`: a parameter next to the
@@ -671,6 +682,28 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
 
+## The app's views (milestone 5 U8, design §7)
+
+Read only, with the member's session in main (`client/electron/features/record-views/ipc.ts`:
+`recordViews:search` / `card` / `forFile`; shapes and wording in `client/shared/record-views.ts`).
+Main only reshapes the server's answers — nothing is filtered or added on the app's side.
+
+- **Kinds** people see (`recordKindOf`): 案件 (`deal`, any type implementing `bundle`), やること
+  (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `minutes`,
+  `outbound_message`), そのほか; the type's own label is shown small. Core states have member words
+  (`stateLabel`; definitions carry no state labels); machinery fields (hashes, outside ids,
+  pointers, `next_actor`) are not on the card; person fields show the member's name
+  (`GET /companies/:id/members`).
+- **検索**: `POST /records/query { text, limit: 100 }` next to the file search, grouped by kind,
+  `total` as the server counts it (only readable records). Records off for the company: nothing
+  shown.
+- **The card** (`src/features/records/components/RecordCard.tsx`): kind, state, title, summary,
+  fields, 経緯 (the ledger, newest first: who・what・note) and 「つながっているもの」 (records by kind,
+  files; a file link marked `broken` says 「つながりが切れています」). Following a link runs
+  `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
+  Generic and without actions: the task card with actions comes from the task screen (S7c).
+- **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
+
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
@@ -705,7 +738,7 @@ important?, key? }` → 201 `{ record, created: true }` (200 `created: false` fo
 
 ## Not yet
 
-The screens (milestone 5), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
+The task screens (milestone 5; the read-only views above exist), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 
 ## Tests

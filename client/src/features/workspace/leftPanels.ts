@@ -1,5 +1,5 @@
 // The left panel's tabs as a list of registered panels (owner decision D7):
-// today's four (スキル / ファイル / 検索 / 履歴) are entries like any other, so
+// today's three (スキル / ファイル / 検索) are entries like any other, so
 // a later extension adds a tab by adding an entry, not by editing the screen.
 import type { ReactNode } from 'react'
 import type { Icon } from '@phosphor-icons/react'

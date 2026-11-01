@@ -44,6 +44,7 @@ import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { registerCalendarIpc } from './features/calendar/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
+import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
@@ -231,6 +232,8 @@ registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, she
 registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Search hits, the record card and a file's 「つながっているもの」 (features/record-views).
+registerRecordViewsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).

@@ -74,7 +74,6 @@ test('history, backup and sync handlers check the allowed roots too; commits are
   writeFiles(outside, { '.backups/2026-01-01/x.md': 'x' })
   const table: Array<[string, unknown[], unknown]> = [
     ['git:log', [outside, '', 5], { success: false, commits: [], error: DENIED }],
-    ['git:showCommit', [outside, 'abcdef0'], { success: false, files: [], error: DENIED }],
     ['backup:list', [outside], { success: false, error: DENIED, backups: [] }],
     ['backup:openFolder', [path.join(outside, '.backups', '2026-01-01')], { success: false, error: DENIED }],
     ['git:sync', [outside, 'co', 'msg'], { success: false, error: DENIED, errorType: 'unknown' }],
@@ -97,13 +96,12 @@ test('history, backup and sync handlers check the allowed roots too; commits are
   const written = path.join(outside, 'written-by-show.txt')
   for (const commit of [`--output=${written}`, 'HEAD', 'main~1', '-p', '', 'abc', 'g123456', 42]) {
     assert.deepEqual(await h.invoke('git:commitFileDiff', root, commit, 'in.txt'), { success: false, error: 'Invalid commit id', diff: '' }, String(commit))
-    assert.deepEqual(await h.invoke('git:showCommit', root, commit), { success: false, files: [], error: 'Invalid commit id' }, String(commit))
   }
   assert.equal(fs.existsSync(written), false)
   fs.rmSync(path.join(outside, '.backups'), { recursive: true })
 })
 
-test('working-tree handlers on a repository: preview, diffs, revert, log, show, list, grep', async () => {
+test('working-tree handlers on a repository: preview, diffs, revert, log of a folder or a file, list, grep', async () => {
   const repo = path.join(root, 'work')
   commitRepo(h.base, repo, { 'a.md': 'a\n', 'b.md': 'b\n', 'dir/c.md': 'needle\n' })
   // Sync keeps .backups/ ignored in every company (step 3); 「元に戻す」 keeps the member's version there.
@@ -149,16 +147,20 @@ test('working-tree handlers on a repository: preview, diffs, revert, log, show, 
     ['second\nbody line', 'author,date,hash,hashShort,message'],
     ['initial', 'author,date,hash,hashShort,message'],
   ])
-  assert.deepEqual(await h.invoke('git:showCommit', repo, first), {
-    success: true, files: [{ status: 'A', path: 'a.md' }, { status: 'A', path: 'b.md' }, { status: 'A', path: 'dir/c.md' }],
-  })
-  assert.deepEqual(await h.invoke('git:showCommit', repo, first, 'dir'), { success: true, files: [{ status: 'A', path: 'dir/c.md' }] })
-  assert.deepEqual(await h.invoke('git:showCommit', repo, first.slice(0, 7).toUpperCase(), 'dir'), { success: true, files: [{ status: 'A', path: 'dir/c.md' }] }) // abbreviated
-  const commitDiff = await h.invoke<{ success: boolean; diff: string }>('git:commitFileDiff', repo, first, 'a.md')
+  // 「前の版」: one file's versions (not its neighbours' in the same folder), and what each changed.
+  const fileLog = await h.invoke<{ success: boolean; commits: Array<{ hash: string }> }>('git:log', repo, 'dir/c.md', 50)
+  assert.deepEqual(fileLog.commits.map(c => c.hash), [first])
+  const commitDiff = await h.invoke<{ success: boolean; diff: string }>('git:commitFileDiff', repo, first.slice(0, 7).toUpperCase(), 'a.md') // abbreviated
   assert.equal(commitDiff.success, true)
   assert.match(commitDiff.diff, /\+a\n/)
-  const badShow = await h.invoke<{ success: boolean; files: unknown[]; error: string }>('git:showCommit', repo, 'no-such-commit')
-  assert.deepEqual([badShow.success, badShow.files, typeof badShow.error], [false, [], 'string'])
+  // A file of a readable private folder is read from that folder's own clone inside the company folder.
+  const priv = path.join(repo, 'priv')
+  commitRepo(h.base, priv, { 'p.md': 'secret\n' }, 'private first')
+  const privFirst = git(h.base, priv, ['rev-parse', 'HEAD']).trim()
+  const privLog = await h.invoke<{ success: boolean; commits: Array<{ hash: string; message: string }> }>('git:log', repo, 'priv/p.md', 50)
+  assert.deepEqual(privLog.commits.map(c => [c.hash, c.message]), [[privFirst, 'private first']])
+  const privDiff = await h.invoke<{ success: boolean; diff: string }>('git:commitFileDiff', repo, privFirst, 'priv/p.md')
+  assert.match(privDiff.diff, /\+secret\n/)
 
   const listed = await h.invoke<{ success: boolean; files: string[]; truncated: boolean }>('git:listFiles', repo, 'dir')
   assert.deepEqual({ ...listed, files: [...listed.files].sort() }, { success: true, files: ['dir/c.md', 'dir/d.md'], truncated: false })

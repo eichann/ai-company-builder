@@ -11,7 +11,7 @@ type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
-const gitLogCalls = async (page: Page) => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'gitLog').length)
+const searchBox = (page: Page) => page.getByPlaceholder('文言を検索... (Enter)')
 
 const ROOT = '/Users/demo/会社'
 const OTHER_ROOT = '/Users/demo/別会社'
@@ -26,7 +26,7 @@ const restart = (page: Page) => openPreview(page, 'skill-layout', { keep: '1' })
 
 const editorTab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索' | '履歴') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索') => page.getByRole('button', { name, exact: true })
 // Shown only on the 全社 tab while some department is not downloaded (開発部 here).
 const companyWideBanner = (page: Page) => page.getByText('一部の部署がダウンロードされていません。', { exact: false })
 
@@ -68,16 +68,16 @@ test.describe('open files and the left tab', () => {
 
   test('the left tab chosen is the one shown at the next start', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await leftTab(page, '履歴').click()
-    await expect(page.getByText('提案書を更新')).toBeVisible()
+    await leftTab(page, '検索').click()
+    await expect(searchBox(page)).toBeVisible()
     await restart(page)
-    await expect(page.getByText('提案書を更新')).toBeVisible()
+    await expect(searchBox(page)).toBeVisible()
   })
 
   test('a saved left tab this version does not know opens スキル, and the rest of the saved state still restores', async ({ page }) => {
     await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'editor:demo': editorState([GUIDE], GUIDE, 'tasks') }) })
     await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
-    expect(await gitLogCalls(page), 'no other tab was opened').toBe(0)
+    await expect(searchBox(page), 'no other tab was opened').toHaveCount(0)
     await leftTab(page, 'ファイル').click()
     await expect(editorTab(page, GUIDE)).toBeVisible()
   })
@@ -92,8 +92,8 @@ test('a left tab remembered for a panel not registered yet (an extension still l
   await restart(page)
   await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
   expect(await savedTab()).toBe('tasks')
-  await leftTab(page, '履歴').click()
-  await expect.poll(savedTab).toBe('history')
+  await leftTab(page, '検索').click()
+  await expect.poll(savedTab).toBe('search')
 })
 
 test.describe('the chosen department', () => {
@@ -243,18 +243,22 @@ test.describe('panel dividers', () => {
         const tree = (await treeDivider(page).boundingBox())!
         const button = (await showChat(page).boundingBox())!
         const box = (await shown(page).boundingBox())!
+        const side = (await page.locator('[data-file-side]').boundingBox())!
         const left = tree.x + tree.width
-        // The show-chat button sits at the window's right edge, the editor between it and the tree.
+        // The show-chat button sits at the window's right edge; the file's side column (つながり・前の版)
+        // just before it, and the editor between that and the tree.
         expect(Math.round(button.x + button.width)).toBe(width)
+        expect(side.x + side.width).toBeLessThanOrEqual(button.x + 1)
+        const right = side.x
         if (view === 'editor') {
           expect(box.x).toBeGreaterThanOrEqual(left - 1)
-          expect(box.x + box.width).toBeLessThanOrEqual(button.x + 1)
-          expect(box.width).toBeGreaterThan(button.x - left - 2)
+          expect(box.x + box.width).toBeLessThanOrEqual(right + 1)
+          expect(box.width).toBeGreaterThan(right - left - 2)
         } else {
           // The preview centres the document (at most 768 px) in the editor.
           expect(box.x).toBeGreaterThanOrEqual(left)
-          expect(box.x + box.width).toBeLessThanOrEqual(button.x)
-          expect(Math.abs(box.x + box.width / 2 - (left + button.x) / 2)).toBeLessThan(20)
+          expect(box.x + box.width).toBeLessThanOrEqual(right)
+          expect(Math.abs(box.x + box.width / 2 - (left + right) / 2)).toBeLessThan(20)
         }
       }
 
