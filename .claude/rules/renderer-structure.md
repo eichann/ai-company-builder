@@ -34,7 +34,8 @@ client/src/
 
 Planned features: `workspace` (department tabs, left panel tabs, panel layout, department
 choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a document),
-`chat`, `sync`, `history`, `search`, `settings`, `auth` (server address, sign-in, session),
+`chat`, `sync`, `history` (a file's 「前の版」), `search`, `records` (the read-only record card and a
+file's 「つながっているもの」), `settings`, `auth` (server address, sign-in, session),
 `company` (choosing a company and setting its folder up: the company selector), `tasks` (やること;
 so far only `api.ts` with 「今日の予定」, `calendar.md`; the file tree's 「やることにつなぐ…」 will come from the task plugin, `records.md`),
 `notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`). Only create what you need; add a feature
@@ -220,10 +221,10 @@ These are the owner's decisions for the skeleton work (splitting `src/app/AppShe
 D7–D9, confirmed 2026-10-30).
 
 - **Panel registry (built, Phase 4-6).** The left panel's tabs are a list of registered panels,
-  today's four (スキル / ファイル / 検索 / 履歴) included: `src/features/workspace/leftPanels.ts`
+  today's three (スキル / ファイル / 検索; the 履歴 tab gave way to a file's 「前の版」) included: `src/features/workspace/leftPanels.ts`
   (`LeftPanel`: id, title, icon, optional badge count and visibility, mount policy, `onOpen`,
   `render`; `resolveLeftPanel`) drawn by `components/LeftPanelTabs.tsx`; `src/app/AppShell.tsx`
-  registers the four. A remembered id with no shown panel opens the first one, and the saved id is
+  registers them. A remembered id with no shown panel opens the first one, and the saved id is
   kept (an extension's tab may register later; `skill-layout-state.spec.ts`). An extension's
   entry will carry the text its manifest declares and render the app's isolated frame, never its
   own React. Same idea as the agent registry (`client/shared/agents/registry.ts`).

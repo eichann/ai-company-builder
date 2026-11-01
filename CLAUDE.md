@@ -34,7 +34,7 @@ data/     SQLite databases and repositories at runtime (gitignored)
 Area rules (load automatically when you touch matching files):
 sync, sync-guards, sync-testing, download-choices, push-check, private-folders,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
-web-research, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
+web-research, tasks, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, records, notifications, google-connector, minutes, calendar,
 shared-core, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the
@@ -58,7 +58,8 @@ is missing, the rule files are the complete working instructions.
 - **Push checker** — the server's pre-receive hook (`server/src/lib/push-check/`); its rejection
   markers (`[WRITE_DENIED]`, `[PROTECTED_CONFIG]`, …) drive the app's automatic recoveries.
 - **Roles** — `owner` and `admin` have full access; `member` follows per-folder rules (scopes)
-  for read/write. Any member can also be a **department manager** (`department_managers`), which
+  for read/write. **One exception**: an owner-only record (「持ち主だけ」, `personal_owner`) is
+  seen by its owner alone — not by owners, admins or managers either (`records.md`). Any member can also be a **department manager** (`department_managers`), which
   allows managing that department's private folders and AI instruction files.
 
 ## Commands

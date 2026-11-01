@@ -16,6 +16,11 @@ paths:
   - "server/src/routes/records-ai.ts"
   - "client/electron/records/**"
   - "client/shared/record-actions.ts"
+  - "client/shared/record-views.ts"
+  - "client/electron/features/record-views/**"
+  - "client/src/features/records/**"
+  - "client/src/features/search/components/RecordHits.tsx"
+  - "server/tests/unit/record-linked-to-file.test.ts"
   - "client/tests/records-tools.test.ts"
   - "server/tests/integration/record-tokens.test.ts"
   - "server/src/ports/records.ts"
@@ -344,15 +349,17 @@ GET     /records/problems          owner/admin (paths may be private: owners/adm
 POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
+POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
-                                   link?: { name, id }, sort?: { field, order? }, finishedSince?,
+                                   link?: { name, id }, linkedToFile?, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
 ```
 
 - **No leaks** (0.13-1, 4-2): a record is readable exactly when its file is (`resolveAccess`
   read; inside a private folder also `canReadPrivateScope`), a server-only record when its
-  folder is (none = everyone). Answers, `total`, link lists and traversals all apply it, so an
+  folder is (none = everyone) — and an owner-only record by its owner alone ("Owner-only
+  records" below). Answers, `total`, link lists and traversals all apply it, so an
   unreadable private record is identical to a nonexistent one (same 404 body). `total` counts up
   to `MAX_CANDIDATES` (20,000) rows.
 - Records imported through an earlier connection of an outside system are marked
@@ -372,11 +379,59 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   like `linkedTo`) and a link that may not be followed (public → private) never matches. All of
   them narrow the SQL candidates; read access is applied afterwards as always, so records and
   `total` (also `countOnly`) hold only what the caller reads.
+- `linkedToFile` (a company path, `fileLinkPath`-checked; not with `linkedTo`): records with a file
+  link to exactly that path — 「つながっているもの」 of a file. A file the caller cannot read answers
+  `{ total: 0, records: [] }`, the same as a file nothing links to; a record outside a private
+  folder never counts for a path inside it (`linkAllowed`: the link is stored but never shown),
+  one inside shows to that folder's readers only. Test: `tests/unit/record-linked-to-file.test.ts`
+  (each guard mutation-checked).
 - Cross-company: the handle is `member.companyId`; another company's record id is a record that
   does not exist (permission matrix `CROSS` row, `tests/unit/record-index.test.ts`).
 - The detail route is `/records/item/:recordId`, not `/records/:recordId`: a parameter next to the
   static `/records/settings` etc. made Hono fall back from RegExpRouter to TrieRouter, under which
   `/api/auth/**` stopped matching (the permission matrix's auth rows caught it).
+
+### Owner-only records (「持ち主だけ」, owner decision 2026-11-01)
+
+Who sees a record: **an owner** in `records.personal_owner` → that member only; **a folder** mark
+→ the readers of that folder; **neither** (every record made before) → the whole company,
+unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migration).
+
+- **Not owners or admins either** — the one exception to "owner/admin see everything" (CLAUDE.md
+  Roles); not department managers, delegates or anyone moving tasks. One branch at the top of
+  `recordReader.record` (`services/record-access.ts`), so every caller applies it: answers,
+  `total`, link lists and `linkedTo` traversals, 「あなたの番」/「AI の番」, the AI's tools,
+  actions, undo / reopen (an admin's included), history, versions, file links, and the services
+  that read through the reader (approvals, minutes, decisions, mail, plugins). For anyone else it
+  is a record that does not exist (the same 404 body).
+- **Create** (`POST /records/item`, the AI's `records_create`): `personal: true` → owner = the
+  creator (person or their AI). Refused with `folder` (400 `PERSONAL_WITH_FOLDER`), for a business
+  plugin's type — any type with a stored `plugin` version (deal, customer: other records take
+  their readers from them; 400 `PERSONAL_NOT_FOR_TYPE`); an assignee other than the creator
+  cannot read it (400 `ASSIGNEE_CANNOT_READ`). The summary carries `personal: true` (only the
+  owner ever sees it). Service-written records are never owner-only.
+- **Links**: a record link on the generic create must name a live record the creator reads, else
+  400 `LINK_TARGET_NOT_FOUND` — the same answer for a missing id, someone's owner-only record and
+  an unreadable private one (this check is new with owner-only records; before, any id was stored).
+  An interface link (`bundle`) is answered by its own check instead (400 `BAD_LINK`, one answer for
+  missing / unreadable — owner-only included — / of another kind), so no link has two refusals
+  that would tell an unseen record from a missing one.
+  Links from an owner-only record to a shared one are shown to the owner only (the other side's
+  readers never see the owner-only end).
+- **Share** 「部署に出す／案件につなぐ」: `POST /records/item/:recordId/share { folder,
+  expectedVersion, note? }` (contract `ShareRecordRequest`), **session only** (no AI route). Only
+  the owner (nobody else finds it); `folder` as on create (a company path the owner reads, not in a
+  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`). Clears
+  `personal_owner`, sets `folder` (`RecordRepository.setPlace`); ledger action `share`, state
+  unchanged, changes `place.personal_owner` / `place.folder` before / after, version + 1
+  (`VERSION_CONFLICT`). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
+  the folder's readers may have seen it); `place.*` changes never land in the server fields.
+- Tests: `server/tests/unit/record-personal.test.ts` (another member, a manager, an admin and the
+  company owner get a missing record's answers on every route; query / count / text / my-turn
+  exclude it; links to it refused alike and links from it hidden; `set_bundle` into an owner-only
+  bundle and `link:` / `finishedSince` / `sort` queries for anyone else; cross-company; existing rows
+  unchanged and the column migration; share only by the owner, its ledger entry, never undone —
+  mutation-checked), permission matrix rows + `CROSS`.
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 
@@ -502,7 +557,7 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `server/tests/integration/record-tokens.test.ts` "provenance in the ledger".
 - **Undo** (`POST …/undo { version, expectedVersion }`): a new `undo` entry with the reversed
   changes (`reversesVersion`); refused when a later entry changed the same values
-  (`CHANGED_SINCE`), for `create` / `undo` entries, and for anyone but the entry's actor or an
+  (`CHANGED_SINCE`), for `create` / `undo` entries and a `share` (`place.*` changes), and for anyone but the entry's actor or an
   owner/admin.
 - **Replay** (§13.11): `replayRecordState(entries, n)` folds entries 1..n; it throws on a gap or a
   version that does not exist rather than describe another version. `GET …/versions/:version`
@@ -629,6 +684,28 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
 
+## The app's views (milestone 5 U8, design §7)
+
+Read only, with the member's session in main (`client/electron/features/record-views/ipc.ts`:
+`recordViews:search` / `card` / `forFile`; shapes and wording in `client/shared/record-views.ts`).
+Main only reshapes the server's answers — nothing is filtered or added on the app's side.
+
+- **Kinds** people see (`recordKindOf`): 案件 (`deal`, any type implementing `bundle`), やること
+  (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `minutes`,
+  `outbound_message`), そのほか; the type's own label is shown small. Core states have member words
+  (`stateLabel`; definitions carry no state labels); machinery fields (hashes, outside ids,
+  pointers, `next_actor`) are not on the card; person fields show the member's name
+  (`GET /companies/:id/members`).
+- **検索**: `POST /records/query { text, limit: 100 }` next to the file search, grouped by kind,
+  `total` as the server counts it (only readable records). Records off for the company: nothing
+  shown.
+- **The card** (`src/features/records/components/RecordCard.tsx`): kind, state, title, summary,
+  fields, 経緯 (the ledger, newest first: who・what・note) and 「つながっているもの」 (records by kind,
+  files; a file link marked `broken` says 「つながりが切れています」). Following a link runs
+  `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
+  Generic and without actions: the task card with actions comes from the task screen (S7c).
+- **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
+
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
@@ -663,7 +740,7 @@ important?, key? }` → 201 `{ record, created: true }` (200 `created: false` fo
 
 ## Not yet
 
-The screens (milestone 5), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
+The task screens (milestone 5; the read-only views above exist), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 
 ## Tests

@@ -18,6 +18,7 @@
  */
 import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX } from '../../shared/types/notifications'
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import type { AccountDirectory } from '../ports/accounts'
@@ -38,17 +39,16 @@ export interface NotificationServiceDeps {
   accounts: Pick<AccountDirectory, 'byIds'>
   /** Tell these members their notices changed (push channel: kind + a fresh version only). */
   push: (companyId: string, userIds: string[]) => void
+  /** The member's role in the company, or null (a notice goes only to someone who reads the record). */
+  roleOf: (companyId: string, userId: string) => string | null
+  /** The company's time zone for a due without one (records.md "Due with a time"); Japan by default. */
+  timeZoneOf?: (companyId: string) => string
 }
 
 /** Notices older than this are forgotten (when the member next reads). */
 export const NOTIFICATION_KEEP_DAYS = 90
 /** An AI turn that has not moved for this long is reported to the requester (C-18). */
 export const AI_TURN_STUCK_MS = 24 * 60 * 60_000
-/**
- * The company's clock for a due without a zone (records.md "Due with a time"). Every company is
- * in Japan today; a per-company zone comes with the company settings (S6).
- */
-export const COMPANY_UTC_OFFSET_MINUTES = 9 * 60
 
 /** Rows read per member before the kind and read filters (the list shows NOTIFICATION_LIST_MAX). */
 const ROWS_READ = 500
@@ -61,14 +61,18 @@ const BAD_SETTINGS = 'Send { kinds: { <kind>: true | false } }'
 
 const str = (v: LedgerValue | undefined): string | null => (typeof v === 'string' && v !== '' ? v : null)
 
-/** The company's local date and time now, `YYYY-MM-DDTHH:MM`. */
-export function companyNow(nowMs: number): string {
-  return new Date(nowMs + COMPANY_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 16)
+/** The company's local date and time now in `timeZone`, `YYYY-MM-DDTHH:MM`. */
+export function companyNow(nowMs: number, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(new Date(nowMs))
+  const p = (type: Intl.DateTimeFormatPartTypes) => parts.find(x => x.type === type)?.value ?? '00'
+  return `${p('year')}-${p('month')}-${p('day')}T${p('hour')}:${p('minute')}`
 }
 
 /** Has this due passed? A date-only due passes when its day is over; one with a time, at that minute. */
-export function duePassed(due: string, nowMs: number): boolean {
-  const now = companyNow(nowMs)
+export function duePassed(due: string, nowMs: number, timeZone: string = DEFAULT_COMPANY_TIME_ZONE): boolean {
+  const now = companyNow(nowMs, timeZone)
   return due.length === 10 ? due < now.slice(0, 10) : due < now
 }
 
@@ -132,6 +136,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     if (candidates.length === 0) return
     const nowMs = clock.nowMs()
     const now = clock.now()
+    const timeZone = deps.timeZoneOf?.(member.companyId) ?? DEFAULT_COMPANY_TIME_ZONE
     const rows: NotificationRow[] = []
     for (const s of records.states(candidates.map(r => r.id))) {
       const def = defs.get(candidates.find(r => r.id === s.recordId)?.type ?? '') as TypeDefinition
@@ -143,7 +148,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       if (assignee === null || assignee === member.userId) continue
       const base = { userId: member.userId, recordId: s.recordId, recordVersion: s.version, action: '', actorId: null, actorKind: null, createdAt: now, readAt: null }
       const due = str(fields.due)
-      if (due !== null && duePassed(due, nowMs)) {
+      if (due !== null && duePassed(due, nowMs, timeZone)) {
         rows.push({ ...base, id: deps.ids.newId(), kind: 'overdue', dedupeKey: `overdue:${s.recordId}:${due}` })
       }
       const aiOnly = Object.values(def.actions).some(a => a.who.length === 1 && a.who[0] === 'ai' && (a.from ?? def.states).includes(s.state as string))
@@ -220,8 +225,16 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const final = new Set(def?.final ?? [])
       const now = clock.now()
       const rows: NotificationRow[] = []
+      // Only members who can read the record now get a notice (and a signal): an owner-only
+      // record's notice reaches its owner alone, admins included (records.md "Owner-only").
+      const rec = handle.records.byIds([change.entry.recordId])[0]
+      const scopes = handle.scopes.listWithRules()
+      const mayRead = (userId: string) => {
+        const role = deps.roleOf(companyId, userId)
+        return rec !== undefined && role !== null && recordReader({ companyId, userId, role }, scopes).record(rec)
+      }
       for (const userId of new Set(userIds)) {
-        if (userId === change.entry.actorId) continue
+        if (userId === change.entry.actorId || !mayRead(userId)) continue
         rows.push({
           id: deps.ids.newId(), userId, kind: noticeKind(userId, change, final), recordId: change.entry.recordId,
           recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,

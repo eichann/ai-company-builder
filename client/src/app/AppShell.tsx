@@ -1,8 +1,12 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, GitCommit, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
-import { CommitHistoryPanel, invalidateCommitCache, prefetchCommits } from '../features/history/components/CommitHistoryPanel'
+import { refreshFileVersions } from '../features/history/refresh'
+import { RecordCard } from '../features/records/components/RecordCard'
+import { usePlaceHistory } from '../features/editor/hooks/usePlaceHistory'
+import { PlaceNavigation } from '../features/editor/components/PlaceNavigation'
+import { FileSidePanel } from './FileSidePanel'
 import { SearchPanel } from '../features/search/components/SearchPanel'
 import { useAppStore } from '../stores/appStore'
 import { useSkills } from '../features/skills/hooks/useSkills'
@@ -44,7 +48,6 @@ import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
-import { consultationDraftFor } from '../../shared/notifications-app'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -102,9 +105,15 @@ export function AppShell() {
   const [settingsFocus, setSettingsFocus] = useState<{ service?: string; at: number } | null>(null)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
-  // The history panel follows the department only while shown (it runs git log).
-  const [historyDeptFolder, setHistoryDeptFolder] = useState(effectiveDeptFolder)
-  if (leftTab === 'history' && historyDeptFolder !== effectiveDeptFolder) setHistoryDeptFolder(effectiveDeptFolder)
+  // ← → over the files and record cards the editor area showed (design §7-4).
+  const showFileAgain = useCallback((path: string) => {
+    if (openFiles.includes(path)) handleSelectOpenFile(path)
+    else { handleOpenFile(path); handlePinFile(path) }
+  }, [openFiles, handleSelectOpenFile, handleOpenFile, handlePinFile])
+  const places = usePlaceHistory({ companyId: currentCompany?.id, activeFilePath, showFile: showFileAgain })
+  const { visitFile } = places
+  const openFileFromTree = useCallback((path: string) => { visitFile(path); handleOpenFile(path) }, [visitFile, handleOpenFile])
+  const selectOpenFile = useCallback((path: string) => { visitFile(path); handleSelectOpenFile(path) }, [visitFile, handleSelectOpenFile])
 
   // The shown department's skills (none while it is not downloaded), and the company-wide ones for slash commands.
   const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
@@ -149,7 +158,7 @@ export function AppShell() {
     await refreshDepartments()
     void refreshSkills()
     if (!isCompanyWide) void refreshCompanySkills()
-    invalidateCommitCache()
+    refreshFileVersions()
   }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
   const sync = useSync({ rootPath, companyId: currentCompany?.id, onSynced: handleSynced })
 
@@ -194,20 +203,24 @@ export function AppShell() {
     selectDepartment(id)
     skillsTab.selectSkill(null)
     // Open file tabs stay: one strip for the whole company, labelled with their department.
-    const dept = departments.find(d => d.id === id)
-    if (dept && rootPath) prefetchCommits(rootPath, dept.folder)
   }
 
   const handleEditFile = (filePath: string) => {
     setLeftTab('files')
-    handleOpenFile(filePath)
+    openFileFromTree(filePath)
   }
   const handleFileSearchSelect = useCallback((filePath: string) => {
     setLeftTab('files')
+    visitFile(filePath)
     handleOpenFile(filePath)
     handlePinFile(filePath)
-  }, [handleOpenFile, handlePinFile, setLeftTab])
+  }, [visitFile, handleOpenFile, handlePinFile, setLeftTab])
   useCommandHandler('file.open', ({ path }) => handleFileSearchSelect(path))
+  // A record's card (search, 「つながっているもの」) opens in the editor area of the files tab.
+  useCommandHandler('record.open', ({ recordId }) => {
+    setLeftTab('files')
+    places.visitRecord(recordId)
+  })
   // A file link in a consultation's own window opens here (that window has no editor).
   useFilesFromChatWindows()
 
@@ -250,23 +263,25 @@ export function AppShell() {
           activeFilePath={activeFilePath}
           previewFilePath={previewFilePath}
           tabLabels={tabLabels}
-          onOpenFile={handleOpenFile}
+          onOpenFile={openFileFromTree}
           onPinFile={handlePinFile}
-          onSelectOpenFile={handleSelectOpenFile}
+          onSelectOpenFile={selectOpenFile}
           onCloseFile={handleCloseFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
+          navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
+          overlay={places.recordId && currentCompany && rootPath
+            ? <RecordCard key={places.recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={places.recordId} />
+            : undefined}
+          aside={activeFilePath && rootPath
+            ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
+            : undefined}
         />
       ),
     },
     {
       id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened',
       onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
-      render: () => <SearchPanel rootPath={rootPath || ''} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
-    },
-    {
-      // Follows the department only while shown: it runs git log.
-      id: 'history', title: '履歴', icon: GitCommit, mount: 'once-opened',
-      render: () => <CommitHistoryPanel rootPath={rootPath || ''} departmentFolder={historyDeptFolder} />,
+      render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
     },
   ]
 
@@ -287,8 +302,7 @@ export function AppShell() {
           <TitleBarNotices
             companyId={currentCompany.id}
             state={notices}
-            // No card screen yet: a consultation about the record, its id in the input (nothing sent).
-            onOpen={target => { void runCommand('chat.newConsultation', consultationDraftFor(target)).catch(() => {}) }}
+            onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
           />
         ) : undefined}
       />

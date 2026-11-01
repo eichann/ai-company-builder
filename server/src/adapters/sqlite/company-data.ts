@@ -12,6 +12,7 @@ import { sqliteOutboundMailRepository } from './outbound-mail'
 import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
+import { sqliteTaskSettingsRepository } from './task-settings'
 
 /**
  * Company handles over the one application database (案 A). Moving to a
@@ -35,6 +36,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         outbound: sqliteOutboundMailRepository(conn, companyId),
         fixedPayloads: sqliteFixedPayloadRepository(conn, companyId),
         notifications: sqliteNotificationRepository(conn, companyId),
+        tasks: sqliteTaskSettingsRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)

@@ -33,7 +33,8 @@ a plugin can never draw a notice (§2-2).
   create / act / undo, the service writer, the external writer). `composition.ts`
   `notifyRecords` sends the `records` signal as before and hands the entry to
   `services/notifications.ts` `recordChange`, which writes one notice per named member — **never
-  the entry's actor** — and pushes `{ kind: 'notifications', version }` to those who have that
+  the entry's actor, and only a member who can read the record now** (an owner-only record's
+  notice reaches its owner alone, owners/admins included; `records.md`) — and pushes `{ kind: 'notifications', version }` to those who have that
   kind on. A failure there is logged and never fails the engine's write.
 - Kinds (`shared/types/notifications.ts`, `noticeKind`; generic over types — final states and the
   `request` fields decide, plus the core `approval` type):
@@ -48,8 +49,9 @@ a plugin can never draw a notice (§2-2).
   server, so both PCs agree. Kinds filter at read time (notices are always stored).
 - Computed when the member reads (no timer on the server, owner decision): **overdue** (A-2) — a
   request the member asked of **someone else** (assignee set and not them), not final, whose due
-  has passed on the company clock (date-only: the day is over; with a time: that minute;
-  `COMPANY_UTC_OFFSET_MINUTES` = Japan until the company settings S6 bring a zone), once per due
+  has passed on the company clock (date-only: the day is over; with a time: that minute; the
+  zone from `timeZoneOf`, today `DEFAULT_COMPANY_TIME_ZONE` = Asia/Tokyo for every company, as
+  `calendar.md`), once per due
   value (`overdue:<record>:<due>`); **stuck AI turn** (C-18) — same requester rule, the current
   state has an action only the AI may do, and the record has not changed for 24 h; once per
   version. Types without `requested_by` (minutes) give no stuck notice.
@@ -95,11 +97,8 @@ carry on. The app never acts on the signal itself: it only asks the server again
   named 「承認のお願い：…」, due shown), the bell shows an unread dot and the list, 「すべて既読にする」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
   that notice read.
-- Opening an item: there is no card screen yet (S7c), and consultations are not linked to records
-  yet (S12), so `AppShell` starts a **new consultation** titled after the record with
-  `「<title>」（<record id>）について、` in its input — nothing is sent
-  (`chat.newConsultation { title, draft }`, `commands.md`). When the card screen exists, open it
-  instead.
+- Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
+  same as a search hit. The consultation a record belongs to opens from there once S12 links them.
 
 ## Tests
 
@@ -107,13 +106,14 @@ carry on. The app never acts on the signal itself: it only asks the server again
 cross-company; the push is kind + version only, to the told members, never the actor; gone when
 access is lost; read state shared by two service instances = two PCs; default kinds and switches;
 overdue once and only for the requester; stuck AI turn after 24 h), permission-matrix rows,
-`client/tests/notifications.test.ts` (signal only refetches, content-carrying event dropped, an
+owner-only record's notices only to its owner (not other members, not owners/admins; no row, no
+signal), `client/tests/notifications.test.ts` (signal only refetches, content-carrying event dropped, an
 unknown kind dropped without closing, session in the header, Mac notification only for new items),
 `client/tests/ui/title-bar-notices.spec.ts` (opening a notice marks only it read and opens its
 record; the dot goes; 「あなたの番」 lists what waits) — each mutation-checked.
 
 ## Not yet
 
-Slack DM for important notices (E-26, stage 3); the card screen as the target (S7c); opening the
-consultation a record belongs to (S12); a per-company time zone (S6); notices for a reply to an
+Slack DM for important notices (E-26, stage 3); opening the consultation a record belongs to
+(S12); a per-company time zone (none in S6 either: `timeZoneOf` is the one place); notices for a reply to an
 interaction or a stopped HubSpot exchange (their events come with stage 3).

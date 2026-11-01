@@ -24,3 +24,10 @@ export function searchFileContents(rootPath: string, query: string, departmentFo
 export function readSearchHit(filePath: string, reads: CompanySearchReads = window.electronAPI) {
   return reads.readFile(filePath)
 }
+
+/** Records (案件・やること・決めたこと・やりとり) whose title or summary holds the words: asked of the company server. */
+export type RecordSearchOutbound = ElectronPort<'searchRecords'>
+
+export function searchRecords(companyId: string, text: string, outbound: RecordSearchOutbound = window.electronAPI) {
+  return outbound.searchRecords(companyId, text)
+}

@@ -117,8 +117,10 @@ function wire() {
     clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs },
     ids: { newId: () => crypto.randomUUID(), newToken: () => crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '') },
   }
+  const roleOf = (co: string, userId: string) => ((MEMBERS[co] ?? []).includes(userId) ? (userId === 'u-owner' ? 'owner' : 'member') : null)
   const service = createNotificationService({
     ...shared,
+    roleOf,
     accounts: { byIds: ids => new Map(ids.map(id => [id, { email: `${id}@example.com`, name: id.replace('u-', '').replace(/^./, c => c.toUpperCase()) }])) },
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
   })
@@ -126,7 +128,6 @@ function wire() {
     push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) })
     if (change) service.recordChange(companyId, userIds, change)
   }
-  const roleOf = (co: string, userId: string) => ((MEMBERS[co] ?? []).includes(userId) ? (userId === 'u-owner' ? 'owner' : 'member') : null)
   const isMember = (co: string, userId: string) => (MEMBERS[co] ?? []).includes(userId)
   engine = createRecordEngine({ ...shared, files: { appendHistoryLine: async () => true, fileAtCommit: async () => true }, managedFolders: () => [], isMember, roleOf, notify })
   writer = createServiceRecordWriter({ ...shared, isMember, roleOf, notify })
@@ -236,6 +237,24 @@ describe('notices from the engine', () => {
     expect(bob.filter(e => e.kind === 'notifications')).toEqual([])
     ok(notices.setSettings(m('u-bob'), { kinds: { others: true } }))
     expect(list('u-bob').items.map(i => i.version)).not.toContain(entry.version)
+  })
+
+  it('an owner-only record’s notices reach its owner alone — never another member, nor an owner/admin', async () => {
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分用：歯医者の予約', personal: true, fields: { assignee: 'u-alice' } })).record
+    for (const u of ['u-alice', 'u-bob', 'u-owner']) ok(notices.setSettings(m(u), { kinds: { others: true } }))
+    const ownerPc = subscribe('a', 'u-owner')
+    const bobPc = subscribe('a', 'u-bob')
+    // A writer naming everyone (an outside system's change, so the owner is not the actor).
+    const entry = { ...source.forCompany('a').records.ledger(t.id).at(-1)!, actorId: 'hubspot', actorKind: 'external' as const }
+    notices.recordChange('a', ['u-alice', 'u-bob', 'u-owner'], { type: 'task', entry, fields: { assignee: 'u-alice', requested_by: 'u-alice' } })
+    expect(list('u-alice').items.map(i => i.recordId)).toEqual([t.id])
+    for (const other of ['u-bob', 'u-owner']) {
+      expect(list(other)).toEqual({ available: true, unread: 0, items: [] })
+      expect(JSON.stringify(list(other))).not.toMatch(/歯医者/)
+    }
+    // No signal either, and no row to find later.
+    expect([...ownerPc, ...bobPc].filter(e => e.kind === 'notifications')).toEqual([])
+    expect(conn.prepare("SELECT user_id FROM notifications WHERE record_id = ?").all(t.id)).toEqual([{ user_id: 'u-alice' }])
   })
 
   it('a notice disappears when the member can no longer read the record', async () => {

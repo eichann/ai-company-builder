@@ -46,6 +46,7 @@ import { createPrivateFolderService } from './services/private-folders'
 import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createTaskSettingsService } from './services/task-settings'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
 import { createPushChannel } from './services/push-channel'
@@ -201,6 +202,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const notifications = createNotificationService({
     ...shared,
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+    // No per-company zone yet (calendar.md): the one place a setting would replace.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
   })
   /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
   const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
@@ -426,6 +430,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
+    taskSettings: createTaskSettingsService({ ...repos, ...shared }),
     permissionViews,
     permissionEditor: createPermissionEditorService({
       ...repos,

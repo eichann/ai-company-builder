@@ -5,7 +5,8 @@
 // (write-access.test.ts), search caps in main (git-search.test.ts). These
 // tests pin what the SkillCentricLayout split (R3) can break: what stays
 // mounted across department and tab switches, the not-downloaded overlay,
-// the read-only marks, and the wiring of search, history and skills refresh.
+// the read-only marks, and the wiring of search (files and records), a record's card,
+// ← →, a file's 「つながっているもの」 / 「前の版」 and skills refresh.
 import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
@@ -16,7 +17,7 @@ declare global { interface Window { __acbLayout: Layout } }
 const ROOT = '/Users/demo/会社'
 const calls = (page: Page, name: string) => page.evaluate(n => window.__acbLayout.calls.filter(c => c.name === n).map(c => c.args), name)
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索' | '履歴') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索') => page.getByRole('button', { name, exact: true })
 const overlay = (page: Page) => page.getByRole('button', { name: 'ダウンロードして同期を開始' })
 
 test('switching departments keeps the file tree mounted with what was expanded or collapsed, without a cold re-read', async ({ page }) => {
@@ -118,15 +119,56 @@ test('search: results grouped by file, the cap note when truncated, cleared by a
   await expect(page.getByText(/結果が多いため/)).toHaveCount(0)
 })
 
-test('history refreshes in place after a sync', async ({ page }) => {
+test('search finds records by kind next to files; a record opens as a card, its links are followed, ← → go back and forth', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await leftTab(page, '履歴').click()
-  await expect(page.getByText('提案書を更新')).toBeVisible()
-  expect((await calls(page, 'gitLog')).at(-1)).toEqual(['営業部/'])
+  await leftTab(page, '検索').click()
+  const box = page.getByRole('textbox').filter({ visible: true }).first()
+  await box.fill('提案')
+  await box.press('Enter')
+  const hits = page.getByLabel('記録の検索結果')
+  await expect(hits.getByText('やること (1)')).toBeVisible()
+  await expect(hits.getByText('決めたこと (1)')).toBeVisible()
+  expect(await calls(page, 'searchRecords')).toEqual([['demo', '提案']])
+
+  // A record opens as a card in the editor area of the files tab.
+  await hits.getByRole('button', { name: /A社 提案書を仕上げる/ }).click()
+  const card = page.getByTestId('record-card')
+  await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
+  await expect(card.getByText('田中 太郎')).toBeVisible()
+  await expect(card.getByText('山田 花子：作りました')).toBeVisible()
+
+  // Following the linked file opens it; the file shows what links to it and its earlier versions.
+  await card.getByRole('button', { name: /A社_提案.md/ }).click()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByText('A社への提案の骨子。')).toBeVisible()
+  const side = page.getByLabel('つながっているもの', { exact: true })
+  await expect(side.getByRole('button', { name: /A社 提案書を仕上げる/ })).toBeVisible()
+  expect(await calls(page, 'getRecordsForFile')).toContainEqual(['営業部/提案書/A社_提案.md'])
+
+  // ← back to the card, → forward to the file.
+  await page.getByRole('button', { name: '戻る' }).click()
+  await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
+  await page.getByRole('button', { name: '進む' }).click()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByText('A社への提案の骨子。')).toBeVisible()
+})
+
+test('「前の版」 of an open file replaces the 履歴 tab and refreshes in place after a sync', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '営業部').click()
+  await expect(leftTab(page, '検索')).toBeVisible()
+  await expect(page.getByRole('button', { name: '履歴', exact: true })).toHaveCount(0)
+  await leftTab(page, 'ファイル').click()
+  await page.getByRole('button', { name: 'A社_提案.md' }).click()
+  const versions = page.getByLabel('前の版')
+  await expect(versions.getByText('提案書を更新')).toBeVisible()
+  expect((await calls(page, 'gitLog')).at(-1)).toEqual(['営業部/提案書/A社_提案.md'])
   await page.getByRole('button', { name: 'サーバーと同期' }).click()
-  await expect(page.getByText('チームの変更を取り込み')).toBeVisible()
-  await expect(page.getByText('提案書を更新')).toBeVisible()
+  await expect(versions.getByText('チームの変更を取り込み')).toBeVisible()
+  // What one version changed opens as a diff.
+  await versions.getByRole('button', { name: /提案書を更新/ }).click()
+  await expect(page.getByText(/の変更）/)).toBeVisible()
 })
 
 test('skills: a skill the AI adds appears; a burst of events is one rescan', async ({ page }) => {

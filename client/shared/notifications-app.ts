@@ -40,16 +40,6 @@ export interface NoticeTarget {
   title: string
 }
 
-/**
- * Opening a record from 「あなたの番」 or the bell while the app has no card
- * screen yet: a new consultation titled after the record, with this text in
- * its input (nothing is sent; the AI looks the record up by its id).
- */
-export function consultationDraftFor(target: NoticeTarget): { title: string; draft: string } {
-  const title = target.title.slice(0, 100) || '記録について'
-  return { title, draft: `「${title}」（${target.recordId}）について、` }
-}
-
 /** `2026-11-05` → 11/5, `2026-11-05T15:00` → 11/5 15:00. */
 export function shortDue(due: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(due)

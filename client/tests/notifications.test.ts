@@ -18,7 +18,7 @@ import assert from 'node:assert/strict'
 import { createSseParser } from '../shared/agent-stop'
 import { createAgentPushChannel } from '../electron/services/agent-push-channel'
 import { createNotificationsWatcher } from '../electron/features/notifications/watcher'
-import { consultationDraftFor, NO_NOTICES } from '../shared/notifications-app'
+import { NO_NOTICES } from '../shared/notifications-app'
 
 const V1 = 'a'.repeat(32)
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
@@ -126,8 +126,4 @@ test('records off: no title bar parts; refusals of bad input', async () => {
   assert.equal(watcher.state('co').available, false)
   assert.deepEqual(await watcher.markRead('co', ['bad id!']), { success: false, error: '入力が正しくありません。' })
   assert.deepEqual(await watcher.markRead('../x', 'all'), { success: false, error: '入力が正しくありません。' })
-})
-
-test('opening a record without a card screen: a consultation draft naming it, nothing sent', () => {
-  assert.deepEqual(consultationDraftFor({ recordId: 'task-aaaaaa01', title: '見積書' }), { title: '見積書', draft: '「見積書」（task-aaaaaa01）について、' })
 })

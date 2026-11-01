@@ -296,9 +296,13 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         type: z.enum(creatable as [string, ...string[]]), title: z.string().min(1).max(200), summary: z.string().max(300).optional(),
         fields: z.record(z.string(), z.union([scalar, z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT)])).optional()
           .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
+        personal: z.boolean().optional().describe('true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ） / owner-only: only the member sees it, admins included; no other assignee'),
         state: z.string().max(40).optional().describe('始める状態（型の create_states のどれか。例 task の preparing＝AI が下ごしらえしてから担当に渡す）。ふつうは省く / the state to start in (one of the type\'s create_states, e.g. task preparing: the AI prepares first, then hands it over); normally leave out'),
       }).strict(),
-      description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。\nCreate a server-only record (${creatable.join(', ')}). Name people and customers by id.`,
+      description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。` +
+        'メンバーが「自分用に」「自分だけのメモとして」と言ったときは personal: true（本人だけが見る。部署に出すのは本人が画面で行う）。\n' +
+        `Create a server-only record (${creatable.join(', ')}). Name people and customers by id. ` +
+        'When the member asks for something just for themselves, set personal: true (only they see it; sharing it to a department is their own step on screen).',
       request: input => ({ method: 'POST', path: '/item', body: input }),
     })
   }

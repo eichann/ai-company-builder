@@ -46,13 +46,15 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `calendar.ts` | 「今日の予定」: the neutral `CalendarEvent`, `CalendarTodayReason`, `dayWindow` (the company's day), `DEFAULT_COMPANY_TIME_ZONE` (`calendar.md`) |
 | `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
+| `business-days.ts` | business days: weekends, Japanese public holidays calculated from the law (no network; `LAW_EXCEPTIONS` for year-specific changes), company holidays, `nextBusinessDay` (`tasks.md`) |
+| `task-settings.ts` | the company's task settings (`parseTaskSettings`, defaults) and `replyTarget` (返事の目安, Japan time) (`tasks.md`) |
 | `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`records.ts`, `plugins.ts`, `index.ts`).
+`records.ts`, `plugins.ts`, `task-settings.ts`, `index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)

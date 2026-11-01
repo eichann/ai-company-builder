@@ -98,7 +98,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   company key of the same company) and `connectors` (the Google connection: OAuth client,
   members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`)
   and `outbound` (mail drafts, their recipients per version, typed addresses, send attempts,
-  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`).
+  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
+  department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -155,7 +156,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /:id/client-activity                       companies.ts
 /api/companies/:companyId/departments
                               GET /, GET /:id, POST /, PUT /:id, DELETE /:id, GET /:id/stats,
-                              POST /reorder, POST /sync, GET|PUT /:id/managers  departments.ts
+                              POST /reorder, POST /sync, GET|PUT /:id/managers,
+                              GET|PUT /:id/members (所属する部署: tasks.md)     departments.ts
 /api/companies/:companyId/folder-sizes  GET ?path=&measure=                  folder-sizes.ts
 /api/companies/:companyId/files         GET /tree, /content, /search          company-files.ts
 /api/companies/:companyId     GET /overview, /permissions, /me/capabilities (+ canViewAgentEvents), /me/write-access
@@ -175,6 +177,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET|PUT /task-settings                          task-settings.ts
+                                                                (やることの一覧の設定: tasks.md)
                               GET|POST /agent-stops, DELETE /agent-stops/:stopId,
                               GET /me/events (SSE push channel)               agent-stops.ts
                                                                 (緊急停止: agent-stop.md)

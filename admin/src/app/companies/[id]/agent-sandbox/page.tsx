@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ArrowCounterClockwise, Barricade, ClockCounterClockwise, Globe, FolderLock, LockSimple, UserSwitch } from '@phosphor-icons/react'
 
 import { ImpactCard } from '@/components/agent-sandbox/impact-card'
+import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -225,29 +226,6 @@ function SettingsForm({ saved, onSaved }: { saved: AgentSandboxView; onSaved: (n
         </div>
       </div>
     </>
-  )
-}
-
-function RadioCard({ checked, onSelect, label, help }: { checked: boolean; onSelect: () => void; label: string; help: string }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={checked}
-      onClick={onSelect}
-      className={cn(
-        'flex flex-col items-start gap-1 rounded-xl border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50',
-        checked ? 'border-brand ring-1 ring-brand/40' : 'hover:border-foreground/20'
-      )}
-    >
-      <span className="flex items-center gap-2 text-sm font-medium">
-        <span aria-hidden="true" className={cn('flex size-4 items-center justify-center rounded-full border', checked ? 'border-brand' : 'border-input')}>
-          {checked && <span className="size-2 rounded-full bg-brand" />}
-        </span>
-        {label}
-      </span>
-      <span className="text-xs text-muted-foreground">{help}</span>
-    </button>
   )
 }
 
