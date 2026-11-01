@@ -114,8 +114,8 @@ take `serviceBody` and parse it with a zod schema in the handler after that chec
 - Enforcement: `tests/security/auth-guards.test.ts` fails for an endpoint whose first handler is
   not a guard, and for `publicRoute` outside `PUBLIC_ENDPOINTS`; `eslint.config.mjs` forbids
   `getUserFromRequest`, `c.req.json()` and `c.req.param('companyId')` in `src/routes`
-  (`guards.ts` and the app-wide `client-activity-middleware.ts` excepted). Files not moved yet are
-  in `NOT_YET_GUARDED` (test and ESLint, warn only); the list only shrinks.
+  (`guards.ts` and the app-wide `client-activity-middleware.ts` excepted) — errors, no
+  exceptions list (every route was moved by 2026-11-02).
 - `guard-tags.ts` holds the guard registry and `publicRoute` without the session or composition
   imports, so a public route factory (`slack.ts`) stays light.
 
