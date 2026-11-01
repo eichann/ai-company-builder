@@ -36,6 +36,7 @@ import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
 import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
+import type { SkillUseRepository } from './skill-uses'
 import type { TaskSettingsRepository } from './task-settings'
 
 export interface CompanyData {
@@ -66,6 +67,8 @@ export interface CompanyData {
   readonly tasks: TaskSettingsRepository
   /** Execution runs of 「AI の番」 and their outside operations by idempotency key (ports/ai-runs.ts, S10b). */
   readonly aiRuns: AiRunRepository
+  /** Which company Skills members' consultations used (ports/skill-uses.ts, records.md "Which Skill"). */
+  readonly skillUses: SkillUseRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

@@ -128,6 +128,7 @@ beforeAll(async () => {
   app.use('*', requestLog())
   app.route('/api/companies/:companyId', (await import('../../src/routes/google')).googleRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/skill-uses')).skillUsesRoute)
   const drive = await import('../../src/routes/google-drive')
   app.route('/api/companies/:companyId', drive.googleDriveRoute)
   app.route('/api/records-ai/google/drive', drive.googleDriveAiRoute)
@@ -327,6 +328,29 @@ describe('the AI puts a PDF / HTML into a picked folder', () => {
     const html = await ai(token, 'POST', '/put', { ...putBody({}, HTML), kind: 'html', name: 'ご提案.html' })
     expect(html.body.data.drivePut.state).toBe('done')
     expect(google.uploads()).toHaveLength(2)
+  })
+
+  it('the AI\'s receipt copies the Skills its consultation had used (records.md "Which Skill"); a person\'s or another consultation\'s are not', async () => {
+    const V1 = 'a'.repeat(40)
+    const V2 = 'b'.repeat(40)
+    const report = (user: string, conversationId: string, tree: string) =>
+      person(user, 'POST', '/me/skill-uses', { conversationId, name: 'sales-proposal-v1', tree, dirty: false })
+    expect((await report('m-sato', 'conv-skill', V1)).status).toBe(200)
+    // Another member's report under the same consultation id, and another consultation of the same member: not copied.
+    expect((await report('m-tanaka', 'conv-skill', V2)).status).toBe(200)
+    expect((await report('m-sato', 'conv-other', V2)).status).toBe(200)
+    const issued = await person('m-sato', 'POST', '/me/record-tokens', { conversationId: 'conv-skill', agent: 'claude-code', scope: 'act' })
+    const token = issued.body.data.token as string
+    const r = await ai(token, 'POST', '/put', putBody({ name: 'スキル版.pdf' }))
+    expect(r.status, r.text).toBe(200)
+    const put = r.body.data.drivePut
+    expect(put.skills).toEqual([{ name: 'sales-proposal-v1', tree: V1, dirty: false, firstUsedAt: expect.any(String) }])
+    // Copied at write time: a Skill used later in the consultation does not rewrite the receipt.
+    expect((await report('m-sato', 'conv-skill', V2)).status).toBe(200)
+    expect((await ai(token, 'GET', `/puts/${put.id}`)).body.data.drivePut.skills).toEqual(put.skills)
+    // A consultation that used none: no skills on its receipt.
+    const plain = await ai(await tokenFor('m-sato', 'act'), 'POST', '/put', putBody({ name: 'スキルなし.pdf' }))
+    expect(plain.body.data.drivePut.skills).toBeNull()
   })
 
   it('a lost answer: unknown, never re-sent, found by the put id', async () => {

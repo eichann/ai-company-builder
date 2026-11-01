@@ -97,7 +97,7 @@ function pickView(p: DrivePickRow): DrivePick {
 function putView(p: DrivePutRow): DrivePutView {
   return {
     id: p.id, state: p.state, name: p.name, mimeType: p.mimeType, bytes: p.bytes, sha256: p.sha256, folderId: p.folderId, folderName: p.folderName,
-    fileId: p.fileId, revisionId: p.revisionId, link: p.link, createdAt: p.createdAt, finishedAt: p.finishedAt, reason: p.reason,
+    fileId: p.fileId, revisionId: p.revisionId, link: p.link, createdAt: p.createdAt, finishedAt: p.finishedAt, reason: p.reason, skills: p.skills,
   }
 }
 
@@ -317,7 +317,7 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const row: DrivePutRow = {
         id, userId: member.userId, requestKey: body.requestKey, actorKind: actor.kind, conversationId: actor.conversationId, runId: actor.runId,
         folderId: body.folderId, folderName: folderPick.name, name: named.name, mimeType, bytes: bytes.byteLength, sha256: body.sha256,
-        state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null,
+        state: 'sending', fileId: null, revisionId: null, link: null, reason: null, createdAt: now, finishedAt: null, skills: null,
       }
 
       // The receipt first: the same request (the app's key: same file, folder and name) is answered with what it made.
@@ -331,6 +331,8 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
         // done, or unknown (looked up again; never re-sent).
         return ok({ drivePut: putView(await reconcile(member.companyId, e)), existing: true })
       }
+      // What the receipt copied (the AI's consultation's Skills, records.md "Which Skill").
+      row.skills = claimed.skills
 
       // Before the upload: the folder is still a folder ACB may add to, and (for the AI) nobody outside sees it.
       const refusedBefore = await (async (): Promise<Outcome<never> | null> => {

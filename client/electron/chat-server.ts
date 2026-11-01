@@ -38,6 +38,7 @@ import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-li
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
+import { skillLoadedBy, type AgentToolEvent, type SkillUseSighting } from '../shared/agent-events'
 import type { ToolStopCheck } from '../shared/agent-stop'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
@@ -94,6 +95,11 @@ export interface ChatServerConfig extends AgentHost {
   prepareAgentStop?: (companyId: string) => Promise<{ refused?: string; toolStopped: ToolStopCheck }>
   /** False while an administrator has stopped the AI: titles are not generated (the renderer keeps its own). */
   oneShotAiAllowed?: () => boolean
+  /**
+   * A Skill the AI loaded in a consultation (records.md "Which Skill"): the host finds its
+   * folder and reports its version (services/skill-use-reporter.ts). Must not throw or block.
+   */
+  onSkillUsed?: (sighting: SkillUseSighting) => void
 }
 
 // ============================================================================
@@ -121,6 +127,30 @@ const SECURITY_POLICY = `
 export function externalRepositoryInstruction(companyRootPath?: string): string {
   const where = companyRootPath ? `「${companyRootPath.replace(/[\\/]+$/, '')}/.workspace/」` : '会社フォルダ直下の「.workspace/」'
   return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するとき、また新しく git init するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone・git init しようとするとアプリが止めます。それ以外の場所にできたリポジトリは同期で共有されず、同期のたびにメンバーへの確認が表示されます。中身を会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらうようユーザーに伝えてください。`
+}
+
+/**
+ * The host for one consultation's turn (records.md "Which Skill"): every tool
+ * event still goes to the host's own `onToolEvent`, and a Skill the AI loaded
+ * (`skillLoadedBy`) is also handed to `onSkillUsed` with the consultation's
+ * company folder and working folder. Without a consultation (or a host that
+ * takes no sightings) the host is returned unchanged.
+ */
+export function withSkillSightings<H extends Pick<ChatServerConfig, 'onToolEvent' | 'onSkillUsed'>>(
+  config: H,
+  turn: Omit<SkillUseSighting, 'skill'> | undefined,
+): H {
+  const { onSkillUsed, onToolEvent } = config
+  if (!turn || !onSkillUsed) return config
+  return {
+    ...config,
+    onToolEvent: (event: AgentToolEvent) => {
+      onToolEvent?.(event)
+      const skill = skillLoadedBy(event)
+      if (!skill) return
+      try { onSkillUsed({ ...turn, skill }) } catch { /* the record is informational: never in the AI's path */ }
+    },
+  }
 }
 
 /**
@@ -229,7 +259,10 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authMode = requestedAuthMode || config.getAuthMode()
     if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
-    const connection = createAgentConnection(authMode, config)
+    // Which Skill this consultation used (records.md "Which Skill"): seen in the AI action log's events.
+    const host = withSkillSightings(config, companyId && appSessionId && companyRootPath && !requestedStep
+      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined)
+    const connection = createAgentConnection(authMode, host)
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
     const aiTurnStep = requestedStep === undefined ? undefined : isAiTurnStep(requestedStep) ? requestedStep : null
@@ -393,7 +426,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // API key mode: add filesystem tools + optional skill tools
     const tools = (() => {
       if (connection.ownsConversation) return undefined
-      const toolEvents = turnToolEvents(config, authMode, modelRequest)
+      const toolEvents = turnToolEvents(host, authMode, modelRequest)
       const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents, turnEnv, turnStop?.toolStopped) : undefined
       const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents, turnStop?.toolStopped) : undefined
       if (!fsTools && !skillTools) return undefined

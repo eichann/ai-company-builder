@@ -3,6 +3,7 @@
  * person picked with Google Picker, and the receipts of puts (操作の控え).
  * Every method is limited to the handle's company and takes the member.
  */
+import type { SkillUse } from '../../shared/core/skill-uses'
 
 export interface DrivePickRow {
   userId: string
@@ -34,6 +35,8 @@ export interface DrivePutRow {
   reason: string | null
   createdAt: string
   finishedAt: string | null
+  /** The company Skills the AI's consultation had used, copied when the receipt is written (records.md "Which Skill"); null otherwise. */
+  skills: SkillUse[] | null
 }
 
 export interface GoogleDriveRepository {
@@ -46,8 +49,8 @@ export interface GoogleDriveRepository {
   /** Removes expired picks (every member). */
   prunePicks(now: string): void
 
-  /** Writes a new put in `sending`; when the member already has one with this request key, returns it instead. */
-  claimPut(row: DrivePutRow): { claimed: true } | { claimed: false; existing: DrivePutRow }
+  /** Writes a new put in `sending` (the AI's copies its consultation's Skills, answered as `skills`; `row.skills` is ignored); when the member already has one with this request key, returns it instead. */
+  claimPut(row: DrivePutRow): { claimed: true; skills: SkillUse[] | null } | { claimed: false; existing: DrivePutRow }
   put(userId: string, id: string): DrivePutRow | null
   /** Settles a put still in `sending` / `unknown` (true when a row changed). */
   settlePut(id: string, fields: Pick<DrivePutRow, 'state' | 'fileId' | 'revisionId' | 'link' | 'reason' | 'finishedAt'>): boolean

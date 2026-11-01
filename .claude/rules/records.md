@@ -38,6 +38,15 @@ paths:
   - "shared/core/record-contents.ts"
   - "server/src/adapters/sqlite/record-contents.ts"
   - "server/src/ports/record-contents.ts"
+  - "shared/core/skill-uses.ts"
+  - "server/src/services/skill-uses.ts"
+  - "server/src/routes/skill-uses.ts"
+  - "server/src/ports/skill-uses.ts"
+  - "server/src/adapters/sqlite/skill-uses.ts"
+  - "server/src/db/schema/skill-uses.ts"
+  - "server/tests/integration/skill-uses.test.ts"
+  - "client/electron/services/skill-use-reporter.ts"
+  - "client/tests/skill-uses.test.ts"
   - "server/src/services/record-contents.ts"
   - "server/src/cli/erase-content.ts"
   - "server/tests/unit/record-contents.test.ts"
@@ -838,7 +847,7 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   entries only; a person's or a consultation's entries have none (a consultation is the member's
   own conversation). **No company Skill** is recorded: an unattended step loads none
   (`ai-turns.md`, `settingSources: []`) — when a step starts using one, its name and the SKILL.md
-  version join the procedure. Additive, nullable columns (`migrateAiRunColumns`).
+  version join the procedure (a consultation's Skills: "Which Skill" below). Additive, nullable columns (`migrateAiRunColumns`).
 - A run is its member's: anyone else, another company's id and a missing one get the same 404
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
 - Test: `server/tests/integration/ai-runs.test.ts` (two devices → one claim; the older
@@ -848,6 +857,53 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   entry used, unchanged by a later re-claim, none on a person's or consultation's entry, a plugin
   turned off or an unreadable app build left out; another member's /
   company's run missing — each guard mutation-checked).
+
+## Which Skill a consultation used (owner decision 2026-11-01: compare work with Skill v1 / v2)
+
+`shared/core/skill-uses.ts` (`SkillUse`, `readSkillUseReport`, `parseSkillUses`).
+
+- **Seen in the app** (`client/shared/agent-events.ts` `skillLoadedBy`): an AI action log event
+  of Claude Code's `Skill` tool that ran (`outcome` ok / unfinished; refused or failed calls,
+  `plugin:skill` names and calls merely working inside a skill folder do not count).
+  `chat-server.ts` `withSkillSightings` wraps the turn's host so every event still reaches
+  `onToolEvent` and a loaded Skill also reaches `onSkillUsed` with the consultation (company,
+  conversation, company folder, working folder) — not for an unattended step, a chat without a
+  company folder or the API-key mode. **Codex: not recorded** — it has no Skill tool (its skills are
+  instructions it reads with ordinary commands), so there is no reliable signal.
+- **Version** (`client/electron/services/skill-use-reporter.ts`, main): the folder is
+  `.claude/skills/<name>/SKILL.md` in the working folder or a parent up to the company folder;
+  version = the git tree id of that folder at HEAD (`rev-parse HEAD:<rel>` + `cat-file -t` =
+  tree; the same on every PC with the same synced content) and `dirty` = `status
+  --no-optional-locks --porcelain` of the folder is not empty (the tree id then names what it
+  started from). **Nothing is reported** for a skill inside a private folder (a `.git` on the way:
+  its name never leaves the PC, `private-folders.md`), one not in HEAD (only on this PC, e.g.
+  kept private by the root `.gitignore`), one found in two places on the way or shadowed by the
+  member's own `~/.claude/skills/<name>` (which one ran is unknown), or an invalid name. Sent:
+  `{ conversationId, name, tree, dirty }` only — no path, no content; once per version per
+  consultation (in memory); failures logged once without names, never in the AI's path.
+- **Before the AI writes**: `records/api.ts` `beforeWrite` waits (≤ 5 s) for the consultation's
+  reports in flight before every non-GET call with the turn's token (record actions, creates,
+  Drive puts), so the copy below sees them.
+- **Server**: `POST /api/companies/:id/me/skill-uses` (session, any member, `routes/skill-uses.ts`
+  → `services/skill-uses.ts`): 400 on a bad body (a path or a Japanese folder name is not a skill
+  name; tree = 40 / 64 hex; dirty boolean). `consultation_skill_uses` (company, member,
+  conversation, skill, tree, dirty, `first_used_at` = server time of the first report; a repeat
+  changes nothing; ≤ `SKILL_USES_PER_CONSULTATION` (20) per consultation, more → `recorded:
+  false`). Informational like provenance: the member reports for their own consultations only,
+  nothing authorizes on it, the tree is not checked against the repository (it may not be pushed
+  yet).
+- **Copied at write time** (`adapters/sqlite/skill-uses.ts` `skillUsesJson`, same statement /
+  transaction as the write): an AI ledger entry (`actor_kind = ai`, its token's conversation,
+  `record_ledger.skills`) and an AI Drive put receipt (`google_drive_puts.skills`, answered as
+  `drivePut.skills`) get the member's consultation's uses as they are then — a Skill used later
+  never rewrites an earlier one; a person's entry (even naming the consultation), another
+  member's uses under the same conversation id and a run with no reported use get none. The
+  history answers `skills` on those entries. Additive, nullable columns (`migrateSkillUseColumns`).
+- Tests: `server/tests/integration/skill-uses.test.ts` (refused names, first time kept, limit,
+  copy at write time, member-scoped, none on a person's entry), `google-drive.test.ts` (the
+  receipt's copy), `client/tests/skill-uses.test.ts` (only a Skill call that ran, the host still
+  logs, tree id equal on a clone, dirty, nothing for private / not in HEAD / ambiguous / shadowed /
+  plugin, no path sent, once per version, a write waits for a report in flight).
 
 ## The content store (中身の箱, owner decision 2026-11-01)
 

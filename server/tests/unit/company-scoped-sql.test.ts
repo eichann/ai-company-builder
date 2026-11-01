@@ -79,6 +79,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // Execution runs of 「AI の番」 (records.md "Execution runs").
   ai_runs: ['adapters/sqlite/ai-runs.ts'],
   ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
+  // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
+  consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],

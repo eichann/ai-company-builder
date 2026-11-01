@@ -34,6 +34,12 @@ export interface RecordsApiDeps {
   fetch?: typeof fetch
   /** The execution run a consultation runs, if any (records/runs.ts). */
   runOf?: (companyId: string, conversationId: string) => BoundRun | null
+  /**
+   * Before the AI writes in a consultation: wait for the Skill uses it reported and still has
+   * in flight (services/skill-use-reporter.ts), so the server copies them onto the write
+   * (records.md "Which Skill"). Bounded by the reporter; never throws.
+   */
+  beforeWrite?: (conversationId: string) => Promise<void>
   /** Per request (default 20 s). */
   timeoutMs?: number
   log?: Pick<Console, 'warn'>
@@ -120,6 +126,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       const data = issued.body.data as { token?: string; tokenId?: string; scope?: 'read' | 'act' } | undefined
       if (issued.status !== 201 || !data?.token || !data.tokenId) return null
       const token = data.token
+      const conversationId = opts.conversationId
       const tokenId = data.tokenId
       let closed = false
       const send = (method: 'GET' | 'POST' | 'PUT', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
@@ -135,6 +142,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
         scope: data.scope === 'act' ? 'act' : 'read',
         async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
+          if (method !== 'GET' && deps.beforeWrite) await deps.beforeWrite(conversationId).catch(() => undefined)
           let r = await send(method, path, body, signal, opts?.timeoutMs)
           // Done before with the same request: read back what it made instead of doing it again.
           const replay = r.status === 200 && (r.body.data as { replayed?: unknown } | undefined)?.replayed === true

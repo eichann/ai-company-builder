@@ -14,6 +14,7 @@ import { sqliteOutboundMailRepository } from './outbound-mail'
 import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
+import { sqliteSkillUseRepository } from './skill-uses'
 import { sqliteTaskSettingsRepository } from './task-settings'
 
 /**
@@ -41,6 +42,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         notifications: sqliteNotificationRepository(conn, companyId),
         tasks: sqliteTaskSettingsRepository(conn, companyId),
         aiRuns: sqliteAiRunRepository(conn, companyId),
+        skillUses: sqliteSkillUseRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)
