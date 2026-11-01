@@ -1,5 +1,5 @@
 /**
- * company_id on scope_rules and department_managers (db/index.ts
+ * company_id on scope_rules and department_managers (db/schema/permissions.ts
  * migrateRuleAndManagerCompanies) against a database as the previous server
  * left it (tests/fixtures/app-schema-before-rule-companies.sql, frozen):
  * every existing rule and manager keeps its row and gets the company of its

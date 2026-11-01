@@ -31,7 +31,7 @@ member) asked, and the core runs it. Approving is a person's act through their s
 - Table `fixed_payloads` (company handle `fixedPayloads`, `ports/fixed-payloads.ts`,
   `HANDLE_TABLES`): `(company_id, owner_kind 'approval' | 'outbound_message', owner_id, version,
   canonical, hash, created_at, body_deleted_at)`, one row per version. **Never rewritten**
-  (trigger `fixed_payloads_immutable`, `db/index.ts` `migrateFixedPayloads`): no UPDATE of owner,
+  (trigger `fixed_payloads_immutable`, `db/schema/fixed-payloads.ts` `migrateFixedPayloads`): no UPDATE of owner,
   version, hash or time; the text may only be cleared once, together with `body_deleted_at`
   (retention, design §9 q9).
 - One hashing helper: `server/src/lib/content-hash.ts` `hashCanonical(text) → 'sha256:<hex>'`

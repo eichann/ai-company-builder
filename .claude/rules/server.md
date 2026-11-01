@@ -29,7 +29,8 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
   shared/core types), services only ports / services / shared / pure lib, only the composition
   root imports adapters (and `db/index.ts`, whose startup seeding runs
-  `adapters/sqlite/permission-store.ts` on the connection it migrates), no route runs SQL or
+  `adapters/sqlite/permission-store.ts` and the content-store move on the connection it migrates;
+  the `db/schema/*` modules import no adapter), no route runs SQL or
   imports `db` (git-http's push snapshot, private-folder lookups and orphan checks use
   `services.access` / `services.companyScopes` with the Member), and `lib/` does not import the database except the modules listed in
   `LIB_WITH_DATABASE` with their reason (only `lib/auth.ts`: Better Auth's own connection, next
@@ -104,7 +105,7 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
 - `scope_rules` / `department_managers` got `company_id` later (2026-10-31,
-  `db/index.ts` `migrateRuleAndManagerCompanies`, every startup, idempotent): added nullable
+  `db/schema/permissions.ts` `migrateRuleAndManagerCompanies`, every startup, idempotent): added nullable
   (additive: an older build still inserts without it) + index; rows still without it get the
   company of their scope / department, rows whose parent is gone are removed (they belong to no
   company; counts are logged, nothing named). Triggers keep it non-null and correct: an INSERT
@@ -250,7 +251,7 @@ GET  /api/config                                  setup state (no auth)
 `/api/git` has only the repo URL (members of that company; others 404) — no server path, no
 legacy `sshUrl`. Repository administration is not an API: creating a company creates its
 repository, and startup configures every repository and hook. The SSH-key and `/api/sync` routes
-were removed in R1 (the `ssh_keys` table is still created by `db/index.ts` but nothing uses it).
+were removed in R1 (the `ssh_keys` table is still created by `db/schema/company.ts` but nothing uses it).
 The admin console's calls are pinned by `server/tests/integration/admin-contract.test.ts`
 (`shared-core.md`).
 
@@ -382,8 +383,14 @@ changes nothing more).
 
 - SQLite through better-sqlite3 (no ORM): `data/app.sqlite` (app) and `data/auth.sqlite`
   (Better Auth; one WAL connection for the process, `lib/auth.ts` `authDb`, also used by
-  `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
-  columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
+  `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema: one module per area in `server/src/db/schema/` (company, permissions, agents,
+  broker, records, plugins, connectors, fixed-payloads, tasks, content-store, outbound-mail,
+  notifications), each with its tables, indexes and migrations; `server/src/db/index.ts`
+  `initDatabase` is the one ordered entry point: every area's `CREATE TABLE IF NOT EXISTS` in one
+  batch at startup (a new area goes in its `SCHEMA` list), then the migrations in a fixed order,
+  then the permission seeding. Columns added later get an idempotent check-then-`ALTER TABLE`
+  (e.g. `migrateInvitationClaims`). A migration that runs an adapter stays in `db/index.ts`
+  (`migrateRecordContents`); tests import every migration from `src/db`.
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
   `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a

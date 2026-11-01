@@ -92,7 +92,7 @@ up by the owner, 2026-10-30: right after the two dials).
   `DATA_DIR`) — in production through `docker compose run --rm --no-deps -v /etc/acb:/kek api
   node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek` (`.env.example`,
   `docs/self-hosting/README*.md`). Keep a copy off the server (password manager).
-- **Tables** (`db/index.ts`): `broker_keys` (scope `company`|`user` + `owner_user_id`,
+- **Tables** (`db/schema/broker.ts`): `broker_keys` (scope `company`|`user` + `owner_user_id`,
   `service`, `display_name`, `last4`, the sealed value `cipher_scheme`/`ciphertext`/`nonce`/
   `tag`/`wrapped_key`/`kek_id`, JSON `destinations` {hosts, pathPrefixes, models}, JSON
   `audience` {allDepartments, departmentIds, everyone, addUserIds, removeUserIds}, JSON `caps`

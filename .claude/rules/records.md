@@ -11,6 +11,7 @@ paths:
   - "server/src/services/record-index.ts"
   - "server/src/services/record-access.ts"
   - "server/src/services/record-engine.ts"
+  - "server/src/services/record-engine/**"
   - "server/src/services/decisions.ts"
   - "server/src/services/record-ai-tokens.ts"
   - "server/src/routes/records-ai.ts"
@@ -182,7 +183,7 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
 `POST /records/item/:recordId/file-links` (session) and `POST /api/records-ai/item/:recordId/file-links`
 (act token, tool `records_link_file`) `{ path, link?, expectedVersion, note? }` link a file or folder
 to a record after it was made; `…/file-links/remove` (tool `records_unlink_file`) removes the link.
-Engine `fileLink` (`services/record-engine.ts`), generic: any type with a `file` link (`link` may
+Engine `fileLink` (`services/record-engine/file-links.ts`), generic: any type with a `file` link (`link` may
 be left out when the type has one; task: `files`). Contract `FileLinkRequest` / `FileLinkResult`.
 
 - Who: anyone who reads the record (as reading it) and **reads the file** (`reader.file`). The
@@ -239,7 +240,7 @@ note? }` — `by` a member id, `note` (≤ 500 characters) for an OK from outsid
 Task: `complete` has `ok_from: [assignee]`, `notify: [requested_by, ok_by]`; `reopen`'s `who` is
 `[requested_by, ok_by, admin]` — reopen is the OK-giver's 「取り消す」 (no new action).
 
-- Refusals (`services/record-engine.ts` `act`): no statement → 400 `OK_REQUIRED`; `ok.by` the actor
+- Refusals (`services/record-engine/act.ts` `act`): no statement → 400 `OK_REQUIRED`; `ok.by` the actor
   → 400 `OK_BY_SELF`; `ok.by` someone who cannot read the task **or not a member of this company**
   → one answer, 400 `OK_BY_CANNOT_READ`, naming no place; a statement where none is needed (the
   requester / reviewer, who complete as before) → 400 `OK_NOT_EXPECTED`.
@@ -509,7 +510,7 @@ adds an action, and the app generates no action tools for them. Tests:
 `server/tests/unit/record-service-types.test.ts`, `record-tokens.test.ts` (an AI token creating
 an approval), `client/tests/records-tools.test.ts` — mutation-checked.
 
-### Service writer (`createServiceRecordWriter`, `services/record-engine.ts`)
+### Service writer (`createServiceRecordWriter`, `services/record-engine/service-writer.ts`)
 
 The engine's entry for the core services (approvals G6, minutes G7, mail G8, decisions). Like the
 external writer, composition.ts hands it to those services only (`serviceRecords`, not in
@@ -531,6 +532,13 @@ preparing / todo, ledger action `wait_over`, actor `CLOCK_ACTOR` = kind `externa
 `acb:clock`; `notifications.md` "The server clock").
 
 ## The state engine (4-3, `services/record-engine.ts`)
+
+`services/record-engine.ts` is the one entry point (callers import only it); the parts are in
+`services/record-engine/`: `types.ts` (deps, actor, `RecordChange`), `values.ts` (values by kind,
+OK statements, materials, provenance), `refusals.ts`, `links.ts` (interface links, `links.<name>`
+ledger values), `context.ts` (what the member-facing operations share), one module per operation
+(`create.ts`, `act.ts`, `undo.ts`, `file-links.ts`, `share.ts`, `history.ts`), and the two writers
+no route reaches (`external-writer.ts`, `service-writer.ts`).
 
 Exactly five duties (ontology §17.7): (1) the action's `from` states, (2) its `who`, (3) state and
 ledger written in one transaction, (4) tell whom it names, (5) a milestone line. Nothing else:
@@ -564,7 +572,7 @@ clock's, a separate service writing through the service writer: `notifications.m
   stays `human`), `conversation_id` the consultation (the body's for a person, **the token's** for
   the AI — the AI routes ignore both body fields; `proposed_by` stays null for the AI, whose actor
   kind already says ai). **Informational only**: the client can report anything, so nothing
-  authorizes on them (`selfReportedProvenance`, `services/record-engine.ts`). Shown in the history
+  authorizes on them (`selfReportedProvenance`, `services/record-engine/values.ts`). Shown in the history
   and in `GET …/versions/:version` (`origin`: the entry that made that version). The command
   `records.runAction` carries both for the confirm screen of milestone 5. Test:
   `server/tests/integration/record-tokens.test.ts` "provenance in the ledger".
@@ -641,7 +649,7 @@ erase it without rewriting history. Table `record_contents` (behind the company 
   (reason `retention`); the server clock runs the eraser's `eraseExpired` per company every 5
   minutes (`notifications.md` "The server clock"); the operator can too (`erase-content.ts
   expired`).
-- **Migration**: at startup (`db/index.ts` `migrateRecordContents`) every company not yet marked
+- **Migration**: at startup (`db/index.ts` `migrateRecordContents`; the table in `db/schema/content-store.ts`) every company not yet marked
   (`record_settings.content_store`) gets its older titles, summaries, content fields, notes and
   reasons moved in; values already referencing their own content are skipped, so it is idempotent.
 - Outbound mail's body and an approval's payload stay in `fixed_payloads` (approvals.md,
@@ -746,7 +754,7 @@ complete and idempotent; the immutability trigger — mutation-checked).
 
 ## Outside systems (milestone 3, `plugins.md`)
 
-- `createExternalRecordWriter` (`services/record-engine.ts`) is the engine's one entry for what a
+- `createExternalRecordWriter` (`services/record-engine/external-writer.ts`) is the engine's one entry for what a
   connector plugin read from or wrote to an outside system. composition.ts hands it to the plugin
   services only (not in `services`, so no route, screen or AI reaches it). Same duties as the
   engine — state + ledger in one transaction with a compare-and-set on the version (P6 writes
