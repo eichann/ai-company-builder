@@ -14,12 +14,12 @@ import type {
 } from '../../ports/records'
 
 type Row = {
-  id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null
+  id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null
   title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
 }
-const COLUMNS = 'id, type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at'
+const COLUMNS = 'id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at'
 const toRecord = (r: Row): RecordRow => ({
-  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder,
+  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner,
   title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null }
@@ -93,12 +93,16 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     upsert(row) {
       conn.prepare(`
-        INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, id) DO UPDATE SET type = excluded.type, type_version = excluded.type_version, scope_id = excluded.scope_id,
           path = excluded.path, folder = excluded.folder, title = excluded.title, summary = excluded.summary,
           updated_at = excluded.updated_at, removed_at = excluded.removed_at
-      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.title, row.summary, row.createdAt, row.updatedAt, row.removedAt)
+      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.personalOwner, row.title, row.summary, row.createdAt, row.updatedAt, row.removedAt)
+    },
+    setPlace(id, place, at) {
+      conn.prepare('UPDATE records SET folder = ?, personal_owner = ?, updated_at = ? WHERE company_id = ? AND id = ?')
+        .run(place.folder, place.personalOwner, at, companyId, id)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)
@@ -193,12 +197,12 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       params.push(limit)
       const extra = where.map(w => ` AND ${w}`).join('')
       return (conn.prepare(`
-        SELECT r.id, r.type, r.scope_id, r.path, r.folder FROM records r
+        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner FROM records r
         LEFT JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
         WHERE r.company_id = ? AND r.removed_at IS NULL${extra}
         ORDER BY r.updated_at DESC, r.id LIMIT ?
-      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null }>)
-        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder }))
+      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null }>)
+        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner }))
     },
     byIds(ids) {
       if (ids.length === 0) return []

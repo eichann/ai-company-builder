@@ -37,6 +37,12 @@ export interface RecordRow {
   path: string | null
   /** Server-only record: the folder whose readers may see it (null = everyone in the company). */
   folder: string | null
+  /**
+   * Owner-only record (「持ち主だけ」, records.md "Owner-only records"): the one member who
+   * may see it — nobody else, owners and admins included. null = visibility by `folder`.
+   * Written on insert and by `setPlace` only (an upsert of an existing row keeps it).
+   */
+  personalOwner: string | null
   title: string
   summary: string
   createdAt: string
@@ -87,6 +93,7 @@ export interface RecordAccessRow {
   scopeId: string | null
   path: string | null
   folder: string | null
+  personalOwner: string | null
 }
 
 /** The AI's credential for the company map (only the digest of its value). */
@@ -120,6 +127,8 @@ export interface RecordRepository {
   fileRecordsIn(scopeId: string | null): RecordRow[]
   upsert(row: RecordRow): void
   markRemoved(id: string, at: string): void
+  /** Who may see a server-only record: an owner-only record shared to a folder (records.md "Owner-only records"). */
+  setPlace(id: string, place: { folder: string | null; personalOwner: string | null }, at: string): void
 
   linksFrom(ids: string[]): RecordLinkRow[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */

@@ -50,7 +50,9 @@ or who can see it. So:
 
 - A private folder = a `scopes` row (`kind 'folder'`) whose `repo_id` points at `scope_repos.id`.
   Rules on it: `everyone: no read, no write` + one user rule per viewer (`read`; `write` for
-  editors). Owners/admins always read and write.
+  editors). Owners/admins always read and write. (Not so for owner-only records, which are not
+  folders: only their owner sees one — owners and admins neither; `records.md` "Owner-only
+  records". A private folder stays readable by owners/admins.)
 - A private scope never inherits (clearing / removing its last rule is refused). Rules deeper
   inside only narrow: in `resolveAccess` (`shared/core/permissions.ts`), read/write inside also
   needs read of the folder itself; a private scope without rules denies. `read: false` is

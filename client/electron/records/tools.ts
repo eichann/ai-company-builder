@@ -287,8 +287,12 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
       schema: z.object({
         type: z.enum(creatable as [string, ...string[]]), title: z.string().min(1).max(200), summary: z.string().max(300).optional(),
         fields: z.record(z.string(), scalar).optional(), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
+        personal: z.boolean().optional().describe('true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ） / owner-only: only the member sees it, admins included; no other assignee'),
       }).strict(),
-      description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。\nCreate a server-only record (${creatable.join(', ')}). Name people and customers by id.`,
+      description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。` +
+        'メンバーが「自分用に」「自分だけのメモとして」と言ったときは personal: true（本人だけが見る。部署に出すのは本人が画面で行う）。\n' +
+        `Create a server-only record (${creatable.join(', ')}). Name people and customers by id. ` +
+        'When the member asks for something just for themselves, set personal: true (only they see it; sharing it to a department is their own step on screen).',
       request: input => ({ method: 'POST', path: '/item', body: input }),
     })
   }

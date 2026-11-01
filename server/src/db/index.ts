@@ -872,6 +872,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Single-use invitation links (services/invitations.ts signUp).
   migrateInvitationClaims(conn)
   migrateRecordLedgerProvenance(conn)
+  migrateRecordPersonalOwner(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
   migratePluginInstallKeyReference(conn)
@@ -1228,6 +1229,16 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   // The company's minutes folder (milestone 4, minutes.md): additive, null = not chosen.
   const settings = new Set((conn.prepare(`PRAGMA table_info(record_settings)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!settings.has('minutes_folder')) conn.exec(`ALTER TABLE record_settings ADD COLUMN minutes_folder TEXT`)
+}
+
+/**
+ * Owner-only records (records.md "Owner-only records", owner decision 2026-11-01): the one
+ * member who may see a record, nobody else (owners and admins included). Additive and
+ * nullable: every existing row stays null, so what each member sees today does not change.
+ */
+export function migrateRecordPersonalOwner(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(records)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('personal_owner')) conn.exec(`ALTER TABLE records ADD COLUMN personal_owner TEXT`)
 }
 
 export function migrateInvitationClaims(conn: Database.Database): void {
