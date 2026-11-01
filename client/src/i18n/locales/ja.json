@@ -104,6 +104,7 @@
     "showHiddenTools": "ほか{{n}}件を表示",
     "collapseTools": "折りたたむ",
     "toolFailed": "できませんでした",
+    "toolTechnicalName": "道具の名前：{{name}}",
     "inputPlaceholder": "メッセージを入力... (⌘+Enter で送信)",
     "inputHint": "Enter で改行 • ⌘+Enter で送信",
     "inputPlaceholderWorking": "作業中も指示を追加できます... (⌘+Enter で送信)",

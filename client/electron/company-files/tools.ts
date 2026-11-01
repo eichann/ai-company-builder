@@ -16,7 +16,8 @@ import { z } from 'zod'
 import path from 'node:path'
 import { CompanyFilesApiError, type CompanyFilesApi } from './api'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
-import { companyPath, shortText, type ToolDisplay } from '../../shared/tool-display'
+import type { ToolDisplay } from '../../shared/tool-display'
+import { fixedToolDisplay } from '../../shared/acb-tool-displays'
 
 export const COMPANY_FILES_SERVER = 'acb_company_files'
 
@@ -61,12 +62,8 @@ export const companyFileDescriptions: Record<CompanyFileToolName, string> = {
     `List a shared company folder, including folders not downloaded here (depth 1–5). \`private: true\` marks a private folder. ${COMMON_EN}`,
 }
 
-/** How each call reads in the chat (`client/shared/tool-display.ts`); paths are company-relative already. */
-export const companyFileDisplays: Record<CompanyFileToolName, ToolDisplay> = {
-  company_search: { label: '会社全体を検索しました', running: '会社全体を検索しています', many: '会社全体を {n} 回検索しました', describe: input => shortText(input.query) },
-  company_read_file: { label: '会社のファイルを読みました', running: '会社のファイルを読んでいます', many: '会社のファイルを {n} 件読みました', describe: input => companyPath(input.path) },
-  company_list: { label: '会社のフォルダの中を見ました', running: '会社のフォルダの中を見ています', many: '会社のフォルダの中を {n} 回見ました', describe: input => companyPath(input.path) },
-}
+/** How each call reads in the chat (`client/shared/acb-tool-displays.ts`). */
+export const companyFileDisplays = Object.fromEntries(COMPANY_FILE_TOOL_NAMES.map(name => [name, fixedToolDisplay(companyFileToolId(name))])) as Record<CompanyFileToolName, ToolDisplay>
 
 /** Appended to the chat's system prompt when the tools are available. */
 export function companyFilesInstructions(notDownloaded: string[] = []): string {

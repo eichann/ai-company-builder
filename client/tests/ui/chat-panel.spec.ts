@@ -104,6 +104,8 @@ test.describe('a running turn', () => {
         { id: 'd2', toolName: 'mcp__acb_records__decisions_record', providerMetadata: decided },
         { id: 'r1', toolName: 'Read', input: { file_path: '/tmp/acb-preview/営業部/提案書.md' } },
         { id: 'x1', toolName: 'mcp__my_crm__find_customer' },
+        // No line from main: the renderer names the app's own tools by itself.
+        { id: 'm1', toolName: 'mcp__acb_records__meeting__finish_reading' },
       ]
       for (const call of calls) {
         c.send({ type: 'tool-input-available', toolCallId: call.id, toolName: call.toolName, dynamic: true, providerExecuted: true, input: call.input ?? {}, ...(call.providerMetadata ? { providerMetadata: call.providerMetadata } : {}) })
@@ -115,7 +117,11 @@ test.describe('a running turn', () => {
     await expect(grouped).toBeVisible()
     // Without the main process's line (no company folder known here): the file name only, never the absolute path.
     await expect(page.getByRole('button', { name: /^ファイルを読みました\s*提案書\.md$/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: '道具を使いました（my_crm・find_customer）' })).toBeVisible()
+    const own = page.getByRole('button', { name: 'ほかの道具を使いました' })
+    await expect(own).toBeVisible()
+    await own.click()
+    await expect(page.getByText('道具の名前：my_crm・find_customer')).toBeVisible()
+    await expect(page.getByRole('button', { name: '議事録を読み終えました' })).toBeVisible()
     await grouped.click()
     await expect(page.getByRole('button', { name: /^決めたことを残しました\s*研修対象を営業部全体に/ })).toHaveCount(2)
     await expect(page.getByText(/mcp__/)).toHaveCount(0)

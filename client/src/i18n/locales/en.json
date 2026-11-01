@@ -104,6 +104,7 @@
     "showHiddenTools": "Show {{n}} more",
     "collapseTools": "Collapse",
     "toolFailed": "Could not do this",
+    "toolTechnicalName": "Tool: {{name}}",
     "inputPlaceholder": "Type a message... (⌘+Enter to send)",
     "inputHint": "Enter for newline • ⌘+Enter to send",
     "inputPlaceholderWorking": "Add an instruction while the AI works... (⌘+Enter to send)",

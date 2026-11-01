@@ -22,6 +22,8 @@ paths:
   - "client/shared/tool-display.ts"
   - "client/electron/tool-display-stream.ts"
   - "client/tests/tool-display.test.ts"
+  - "client/tests/tool-rows-real-path.test.ts"
+  - "client/shared/acb-tool-displays.ts"
   - "client/electron/records/tool-providers.ts"
 ---
 
@@ -282,27 +284,36 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   「自分の鍵」 is the one place for keys). Tool outputs are not stored in history, so a restored
   conversation shows the card only when the AI's text kept the marker.
 - **Tool rows** are plain Japanese for non-engineers (owner, 2026-11-02): never a raw tool id
-  (`mcp__acb_records__…`). `client/shared/tool-display.ts` (pure): `ToolDisplay` = `label`
-  (finished, 「決めたことを残しました」), `running` (「…しています」), `many` (`{n}`, 「決めたことを
-  {n} 件残しました」) and an optional `describe(input)` detail. **Every ACB tool declares its
-  `display` next to its definition**: `RecordToolDescriptor.display` is required (record tools,
-  tools made from types / plugins, every provider in `records/tool-providers.ts`), and the fixed
-  servers export one (`referenceDisplays`, `companyFileDisplays`, `reviewDisplay`,
-  `webResearchDisplay`, `askUserDisplay`). `tests/tool-display.test.ts` fails when a tool a turn
-  can get has none or one that is not Japanese. Built-in agent tools (Claude Code, Codex,
-  api-key) are labelled in `tool-display.ts`; anything else is muted 「道具を使いました（server・tool）」.
+  (`mcp__acb_records__…`), not even in brackets. `client/shared/tool-display.ts` (pure):
+  `ToolDisplay` = `label` (finished, 「決めたことを残しました」), `running` (「…しています」), `many`
+  (`{n}`, 「決めたことを {n} 件残しました」) and an optional `describe(input)` detail.
+- **The renderer names every ACB tool by its name alone** (`client/shared/acb-tool-displays.ts`),
+  in every kind of consultation — normal, a person-started step, an unattended 「AI の番」, restored
+  history — without depending on a line from main (staging, 2026-11-02: every row of a minutes
+  reading read 「道具を使いました（acb_records・minutes_read）」). Fixed tools are listed in
+  `ACB_TOOL_DISPLAYS`, and their definitions take `display` from there (`recordToolDisplay`,
+  `fixedToolDisplay`; `RecordToolDescriptor.display` is required, so a provider's new tool in
+  `records/tool-providers.ts` needs an entry). A record type's action (`<type>__<action>`) reads
+  its Japanese action label in the past tense (`actionToolDisplay`: 「議事録を読み終える」 →
+  「議事録を読み終えました」; core types in the renderer, the company's definition in main); a
+  plugin operation reads `pluginOperationDisplay` (main) or a sentence from its name. Built-in
+  agent tools are in `tool-display.ts`. Anything else reads 「ほかの道具を使いました」, muted; its
+  server and tool show only in the expanded row (「道具の名前：…」). `tests/tool-display.test.ts`
+  fails when a tool a turn can get has no Japanese name in the renderer.
 - A detail is a title, a count or a company-relative path (outside the company folder: the file
   name only), ≤ 40 characters with key/token-looking strings masked (`shortText`): never command
   text (Bash shows Claude's own `description` only), mail addresses or subjects, URL paths.
-- Main labels each call (`electron/tool-display-stream.ts`, after the payload limits): the line
-  rides on the part as `callProviderMetadata.acb.display`; the renderer (`toolRows.ts`) falls
-  back to the built-in / muted line. Consecutive finished, successful calls of one tool become
-  one expandable row (`SameItem`). A failed call reads 「できませんでした：<reason>」 where the
-  reason is only the app's own Japanese refusal (`{ error }` answer, `failureOf`), never raw
-  English. History keeps calls as `\n[Tool: name]` markers (the hand-off compares that text;
-  `recovery-context.ts` reads restored calls as the same markers) plus `toolLines` (label and
-  `many` of the app's tools, never a detail); restoring turns each marker into a
-  `data-tool-call` part drawn as a row. Tests: `tests/tool-display.test.ts`,
+- Main adds what only it knows (`electron/tool-display-stream.ts`, after the payload limits): the
+  company's own type / plugin labels and the detail with the company folder, on the part as
+  `callProviderMetadata.acb.display` (never for an unknown tool). Consecutive finished, successful
+  calls of one tool become one expandable row (`SameItem`). A failed call reads
+  「できませんでした：<reason>」 where the reason is only the app's own Japanese refusal (`{ error }`
+  answer, `failureOf`), never raw English. History keeps calls as `\n[Tool: name]` markers (the
+  hand-off compares that text; `recovery-context.ts` reads restored calls as the same markers) plus
+  `toolLines` (label and `many` of a company's own type / plugin tools, never a detail);
+  restoring turns each marker into a `data-tool-call` part drawn as a row. The rows are
+  `components/ToolRows.tsx`. Tests: `tests/tool-rows-real-path.test.ts` (the real main → renderer
+  path of an AI turn, with and without main's lines, restored), `tests/tool-display.test.ts`,
   `src/features/chat/tool-rows.test.ts`, `tests/chat-panel-helpers.test.ts`.
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas

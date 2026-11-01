@@ -9,7 +9,7 @@
  * (records/tools.ts, the tool providers, company-files, consultations, review,
  * web-research); `client/tests/tool-display.test.ts` fails when one lacks it.
  * Built-in agent tools (Claude Code, Codex, api-key mode) are labelled here.
- * Anything else is a member's own tool: 「道具を使いました（server・tool）」, muted.
+ * The app's own tools are in acb-tool-displays.ts; anything else reads 「ほかの道具を使いました」, muted.
  */
 
 export interface ToolDisplay {
@@ -40,36 +40,16 @@ export interface ToolLine {
   detail?: string
   /** A tool the app does not know (a member's own MCP server): drawn muted. */
   muted?: boolean
+  /** Its server and tool (「my_crm・find_customer」): only in the expanded row, never in the line. */
+  technical?: string
 }
 
 /** Where the main process puts a call's line on the tool part. */
 export const TOOL_LINE_METADATA_KEY = 'acb'
 
-export const DETAIL_MAX = 40
-
-const SECRET_RE = /\b(?:sk|pk|rk|ghp|gho|xox[abpr]|AKIA|AIza|ya29)[-_.A-Za-z0-9]{8,}|[A-Za-z0-9+/_-]{32,}={0,2}|\b(?:bearer|token|password|passwd|secret|api[_-]?key)\s*[:=]\s*\S+/gi
-
-/** One line, without anything that looks like a key or a token, at most `max` characters. */
-export function shortText(value: unknown, max = DETAIL_MAX): string {
-  if (typeof value !== 'string') return ''
-  const line = value.replace(/\s+/g, ' ').trim().replace(SECRET_RE, '••••')
-  return line.length > max ? `${line.slice(0, max - 1)}…` : line
-}
-
-/** A path relative to the company folder; a path outside it shows only its file name. */
-export function companyPath(value: unknown, root?: string): string {
-  if (typeof value !== 'string' || !value.trim()) return ''
-  const path = value.trim().replace(/\\/g, '/')
-  const base = root?.replace(/\\/g, '/').replace(/\/+$/, '')
-  if (base && path.startsWith(`${base}/`)) return path.slice(base.length + 1)
-  if (!path.startsWith('/') && !/^[A-Za-z]:\//.test(path)) return path.replace(/^\.\//, '')
-  return path.split('/').filter(Boolean).pop() ?? ''
-}
-
-/** How many items a list argument has (0 when it is not a list). */
-export function countOf(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0
-}
+export { DETAIL_MAX, companyPath, countOf, shortText } from './tool-display-text'
+import { companyPath, shortText } from './tool-display-text'
+import { ACB_TOOL_DISPLAYS, acbToolDisplay } from './acb-tool-displays'
 
 const fileDetail = (input: Record<string, unknown>, ctx: ToolDisplayContext) =>
   companyPath(input.file_path ?? input.notebook_path ?? input.path, ctx.root)
@@ -134,20 +114,20 @@ function mcpParts(toolName: string, input: Record<string, unknown>): [string, st
 }
 
 /**
- * A call's line: its declared display (ACB tools, passed in by whoever knows the
- * definition), else the built-in one, else the muted 「道具を使いました」.
+ * A call's line: the display passed in (main's, from the company's own definitions), else the
+ * built-in one, else the app's own by name (acb-tool-displays.ts), else 「ほかの道具を使いました」.
  */
 export function toolLineOf(toolName: string, rawInput: unknown, display?: ToolDisplay, context: ToolDisplayContext = {}): ToolLine {
   const input = parsedInput(rawInput)
-  const known = display ?? builtinToolDisplay(toolName)
+  const known = display ?? builtinToolDisplay(toolName) ?? acbToolDisplay(toolName)
   if (known) {
     let detail: string | undefined
     try { detail = shortText(known.describe?.(input, context) ?? '') || undefined } catch { detail = undefined }
     return { label: known.label, running: known.running, many: known.many ?? `${known.label}（{n} 回）`, ...(detail ? { detail } : {}) }
   }
   const mcp = mcpParts(toolName, input)
-  const who = mcp ? `${shortText(mcp[0], 30)}・${shortText(mcp[1], 30)}` : shortText(toolName, 40)
-  return { label: `道具を使いました（${who}）`, running: `道具を使っています（${who}）`, many: `道具を {n} 回使いました（${who}）`, muted: true }
+  const technical = mcp ? `${shortText(mcp[0], 30)}・${shortText(mcp[1], 30)}` : shortText(toolName, 40)
+  return { label: 'ほかの道具を使いました', running: 'ほかの道具を使っています', many: 'ほかの道具を {n} 回使いました', muted: true, technical }
 }
 
 /** The collapsed line of `n` identical calls. */
@@ -155,15 +135,14 @@ export function manyLine(line: ToolLine, n: number): string {
   return line.many.replace('{n}', String(n))
 }
 
-/** A line from the stream, if the part carries a well-formed one. */
+/** A line from the stream, if the part carries a well-formed one for a tool main knows (a muted one is worked out here). */
 export function readToolLine(metadata: unknown): ToolLine | undefined {
   const value = (metadata as Record<string, { display?: unknown } | undefined> | undefined)?.[TOOL_LINE_METADATA_KEY]?.display as Partial<ToolLine> | undefined
-  if (!value || typeof value !== 'object') return undefined
+  if (!value || typeof value !== 'object' || value.muted) return undefined
   if (typeof value.label !== 'string' || typeof value.running !== 'string' || typeof value.many !== 'string') return undefined
   return {
     label: value.label, running: value.running, many: value.many,
     ...(typeof value.detail === 'string' && value.detail ? { detail: value.detail } : {}),
-    ...(value.muted === true ? { muted: true } : {}),
   }
 }
 
@@ -184,11 +163,12 @@ export function storedToolLine(toolName: string, line: ToolLine): StoredToolLine
   return { label: shortText(line.label, 80), many: shortText(line.many, 80) }
 }
 
-/** The line of a restored call: the built-in one, the stored one, else the muted 「道具を使いました」. */
+/** The line of a restored call: the built-in or fixed app one, the stored one (a company's own type or plugin), else by name. */
 export function restoredToolLine(toolName: string, stored: unknown): ToolLine {
-  if (builtinToolDisplay(toolName)) return toolLineOf(toolName, {})
+  if (builtinToolDisplay(toolName) || ACB_TOOL_DISPLAYS[toolName]) return toolLineOf(toolName, {})
   const value = stored as Partial<StoredToolLine> | undefined
-  if (value && typeof value.label === 'string' && value.label && typeof value.many === 'string' && value.many.includes('{n}')) {
+  // An older app stored the raw-id fallback 「道具を使いました（…）」: never shown again.
+  if (value && typeof value.label === 'string' && value.label && !value.label.includes('（') && typeof value.many === 'string' && value.many.includes('{n}')) {
     return { label: value.label, running: value.label, many: value.many }
   }
   return toolLineOf(toolName, {})

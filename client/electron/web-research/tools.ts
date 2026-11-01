@@ -13,7 +13,8 @@
  */
 import { z } from 'zod'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
-import { shortText, type ToolDisplay } from '../../shared/tool-display'
+import type { ToolDisplay } from '../../shared/tool-display'
+import { fixedToolDisplay } from '../../shared/acb-tool-displays'
 import {
   WEB_RESEARCH_LIMITS, WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, formatWebResearchResult, validateWebResearchInput,
   type WebResearchInput,
@@ -38,10 +39,8 @@ export const webResearchDescription =
   'Ask narrow questions, pass page URLs when known, split broad topics into several calls, and use depth "deep" when the answer matters. The first line counts the pages actually read; if it is 0 the result is a search-snippet summary — call again with URLs to confirm. ' +
   'Put only what is needed in the question — never paste company file contents, private folder content, personal data or secrets. Takes up to ~5 minutes; calls per conversation are limited (a deep call counts as one).'
 
-/** How the call reads in the chat (`client/shared/tool-display.ts`): the question is the member's topic, never a URL path. */
-export const webResearchDisplay: ToolDisplay = {
-  label: 'Webで調べました', running: 'Webで調べています', many: 'Webで {n} 回調べました', describe: input => shortText(input.question),
-}
+/** How the call reads in the chat (`client/shared/acb-tool-displays.ts`). */
+export const webResearchDisplay: ToolDisplay = fixedToolDisplay(`mcp__${WEB_RESEARCH_SERVER}__${WEB_RESEARCH_TOOL}`)
 
 export interface WebResearchTools {
   /** The tool's text result (never throws for the AI; rethrows only when the turn was stopped). */

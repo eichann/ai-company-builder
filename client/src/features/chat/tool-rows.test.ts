@@ -214,7 +214,8 @@ test('a row never shows a raw tool id: the stream\'s line, else the built-in one
   assert.equal(live.line.label, '記録を作りました')
   assert.equal(live.line.detail, 'タスク「修正見積」')
   const own = toolRowOf(tool('b', 'mcp__my_crm__find_customer', 'output-available'))!
-  assert.equal(own.line.label, '道具を使いました（my_crm・find_customer）')
+  assert.equal(own.line.label, 'ほかの道具を使いました')
+  assert.equal(own.line.technical, 'my_crm・find_customer', 'the technical name only for the expanded row')
   assert.equal(own.line.muted, true)
   assert.equal(toolRowOf(tool('s', 'Skill', 'output-available', { input: { skill: 'proposal' } }))!.line.detail, 'proposal')
   const errored = toolRowOf(tool('c', 'Read', 'output-error', { errorText: 'ENOENT: no such file /Users/x/.ssh/id_rsa' }))!
