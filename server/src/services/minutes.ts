@@ -44,7 +44,7 @@ import { GoogleReadFailed, type GoogleMeetings, type MeetEvent, type MeetingAtte
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader, type RecordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter } from './record-engine'
-import { currentTypes } from './record-index'
+import { currentTypes, ensureCoreTypes } from './record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
 export interface MinutesMember {
@@ -326,6 +326,9 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const domain = handle.connectors.client()?.domain
       if (!domain) return refuse('forbidden', 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。', { code: 'GOOGLE_STOPPED' })
       result.checked = true
+      // The meeting definition in force must know `occurred_at` (version 2) before the intake writes it,
+      // also in a company whose map was not indexed since the server was updated.
+      ensureCoreTypes(records, deps.clock.now())
       const intake = meetingIntakeOf(records.meetingIntake())
       const members = deps.members(member.companyId)
       const byEmail = new Map(members.flatMap(m => {
@@ -378,7 +381,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
             const input = {
               ...base,
               fields: {
-                meeting_at: event.start, assignee, attendees: JSON.stringify(attending), external_count: external.length,
+                // occurred_at: the common outside time (`outside_event`); meeting_at stays for older readers.
+                meeting_at: event.start, occurred_at: event.start, assignee, attendees: JSON.stringify(attending), external_count: external.length,
                 source_ref: JSON.stringify(ref), doc_version: versions.join(','),
               },
               links: { ...(bundle ? { bundle: [bundle.id] } : {}), ...(counterpart ? { counterpart: [counterpart] } : {}) },

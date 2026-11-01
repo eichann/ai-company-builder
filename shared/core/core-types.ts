@@ -36,7 +36,16 @@
  *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
- * original (0.23-2). Version 3 links `bundle` and `counterpart`.
+ * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
+ * implements `outside_event` (its `occurred_at` was there from the start).
+ *
+ * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
+ * of a thing that happened outside implements `outside_event` — `occurred_at`
+ * is when it happened there; when ACB learned of it is the `create` entry's
+ * `at`. `meeting` version 2 adds `occurred_at` (= `meeting_at`, which stays for
+ * compatibility; the intake writes both, older meetings are carried over at
+ * startup with a ledger entry, `OUTSIDE_TIME_ACTION`). `outbound_message` is
+ * not one (ACB makes it; `sent_at` stays) — the sent mail's `interaction` is.
  *
  * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
  * the `minutes` type; the 議事録 is the meeting's content, read where it is),
@@ -111,7 +120,8 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 3
+version: 4
+implements: [outside_event]
 storage: server
 fields:
   occurred_at:  { label: いつ, kind: datetime, source: server }
@@ -135,10 +145,12 @@ actions:
 `,
   meeting: `---
 label: 会議
-version: 1
+version: 2
+implements: [outside_event]
 storage: server
 fields:
   meeting_at:     { label: 会議の日時, kind: datetime, source: server }
+  occurred_at:    { label: 外で起きた日時, kind: datetime, source: server }
   assignee:       { label: 担当, kind: person, source: server }
   attendees:      { label: 出席したメンバー, kind: text, source: server }
   external_count: { label: 社外の参加者の数, kind: number, source: server }
@@ -338,6 +350,15 @@ export const WAIT_OVER_ACTION = 'wait_over'
  * member, never the AI), this id, and a source the history shows as is.
  */
 export const CLOCK_ACTOR = Object.freeze({ id: 'acb:clock', kind: 'external' as const, source: 'ACB の時計' })
+
+/**
+ * The ledger action of the startup carry-over of a meeting's outside time
+ * (`meeting_at` → `occurred_at`, meeting version 2): no action of the type.
+ */
+export const OUTSIDE_TIME_ACTION = 'carry_outside_time'
+
+/** The server's own migration as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
+export const MIGRATION_ACTOR = Object.freeze({ id: 'acb:migration', kind: 'external' as const, source: 'ACB' })
 
 /** May the service writer move a record of `type` from `from` to `to`? */
 export function serviceTransitionAllowed(type: string, from: string | null, to: string): boolean {

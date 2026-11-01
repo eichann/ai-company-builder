@@ -234,6 +234,12 @@ export interface InterfaceDef {
  *   guest, a 受講企業, an applicant. Its display name is the record's title;
  *   `counterpart_kind` says company or person; `domain` / `email` are the keys
  *   later matching (名寄せ) uses (either may be empty).
+ * - `outside_event` = 「外で起きたこと」 (owner decision 2026-11-01 「流れを測れる
+ *   記録」): a record of something that happened outside ACB — a mail or call
+ *   received, a meeting — with `occurred_at`, when it happened there. When ACB
+ *   learned of it is the record's first ledger entry (`create`'s `at`), so the
+ *   two are always told apart. Core `interaction` and `meeting` implement it; a
+ *   business plugin's type of incoming things may too.
  */
 export const INTERFACES: Record<string, InterfaceDef> = {
   request: {
@@ -258,6 +264,10 @@ export const INTERFACES: Record<string, InterfaceDef> = {
   prepared: {
     label: 'AI が用意したもの',
     fields: { requested_by: 'person', assignee: 'person' },
+  },
+  outside_event: {
+    label: '外で起きたこと',
+    fields: { occurred_at: 'datetime' },
   },
 }
 

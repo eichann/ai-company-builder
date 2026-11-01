@@ -109,8 +109,8 @@ describe('the core names no business type', () => {
     for (const text of Object.values(CORE_TYPE_FILES)) expect(text).not.toMatch(/target:\s*(deal|customer)\b/)
   })
 
-  it('the core interfaces are fixed: bundle and counterpart for things, request and prepared for turns', () => {
-    expect(Object.keys(INTERFACES).sort()).toEqual(['bundle', 'counterpart', 'prepared', 'request'])
+  it('the core interfaces are fixed: bundle and counterpart for things, request and prepared for turns, outside_event for what happened outside', () => {
+    expect(Object.keys(INTERFACES).sort()).toEqual(['bundle', 'counterpart', 'outside_event', 'prepared', 'request'])
   })
 })
 
