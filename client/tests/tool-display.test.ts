@@ -25,6 +25,7 @@ import { REVIEW_TOOL_ID } from '../shared/review-request'
 import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
 import { CHOICE_TOOL_NAMES } from '../shared/choice-prompt'
 import { builtinToolDisplay, readToolLine, toolLineOf, type ToolDisplay } from '../shared/tool-display'
+import { ACB_TOOL_DISPLAYS, actionToolDisplay, pluginOperationDisplay } from '../shared/acb-tool-displays'
 
 const PLUGINS: PluginAiTools = {
   plugins: [{
@@ -92,6 +93,28 @@ test('every ACB tool a turn can get has a plain-Japanese label (records, plugins
     ...specs.map(s => `mcp__acb_records__${s.name}`),
   ]
   for (const name of appTools) assertPlain(name, displays.get(name))
+
+  // The renderer names each of them by its name alone (no line from main: an unattended run,
+  // restored history), and a fixed tool's definition takes its words from that one place.
+  for (const name of appTools) {
+    const line = toolLineOf(name, {})
+    assert.ok(!line.muted && JAPANESE.test(line.label) && !/mcp__|acb_/.test(line.label), `${name} has no name of its own in the renderer: ${line.label}`)
+  }
+  for (const spec of specs) if (ACB_TOOL_DISPLAYS[`mcp__acb_records__${spec.name}`]) assert.equal(spec.display, ACB_TOOL_DISPLAYS[`mcp__acb_records__${spec.name}`], spec.name)
+})
+
+test('a record type\'s action reads its Japanese label in the past tense; an unknown one still reads as a sentence', () => {
+  const label = (name: string) => toolLineOf(`mcp__acb_records__${name}`, {}).label
+  assert.equal(label('meeting__finish_reading'), '議事録を読み終えました')
+  assert.equal(label('task__request_review'), 'レビューを依頼しました')
+  assert.equal(label('meeting__fail_reading'), '議事録を読めませんでした')
+  assert.equal(label('reply_request__drop'), '返事をしないことにしました')
+  for (const name of ['corporate-sales__update_deal', 'someone__does_something', 'deal__frobnicate']) {
+    assert.ok(JAPANESE.test(label(name)) && !label(name).includes('__') && !label(name).includes('acb'), `${name}: ${label(name)}`)
+  }
+  // From the company's definition (main), the plugin's own words.
+  assert.equal(pluginOperationDisplay('HubSpot', '商談を記録', 'create').label, 'HubSpotで商談を記録しました')
+  assert.equal(actionToolDisplay('議事録を読み終える').running, '議事録を読み終えています')
 })
 
 test('the owner\'s examples read as plain sentences', async () => {
@@ -125,7 +148,8 @@ test('built-in agent tools read in Japanese, company-relative, and never show a 
   assert.ok((toolLineOf('Grep', { pattern: 'あ'.repeat(200) }).detail ?? '').length <= 40, 'long arguments are cut')
   // A member's own tool: muted, named by server and tool.
   const own = toolLineOf('mcp__my_crm__find_customer', {})
-  assert.equal(own.label, '道具を使いました（my_crm・find_customer）')
+  assert.equal(own.label, 'ほかの道具を使いました')
+  assert.equal(own.technical, 'my_crm・find_customer')
   assert.equal(own.muted, true)
 })
 
@@ -148,6 +172,6 @@ test('the stream labels each call on its part and keeps the subagent parent', as
   const a = out[0] as Extract<UIMessageChunk, { type: 'tool-input-available' }>
   assert.equal((a.providerMetadata?.['claude-code'] as { parentToolCallId?: string }).parentToolCallId, 'agent-1')
   assert.deepEqual(readToolLine(a.providerMetadata), { label: '決めたことを残しました', running: '決めたことを残しています', many: '決めたことを {n} 件残しました', detail: '方針A' })
-  assert.equal(readToolLine((out[1] as typeof a).providerMetadata)?.muted, true)
+  assert.equal((out[1] as typeof a).providerMetadata?.acb, undefined, 'an unknown tool gets no line from main (the renderer keeps its name out of the row)')
   assert.deepEqual(out[2], chunks[2])
 })
