@@ -12,6 +12,8 @@ import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
 } from '../../ports/records'
+import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
+import { sqliteContentStore } from './record-contents'
 
 type Row = {
   id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null
@@ -39,12 +41,22 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   receipt: r.receipt ? JSON.parse(r.receipt) as ExternalReceipt : null,
 })
 
+/** Where the content id starts in a reference (`acb-content:<id>:…`, 1-based for substr). */
+const CONTENT_ID_AT = CONTENT_REF_PREFIX.length + 1
+
 /** A LIKE pattern matching `text` anywhere, with %, _ and \ taken literally. */
 function likeAnywhere(text: string): string {
   return `%${text.replace(/[\\%_]/g, m => `\\${m}`)}%`
 }
 
 export function sqliteRecordRepository(conn: Database.Database, companyId: string): RecordRepository {
+  // Titles, summaries, content fields, notes and reasons live in the content store
+  // (./record-contents.ts): stored as references on the way in, resolved on the way out.
+  const contents = sqliteContentStore(conn, companyId)
+  const resolveRows = (rows: RecordRow[]): RecordRow[] => {
+    const resolve = contents.resolver(rows.flatMap(r => [{ recordId: r.id, value: r.title }, { recordId: r.id, value: r.summary }]))
+    return rows.map(r => ({ ...r, title: resolve(r.id, r.title), summary: resolve(r.id, r.summary) }))
+  }
   return {
     settings() {
       const r = conn.prepare('SELECT enabled, updated_at, updated_by FROM record_settings WHERE company_id = ?').get(companyId) as
@@ -81,24 +93,29 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     find(id) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND id = ?`).get(companyId, id) as Row | undefined
-      return r ? toRecord(r) : null
+      return r ? resolveRows([toRecord(r)])[0] : null
     },
     findByPath(path) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path = ? AND removed_at IS NULL`).get(companyId, path) as Row | undefined
-      return r ? toRecord(r) : null
+      return r ? resolveRows([toRecord(r)])[0] : null
     },
     fileRecordsIn(scopeId) {
-      return (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path IS NOT NULL AND removed_at IS NULL AND scope_id IS ?`)
+      const rows = (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path IS NOT NULL AND removed_at IS NULL AND scope_id IS ?`)
         .all(companyId, scopeId) as Row[]).map(toRecord)
+      return resolveRows(rows)
     },
     upsert(row) {
+      const b = contents.batch(row.id, row.type)
+      const title = b.put(row.title)
+      const summary = b.put(row.summary)
       conn.prepare(`
         INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, id) DO UPDATE SET type = excluded.type, type_version = excluded.type_version, scope_id = excluded.scope_id,
           path = excluded.path, folder = excluded.folder, title = excluded.title, summary = excluded.summary,
           updated_at = excluded.updated_at, removed_at = excluded.removed_at
-      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.personalOwner, row.title, row.summary, row.createdAt, row.updatedAt, row.removedAt)
+      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.personalOwner, title, summary, row.createdAt, row.updatedAt, row.removedAt)
+      b.flush(row.updatedAt)
     },
     setPlace(id, place, at) {
       conn.prepare('UPDATE records SET folder = ?, personal_owner = ?, updated_at = ? WHERE company_id = ? AND id = ?')
@@ -145,33 +162,47 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     states(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare('SELECT record_id, state, fields, version, updated_at FROM record_state WHERE company_id = ? AND record_id IN (SELECT value FROM json_each(?))')
-        .all(companyId, JSON.stringify(ids)) as Array<{ record_id: string; state: string | null; fields: string; version: number; updated_at: string }>)
-        .map((r): RecordStateRow => ({ recordId: r.record_id, state: r.state, fields: r.fields, version: r.version, updatedAt: r.updated_at }))
+      const rows = (conn.prepare(`SELECT s.record_id, s.state, s.fields, s.version, s.updated_at, r.type FROM record_state s
+          LEFT JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+          WHERE s.company_id = ? AND s.record_id IN (SELECT value FROM json_each(?))`)
+        .all(companyId, JSON.stringify(ids)) as Array<{ record_id: string; state: string | null; fields: string; version: number; updated_at: string; type: string | null }>)
+      const fields = contents.resolveFields(rows.map(r => ({ recordId: r.record_id, type: r.type, fields: r.fields })))
+      return rows.map((r, i): RecordStateRow => ({ recordId: r.record_id, state: r.state, fields: fields[i], version: r.version, updatedAt: r.updated_at }))
     },
 
     writeState(row, expectedVersion) {
+      const type = contents.typeOfRecord(row.recordId)
+      const b = contents.batch(row.recordId, type)
+      const stored = contents.storeFields(b, type, row.fields)
+      let r
       if (expectedVersion === 0) {
-        const r = conn.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(company_id, record_id) DO NOTHING')
-          .run(companyId, row.recordId, row.state, row.fields, row.version, row.updatedAt)
-        return r.changes === 1
+        r = conn.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(company_id, record_id) DO NOTHING')
+          .run(companyId, row.recordId, row.state, stored, row.version, row.updatedAt)
+      } else {
+        r = conn.prepare('UPDATE record_state SET state = ?, fields = ?, version = ?, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?')
+          .run(row.state, stored, row.version, row.updatedAt, companyId, row.recordId, expectedVersion)
       }
-      const r = conn.prepare('UPDATE record_state SET state = ?, fields = ?, version = ?, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?')
-        .run(row.state, row.fields, row.version, row.updatedAt, companyId, row.recordId, expectedVersion)
+      // The texts only when the write happened (a lost compare-and-set stores nothing).
+      if (r.changes === 1) b.flush(row.updatedAt)
       return r.changes === 1
     },
 
     ledger(recordId) {
-      return (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
+      const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
           decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
+      return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
-    appendLedger(e: LedgerEntry) {
+    appendLedger(entry: LedgerEntry) {
+      const type = contents.typeOfRecord(entry.recordId)
+      const b = contents.batch(entry.recordId, type)
+      const e = contents.storeEntry(b, type, entry)
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
           changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
           e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null)
+      b.flush(e.at)
     },
 
     candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[] {
@@ -214,8 +245,13 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         params.push(filter.link.name, filter.link.id)
       }
       if (filter.text) {
-        where.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\')")
-        params.push(likeAnywhere(filter.text), likeAnywhere(filter.text))
+        // Title and summary are in the content store (an erased one matches nothing); a row
+        // written before the store (or by an older build) still holds its text.
+        where.push(`(EXISTS (SELECT 1 FROM record_contents c WHERE c.company_id = r.company_id AND c.record_id = r.id AND c.text IS NOT NULL
+            AND c.id IN (substr(r.title, ${CONTENT_ID_AT}, 32), substr(r.summary, ${CONTENT_ID_AT}, 32)) AND c.text LIKE ? ESCAPE '\\')
+          OR (r.title NOT LIKE '${CONTENT_REF_PREFIX}%' AND r.title LIKE ? ESCAPE '\\')
+          OR (r.summary NOT LIKE '${CONTENT_REF_PREFIX}%' AND r.summary LIKE ? ESCAPE '\\'))`)
+        params.push(likeAnywhere(filter.text), likeAnywhere(filter.text), likeAnywhere(filter.text))
       }
       let order = 'r.updated_at DESC, r.id'
       if (filter.sort) {
@@ -236,8 +272,8 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     byIds(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND removed_at IS NULL AND id IN (SELECT value FROM json_each(?))`)
-        .all(companyId, JSON.stringify(ids)) as Row[]).map(toRecord)
+      return resolveRows((conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND removed_at IS NULL AND id IN (SELECT value FROM json_each(?))`)
+        .all(companyId, JSON.stringify(ids)) as Row[]).map(toRecord))
     },
 
     head(repo) {

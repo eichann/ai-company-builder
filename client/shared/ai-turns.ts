@@ -18,7 +18,7 @@ export interface AutoTurnSettings {
   stopAfterFailures: number
 }
 
-/** The company defaults (S6: off until an admin turns 「自動で進める」 on). */
+/** The company defaults (S6: 「自動で進める」 on unless an admin turns it off). */
 export const DEFAULT_AUTO_TURN_SETTINGS: AutoTurnSettings = { ...DEFAULT_TASK_SETTINGS.autoRun }
 
 /**

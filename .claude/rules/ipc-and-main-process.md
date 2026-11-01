@@ -46,7 +46,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
   「議事録が届きました」 checked with the session in main, `minutes.md` "The app"), `record-views`
   (recordViews:search / card / forFile: search hits, the record card and a file's
-  「つながっているもの」, read with the session; `records.md` "The app's views"), `ai-turns`
+  「つながっているもの」, read with the session; `records.md` "The app's views"),
+  `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
+  `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). No `tasks`
   channels: the file tree's 「やることにつなぐ…」 will come from the task plugin (`records.md`

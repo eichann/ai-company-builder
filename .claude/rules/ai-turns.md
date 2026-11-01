@@ -75,8 +75,8 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
 - `aiTurns:settings(companyId)` — the company's 「自動で進める」: `autoRun` of S6's task settings
   (`GET /task-settings` with the session; `shared/core/task-settings.ts`: enabled, daily limit,
   stop after N failures in a row). `readAutoTurnSettings` checks each value against S6's limits;
-  not readable (offline, an older server) or missing → **off**: nothing starts on a guess. S6's
-  default is off, so an admin turns it on (admin console 「やることの一覧」).
+  not readable (offline, an older server) or missing → **off**: nothing starts on a guess. The
+  company default is on (owner decision); an admin turns it off in the admin console 「やることの一覧」.
 
 ## The rules (`aiTurns.ts`, per member and company in localStorage `aiTurns:<company>:<user>`)
 

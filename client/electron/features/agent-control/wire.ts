@@ -19,9 +19,11 @@ export interface AgentControlDeps {
   lifecycle: AppLifecycle
   /** A `records` signal for a company (no content: the listener asks the server again). */
   onRecords?: (companyId: string) => void
+  /** A `notifications` signal for a company (no content: the listener asks the server again). */
+  onNotifications?: (companyId: string) => void
 }
 
-export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords }: AgentControlDeps) {
+export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications }: AgentControlDeps) {
   // The member's AI policy per company (「AI の囲い」 and the stop), read at each chat turn.
   // The stop part is also kept on disk per account (the emergency stop survives a restart offline).
   const policy = createAgentPolicyStore({
@@ -40,6 +42,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
       void policy.refresh(companyId)
     },
     onRecords,
+    onNotifications,
   })
   lifecycle.beforeQuit(() => pushChannel.stopAll())
   const stop = createAgentStop({ policy, watch: companyId => pushChannel.watch(companyId), turns })

@@ -8,7 +8,7 @@ import {
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnCandidate, type AiTurnDecisionInput,
 } from './aiTurns'
 
-// The company turned 「自動で進める」 on (S6's default is off).
+// 「自動で進める」 on (the company default); the tests below never rely on it implicitly.
 const ON = { ...DEFAULT_AUTO_TURN_SETTINGS, enabled: true }
 const NOW = Date.parse('2026-11-01T10:00:00+09:00')
 const minutes = (id: string, meetingAt: string, extra: Partial<AiTurnCandidate> = {}): AiTurnCandidate =>

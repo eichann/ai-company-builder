@@ -23,7 +23,7 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
                       private-folders.ts (scope repositories + their rows),
                       local-secret-cipher.ts, kek-file.ts, upstream-https.ts
 src/composition.ts — the only module that imports adapters; routes take `services` from it
-src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts), each its own composition root
+src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts, erase-content.ts), each its own composition root
 ```
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
@@ -191,6 +191,9 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+                              GET /me/notifications, POST /me/notifications/read,
+                              GET|PUT /me/notifications/settings              notifications.ts
+                                                                (知らせ: notifications.md)
                               GET|PUT /records/settings, GET /records/problems,
                               POST /records/reindex, GET /records/types,
                               POST /records/query, GET /records/item/:recordId,

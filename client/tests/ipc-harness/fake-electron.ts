@@ -173,6 +173,14 @@ export const net = {
   },
 }
 
+/** Desktop notifications: recorded (title, body) instead of shown. */
+export class Notification extends EventEmitter {
+  static shown: Array<{ title: string; body: string }> = []
+  static isSupported() { return true }
+  constructor(private readonly options: { title: string; body: string }) { super() }
+  show() { Notification.shown.push({ title: this.options.title, body: this.options.body }) }
+}
+
 export const nativeImage = {
   createFromDataURL: (url: string) => ({ dataURL: url }),
 }
@@ -244,5 +252,5 @@ export const ipcRenderer = {
 }
 
 export default {
-  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, session, systemPreferences, contextBridge, ipcRenderer, screen,
+  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, Notification, session, systemPreferences, contextBridge, ipcRenderer, screen,
 }

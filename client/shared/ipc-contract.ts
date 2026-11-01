@@ -37,6 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
@@ -486,6 +487,13 @@ export interface IpcInvokeChannels {
   'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
   /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
   'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
+  // The title bar's 「あなたの番」 and bell (notifications.md): read with the member's session in main.
+  /** The company on screen (null: none); starts the 5-minute check. */
+  'notifications:watch': { args: [companyId: string | null]; result: void }
+  'notifications:state': { args: [companyId: string]; result: NoticesState }
+  'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+  'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
+  'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
   // What the app shows of records (record-views.ts), read with the session in main.
   'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
   'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
@@ -604,6 +612,8 @@ export interface IpcEventChannels {
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
   /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
   'minutes:changed': [data: { companyId: string }]
+  /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
+  'notifications:changed': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -797,6 +807,12 @@ export interface ElectronAPI {
   getAutoTurnSettings: Invoke<'aiTurns:settings'>
   claimAiTurn: Invoke<'aiTurns:claim'>
   settleAiTurn: Invoke<'aiTurns:settle'>
+  watchNotifications: Invoke<'notifications:watch'>
+  getNotificationsState: Invoke<'notifications:state'>
+  markNotificationsRead: Invoke<'notifications:markRead'>
+  getNotificationSettings: Invoke<'notifications:settings'>
+  setNotificationSetting: Invoke<'notifications:setSetting'>
+  onNotificationsChanged: Subscribe<'notifications:changed'>
   searchRecords: Invoke<'recordViews:search'>
   getRecordCard: Invoke<'recordViews:card'>
   getRecordsForFile: Invoke<'recordViews:forFile'>

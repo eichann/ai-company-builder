@@ -34,6 +34,11 @@ export interface DesktopShell {
   selectDirectory(): Promise<string | null>
   /** Start a native drag of a (validated) file out of the window that sent the request. */
   startDrag(sender: IpcSender, file: string): void
+  /**
+   * A desktop notification (macOS: the corner banner); `onClick` when the member clicks it.
+   * Does nothing where the system has none.
+   */
+  notify(title: string, body: string, onClick?: () => void): void
 }
 
 /** The app quitting, in the order the hooks were added. */

@@ -38,7 +38,7 @@ import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownl
 import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
-import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
@@ -47,6 +47,8 @@ import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
+import { useNotices } from '../features/notifications/hooks/useNotices'
+import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -71,6 +73,8 @@ export function AppShell() {
   const minutes = useMinutesNotices(currentCompany?.id)
   // Where each of them stands with the automatic 「AI の番」 (the chat's runner reports it).
   const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
+  // 「あなたの番」 and the bell (features/notifications): main reads them with the session.
+  const notices = useNotices(currentCompany?.id)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -297,6 +301,13 @@ export function AppShell() {
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
         extra={minutes.available && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
+        notices={currentCompany ? (
+          <TitleBarNotices
+            companyId={currentCompany.id}
+            state={notices}
+            onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
+          />
+        ) : undefined}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       <DepartmentBar

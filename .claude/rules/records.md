@@ -32,6 +32,12 @@ paths:
   - "server/tests/integration/records.test.ts"
   - "server/tests/integration/record-links.test.ts"
   - "server/tests/unit/push-channel.test.ts"
+  - "shared/core/record-contents.ts"
+  - "server/src/adapters/sqlite/record-contents.ts"
+  - "server/src/ports/record-contents.ts"
+  - "server/src/services/record-contents.ts"
+  - "server/src/cli/erase-content.ts"
+  - "server/tests/unit/record-contents.test.ts"
 ---
 
 # Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
@@ -570,9 +576,11 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 - **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
   the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
   value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
-  event itself (0.18-1, SSE rule). The app's one listener is 「議事録が届きました」: a `records`
-  event only makes main ask the server again for the member's received minutes (`minutes.md`
-  "The app").
+  event itself (0.18-1, SSE rule). The app's listeners: 「議事録が届きました」 (main asks the server
+  again for the member's received minutes, `minutes.md` "The app") and the title bar's 「あなたの番」
+  (`notifications.md`). `notify` also carries the ledger entry (`RecordChange`), from which the
+  notices (知らせ) are written — never the actor, kind + record + version only
+  (`notifications.md`).
 - **Milestone line** (duty 5, `history_line: true`, file records only — a company's own
   `storage: file` type; no core type has one any more): appended to the file's
   「## 経緯」 section (created at the end when missing) as the server's own commit
@@ -583,6 +591,78 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 - Server-only records (`POST /records/item`, types with storage `server` / `either`): title,
   summary, optional folder (not inside a private folder yet), server fields, links; the id is
   `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
+
+## The content store (中身の箱, owner decision 2026-11-01)
+
+Text that easily holds personal data is kept apart from the append-only ledger so an operator can
+erase it without rewriting history. Table `record_contents` (behind the company handle; SQL only in
+`adapters/sqlite/record-contents.ts`; rules in `shared/core/record-contents.ts`).
+
+- **What is content**: a record's `title` and `summary`; every `long_text` field (task `purpose` and `prep_summary`,
+  decision `why`, minutes `summary_text`, approval `reason`, …); `ok_note` (any type with the OK
+  fields); `EXTRA_CONTENT_FIELDS` (decision `source`, outbound_message `subject` — the same words as
+  its title); every ledger `note` and `decision.reason` (send-back / decline / cancel / retract
+  reasons, OK notes, approval reasons). Short scalars (state, due, people, amounts, choices, tags,
+  links, ids) stay in the ledger as before. A field's kind never changes across type versions, so
+  every stored version of the type decides.
+- **References**: `records.title / summary`, `record_state.fields` and every `record_ledger` row
+  hold `acb-content:<id>:sha256:<hex>` instead of the text. The records adapter stores on the way
+  in (`upsert`, `writeState` — only when its compare-and-set wins —, `appendLedger`) and resolves
+  on the way out (`find`, `byIds`, `states`, `ledger`, …), so services, routes, the AI's tools,
+  text search, undo and replay see text exactly as before. A content id is
+  sha256(record id, hash)[:32]: one row per distinct text of a record, so storing the same text
+  again is a no-op — and **a text once erased stays erased** when the same words come back (an
+  import, a re-index).
+- **Who reads it** is who reads its record: there is no read of content by id, and the row copies
+  no owner / visibility (it cannot drift from the record's). A reference resolves only to content
+  of the same record of the same company (a reference copied into another record reads empty);
+  the services' read checks (folders, private folders, owner-only records) apply to the record and
+  so to its content. A value that is not a reference (a row written before the store) reads as it is.
+- **Erased** content reads `消去済み（YYYY-MM-DD）` (`erasedText`) in every answer — detail,
+  query, history, `versions/:version` replay (the other values of that version replay as before),
+  the AI's tools. A later write carrying that marker stores the marker, never the old text.
+- **Never rewritten** (trigger `record_contents_immutable`): no UPDATE of id, record, hash, class,
+  times; the text is only cleared once, with `erased_at` / `erased_reason`. Rows go only with the
+  company (cascade).
+- **Search** (`text` of `POST /records/query`): the content rows of each candidate's title /
+  summary (erased ones never match), then the read filter as always — a title is found only among
+  records the caller reads.
+- **Retention** (`retentionClassOf`): `standard` (until erased) or `incoming_3y` — records of type
+  `interaction` (owner decision G-33: 3 years). A copy of such a text of at least 20 characters
+  stored for another record of the company (same hash) inherits the original's expiry.
+  `services/record-contents.ts` `eraseExpired()` erases what has expired in every company
+  (reason `retention`); nothing schedules it yet — the future server clock (or the operator,
+  `erase-content.ts expired`) runs it.
+- **Migration**: at startup (`db/index.ts` `migrateRecordContents`) every company not yet marked
+  (`record_settings.content_store`) gets its older titles, summaries, content fields, notes and
+  reasons moved in; values already referencing their own content are skipped, so it is idempotent.
+- Outbound mail's body and an approval's payload stay in `fixed_payloads` (approvals.md,
+  outbound-mail.md: their own hash, 30-day mail retention); erasing a record also clears them.
+
+### Erasing: the operator's runbook (no delete in the product)
+
+There is no route, screen or AI tool that erases; the operator does it on the server, and the
+request (who asked, why, when) is kept in the erasure log **outside the product**.
+
+1. Find the record id and list its contents:
+   `node --import tsx src/cli/erase-content.ts list <companyId> <recordId>` (ids, class, dates; no
+   text).
+2. Erase: `… erase-content.ts record <companyId> <recordId> <reason>` (every content of the record,
+   plus the text of its fixed content — an approval's payload, a mail's body), or
+   `… content <companyId> <reason> <contentId>…` for single pieces. `reason` is a short word
+   (`request`, `ticket-123`; `ERASE_REASON_RE`), never a name.
+3. Copy the printed `erased <companyId> <contentId>` lines into the erasure log.
+4. **Backups**: a backup (restic) or a company archive taken before the erasure still holds the
+   text. After any restore of the database or a company, re-apply every logged erasure since that
+   backup: `… content <companyId> restore-reapply <contentId>…` (ids already erased are skipped).
+5. Files are not content: a record's linked files, and a company's own `storage: file` record
+   files, live in the repository — removing personal data there is a separate step.
+
+Tests: `server/tests/unit/record-contents.test.ts` (no text in `records` / `record_state` /
+`record_ledger`; erased reads as erased everywhere with its text gone and replay still working;
+another company / a copied reference / the eraser given another company reach nothing; unreadable
+records' content and titles stay out of search; retention and its copies; the startup move,
+complete and idempotent; the immutability trigger — mutation-checked).
 
 ## Who is acting: the credential decides (owner requirement, 2026-10-31)
 
@@ -755,6 +835,7 @@ where the type lets it, unreadable and private-folder files refused alike withou
 cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
 `server/tests/unit/record-task-v5.test.ts` (task version 5 and the query's additions, above),
+`server/tests/unit/record-contents.test.ts` (the content store, above),
 `server/tests/unit/record-tags-bundle.test.ts` (tags and links to an interface, above),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,

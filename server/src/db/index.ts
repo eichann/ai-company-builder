@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
+import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 
 // Ensure data directory exists
@@ -802,6 +803,31 @@ export function initDatabase(conn: Database.Database = sqlite) {
     WHEN NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
     BEGIN SELECT RAISE(ABORT, 'department_members.company_id must be the company of its department'); END;
 
+    -- The content store (中身の箱, records.md "The content store"): texts that easily
+    -- hold personal data (titles, summaries, long_text fields, notes, reasons), one row
+    -- per distinct text of a record (id = sha256(record id, hash)[:32]). records,
+    -- record_state and record_ledger hold only references (acb-content:<id>:<hash>).
+    -- Never rewritten (trigger in migrateRecordContents): erasing clears the text once,
+    -- with erased_at / erased_reason; the hash and the row stay. Who reads it is who
+    -- reads its record (no read of its own). expires_at: the retention class's end.
+    CREATE TABLE IF NOT EXISTS record_contents (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      hash TEXT NOT NULL CHECK (hash GLOB 'sha256:*' AND length(hash) = 71),
+      text TEXT,
+      retention_class TEXT NOT NULL CHECK (retention_class IN ('standard', 'incoming_3y')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      erased_at TEXT,
+      erased_reason TEXT,
+      PRIMARY KEY (company_id, id),
+      CHECK ((text IS NULL) = (erased_at IS NOT NULL))
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_contents_record ON record_contents(company_id, record_id);
+    CREATE INDEX IF NOT EXISTS idx_record_contents_hash ON record_contents(company_id, hash);
+    CREATE INDEX IF NOT EXISTS idx_record_contents_expires ON record_contents(company_id, expires_at) WHERE expires_at IS NOT NULL AND erased_at IS NULL;
+
     -- Outbound mail (milestone 4 G8, .claude/rules/outbound-mail.md), behind the
     -- company handle (ports/outbound-mail.ts). The content per version (canonical
     -- text + hash) is in fixed_payloads; the state in the company map.
@@ -862,6 +888,36 @@ export function initDatabase(conn: Database.Database = sqlite) {
       FOREIGN KEY (company_id, message_id) REFERENCES outbound_mails(company_id, message_id) ON DELETE CASCADE
     );
 
+    -- Notices (知らせ, stage 2 S5, .claude/rules/notifications.md), behind the
+    -- company handle (ports/notifications.ts): per company × member, no text
+    -- (built when read), the read state shared by the member's PCs.
+    CREATE TABLE IF NOT EXISTS notifications (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      record_version INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      actor_id TEXT,
+      actor_kind TEXT CHECK (actor_kind IS NULL OR actor_kind IN ('human', 'ai', 'external')),
+      dedupe_key TEXT,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      PRIMARY KEY (company_id, id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(company_id, user_id, dedupe_key) WHERE dedupe_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_notifications_member ON notifications(company_id, user_id, created_at);
+
+    -- A member's notice kinds turned on / off (JSON object kind → boolean).
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      kinds TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id)
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_connector_history_company ON connector_history(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_outbound_sends_message ON outbound_sends(company_id, message_id, started_at);
@@ -915,6 +971,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordTypeSources(conn)
   migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)
+  migrateRecordContents(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
 
@@ -1329,6 +1386,33 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   // The company's minutes folder (milestone 4, minutes.md): additive, null = not chosen.
   const settings = new Set((conn.prepare(`PRAGMA table_info(record_settings)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!settings.has('minutes_folder')) conn.exec(`ALTER TABLE record_settings ADD COLUMN minutes_folder TEXT`)
+  // The content store (records.md): 1 once the company's older rows were moved into it.
+  if (!settings.has('content_store')) conn.exec(`ALTER TABLE record_settings ADD COLUMN content_store INTEGER`)
+}
+
+/**
+ * The content store (records.md "The content store"): content is never
+ * rewritten — only its text cleared once (erasure, retention) together with
+ * erased_at / erased_reason. Then every company whose rows were written before
+ * the store gets them moved in (adapters/sqlite/record-contents.ts
+ * `migrateCompanyContents`: idempotent; a company once done is skipped).
+ */
+export function migrateRecordContents(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TRIGGER IF NOT EXISTS record_contents_immutable BEFORE UPDATE ON record_contents
+    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.id IS NOT OLD.id OR NEW.record_id IS NOT OLD.record_id OR NEW.hash IS NOT OLD.hash
+      OR NEW.retention_class IS NOT OLD.retention_class OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
+      OR (NEW.text IS NOT OLD.text AND NEW.text IS NOT NULL)
+      OR (OLD.erased_at IS NOT NULL AND (NEW.erased_at IS NOT OLD.erased_at OR NEW.erased_reason IS NOT OLD.erased_reason))
+    BEGIN SELECT RAISE(ABORT, 'content is never rewritten (only its text erased)'); END;
+  `)
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const done = conn.prepare('SELECT content_store FROM record_settings WHERE company_id = ?').get(id) as { content_store: number | null } | undefined
+    if (!done || done.content_store === 1) continue
+    const { moved } = migrateCompanyContents(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] content store: moved ${moved} text(s) of company ${id}`)
+  }
 }
 
 /**

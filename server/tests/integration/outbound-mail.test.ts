@@ -28,6 +28,7 @@ import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -393,7 +394,7 @@ describe('outbound mail', () => {
     expect(r.body.data.draft).toMatchObject({ state: 'sent', providerMessageId: mail.id })
     expect(JSON.parse(stateOf(draft.id).fields)).toMatchObject({ provider_message_id: mail.id, sent_at: expect.any(String) })
     // The interaction: channel email, the subject, domains only, Gmail's id; linked to the deal.
-    const interaction = db.prepare("SELECT r.id, r.title, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'interaction'").get(CO) as Json
+    const [interaction] = withRecordText(db, CO, db.prepare("SELECT r.id, r.title, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'interaction'").all(CO) as Json[])
     expect(interaction.title).toBe('本日はありがとうございました')
     expect(JSON.parse(interaction.fields)).toMatchObject({ channel: 'email', counterpart: 'a-corp.example, div.example', source_ref: `gmail:${mail.id}` })
     expect(interaction.fields).not.toContain('suzuki')

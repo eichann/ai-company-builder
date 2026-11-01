@@ -48,7 +48,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `business-days.ts` | business days: weekends, Japanese public holidays calculated from the law (no network; `LAW_EXCEPTIONS` for year-specific changes), company holidays, `nextBusinessDay` (`tasks.md`) |
 | `task-settings.ts` | the company's task settings (`parseTaskSettings`, defaults) and `replyTarget` (返事の目安, Japan time) (`tasks.md`) |
-| `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
+| `plugins.ts` | connector plugins, the one entry point (re-exports; `plugins.md`): the declaration (`plugin-declaration.ts` shape, `plugin-declaration-rules.ts`, `plugin-manifest.ts` `parsePluginManifest` with `plugin-connector-declaration.ts` / `plugin-business-declaration.ts`), the package (`plugin-package.ts` `validatePluginPackage`, `combineUse`), the mapping (`plugin-mapping.ts` `parsePluginMapping`), field policies (`plugin-policies.ts`: external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways (`plugin-values.ts`), `available_to` |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.

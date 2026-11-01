@@ -122,6 +122,8 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
 - Export while the server runs is consistent for the rows (one read transaction). A push that
   lands between the rows and the bundles is in the bundle but not in the rows' view; for an
   exact copy, export during maintenance.
+- An archive (like any backup) taken before an erasure of content still holds that text: after a
+  restore, re-apply the erasure log (`records.md` "Erasing: the operator's runbook").
 - Deleting a company is designed but not a command (needs the retention promise first); the
   steps are in the CLI's header comment.
 
