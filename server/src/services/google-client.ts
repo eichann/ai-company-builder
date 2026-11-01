@@ -27,7 +27,7 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
@@ -236,7 +236,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
   function scopeStop(connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
     if (!grant.scopes.includes(scope)) return 'scope-not-granted'
     const feature = googleFeatureOfScope(scope)
-    if (feature !== null && connectors.client()?.featuresOff.includes(feature)) return 'off'
+    const client = connectors.client()
+    if (feature !== null && client && !googleCompanyFeatureOn(feature, client)) return 'off'
     if (feature !== null && grant.featuresOff.includes(feature)) return 'feature-off'
     return null
   }

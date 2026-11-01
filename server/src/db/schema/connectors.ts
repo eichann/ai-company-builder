@@ -154,13 +154,17 @@ export function migrateGooglePicker(conn: Database.Database): void {
 }
 
 /**
- * The Google features the admin turned off for the whole company (JSON list;
- * owner decision 2026-11-02): never asked of members, refused from the next
- * call. Added after the table shipped; default `[]` keeps every feature on.
+ * The admin's company-level Google switches (JSON lists; owner decisions
+ * 2026-11-02, `GOOGLE_COMPANY_DEFAULT_OFF`): `features_off` = features on by
+ * default the admin turned off, `features_on` = features off by default
+ * (受信を読む) the admin turned on. Off: never asked of members, refused from
+ * the next call. Added after the table shipped; `[]` = every default holds,
+ * so a company that never chose has 受信を読む off.
  */
 export function migrateGoogleCompanyFeatures(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('features_off')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN features_off TEXT NOT NULL DEFAULT '[]'")
+  if (!cols.has('features_on')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN features_on TEXT NOT NULL DEFAULT '[]'")
 }
 
 /**

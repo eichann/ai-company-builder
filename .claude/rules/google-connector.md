@@ -39,8 +39,8 @@ ask only for the features the company turned on — all of them in one consent (
 owner decision 2026-11-02, "One consent" below), a feature turned on later once more or when first
 used; never `drive`, `drive.readonly`,
 `gmail.compose`, `gmail.metadata`, `gmail.modify`, `https://mail.google.com/` or domain-wide
-delegation (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox` feature
-(owner decision 2026-11-01, spec §7-1; each company registers its own internal app, so no
+delegation (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox` feature,
+off for a company until its admin turns it on (owner decisions 2026-11-01 / 11-02, spec §7-1; each company registers its own internal app, so no
 Google review). Drive (`drive.file` + Google Picker): `google-drive.md`. Google is a built-in
 core connector serving the roles 予定を読む / メールを読む・送る / 会議の記録を読む
 (`connector-roles.md`): the core services reach it only through the role ports.
@@ -81,10 +81,16 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 
 ## One consent (「仕事の道具をつなぐ」, owner decision 2026-11-02)
 
-- **Company features**: `google_oauth_clients.features_off` (JSON, default `[]`,
-  `migrateGoogleCompanyFeatures`, lane A) — the admin's per-feature switch (`PUT /google/features`,
-  history `features`). What the company offers = `googleCompanyFeatures`: every feature not off,
-  Drive only with the Picker registered. A feature off is **never asked** (also not one the member
+- **Company features**: the admin's per-feature switch (`PUT /google/features`, history
+  `features`) over each feature's default: `GOOGLE_COMPANY_DEFAULT_OFF` = **受信を読む (`inbox`) is
+  off for every company, existing and new, until its admin turns it on** (owner decision
+  2026-11-02: the most sensitive scope; the incoming-mail flow ships off); 予定と議事録 and
+  メールを送る are on until turned off. Stored as `google_oauth_clients.features_off` (default-on
+  features turned off) and `features_on` (default-off features turned on), both JSON default `[]`
+  (`migrateGoogleCompanyFeatures`, lane A), so a company that never chose keeps the defaults
+  (`googleCompanyFeatureOn`, `googleCompanySwitched`). What the company offers =
+  `googleCompanyFeatures`: every feature on, Drive only with the Picker registered. The admin
+  view's `featuresOff` lists every feature off for the company, the defaults included. A feature off is **never asked** (also not one the member
   allowed before: `googleFeaturesToAsk` = asked ∩ offered ∪ granted ∩ offered) and its calls are
   refused from the next one (`google-client.ts` `scopeStop` → `off`, before anything leaves);
   members' grants keep the scope until they re-consent or stop.
@@ -199,7 +205,7 @@ Drive through the role ports (`connector-roles.md`).
 
 ## Gmail (`services/google-mail.ts`: the role メールを読む・送る)
 
-- **Read** (`inbox`, `gmail.readonly`; `MailReader`): `listMessages(companyId, userId, { afterMs,
+- **Read** (`inbox`, `gmail.readonly`, off for a company until its admin turns it on; `MailReader`): `listMessages(companyId, userId, { afterMs,
   pageToken?, max? ≤ 50 })` → `users/me/messages?q=after:<seconds>&labelIds=INBOX`, then each
   message's `format=metadata` (From, To, Cc, Subject, Date, Message-ID, In-Reply-To, List-Id,
   List-Unsubscribe, Precedence, Auto-Submitted, X-Autoreply) → `MailSummary` (addresses lower
@@ -250,7 +256,7 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
   by main with the session and handed to the Picker's own window, never stored
   (`google-drive.md`). Shows the account and
   予定と議事録を読む / メールを送る / 受信を読む (「（オフにしています）」 when the member turned one off);
-  「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail), 「受信を読む許可も足す」 (inbox),
+  「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail), 「受信を読む許可も足す」 (inbox; both only when the company offers them),
   「許可をやめる」 (confirmation); after opening the browser 「ブラウザで Google の画面を開きました。
   許可したらこの画面に戻ってください。」 and a check every 3 s for up to 2 minutes. The first status
   load runs from a callback ref (the `useEffect` cap of `architecture-boundaries.test.ts`). Test:
@@ -260,7 +266,8 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
 
 ## Tests
 
-`server/tests/integration/google-one-consent.test.ts` (「仕事の道具をつなぐ」: `{ all }` asks exactly
+`server/tests/integration/google-one-consent.test.ts` (「仕事の道具をつなぐ」: 受信を読む off until the
+admin turns it on, and off again; `{ all }` asks exactly
 the company's features, Drive only with the Picker; a company-off feature never asked — by name or
 as one granted before — and its calls refused before anything leaves; scopes unticked on Google's
 page kept out, seen, not asked again; 「あとで」; a company without Google records nothing),

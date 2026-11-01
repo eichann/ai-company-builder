@@ -13,7 +13,7 @@
  * company's Workspace domain is accepted — anything else stores nothing.
  */
 import {
-  googleCompanyFeatures, googleFeaturesOf, googleFeaturesOff, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
+  googleCompanyFeatureOn, googleCompanyFeatures, googleCompanySwitched, googleFeaturesOf, GOOGLE_COMPANY_DEFAULT_OFF, googleFeaturesOff, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
   checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
 import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
@@ -85,7 +85,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
   function companyFeaturesOf(connectors: ConnectorRepository): GoogleFeature[] {
     const client = connectors.client()
     if (!client) return []
-    return googleCompanyFeatures({ featuresOff: client.featuresOff, pickerConfigured: connectors.picker() !== null })
+    return googleCompanyFeatures({ ...client, pickerConfigured: connectors.picker() !== null })
   }
 
   async function view(companyId: string): Promise<GoogleAdminView> {
@@ -128,7 +128,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         try { detail = JSON.parse(h.change) as Record<string, unknown> } catch { /* unreadable: shown empty */ }
         return { id: h.id, action: h.action as GoogleChangeAction, at: h.at, by: h.by, byName: people.get(h.by)?.name ?? null, userId: h.userId, detail }
       }),
-      featuresOff: googleFeaturesOff(client?.featuresOff ?? []),
+      featuresOff: client ? GOOGLE_FEATURES.filter(f => !googleCompanyFeatureOn(f, client)) : [...GOOGLE_COMPANY_DEFAULT_OFF],
       companyFeatures: companyFeaturesOf(connectors),
     }
   }
@@ -276,10 +276,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       const client = connectors.client()
       if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
       const feature = body.feature
-      const off = !body.on
-      if (client.featuresOff.includes(feature) !== off) {
-        const next = GOOGLE_FEATURES.filter(f => (f === feature ? off : client.featuresOff.includes(f)))
-        connectors.setClientFeaturesOff(next, clock.now(), member.userId, change('features', member.userId, null, { feature, on: body.on }))
+      if (googleCompanyFeatureOn(feature, client) !== body.on) {
+        connectors.setClientFeatures(googleCompanySwitched(client, feature, body.on), clock.now(), member.userId, change('features', member.userId, null, { feature, on: body.on }))
       }
       google.forgetCompany(member.companyId)
       return ok(await view(member.companyId))

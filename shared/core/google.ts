@@ -119,12 +119,39 @@ export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
 // What the company offers its members (owner decision 2026-11-02, 「仕事の道具をつなぐ」).
 
 /**
- * The features a company offers: every feature the admin did not turn off
- * (`google_oauth_clients.features_off`), and Drive only once Google Picker is
- * registered (without it Drive cannot be used, so `drive.file` is not asked).
+ * Off for a company until its admin turns them on (owner decision 2026-11-02:
+ * 受信を読む is the most sensitive scope, and the incoming-mail flow ships off).
+ * The others are on until the admin turns them off.
  */
-export function googleCompanyFeatures(company: { featuresOff: readonly string[]; pickerConfigured: boolean }): GoogleFeature[] {
-  return GOOGLE_FEATURES.filter(f => !company.featuresOff.includes(f) && (f !== 'drive' || company.pickerConfigured))
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['inbox']
+
+/** The admin's switches as stored: default-on features turned off, default-off features turned on. */
+export interface GoogleCompanySwitches {
+  featuresOff: readonly string[]
+  featuresOn: readonly string[]
+}
+
+/** Whether the company has a feature on (the admin's switch over the feature's default). */
+export function googleCompanyFeatureOn(feature: GoogleFeature, company: GoogleCompanySwitches): boolean {
+  return GOOGLE_COMPANY_DEFAULT_OFF.includes(feature) ? company.featuresOn.includes(feature) : !company.featuresOff.includes(feature)
+}
+
+/** The switches after the admin turns one feature on or off (only the list of its default changes). */
+export function googleCompanySwitched(company: GoogleCompanySwitches, feature: GoogleFeature, on: boolean): { featuresOff: GoogleFeature[]; featuresOn: GoogleFeature[] } {
+  const defaultOff = GOOGLE_COMPANY_DEFAULT_OFF.includes(feature)
+  return {
+    featuresOff: GOOGLE_FEATURES.filter(f => (f === feature && !defaultOff ? !on : company.featuresOff.includes(f) && !GOOGLE_COMPANY_DEFAULT_OFF.includes(f))),
+    featuresOn: GOOGLE_FEATURES.filter(f => (f === feature && defaultOff ? on : company.featuresOn.includes(f) && GOOGLE_COMPANY_DEFAULT_OFF.includes(f))),
+  }
+}
+
+/**
+ * The features a company offers: every feature on for the company
+ * (`googleCompanyFeatureOn`), and Drive only once Google Picker is registered
+ * (without it Drive cannot be used, so `drive.file` is not asked).
+ */
+export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerConfigured: boolean }): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => googleCompanyFeatureOn(f, company) && (f !== 'drive' || company.pickerConfigured))
 }
 
 /**

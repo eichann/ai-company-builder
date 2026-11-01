@@ -158,6 +158,8 @@ beforeAll(async () => {
 
   // Google on; Sato allows sending and 受信を読む.
   expect((await person('th-owner', 'PUT', '/google/client', { clientId: CLIENT_ID, clientSecret: SECRET, domain: GOOGLE_SEED.internalDomain })).status).toBe(200)
+  // 受信を読む is off for a company until its admin turns it on (google-connector.md "One consent").
+  expect((await person('th-owner', 'PUT', '/google/features', { feature: 'inbox', on: true })).status).toBe(200)
   await allowGoogle('th-sato', ['mail'])
   await allowGoogle('th-sato', ['inbox'])
   // Slack on (practice app); Sato allows reading and replying.
