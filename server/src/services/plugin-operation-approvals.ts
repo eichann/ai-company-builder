@@ -6,7 +6,7 @@
  * re-checks everything at send time and sends exactly the payload's raw
  * values (never re-translated through the mapping).
  */
-import { approvalReasonProblem, type ApprovalFieldChange, type ApproverRule, type PluginApprovalPayload } from '../../shared/core/approvals'
+import { approvalReasonProblem, type ApprovalFieldChange, type ApproverSpec, type PluginApprovalPayload } from '../../shared/core/approvals'
 import { acbToExternal, approverFor, effectiveFieldPolicy, externalToAcb, type AcbValue } from '../../shared/core/plugins'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
@@ -43,7 +43,7 @@ export function createOperationApprovals(
      */
     async prepareApproval(
       member: Member, actor: OperationActor, pluginId: string, recordId: string | null, operation: string, input: unknown,
-    ): Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverRule; folder: string | null }>> {
+    ): Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverSpec; folder: string | null }>> {
       const b = isObj(input) ? input : null
       if (!b) return refuse('bad-request', 'The input must be an object')
       const basis = isObj(b.basis) ? b.basis : {}

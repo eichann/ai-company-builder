@@ -46,6 +46,7 @@ import type { TaskSettingsRepository } from './task-settings'
 import type { IdentityRepository } from './identities'
 // lane B ▲
 // lane C ▼
+import type { PluginRoleRepository } from './plugin-roles'
 // lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -85,6 +86,8 @@ export interface CompanyData {
   readonly identities: IdentityRepository
   // lane B ▲
   // lane C ▼
+  /** Business roles (役割): the company's assignments, まとまり overrides, history (ports/plugin-roles.ts, plugin-roles.md). */
+  readonly pluginRoles: PluginRoleRepository
   // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport

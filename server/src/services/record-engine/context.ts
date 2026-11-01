@@ -17,10 +17,14 @@ import { refuse, type Outcome } from '../outcome'
 import { recordReader, type RecordReader } from '../record-access'
 import { recordSummaries } from '../records'
 import { bad } from './refusals'
-import type { ActorInput, RecordChange, RecordEngineDeps } from './types'
+import type { ActorInput, RecordChange, RecordEngineDeps, RoleHolders } from './types'
 
 export function engineContext(deps: RecordEngineDeps) {
   const { companyData, transactions, clock } = deps
+  /** Business roles' holders (plan C3), bound once by the plugins lane (`useRoles`); none until then. */
+  let roleHolders: RoleHolders | null = null
+  const roles = () => roleHolders
+  const useRoles = (r: RoleHolders) => { roleHolders = r }
 
   function open(member: Member): { records: RecordRepository; reader: RecordReader } | null {
     const handle = companyData.forCompany(member.companyId)
@@ -87,7 +91,7 @@ export function engineContext(deps: RecordEngineDeps) {
 
   const summaryOf = (records: RecordRepository, id: string) => recordSummaries(records, records.byIds([id])).get(id) as RecordSummary
 
-  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, tell, summaryOf }
+  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, tell, summaryOf, roles, useRoles }
 }
 
 export type EngineContext = ReturnType<typeof engineContext>

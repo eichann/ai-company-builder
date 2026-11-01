@@ -26,6 +26,7 @@ import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { identitySchema } from './schema/identities'
 // lane B ▲
 // lane C ▼
+import { pluginRoleSchema } from './schema/plugin-roles'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateInvitationClaims } from './schema/company'
@@ -80,6 +81,7 @@ const SCHEMA = [
   identitySchema,
   // lane B ▲
   // lane C ▼
+  pluginRoleSchema,
   // lane C ▲
 ]
 

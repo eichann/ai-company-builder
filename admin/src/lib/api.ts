@@ -955,10 +955,11 @@ export type {
   PluginPackageView,
   PluginProblem,
   PluginReadScopeView,
+  PluginRolesView,
 } from '../../../shared/types/plugins'
 export type { FieldPolicy } from '../../../shared/core/plugins'
 
-import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView } from '../../../shared/types/plugins'
+import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView, PluginRolesView } from '../../../shared/types/plugins'
 
 const pluginPath = (companyId: string, pluginId: string) => `/api/companies/${enc(companyId)}/plugins/${enc(pluginId)}`
 
@@ -986,6 +987,11 @@ export const pluginsApi = {
   /** The outside account changed on purpose: start a new connection. */
   renewConnection: (companyId: string, pluginId: string) =>
     getData<{ connectionId: string }>(`${pluginPath(companyId, pluginId)}/connection/renew`, { method: 'POST', body: {} }),
+  /** A business plugin's roles (役割, plan C3): declared roles, the company's holders, まとまり overrides, history. */
+  roles: (companyId: string, pluginId: string) => getData<PluginRolesView>(`${pluginPath(companyId, pluginId)}/roles`),
+  /** The company's holders of one role (empty = nobody; an approval then goes to an owner / admin). */
+  assignRole: (companyId: string, pluginId: string, role: string, userIds: string[]) =>
+    getData<PluginRolesView>(`${pluginPath(companyId, pluginId)}/roles/${enc(role)}`, { method: 'PUT', body: { userIds } }),
 }
 
 // The Google connection (「つなぎ先」→「Google」, milestone 4 G3): shapes from shared/types/google.ts.

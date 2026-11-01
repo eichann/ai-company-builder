@@ -5,6 +5,11 @@ import type { RecordFileWriter } from '../../ports/record-files'
 import type { Transactions } from '../../ports/transactions'
 import type { AcceptanceQuestion } from '../task-acceptance'
 
+/** Who holds a business role on a record (plan C3; services/plugin-roles.ts implements it). */
+export interface RoleHolders {
+  holdsOnRecord(companyId: string, type: string, recordId: string, role: string, userId: string): boolean
+}
+
 export interface RecordEngineDeps {
   companyData: CompanyDataSource
   transactions: Transactions

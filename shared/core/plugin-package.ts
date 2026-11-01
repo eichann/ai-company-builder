@@ -67,6 +67,14 @@ export function validatePluginPackage(input: {
         if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w) && !declaredRole(manifest, w)) errors.push(`操作「${opname}」の who「${w}」は人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
       }
     }
+    // A type's `role:<name>` (plan C3) names a role this plugin declares (contract 2 only: contract 1 declares none).
+    for (const [tname, t] of Object.entries(owned)) {
+      for (const [aname, a] of Object.entries(t.actions)) {
+        for (const w of a.who) {
+          if (roleOfWho(w) !== null && !declaredRole(manifest, w)) errors.push(`型「${tname}」の操作「${aname}」の who「${w}」は、このプラグインの roles にない役割です`)
+        }
+      }
+    }
     errors.push(...flowProblems(manifest, owned, stepFiles, uiFiles))
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned } }

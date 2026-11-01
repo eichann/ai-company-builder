@@ -121,6 +121,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   identity_history: ['adapters/sqlite/identities.ts'],
   // lane B ▲
   // lane C ▼
+  // Business roles (plugin-roles.md).
+  plugin_role_assignments: ['adapters/sqlite/plugin-roles.ts'],
+  plugin_role_overrides: ['adapters/sqlite/plugin-roles.ts'],
+  plugin_role_history: ['adapters/sqlite/plugin-roles.ts'],
   // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
@@ -133,6 +137,7 @@ const HANDLE_FACTORIES = [
   'sqliteIdentityRepository',
   // lane B ▲
   // lane C ▼
+  'sqlitePluginRoleRepository',
   // lane C ▲
 ]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'

@@ -83,6 +83,7 @@ const TYPES: Record<string, string> = {
   MinutesFolder: 'MinutesFolderSetting',
   Plugins: '{ plugins: PluginListItem[] }',
   Plugin: 'PluginDetail',
+  PluginRoles: 'PluginRolesView',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -436,6 +437,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-sales/mapping/restore`, { version: 1 })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/read-scope`, { departmentIds: [], userIds: [USERS.owner] })
+    // Business roles (plan C3): this package declares none, the shape is the same.
+    await expectShape('PluginRoles', USERS.owner, 'GET', `${base}/plugins/sample-sales/roles`)
   })
 
   it('invitations', async () => {

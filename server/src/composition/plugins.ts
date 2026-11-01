@@ -9,21 +9,37 @@
  * call line in composition.ts.
  */
 import type Database from 'better-sqlite3'
+import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { AgentPolicyService } from '../services/agent-policy'
+import type { ApprovalRoleHolders } from '../services/approvals'
 import { createPluginDistribution } from '../services/plugin-distribution'
+import { createPluginRoleService } from '../services/plugin-roles'
 import type { PluginShelf } from '../services/plugin-shelf'
+import type { RoleHolders } from '../services/record-engine/types'
 
 export interface PluginsLaneDeps {
   conn: Database.Database
   companyData: CompanyDataSource
+  clock: Clock
   pluginShelf: PluginShelf
   agentPolicy: Pick<AgentPolicyService, 'usePlugins'>
+  recordEngine: { useRoles(r: RoleHolders): void }
+  approvals: { useRoles(r: ApprovalRoleHolders): void }
+  isMember: (companyId: string, userId: string) => boolean
+  managedFolders: (companyId: string, userId: string) => string[]
 }
 
 export function wirePluginsLane(deps: PluginsLaneDeps) {
   // C2 「配る道」: the packages the members' apps keep, listed in their agent policy.
   const pluginDistribution = createPluginDistribution({ companyData: deps.companyData, shelf: deps.pluginShelf })
   deps.agentPolicy.usePlugins(pluginDistribution)
-  return { pluginDistribution }
+  // C3 「役割」: the one resolution of business roles' holders, for the engine's `who` and the approvers.
+  const pluginRoles = createPluginRoleService({
+    companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf,
+    isMember: deps.isMember, managedFolders: deps.managedFolders,
+  })
+  deps.recordEngine.useRoles(pluginRoles.resolver)
+  deps.approvals.useRoles(pluginRoles.resolver)
+  return { pluginDistribution, pluginRoles }
 }

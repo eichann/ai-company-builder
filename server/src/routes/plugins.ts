@@ -19,6 +19,11 @@
  * Handing packages to the app (plan C2; any member, services/plugin-distribution.ts):
  *   GET  /plugins/:pluginId/package/:version   a version the member's agent policy lists now: its files (base64)
  *
+ * Business roles (plan C3, services/plugin-roles.ts, plugin-roles.md):
+ *   GET  /plugins/:pluginId/roles                              owner/admin: declared roles, the company's assignment, overrides, history
+ *   PUT  /plugins/:pluginId/roles/:role                        owner/admin: { userIds } the company's holders
+ *   PUT  /plugins/:pluginId/roles/:role/bundles/:recordId      owner/admin or the まとまり's department manager: { userIds | null }
+ *
  * Typed operations (P6; any member — the record, the operation's `who` and the
  * field policies decide; the member's AI uses routes/records-ai.ts):
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, basis?, conversationId?, proposedBy? } / {}
@@ -41,7 +46,7 @@ import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
-const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution } = services
+const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution, pluginRoles } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
 
@@ -100,6 +105,24 @@ pluginsRoute.put('/plugins/:pluginId/enabled', async (c) => {
   const result = await plugins.setEnabled(member, c.req.param('pluginId'), await jsonBody(c))
   if (result.ok) agentPolicy.announce(member.companyId)
   return answer(c, result)
+})
+
+pluginsRoute.get('/plugins/:pluginId/roles', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, pluginRoles.roles(member, c.req.param('pluginId')))
+})
+
+pluginsRoute.put('/plugins/:pluginId/roles/:role', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, pluginRoles.assign(member, c.req.param('pluginId'), c.req.param('role'), await jsonBody(c)))
+})
+
+pluginsRoute.put('/plugins/:pluginId/roles/:role/bundles/:recordId', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, pluginRoles.setBundleOverride(member, c.req.param('pluginId'), c.req.param('role'), c.req.param('recordId'), await jsonBody(c)))
 })
 
 // Any member: a package their app keeps (plan C2; only a version their agent policy lists now).

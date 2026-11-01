@@ -24,6 +24,7 @@ import { sqliteTaskSettingsRepository } from './task-settings'
 import { sqliteIdentityRepository } from './identities'
 // lane B ▲
 // lane C ▼
+import { sqlitePluginRoleRepository } from './plugin-roles'
 // lane C ▲
 /**
  * Company handles over the one application database (案 A). Moving to a
@@ -58,6 +59,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         identities: sqliteIdentityRepository(conn, companyId),
         // lane B ▲
         // lane C ▼
+        pluginRoles: sqlitePluginRoleRepository(conn, companyId),
         // lane C ▲
         archive: sqliteCompanyRowsExport(conn, companyId),
       }

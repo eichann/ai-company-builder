@@ -32,7 +32,7 @@
  * Anyone else gets the same 404 as a request that does not exist.
  */
 import {
-  APPROVER_LABELS, approvalPayloadCanonical, approvalReasonProblem, mayApprove, type ApproverRule, type PluginApprovalPayload,
+  APPROVER_LABELS, approvalPayloadCanonical, approvalReasonProblem, mayApprove, type ApproverSpec, type PluginApprovalPayload,
 } from '../../shared/core/approvals'
 import { MEETING_TYPE } from '../../shared/core/minutes'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
@@ -77,7 +77,7 @@ export interface ApprovalOperations {
   run(member: Member, actor: ActorInput, pluginId: string, recordId: string, operation: string, body: unknown): Promise<Outcome<unknown>>
   createRecord(member: Member, actor: ActorInput, pluginId: string, operation: string, body: unknown): Promise<Outcome<unknown>>
   prepareApproval(member: Member, actor: ActorInput, pluginId: string, recordId: string | null, operation: string, input: unknown):
-    Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverRule; folder: string | null }>>
+    Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverSpec; folder: string | null }>>
   executeApproved(approver: Member, requestedFor: { userId: string; actorKind: 'human' | 'ai'; conversationId: string | null; source?: string | null },
     payload: PluginApprovalPayload, reason: string): Promise<Outcome<PluginOperationRecordView>>
   similarDeals(member: Member, pluginId: string, title: string): Promise<Outcome<{ similar: Array<{ recordId: string; title: string | null }> }>>
@@ -108,7 +108,12 @@ interface Loaded {
   state: ApprovalState
   version: number
   fields: Record<string, LedgerValue>
-  rule: ApproverRule
+  /** `role:<name>` for `approver_rule: role` (approval version 5, plan C3). */
+  rule: ApproverSpec
+  /** The business plugin whose operation it is (from `operation`: `<plugin>.<operation>`). */
+  pluginId: string
+  /** The まとまり of the work (its `bundle` link), for a role's override. */
+  bundle: string | null
   requestedBy: string
   /** The record the operation is on (from the fixed payload; null for a create). */
   about: string | null
@@ -135,8 +140,22 @@ export function changePercent(before: PluginFieldValue, after: PluginFieldValue)
   return Math.round(((after - before) / Math.abs(before)) * 1000) / 10
 }
 
+/** Who holds a business role (plan C3; services/plugin-roles.ts), bound by the plugins lane. */
+export interface ApprovalRoleHolders {
+  holders(companyId: string, pluginId: string, role: string, bundleId: string | null): string[]
+  label(companyId: string, pluginId: string, role: string): string | null
+}
+
+const roleOfSpec = (s: ApproverSpec): string | null => (s.startsWith('role:') ? s.slice('role:'.length) : null)
+
 export function createApprovalService(deps: ApprovalDeps) {
   const { companyData, writer, fixed, operations } = deps
+  /** Business roles' holders, bound once by composition/plugins.ts (`useRoles`); none until then (a role then falls back to owners / admins). */
+  let roles: ApprovalRoleHolders | null = null
+  const holdsRole = (companyId: string, a: Pick<Loaded, 'rule' | 'pluginId' | 'bundle'>, userId: string): boolean => {
+    const role = roleOfSpec(a.rule)
+    return role !== null && roles !== null && roles.holders(companyId, a.pluginId, role, a.bundle).includes(userId)
+  }
   const locks = new Map<string, Promise<unknown>>()
 
   /** One approve / send back / withdraw of a request at a time inside this server. */
@@ -176,6 +195,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       isRequester: a.requestedBy === member.userId,
       isDeptManager: managesFolder(member.companyId, member.userId, a.row.folder),
       isAdmin: FULL_ACCESS_ROLES.has(member.role),
+      holdsRole: holdsRole(member.companyId, a, member.userId),
     })
     if (own) return { ok: true, onBehalfOf: null }
     for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
@@ -183,6 +203,8 @@ export function createApprovalService(deps: ApprovalDeps) {
         isRequester: a.requestedBy === absentee,
         isDeptManager: managesFolder(member.companyId, absentee, a.row.folder),
         isAdmin: false,
+        // A delegate stands in for an absent role holder too (plan C3).
+        holdsRole: holdsRole(member.companyId, a, absentee),
       })
       if (asThem) return { ok: true, onBehalfOf: absentee }
     }
@@ -196,9 +218,14 @@ export function createApprovalService(deps: ApprovalDeps) {
     let fields: Record<string, LedgerValue> = {}
     try { fields = JSON.parse(s.fields) as Record<string, LedgerValue> } catch { return null }
     const links = handle.records.linksFrom([row.id])
-    const rule = (['self', 'dept_manager', 'admin'] as const).find(r => r === fields.approver_rule) ?? 'admin'
+    // Version 5 (plan C3): `role` + `approver_role`; anything unreadable is the strictest (admin).
+    const roleName = fields.approver_rule === 'role' ? str(fields.approver_role) : null
+    const rule: ApproverSpec = roleName ? `role:${roleName}` : (['self', 'dept_manager', 'admin'] as const).find(r => r === fields.approver_rule) ?? 'admin'
+    const operation = str(fields.operation) ?? ''
     return {
       row, state: s.state as ApprovalState, version: s.version, fields, rule, requestedBy: str(fields.requested_by) ?? '',
+      pluginId: operation.includes('.') ? operation.slice(0, operation.indexOf('.')) : '',
+      bundle: links.find(l => l.name === 'bundle')?.targetId ?? null,
       // The record is the payload's (the `bundle` link holds it only when it is a まとまり).
       about: payloadOf(companyId, row.id)?.payload.record?.id ?? null,
       meeting: links.find(l => l.name === 'meeting')?.targetId ?? null,
@@ -354,7 +381,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       materials: materials(viewer, handle, a, payload),
       proposedReason: str(a.fields.reason),
       requestedBy: a.requestedBy, requestedByAi: first?.actorKind === 'ai',
-      approver: str(a.fields.assignee), approverRule: a.rule, approverRuleLabel: APPROVER_LABELS[a.rule],
+      approver: str(a.fields.assignee), ...ruleView(viewer.companyId, a),
       hash: fp.hash, version: fp.version, createdAt: a.row.createdAt,
       viewerMayApprove: pending && qualifies(viewer, a), viewerIsRequester: a.requestedBy === viewer.userId,
       outcome: pending || !last || last.version === 1 ? null : {
@@ -363,11 +390,28 @@ export function createApprovalService(deps: ApprovalDeps) {
     }
   }
 
-  /** Whom to ask (a member id), by the server's data; null when nobody fits. */
-  function resolveApprover(member: Member, rule: ApproverRule, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>): string | null {
+  /** The rule as the card shows it: a role by its declared label. */
+  function ruleView(companyId: string, a: Pick<Loaded, 'rule' | 'pluginId'>): Pick<ApprovalView, 'approverRule' | 'approverRole' | 'approverRuleLabel'> {
+    const role = roleOfSpec(a.rule)
+    if (role === null) return { approverRule: a.rule as Exclude<ApproverSpec, `role:${string}`>, approverRole: null, approverRuleLabel: APPROVER_LABELS[a.rule as Exclude<ApproverSpec, `role:${string}`>] }
+    return { approverRule: 'role', approverRole: role, approverRuleLabel: roles?.label(companyId, a.pluginId, role) ?? '役割' }
+  }
+
+  /**
+   * Whom to ask (a member id), by the server's data; null when nobody fits. A
+   * role (plan C3): its first holder for this まとまり who can read the place,
+   * else an owner / admin (who always qualifies).
+   */
+  function resolveApprover(member: Member, rule: ApproverSpec, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>,
+    work: { pluginId: string; bundle: string | null }): string | null {
     const handle = companyData.forCompany(member.companyId)
     if (rule === 'self') return member.userId
     const reads = (userId: string) => canReadPlace(member.companyId, handle, userId, place)
+    const role = roleOfSpec(rule)
+    if (role !== null && roles !== null) {
+      const first = [...roles.holders(member.companyId, work.pluginId, role, work.bundle)].sort().find(reads)
+      if (first) return first
+    }
     if (rule === 'dept_manager') {
       const dept = departmentOf(handle, place.folder)
       const managers = dept ? [...handle.scopes.departmentManagerIds(dept.id)].sort() : []
@@ -391,6 +435,9 @@ export function createApprovalService(deps: ApprovalDeps) {
   }
 
   const service = {
+    /** Bound once by the plugins lane (composition/plugins.ts): who holds a business role (plan C3). */
+    useRoles(r: ApprovalRoleHolders): void { roles = r },
+
     /**
      * A plugin operation through the person's or AI's route: run it; when its
      * policy needs approval (409 APPROVAL_REQUIRED), make the request instead.
@@ -445,7 +492,9 @@ export function createApprovalService(deps: ApprovalDeps) {
       }
 
       const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null, personalOwner: null }
-      const approver = resolveApprover(member, rule, place)
+      // The work's まとまり: the record when it is one, else the record's own `bundle` link (a role's override).
+      const workBundle = recordRow ? (isBundle ? recordRow.id : handle.records.linksFrom([recordRow.id]).find(l => l.name === 'bundle')?.targetId ?? null) : null
+      const approver = resolveApprover(member, rule, place, { pluginId, bundle: workBundle })
       if (!approver) return refuse('conflict', '承認できる人が見つかりません。管理者に相談してください。', { code: 'NO_APPROVER' })
       const plugin = await deps.plugin(member.companyId, pluginId).catch(() => null)
       const def = typeOf(handle, payload.record?.id ?? null, plugin, payload.object)
@@ -461,7 +510,8 @@ export function createApprovalService(deps: ApprovalDeps) {
           const made = writer.create(member.companyId, {
             type: TYPE, id, title, folder: folder ?? null,
             fields: {
-              requested_by: member.userId, assignee: approver, next_actor: approver, approver_rule: rule, operation: opName,
+              requested_by: member.userId, assignee: approver, next_actor: approver, operation: opName,
+              approver_rule: roleOfSpec(rule) !== null ? 'role' : rule, approver_role: roleOfSpec(rule),
               payload_hash: fixedNow.hash, payload_version: fixedNow.version, reason: proposed,
             },
             links: { ...(payload.record && isBundle ? { bundle: [payload.record.id] } : {}), ...(meetingId ? { meeting: [meetingId] } : {}) },

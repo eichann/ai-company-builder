@@ -5,7 +5,7 @@
  * (`effectiveOperationPolicy`) — never `auto` where the declaration's rules
  * forbid it, whatever is stored.
  */
-import { stricterApprover, type ApproverRule } from './approvals'
+import { stricterApprover, type ApproverSpec } from './approvals'
 import { PRIOR_ONLY_FIELDS, type FieldPolicy, type PluginManifest } from './plugin-declaration'
 import { DEFAULT_APPROVERS, type PluginMapping } from './plugin-mapping'
 import type { AcbValue } from './plugin-values'
@@ -16,12 +16,12 @@ import type { AcbValue } from './plugin-values'
  * approvers; moving `stage` to a closing stage needs at least a department
  * manager (design §9 q2/q3). Only asked for `prior` fields / operations.
  */
-export function approverFor(manifest: PluginManifest, mapping: PluginMapping, operationName: string, fields: Record<string, AcbValue>): ApproverRule {
+export function approverFor(manifest: PluginManifest, mapping: PluginMapping, operationName: string, fields: Record<string, AcbValue>): ApproverSpec {
   const op = manifest.operations[operationName]
   if (op?.kind === 'create') return mapping.approvalBy[operationName] ?? (op.createsRecord ? 'self' : 'dept_manager')
-  let rule: ApproverRule | null = null
+  let rule: ApproverSpec | null = null
   for (const [field, value] of Object.entries(fields)) {
-    let r = mapping.approvalBy[field] ?? DEFAULT_APPROVERS[field] ?? 'dept_manager'
+    let r: ApproverSpec = mapping.approvalBy[field] ?? DEFAULT_APPROVERS[field] ?? 'dept_manager'
     if (field === 'stage' && typeof value === 'string' && mapping.closingStages.includes(value)) r = stricterApprover(r, 'dept_manager')
     rule = rule === null ? r : stricterApprover(rule, r)
   }

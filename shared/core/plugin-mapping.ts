@@ -4,7 +4,8 @@
  * configures, and the check against the outside system's real property list
  * (「HubSpot に聞いて確かめる」, `checkMappingAgainstProperties`).
  */
-import { APPROVER_RULES, type ApproverRule } from './approvals'
+import { APPROVER_RULES, type ApproverRule, type ApproverSpec } from './approvals'
+import { roleRefName } from './plugin-roles'
 import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, externalFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
 import { EXTERNAL_NAME_RE, strList, unknownKeys } from './plugin-declaration-rules'
 import { normalizeRepoPath } from './paths'
@@ -43,10 +44,11 @@ export interface PluginMapping {
   policy: Record<string, FieldPolicy>
   /**
    * Who approves a `prior` field or create operation (design 節目4 §3-4, §9 q3):
-   * `self` (the member the request is for), `dept_manager`, `admin`. Absent:
+   * `self` (the member the request is for), `dept_manager`, `admin`, or
+   * `role:<name>` — a role the business plugin declares (plan C3). Absent:
    * `DEFAULT_APPROVERS`, else `dept_manager`.
    */
-  approvalBy: Record<string, ApproverRule>
+  approvalBy: Record<string, ApproverSpec>
   /** ACB values of `stage` that close a deal (won / lost): moving there needs at least a department manager. */
   closingStages: string[]
 }
@@ -66,6 +68,12 @@ export function mappableField(type: TypeDefinition, name: string): FieldDef | nu
 }
 
 /** Parse and validate a company's mapping against the package it configures. */
+/** `role:<name>` of a role the business plugin declares (plan C3). */
+const isDeclaredRole = (roles: Record<string, unknown>, who: unknown): boolean => {
+  const name = typeof who === 'string' ? roleRefName(who) : null
+  return name !== null && Object.prototype.hasOwnProperty.call(roles, name)
+}
+
 export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest; types: Record<string, TypeDefinition> }): PluginParsed<PluginMapping> {
   const yaml = parseYamlLite(text)
   if (!yaml.ok) return { ok: false, errors: [`${yaml.line} 行目: ${yaml.error}`] }
@@ -200,13 +208,16 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     policy[f] = p as FieldPolicy
   }
 
-  const approvalBy: Record<string, ApproverRule> = {}
+  const approvalBy: Record<string, ApproverSpec> = {}
   const rawApprovalBy = raw.approval_by ?? {}
   if (!isYamlMap(rawApprovalBy)) err(`approval_by は「欄の名前: ${APPROVER_RULES.join(' / ')}」の形で書いてください`)
   else for (const [f, who] of Object.entries(rawApprovalBy)) {
-    if (!(APPROVER_RULES as readonly string[]).includes(who as string)) { err(`approval_by の「${f}」は ${APPROVER_RULES.join(' / ')} のどれかです`); continue }
+    if (!(APPROVER_RULES as readonly string[]).includes(who as string) && !isDeclaredRole(manifest.roles, who)) {
+      err(`approval_by の「${f}」は ${APPROVER_RULES.join(' / ')} か、このプラグインの役割（role:<名前>）です`)
+      continue
+    }
     if (!createOps.some(([n]) => n === f) && !Object.values(objects).some(o => o.fields[f]?.write)) { err(`approval_by の「${f}」は、書き戻す欄か作る操作の名前です`); continue }
-    approvalBy[f] = who as ApproverRule
+    approvalBy[f] = who as ApproverSpec
   }
 
   const closingStages: string[] = []

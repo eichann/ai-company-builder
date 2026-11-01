@@ -201,6 +201,9 @@ export const OK_FIELDS = { by: 'ok_by', note: 'ok_note' } as const
 /** Who-values that are not field names. */
 export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone'] as const
 
+/** `role:<name>` in an action's `who` (plan C3; the same name rule as a plugin's declared roles). */
+export const ROLE_REF_RE = /^role:[a-z][a-z0-9_]{0,39}$/
+
 /**
  * What an interface asks of a type that claims it (`implements`): server
  * fields of these kinds, a choice field offering at least these options, and
@@ -474,8 +477,10 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         }
       }
       const who = list(a.who)
-      const whoOk = !!who && who.length > 0 && who.every(w => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w)))
-      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} で書いてください`)
+      // `role:<name>` (plan C3): a business role, held by whom the company assigns (plugin-roles.ts);
+      // a plugin package may name only roles it declares (validatePluginPackage).
+      const whoOk = !!who && who.length > 0 && who.every(w => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w) || ROLE_REF_RE.test(w)))
+      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} か role:<役割の名前> で書いてください`)
       const notify = list(a.notify)
       const notifyOk = !!notify && notify.every(n => typeof n === 'string' && (personFields.has(n) || args[n] === 'person'))
       if (!notifyOk) err(`操作「${aname}」の notify は人の欄か人の引数の名前で書いてください`)

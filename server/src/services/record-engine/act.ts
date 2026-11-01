@@ -2,6 +2,7 @@
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
 import { INTERFACES, OK_FIELDS, type ActionDef } from '../../../shared/core/record-types'
+import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
@@ -19,8 +20,13 @@ import { ASSIGNEE_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnl
 import type { ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
-/** May `member` (acting as `actor`) do an action whose `who` is this, on a record with these values? */
-export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean): boolean {
+/**
+ * May `member` (acting as `actor`) do an action whose `who` is this, on a record with these values?
+ * `holdsRole(name)`: whether `member` holds the business role `role:<name>` on this record (plan C3,
+ * services/plugin-roles.ts); without it a `role:` entry matches no one (fails closed).
+ */
+export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean,
+  holdsRole?: (role: string) => boolean): boolean {
   if (actor.kind === 'ai' && !who.includes('ai')) return false
   const people = who.filter(w => w !== 'ai')
   // `ai` alone: any member's AI may do it.
@@ -29,6 +35,7 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     w === 'anyone' ||
     (w === 'admin' && FULL_ACCESS_ROLES.has(member.role)) ||
     (w === 'dept_manager' && managesPlace) ||
+    (w.startsWith(ROLE_WHO_PREFIX) && holdsRole?.(w.slice(ROLE_WHO_PREFIX.length)) === true) ||
     values[w] === member.userId)
 }
 
@@ -63,14 +70,16 @@ export function acting(ctx: EngineContext) {
       // Duty 2: who?
       const place = row.path ?? row.folder ?? ''
       const manages = (userId: string) => action.who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
-      let byWho = mayAct(action.who, member, actor, current.fields, manages(member.userId))
+      // `role:<name>` (plan C3): held on this record (its plugin, its まとまり), by the one resolution.
+      const holds = (userId: string) => (role: string) => ctx.roles()?.holdsOnRecord(member.companyId, row.type, row.id, role, userId) === true
+      let byWho = mayAct(action.who, member, actor, current.fields, manages(member.userId), holds(member.userId))
       // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
       // or department they stand in for — never the absentee's role (no admin powers), and every
       // read check above and below stays the delegate's own.
       let onBehalfOf: string | null = null
       if (!byWho) {
         for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
-          if (mayAct(action.who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee))) {
+          if (mayAct(action.who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee), holds(absentee))) {
             byWho = true
             onBehalfOf = absentee
             break
