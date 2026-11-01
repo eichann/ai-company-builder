@@ -27,6 +27,14 @@ export const NOTIFICATION_KINDS = [
   'wait_over',
   'acceptance_waiting',
   'delegate_stopped',
+  // Stage 3–4 lanes (plan 段階3・4a・4b 並行): each lane adds its kinds only right
+  // below its own marker; the line under each block stays unchanged.
+  // lane A ▼ (reserved: connection_broken)
+  // ── lane A ▲
+  // lane B ▼ (reserved: reply_arrived, intake_unsure, follow_up_ready)
+  // ── lane B ▲
+  // lane C ▼ (reserved: role_unassigned)
+  // ── lane C ▲
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -47,6 +55,12 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
   acceptance_waiting: '頼んだことが 1 営業日たっても引き受けられていない',
   delegate_stopped: '不在の人の代わりが受け持てないもの（部署の責任者へ）',
+  // lane A ▼
+  // ── lane A ▲
+  // lane B ▼
+  // ── lane B ▲
+  // lane C ▼
+  // ── lane C ▲
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -63,6 +77,12 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   wait_over: true,
   acceptance_waiting: true,
   delegate_stopped: true,
+  // lane A ▼
+  // ── lane A ▲
+  // lane B ▼
+  // ── lane B ▲
+  // lane C ▼
+  // ── lane C ▲
   others: false,
 }
 
