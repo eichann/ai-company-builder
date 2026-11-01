@@ -16,14 +16,17 @@
  */
 import { Hono } from 'hono'
 import { SLACK_EVENT_MAX_BYTES, type SlackEvents } from '../services/slack-events'
+import { publicRoute } from './guard-tags'
 
 export function createSlackRoute(events: Pick<SlackEvents, 'receive'>): Hono {
   const route = new Hono()
-  route.post('/events/:companyId', async (c) => {
+  route.post('/events/:companyId', publicRoute('Slack signs the exact body with the company\'s own signing secret'), async (c) => {
     c.header('Cache-Control', 'no-store')
     const declared = Number(c.req.header('content-length') ?? '0')
     if (declared > SLACK_EVENT_MAX_BYTES) return c.body(null, 413)
     const raw = await c.req.text()
+    // The company in the URL only picks which signing secret checks the signature; unsigned → empty 401.
+    // eslint-disable-next-line no-restricted-syntax
     const answer = await events.receive(c.req.param('companyId'), {
       timestamp: c.req.header('x-slack-request-timestamp'),
       signature: c.req.header('x-slack-signature'),
