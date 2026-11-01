@@ -433,6 +433,14 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
   r('POST /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations`, body: { role: 'nobody' } }), [400, 400, 403, 403, 403, 401]),
   r('DELETE /api/companies/:companyId/invitations/:invitationId', w => ({ path: `${C(w)}/invitations/no-such-invitation` }), [404, 404, 403, 403, 403, 401]),
+
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 ]
 
 /**
@@ -533,6 +541,14 @@ const CROSS: CrossRow[] = [
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
   x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
+
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 ]
 
 /**
@@ -569,6 +585,14 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/google/drive/puts/:putId': 'the AI\'s routes: the company comes from the record token, never from the URL (another member\'s put: tests/integration/google-drive.test.ts)',
   'GET /api/records-ai/minutes/:recordId/text': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s minutes: tests/integration/minutes.test.ts)',
   'POST /api/records-ai/minutes/:recordId/bundle': 'the AI\'s routes: the company comes from the record token, never from the URL',
+
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 /** The parameters of a route that name something other than the company in the URL. */

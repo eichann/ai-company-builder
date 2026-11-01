@@ -38,6 +38,13 @@ import { minutesRoute } from './routes/minutes'
 import { notificationsRoute } from './routes/notifications'
 import { calendarRoute } from './routes/calendar'
 import { oauthRoute } from './routes/oauth'
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 import { requestLog } from './lib/request-log'
 import { services } from './composition'
 
@@ -139,3 +146,10 @@ app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲

@@ -17,6 +17,13 @@ import { sqliteScopeRepository } from './scopes'
 import { sqliteSkillUseRepository } from './skill-uses'
 import { sqliteTaskSettingsRepository } from './task-settings'
 
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 /**
  * Company handles over the one application database (案 A). Moving to a
  * database per company (B), or to PostgreSQL with row-level security (C),
@@ -43,6 +50,13 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         tasks: sqliteTaskSettingsRepository(conn, companyId),
         aiRuns: sqliteAiRunRepository(conn, companyId),
         skillUses: sqliteSkillUseRepository(conn, companyId),
+        // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+        // lane A ▼
+        // lane A ▲
+        // lane B ▼
+        // lane B ▲
+        // lane C ▼
+        // lane C ▲
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)

@@ -22,7 +22,7 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
                       company-files.ts, orphaned-scopes.ts (git + orphaned_scopes table),
                       private-folders.ts (scope repositories + their rows),
                       local-secret-cipher.ts, kek-file.ts, upstream-https.ts
-src/composition.ts — the only module that imports adapters; routes take `services` from it
+src/composition.ts — the only module that imports adapters (with its lane parts composition/*.ts); routes take `services` from it
 src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts, erase-content.ts), each its own composition root
 ```
 
@@ -80,6 +80,22 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   and no `CROSS` row fails the test, unless it is in `NOT_OBJECT_IDS` with its reason (invitation
   link tokens, the relay, service names that set this company's own row). A new endpoint that
   takes an id gets its `CROSS` row in the same PR.
+
+## Lane markers (parallel lanes A connectors, B inbox, C plugins)
+
+Three lanes add server code in parallel; these spots are where they would collide, so each has
+markers `// lane A ▼` … `// lane C ▲` (the ▲ lines keep the blocks apart for git):
+
+- `src/composition/{connectors,inbox,plugins}.ts` — each lane wires its services in its own file;
+  `createServices` calls each once on its own line (between the markers) and spreads the result
+  into `services`. These files may import adapters like `composition.ts` (layering test).
+- `src/app.ts` (route imports and `app.route` lines), `src/db/index.ts` (imports, `SCHEMA`,
+  migration calls), `ports/company-data.ts` and `adapters/sqlite/company-data.ts` (imports and
+  handle fields), `tests/unit/company-scoped-sql.test.ts` (`HANDLE_TABLES`, `HANDLE_FACTORIES`),
+  `tests/integration/permission-matrix.test.ts` (`MATRIX`, `CROSS`, `NOT_OBJECT_IDS`).
+
+A lane adds lines only right under its own `▼`, never moves or removes a marker, and keeps its
+tables in its own `db/schema/<lane file>.ts` (idempotent migrations, no numbers).
 
 ## Company handle (「会社つきの手形」, multi-tenant foundation 案 A, 2026-10-31)
 

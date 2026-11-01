@@ -92,6 +92,9 @@ import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
+import { wireConnectorsLane } from './composition/connectors'
+import { wireInboxLane } from './composition/inbox'
+import { wirePluginsLane } from './composition/plugins'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -461,7 +464,21 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
   })
 
+  // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files
+  // under composition/ (.claude/rules/server.md "Lane markers"); each lane edits
+  // only its own call, and the marker lines keep the three calls apart for git.
+  // lane A ▼
+  const connectorsLane = wireConnectorsLane({ conn })
+  // lane B ▼
+  const inboxLane = wireInboxLane({ conn })
+  // lane C ▼
+  const pluginsLane = wirePluginsLane({ conn })
+  // lanes ▲
+
   return {
+    ...connectorsLane,
+    ...inboxLane,
+    ...pluginsLane,
     access,
     outboundMail,
     googleClient,
