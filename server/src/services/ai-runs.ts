@@ -24,8 +24,9 @@
  */
 import {
   AI_RUN_CLAIM_TTL_MS, AI_RUN_FAILURE_CLASSES, AI_RUN_PERSON_STATES, AI_RUN_STATE_LABELS, AI_RUN_STEP_RE, AI_RUN_TEMPORARY_LIMIT,
-  DEVICE_ID_RE, FAILURE_CODE_RE, OPERATION_KEY_RE, failureDestination, retryDelayMs, type AiRunFailureClass,
+  DEVICE_ID_RE, FAILURE_CODE_RE, OPERATION_KEY_RE, failureDestination, parseAiRunProcedure, retryDelayMs, type AiRunFailureClass, type AiRunProcedure,
 } from '../../shared/core/ai-runs'
+import { parseClientVersion } from '../../shared/core/client-version'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
@@ -116,12 +117,24 @@ export function createAiRunService(deps: AiRunDeps) {
       deviceId: run.deviceId, conversationId: run.conversationId, claimExpiresAt: run.claimExpiresAt,
       failure: run.failureClass ? { class: run.failureClass, code: run.failureCode } : null,
       retryAt: run.retryAt, attempts: run.attempts, pluginVersion: run.pluginVersion, stepsVersion: run.stepsVersion,
+      procedure: parseAiRunProcedure(run.procedure),
       needsPerson: AI_RUN_PERSON_STATES.includes(run.state),
       operations: operations.map(o => ({
         key: o.key, kind: o.kind, state: o.state, ref: o.refKind && o.refId ? { kind: o.refKind, id: o.refId } : null, updatedAt: o.updatedAt,
       })),
       createdAt: run.createdAt, updatedAt: run.updatedAt,
     }
+  }
+
+  /**
+   * Which procedure a claim runs (records.md "Which procedure"): the step, the app build that
+   * sent the claim (its X-ACB-Client-Version, kept only when it parses) and the plugins turned
+   * on for the company now — read here, never taken from the app.
+   */
+  function procedureOf(companyId: string, step: string, appBuild: string | null | undefined): AiRunProcedure {
+    const plugins = companyData.forCompany(companyId).plugins.installs()
+      .filter(i => i.enabled).map(i => ({ id: i.pluginId, version: i.version })).sort((a, b) => a.id.localeCompare(b.id))
+    return { step, app: parseClientVersion(appBuild)?.raw.slice(0, 120) ?? null, plugins }
   }
 
   /** The member's own run (anyone else's, another company's or a missing one: the same 404). */
@@ -156,7 +169,7 @@ export function createAiRunService(deps: AiRunDeps) {
 
   return {
     /** POST …/ai-run-claims — one app instance wins; a re-claim raises the generation. */
-    claim(member: Member, body: unknown): Outcome<{ run: AiRunView; created: boolean }> {
+    claim(member: Member, body: unknown, appBuild?: string | null): Outcome<{ run: AiRunView; created: boolean }> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       const { recordId, step, deviceId, conversationId, pluginVersion, stepsVersion } = body
       if (typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return refuse('bad-request', 'recordId is a record id')
@@ -175,7 +188,10 @@ export function createAiRunService(deps: AiRunDeps) {
       const nowMs = clock.nowMs()
       const at = nowIso(nowMs)
       const expires = nowIso(nowMs + AI_RUN_CLAIM_TTL_MS)
-      const versions = { pluginVersion: (pluginVersion as string | undefined) ?? null, stepsVersion: (stepsVersion as string | undefined) ?? null }
+      const versions = {
+        pluginVersion: (pluginVersion as string | undefined) ?? null, stepsVersion: (stepsVersion as string | undefined) ?? null,
+        procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild)),
+      }
       return transactions.run((): Outcome<{ run: AiRunView; created: boolean }> => {
         const open = r.openRun(recordId, step)
         if (!open) {

@@ -10,6 +10,8 @@
  * Pure (shared/core): the server answers with it, the app can show it.
  */
 
+import type { AiRunProcedure } from './ai-runs'
+
 export type LedgerValue = string | number | boolean | null
 
 /** `state` is the record's state; any other name is a server field. */
@@ -95,6 +97,14 @@ export interface LedgerEntry {
    * null otherwise.
    */
   runId?: string | null
+
+  /**
+   * Which procedure the run used (`shared/core/ai-runs.ts` AiRunProcedure):
+   * copied from the run when the entry is written, so a later re-claim under
+   * another app build or plugin version never rewrites it. Only on entries
+   * with a `runId`; absent / null otherwise (a person, a consultation).
+   */
+  procedure?: AiRunProcedure | null
 }
 
 /**

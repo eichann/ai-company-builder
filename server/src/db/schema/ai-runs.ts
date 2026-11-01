@@ -74,4 +74,8 @@ export function migrateAiRunColumns(conn: Database.Database): void {
   if (!tokens.has('run_generation')) conn.exec('ALTER TABLE record_ai_tokens ADD COLUMN run_generation INTEGER')
   if (!cols('record_ledger').has('run_id')) conn.exec('ALTER TABLE record_ledger ADD COLUMN run_id TEXT')
   if (!cols('plugin_operations').has('run_id')) conn.exec('ALTER TABLE plugin_operations ADD COLUMN run_id TEXT')
+  // Which procedure (records.md "Which procedure"): JSON of AiRunProcedure on the run (set at each
+  // claim) and copied onto each ledger entry written in it (never rewritten afterwards).
+  if (!cols('ai_runs').has('procedure')) conn.exec('ALTER TABLE ai_runs ADD COLUMN procedure TEXT')
+  if (!cols('record_ledger').has('procedure')) conn.exec('ALTER TABLE record_ledger ADD COLUMN procedure TEXT')
 }
