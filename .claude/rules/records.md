@@ -326,7 +326,7 @@ Milestone 4 adds four (people by id in person fields):
   `minutes`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
   (note required), both `who: [owner, dept_manager, admin]`, decisions.
 
-A link's `target` is a label, not a check: `deal` / `customer` come from a plugin and may not
+A link's `target` is a label, not a check: `deal` / `customer` come from a business plugin (「法人営業」) and may not
 exist in a company; the parser and the engine accept a link to a type that is not defined.
 
 ### Service-owned types (`SERVICE_OWNED_TYPES`, `shared/core/core-types.ts`)
@@ -515,7 +515,7 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   this entry (`recordId: null`, the requester as actor, a decision when approved); a meeting
   logged on a deal adds an entry **without field changes** (`entryWithoutChanges`) to the deal's
   ledger, its receipt naming the meeting — the version goes up, nothing else changes.
-- Types a package brings are stored with source `plugin` (`record_types.source`; a table made
+- A business plugin's types (`plugins.md` "Two roles"; written by its connector's import) are stored with source `plugin` (`record_types.source`; a table made
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
 

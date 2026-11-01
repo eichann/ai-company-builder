@@ -18,13 +18,14 @@
  *   gets the same 404 as for a missing one; notices carry no content.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
+import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -99,7 +100,7 @@ beforeAll(async () => {
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   shelfDir = mkdtempSync(join(tmpdir(), 'acb-op-shelf-'))
-  cpSync(join(__dirname, '../fixtures/plugins/sample-hub'), join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  putSampleHub(shelfDir)
   // Staging's way: HubSpot's connections go to the fake on this machine (lib/config.ts).
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_FAKE_HUBSPOT_URL: `http://127.0.0.1:${port}`,
@@ -132,6 +133,7 @@ beforeAll(async () => {
   db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(CO, ts(), 'op-owner')
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
+  await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
   expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['op-member'] })).ok).toBe(true)

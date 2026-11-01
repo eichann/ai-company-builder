@@ -9,7 +9,7 @@ contract: 1
 available_to: [company-desk-only]
 service: sample-desk
 base_url: https://desk.sample.example/api
-types: [ticket]
+maps_to: sample-support@1.0.0
 objects:
   ticket:
     record_type: ticket

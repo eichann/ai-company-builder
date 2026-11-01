@@ -19,7 +19,13 @@ export const PROBLEM_TEXT: Record<PluginProblem, string> = {
   'key-destination': '選んだ鍵は、この送り先に使えない設定です（「API キー」で送り先を確かめてください）',
   'mapping-invalid': '読み替え表に直すところがあります',
   'auto-not-acknowledged': '自動で書き戻す欄の確認がまだです（読み替え表を保存するときに確認します）',
+  'business-missing': 'このつなぎ先が使う業務（「法人営業」など）が入っていないか、版が合っていません',
+  'business-stopped': 'このつなぎ先が使う業務（「法人営業」など）がオフか、止まっています',
+  'not-a-connector': '外のサービスにはつながないため、取り込みや書き戻しはありません',
 }
+
+/** The server's own sentence, when it names what is needed in plain words (the business a connector needs). */
+const serverSentence = (body: Record<string, unknown> | null) => (typeof body?.error === 'string' ? body.error : null)
 
 /** The fixed words of 「HubSpot に聞いて確かめる」 and the import, for people. */
 export const REASON_TEXT: Record<string, string> = {
@@ -70,9 +76,17 @@ export const HISTORY_LABELS: Record<string, string> = {
 export function integrationRefusal(code: string | undefined, body: Record<string, unknown> | null): string | null {
   const problem = typeof body?.problem === 'string' ? (body.problem as PluginProblem) : null
   switch (code) {
-    case 'PLUGIN_NOT_READY': return `まだオンにできません：${problem && PROBLEM_TEXT[problem] ? PROBLEM_TEXT[problem] : '設定が足りません'}`
+    case 'PLUGIN_NOT_READY':
+      // The business a connector needs: the server names it (「法人営業」（0.1.0）).
+      if ((problem === 'business-missing' || problem === 'business-stopped') && serverSentence(body)) return `まだオンにできません：${serverSentence(body)}`
+      return `まだオンにできません：${problem && PROBLEM_TEXT[problem] ? PROBLEM_TEXT[problem] : '設定が足りません'}`
+    case 'BUSINESS_PLUGIN_REQUIRED': return serverSentence(body) ?? '先に、このつなぎ先が使う業務（「法人営業」など）を入れてオンにしてください'
+    case 'TYPE_OWNED_ELSEWHERE': return '同じ種類の記録を扱う業務がすでに入っているため、使い始められません'
+    case 'NOT_A_CONNECTOR': return '外のサービスにはつながないため、この設定はありません'
     case 'PLUGIN_NOT_ACTIVE': return `いまは動いていません：${problem && PROBLEM_TEXT[problem] ? PROBLEM_TEXT[problem] : '設定が足りません'}`
-    case 'PLUGIN_WOULD_STOP': return 'この設定にすると止まってしまうため、変えていません（先にオフにするか、読み替え表を直してください）'
+    case 'PLUGIN_WOULD_STOP':
+      if (Array.isArray(body?.dependents)) return 'この版にすると、これを使っているつなぎ先が止まるため、変えていません（先にそのつなぎ先をオフにしてください）'
+      return 'この設定にすると止まってしまうため、変えていません（先にオフにするか、読み替え表を直してください）'
     case 'NOT_INSTALLED': return '先に版と鍵を選んで保存してください'
     case 'READ_SCOPE_REQUIRED': return '先に「読める人」（部署かメンバー）を選んで保存してください。誰も選ばないままではオンにできず、オンの間は空にできません'
     case 'READ_SCOPE_INVALID': return 'この会社にない部署か、メンバーではない人が含まれています'

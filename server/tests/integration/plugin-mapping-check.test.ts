@@ -12,12 +12,13 @@
  * - A key HubSpot refuses → "could not ask", and the key value is nowhere.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { fakeUpstream } from '../helpers/fake-upstream'
+import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -28,7 +29,6 @@ vi.mock('../../src/lib/auth', () => ({
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const KEY = 'pat-fake-NOT-REAL-mapcheck-0123456789'
-const FIXTURE = join(__dirname, '../fixtures/plugins/sample-hub')
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any
@@ -65,7 +65,7 @@ beforeAll(async () => {
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
   shelfDir = mkdtempSync(join(tmpdir(), 'acb-mc-shelf-'))
-  cpSync(FIXTURE, join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  putSampleHub(shelfDir)
 
   fake = createFakeHubSpot()
   fake.addKey(KEY)
@@ -87,6 +87,7 @@ beforeAll(async () => {
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   // Installed only: off, no mapping saved, nothing acknowledged.
+  await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
 })
 

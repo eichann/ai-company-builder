@@ -16,7 +16,7 @@
  * - Google stopped (the company switch) or no permission → nothing is read; records off → 404.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
@@ -25,6 +25,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, ALL_FAKE_SCOPES, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
+import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })
 
@@ -51,7 +52,6 @@ const REDIRECT = `${PUBLIC}/api/oauth/google/callback`
 const CLIENT_ID = '123456789012-minutes.apps.googleusercontent.com'
 const SECRET = 'fake-google-secret-NOT-REAL-minutes-0123456789'
 const HUBSPOT_KEY = 'pat-fake-NOT-REAL-minutes-0123456789'
-const FIXTURE = join(__dirname, '../fixtures/plugins/sample-hub')
 const ts = () => new Date().toISOString()
 
 /** Lines of the minutes that must never be kept anywhere (notes, transcript, follow-up). */
@@ -149,7 +149,7 @@ beforeAll(async () => {
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'))
   chmodSync(join(kekDir, 'kek'), 0o600)
   shelfDir = mkdtempSync(join(tmpdir(), 'acb-mn-shelf-'))
-  cpSync(FIXTURE, join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  putSampleHub(shelfDir)
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, PUBLIC_URL: PUBLIC, ACB_ALLOW_FAKE_UPSTREAMS: '1',
     ACB_FAKE_GOOGLE_URL: `http://127.0.0.1:${(googleServer.address() as AddressInfo).port}`,
@@ -190,6 +190,7 @@ beforeAll(async () => {
   expect((await call('mn-owner', 'PUT', `${C()}/records/settings`, { enabled: true })).status).toBe(200)
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: HUBSPOT_KEY, audience })).value.keys[0].id
+  await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
   const saved = await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step'] })
   expect(saved.ok, JSON.stringify(saved)).toBe(true)

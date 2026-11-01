@@ -2,6 +2,7 @@
 # (milestone 3 P5 / P6; tests/fakes/hubspot). The real package lives in the
 # private acb-plugins repository (owner decision §6-6). HubSpot's dated API
 # paths (search and pipelines on 2026-09, the rest on 2026-03).
+# It only connects: the deal / customer types are sample-sales's (maps_to).
 id: sample-hub
 label: 見本の HubSpot
 version: 0.1.0
@@ -19,7 +20,7 @@ scopes:
 operation_scopes:
   add_note: [crm.objects.contacts.read, crm.objects.contacts.write]
   log_meeting: [crm.objects.deals.write]
-types: [deal, customer]
+maps_to: sample-sales@0.1.0
 
 objects:
   deal:

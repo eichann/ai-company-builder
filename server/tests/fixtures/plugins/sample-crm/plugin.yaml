@@ -14,7 +14,7 @@ scopes:
 operation_scopes:
   add_note: [crm.objects.notes.write]
   log_meeting: [crm.objects.deals.write]
-types: [deal]
+maps_to: sample-sales@0.1.0
 
 objects:
   deal:

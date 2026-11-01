@@ -4,7 +4,7 @@
  * versions and history. Owner/admin only (the admin page 「つなぎ先」, P8).
  * No answer ever holds a key value: an install names the key by id.
  */
-import type { FieldPolicy, OperationKind, OperationReach, PluginKind, UndoKind } from '../core/plugins'
+import type { FieldPolicy, OperationKind, OperationReach, PluginKind, PluginRole, UndoKind } from '../core/plugins'
 
 /** Why a company's plugin cannot run now (each kill switch and each missing piece). */
 export type PluginProblem =
@@ -26,6 +26,12 @@ export type PluginProblem =
   | 'mapping-invalid'
   /** A field would write automatically without the recorded acknowledgement (no HubSpot workflow is triggered by it). */
   | 'auto-not-acknowledged'
+  /** A connector: the business plugin it maps to (`maps_to`) is not installed at that exact version. */
+  | 'business-missing'
+  /** A connector: the business plugin it maps to is installed but does not run (off, stopped, changed, not on the shelf). */
+  | 'business-stopped'
+  /** A business plugin: it owns types and connects to nothing (no import, relay, mapping or operations). */
+  | 'not-a-connector'
 
 export interface PluginOperationView {
   name: string
@@ -40,14 +46,22 @@ export interface PluginPackageView {
   label: string
   version: string
   kind: PluginKind
+  /** `connector` (talks to one outside system, owns no type) or `business` (owns types, talks to nothing). */
+  role: PluginRole
   description: string | null
-  /** The key broker's service whose company key it uses. */
+  /** The key broker's service whose company key it uses ('' for a business plugin). */
   service: string
-  /** The one destination host. */
+  /** The one destination host ('' for a business plugin). */
   host: string
   scopes: string[]
   operationScopes: Record<string, string[]>
+  /** The types it owns (a business plugin); a connector owns none. */
   types: string[]
+  /**
+   * A connector: the business plugin version it needs installed and on first
+   * (its label from the shelf as this company sees it; the id when not there).
+   */
+  mapsTo: { id: string; version: string; label: string } | null
   operations: PluginOperationView[]
   fingerprint: string
   /** Stopped for every company by the operator. */

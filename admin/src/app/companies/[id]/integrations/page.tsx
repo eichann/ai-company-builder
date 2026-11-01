@@ -121,14 +121,33 @@ export default function IntegrationsPage() {
 }
 
 function labelOf(item: PluginListItem) {
-  const pkg = item.versions.find((v) => v.version === item.install?.version) ?? item.versions[item.versions.length - 1]
-  return pkg?.label ?? item.id
+  return packageOf(item)?.label ?? item.id
 }
 
 function StatusBadge({ item }: { item: PluginListItem }) {
   if (!item.install) return <Badge variant="outline">まだ使っていません</Badge>
   if (item.install.problem === null) return <Badge>動いています</Badge>
   return <Badge variant="outline">{item.install.problem === 'off' ? 'オフ' : '止まっています'}</Badge>
+}
+
+/** The version shown: the installed one, else the newest. */
+function packageOf(item: PluginListItem) {
+  return item.versions.find((v) => v.version === item.install?.version) ?? item.versions[item.versions.length - 1]
+}
+
+/**
+ * What a connector needs first (owner decision 2026-11-01): the business it
+ * reads and writes the records of (「法人営業」), installed and on.
+ */
+function NeedsBusiness({ item }: { item: PluginListItem }) {
+  const needs = packageOf(item)?.mapsTo
+  if (!needs) return null
+  return (
+    <p className="text-sm text-muted-foreground">
+      このつなぎ先を使うには、先に「{needs.label}」（{needs.version}）を使い始めて、オンにしてください。
+      「{needs.label}」を止めると、このつなぎ先の取り込みと書き戻しも止まります。
+    </p>
+  )
 }
 
 function IntegrationSummary({ item, onOpen }: { item: PluginListItem; onOpen: () => void }) {
@@ -142,6 +161,7 @@ function IntegrationSummary({ item, onOpen }: { item: PluginListItem; onOpen: ()
             <StatusBadge item={item} />
           </CardTitle>
           {item.install?.problem && <CardDescription>{PROBLEM_TEXT[item.install.problem]}</CardDescription>}
+          {!item.install && <NeedsBusiness item={item} />}
         </div>
         <Button variant="outline" size="sm" onClick={onOpen}>開く</Button>
       </CardHeader>
@@ -174,6 +194,8 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
   const install = current.install
   const latest = current.versions[current.versions.length - 1]
   const pkg = current.versions.find((v) => v.version === install?.version) ?? latest
+  // A business (「法人営業」) owns the records' shape and talks to no outside service: no key, readers, mapping or import.
+  const business = pkg?.role === 'business'
   const service = broker?.services.find((s) => s.service === pkg?.service)
   const keys = broker?.keys.filter((k) => k.scope === 'company' && k.service === pkg?.service) ?? []
   const [version, setVersion] = useState<string>(install?.version ?? latest?.version ?? '')
@@ -229,11 +251,18 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
           <StatusBadge item={current} />
         </CardTitle>
         <CardDescription>
-          送り先：{pkg?.host ?? '—'}
-          {install?.accountId ? `　つないでいるアカウント：${install.accountId}` : ''}
+          {business ? (
+            '案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）'
+          ) : (
+            <>
+              送り先：{pkg?.host ?? '—'}
+              {install?.accountId ? `　つないでいるアカウント：${install.accountId}` : ''}
+            </>
+          )}
         </CardDescription>
       </CardHeader>
       <div className="space-y-6 border-t px-5 py-4">
+        <NeedsBusiness item={current} />
         {service?.practice && (
           <div role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
             <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
@@ -248,7 +277,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
 
         {/* Version and key */}
         <section className="space-y-3">
-          <h3 className="text-sm font-medium">使う版と鍵</h3>
+          <h3 className="text-sm font-medium">{business ? '使う版' : '使う版と鍵'}</h3>
           <div className="flex flex-wrap items-end gap-3">
             <label className="space-y-1 text-sm">
               <span className="block text-muted-foreground">版</span>
@@ -256,7 +285,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
                 {current.versions.map((v) => <option key={v.version} value={v.version}>{v.version}{v.stopped ? '（止められています）' : ''}</option>)}
               </select>
             </label>
-            <label className="space-y-1 text-sm">
+            {!business && <label className="space-y-1 text-sm">
               <span className="block text-muted-foreground">鍵（「API キー」で登録した会社の鍵）</span>
               <select aria-label="鍵" className="h-9 min-w-56 rounded-md border bg-transparent px-2 text-sm" value={keyId} onChange={(e) => setKeyId(e.target.value)}>
                 <option value="">選んでいません</option>
@@ -266,18 +295,18 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
                   </option>
                 ))}
               </select>
-            </label>
+            </label>}
             <Button size="sm" disabled={busy || !version}
-              onClick={() => run(install ? '版と鍵を保存しました' : '使い始めました', () => pluginsApi.install(companyId, item.id, version, keyId || null))}>
+              onClick={() => run(install ? (business ? '版を保存しました' : '版と鍵を保存しました') : '使い始めました', () => pluginsApi.install(companyId, item.id, version, business ? null : keyId || null))}>
               {install ? '保存' : '使い始める'}
             </Button>
           </div>
-          {keys.length === 0 && pkg && (
+          {!business && keys.length === 0 && pkg && (
             <p className="text-xs text-muted-foreground">この送り先の会社の鍵がまだありません。「API キー」で登録してください（鍵の中身はここには表示されません）。</p>
           )}
         </section>
 
-        {install && d && (
+        {install && d && !business && (
           <ReadScopeSection
             key={`${install.connectionId}:${JSON.stringify(d.readScope)}`}
             system={labelOf(current)}
@@ -303,12 +332,14 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
               <Button size="sm" disabled={busy} onClick={() => run('オンにしました', () => pluginsApi.setEnabled(companyId, item.id, true))}>オンにする</Button>
             )}
             <p className="text-xs text-muted-foreground">
-              オンにすると、この送り先へは決められた書き戻しだけが届くようになります（オフにしても、自由な書き込みには戻りません）。
+              {business
+                ? 'オフにすると、これを使うつなぎ先（HubSpot など）の取り込みと書き戻しも、次の1回から止まります。'
+                : 'オンにすると、この送り先へは決められた書き戻しだけが届くようになります（オフにしても、自由な書き込みには戻りません）。'}
             </p>
           </section>
         )}
 
-        {install && d && (
+        {install && d && !business && (
           <MappingEditor
             pluginId={item.id}
             detail={d}
@@ -320,7 +351,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         )}
 
         {/* Import */}
-        {install && (
+        {install && !business && (
           <section className="space-y-2">
             <h3 className="text-sm font-medium">取り込む</h3>
             <p className="text-xs text-muted-foreground">読み替え表の範囲の案件を、会社の記録に取り込みます（ファイルは作りません）。</p>
@@ -362,7 +393,9 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         open={confirmOff}
         onOpenChange={setConfirmOff}
         title="止めますか？"
-        description="取り込みと書き戻しが、次の1回から止まります。読み替え表と記録はそのまま残ります。"
+        description={business
+          ? 'これを使うつなぎ先（HubSpot など）の取り込みと書き戻しが、次の1回から止まります。記録はそのまま残ります。'
+          : '取り込みと書き戻しが、次の1回から止まります。読み替え表と記録はそのまま残ります。'}
         confirmLabel="止める"
         onConfirm={async () => {
           if (await run('止めました', () => pluginsApi.setEnabled(companyId, item.id, false))) setConfirmOff(false)
