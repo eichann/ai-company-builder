@@ -1,4 +1,4 @@
-import { ApiError, ApiTimeoutError } from './api'
+import { ApiError, ApiTimeoutError, INVALID_RESPONSE } from './api'
 
 // The API answers in English for developers; the people using this panel are
 // non-engineers, so each failure is restated in Japanese with what to do next.
@@ -60,6 +60,10 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
 /** A Japanese sentence explaining a failed request and the next step. */
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
+    // Not JSON, or not the shape the page expects (api-schemas.ts): nothing broken is shown.
+    if (err.code === INVALID_RESPONSE) {
+      return 'サーバーからの応答を正しく読み取れなかったため、表示を止めました。ページを再読み込みしてください。続くときはサーバーの運用担当者に知らせてください。'
+    }
     // Already Japanese and exact (shared/types/private-folders.ts reservedPathMessage).
     if (err.code === 'FOLDER_NAME_UNAVAILABLE' && err.message) return err.message
     // Japanese already (server/src/services/companies.ts COMPANY_CREATION_FORBIDDEN, COMPANY_CREATION_FAILED).

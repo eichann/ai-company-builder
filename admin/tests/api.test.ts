@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { API_TIMEOUT_MS, ApiError, ApiTimeoutError, apiClient, authApi, companiesApi, invitationsApi, overviewApi } from '@/lib/api'
+import { API_TIMEOUT_MS, ApiError, ApiTimeoutError, INVALID_RESPONSE, apiClient, authApi, companiesApi, invitationsApi, overviewApi } from '@/lib/api'
 import { describeError } from '@/lib/errors'
-import { COMPANY_ID, ok } from './fixtures'
+import { COMPANY_ID, company, members, ok, quietOverview } from './fixtures'
 import { mockApi } from './mock-api'
 
 const base = `/api/companies/${COMPANY_ID}`
@@ -68,5 +68,35 @@ describe('API client', () => {
     const { calls } = mockApi({ [`GET /api/invitations/a/b`]: { body: ok({}) } })
     await invitationsApi.validate('a/b').catch(() => {})
     expect(calls[0].url).toBe('/api/invitations/a%2Fb')
+  })
+
+  it('an answer of the right shape is passed through, extra fields included', async () => {
+    mockApi({ [`GET ${base}`]: { body: ok({ ...company, futureField: 1 }) } })
+    await expect(companiesApi.get(COMPANY_ID)).resolves.toMatchObject({ id: company.id, futureField: 1 })
+  })
+
+  it('a malformed answer is refused with a plain message instead of being rendered', async () => {
+    const broken = members.map((m) => ({ ...m, role: 'superuser', email: 42 }))
+    mockApi({
+      [`GET ${base}/members`]: { body: ok(broken) },
+      [`GET ${base}/overview`]: { body: ok({ ...quietOverview, attention: undefined }) },
+      [`GET ${base}`]: { body: { success: true } },
+    })
+    for (const call of [() => companiesApi.getMembers(COMPANY_ID), () => overviewApi.get(COMPANY_ID), () => companiesApi.get(COMPANY_ID)]) {
+      const err = await call().catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(ApiError)
+      expect((err as ApiError).code).toBe(INVALID_RESPONSE)
+      expect(describeError(err)).toMatch(/応答を正しく読み取れなかった/)
+    }
+    // Where the shape broke, never the values.
+    const err = (await companiesApi.getMembers(COMPANY_ID).catch((e: unknown) => e)) as ApiError
+    expect(err.body?.issues).toContain('data.0.role')
+    expect(JSON.stringify(err.body)).not.toContain('superuser')
+  })
+
+  it('an answer that is not JSON says so in Japanese, not in English', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>proxy</html>', { status: 200 })))
+    const err = await apiClient('/api/x').catch((e: unknown) => e)
+    expect(describeError(err)).toMatch(/応答を正しく読み取れなかった/)
   })
 })
