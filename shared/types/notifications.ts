@@ -21,6 +21,7 @@ export const NOTIFICATION_KINDS = [
   'due_changed',
   'overdue',
   'ai_turn_stuck',
+  'wait_over',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -37,6 +38,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   due_changed: '頼んだことの期限が変わった',
   overdue: '頼んだことが期限を過ぎた',
   ai_turn_stuck: '頼んだことの AI の番が 24 時間進んでいない',
+  wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -49,6 +51,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   due_changed: true,
   overdue: true,
   ai_turn_stuck: true,
+  wait_over: true,
   others: false,
 }
 

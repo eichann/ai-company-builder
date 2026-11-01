@@ -6,7 +6,9 @@ import { initDatabase } from './db'
 import { configureAllBareRepos } from './routes/git'
 import { scheduleAgentEventRetention } from './lib/agent-event-retention'
 import { scheduleMailBodyRetention } from './lib/mail-body-retention'
+import { scheduleServerClock } from './lib/server-clock-schedule'
 import { services } from './composition'
+import { CLOCK_INTERVAL_MS } from './services/server-clock'
 import { PRACTICE_UPSTREAMS } from './lib/config'
 import { app } from './app'
 
@@ -119,3 +121,5 @@ console.log(`Server is running on http://localhost:${port}`)
 scheduleAgentEventRetention(() => services.agentEvents.prune())
 // Outbound mail's bodies, 30 days after sent / discarded (outbound-mail.md): one run per server, per company handle.
 scheduleMailBodyRetention(() => services.outboundMail.cleanupBodies())
+// The server clock (notifications.md "The server clock"): one per server process; it never runs the AI.
+scheduleServerClock(() => services.serverClock.runOnce(), { intervalMs: CLOCK_INTERVAL_MS })

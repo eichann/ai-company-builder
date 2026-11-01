@@ -4,6 +4,7 @@
 // member may not read); the renderer only draws them. Pure: types and wording.
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
+import { WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
 
@@ -112,6 +113,8 @@ export function cardFields(r: RecordSummary, def: TypeDefinition | undefined, pe
 
 const ENGINE_ACTIONS: Record<string, string> = {
   create: '作りました', undo: '取り消しました', link_file: 'ファイルをつなぎました', unlink_file: 'ファイルを外しました',
+  // The server clock (notifications.md "The server clock").
+  [WAIT_OVER_ACTION]: '見込みの日時が過ぎたので、追いかけの番にしました',
 }
 
 /** One line of 経緯 per ledger entry, newest first. */

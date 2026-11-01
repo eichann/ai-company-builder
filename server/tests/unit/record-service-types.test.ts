@@ -188,9 +188,10 @@ describe('the service writer', () => {
     expect(r.entry).toMatchObject({ version: 2, action: 'approve', fromState: 'pending', toState: 'approved', actorId: 'u-bob', actorKind: 'human', isDecision: true, decision: { reason: '妥当' } })
     // Final: nothing moves it back to pending.
     expect(writer.transition('a', { recordId: a.id, action: 'x', expectedVersion: 2, to: 'pending', actor: bob })).toEqual({ ok: false, reason: 'transition-not-allowed' })
-    // Only service-owned records.
+    // Only service-owned records — a task only along the server clock's listed moves, never a field change.
     const task = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 't' })).record
-    expect(writer.transition('a', { recordId: task.id, action: 'x', expectedVersion: 1, to: 'done', actor: bob })).toEqual({ ok: false, reason: 'not-service-owned' })
+    expect(writer.transition('a', { recordId: task.id, action: 'x', expectedVersion: 1, to: 'done', actor: bob })).toEqual({ ok: false, reason: 'transition-not-allowed' })
+    expect(writer.transition('a', { recordId: task.id, action: 'x', expectedVersion: 1, to: null, fields: { purpose: 'x' }, actor: bob })).toEqual({ ok: false, reason: 'not-service-owned' })
   })
 
   it('a person it names must be able to read the record', () => {
