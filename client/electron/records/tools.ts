@@ -290,7 +290,12 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
       }
       for (const [arg, kind] of Object.entries(a.args)) shape[arg] = kindSchema(kind, t.fields[arg]?.options)
       const from = a.from ? a.from.join(' / ') : 'どの状態からでも'
-      const aiNote = a.who.includes('ai') ? '' : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.'
+      const aiNote = a.who.includes('ai') ? '' : ' この操作は AI からはできない（本人が画面で行う）。This action is not open to the AI: ask the member to do it.' +
+        // ok_from (task complete): the person may do it on someone's OK; the AI only suggests it.
+        (a.okFrom && !a.who.includes('ai')
+          ? ` ${a.okFrom.map(f => t.fields[f]?.label ?? f).join('・')}も、誰の OK か（OK した人か、ACB の外でもらった OK のいきさつ）を書けば画面で行える。済んだようなら本人に提案してよい。` +
+            ` The ${a.okFrom.join(' / ')} may also do it on screen, stating whose OK it was; you may suggest it, never do it.`
+          : '')
       specs.push({
         name: tool, readOnly: false, schema: z.object(shape).strict(),
         description: `「${t.label}」の「${a.label}」（${from} → ${a.to ?? '状態はそのまま'}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${aiNote}\n` +

@@ -22,7 +22,7 @@
 import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
-import { isDateValue, type ActionDef, type FieldKind, type TypeDefinition } from '../../shared/core/record-types'
+import { isDateValue, OK_FIELDS, type ActionDef, type FieldKind, type TypeDefinition } from '../../shared/core/record-types'
 import {
   replayRecordState, type DecisionMaterial, type ExternalReceipt, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry,
   type LedgerValue, type ReplayedState, type VersionOrigin,
@@ -106,6 +106,15 @@ const conflict = (error: string, code: string, extra: Record<string, unknown> = 
 export const ASSIGNEE_CANNOT_READ = 'この人はこの記録を見られないため、担当にできません。見られる人を選んでください。'
 const bad = (error: string, code = 'BAD_REQUEST') => refuse('bad-request', error, { code })
 
+/**
+ * An OK statement naming someone who may not be named (another company's
+ * id, someone who cannot read the record): one answer, no place named.
+ */
+export const OK_BY_CANNOT_READ = {
+  error: 'この人はこの記録を見られないため、OK した人にできません。記録を見られる人を選ぶか、OK のいきさつを書いてください。',
+  code: 'OK_BY_CANNOT_READ',
+}
+
 /** The generic create refuses the types the server's own services make (records.md "Service-owned types"). */
 export const TYPE_CREATED_BY_SERVICE = { error: 'この種類の記録は ACB が決まった手順で作ります。ここからは作れません', code: 'TYPE_CREATED_BY_SERVICE' }
 /** …and the generic action / undo routes refuse the types whose state only those services change. */
@@ -156,6 +165,25 @@ function parseMaterials(raw: unknown): DecisionMaterial[] | string {
     } else return 'materials: { kind: file, path, commit } or { kind: record, id, version }'
   }
   return out
+}
+
+const OK_REQUIRED = '誰の OK で完了にするのかが要ります。OK をくれた人を選ぶか、ACB の外でもらった OK ならそのいきさつ（例: 先方からメールで了承）を書いてください'
+
+/**
+ * `ok: { by?, note? }` of an action done through `ok_from`: whose OK it was
+ * (a member id) and/or how it came (an OK from outside ACB) — at least one.
+ */
+function parseOkStatement(raw: unknown): { by: string | null; note: string | null } | string {
+  if (raw === undefined || raw === null) return OK_REQUIRED
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'ok: { by?: member id, note?: text }'
+  const o = raw as Record<string, unknown>
+  for (const k of Object.keys(o)) if (k !== 'by' && k !== 'note') return 'ok: { by?: member id, note?: text }'
+  if (o.by !== undefined && o.by !== null && (typeof o.by !== 'string' || o.by.length > 200)) return 'ok.by: a member id'
+  if (o.note !== undefined && o.note !== null && (typeof o.note !== 'string' || o.note.length > TEXT_MAX || CONTROL.test(o.note))) return `ok.note: up to ${TEXT_MAX} characters`
+  const by = typeof o.by === 'string' && o.by !== '' ? o.by : null
+  const note = typeof o.note === 'string' && o.note.trim() !== '' ? o.note.trim().normalize('NFC') : null
+  if (by === null && note === null) return OK_REQUIRED
+  return { by, note }
 }
 
 const REF_RE = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}@[1-9]\d{0,9}$/
@@ -378,12 +406,30 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       // Duty 2: who?
       const place = row.path ?? row.folder ?? ''
       const managesPlace = action.who.includes('dept_manager') && deps.managedFolders(member.companyId, member.userId).some(f => isSameOrAncestorPath(f, place))
-      if (!mayAct(action.who, member, actor, current.fields, managesPlace)) {
+      // …or, for a person `ok_from` names (never the AI), with a statement of whose OK it was.
+      const byWho = mayAct(action.who, member, actor, current.fields, managesPlace)
+      const withOk = !byWho && actor.kind === 'human' && (action.okFrom ?? []).some(w => current.fields[w] === member.userId)
+      if (!byWho && !withOk) {
         return refuse('forbidden', actor.kind === 'ai' && !action.who.includes('ai')
           ? 'この操作は AI からはできません。本人が画面から行ってください'
           : 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
       }
       if (action.note === 'required' && note.trim() === '') return bad('この操作にはひとことのメモが要ります', 'NOTE_REQUIRED')
+      let okStatement: { by: string | null; note: string | null } | null = null
+      if (withOk) {
+        const parsed = parseOkStatement(b.ok)
+        if (typeof parsed === 'string') return bad(parsed, parsed === OK_REQUIRED ? 'OK_REQUIRED' : 'BAD_OK')
+        if (parsed.by !== null) {
+          if (parsed.by === member.userId) return bad('自分の OK では完了にできません。OK をくれた人を選ぶか、OK のいきさつを書いてください', 'OK_BY_SELF')
+          // Someone who cannot read the record and anyone who is not a member here (another
+          // company's id: `canRead` finds no role) get the same answer.
+          if (!canRead(member.companyId, parsed.by, row)) return bad(OK_BY_CANNOT_READ.error, OK_BY_CANNOT_READ.code)
+        }
+        okStatement = parsed
+      } else if (b.ok !== undefined && b.ok !== null) {
+        // Only the path that needs it carries an OK statement (the ledger would claim an OK that decided nothing).
+        return bad('この操作に OK した人の記入は要りません', 'OK_NOT_EXPECTED')
+      }
 
       const isMember = (id: string) => deps.isMember(member.companyId, id)
       const rawArgs = (b.args ?? {}) as Record<string, unknown>
@@ -451,6 +497,14 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const nextFields: Record<string, LedgerValue> = { ...current.fields, ...args }
       if (action.handTo && def.implements.includes('request')) nextFields.next_actor = nextFields[action.handTo] ?? null
       const nextState = action.to ?? current.state
+      // An OK statement belongs to the state change it was given for: written by that action,
+      // cleared by any other state change (a reopen) so it never vouches for a later one.
+      if (okStatement) {
+        nextFields[OK_FIELDS.by] = okStatement.by
+        nextFields[OK_FIELDS.note] = okStatement.note
+      } else if (nextState !== current.state && Object.values(def.actions).some(a => a.okFrom)) {
+        for (const f of Object.values(OK_FIELDS)) if ((nextFields[f] ?? null) !== null) nextFields[f] = null
+      }
       const changes: LedgerChange[] = []
       if (nextState !== current.state) changes.push({ field: 'state', before: current.state, after: nextState })
       for (const [field, after] of Object.entries(nextFields)) {

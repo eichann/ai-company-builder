@@ -10,7 +10,7 @@
  * ontology §17.7): fields and where each value lives (`source: file` = the
  * record's text, `source: server` = the company map, written only by the
  * engine), links to other records or files, the states, and the actions
- * (from → to, who may, whom to notify, files to attach, note rule, history
+ * (from → to, who may — and who may with someone's OK —, whom to notify, files to attach, note rule, history
  * line, decision flag). No expressions, computed fields, cascades, timers or
  * outside sends: there is nothing in the schema to write them with.
  *
@@ -101,6 +101,16 @@ export interface ActionDef {
    * value becomes `next_actor` (whose turn it is next). A copy, not an expression.
    */
   handTo: string | null
+  /**
+   * YAML `ok_from`: person fields whose holder may ALSO do this action when
+   * they say whose OK it was (owner decision 2026-11-01: the assignee
+   * completes a task the boss OK'd). The engine then requires `ok.by` (a
+   * member who reads the record, not the actor) or `ok.note` (an OK from
+   * outside ACB) and writes them into the type's `ok_by` / `ok_note` fields,
+   * which the parser requires. Never the AI. Absent = nobody beyond `who`
+   * (left out of the definition then, so existing stored JSON compares equal).
+   */
+  okFrom?: string[]
 }
 
 export interface TypeDefinition {
@@ -117,6 +127,9 @@ export interface TypeDefinition {
   final: string[]
   actions: Record<string, ActionDef>
 }
+
+/** The server fields an action with `ok_from` writes (whose OK it was / an OK from outside ACB). */
+export const OK_FIELDS = { by: 'ok_by', note: 'ok_note' } as const
 
 /** Who-values that are not field names. */
 export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone'] as const
@@ -261,7 +274,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -308,6 +321,14 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         else if (typeof a.hand_to !== 'string' || !(personFields.has(a.hand_to) || args[a.hand_to] === 'person')) err(`操作「${aname}」の hand_to は人の欄か人の引数の名前で書いてください`)
         else handTo = a.hand_to
       }
+      let okFrom: string[] | undefined
+      if (a.ok_from !== undefined && a.ok_from !== null) {
+        const o = list(a.ok_from)
+        if (!o || o.length === 0 || !o.every(w => typeof w === 'string' && personFields.has(w))) err(`操作「${aname}」の ok_from は人の欄の名前で書いてください`)
+        else if (fields[OK_FIELDS.by]?.kind !== 'person' || fields[OK_FIELDS.by]?.source !== 'server' || fields[OK_FIELDS.note]?.kind !== 'text' || fields[OK_FIELDS.note]?.source !== 'server') {
+          err(`操作「${aname}」に ok_from を書くときは、欄「${OK_FIELDS.by}」（kind: person, source: server）と「${OK_FIELDS.note}」（kind: text, source: server）が要ります`)
+        } else okFrom = o as string[]
+      }
       if (to === null && Object.keys(args).length === 0) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かのどちらかが要ります`)
       actions[aname] = {
         label: isStr(a.label) ? a.label : aname,
@@ -322,6 +343,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         approval: approval as ApprovalTier,
         args,
         handTo,
+        ...(okFrom ? { okFrom } : {}),
       }
     }
   }

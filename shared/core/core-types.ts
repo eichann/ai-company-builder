@@ -12,6 +12,10 @@
  * Version 3 (2026-11-01): `set_due` (「延ばす」) tells the requester. The due
  * may carry a time of day (kind `date` takes `YYYY-MM-DD[THH:MM]`,
  * shared/core/record-types.ts `isDateValue`) — the kind itself is unchanged.
+ * Version 4 (2026-11-01): the assignee may complete too, saying whose OK it
+ * was (`ok_from: [assignee]` → `ok_by` a member, or `ok_note` for an OK from
+ * outside ACB); the OK-giver is told and may reopen (「取り消す」). The
+ * requester / reviewer complete as before; the AI never.
  *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
@@ -31,7 +35,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 3
+version: 4
 implements: [request]
 storage: server
 fields:
@@ -43,6 +47,8 @@ fields:
   waiting_on:   { label: 待っているもの, kind: text, source: server }
   due:          { label: 期限, kind: date, source: server }
   reviewer:     { label: レビューする人, kind: person, source: server }
+  ok_by:        { label: OKした人, kind: person, source: server }
+  ok_note:      { label: OKのいきさつ, kind: text, source: server }
 links:
   customer:     { label: 顧客, target: customer, cardinality: one, inverse: tasks }
   files:        { label: 関係するファイル, target: file, cardinality: many }
@@ -57,9 +63,9 @@ actions:
   assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
-  complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], notify: requested_by, attach: [files], note: optional, decision: true }
+  complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], ok_from: [assignee], notify: [requested_by, ok_by], attach: [files], note: optional, decision: true }
   cancel:         { label: 中止する, from: [todo, in_progress, review, waiting], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
-  reopen:         { label: やり直す, from: [done, cancelled], to: in_progress, who: [requested_by, admin], notify: assignee, note: optional, hand_to: assignee }
+  reopen:         { label: やり直す, from: [done, cancelled], to: in_progress, who: [requested_by, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
 ---
 # タスク
 
