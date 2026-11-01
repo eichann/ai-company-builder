@@ -301,12 +301,18 @@ describe('GET /departments returns the same data as before', () => {
     expect(oracleList('dl-empty')).toEqual([])
   })
 
-  it('a missing repository lists nothing, like before', async () => {
+  it('a missing repository is an error, not an empty list (code review 2026-11)', async () => {
+    // Before, `success: true, data: []`: a broken company looked like one without departments.
     addCompany('dl-norepo')
     addDeptRow('dl-norepo', 'sales', 0)
-    const r = await list('dl-norepo')
-    expect(r.status).toBe(200)
-    expect(r.text).toBe(JSON.stringify({ success: true, data: [] }))
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await list('dl-norepo')
+      expect(r.status).toBe(500)
+      expect(r.text).toBe(JSON.stringify({ error: 'Failed to list departments' }))
+    } finally {
+      errors.mockRestore()
+    }
   })
 
   it('a repository whose only branch is master is still listed (old pull fallback)', async () => {

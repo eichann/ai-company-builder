@@ -25,6 +25,11 @@ export interface RepoStore {
    * as the server's own push, under the company lock.
    */
   seedCompanyRepo(companyId: string, bareRepoPath: string, departmentFolders: string[]): Promise<void>
+  /**
+   * Remove the company's bare repository (nothing when there is none). Only
+   * for undoing a company creation that failed: no row points at it yet.
+   */
+  removeCompanyRepo(companyId: string): Promise<void>
 
   companyRepoExists(companyId: string): boolean
   /** The non-hidden root folders of the shared branch. Throws 'Repository not found' without a repository. */

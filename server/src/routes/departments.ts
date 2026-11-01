@@ -54,11 +54,13 @@ departmentsRoute.get('/', async (c) => {
       data: rows.map(departmentToCamelCase) as unknown as Department[],
     })
   } catch (error) {
+    // A failure is an error, never an empty list (code review 2026-11): "no
+    // departments" made the app and the admin console look as if the company
+    // had none. Released apps treat a non-OK answer as "could not load".
+    // A company created since its creation became all or nothing always has
+    // its repository; an empty one answers [] (repo-folders.ts).
     logError('departments', 'failed to list departments', error)
-    return c.json({
-      success: true,
-      data: [], // Return empty if repo doesn't exist yet
-    })
+    return c.json({ error: 'Failed to list departments' }, 500)
   }
 })
 
@@ -243,11 +245,17 @@ departmentsRoute.get('/:id/stats', async (c) => {
   const existing = departments.get(member.value, deptId)
   if (!existing.ok) return refusal(c, existing)
 
-  // Read from the bare repo's shared branch (no pull/clone)
-  return c.json({
-    success: true,
-    data: await departments.stats(member.value, existing.value),
-  })
+  // Read from the bare repo's shared branch (no pull/clone). A failure is an
+  // error, never "empty": the admin console asks before deleting with these counts.
+  try {
+    return c.json({
+      success: true,
+      data: await departments.stats(member.value, existing.value),
+    })
+  } catch (error) {
+    logError('departments', 'failed to count a department folder', error)
+    return c.json({ error: 'Failed to read the department folder' }, 500)
+  }
 })
 
 // POST /api/companies/:companyId/departments/reorder - Reorder departments

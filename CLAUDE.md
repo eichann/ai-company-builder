@@ -18,14 +18,15 @@ Maintainer note (stripped before it reaches Claude's context):
 
 ```
 server/   Hono API + git smart-HTTP server (port 3001). SQLite via better-sqlite3.
-  src/routes → services → ports ← adapters, wired in src/composition.ts; lib/ (git, push-check)
+  src/routes → services → ports ← adapters, wired in src/composition.ts; lib/ = git, push-check,
+  config, auth and storage-free helpers (no SQL except lib/auth.ts: server rule)
 admin/    Next.js admin console (port 3100), production build in Docker.
 client/   Electron desktop app (renderer on Vite, port 5173).
   electron/            main process: main.ts (composition root), features/<domain>/ipc.ts,
                        services/, sync/ (git:sync), agents/ (Claude Code, Codex), guards
   shared/              types + pure helpers used by main, preload and renderer
-  src/                 React renderer; moving to features/<name>/ (components/, hooks/, lib/ are
-                       legacy: renderer-structure rule)
+  src/                 React renderer: app/, features/<name>/, shared/ (ui, hooks, lib, ipc),
+                       stores/ (renderer-structure rule)
   tests/               node tests (*.test.ts), sync-harness/ + sync/, ui/ (Playwright), perf/
 shared/   core/ = the one copy of path, name and permission rules; types/ = API contracts
 data/     SQLite databases and repositories at runtime (gitignored)
