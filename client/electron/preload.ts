@@ -147,6 +147,9 @@ const api: ElectronAPI = {
   getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
   claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId),
   settleAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:settle', companyId, recordId),
+  searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
+  getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
+  getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),
   getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),
   updateOutboundMail: (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string) => invoke('outboundMail:update', companyId, messageId, edit, conversationId),
@@ -170,8 +173,6 @@ const api: ElectronAPI = {
     invoke('git:grep', repoPath, query, folderPath),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>
     invoke('git:log', repoPath, folderPath, limit),
-  gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
-    invoke('git:showCommit', repoPath, commitHash, folderPath),
   gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) =>
     invoke('git:setupCompanyRemote', repoPath, companyId, selectedPaths),
   gitInspectCompanyFolder: (folder: string, companyId: string) =>

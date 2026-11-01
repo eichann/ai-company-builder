@@ -11,7 +11,7 @@
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
-import { RECORD_ID_RE } from '../../shared/core/records'
+import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -101,6 +101,8 @@ interface ParsedQuery {
   /** Records whose outgoing link `name` holds `id` (e.g. a task's `bundle`). */
   link?: { name: string; id: string }
   linkedTo?: { id: string; hops: 1 | 2 }
+  /** Records linking to this company path (a file or folder). */
+  linkedToFile?: string
   text?: string
   limit: number
   offset: number
@@ -111,7 +113,7 @@ interface ParsedQuery {
 function parseQuery(body: unknown): ParsedQuery | string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The query must be an object'
   const b = body as Record<string, unknown>
-  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'link', 'sort', 'finishedSince', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
+  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'link', 'sort', 'finishedSince', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
   const q: ParsedQuery = { fields: [], contains: [], ranges: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
@@ -161,6 +163,12 @@ function parseQuery(body: unknown): ParsedQuery | string {
     if (typeof l !== 'object' || l === null || typeof l.id !== 'string' || !RECORD_ID_RE.test(l.id)) return 'linkedTo.id must be a record id'
     if (l.hops !== undefined && l.hops !== 1 && l.hops !== 2) return 'linkedTo.hops is 1 or 2'
     q.linkedTo = { id: l.id, hops: (l.hops as 1 | 2 | undefined) ?? 1 }
+  }
+  if (b.linkedToFile !== undefined) {
+    if (q.linkedTo) return 'linkedTo and linkedToFile cannot be used together'
+    const p = typeof b.linkedToFile === 'string' && b.linkedToFile.length <= 1000 ? fileLinkPath(b.linkedToFile) : null
+    if (!p) return 'linkedToFile must be a path inside the company folder'
+    q.linkedToFile = p
   }
   if (b.link !== undefined) {
     const l = b.link as { name?: unknown; id?: unknown }
@@ -215,6 +223,7 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
       id: r.id, type: r.type, typeVersion: r.typeVersion, title: r.title, summary: r.summary, path: r.path,
       state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s && s.updatedAt > r.updatedAt ? s.updatedAt : r.updatedAt,
       ...(old?.has(r.id) ? { fromOldConnection: true as const, notice: OLD_CONNECTION_LABEL } : {}),
+      ...(r.personalOwner !== null ? { personal: true as const } : {}),
     } satisfies RecordSummary]
   }))
 }
@@ -369,6 +378,15 @@ export function createRecordService(deps: RecordServiceDeps) {
         if (q.linkedTo.hops === 2) for (const r of neighbours(records, reader, hop1)) reached.set(r.id, r)
         reached.delete(q.linkedTo.id)
         filter.ids = [...reached.keys()]
+      }
+      if (q.linkedToFile) {
+        // Only for a file the caller reads; a link into a private folder counts only from inside that folder
+        // (linkAllowed). Otherwise the answer is the same empty one as for a file nothing links to.
+        const path = q.linkedToFile
+        if (!reader.file(path)) return ok({ total: 0, records: [] })
+        const target = { scopeId: findPrivateScope(handleOf(member).scopes.listWithRules(), path)?.id ?? null }
+        const sourceIds = [...new Set(records.fileLinksTo([path]).map(l => l.sourceId))].slice(0, MAX_NEIGHBOURS)
+        filter.ids = records.byIds(sourceIds).filter(r => linkAllowed(r, target)).map(r => r.id)
       }
       // By a link (a task's bundle): the target must be one the member reads, as linkedTo; a link that
       // may not be followed (public → private) never matches.

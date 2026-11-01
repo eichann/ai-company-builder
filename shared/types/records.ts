@@ -15,6 +15,7 @@
  *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
  *   POST /records/item/:recordId/file-links        FileLinkRequest → FileLinkResult (link a file later)
  *   POST /records/item/:recordId/file-links/remove FileLinkRequest → FileLinkResult (remove that link)
+ *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only → a folder; session only)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState
  *
@@ -27,8 +28,9 @@
  *
  * While the feature is off for the company, every route but the settings
  * answers 404 `RECORDS_DISABLED`. Answers, counts and link lists hold only
- * records the caller may read: a record in a private folder they cannot read
- * is exactly a record that does not exist.
+ * records the caller may read: a record in a private folder they cannot read,
+ * and another member's owner-only record (owners and admins included), is
+ * exactly a record that does not exist.
  */
 import type { TypeDefinition } from '../core/record-types'
 import type { DecisionMaterial, LedgerEntry } from '../core/record-ledger'
@@ -80,6 +82,12 @@ export interface RecordQuery {
   link?: { name: string; id: string }
   /** Records linked to this one (either direction), up to `hops` (1 or 2, default 1). */
   linkedTo?: { id: string; hops?: 1 | 2 }
+  /**
+   * Records with a file link to exactly this company path (「つながっているもの」 of
+   * a file). Empty when the caller cannot read the file; a record outside a
+   * private folder never counts for a path inside one. Not with `linkedTo`.
+   */
+  linkedToFile?: string
   /** Substring of the title or summary (0.23-1: not the full text). */
   text?: string
   /** 1–200, default 50. */
@@ -125,6 +133,12 @@ export interface RecordSummary {
   fromOldConnection?: true
   /** With `fromOldConnection`: `OLD_CONNECTION_LABEL`, to show as is. */
   notice?: string
+  /**
+   * Owner-only (「持ち主だけ」, records.md "Owner-only records"): only the member
+   * reading it sees it — it reaches nobody else, owners and admins included.
+   * Absent for every other record.
+   */
+  personal?: true
 }
 
 export interface RecordQueryResult {
@@ -175,6 +189,12 @@ export interface CreateRecordRequest {
   summary?: string
   /** The folder whose readers may see it (none = everyone in the company); not inside a private folder. */
   folder?: string
+  /**
+   * Owner-only (「持ち主だけ」: 自分用のやること): only the creator sees it — not owners or admins
+   * either. Never with `folder` (400 PERSONAL_WITH_FOLDER); an assignee other than the creator
+   * cannot read it (400 ASSIGNEE_CANNOT_READ). Shown to a folder later with ShareRecordRequest.
+   */
+  personal?: boolean
   /** Server-field values (requested_by defaults to the creator for request types). */
   fields?: Record<string, RecordFieldValue>
   links?: Record<string, string | string[]>
@@ -222,6 +242,21 @@ export interface FileLinkRequest {
   path: string
   /** The link's name; may be left out when the type has one file link (task: `files`). */
   link?: string
+  expectedVersion: number
+  note?: string
+  proposedBy?: 'ai'
+  conversationId?: string
+}
+
+/**
+ * 「部署に出す／案件につなぐ」: the owner makes their owner-only record visible to
+ * the readers of `folder` (a folder they read, not a private one; for a deal,
+ * the deal's folder). Ledger action `share` (`place.personal_owner`,
+ * `place.folder`), never undone. Not personal any more → 409 NOT_PERSONAL;
+ * anyone but the owner cannot find the record (404 RECORD_NOT_FOUND).
+ */
+export interface ShareRecordRequest {
+  folder: string
   expectedVersion: number
   note?: string
   proposedBy?: 'ai'

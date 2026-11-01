@@ -94,6 +94,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   outbound_sends: ['adapters/sqlite/outbound-mail.ts'],
   // Fixed content of approvals and outbound mail (approvals.md).
   fixed_payloads: ['adapters/sqlite/fixed-payloads.ts'],
+  // Task settings and department membership (tasks.md).
+  task_settings: ['adapters/sqlite/task-settings.ts'],
+  department_members: ['adapters/sqlite/task-settings.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
 const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository']

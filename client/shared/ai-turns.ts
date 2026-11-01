@@ -6,7 +6,9 @@
  * looks at it afterwards (with the session). Pure, no Node or Electron.
  */
 
-/** The company's 「自動で進める」 and its limits (stage 2 S6 provides them; until then the defaults). */
+import { DEFAULT_TASK_SETTINGS, TASK_SETTINGS_LIMITS } from '../../shared/core/task-settings'
+
+/** The company's 「自動で進める」 and its limits: `autoRun` of the task settings (S6, `GET /task-settings`). */
 export interface AutoTurnSettings {
   /** 「自動で進める」: AI turns start without a person pressing anything. */
   enabled: boolean
@@ -16,18 +18,21 @@ export interface AutoTurnSettings {
   stopAfterFailures: number
 }
 
-/** Owner decision 2026-11-01: automatic by default. */
-export const DEFAULT_AUTO_TURN_SETTINGS: AutoTurnSettings = { enabled: true, dailyLimit: 20, stopAfterFailures: 3 }
+/** The company defaults (S6: off until an admin turns 「自動で進める」 on). */
+export const DEFAULT_AUTO_TURN_SETTINGS: AutoTurnSettings = { ...DEFAULT_TASK_SETTINGS.autoRun }
 
-/** Settings as received (a newer server, S6), each value checked; anything unusable → the default. */
+/**
+ * `autoRun` as the server answered it, each value checked against S6's limits. Unreadable or
+ * missing → off: an AI turn never starts on a guess.
+ */
 export function readAutoTurnSettings(value: unknown): AutoTurnSettings {
   const v = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  const count = (x: unknown, fallback: number, max: number) =>
-    typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= max ? x : fallback
+  const count = (x: unknown, fallback: number, limits: { min: number; max: number }) =>
+    typeof x === 'number' && Number.isInteger(x) && x >= limits.min && x <= limits.max ? x : fallback
   return {
-    enabled: typeof v.enabled === 'boolean' ? v.enabled : DEFAULT_AUTO_TURN_SETTINGS.enabled,
-    dailyLimit: count(v.dailyLimit, DEFAULT_AUTO_TURN_SETTINGS.dailyLimit, 500),
-    stopAfterFailures: count(v.stopAfterFailures, DEFAULT_AUTO_TURN_SETTINGS.stopAfterFailures, 50) || DEFAULT_AUTO_TURN_SETTINGS.stopAfterFailures,
+    enabled: v.enabled === true,
+    dailyLimit: count(v.dailyLimit, DEFAULT_AUTO_TURN_SETTINGS.dailyLimit, TASK_SETTINGS_LIMITS.dailyLimit),
+    stopAfterFailures: count(v.stopAfterFailures, DEFAULT_AUTO_TURN_SETTINGS.stopAfterFailures, TASK_SETTINGS_LIMITS.stopAfterFailures),
   }
 }
 

@@ -23,6 +23,8 @@
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
+ *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
+ *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -50,3 +52,5 @@ export * from './approvals'
 export * from './mail'
 export * from './minutes'
 export * from './calendar'
+export * from './business-days'
+export * from './task-settings'

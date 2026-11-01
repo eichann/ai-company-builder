@@ -8,6 +8,8 @@ import {
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnCandidate, type AiTurnDecisionInput,
 } from './aiTurns'
 
+// The company turned 「自動で進める」 on (S6's default is off).
+const ON = { ...DEFAULT_AUTO_TURN_SETTINGS, enabled: true }
 const NOW = Date.parse('2026-11-01T10:00:00+09:00')
 const minutes = (id: string, meetingAt: string, extra: Partial<AiTurnCandidate> = {}): AiTurnCandidate =>
   ({ id, title: id, version: 1, meetingAt, ...extra })
@@ -15,12 +17,12 @@ const A = minutes('minutes-aaaaaaaa', '2026-10-31T10:00:00Z')
 const B = minutes('minutes-bbbbbbbb', '2026-10-30T10:00:00Z')
 
 const input = (over: Partial<AiTurnDecisionInput> = {}): AiTurnDecisionInput => ({
-  settings: DEFAULT_AUTO_TURN_SETTINGS, agent: 'claude-code', agentReady: true, busy: false,
+  settings: ON, agent: 'claude-code', agentReady: true, busy: false,
   log: freshLog(NOW), queue: [A, B], pass: null, now: NOW, ...over,
 })
 
 test('the company setting off: nothing starts', () => {
-  assert.deepEqual(nextAiTurn(input({ settings: { ...DEFAULT_AUTO_TURN_SETTINGS, enabled: false } })), { wait: 'off' })
+  assert.deepEqual(nextAiTurn(input({ settings: { ...ON, enabled: false } })), { wait: 'off' })
   // Settings not known yet count as off (never run on a guess).
   assert.deepEqual(nextAiTurn(input({ settings: null })), { wait: 'off' })
 })
@@ -45,7 +47,7 @@ test('one at a time, and at most a few per pass until the next pass', () => {
 })
 
 test('the daily limit stops automatic runs for the day; a new day counts again', () => {
-  const settings = { ...DEFAULT_AUTO_TURN_SETTINGS, dailyLimit: 2 }
+  const settings = { ...ON, dailyLimit: 2 }
   let log = freshLog(NOW)
   log = recordStarted(recordStarted(log, A.id), B.id)
   assert.deepEqual(nextAiTurn(input({ settings, log, queue: [minutes('minutes-dddddddd', '2026-10-29T00:00:00Z')] })), { wait: 'daily-limit' })
@@ -61,7 +63,7 @@ test('a record is tried at most twice a day (no endless retries of the same minu
 })
 
 test('N failures in a row stop until the member resumes; a success in between resets the count', () => {
-  const settings = { ...DEFAULT_AUTO_TURN_SETTINGS, stopAfterFailures: 2 }
+  const settings = { ...ON, stopAfterFailures: 2 }
   let log = recordOutcome(freshLog(NOW), 'minutes-x1x1x1x1', 'failed', settings, 0)
   log = recordOutcome(log, 'minutes-x2x2x2x2', 'done', settings, 0)
   log = recordOutcome(log, 'minutes-x3x3x3x3', 'unfinished', settings, 0)
@@ -79,7 +81,7 @@ test("Claude's usage limit pauses (not a failure) until the window resets", () =
     windows: [{ id: 'five_hour', label: '5時間', usedPercent: 100, resetsAt }, { id: 'seven_day', label: '1週間', usedPercent: 60, resetsAt: NOW + 3 * 86_400_000 }] }
   const until = usagePauseUntil(snapshot, NOW)
   assert.equal(until, resetsAt)
-  const log = recordOutcome(freshLog(NOW), B.id, 'usage-limit', DEFAULT_AUTO_TURN_SETTINGS, until)
+  const log = recordOutcome(freshLog(NOW), B.id, 'usage-limit', ON, until)
   assert.equal(log.failuresInARow, 0)
   assert.equal(log.handed[B.id], undefined)
   assert.deepEqual(nextAiTurn(input({ log })), { wait: 'paused-usage' })
@@ -87,7 +89,9 @@ test("Claude's usage limit pauses (not a failure) until the window resets", () =
   assert.ok(usagePauseUntil(undefined, NOW) > NOW)
 })
 
-test('settings from a server: unusable values fall back to the defaults, never to "unlimited"', () => {
+test('settings from a server: unusable values fall back to the defaults, never to "unlimited"; unreadable means off', () => {
+  assert.equal(readAutoTurnSettings(undefined).enabled, false)
+  assert.equal(readAutoTurnSettings({ enabled: 'yes' }).enabled, false)
   assert.deepEqual(readAutoTurnSettings({ enabled: false, dailyLimit: -1, stopAfterFailures: 'x' }),
     { enabled: false, dailyLimit: DEFAULT_AUTO_TURN_SETTINGS.dailyLimit, stopAfterFailures: DEFAULT_AUTO_TURN_SETTINGS.stopAfterFailures })
   assert.equal(readAutoTurnSettings({ dailyLimit: 1e9 }).dailyLimit, DEFAULT_AUTO_TURN_SETTINGS.dailyLimit)
@@ -95,7 +99,7 @@ test('settings from a server: unusable values fall back to the defaults, never t
 
 test('a failed run is handed to the person at once with the reason, never left silently in 「AI の番」; 「もう一度」 gives it back', () => {
   let log = recordStarted(freshLog(NOW), B.id)
-  log = recordOutcome(log, B.id, 'failed', DEFAULT_AUTO_TURN_SETTINGS, 0)
+  log = recordOutcome(log, B.id, 'failed', ON, 0)
   assert.deepEqual(nextAiTurn(input({ log })), { run: A })
   const [b] = aiTurnItems({ queue: [B], log, wait: 'busy', noticeText: null, running: null })
   assert.deepEqual(b, { recordId: B.id, state: 'failed', reason: FAILED_REASON, canRetry: true, canHand: false })

@@ -182,9 +182,12 @@ describe('a link to an interface', () => {
     const other = ok(note(['x'])).record
     const closed = effort(m('u-alice'), { folder: '経理' })
     const foreign = effort(m('u-alice', 'b'))
-    const answers = [other.id, closed.id, foreign.id, 'effort-0000000000000000'].map(id => note(['y'], { links: { bundle: id } }, m('u-mallory')))
+    // Someone else's owner-only bundle (records.md "Owner-only records"): unseen, so the same answer — for an owner too.
+    const personal = effort(m('u-alice'), { personal: true })
+    const answers = [other.id, closed.id, foreign.id, personal.id, 'effort-0000000000000000'].map(id => note(['y'], { links: { bundle: id } }, m('u-mallory')))
     for (const a of answers) expect(a).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
     expect(new Set(answers.map(a => JSON.stringify(a)))).toHaveProperty('size', 1)
+    expect(note(['y'], { links: { bundle: personal.id } }, m('u-owner', 'a', 'owner'))).toEqual(answers[0])
     // The member who reads the closed bundle may link it.
     expect(note(['y'], { links: { bundle: closed.id } }, m('u-bob')).ok).toBe(true)
   })

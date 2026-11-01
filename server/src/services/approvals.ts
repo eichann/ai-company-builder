@@ -153,7 +153,7 @@ export function createApprovalService(deps: ApprovalDeps) {
   const managesFolder = (companyId: string, userId: string, folder: string | null) =>
     folder !== null && folder !== '' && deps.managedFolders(companyId, userId).some(f => isSameOrAncestorPath(f, folder.normalize('NFC')))
 
-  function canReadPlace(companyId: string, handle: CompanyData, userId: string, row: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder'>): boolean {
+  function canReadPlace(companyId: string, handle: CompanyData, userId: string, row: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>): boolean {
     const role = deps.roleOf(companyId, userId)
     return role !== null && recordReader({ companyId, userId, role }, handle.scopes.listWithRules()).record(row)
   }
@@ -338,7 +338,7 @@ export function createApprovalService(deps: ApprovalDeps) {
   }
 
   /** Whom to ask (a member id), by the server's data; null when nobody fits. */
-  function resolveApprover(member: Member, rule: ApproverRule, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder'>): string | null {
+  function resolveApprover(member: Member, rule: ApproverRule, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>): string | null {
     const handle = companyData.forCompany(member.companyId)
     if (rule === 'self') return member.userId
     const reads = (userId: string) => canReadPlace(member.companyId, handle, userId, place)
@@ -414,7 +414,7 @@ export function createApprovalService(deps: ApprovalDeps) {
         if (v) return ok({ outcome: 'approval-requested', approval: v, existing: true })
       }
 
-      const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null }
+      const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null, personalOwner: null }
       const approver = resolveApprover(member, rule, place)
       if (!approver) return refuse('conflict', '承認できる人が見つかりません。管理者に相談してください。', { code: 'NO_APPROVER' })
       const plugin = await deps.plugin(member.companyId, pluginId).catch(() => null)

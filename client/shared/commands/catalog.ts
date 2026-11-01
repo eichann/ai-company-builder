@@ -60,6 +60,11 @@ export const COMMANDS = defineCommands([
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),
   },
   {
+    // Shows a record's card in the editor area (files tab), as a place ← → can return to.
+    id: 'record.open', title: '記録のカードを開く', class: 'view',
+    args: z.object({ recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/) }),
+  },
+  {
     // Runs an action of a record's type through the server's state engine
     // (records.md). It changes shared state and tells the person it names,
     // hence outbound. The member's own screens call it with their session; the

@@ -9,7 +9,7 @@ import { createRecordsApi } from '../electron/records/api'
 const COMPANY = 'acme'
 const RECORD = 'minutes-0a1b2c3d4e5f6071'
 
-function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }) {
+function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown) {
   const record = { ...initial }
   const calls: string[] = []
   const tokens: Array<{ conversationId: string; agent: string; scope: string }> = []
@@ -32,6 +32,9 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
       record.state = 'reading'
       record.version += 1
       return json(200, { data: { record } })
+    }
+    if (url.pathname === `/api/companies/${COMPANY}/task-settings` && method === 'GET' && autoRun) {
+      return json(200, { success: true, data: { settings: { autoRun }, canEdit: false, updatedAt: null, updatedBy: null, updatedByName: null } })
     }
     if (url.pathname === `/api/companies/${COMPANY}/records/item/${RECORD}` && method === 'GET') return json(200, { data: { record } })
     if (url.pathname === `/api/companies/${COMPANY}/records/item/${RECORD}/actions/retry` && method === 'POST') {
@@ -98,4 +101,13 @@ test('after the turn: a reading left unfinished goes back to 「AI の番」; a 
   const finished = fakeServer({ state: 'read', version: 6 })
   assert.deepEqual(await claimsFor(finished).settle(COMPANY, RECORD), { outcome: 'done' })
   assert.ok(!finished.calls.some(c => c.endsWith('/actions/retry')))
+})
+
+test("「自動で進める」 comes from the company's task settings (S6); not readable means off, never a guess", async () => {
+  const on = fakeServer(undefined, { enabled: true, dailyLimit: 12, stopAfterFailures: 2 })
+  assert.deepEqual(await claimsFor(on).settings(COMPANY), { enabled: true, dailyLimit: 12, stopAfterFailures: 2 })
+  const off = fakeServer(undefined, { enabled: false, dailyLimit: 30, stopAfterFailures: 3 })
+  assert.equal((await claimsFor(off).settings(COMPANY)).enabled, false)
+  // An older server without the settings (404), or offline: nothing runs by itself.
+  assert.equal((await claimsFor(fakeServer()).settings(COMPANY)).enabled, false)
 })

@@ -97,6 +97,8 @@ const provenance = (actor: ActorInput) => ({
 })
 
 const NOTE_MAX = 2000
+/** The ledger action of sharing an owner-only record to a folder. */
+export const SHARE_ACTION = 'share'
 const TEXT_MAX = 500
 const LONG_TEXT_MAX = 5000
 
@@ -225,6 +227,21 @@ export const FILE_NOT_LINKABLE = {
 }
 
 /**
+ * A record link on create whose target the member cannot see: a missing record,
+ * another member's owner-only record and an unreadable private one all get this
+ * one answer (records.md "Owner-only records").
+ */
+export const LINK_TARGET_NOT_FOUND = { error: 'つなぐ先の記録が見つかりません', code: 'LINK_TARGET_NOT_FOUND' }
+
+/**
+ * Ledger changes that describe the record's place and links, not a server
+ * field: `links.<name>` (restored to the link rows) and `place.<what>` (an
+ * owner-only record shared to a folder; never undone). A replay shows them;
+ * they never land in the server fields.
+ */
+const isPlaceOrLinkChange = (field: string) => field.startsWith('links.') || field.startsWith('place.')
+
+/**
  * A link's targets as one ledger value (`links.<name>` before / after):
  * file links as a JSON array of company paths (a path may hold a comma),
  * record links as ids joined with commas (the service writer's form); null = none.
@@ -283,6 +300,20 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     return recordReader({ companyId, userId, role }, companyData.forCompany(companyId).scopes.listWithRules()).record(place)
   }
 
+  /**
+   * A folder a server-only record may be placed in (its readers' place): a
+   * company path outside every private folder that the member reads.
+   */
+  function placeFolder(member: Member, type: string, raw: unknown, reader: RecordReader): string | Outcome<never> {
+    const f = typeof raw === 'string' ? normalizeRepoPath(raw) : null
+    if (!f) return bad('folder must be a company path')
+    const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+    // Server-only records outside private folders for now (their links and reads assume a public place).
+    if (findPrivateScope(scopes, f)) return bad('A server-only record cannot be placed in a private folder yet', 'PRIVATE_PLACE')
+    if (!reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null })) return refuse('forbidden', 'You cannot read that folder')
+    return f
+  }
+
   function stateOf(records: RecordRepository, row: RecordRow, def: TypeDefinition) {
     const s = records.states([row.id])[0]
     let fields: Record<string, LedgerValue> = {}
@@ -326,14 +357,21 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
       if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
       if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')
+      // `personal: true` = owner-only (「持ち主だけ」): the creator alone sees it, never with a folder.
+      if (b.personal !== undefined && typeof b.personal !== 'boolean') return bad('personal must be true or false')
+      const personalOwner = b.personal === true ? member.userId : null
+      // A business plugin's types (deal, customer) are the place other records take their readers
+      // from (approvals, minutes, sent mail): never owner-only — also when a company extends one.
+      if (personalOwner !== null && records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')) {
+        return bad('この種類の記録は自分用にはできません', 'PERSONAL_NOT_FOR_TYPE')
+      }
+      if (personalOwner !== null && b.folder !== undefined && b.folder !== null) {
+        return bad('自分用の記録には部署を指定できません。部署に出すときは「部署に出す」を使ってください', 'PERSONAL_WITH_FOLDER')
+      }
       let folder: string | null = null
       if (b.folder !== undefined && b.folder !== null) {
-        const f = typeof b.folder === 'string' ? normalizeRepoPath(b.folder) : null
-        if (!f) return bad('folder must be a company path')
-        const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
-        // Server-only records outside private folders for now (their links and reads assume a public place).
-        if (findPrivateScope(scopes, f)) return bad('A server-only record cannot be placed in a private folder yet', 'PRIVATE_PLACE')
-        if (!reader.record({ id: '', type: def.name, scopeId: null, path: null, folder: f })) return refuse('forbidden', 'You cannot read that folder')
+        const f = placeFolder(member, def.name, b.folder, reader)
+        if (typeof f !== 'string') return f
         folder = f
       }
       const isMember = (id: string) => deps.isMember(member.companyId, id)
@@ -347,7 +385,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v
       }
-      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder })) {
+      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner })) {
         return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
       }
       // The state it starts in: `initial`, or one the type lists in `create_states` (task: `preparing`, the AI's turn).
@@ -382,6 +420,13 @@ export function createRecordEngine(deps: RecordEngineDeps) {
             links.push({ sourceId: id, name, position: links.length, targetId: null, targetPath: p })
           } else {
             if (typeof t !== 'string' || !RECORD_ID_RE.test(t)) return bad(`${name}: a record id`)
+            // A live record the member reads: someone else's owner-only record, a private one and a
+            // missing one get the same answer (none of them is named or confirmed). An interface link
+            // is answered by its own check below (BAD_LINK, also one answer for missing / unreadable /
+            // of another kind), so each link has exactly one refusal for an unseen target.
+            if (!l.targetIsInterface && !records.byIds([t]).some(r => reader.record(r))) {
+              return bad(LINK_TARGET_NOT_FOUND.error, LINK_TARGET_NOT_FOUND.code)
+            }
             links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
           }
         }
@@ -402,7 +447,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       }
       transactions.run(() => {
         records.upsert({
-          id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder,
+          id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder, personalOwner,
           title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
         })
         records.replaceLinks(id, links)
@@ -625,7 +670,10 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const ledger = records.ledger(row.id)
       const target = ledger.find(e => e.version === b.version)
       if (!target) return refuse('not-found', 'その変更はありません', { code: 'ENTRY_NOT_FOUND' })
-      if (target.action === 'create' || target.action === 'undo') return bad('This change cannot be undone', 'NOT_UNDOABLE')
+      // Sharing an owner-only record is not taken back: the folder's readers may already have seen it.
+      if (target.action === 'create' || target.action === 'undo' || target.changes.some(c => c.field.startsWith('place.'))) {
+        return bad('This change cannot be undone', 'NOT_UNDOABLE')
+      }
       if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
       const latest = ledger.length > 0 ? ledger[ledger.length - 1].version : 0
       if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
@@ -649,7 +697,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
       }
       const changes = target.changes.map(c => ({ field: c.field, before: c.after, after: c.before }))
-      const nextFields = Object.fromEntries(Object.entries(now.fields).filter(([k]) => !k.startsWith('links.')))
+      const nextFields = Object.fromEntries(Object.entries(now.fields).filter(([k]) => !isPlaceOrLinkChange(k)))
       let nextState = now.state
       let nextLinks: RecordLinkRow[] | null = null
       for (const c of changes) {
@@ -751,6 +799,55 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
       return ok({ record: summaryOf(records, row.id), entry, changed: true })
+    },
+
+    /**
+     * 「部署に出す／案件につなぐ」 (records.md "Owner-only records"): an owner-only
+     * record becomes visible to the readers of `folder` (a department folder
+     * the owner reads, never a private one). Only its owner — nobody else can
+     * even find it — and only the person, with their session (the route has no
+     * AI twin). A ledger entry `share` with `place.personal_owner` /
+     * `place.folder` before / after; never undone.
+     */
+    share(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+      const opened = open(member)
+      if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const { records, reader } = opened
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
+      if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      // Readable and owner-only means it is the member's own (the reader shows it to nobody else).
+      if (row.personalOwner !== member.userId) return conflict('この記録はもうほかの人にも見えています', 'NOT_PERSONAL')
+      const def = currentTypes(records).get(row.type)?.definition
+      if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
+      const b = body as Record<string, unknown> | null
+      if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
+      if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
+      const note = b.note === undefined ? '' : b.note
+      if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)
+      if (b.folder === undefined || b.folder === null) return bad('folder: the department folder whose readers will see it', 'FOLDER_REQUIRED')
+      const folder = placeFolder(member, row.type, b.folder, reader)
+      if (typeof folder !== 'string') return folder
+      const current = stateOf(records, row, def)
+      const expected = b.expectedVersion as number
+      if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
+      const at = clock.now()
+      const entry: LedgerEntry = {
+        recordId: row.id, version: current.version + 1, action: SHARE_ACTION, fromState: current.state, toState: current.state,
+        actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note,
+        changes: [
+          { field: 'place.personal_owner', before: member.userId, after: null },
+          { field: 'place.folder', before: row.folder, after: folder },
+        ],
+        attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
+      }
+      const written = transactions.run(() => {
+        if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
+        records.setPlace(row.id, { folder, personalOwner: null }, at)
+        records.appendLedger(entry)
+        return true
+      })
+      if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
+      return ok({ record: summaryOf(records, row.id), entry })
     },
 
     history(member: Member, recordId: string): Outcome<{ entries: LedgerEntry[] }> {
@@ -876,7 +973,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         }
         deps.transactions.run(() => {
           records.upsert({
-            id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder: input.folder,
+            id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder: input.folder, personalOwner: null,
             title: title || def.label, summary: '', createdAt: at, updatedAt: at, removedAt: null,
           })
           records.replaceLinks(id, linkRows(id))
@@ -1065,7 +1162,8 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const id = input.id ?? newRecordId(def.name, deps.ids.newToken().slice(0, 16))
     if (!RECORD_ID_RE.test(id) || !id.startsWith(`${def.name}-`)) return fail('bad-value', 'id')
-    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder }
+    // Service records are never owner-only (records.md "Owner-only records").
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner: null }
     if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const links: RecordLinkRow[] = []
     for (const [name, targets] of Object.entries(input.links ?? {})) {
@@ -1109,7 +1207,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       try {
         written = deps.transactions.run(() => {
           records.upsert({
-            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder,
+            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder, personalOwner: null,
             title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
           })
           records.replaceLinks(id, links)

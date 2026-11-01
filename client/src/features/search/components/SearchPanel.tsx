@@ -2,7 +2,9 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { MagnifyingGlass, X, CircleNotch } from '@phosphor-icons/react'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { CodeEditor } from '../../../shared/ui/CodeEditor'
-import { readSearchHit, searchFileContents } from '../api'
+import type { RecordListResult } from '../../../../shared/record-views'
+import { readSearchHit, searchFileContents, searchRecords } from '../api'
+import { RecordHits } from './RecordHits'
 
 interface GrepMatch {
   file: string
@@ -19,6 +21,8 @@ interface GroupedResult {
 
 interface SearchPanelProps {
   rootPath: string
+  /** Records are searched company-wide (what the member may read); none without a company. */
+  companyId?: string
   /** '' = the whole company (全社 tab). */
   departmentFolder: string
   inputRef?: React.RefObject<HTMLInputElement>
@@ -48,9 +52,10 @@ interface LoadedFile {
   content: string
 }
 
-export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPanelProps) {
+export function SearchPanel({ rootPath, companyId, departmentFolder, inputRef }: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GrepMatch[]>([])
+  const [recordHits, setRecordHits] = useState<RecordListResult | null>(null)
   const [truncated, setTruncated] = useState(false)
   const [searchError, setSearchError] = useState<string | null>(null)
   const [searchedQuery, setSearchedQuery] = useState('')
@@ -77,6 +82,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
     setIsSearching(false)
     setSelected(null)
     setLoadedFile(null)
+    setRecordHits(null)
   }, [rootPath, departmentFolder])
 
   const handleSearch = useCallback(async () => {
@@ -87,6 +93,12 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
     setIsSearching(true)
     setHasSearched(true)
     setSearchError(null)
+    setRecordHits(null)
+    if (companyId) {
+      searchRecords(companyId, trimmed)
+        .then(r => { if (seq === searchSeq.current) setRecordHits(r) })
+        .catch(() => {})
+    }
     try {
       // Main caps it (20 per file, 500 in all) and stops the previous search.
       const result = await searchFileContents(rootPath, trimmed, departmentFolder)
@@ -108,7 +120,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
     } finally {
       if (seq === searchSeq.current) setIsSearching(false)
     }
-  }, [query, rootPath, departmentFolder])
+  }, [query, rootPath, companyId, departmentFolder])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
@@ -125,6 +137,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
       setHasSearched(false)
       setSelected(null)
       setLoadedFile(null)
+      setRecordHits(null)
     }
   }, [handleSearch])
 
@@ -193,7 +206,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
             />
             {query && (
               <button
-                onClick={() => { searchSeq.current++; setQuery(''); setResults([]); setTruncated(false); setSearchError(null); setIsSearching(false); setHasSearched(false); setSelected(null); setLoadedFile(null) }}
+                onClick={() => { searchSeq.current++; setQuery(''); setResults([]); setTruncated(false); setSearchError(null); setIsSearching(false); setHasSearched(false); setSelected(null); setLoadedFile(null); setRecordHits(null) }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-zinc-700 text-gray-400 dark:text-zinc-500"
               >
                 <X size={11} />
@@ -205,8 +218,8 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
               {searchError
                 ? searchError
                 : results.length === 0
-                  ? '一致する結果がありません'
-                  : `${grouped.length}ファイル / ${results.length}件`
+                  ? 'ファイルには一致する結果がありません'
+                  : `ファイル：${grouped.length}ファイル / ${results.length}件`
               }
             </p>
           )}
@@ -229,8 +242,10 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
               <MagnifyingGlass size={36} className="mb-3 opacity-40" />
               <p className="text-xs text-center">検索ワードを入力して Enter</p>
             </div>
-          ) : grouped.length === 0 ? null : (
-            <div className="py-1">
+          ) : (
+            <>
+            <RecordHits result={recordHits} />
+            {grouped.length > 0 && <div className="py-1">
               {grouped.map(({ file, displayPath, matches }) => {
                 const IC = getFileIcon(file.split('/').pop() || '', false)
                 return (
@@ -276,7 +291,8 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
                   </div>
                 )
               })}
-            </div>
+            </div>}
+            </>
           )}
         </div>
       </div>

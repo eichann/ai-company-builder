@@ -33,6 +33,7 @@ import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
 import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
+import type { TaskSettingsRepository } from './task-settings'
 
 export interface CompanyData {
   /** The company this handle is limited to. */
@@ -54,6 +55,8 @@ export interface CompanyData {
   readonly outbound: OutboundMailRepository
   /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */
   readonly fixedPayloads: FixedPayloadRepository
+  /** Task settings (task list departments, reply 目安, auto-run) and department membership (ports/task-settings.ts). */
+  readonly tasks: TaskSettingsRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

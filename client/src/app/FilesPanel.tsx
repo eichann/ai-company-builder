@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { FileTreePanel } from '../features/files/components/FileTreePanel'
 import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
@@ -20,6 +21,12 @@ interface Props {
   onSelectOpenFile: (filePath: string) => void
   onCloseFile: (filePath: string) => void
   onPrivateFolderCreated: () => void
+  /** ← → in front of the editor's tabs. */
+  navigation?: ReactNode
+  /** A record's card shown in the editor area instead of the active file. */
+  overlay?: ReactNode
+  /** Beside the active file. */
+  aside?: ReactNode
 }
 
 /** The ファイル tab: the file tree (files) and the open files (editor), split by the layout tree. */
@@ -51,6 +58,9 @@ export function FilesPanel(props: Props) {
           onSelectFile={props.onSelectOpenFile}
           onCloseFile={props.onCloseFile}
           onPinFile={props.onPinFile}
+          navigation={props.navigation}
+          overlay={props.overlay}
+          aside={props.aside}
         />
       )}
     />

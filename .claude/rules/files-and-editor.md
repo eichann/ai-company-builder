@@ -17,6 +17,7 @@ paths:
   - "client/shared/skill-frontmatter.ts"
   - "client/tests/skill-frontmatter.test.ts"
   - "client/src/features/history/**"
+  - "client/src/app/FileSidePanel.tsx"
   - "client/src/features/search/**"
   - "client/src/shared/ipc/diffs.ts"
   - "client/src/shared/ipc/file-events.ts"
@@ -86,7 +87,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
-  once opened (history follows the department only while shown, since it runs `git log`).
+  once opened.
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
   `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
@@ -247,7 +248,28 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
-## Search, Cmd+P and folder history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
+## Places, ← → and the file's side column (milestone 5 U8, design §7)
+
+- The editor area shows a file tab or a record's card (`features/records/components/RecordCard.tsx`,
+  `records.md` "The app's views"). `features/editor/places.ts` (pure) + `hooks/usePlaceHistory.ts`
+  keep the places shown, like a browser: ← / → (`components/PlaceNavigation.tsx`, in front of the
+  tabs) step through them, a new place drops the forward ones, ≤ 50, a new company starts over;
+  the restored active tab is the first place. `AppShell` records a place for what the member
+  chose (tree, tab, Cmd+P, `file.open`, `record.open`); ← to a closed file opens it again.
+  `TabbedEditorPanel` takes the parts as slots (`navigation`, `overlay` = the card shown instead
+  of the file with the tabs kept, `aside`), so the editor knows nothing of records.
+- Beside the open file, `src/app/FileSidePanel.tsx` (foldable, `localStorage editor:side-open`)
+  composes 「つながっているもの」 (`features/records/components/FileConnections.tsx`) and 「前の版」
+  (`features/history/components/FileVersions.tsx`).
+- **No 履歴 tab** (owner decision §7-8): the commit list of a folder is gone; a file's earlier
+  versions are reached from the file. 「前の版」 lists `git log` of that one file (30) and shows what
+  a version changed (`DiffModal`, commit mode); it reads again after every sync
+  (`features/history/refresh.ts` `refreshFileVersions`, called by `AppShell`). Putting an earlier
+  version back is not built (the 履歴 tab had none either; 復元 of `.backups` is unchanged).
+- UI tests: `tests/ui/skill-layout.spec.ts` (search with records, the card, ← →, 「前の版」 after a
+  sync), `skill-layout-state.spec.ts` (the side column keeps the editor inside the window).
+
+## Search, Cmd+P and a file's history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
 
 - Content search is a fixed string, A–Z case-insensitive (`LC_ALL=C -F -i`), ≤ 20 matches per
   file and **≤ 500 in all**: git's output is streamed and the process killed there (`truncated` →
@@ -257,9 +279,13 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   or a not-downloaded folder (exclude pathspecs); readable private folders in their own clone
   (paths company-relative). Every read runs with `GIT_NO_LAZY_FETCH=1` + `GIT_OPTIONAL_LOCKS=0`
   so a search never downloads a blob. `''` = the whole company (pathspec `.`, never `/`).
-- Folder history uses `git log -- :(literal)<folder>/` without `--follow` (simple-git's `file`
-  option added it: 0.9 s instead of 0.02 s, same commits). `invalidateCommitCache()` also makes
-  the visible history panel re-fetch.
+- `git:log` takes a folder or one file: `git log -- :(literal)<path>` without `--follow`
+  (simple-git's `file` option added it: 0.9 s instead of 0.02 s on a folder, same commits). A path
+  inside a readable private folder is read from that folder's own clone (the deepest `.git` under
+  the company root, validated by the allowed roots), as is `git:commitFileDiff` (`repoHolding`;
+  test `ipc-git.test.ts`). `git:showCommit` was removed with the 履歴 tab.
+- The 検索 tab also lists records (`records.md` "The app's views"): `RecordHits`, by kind, above the
+  files; company-wide (the server decides what the member reads), cleared like the file hits.
 - The review diff (`src/features/doc-review/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder
@@ -268,5 +294,6 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
 - The renderer reaches these through read-only ports: `src/features/search/api.ts`
   (`CompanySearchReads`: the file list for Cmd+P, content search, a hit's text),
-  `src/features/history/api.ts` (`CommitHistoryReads`: log, a commit's files) and, for
-  `DiffViewer` (shown by the sync preview and the history), `src/shared/ipc/diffs.ts` (`DiffReads`).
+  `src/features/history/api.ts` (`FileVersionReads`: a file's log) and, for
+  `DiffViewer` (shown by the sync preview and 「前の版」), `src/shared/ipc/diffs.ts` (`DiffReads`).
+  Record hits go through `RecordSearchOutbound` (search's `api.ts`: the words go to the server).

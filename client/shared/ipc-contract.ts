@@ -37,6 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
@@ -277,12 +278,6 @@ export interface GitLogResult {
   error?: string
 }
 
-export interface GitShowCommitResult {
-  success: boolean
-  files: Array<{ status: string; path: string }>
-  error?: string
-}
-
 /** electron/sync/company-folder.ts (CompanyFolderDecision) */
 export type CompanyFolderDecisionView =
   | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' }
@@ -491,6 +486,11 @@ export interface IpcInvokeChannels {
   'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
   /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
   'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
+  // What the app shows of records (record-views.ts), read with the session in main.
+  'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
+  'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
+  /** companyPath: the file's path inside the company folder (`営業部/見積.md`), not a local path. */
+  'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -507,8 +507,8 @@ export interface IpcInvokeChannels {
   // folderPath '' = the whole company (electron/git-search.ts)
   'git:listFiles': { args: [repoPath: string, folderPath: string]; result: GitListFilesResult }
   'git:grep': { args: [repoPath: string, query: string, folderPath: string]; result: GitGrepResult }
+  // folderPath: a folder or one file (「前の版」); inside a private folder, read from its own repository
   'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult }
-  'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult }
   'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
   'git:inspectCompanyFolder': { args: [folder: string, companyId: string]; result: InspectCompanyFolderResult }
   'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
@@ -797,6 +797,9 @@ export interface ElectronAPI {
   getAutoTurnSettings: Invoke<'aiTurns:settings'>
   claimAiTurn: Invoke<'aiTurns:claim'>
   settleAiTurn: Invoke<'aiTurns:settle'>
+  searchRecords: Invoke<'recordViews:search'>
+  getRecordCard: Invoke<'recordViews:card'>
+  getRecordsForFile: Invoke<'recordViews:forFile'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>
@@ -812,7 +815,6 @@ export interface ElectronAPI {
   gitListFiles: Invoke<'git:listFiles'>
   gitGrep: Invoke<'git:grep'>
   gitLog: Invoke<'git:log'>
-  gitShowCommit: Invoke<'git:showCommit'>
   gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
   gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'>
   onSetupProgress: Subscribe<'setup:progress'>

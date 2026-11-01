@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, type ReactNode } from 'react'
 import { FileText, Code, Eye } from '@phosphor-icons/react'
 import { CodeEditor } from '../../../shared/ui/CodeEditor'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
@@ -28,6 +28,12 @@ interface TabbedEditorPanelProps {
   gotoLine?: number | null
   /** This editor's pane: its shortcuts (⌘S, ⌘⇧V, ⌘F) work only while the focus is inside it. */
   paneId?: string
+  /** In front of the tabs (← →). */
+  navigation?: ReactNode
+  /** Shown instead of the active file (a record's card); the tabs stay, and choosing one leaves it. */
+  overlay?: ReactNode
+  /** Beside the active file (「つながっているもの」, 「前の版」). */
+  aside?: ReactNode
 }
 
 export function TabbedEditorPanel({
@@ -40,6 +46,9 @@ export function TabbedEditorPanel({
   onPinFile,
   gotoLine,
   paneId = 'editor',
+  navigation,
+  overlay,
+  aside,
 }: TabbedEditorPanelProps) {
   const { isReadOnly } = useWriteAccess()
   const [error, setError] = useState<string | null>(null)
@@ -117,6 +126,15 @@ export function TabbedEditorPanel({
     }
   }
 
+  if (openFiles.length === 0 && overlay) {
+    return (
+      <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30">
+        <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}</div>
+        <div className="flex-1 overflow-auto min-w-0">{overlay}</div>
+      </div>
+    )
+  }
+
   if (openFiles.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-900/30 text-gray-400 dark:text-zinc-600">
@@ -130,16 +148,35 @@ export function TabbedEditorPanel({
   return (
     // tabIndex: a click on the preview (nothing focusable) still puts the focus in this editor's area.
     <div ref={rootRef} {...commandArea('editor', paneId)} tabIndex={-1} className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30 outline-none">
+      <div className="flex-shrink-0 flex min-w-0 bg-gray-100 dark:bg-zinc-900/50">
+      {navigation}
+      <div className="flex-1 min-w-0">
       <EditorTabBar
         openFiles={openFiles}
         fileContents={fileContents}
-        activeFilePath={activeFilePath}
+        activeFilePath={overlay ? null : activeFilePath}
         previewFilePath={previewFilePath}
         tabLabels={tabLabels}
         onSelect={handleSelectFile}
         onPin={onPinFile}
         onClose={handleCloseTab}
       />
+      </div>
+      </div>
+
+      <ConfirmDialog
+        isOpen={confirmRequest !== null}
+        title={confirmRequest?.title ?? ''}
+        message={confirmRequest?.message ?? ''}
+        confirmText={confirmRequest?.confirmText}
+        cancelText="キャンセル"
+        danger={confirmRequest?.danger}
+        confirmOnEnter={false}
+        onConfirm={() => saving.answerConfirm(true)}
+        onCancel={() => saving.answerConfirm(false)}
+      />
+
+      {overlay ? <div className="flex-1 overflow-auto min-w-0">{overlay}</div> : <>
 
       {activeFilePath && isReadOnly(activeFilePath) && <ReadOnlyNotice />}
 
@@ -158,21 +195,11 @@ export function TabbedEditorPanel({
 
       {notice && <EditorNotice notice={notice} onDismiss={() => setNotice(null)} />}
 
-      <ConfirmDialog
-        isOpen={confirmRequest !== null}
-        title={confirmRequest?.title ?? ''}
-        message={confirmRequest?.message ?? ''}
-        confirmText={confirmRequest?.confirmText}
-        cancelText="キャンセル"
-        danger={confirmRequest?.danger}
-        confirmOnEnter={false}
-        onConfirm={() => saving.answerConfirm(true)}
-        onCancel={() => saving.answerConfirm(false)}
-      />
 
       {error && <EditorError error={error} onDismiss={() => setError(null)} />}
 
-      {/* Editor / Image Preview */}
+      {/* Editor / Image Preview, and beside it the file's links and earlier versions */}
+      <div className="flex-1 min-h-0 flex min-w-0">
       <div className="flex-1 overflow-hidden min-w-0">
         {activeFile && activeFilePath && externalDiffPath === activeFilePath && activeFile.external?.kind === 'changed' ? (
           <div className="h-full flex flex-col">
@@ -255,6 +282,8 @@ export function TabbedEditorPanel({
           </div>
         ) : null}
       </div>
+      {activeFile && aside}
+      </div>
 
       {/* Footer hint */}
       <div className="flex-shrink-0 px-4 py-1.5 border-t border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">
@@ -264,6 +293,7 @@ export function TabbedEditorPanel({
             : `自動保存 ${saving.hasChanges ? '(未保存の変更あり)' : ''}`}
         </span>
       </div>
+      </>}
     </div>
   )
 }

@@ -100,7 +100,6 @@ contract.invoke git:log
 contract.invoke git:preview
 contract.invoke git:revertFile
 contract.invoke git:setupCompanyRemote
-contract.invoke git:showCommit
 contract.invoke git:sparseGetExclusions
 contract.invoke git:sparseSetExclusions
 contract.invoke git:sparseUncommittedChanges
@@ -130,6 +129,9 @@ contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
 contract.invoke privateFolders:reservedPathRefusal
+contract.invoke recordViews:card
+contract.invoke recordViews:forFile
+contract.invoke recordViews:search
 contract.invoke shell:openExternal
 contract.invoke skills:list
 contract.invoke skills:makePrivate
@@ -291,6 +293,8 @@ contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients:
 contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => string
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
+contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
+contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
@@ -307,7 +311,6 @@ contract.type ElectronAPI.gitLog = gitLog: Invoke<'git:log'>
 contract.type ElectronAPI.gitPreview = gitPreview: Invoke<'git:preview'>
 contract.type ElectronAPI.gitRevertFile = gitRevertFile: Invoke<'git:revertFile'>
 contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
-contract.type ElectronAPI.gitShowCommit = gitShowCommit: Invoke<'git:showCommit'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
 contract.type ElectronAPI.linkMinutesDeal = linkMinutesDeal: Invoke<'minutes:linkDeal'>
@@ -354,6 +357,7 @@ contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'too
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
+contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
 contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
 contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundMail:send'>
@@ -466,10 +470,6 @@ contract.type GitResult.success = success: boolean
 contract.type GitResult.untrackedPersonalFiles = untrackedPersonalFiles?: string[]
 contract.type GitResult.writeDeniedBackupPath = writeDeniedBackupPath?: string
 contract.type GitResult.writeDeniedFiles = writeDeniedFiles?: string[]
-contract.type GitShowCommitResult = export interface GitShowCommitResult { }
-contract.type GitShowCommitResult.error = error?: string
-contract.type GitShowCommitResult.files = files: Array<{ status: string; path: string }>
-contract.type GitShowCommitResult.success = success: boolean
 contract.type InspectCompanyFolderResult = export interface InspectCompanyFolderResult { }
 contract.type InspectCompanyFolderResult.decision = decision?: CompanyFolderDecisionView
 contract.type InspectCompanyFolderResult.error = error?: string
@@ -581,7 +581,6 @@ contract.type IpcInvokeChannels.'git:log' = 'git:log': { args: [repoPath: string
 contract.type IpcInvokeChannels.'git:preview' = 'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
 contract.type IpcInvokeChannels.'git:revertFile' = 'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
 contract.type IpcInvokeChannels.'git:setupCompanyRemote' = 'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
-contract.type IpcInvokeChannels.'git:showCommit' = 'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult }
 contract.type IpcInvokeChannels.'git:sparseGetExclusions' = 'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
@@ -611,6 +610,9 @@ contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null }
+contract.type IpcInvokeChannels.'recordViews:card' = 'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
+contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
+contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
@@ -787,7 +789,6 @@ main.handle git:log @ features/git-history/ipc.ts (repoPath: string, folderPath:
 main.handle git:preview @ features/git-history/ipc.ts (repoPath: string)
 main.handle git:revertFile @ features/git-history/ipc.ts (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted')
 main.handle git:setupCompanyRemote @ features/company-setup/ipc.ts (repoPath: string, companyId: string, selectedPaths?: string[])
-main.handle git:showCommit @ features/git-history/ipc.ts (repoPath: string, commitHash: string, folderPath?: string)
 main.handle git:sparseGetExclusions @ features/download-choices/ipc.ts (repoPath: string)
 main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath: string, excluded: string[])
 main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
@@ -817,6 +818,9 @@ main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: 
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
 main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts (targetPath: string)
+main.handle recordViews:card @ features/record-views/ipc.ts (companyId, recordId)
+main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, companyPath)
+main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -952,6 +956,10 @@ preload getPermissionMode -> invoke config:getPermissionMode()
 preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
 preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
+preload getRecordCard -> invoke recordViews:card($0, $1)
+preload getRecordCard : (companyId: string, recordId: string) => Promise<RecordCardResult>
+preload getRecordsForFile -> invoke recordViews:forFile($0, $1)
+preload getRecordsForFile : (companyId: string, companyPath: string) => Promise<RecordListResult>
 preload getServerUrl -> invoke config:getServerUrl()
 preload getServerUrl : () => Promise<string | null>
 preload getSession -> invoke auth:getSession()
@@ -984,8 +992,6 @@ preload gitRevertFile -> invoke git:revertFile($0, $1, $2)
 preload gitRevertFile : (repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<SimpleResult>
 preload gitSetupCompanyRemote -> invoke git:setupCompanyRemote($0, $1, $2)
 preload gitSetupCompanyRemote : (repoPath: string, companyId: string, selectedPaths?: string[] | undefined) => Promise<GitResult & { refused?: boolean | undefined; }>
-preload gitShowCommit -> invoke git:showCommit($0, $1, $2)
-preload gitShowCommit : (repoPath: string, commitHash: string, folderPath?: string | undefined) => Promise<GitShowCommitResult>
 preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
 preload hasApiKey -> invoke config:hasApiKey()
@@ -1078,6 +1084,8 @@ preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)
 preload saveOwnBrokerKey : (companyId: string, service: string, secret: string, displayName?: string | undefined) => Promise<OwnKeysResult>
 preload searchChatSessions -> invoke chatHistory:search($0, $1)
 preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
+preload searchRecords -> invoke recordViews:search($0, $1)
+preload searchRecords : (companyId: string, text: string) => Promise<RecordListResult>
 preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)

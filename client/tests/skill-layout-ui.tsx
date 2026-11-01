@@ -104,6 +104,9 @@ const COMMITS = [
   { hash: 'c1'.padEnd(40, '0'), hashShort: 'c1000000', message: '顧客一覧を追加', author: '山田 花子', date: '2026-10-21T09:00:00+09:00' },
 ]
 
+const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', kind: 'task' as const, title: 'A社 提案書を仕上げる', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
+const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめ済み', updatedAt: '2026-10-30T10:00:00Z' }
+
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
 // A file link clicked in a consultation's own window, after main checked it.
 const fileRequests = emitter<{ path: string }>()
@@ -162,7 +165,26 @@ const api: Partial<ElectronAPI> = {
     return { success: true, results: [] }
   },
   gitLog: async (_root: string, folder: string) => { record('gitLog', [folder]); return { success: true, commits: [...COMMITS] } },
-  gitShowCommit: async () => ({ success: true, files: [] }) as never,
+  gitCommitFileDiff: async () => ({ success: true, diff: '@@ -1 +1 @@\n-# 提案\n+# A社 提案\n' }),
+  // Records (search, the record card, a file's 「つながっているもの」): what the server would answer.
+  searchRecords: async (companyId: string, text: string) => {
+    record('searchRecords', [companyId, text])
+    return text === '提案'
+      ? { success: true, available: true, total: 2, records: [RECORD_TASK, RECORD_DECISION] }
+      : { success: true, available: true, total: 0, records: [] }
+  },
+  getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+    ? { success: true, card: {
+      record: RECORD_TASK,
+      fields: [{ label: '担当', value: '田中 太郎' }, { label: '期限', value: '2026-11-05' }],
+      history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
+      links: [{ label: '関係するファイル', path: '営業部/提案書/A社_提案.md' }, { label: '決めたこと', record: RECORD_DECISION }],
+    } }
+    : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
+  getRecordsForFile: async (_companyId: string, companyPath: string) => {
+    record('getRecordsForFile', [companyPath])
+    return { success: true, available: true, total: companyPath === '営業部/提案書/A社_提案.md' ? 1 : 0, records: companyPath === '営業部/提案書/A社_提案.md' ? [RECORD_TASK] : [] }
+  },
   gitSync: async () => {
     record('gitSync', [])
     await sleep(150)

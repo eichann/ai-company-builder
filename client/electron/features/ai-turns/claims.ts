@@ -22,8 +22,6 @@ export interface AiTurnClaimsDeps {
   windowOpen: () => boolean
   /** The emergency stop allows AI (agent-stop.md). */
   aiAllowed: () => boolean
-  /** The company's 「自動で進める」 (S6); undefined → the defaults. */
-  readSettings?: (companyId: string) => Promise<unknown>
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
 }
@@ -59,9 +57,12 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
 
   return {
+    /** The company's 「自動で進める」 (`autoRun` of S6's task settings); not readable → off. */
     async settings(companyId: string): Promise<AutoTurnSettings> {
-      if (!COMPANY.test(companyId) || !deps.readSettings) return readAutoTurnSettings(undefined)
-      try { return readAutoTurnSettings(await deps.readSettings(companyId)) } catch { return readAutoTurnSettings(undefined) }
+      if (!COMPANY.test(companyId)) return readAutoTurnSettings(undefined)
+      const r = await session(companyId, 'GET', '/task-settings')
+      const view = r?.status === 200 ? r.data as { settings?: { autoRun?: unknown } } | undefined : undefined
+      return readAutoTurnSettings(view?.settings?.autoRun)
     },
 
     /** Take the record's AI turn for this consultation, or learn that another PC (or person) was first. */

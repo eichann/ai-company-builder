@@ -18,7 +18,7 @@ import { logError } from '../lib/error-log'
 export { MAX_MANAGERS_PER_DEPARTMENT }
 
 export const departmentsRoute = new Hono()
-const { access, departments } = services
+const { access, departments, taskSettings } = services
 
 // A departments row as the API returns it — camelCase keys, and is_active
 // (SQLite 0/1) as a boolean
@@ -379,4 +379,39 @@ departmentsRoute.put('/:id/managers', async (c) => {
   if (!managers.ok) return refusal(c, managers)
 
   return c.json({ success: true, data: { managers: managers.value } })
+})
+
+// ============================================================================
+// Department membership (所属する部署, stage 2 S6, .claude/rules/tasks.md)
+//
+// Who belongs to a department: any member reads; owner/admin and that
+// department's managers replace it. Belonging changes nobody's folder access.
+// ============================================================================
+
+// GET /api/companies/:companyId/departments/:id/members - any member (read-only)
+departmentsRoute.get('/:id/members', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const member = access.member(c.req.param('companyId') ?? '', user.id)
+  if (!member.ok) return refusal(c, member)
+  const result = taskSettings.departmentMembers(member.value, c.req.param('id') ?? '')
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+// PUT /api/companies/:companyId/departments/:id/members - owner/admin or this department's managers; replaces the set
+departmentsRoute.put('/:id/members', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const member = access.member(c.req.param('companyId') ?? '', user.id)
+  if (!member.ok) return refusal(c, member)
+  let body: unknown
+  try { body = await c.req.json() } catch { body = null }
+  const result = taskSettings.setDepartmentMembers(member.value, c.req.param('id') ?? '', body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
 })

@@ -72,10 +72,11 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
 - `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
   `failed` / `skipped` → failed, still `reading` → `retry` (the assignee's own action) so it is not
   stuck for 30 minutes.
-- `aiTurns:settings(companyId)` — the company's 「自動で進める」 (`AutoTurnSettings`: enabled, daily
-  limit, stop after N failures in a row; `readAutoTurnSettings` checks each value). Until S6 adds
-  the setting, `createAiTurnClaims` has no `readSettings` and answers the defaults (on, 20 a day,
-  stop after 3). S6 plugs in by passing `readSettings` in `main.ts`.
+- `aiTurns:settings(companyId)` — the company's 「自動で進める」: `autoRun` of S6's task settings
+  (`GET /task-settings` with the session; `shared/core/task-settings.ts`: enabled, daily limit,
+  stop after N failures in a row). `readAutoTurnSettings` checks each value against S6's limits;
+  not readable (offline, an older server) or missing → **off**: nothing starts on a guess. S6's
+  default is off, so an admin turns it on (admin console 「やることの一覧」).
 
 ## The rules (`aiTurns.ts`, per member and company in localStorage `aiTurns:<company>:<user>`)
 
