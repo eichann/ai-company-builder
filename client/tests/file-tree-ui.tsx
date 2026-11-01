@@ -6,6 +6,7 @@
 //
 // window.__acbCalls  every write the tree asked for, as [method, ...args]
 // window.__acbSelected  the paths onSelectFile received, in order
+// ?tasks=off  the company does not use tasks (records off): no 「やることにつなぐ…」
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -113,6 +114,7 @@ installElectronAPI({
   reservedPathRefusal: async p => (split(p)[1] === '人事評価' ? '「人事評価」という名前は使えません。別の名前にしてください。' : null),
   getMyPrivateFolders: async () => ({ success: true, folders: FOLDERS }),
   // 「やることにつなぐ…」: the member's open tasks and the link (main asks the server).
+  getTasksAvailable: async () => new URLSearchParams(location.search).get('tasks') !== 'off',
   getOpenTasks: async () => ({ success: true, tasks: TASKS }),
   linkFileToTask: async (companyId, taskId, companyPath, seenVersion) => {
     calls.push(['linkFileToTask', companyId, taskId, companyPath, seenVersion])
@@ -136,7 +138,7 @@ function Preview() {
           departmentFolder="営業部"
           selectedFilePath={open}
           onSelectFile={p => { selected.push(p); setOpen(p) }}
-          onLinkToTask={p => link.open(p.slice(ROOT.length + 1))}
+          onLinkToTask={link.available ? p => link.open(p.slice(ROOT.length + 1)) : undefined}
         />
       </div>
       <div className="flex-1 p-8 text-sm text-gray-500 dark:text-zinc-400">

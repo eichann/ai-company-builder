@@ -131,6 +131,7 @@ contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
+contract.invoke tasks:available
 contract.invoke tasks:linkFile
 contract.invoke tasks:open
 contract.invoke tool-approval-response
@@ -289,6 +290,7 @@ contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreate
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
+contract.type ElectronAPI.getTasksAvailable = getTasksAvailable: Invoke<'tasks:available'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
 contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
@@ -607,6 +609,7 @@ contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'tasks:available' = 'tasks:available': { args: [companyId: string]; result: boolean }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, taskId: string, companyPath: string, seenVersion: number]; result: LinkFileResult }
 contract.type IpcInvokeChannels.'tasks:open' = 'tasks:open': { args: [companyId: string]; result: OpenTasksResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
@@ -811,6 +814,7 @@ main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFo
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
+main.handle tasks:available @ features/tasks/ipc.ts (companyId)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, taskId, companyPath, seenVersion)
 main.handle tasks:open @ features/tasks/ipc.ts (companyId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
@@ -943,6 +947,8 @@ preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
 preload getStats -> invoke fs:stat($0)
 preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
+preload getTasksAvailable -> invoke tasks:available($0)
+preload getTasksAvailable : (companyId: string) => Promise<boolean>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
 preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
 preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)

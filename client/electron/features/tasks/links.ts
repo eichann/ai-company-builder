@@ -33,6 +33,16 @@ function choiceOf(r: unknown): TaskChoice | null {
   return { id: x.id, title: x.title.slice(0, 200), state: typeof x.state === 'string' ? x.state : null, due: typeof due === 'string' ? due : null, version: x.version }
 }
 
+type TaskType = { states: string[]; final?: unknown }
+
+/** The `task` type from `GET /records/types` (404 while records are off), or null. */
+function taskTypeOf(types: Answer): TaskType | null {
+  if (types.status !== 200) return null
+  const task = ((types.body?.data as { types?: Array<{ definition?: { name?: unknown; states?: unknown; final?: unknown } }> } | undefined)?.types ?? [])
+    .map(t => t.definition).find(d => d?.name === 'task')
+  return task && Array.isArray(task.states) ? task as TaskType : null
+}
+
 export function createTaskLinks(deps: TaskLinksDeps) {
   const doFetch = deps.fetch ?? fetch
 
@@ -53,16 +63,24 @@ export function createTaskLinks(deps: TaskLinksDeps) {
   }
 
   return {
+    /**
+     * Whether the company uses tasks (records on and a `task` type): the menu item shows only
+     * then. Offline or unsure answers false — the chooser is useless without the server.
+     */
+    async available(companyId: string): Promise<boolean> {
+      if (!COMPANY.test(companyId)) return false
+      const types = await call(companyId, 'GET', '/records/types')
+      return types !== null && taskTypeOf(types) !== null
+    },
+
     /** The member's open tasks: they request it, do it, review it, or it is their turn. */
     async openTasks(companyId: string): Promise<OpenTasksResult> {
       const me = deps.userId()
       if (!COMPANY.test(companyId) || !me) return { success: false, error: INVALID }
       const types = await call(companyId, 'GET', '/records/types')
       if (!types) return { success: false, error: TASKS_OFFLINE_TEXT }
-      if (types.status === 404) return { success: false, error: TASKS_OFF_TEXT }
-      const task = ((types.body?.data as { types?: Array<{ definition?: { name?: unknown; states?: unknown; final?: unknown } }> } | undefined)?.types ?? [])
-        .map(t => t.definition).find(d => d?.name === 'task')
-      if (!task || !Array.isArray(task.states)) return { success: false, error: TASKS_OFF_TEXT }
+      const task = taskTypeOf(types)
+      if (!task) return { success: false, error: TASKS_OFF_TEXT }
       const final = Array.isArray(task.final) ? task.final as string[] : []
       const open = (task.states as string[]).filter(s => !final.includes(s))
       const answers = await Promise.all(TASK_PEOPLE_FIELDS.map(field =>

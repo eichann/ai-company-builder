@@ -190,13 +190,15 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
 - No existence check: a path not synced yet links and reads `broken` until it arrives.
 - The app's entrance (milestone 5 brings the task card): the file tree's right-click item
   「やることにつなぐ…」 (`src/features/files/contextMenuItems.tsx`, shown when `FileTreePanel` gets
-  `onLinkToTask`; `src/app/FilesPanel.tsx` composes) opens `src/features/tasks/components/LinkToTaskDialog.tsx`
+  `onLinkToTask`; `src/app/FilesPanel.tsx` composes, only while `useLinkToTask`'s `available`:
+  IPC `tasks:available` asks `GET /records/types` — records on and a `task` type; off, offline or
+  unsure hides the item, and while hidden it asks again when the window regains focus) opens `src/features/tasks/components/LinkToTaskDialog.tsx`
   (`hooks/useLinkToTask.ts`): the member's open tasks — non-final states, where they are
   assignee, requester, reviewer or next actor — searched by title, soonest due first; choosing one
   links the file's company path and shows 「「<file>」を「<task>」につなぎました。」. IPC `tasks:open` /
   `tasks:linkFile` (`client/electron/features/tasks/`, with the session in main; one retry at the
   server's version on `VERSION_CONFLICT`), pure parts `client/shared/task-links.ts`. UI test:
-  `client/tests/ui/file-tree.spec.ts` 「やることにつなぐ…」.
+  `client/tests/ui/file-tree.spec.ts` 「やることにつなぐ…」 and the records-off case.
 - The consultation AI: no consultation is linked to a task in the app yet (only a minutes
   consultation stores `minutesId`, `minutes.md`). `records_get` returns the file links (`path`,
   `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked

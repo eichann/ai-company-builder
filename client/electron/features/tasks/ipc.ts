@@ -1,4 +1,5 @@
 // 「やることにつなぐ…」 (records.md "Linking files later"):
+//   tasks:available whether the company uses tasks (the item shows only then)
 //   tasks:open      the member's open tasks to choose from
 //   tasks:linkFile  link a company file to the chosen task
 // Everything goes with the member's session, which stays in main.
@@ -10,6 +11,7 @@ const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0 &
 const invalid = { success: false, error: '入力が正しくありません。' } as const
 
 export function registerTasksIpc(ipc: IpcRegistrar, tasks: TaskLinks): void {
+  ipc.handle('tasks:available', (_event, companyId) => (str(companyId) ? tasks.available(companyId) : false))
   ipc.handle('tasks:open', (_event, companyId) => (str(companyId) ? tasks.openTasks(companyId) : invalid))
   ipc.handle('tasks:linkFile', (_event, companyId, taskId, companyPath, seenVersion) =>
     str(companyId) && str(taskId) && str(companyPath) && typeof seenVersion === 'number'
