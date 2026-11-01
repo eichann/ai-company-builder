@@ -738,7 +738,11 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   `runId` comes from the token, never a body). `ledgerCause` (`shared/core/record-ledger.ts`):
   `person` (a session), `ai` (the member's AI in a consultation), `run` (an automated run under
   the member's authority), `system` (`acb:` actors: the server clock), `outside` (seen in an
-  outside system). The history answers each entry's `cause` and `runId`.
+  outside system). The history answers each entry's `cause` and `runId`. Putting a stuck step
+  back is never the member's: a run finished as failed lets its step put the record back
+  (`afterFailedRun`; minutes reading → `minutes.putBackAfterRun`, actor the member's AI with the
+  run's id → `run`), and the 30-minute rule runs in `POST /me/minutes/check` as the server clock
+  (`system`) (`minutes.md`).
 - A run is its member's: anyone else, another company's id and a missing one get the same 404
   `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
 - Test: `server/tests/integration/ai-runs.test.ts` (two devices → one claim; the older

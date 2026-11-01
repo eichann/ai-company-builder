@@ -88,7 +88,7 @@ export type ChatInputRequest =
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
    * record with this tab's conversation id; only when that wins, send the first message.
    */
-  | { kind: 'aiTurn'; step: AiTurnStep; message: string; title: string; minutesId: string; claim: (conversationId: string) => Promise<boolean> }
+  | { kind: 'aiTurn'; step: AiTurnStep; title: string; minutesId: string; claim: (conversationId: string) => Promise<{ message: string } | null> }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
@@ -316,12 +316,13 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     // Not shown on purpose: the tab is fresh, so its own conversation id is the one the claim names.
     if (inputRequest?.kind === 'aiTurn') {
       if (!historyReadyRef.current) return
-      const { step, message, title, minutesId, claim } = inputRequest
+      const { step, title, minutesId, claim } = inputRequest
       onInputRequestConsumed?.()
       const conversationId = appSessionIdRef.current
       if (!conversationId || !agentCan(authMode, 'recordActions')) { void claim(''); return }
       void claim(conversationId).then(claimed => {
         if (!claimed || appSessionIdRef.current !== conversationId) return
+        const { message } = claimed
         customTitleRef.current = { title, auto: false }
         titleGenerationDoneRef.current = true
         onTitleChange?.(title)

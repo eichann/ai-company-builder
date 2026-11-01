@@ -38,11 +38,13 @@ export function readAutoTurnSettings(value: unknown): AutoTurnSettings {
 
 /**
  * Taking a record's AI turn (`aiTurns:claim`): the type's first AI action at
- * the version the app saw — a compare-and-set on the server, so of two PCs
- * only one wins.
+ * the record's version read just before — a compare-and-set on the server, so
+ * of two PCs only one wins. `version`: the record's version after that action,
+ * which the AI's first message names (an unattended run has no records_get;
+ * null when the server's answer did not say).
  */
 export type AiTurnClaimResult =
-  | { claimed: true }
+  | { claimed: true; version: number | null }
   | { claimed: false; reason: 'taken' | 'not-allowed' | 'unavailable' }
 
 /**
@@ -123,6 +125,9 @@ const MEETING_ID_RE = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
 
 /** The record kinds the runner handles, and each one's claiming action. Today: reading a meeting's minutes. */
 export const AI_TURN_CLAIM_ACTIONS = { meeting: 'start_reading' } as const
+
+/** The state each kind's claiming action starts from (anything else: the record moved on). */
+export const AI_TURN_CLAIM_FROM: Record<keyof typeof AI_TURN_CLAIM_ACTIONS, string> = { meeting: 'received' }
 
 /** The step each kind runs: the server's execution run is per record and step (S10b). */
 export const AI_TURN_KIND_STEPS: Record<keyof typeof AI_TURN_CLAIM_ACTIONS, AiTurnStep> = { meeting: 'minutes-reading' }

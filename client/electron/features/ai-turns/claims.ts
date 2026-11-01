@@ -18,7 +18,7 @@
 
 import type { AgentId } from '../../../shared/agents/registry'
 import { agentCan } from '../../../shared/agents/registry'
-import { AI_TURN_CLAIM_ACTIONS, AI_TURN_KIND_STEPS, aiTurnKindOf, readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
+import { AI_TURN_CLAIM_ACTIONS, AI_TURN_CLAIM_FROM, AI_TURN_KIND_STEPS, aiTurnKindOf, readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 
@@ -36,6 +36,11 @@ export interface AiTurnClaimsDeps {
   runs: RunRegistry
   /** This app instance (random per launch): the server's claim holder. */
   deviceId: string
+  /**
+   * The record moved on since the app's notice (another PC finished it, a person acted): the
+   * notices are read again, so this PC stops showing it as waiting for the AI.
+   */
+  recordMovedOn?: (companyId: string) => void
   /** How often a running claim is renewed (default 60 s; the server's claim lasts 5 minutes). */
   renewEveryMs?: number
   fetch?: typeof fetch
@@ -102,14 +107,25 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       return readAutoTurnSettings(view?.settings?.autoRun)
     },
 
-    /** Take the record's AI turn for this consultation, or learn that another PC (or person) was first. */
-    async claim(companyId: string, recordId: string, expectedVersion: number, conversationId: string): Promise<AiTurnClaimResult> {
+    /**
+     * Take the record's AI turn for this consultation, or learn that another PC (or person) was
+     * first. The version comes from the record read now: the notice's may be old (an earlier run
+     * was put back), and claiming at it would be refused every time.
+     */
+    async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string): Promise<AiTurnClaimResult> {
       const kind = aiTurnKindOf(recordId)
-      if (!COMPANY.test(companyId) || !kind || !Number.isInteger(expectedVersion) || expectedVersion < 1 || !CONVERSATION.test(conversationId)) {
+      if (!COMPANY.test(companyId) || !kind || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
         return { claimed: false, reason: 'not-allowed' }
       }
       const agent = deps.agent()
       if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(agent, 'recordActions')) return { claimed: false, reason: 'not-allowed' }
+      const now = await recordOf(companyId, recordId)
+      // No longer waiting for the AI (another PC read it, a person skipped it): nothing to claim.
+      if (now && now.state !== AI_TURN_CLAIM_FROM[kind]) {
+        deps.recordMovedOn?.(companyId)
+        return { claimed: false, reason: 'taken' }
+      }
+      const expectedVersion = now?.version ?? noticeVersion
       // The server's execution run first: one PC holds it (another PC, a run waiting for a person
       // or for reconciliation → taken; the server is the authority).
       const claimed = await session(companyId, 'POST', '/ai-run-claims', { recordId, step: AI_TURN_KIND_STEPS[kind], deviceId: deps.deviceId, conversationId })
@@ -139,10 +155,12 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
           await finishRun(companyId, recordId, { class: 'permission', code: 'READ_ONLY_TOKEN' })
           return { claimed: false, reason: 'not-allowed' }
         }
-        await access.call('POST', `/item/${encodeURIComponent(recordId)}/actions/${AI_TURN_CLAIM_ACTIONS[kind]}`, { expectedVersion })
-        return { claimed: true }
+        const started = await access.call('POST', `/item/${encodeURIComponent(recordId)}/actions/${AI_TURN_CLAIM_ACTIONS[kind]}`, { expectedVersion }) as { record?: { version?: unknown } } | undefined
+        const version = started?.record?.version
+        return { claimed: true, version: typeof version === 'number' ? version : null }
       } catch (error) {
         const code = (error as { code?: unknown }).code
+        if (code === 'VERSION_CONFLICT' || code === 'BAD_STATE') deps.recordMovedOn?.(companyId)
         // Not started: the run is given back for later (VERSION_CONFLICT — the member or another PC was first —,
         // offline); the server's claim keeps a second PC from starting it meanwhile.
         await finishRun(companyId, recordId, { class: 'temporary', code: typeof code === 'string' && /^[A-Z0-9_]{1,60}$/.test(code) ? code : 'NOT_STARTED' })
@@ -185,9 +203,15 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
         return { outcome: 'failed' }
       }
       // Stopped without finishing: tried again later (a few times, then a person — the server counts).
+      // Finishing the run puts the reading back (the ledger names the run, not the member).
+      const ran = held.has(heldKey(companyId, recordId))
       await finishRun(companyId, recordId, { class: 'temporary', code: 'UNFINISHED' })
       if (record.state !== 'reading') return { outcome: 'unknown' }
-      const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/retry`, { expectedVersion: record.version })
+      const after = ran ? await recordOf(companyId, recordId) : record
+      if (after && after.state === 'received') return { outcome: 'put-back' }
+      if (!after || after.state !== 'reading') return { outcome: 'unknown' }
+      // An older server leaves it reading: put it back with the member's session, as before.
+      const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/retry`, { expectedVersion: after.version })
       if (!r || r.status >= 300) log.warn(`[ai-turns] retry: answered ${r?.status ?? 'nothing'}`)
       return { outcome: r && r.status < 300 ? 'put-back' : 'unknown' }
     },

@@ -51,7 +51,10 @@ access itself: `google-connector.md` (G3).
      the member who found it; attendees = members whose ACB email is on the event.
    Answer `MinutesCheckResult`: `{ checked, reason?, message?, meetings, internalOnly, created:
    [ids], existing, waiting, stale: [ids] }` — counts and ids only, never text. `stale`: the
-   member's own records in `reading` for > 30 minutes; the app runs the type's `retry` on them.
+   member's own records in `reading` for > 30 minutes, which the check itself puts back to
+   `received` (the type's `retry` through the service writer, actor the server clock
+   `CLOCK_ACTOR`: ledger cause `system`, never the member); an older app's `retry` on them finds
+   nothing to do.
 2. **まとまり** (mechanical, design §1-2 step 3; whatever its type — the core names no business
    type): unfinished records of any type implementing `bundle` (a 案件, a 企画…) readable by the
    assignee that link to a 相手 (a record of a type implementing `counterpart`) whose `domain` is an
@@ -74,7 +77,9 @@ access itself: `google-connector.md` (G3).
 ## The text
 
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin
-`GET /api/companies/:id/me/minutes/item/:recordId/text` → `MinutesText`: `{ header:
+`GET /api/companies/:id/me/minutes/item/:recordId/text` → `MinutesText`: `{ recordId, version (the
+meeting record's version now: the `expectedVersion` of its next action — an unattended run has no
+`records_get`), header:
 MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, folder (the minutes folder: where its decisions go), attendees:
 [{ memberId, displayName }], externalAttendees (count only), bundle: { id, type, typeLabel, title,
 state, fields, version } | null, candidates: [{ id, title, typeLabel }], instructionLike: [{ label, words }] }`.
@@ -141,8 +146,9 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   `AppShell`; the subscription's end sends `null`); main then checks at once, every 10 minutes
   (`MINUTES_CHECK_INTERVAL_MS`) and on 「議事録を確かめる」 (`minutes:check`). Each check first asks
   `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
-  asked or shown** (no error either). With it: `POST /me/minutes/check`, then each `stale` id is
-  put back with the type's `retry` at its current version, then the notices are read from
+  asked or shown** (no error either). With it: `POST /me/minutes/check` (the server puts stale
+  readings back itself; for an older server each `stale` id still in `reading` is put back with the
+  type's `retry` at its current version), then the notices are read from
   `GET /records/ai-turn` (type `meeting`, state `received`: id, title, `meeting_at`, version —
   never text). Main sends `minutes:changed { companyId }` when they change; the renderer re-reads
   `minutes:notices`.
@@ -155,7 +161,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   icon button in the title bar (`MinutesCheckButton.tsx`), shown only while the grant allows minutes.
 - **Automatic reading** (stage 2 S10, `ai-turns.md`): with the company's 「自動で進める」 on and
   Claude Code chosen, the main window reads received minutes by itself in a hidden consultation
-  (claimed with `start_reading` at the record's version, then the same first message wrapped by
+  (claimed with `start_reading` at the record's version read just before, then the same first message wrapped by
   `autoMinutesFirstMessage`). The notice below stays as the fallback until S11.
 - **「読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
   `chat.newConsultation { message, title, minutesId }` (`commands.md`). The chat starts a new
@@ -188,7 +194,9 @@ record for two members, organizer assignee; two candidates not linked, one linke
 only a まとまり can be chosen (a 顧客 is refused); which meetings are read (owner/admin only, default
 external, `all` reads the internal one); the text only
 for the assignee / attendees, another company's record = missing; no minutes text in any table,
-log line or other answer; the folder refusal never naming the place; stale reading; Google
+log line or other answer; the AI's text answer carries the record's version; the folder refusal
+never naming the place; stale reading put back by the server as its clock; an unfinished automatic
+run put back at its finish as the run's doing (ledger cause `run`); Google
 stopped / not connected; records off; `meetingAttendees` — each mutation-checked.
 `client/tests/records-tools.test.ts` (the tool's output carries the header above and the footer
 below the text), `client/tests/web-research.test.ts` (the addressed-to-AI flag).

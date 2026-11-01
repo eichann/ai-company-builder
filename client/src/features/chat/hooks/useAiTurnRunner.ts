@@ -96,22 +96,22 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     o.deliver(tabId, {
       kind: 'aiTurn',
       step: 'minutes-reading',
-      message: autoMinutesFirstMessage(minutesFirstMessage(notice)),
       title: minutesConsultationTitle(notice),
       minutesId: notice.id,
       claim: async (conversationId: string) => {
         const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
-        if (running.current !== run) return false
+        if (running.current !== run) return null
         if (!result.claimed) {
           if (result.reason === 'taken') taken.current.add(`${notice.id}@${notice.version}`)
           running.current = null
           latest.current.closeTab(tabId)
-          return false
+          return null
         }
         saveLog(recordStarted(loadLog(Date.now()), notice.id))
         run.phase = 'running'
         run.since = Date.now()
-        return true
+        // The message names the version the claim left the record at (the AI cannot look it up).
+        return { message: autoMinutesFirstMessage(minutesFirstMessage(notice), result.version) }
       },
     })
   }, [latest, loadLog, saveLog])

@@ -38,6 +38,8 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
     if (url.pathname === `/api/companies/${COMPANY}/ai-runs/${run.id}/finish` && method === 'POST') {
       run.finished.push(body)
       run.state = body.outcome === 'done' ? 'done' : body.failure.class === 'bad-input' ? 'waiting_person' : 'retry_later'
+      // The server puts an unfinished reading back itself (the ledger names the run).
+      if (body.outcome === 'failed' && record.state === 'reading') { record.state = 'received'; record.version += 1 }
       return json(200, { data: { run } })
     }
     if (url.pathname === `/api/companies/${COMPANY}/ai-runs` && method === 'GET') return json(200, { data: { runs: [{ id: run.id, recordId: RECORD }] } })
@@ -129,7 +131,7 @@ test('a write the server already did for this run (same key) is read back, not d
 test('a run-bound token sends every write with an idempotency key made from the request itself', async () => {
   const server = fakeServer()
   const pc = claimsFor(server)
-  assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true })
+  assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true, version: 4 })
   const body = { expectedVersion: 3 }
   assert.deepEqual(server.run.keys, [operationKeyOf('POST', `/item/${RECORD}/actions/start_reading`, body)])
   // The same request from another PC redoing the step carries the same key (the server answers what the first made).
@@ -146,7 +148,7 @@ test('a run the server holds for a person is not started; 「もう一度」 giv
   assert.ok(!server.calls.some(c => c.includes('/actions/')))
   assert.deepEqual(await pc.retry(COMPANY, RECORD), { ok: true })
   assert.equal(server.run.state, 'open')
-  assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true })
+  assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true, version: 4 })
   await pc.settle(COMPANY, RECORD)
 })
 
@@ -158,7 +160,7 @@ test('after the turn the run is finished with its class: done, the AI could not 
   ] as const) {
     const server = fakeServer()
     const pc = claimsFor(server)
-    assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true })
+    assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: true, version: 4 })
     Object.assign(server.record, after)
     await pc.settle(COMPANY, RECORD)
     assert.deepEqual(server.run.finished, [{ generation: 1, ...expected }])
@@ -197,4 +199,31 @@ test("「自動で進める」 comes from the company's task settings (S6); not 
   assert.equal((await claimsFor(off).settings(COMPANY)).enabled, false)
   // An older server without the settings (404), or offline: nothing runs by itself.
   assert.equal((await claimsFor(fakeServer()).settings(COMPANY)).enabled, false)
+})
+
+test('a notice older than the record (an earlier run was put back): the claim starts it at the version now and says which', async () => {
+  // The notice saw version 2; two put-backs later the record is at 6. Claiming at 2 was refused forever.
+  const server = fakeServer({ state: 'received', version: 6 })
+  const pc = claimsFor(server)
+  assert.deepEqual(await pc.claim(COMPANY, RECORD, 2, 'conversation-aaaa'), { claimed: true, version: 7 })
+  assert.deepEqual(server.record, { state: 'reading', version: 7 })
+  await pc.settle(COMPANY, RECORD)
+})
+
+test('a record another PC already finished: nothing is claimed and the notices are read again at once', async () => {
+  const server = fakeServer({ state: 'read', version: 5 })
+  const moved: string[] = []
+  const pc = claimsFor(server, { recordMovedOn: companyId => moved.push(companyId) })
+  assert.deepEqual(await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa'), { claimed: false, reason: 'taken' })
+  assert.ok(!server.calls.some(c => c.endsWith('/ai-run-claims') || c.includes('/actions/')))
+  assert.deepEqual(moved, [COMPANY])
+})
+
+test('an unfinished run is put back by finishing it on the server, never as the member\'s own retry', async () => {
+  const server = fakeServer()
+  const pc = claimsFor(server)
+  assert.equal((await pc.claim(COMPANY, RECORD, 3, 'conversation-aaaa')).claimed, true)
+  assert.deepEqual(await pc.settle(COMPANY, RECORD), { outcome: 'put-back' })
+  assert.deepEqual(server.record, { state: 'received', version: 5 })
+  assert.ok(!server.calls.some(c => c.endsWith('/records/item/' + RECORD + '/actions/retry')))
 })

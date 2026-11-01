@@ -39,9 +39,10 @@ the fallback (removing it is S11).
   handed `ChatInputRequest` `{ kind: 'aiTurn', step, message, title, minutesId, claim }` through
   `inputRequest` (the only request a tab takes while not shown). The tab calls `claim(its own
   conversation id)`; only when that wins does it set the title (「<件名> のあと（M/D）」, kept),
-  store `minutesId` and send the first message (`minutesFirstMessage` wrapped by
-  `autoMinutesFirstMessage`: the app started it, the start is already marked, end with
-  finish / fail). It is listed in 「AIへの相談」 like any open tab (working → 新着).
+  store `minutesId` and send the first message the claim returns (`minutesFirstMessage` wrapped by
+  `autoMinutesFirstMessage`: the app started it, the start is already marked, **the record's
+  version after the start** (the claim's `version`), end with finish / fail, retry once with a
+  refusal's version). It is listed in 「AIへの相談」 like any open tab (working → 新着).
 - **Only the step's tools** (owner decision 2026-11-01, binding): the automatic send carries
   `aiTurnStep` (`ChatRequestOptions`, consumed by that one request — `chatRequestBody.ts`; the
   member's own later messages in that consultation are normal turns). The chat server then gives
@@ -50,7 +51,10 @@ the fallback (removing it is S11).
   minutes reading = `minutes_read`, `minutes_link_bundle`, the three `meeting__…_reading` actions,
   `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
   `show`, and a business plugin's `…__update_deal` / `…__log_meeting`; anything else is filtered
-  out and refused if called). Claude Code runs it with `settingSources: []` and
+  out and refused if called). There is deliberately **no `records_get`** (least privilege: the run
+  reads only its meeting): the version it acts at comes from the first message, `minutes_read`'s
+  answer (`version`), `minutes_link_bundle`'s answer, and a `VERSION_CONFLICT` refusal, which
+  carries the record's version now (`refusalForAi`, `records/tools.ts`, for every record tool). Claude Code runs it with `settingSources: []` and
   `strictMcpConfig: true` (none of the member's settings, MCP servers, hooks or plugins, like the
   hand-off agent), `tools: <the step's builtinTools>` (minutes reading: `[]`), a flag-settings deny
   of `CLAUDE_UNATTENDED_DENIED_TOOLS` (shell, web, file writes, subagents) unless declared, and a
@@ -67,15 +71,24 @@ the fallback (removing it is S11).
   first claims the server's **execution run** of the record's step (S10b, below); then it
   opens a record token for **that consultation** (`act`, the configured agent) and runs the type's
   first AI action (`AI_TURN_CLAIM_ACTIONS`: meeting → `start_reading`; a meeting's id is
-  `meeting-…`, or `minutes-…` for one made before the type was renamed) at the version the app saw:
-  the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` → `taken`, never
-  tried again at that version). The ledger records it as the AI's, pointing at the consultation.
+  `meeting-…`, or `minutes-…` for one made before the type was renamed) at the version **read just
+  before** with the session (the notice's `expectedVersion` is only a fallback when unreadable: a
+  notice from before a put-back is older than the record, and claiming at it was refused every
+  time): the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` →
+  `taken`, never tried again at that version). A record no longer in the claim's from-state
+  (`AI_TURN_CLAIM_FROM`: meeting → `received`) is `taken` without claiming a run. When the record
+  moved on (that, or a conflict at the start) main re-reads the notices at once
+  (`recordMovedOn` → `minutes.recordsSignal`), so this PC stops showing 「AI が読み取る予定です」.
+  Answers `{ claimed: true, version }` (the version after the start). The ledger records it as the AI's, pointing at the consultation.
   Refused without a call to the server (`not-allowed`): an agent without `recordActions` (Codex,
   the API key), a closed main window, the emergency stop (`oneShotAiAllowed`), a record kind not
   in the table, a malformed conversation id.
 - `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
-  `failed` / `skipped` → failed, still `reading` → `retry` (the assignee's own action) so it is not
-  stuck for 30 minutes. It also finishes the run (below).
+  `failed` / `skipped` → failed, still `reading` → put back to 「AI の番」 so it is not stuck for 30
+  minutes: finishing the run as failed does it on the server (`afterFailedRun` in
+  `services/ai-runs.ts` → `minutes.putBackAfterRun`, ledger cause `run` with the run's id, never
+  the member's); only an older server that leaves it `reading` gets the session's `retry`. It also
+  finishes the run (below).
 - `aiTurns:retry(companyId, recordId)` — 「もう一度」 also gives the server's run back
   (`POST /ai-runs/:runId/retry`); the runner forgets that it saw the record taken.
 - `aiTurns:settings(companyId)` — the company's 「自動で進める」: `autoRun` of S6's task settings
@@ -155,9 +168,13 @@ step rides on one request only), `tests/ai-turn-claims.test.ts` (two PCs → one
 winner's token bound to it; writes carry an idempotency key made from the request; a replayed
 write is read back, not redone; a run held for a person is not started and 「もう一度」 gives it back;
 the run finished with its class; Codex / API key / closed window / stop →
-no server call; minutes only; settle puts an unfinished reading back), `tests/ui/ai-turns.spec.ts`
+no server call; minutes only; settle puts an unfinished reading back; a notice older than the record
+still claims at the version now; a record already finished claims nothing and re-reads the notices;
+an unfinished run is put back by the run's finish, not the member's retry), `tests/ai-turn-unattended.test.ts`
+also: after earlier put-backs (version > 2) an unattended run finishes without `records_get`
+(`minutes_read`'s version, a conflict's version), `tests/ui/ai-turns.spec.ts`
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
-its title and `minutesId`, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
+its title, `minutesId` and the claim's version in the first message, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
 Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again).
 
 ## Not yet (S11 and later)

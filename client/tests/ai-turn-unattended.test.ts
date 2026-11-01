@@ -8,6 +8,9 @@ import type { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
 import { createCodexConnection } from '../electron/agents/codex'
 import { AI_TURN_STEPS, aiTurnStepAllowsRecordTool } from '../shared/ai-turns'
+import { coreTypeDefinitions } from '../../shared/core/core-types'
+import { createRecordsApi } from '../electron/records/api'
+import { createRecordTools } from '../electron/records/tools'
 import { buildChatRequestBody, type ChatRequestSources } from '../src/features/chat/chatRequestBody'
 
 const claudeConfig: ClaudeConnectionConfig = {
@@ -87,4 +90,43 @@ test('the step rides on the one automatic request only; the member\'s next messa
   }
   assert.equal(buildChatRequestBody(sources).aiTurnStep, 'minutes-reading')
   assert.equal(buildChatRequestBody(sources).aiTurnStep, undefined)
+})
+
+test('after earlier runs were put back (version > 2), an unattended run can still finish reading: it never has to guess the version', async () => {
+  const MEETING = 'meeting-0a1b2c3d4e5f6071'
+  // Started by the app's claim after two put-backs: reading at version 7 (a first run would be at 2).
+  const record = { state: 'reading', version: 7 }
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status })
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {}
+    if (path.endsWith('/me/record-tokens')) return json(201, { data: { token: 'acb_rec_x', tokenId: 't1', scope: 'act' } })
+    if (path === '/api/records-ai/types') return json(200, { data: { types: coreTypeDefinitions().filter(t => t.name === 'meeting').map(definition => ({ definition })) } })
+    if (path === '/api/records-ai/plugins') return json(200, { data: { plugins: [] } })
+    if (path === `/api/records-ai/minutes/${MEETING}/text`) {
+      return json(200, { data: {
+        recordId: MEETING, version: record.version, header: '【ここから】', text: '本文', footer: '【ここまで】', truncated: false, docVersion: 'notes:1',
+        meeting: { title: 'A社 商談', at: null }, folder: '営業部', attendees: [], externalAttendees: 1,
+        bundle: { id: 'deal-aaaaaa01', type: 'deal', typeLabel: '案件', title: '研修導入', state: null, fields: {}, version: 3 }, candidates: [], instructionLike: [],
+      } })
+    }
+    if (path === `/api/records-ai/item/${MEETING}/actions/finish_reading`) {
+      if (body.expectedVersion !== record.version) return json(409, { error: 'ほかの人が先に変えました', code: 'VERSION_CONFLICT', version: record.version })
+      Object.assign(record, { state: 'read', version: record.version + 1 })
+      return json(200, { data: { record } })
+    }
+    return json(404, { code: 'NOT_FOUND' })
+  }) as typeof globalThis.fetch
+  const access = await createRecordsApi({ baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch }).openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' })
+  const tools = (await createRecordTools(access!))!
+  // The step has no records_get: what the AI reads must carry the version.
+  assert.ok(!aiTurnStepAllowsRecordTool('minutes-reading', 'records_get'))
+  const read = await tools.execute('minutes_read', { id: MEETING })
+  const told = JSON.parse(read.slice(read.lastIndexOf('\n{'))) as { version?: unknown }
+  assert.equal(told.version, 7)
+  // A guess (the first run's version) is refused with the version now, so one retry finishes.
+  const refused = JSON.parse(await tools.execute('meeting__finish_reading', { id: MEETING, expectedVersion: 2, summary_text: '要約' })) as { code?: string; version?: unknown }
+  assert.deepEqual([refused.code, refused.version], ['VERSION_CONFLICT', 7])
+  await tools.execute('meeting__finish_reading', { id: MEETING, expectedVersion: told.version, summary_text: '要約' })
+  assert.deepEqual(record, { state: 'read', version: 8 })
 })
