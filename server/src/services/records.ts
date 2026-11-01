@@ -12,6 +12,7 @@
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
+import { turnsOf } from '../../shared/core/record-turns'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -532,6 +533,30 @@ export function createRecordService(deps: RecordServiceDeps) {
       const ids = [member.userId, ...actsFor(member)]
       const mine = ids.includes(fields.assignee as string) || ids.includes(fields.next_actor as string)
       return mine && aiTurnStates(def).has(state.state ?? '') ? 'yes' : 'not-ai-turn'
+    },
+
+    /**
+     * `POST …/records/item/:recordId/opened` (session only): the member's app
+     * opened the record (the card). When the record waits for them — or for an
+     * absentee they cover today — the first opening of this turn is kept
+     * (records.md "Whose turn it was": 着手 without pressing 着手). One
+     * timestamp per record and turn, never a view log, never in an answer:
+     * the reply is the same whether anything was kept. Unreadable = not found
+     * (owner-only records stay their owner's).
+     */
+    opened(member: Member, recordId: string): Outcome<Record<string, never>> {
+      const records = handleOf(member).records
+      if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const reader = recordReader(member, handleOf(member).scopes.listWithRules())
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
+      if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      const def = currentTypes(records).get(row.type)?.definition
+      if (!def?.implements.includes('request')) return ok({})
+      const turn = turnsOf(def, records.ledger(row.id)).at(-1)
+      const holder = turn?.holder
+      if (!turn || !holder || (holder !== member.userId && !actsFor(member).includes(holder))) return ok({})
+      records.noteTurnOpened({ recordId: row.id, turnVersion: turn.sinceVersion, holderId: holder, openedBy: member.userId, openedAt: clock.now() })
+      return ok({})
     },
 
     async get(member: Member, recordId: string): Promise<Outcome<RecordDetail>> {

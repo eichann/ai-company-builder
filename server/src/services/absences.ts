@@ -19,7 +19,7 @@
  * Who sets a member's absences: the member, owners / admins, and managers of
  * a department the member belongs to (所属, tasks.md).
  */
-import { absencesOverlap, ABSENCE_MAX_OPEN, delegation, parseAbsenceInput, type AbsenceCover, type Delegation } from '../../shared/core/absences'
+import { absencesOverlap, ABSENCE_MAX_OPEN, delegation, delegationAsOf, parseAbsenceInput, type AbsenceCover, type Delegation } from '../../shared/core/absences'
 import type { AbsenceCreated, AbsenceView, MemberAbsencesView } from '../../shared/types/absences'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -85,6 +85,18 @@ export function createAbsenceService(deps: AbsenceServiceDeps) {
     /** Who covers `userId` today, or null when they are not absent. */
     coverOf(companyId: string, userId: string): AbsenceCover | null {
       return delegationOf(companyId).coverOf(userId)
+    },
+
+    /**
+     * Who covered `userId` at a past moment `at` (ISO), or null when they were
+     * not absent then — from the periods the company knew at `at` (removed ones
+     * included: they are history, records.md "Whose turn it was"). With the
+     * ledger's `next_actor` / `assignee` at that moment, this is whose turn a
+     * record was, for any past time.
+     */
+    coverAt(companyId: string, userId: string, at: string): AbsenceCover | null {
+      const day = companyNow(Date.parse(at), deps.timeZoneOf(companyId)).slice(0, 10)
+      return delegationAsOf(handle(companyId).tasks.absencesOn(day), day, at).coverOf(userId)
     },
 
     /** Whom the stops of an absentee are told to: managers of the departments they belong to (not themselves). */
@@ -167,7 +179,8 @@ export function createAbsenceService(deps: AbsenceServiceDeps) {
       const found = tasks.absencesFrom(todayOf(member.companyId)).find(a => a.id === absenceId)
       if (!found) return refuse('not-found', ABSENCE_NOT_FOUND.error, { code: ABSENCE_NOT_FOUND.code })
       if (!mayEdit(member, found.userId)) return refuse('forbidden', ABSENCES_FORBIDDEN)
-      tasks.removeAbsence(found.id)
+      // Marked removed, never deleted: whose turn it was before stays answerable.
+      tasks.removeAbsence(found.id, member.userId, clock.now())
       return ok({ removed: true })
     },
   }

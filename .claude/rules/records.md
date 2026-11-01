@@ -56,6 +56,9 @@ paths:
   - "server/src/adapters/sqlite/ai-runs.ts"
   - "server/src/db/schema/ai-runs.ts"
   - "server/tests/integration/ai-runs.test.ts"
+  - "shared/core/record-turns.ts"
+  - "server/tests/unit/record-turn-opens.test.ts"
+  - "client/tests/record-views-opened.test.ts"
 ---
 
 # Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
@@ -428,6 +431,7 @@ POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
+POST    /records/item/:recordId/opened         the app opened it: the turn-holder's first opening kept ("Whose turn it was")
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
                                    link?: { name, id }, linkedToFile?, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
@@ -989,11 +993,53 @@ mailbox, never their role.
   company (another company's id = nobody, 400 `DELEGATE_NOT_MEMBER`), no overlap with the member's
   own periods (409 `ABSENCE_OVERLAP`), ≤ 20 open. `delegateCannotRead` counts the absentee's
   waiting items the delegate cannot read — only those the setter may read (no count of the
-  unreadable). Removing a member removes their absences and those they cover.
+  unreadable). Removing a member stops their absences and those they cover. **Absences are
+  history** ("Whose turn it was"): `DELETE` and a member's removal mark the period
+  (`removed_at`, `removed_by`), never delete it; a trigger lets a row change only from standing to
+  removed (`migrateMemberAbsenceHistory`).
 - **UI**: the app's settings 「不在と代わりの人」 (own absences; `client/src/features/absences/`, IPC
   `absences:get|add|remove` with the session in main); department managers set their members'
   in the admin console (task-list page, 「不在・代わりの人」; `tasks.md`). The approval card shows
   「Aさん（代わりに承認・本来は Bさん）」.
+
+## Whose turn it was (流れを測れる記録, owner decision 2026-11-01)
+
+From stored data alone, per record: when it became whose turn, when that person first opened it,
+and (with the ledger's actions) when it finished. Nobody presses 着手 for it.
+
+- **The ledger says whose turn** (`shared/core/record-turns.ts`): `turnHolder` is the rule of
+  「あなたの番」 (`next_actor`, else `assignee`; nobody in a final or AI-turn state; types implementing
+  `request` only); `turnsOf(def, ledger)` folds the entries into stretches `{ holder, sinceVersion,
+  since }` — a new stretch at each entry that changes the holder, so work by the holder (start,
+  wait, tags) keeps the turn. Every change of those values is already an engine entry (actions,
+  `assign`, the server clock's `wait_over`, the service writer).
+- **Absence is not rewritten into it**: an absence changes who acts, not the holder. Rather than
+  writing ledger rows for every affected record when an absence starts or ends (a fan-out at day
+  boundaries the server clock would have to drive), absence periods are **append-only history**
+  (above): `delegationAsOf(periods, day, at)` (`shared/core/absences.ts`) uses the periods known at
+  `at` (set at or before it, not removed by then), and `services/absences.ts` `coverAt(companyId,
+  userId, at)` answers who covered the holder at any past moment — the same answer after the
+  period is taken back. A change of the company's time zone shifts which day a moment falls on
+  (not recorded; whole-day periods).
+- **The turn-holder's first opening** (`record_turn_opens`, one row per record × turn: `turn_version`
+  = the turn's `sinceVersion`, `holder_id`, `opened_by` — the delegate when they covered —,
+  `opened_at`; insert-or-ignore, never updated). The app's record card (`recordViews:card`) sends
+  `POST /records/item/:recordId/opened` (session only; not awaited, nothing shown) after the card
+  loaded; `services/records.ts` `opened` keeps it only when the current turn's holder is the caller
+  or an absentee they cover today. Not a view log: one timestamp per turn, later openings and
+  anyone else's change nothing. **In no API answer** (the reply is `{}` whether kept or not), read
+  only by the operator / a later measurement screen (an owner decision); owner-only records are
+  their owner's (the reader's 404 first). Not in the ledger on purpose: an entry would raise the
+  record's version (others' `expectedVersion` would conflict) and fill 経緯 with 「開いた」.
+- Not yet: the approval card in a consultation and a task screen (S7c) do not send `opened`
+  (only the record card does); a measurement screen reading these.
+- Tests: `server/tests/unit/record-turn-opens.test.ts` (turns from the ledger; kept once per turn
+  by the holder only, a new turn its own; the delegate during the absence; final / AI turn keep
+  nothing; owner-only, another company's and a missing record the same 404),
+  `server/tests/unit/absences.test.ts` "whose turn it was" (a period taken back or a member
+  removed still answers the past; rows cannot be rewritten),
+  `client/tests/record-views-opened.test.ts` (the card sends it once with the session, not when
+  it could not be shown) — mutation-checked.
 
 ## Decisions (`services/decisions.ts`, design §3-3)
 

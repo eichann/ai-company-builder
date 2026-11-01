@@ -22,6 +22,9 @@ export interface StoredAbsence {
   delegateId: string
   setBy: string
   setAt: string
+  /** When the period was removed (taken back early, or the member left); absent / null while it stands. Never deleted: history. */
+  removedAt?: string | null
+  removedBy?: string | null
 }
 
 export interface TaskSettingsRepository {
@@ -35,12 +38,20 @@ export interface TaskSettingsRepository {
   replaceDepartmentMembers(departmentId: string, userIds: string[], createdBy: string, at: string): void
   /** The departments the user belongs to (the member left the company → removeMember). */
   departmentIdsOf(userId: string): string[]
-  /** The user left the company: they belong to no department of it any more, and their absences (and those they cover) go. */
-  removeMember(userId: string): void
+  /**
+   * The user left the company: they belong to no department of it any more, and their absences
+   * (and those they cover) stop — marked removed at `at` by `by`, kept as history.
+   */
+  removeMember(userId: string, by: string, at: string): void
 
-  /** Every absence of the company that has not ended before `day` (`until >= day`), soonest first. */
+  /** Every standing (not removed) absence of the company that has not ended before `day` (`until >= day`), soonest first. */
   absencesFrom(day: string): StoredAbsence[]
+  /**
+   * Every absence that covers `day`, removed ones included (with `removedAt`): what the
+   * company knew at any moment about that day — records.md "Whose turn it was".
+   */
+  absencesOn(day: string): StoredAbsence[]
   addAbsence(absence: StoredAbsence): void
-  /** Remove one absence; false when there is none with that id here. */
-  removeAbsence(id: string): boolean
+  /** Mark one standing absence removed (never deleted); false when there is none with that id here. */
+  removeAbsence(id: string, by: string, at: string): boolean
 }

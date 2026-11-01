@@ -1,3 +1,5 @@
+import type Database from 'better-sqlite3'
+
 /**
  * Task settings and department membership (tasks.md).
  * Part of the one schema run by db/index.ts initDatabase (tables before every migration).
@@ -51,3 +53,24 @@ export const taskSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_member_absences_company_until ON member_absences(company_id, until_day);
 `
+
+/**
+ * Absences are history (records.md "Absence and the delegate", "Whose turn it was"): a removed
+ * period is marked (`removed_at`, `removed_by`), never deleted, so whose turn a record was at any
+ * past moment can be recomputed from the ledger plus the periods known at that moment
+ * (shared/core/absences.ts `delegationAsOf`). Additive and nullable (an older build keeps working);
+ * the trigger lets a row change only once, from live to removed, and nothing else of it.
+ */
+export function migrateMemberAbsenceHistory(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(member_absences)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('removed_at')) conn.exec('ALTER TABLE member_absences ADD COLUMN removed_at TEXT')
+  if (!cols.has('removed_by')) conn.exec('ALTER TABLE member_absences ADD COLUMN removed_by TEXT')
+  conn.exec(`
+    CREATE TRIGGER IF NOT EXISTS member_absences_append_only BEFORE UPDATE ON member_absences
+    WHEN OLD.removed_at IS NOT NULL OR NEW.removed_at IS NULL
+      OR NEW.company_id IS NOT OLD.company_id OR NEW.id IS NOT OLD.id OR NEW.user_id IS NOT OLD.user_id
+      OR NEW.from_day IS NOT OLD.from_day OR NEW.until_day IS NOT OLD.until_day OR NEW.delegate_id IS NOT OLD.delegate_id
+      OR NEW.set_by IS NOT OLD.set_by OR NEW.set_at IS NOT OLD.set_at
+    BEGIN SELECT RAISE(ABORT, 'member_absences rows are history: only marking a live row removed is allowed'); END;
+  `)
+}

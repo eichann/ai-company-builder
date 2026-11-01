@@ -256,6 +256,15 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
       return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
+    noteTurnOpened(o) {
+      return conn.prepare(`INSERT OR IGNORE INTO record_turn_opens (company_id, record_id, turn_version, holder_id, opened_by, opened_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(companyId, o.recordId, o.turnVersion, o.holderId, o.openedBy, o.openedAt).changes === 1
+    },
+    turnOpens(recordId) {
+      return (conn.prepare(`SELECT record_id, turn_version, holder_id, opened_by, opened_at FROM record_turn_opens WHERE company_id = ? AND record_id = ? ORDER BY turn_version`)
+        .all(companyId, recordId) as Array<{ record_id: string; turn_version: number; holder_id: string; opened_by: string; opened_at: string }>)
+        .map(r => ({ recordId: r.record_id, turnVersion: r.turn_version, holderId: r.holder_id, openedBy: r.opened_by, openedAt: r.opened_at }))
+    },
     appendLedger(entry: LedgerEntry) {
       const type = contents.typeOfRecord(entry.recordId)
       const b = contents.batch(entry.recordId, type)

@@ -98,6 +98,23 @@ export const recordSchema = `
       PRIMARY KEY (company_id, record_id, version)
     );
 
+    -- 「番の人が最初に開いた」 (records.md "Whose turn it was", owner decision
+    -- 2026-11-01): one row per record and turn — turn_version = the ledger version
+    -- that began the turn (shared/core/record-turns.ts) — written the first time
+    -- the turn-holder (or the delegate covering them) opens the record in the app.
+    -- A single timestamp, never a view log; insert-or-ignore, never updated.
+    -- holder_id: whose turn it was; opened_by: who opened it (the delegate when
+    -- they covered). Not in any API answer.
+    CREATE TABLE IF NOT EXISTS record_turn_opens (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      turn_version INTEGER NOT NULL,
+      holder_id TEXT NOT NULL,
+      opened_by TEXT NOT NULL,
+      opened_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, record_id, turn_version)
+    );
+
     -- The AI's credential for the company map (records.md "Who is acting"): issued
     -- per chat turn by the member's app, sent by the AI's record tools instead of
     -- the member's session (which the AI process never gets). Only the sha256 of
