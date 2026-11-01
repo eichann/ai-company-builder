@@ -135,6 +135,22 @@ describe('what a record token can reach', () => {
     expect((await tokenFor('u-bob', 'act', CO, 'claude-code')).scope).toBe('act')
   })
 
+  it('linking a file later: a read token (Codex) cannot, an act token is recorded as ai; another company’s record is missing', async () => {
+    const made = await session('u-owner', 'POST', '/records/item', { type: 'task', title: '計画を立てる', fields: { assignee: 'u-bob' } })
+    const id = (made.body.data?.record as { id: string }).id
+    const codex = await tokenFor('u-bob', 'act', CO, 'codex')
+    expect(await ai(codex.token, 'POST', `/item/${id}/file-links`, { path: '営業部/計画.md', expectedVersion: 1 })).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
+    const { token } = await tokenFor('u-bob', 'act')
+    const r = await ai(token, 'POST', `/item/${id}/file-links`, { path: '営業部/計画.md', expectedVersion: 1, actor: { kind: 'human' } })
+    expect(r).toMatchObject({ status: 200, body: { data: { changed: true, entry: { action: 'link_file', actorKind: 'ai', actorSource: 'claude-code' } } } })
+    const detail = await session('u-bob', 'GET', `/records/item/${id}`)
+    expect(detail.body.data).toMatchObject({ links: [{ name: 'files', direction: 'out', path: '営業部/計画.md' }] })
+    const theirs = await call({ user: 'u-owner', method: 'POST', path: `/api/companies/${OTHER}/records/item`, body: { type: 'task', title: '他社', fields: { assignee: 'u-bob' } } })
+    const theirId = (theirs.body.data?.record as { id: string }).id
+    expect(await ai(token, 'POST', `/item/${theirId}/file-links`, { path: '営業部/計画.md', expectedVersion: 1 }))
+      .toEqual(await ai(token, 'POST', '/item/task-zzzzzzzz/file-links', { path: '営業部/計画.md', expectedVersion: 1 }))
+  })
+
   it('only its own company: another company’s id in the token, or its record ids, find nothing', async () => {
     const { token } = await tokenFor('u-bob', 'act')
     const forged = token.replace(`acb_rec_${CO}.`, `acb_rec_${OTHER}.`)

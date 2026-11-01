@@ -192,6 +192,7 @@ GET  /api/config                                  setup state (no auth)
                               POST /records/query, GET /records/item/:recordId,
                               GET /records/my-turn, POST /records/item,
                               POST /records/item/:recordId/actions/:action,
+                              POST /records/item/:recordId/file-links (+ /remove),
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
@@ -216,6 +217,7 @@ GET  /api/config                                  setup state (no auth)
                                                                 (議事録の取り込み: minutes.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
+                              POST /item/:recordId/file-links (+ /remove),
                               GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId,

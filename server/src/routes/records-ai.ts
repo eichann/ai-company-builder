@@ -11,6 +11,7 @@
  *   POST /item                                  (act)
  *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
+ *   POST /item/:recordId/file-links (+ /remove)  (act) link a file later / remove it (types letting the AI act)
  *
  *   GET  /minutes/:recordId/text          the minutes as outside text (tool minutes_read; G7, minutes.md):
  *                                         the assignee or an attendee, read now from Google with
@@ -129,6 +130,16 @@ recordsAiRoute.post('/item/:recordId/actions/:action', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
   return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+})
+
+recordsAiRoute.post('/item/:recordId/file-links', async (c) => {
+  const h = holderOf(c, 'act')
+  return h instanceof Response ? h : answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'link', await jsonBody(c)))
+})
+
+recordsAiRoute.post('/item/:recordId/file-links/remove', async (c) => {
+  const h = holderOf(c, 'act')
+  return h instanceof Response ? h : answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'unlink', await jsonBody(c)))
 })
 
 // The operations the app turns into this AI's tools (a read token: reads only).

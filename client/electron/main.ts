@@ -46,6 +46,8 @@ import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createTaskLinks } from './features/tasks/links'
+import { registerTasksIpc } from './features/tasks/ipc'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
@@ -197,6 +199,8 @@ const minutes = createMinutesChecker({
 recordsSignal = companyId => minutes.recordsSignal(companyId)
 lifecycle.beforeQuit(() => minutes.stop())
 registerMinutesIpc(ipc, minutes)
+// 「やることにつなぐ…」 (features/tasks): the file tree links a file to one of the member's tasks.
+registerTasksIpc(ipc, createTaskLinks({ baseUrl: getServerApiUrl, cookies: session.cookies, userId: session.userId }))
 
 // Local chat history and hand-off memos (features/chat-history).
 const chatHistory = wireChatHistory(ipc, {
