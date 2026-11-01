@@ -163,6 +163,20 @@ describe('notices from the engine', () => {
     expect(list('u-bob').items.map(i => i.text)).toEqual(['Aliceさんが「提案書を作る」であなたを担当にしました'])
   })
 
+  it('task v5: 受けられない comes back to the requester (on by default); the AI’s preparation tells the assignee', async () => {
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '見積書', fields: { assignee: 'u-bob' } })).record
+    ok(await engine.act(m('u-bob'), HUMAN, t.id, 'decline', { expectedVersion: 1, note: '今週は手が空きません' }))
+    expect(list('u-alice').items.map(i => [i.kind, i.text])).toEqual([['request_returned', 'Bobさんが「見積書」をあなたに戻しました（受けられない）']])
+
+    const p = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '下調べ', state: 'preparing', fields: { assignee: 'u-bob' } })).record
+    expect(p.state).toBe('preparing')
+    ok(notices.setSettings(m('u-bob'), { kinds: { others: true } }))
+    // While it is the AI's turn nobody is told; the AI's hand-over tells the assignee.
+    expect(list('u-bob').items.map(i => i.recordId)).not.toContain(p.id)
+    ok(await engine.act(m('u-alice'), { kind: 'ai' as const, source: 'claude-code' }, p.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '空きを確かめました' } }))
+    expect(list('u-bob').items.filter(i => i.recordId === p.id).map(i => i.text)).toEqual(['「下調べ」の用意ができた（Aliceさんの AI）'])
+  })
+
   it('an approval’s result is the requester’s notice', async () => {
     const created = writer.create('a', {
       type: 'approval', title: '金額の変更', fields: { assignee: 'u-bob', operation: 'hubspot.update_deal', payload_hash: 'sha256:aa', payload_version: 1 },

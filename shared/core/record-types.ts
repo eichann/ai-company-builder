@@ -25,8 +25,56 @@ import { isYamlMap, parseYamlLite, splitFrontmatter, type YamlValue } from './ya
 /** Type, field, link, state, action and argument names: English, lower case. */
 export const ONTOLOGY_NAME_RE = /^[a-z][a-z0-9_]{0,39}$/
 
-export const FIELD_KINDS = ['text', 'long_text', 'number', 'date', 'datetime', 'boolean', 'person', 'choice', 'record'] as const
+export const FIELD_KINDS = ['text', 'long_text', 'number', 'date', 'datetime', 'boolean', 'person', 'choice', 'record', 'tags'] as const
 export type FieldKind = typeof FIELD_KINDS[number]
+
+/**
+ * Kind `tags` (owner decision 2026-11-01, 「何個も値を持てる項目」): a list of
+ * short words (タグ), server-sourced only. A value is given as an array of
+ * strings; each is NFC-normalized, trimmed, its inner whitespace runs made
+ * one space; empty entries and repeats are dropped (first one kept, order
+ * kept). Stored — and kept in the ledger — as the JSON text of that array
+ * (`["急ぎ","見積"]`; no tags = null), so every record value stays one scalar.
+ */
+export const TAGS_MAX_COUNT = 20
+export const TAG_MAX_LENGTH = 40
+// eslint-disable-next-line no-control-regex
+const TAG_FORBIDDEN_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+
+/** One tag as stored, or null when it is not a usable tag (empty, too long, control characters). */
+export function normalizeTag(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > TAG_MAX_LENGTH * 4) return null
+  if (TAG_FORBIDDEN_RE.test(value.replace(/[\t\n\r]/g, ' '))) return null
+  const t = value.normalize('NFC').replace(/\s+/g, ' ').trim()
+  if (t === '' || [...t].length > TAG_MAX_LENGTH) return null
+  return t
+}
+
+/** A tags value as stored (JSON text, or null for none), or an error text (Japanese, for the member). */
+export function normalizeTagsValue(value: unknown): string | null | { error: string } {
+  if (value === null) return null
+  const problem = { error: `タグは ${TAG_MAX_LENGTH} 文字までの言葉を ${TAGS_MAX_COUNT} 個まで、文字の並びで入れてください` }
+  if (!Array.isArray(value) || value.length > TAGS_MAX_COUNT * 2) return problem
+  const out: string[] = []
+  for (const v of value) {
+    const t = normalizeTag(v)
+    if (t === null) return problem
+    if (!out.includes(t)) out.push(t)
+  }
+  if (out.length > TAGS_MAX_COUNT) return problem
+  return out.length === 0 ? null : JSON.stringify(out)
+}
+
+/** The tags of a stored value (anything unreadable = none). */
+export function parseTagsValue(stored: unknown): string[] {
+  if (typeof stored !== 'string') return []
+  try {
+    const v: unknown = JSON.parse(stored)
+    return Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
 
 /**
  * A value of kind `date`: a day (`2026-11-05`) or a day with a time of day
@@ -69,8 +117,14 @@ export interface FieldDef {
 
 export interface LinkDef {
   label: string
-  /** A type name, or `file` for files of the company folder. */
+  /**
+   * A type name, or `file` for files of the company folder — or, with
+   * `targetIsInterface`, an interface name (YAML `interface: bundle`): any
+   * record whose type implements it (owner decision 2026-11-01, 「まとまり」).
+   */
   target: string
+  /** The target is an interface in `INTERFACES` (absent otherwise, so stored definitions compare equal). */
+  targetIsInterface?: true
   cardinality: 'one' | 'many'
   /** The name the other side shows the link under (a label only; nothing is stored twice). */
   inverse?: string
@@ -111,6 +165,14 @@ export interface ActionDef {
    * (left out of the definition then, so existing stored JSON compares equal).
    */
   okFrom?: string[]
+  /**
+   * YAML `links`: record links (not file links) the action may set (task
+   * version 5: `set_bundle` → `bundle`, `finish_prep` → `prepared`). The body
+   * gives `links: { <name>: id | [ids] | null }`; a link left out stays as it
+   * is. Each target must be a live record of this company the actor reads,
+   * of the link's type (or implementing its interface). Absent = none.
+   */
+  links?: string[]
 }
 
 export interface TypeDefinition {
@@ -125,6 +187,11 @@ export interface TypeDefinition {
   initial: string | null
   /** States in which nothing is waiting for anyone (done, cancelled…): not anyone's turn. */
   final: string[]
+  /**
+   * YAML `create_states`: states a create may start in instead of `initial`
+   * (task version 5: `preparing`, the AI's turn before the person's). Absent = only `initial`.
+   */
+  createStates?: string[]
   actions: Record<string, ActionDef>
 }
 
@@ -137,13 +204,44 @@ export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone'] as const
 /**
  * Interfaces (4-4): fields a type must have, all server-sourced, to be
  * treated as one kind of thing across types. `request` = 「依頼」, what
- * 「あなたの番」 collects regardless of the type.
+ * 「あなたの番」 collects regardless of the type. `bundle` = 「まとまり」
+ * (owner decision 2026-11-01): what tasks are gathered under — a core
+ * 取り組み, or a business plugin's 案件 / 企画 — with whose it is and what for;
+ * a link may target it (`interface: bundle`) instead of one type.
  */
 export const INTERFACES: Record<string, { label: string; fields: Record<string, FieldKind> }> = {
   request: {
     label: '依頼',
     fields: { requested_by: 'person', assignee: 'person', next_actor: 'person', waiting_on: 'text', due: 'date' },
   },
+  bundle: {
+    label: 'まとまり',
+    fields: { owner: 'person', purpose: 'text' },
+  },
+  /**
+   * 「AI が用意したもの」 (stage 2 S2): what an AI made for a person to check
+   * and act on — a mail draft (`outbound_message`), an approval request — that
+   * a task links under `prepared`. Who made it and whose it is to act on.
+   */
+  prepared: {
+    label: 'AI が用意したもの',
+    fields: { requested_by: 'person', assignee: 'person' },
+  },
+}
+
+/**
+ * The states where it is the AI's turn: a state some action only the AI may
+ * do (`who` exactly `[ai]`) starts from (from null = every non-final state).
+ * 「AI の番」 lists them; 「あなたの番」 leaves them out (the person's turn
+ * comes when the AI hands the record over).
+ */
+export function aiTurnStates(def: TypeDefinition): Set<string> {
+  const states = new Set<string>()
+  for (const a of Object.values(def.actions)) {
+    if (a.who.length !== 1 || a.who[0] !== 'ai') continue
+    for (const s of a.from ?? def.states.filter(x => !def.final.includes(x))) states.add(s)
+  }
+  return states
 }
 
 /** Names a field may not take: the record's own keys and the index columns. */
@@ -169,7 +267,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -192,6 +290,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       const source = f.source ?? 'server'
       if (source !== 'file' && source !== 'server') { err(`欄「${fname}」の source は file か server です`); continue }
       if ((fname === 'title' || fname === 'summary') && source !== 'file') err(`欄「${fname}」は source: file です（記録の文章から読みます）`)
+      if (kind === 'tags' && source !== 'server') err(`欄「${fname}」の kind: tags は source: server だけです（記録のファイルには書きません）`)
       if (!isStr(f.label)) err(`欄「${fname}」に label を書いてください`)
       const def: FieldDef = { label: isStr(f.label) ? f.label : fname, kind: kind as FieldKind, source }
       if (kind === 'choice') {
@@ -221,13 +320,24 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [lname, l] of Object.entries(rawLinks)) {
       if (!ONTOLOGY_NAME_RE.test(lname)) { err(`つながりの名前「${lname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(l)) { err(`つながり「${lname}」は { label, target, cardinality } の形で書いてください`); continue }
-      for (const k of Object.keys(l)) if (!['label', 'target', 'cardinality', 'inverse'].includes(k)) err(`つながり「${lname}」に知らない項目「${k}」があります`)
+      for (const k of Object.keys(l)) if (!['label', 'target', 'interface', 'cardinality', 'inverse'].includes(k)) err(`つながり「${lname}」に知らない項目「${k}」があります`)
       if (!isStr(l.label)) err(`つながり「${lname}」に label を書いてください`)
-      if (!isStr(l.target) || !ONTOLOGY_NAME_RE.test(l.target)) { err(`つながり「${lname}」の target に型の名前か file を書いてください`); continue }
+      let target: string
+      let toInterface = false
+      if (l.interface !== undefined) {
+        // An interface target: any type implementing it. Named explicitly, so an unknown one is an error (a type target is only a label).
+        if (l.target !== undefined) { err(`つながり「${lname}」には target か interface のどちらか一方を書いてください`); continue }
+        if (typeof l.interface !== 'string' || !Object.prototype.hasOwnProperty.call(INTERFACES, l.interface)) { err(`つながり「${lname}」の interface「${String(l.interface)}」という共通の型はありません（${Object.keys(INTERFACES).join(' / ')}）`); continue }
+        target = l.interface
+        toInterface = true
+      } else {
+        if (!isStr(l.target) || !ONTOLOGY_NAME_RE.test(l.target)) { err(`つながり「${lname}」の target に型の名前か file を書いてください`); continue }
+        target = l.target
+      }
       const cardinality = l.cardinality ?? 'many'
       if (cardinality !== 'one' && cardinality !== 'many') { err(`つながり「${lname}」の cardinality は one か many です`); continue }
       if (l.inverse !== undefined && (!isStr(l.inverse) || !ONTOLOGY_NAME_RE.test(l.inverse))) err(`つながり「${lname}」の inverse は英小文字の名前で書いてください`)
-      links[lname] = { label: isStr(l.label) ? l.label : lname, target: l.target, cardinality, ...(isStr(l.inverse) ? { inverse: l.inverse } : {}) }
+      links[lname] = { label: isStr(l.label) ? l.label : lname, target, cardinality, ...(toInterface ? { targetIsInterface: true as const } : {}), ...(isStr(l.inverse) ? { inverse: l.inverse } : {}) }
     }
   }
 
@@ -252,12 +362,19 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   if (!finalRaw || !finalRaw.every(f => typeof f === 'string' && states.includes(f))) err('final は states の名前の並びで書いてください')
   else final.push(...(finalRaw as string[]))
 
+  let createStates: string[] | undefined
+  if (raw.create_states !== undefined && raw.create_states !== null) {
+    const c = list(raw.create_states)
+    if (!c || !c.every(s => typeof s === 'string' && states.includes(s) && !final.includes(s))) err('create_states は states のうち final でない状態の名前の並びで書いてください')
+    else if (c.length > 0) createStates = [...new Set(c as string[])]
+  }
+
   const implementsRaw = list(raw.implements)
   const implementsList: string[] = []
   if (!implementsRaw) err('implements は共通の型の名前の並びで書いてください')
   else {
     for (const i of implementsRaw) {
-      if (typeof i !== 'string' || !(i in INTERFACES)) { err(`共通の型「${String(i)}」はありません`); continue }
+      if (typeof i !== 'string' || !Object.prototype.hasOwnProperty.call(INTERFACES, i)) { err(`共通の型「${String(i)}」はありません`); continue }
       implementsList.push(i)
       for (const [fname, kind] of Object.entries(INTERFACES[i].fields)) {
         const f = fields[fname]
@@ -274,7 +391,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'links']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -329,7 +446,13 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
           err(`操作「${aname}」に ok_from を書くときは、欄「${OK_FIELDS.by}」（kind: person, source: server）と「${OK_FIELDS.note}」（kind: text, source: server）が要ります`)
         } else okFrom = o as string[]
       }
-      if (to === null && Object.keys(args).length === 0) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かのどちらかが要ります`)
+      let actionLinks: string[] | undefined
+      if (a.links !== undefined && a.links !== null) {
+        const l = list(a.links)
+        if (!l || l.length === 0 || !l.every(n => typeof n === 'string' && links[n] !== undefined && links[n].target !== 'file')) err(`操作「${aname}」の links は記録へのつながり（file でないもの）の名前で書いてください`)
+        else actionLinks = [...new Set(l as string[])]
+      }
+      if (to === null && Object.keys(args).length === 0 && !actionLinks) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かつながりを決める（links）かのどれかが要ります`)
       actions[aname] = {
         label: isStr(a.label) ? a.label : aname,
         from,
@@ -344,6 +467,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         args,
         handTo,
         ...(okFrom ? { okFrom } : {}),
+        ...(actionLinks ? { links: actionLinks } : {}),
       }
     }
   }
@@ -363,6 +487,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       states,
       initial,
       final,
+      ...(createStates ? { createStates } : {}),
       actions,
     },
   }
@@ -399,7 +524,7 @@ export function compareTypeDefinitions(prev: TypeDefinition, next: TypeDefinitio
   for (const [n, l] of Object.entries(prev.links)) {
     const m = next.links[n]
     if (!m) breaking.push(`つながり「${n}」を消す（名前を変える）`)
-    else if (m.target !== l.target || m.cardinality !== l.cardinality) breaking.push(`つながり「${n}」の相手・数を変える`)
+    else if (m.target !== l.target || !!m.targetIsInterface !== !!l.targetIsInterface || m.cardinality !== l.cardinality) breaking.push(`つながり「${n}」の相手・数を変える`)
   }
   for (const s of prev.states) if (!next.states.includes(s)) breaking.push(`状態「${s}」を消す（名前を変える）`)
   for (const a of Object.keys(prev.actions)) if (!(a in next.actions)) breaking.push(`操作「${a}」を消す（名前を変える）`)

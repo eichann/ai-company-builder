@@ -35,6 +35,7 @@ contract.invoke brokerKeys:delete
 contract.invoke brokerKeys:list
 contract.invoke brokerKeys:moveFromEnv
 contract.invoke brokerKeys:save
+contract.invoke calendar:today
 contract.invoke chat-server:getInfo
 contract.invoke chatHistory:deleteSession
 contract.invoke chatHistory:getSession
@@ -272,6 +273,7 @@ contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'a
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
+contract.type ElectronAPI.getCalendarToday = getCalendarToday: Invoke<'calendar:today'>
 contract.type ElectronAPI.getChatServerInfo = getChatServerInfo: Invoke<'chat-server:getInfo'>
 contract.type ElectronAPI.getChatSession = getChatSession: Invoke<'chatHistory:getSession'>
 contract.type ElectronAPI.getChatSessionSummaries = getChatSessionSummaries: Invoke<'chatHistory:getSummaries'>
@@ -520,6 +522,7 @@ contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { arg
 contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
 contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
 contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
 contract.type IpcInvokeChannels.'chatHistory:getSession' = 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null }
@@ -727,6 +730,7 @@ main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, servi
 main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
 main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
 main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
+main.handle calendar:today @ features/calendar/ipc.ts (companyId: string)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
 main.handle chatHistory:getSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -918,6 +922,8 @@ preload getApproval -> invoke approvals:get($0, $1)
 preload getApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
+preload getCalendarToday -> invoke calendar:today($0)
+preload getCalendarToday : (companyId: string) => Promise<CalendarTodayResult>
 preload getChatServerInfo -> invoke chat-server:getInfo()
 preload getChatServerInfo : () => Promise<ChatServerInfo | null>
 preload getChatSession -> invoke chatHistory:getSession($0, $1)

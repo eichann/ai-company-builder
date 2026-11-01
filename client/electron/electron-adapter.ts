@@ -8,7 +8,8 @@ import { pathToFileURL } from 'url'
 import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
-import { allowPermission, type AppPage } from './permission-policy'
+import { allowPermission, isAppPage, type AppPage } from './permission-policy'
+import { webLinkForBrowser } from './external-url'
 import type { DesktopShell, WindowPort } from './features/ports'
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
@@ -92,6 +93,30 @@ export function createBroadcastPort(getWindows: () => Array<BrowserWindow | null
 
 export interface WindowBounds { x?: number; y?: number; width: number; height: number }
 
+/**
+ * Every app window shows only the app's page: a link that would open a new
+ * window (`target="_blank"` in a chat answer or a markdown preview,
+ * window.open) or navigate the window away from the app opens in the member's
+ * own browser instead (http / https only; anything else is just refused).
+ * Without this, Electron opened such links in a new app window. Only the main
+ * frame: the PDF preview's iframe is Chromium's viewer and navigates itself.
+ */
+export function keepAppPageInWindow(contents: WebContents, page: AppPage): void {
+  const openInBrowser = (url: string) => {
+    const link = webLinkForBrowser(url)
+    if (link) void shell.openExternal(link).catch(() => { /* no browser: nothing to do */ })
+  }
+  contents.setWindowOpenHandler(({ url }) => {
+    openInBrowser(url)
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', event => {
+    if (isAppPage(event.url, page)) return
+    event.preventDefault()
+    openInBrowser(event.url)
+  })
+}
+
 /** Saved bounds only when they still lie on a connected display (a monitor may be gone); else only the size. */
 function usableBounds(saved: WindowBounds | undefined, fallback: WindowBounds): WindowBounds {
   if (!saved || !(saved.width >= 420) || !(saved.height >= 480)) return fallback
@@ -106,10 +131,12 @@ function usableBounds(saved: WindowBounds | undefined, fallback: WindowBounds): 
  * Consultation windows (「別ウィンドウで開く」, features/chat-windows): the
  * same page, preload and web preferences as the main window (`webPreferences`
  * is the main window's, so the hardening is one copy), loaded with
- * `?window=chat`; no other page, no popups. The last bounds are remembered.
+ * `?window=chat`; no other page, no popups (`keepAppPageInWindow`). The last
+ * bounds are remembered.
  */
 export function createChatWindowHost(options: {
   webPreferences: () => WebPreferences
+  page: () => AppPage
   load: (win: BrowserWindow) => void
   bounds: { load(): WindowBounds | undefined; save(bounds: WindowBounds): void }
 }) {
@@ -134,8 +161,7 @@ export function createChatWindowHost(options: {
       })
       const id = win.webContents.id
       windows.set(id, win)
-      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      win.webContents.on('will-navigate', event => event.preventDefault())
+      keepAppPageInWindow(win.webContents, options.page())
       win.once('ready-to-show', () => win.show())
       let confirmed = false
       win.on('close', event => {
@@ -234,6 +260,7 @@ export function createAppPages(appDir: string) {
  */
 export function createMainWindowHost(options: {
   webPreferences: () => WebPreferences
+  page: () => AppPage
   load: (win: BrowserWindow) => void
   askClose: (window: WindowPort) => void
   /** Sent with requests to image.docbase.io (its images answer 403 otherwise). */
@@ -260,6 +287,7 @@ export function createMainWindowHost(options: {
       })
       current = win
       win.on('closed', options.onClosed)
+      keepAppPageInWindow(win.webContents, options.page())
       const winGuard = createCloseGuard({
         ask: () => options.askClose(port),
         close: () => { if (!win.isDestroyed()) win.close() },

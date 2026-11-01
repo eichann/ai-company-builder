@@ -1,5 +1,5 @@
 /**
- * SQLite storage of the Google connection (ports/connectors.ts), limited to
+ * SQLite storage of the connectors (ports/connectors.ts), limited to
  * one company: every statement binds `company_id = ?` with the handle's id.
  * Sealed secrets are stored as their JSON envelope only.
  */
@@ -12,7 +12,7 @@ type ClientRow = {
   created_at: string; created_by: string; updated_at: string; updated_by: string
 }
 type GrantRow = {
-  user_id: string; provider: string; grant_id: string; account_email: string; scopes: string; status: string
+  user_id: string; provider: string; grant_id: string; account_email: string; scopes: string; features_off: string; status: string
   status_reason: string | null; created_at: string; updated_at: string; last_used_at: string | null
 }
 type PendingRow = {
@@ -20,7 +20,7 @@ type PendingRow = {
 }
 type HistoryRow = { id: string; provider: string; action: string; user_id: string | null; at: string; by_user: string; change: string }
 
-const GRANT_COLUMNS = 'user_id, provider, grant_id, account_email, scopes, status, status_reason, created_at, updated_at, last_used_at'
+const GRANT_COLUMNS = 'user_id, provider, grant_id, account_email, scopes, features_off, status, status_reason, created_at, updated_at, last_used_at'
 
 const toClient = (r: ClientRow): OAuthClientRow => ({
   clientId: r.client_id, secretLast4: r.secret_last4, domain: r.domain, enabled: r.enabled === 1,
@@ -36,7 +36,7 @@ const scopesOf = (text: string): string[] => {
 }
 const toGrant = (r: GrantRow): ConnectorGrantRow => ({
   userId: r.user_id, provider: r.provider as ConnectorProvider, grantId: r.grant_id, accountEmail: r.account_email,
-  scopes: scopesOf(r.scopes), status: r.status as ConnectorGrantRow['status'], statusReason: r.status_reason,
+  scopes: scopesOf(r.scopes), featuresOff: scopesOf(r.features_off), status: r.status as ConnectorGrantRow['status'], statusReason: r.status_reason,
   createdAt: r.created_at, updatedAt: r.updated_at, lastUsedAt: r.last_used_at,
 })
 const sealedOf = (text: string): SealedSecret => JSON.parse(text) as SealedSecret

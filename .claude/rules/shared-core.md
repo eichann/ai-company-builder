@@ -34,7 +34,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
 | `yaml-lite.ts` | the strict YAML subset of type definitions and record files (`parseYamlLite`, `splitFrontmatter`) (`records.md`) |
-| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES`; the push checker uses it too |
+| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES` (`request`, `bundle`), the tags kind's value rule (`normalizeTag` / `normalizeTagsValue` / `parseTagsValue`); the push checker uses it too |
 | `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId`, `appendHistoryLine` |
 | `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
 | `core-types.ts` | the core types `task` and `interaction`, in the definition format |
@@ -43,6 +43,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
 | `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
 | `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
+| `calendar.ts` | 「今日の予定」: the neutral `CalendarEvent`, `CalendarTodayReason`, `dayWindow` (the company's day), `DEFAULT_COMPANY_TIME_ZONE` (`calendar.md`) |
 | `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |

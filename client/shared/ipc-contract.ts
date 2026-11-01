@@ -38,6 +38,7 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
+import type { CalendarTodayResult } from './calendar'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
@@ -471,6 +472,9 @@ export interface IpcInvokeChannels {
   'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
   /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
   'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
+  // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
+  /** Not being able to read the calendar is an empty list with a reason (`data.reason`), not a failure. */
+  'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
   'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -783,6 +787,8 @@ export interface ElectronAPI {
   sendBackApproval: Invoke<'approvals:sendBack'>
   withdrawApproval: Invoke<'approvals:withdraw'>
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
+  // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
+  getCalendarToday: Invoke<'calendar:today'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the deal choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>

@@ -180,7 +180,7 @@ GET  /api/config                                  setup state (no auth)
                                                                 (緊急停止: agent-stop.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service (+ /own-keys, /read-only),
+                              PUT /broker/services/:service (+ /own-keys, /read-only, /default-key),
                               PUT|DELETE /broker/relay-services/:service,
                               PUT /broker/settings, POST /broker/stop-all,
                               POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,
@@ -218,6 +218,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/minutes/item/:recordId/text,
                               POST /me/minutes/item/:recordId/deal               minutes.ts
                                                                 (議事録の取り込み: minutes.md)
+                              GET /me/calendar/today                          calendar.ts
+                                                                (今日の予定: calendar.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
                               POST /item/:recordId/file-links (+ /remove),

@@ -70,11 +70,15 @@ import { createPluginMappingCheckService } from './services/plugin-mapping-check
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createDecisionService } from './services/decisions'
 import { createGoogleMeetings } from './services/google-meetings'
+import { createGoogleCalendar } from './services/google-calendar'
+import { createCalendarService } from './services/calendar'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
 import { createMinutesService } from './services/minutes'
 import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
@@ -167,8 +171,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
     // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
     managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
-    // 「すべての鍵を止める」 stops members' Google permissions too (bound below).
-    onStopAll: (companyId, by) => { void googleConnector.stopAll(companyId, by) },
+    // 「すべての鍵を止める」 stops members' permissions at every OAuth provider too (bound below).
+    onStopAll: (companyId, by) => { void memberOAuth.stopAll(companyId, by) },
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -326,12 +330,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       : `https://${GOOGLE_AUTHORIZE_HOST}`,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   })
+  // Members' own OAuth permissions, provider-neutral (member-oauth.md); Google registers below.
+  const memberOAuth = createMemberOAuth({
+    ...shared,
+    brokerVault,
+    tokenDigest: sha256TokenDigest,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    redirectUri: provider => `${publicUrl()}${oauthCallbackPath(provider)}`,
+  })
   const googleConnector = createGoogleConnector({
     ...shared,
     brokerVault,
     google: googleClient,
-    tokenDigest: sha256TokenDigest,
-    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    memberOAuth,
     redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
     practiceGoogle: practiceGoogle !== undefined,
     operatorStopped: () => pluginShelf.isStopped('google', ''),
@@ -352,6 +363,17 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         return a ? [{ userId: m.user_id, email: a.email, name: a.name ?? '', role: m.role }] : []
       })
     },
+  })
+
+  // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the one
+  // Google client; Google's specifics stay in google-calendar.ts (the role 「予定を読む」 replaces it).
+  const calendar = createCalendarService({
+    clock: shared.clock,
+    reader: createGoogleCalendar({
+      request: (companyId, userId, req) => googleClient.request(companyId, userId, req),
+      internalDomain: companyId => shared.companyData.forCompany(companyId).connectors.client()?.domain ?? null,
+    }),
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
   })
 
   // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
@@ -388,7 +410,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     outboundMail,
     googleClient,
     googleConnector,
+    memberOAuth,
     minutes,
+    calendar,
     pluginShelf,
     plugins,
     pluginImport,

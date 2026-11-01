@@ -10,11 +10,13 @@
 /**
  * The kinds of notice. A member turns each on or off; `NOTIFICATION_DEFAULTS`
  * is the owner's first setting (E-25: completion of what you asked, approval
- * results and a due pushed back are on; others' affairs are off).
+ * results and a due pushed back are on; others' affairs are off). What you asked
+ * coming back to you (受けられない, task v5) counts as its result: on.
  */
 export const NOTIFICATION_KINDS = [
   'request_done',
   'ok_completed',
+  'request_returned',
   'approval_result',
   'due_changed',
   'overdue',
@@ -30,6 +32,7 @@ export const isNotificationKind = (value: unknown): value is NotificationKind =>
 export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   request_done: '頼んだことが終わった・中止になった',
   ok_completed: 'あなたの OK で完了になった',
+  request_returned: '頼んだことが受けられないと戻ってきた',
   approval_result: '承認のお願いの結果（承認・差し戻しなど）',
   due_changed: '頼んだことの期限が変わった',
   overdue: '頼んだことが期限を過ぎた',
@@ -41,6 +44,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
 export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   request_done: true,
   ok_completed: true,
+  request_returned: true,
   approval_result: true,
   due_changed: true,
   overdue: true,

@@ -1,15 +1,18 @@
 /**
- * The Google connection's storage, behind the company handle
- * (`.claude/rules/google-connector.md`): the company's OAuth client, members'
- * grants, the pending 「Google で許可」 starts and their history. Every method
- * is limited to the handle's company.
+ * The connectors' storage, behind the company handle: the company's Google
+ * OAuth client (`.claude/rules/google-connector.md`) and, for every provider,
+ * members' grants, the pending 「… で許可」 starts and their history
+ * (`.claude/rules/member-oauth.md`). Every method is limited to the handle's
+ * company; grants and pending starts are always read under their provider.
  *
  * Secrets are passed and returned only as sealed envelopes (the vault seals
  * and opens them); the listing methods never return one.
  */
 import type { SealedSecret } from './secret-cipher'
 
-export type ConnectorProvider = 'google'
+/** Providers with member-level OAuth (the CHECK of connector_grants / oauth_pending lists the same). */
+export const CONNECTOR_PROVIDERS = ['google', 'slack'] as const
+export type ConnectorProvider = typeof CONNECTOR_PROVIDERS[number]
 
 export interface OAuthClientRow {
   clientId: string
@@ -29,6 +32,12 @@ export interface ConnectorGrantRow {
   grantId: string
   accountEmail: string
   scopes: string[]
+  /**
+   * The provider's features the member turned off inside this grant (owner
+   * decision 2026-11-01: e.g. Google メールを送る off). Stored now; setting
+   * and enforcing it come with the feature toggles.
+   */
+  featuresOff: string[]
   status: 'active' | 'revoked' | 'stopped'
   statusReason: string | null
   createdAt: string
@@ -71,7 +80,7 @@ export interface ConnectorRepository {
   /** The sealed refresh token of an active grant (null otherwise). */
   refreshToken(provider: ConnectorProvider, userId: string): { grantId: string; sealed: SealedSecret } | null
   /** Insert or replace the member's grant as active with a new token. */
-  putGrant(row: Omit<ConnectorGrantRow, 'status' | 'statusReason' | 'lastUsedAt'>, sealed: SealedSecret, change: ConnectorChangeRow | null): void
+  putGrant(row: Omit<ConnectorGrantRow, 'status' | 'statusReason' | 'lastUsedAt' | 'featuresOff'>, sealed: SealedSecret, change: ConnectorChangeRow | null): void
   /** Only the scopes (incremental consent that kept the token). */
   setGrantScopes(provider: ConnectorProvider, userId: string, scopes: string[], at: string, change: ConnectorChangeRow | null): void
   /**

@@ -22,7 +22,7 @@
 import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
-import { isDateValue, OK_FIELDS, type ActionDef, type FieldKind, type TypeDefinition } from '../../shared/core/record-types'
+import { aiTurnStates, INTERFACES, isDateValue, normalizeTagsValue, OK_FIELDS, type ActionDef, type FieldKind, type LinkDef, type TypeDefinition } from '../../shared/core/record-types'
 import {
   replayRecordState, type DecisionMaterial, type ExternalReceipt, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry,
   type LedgerValue, type ReplayedState, type VersionOrigin,
@@ -148,8 +148,31 @@ function checkValue(kind: FieldKind, value: unknown, options: string[] | undefin
     case 'choice': return typeof value === 'string' && (options ?? []).includes(value) ? value : { error: `${(options ?? []).join(' / ')} のどれかです` }
     case 'person': return typeof value === 'string' && value.length <= 200 && isMember(value) ? value : { error: 'この会社のメンバーの id で入れてください' }
     case 'record': return typeof value === 'string' && RECORD_ID_RE.test(value) ? value : { error: '記録の id で入れてください' }
+    case 'tags': return normalizeTagsValue(value)
   }
 }
+
+/**
+ * A link whose target is an interface (`interface: bundle`) holds only live
+ * records of this company whose type implements it — and, when `readable` is
+ * given, that the caller may read. The targets it may not hold (empty for a
+ * link to a type or file: those targets are labels, records.md).
+ */
+function interfaceLinkMisses(records: RecordRepository, link: LinkDef, targets: string[], readable?: (r: RecordAccessRow) => boolean): string[] {
+  if (!link.targetIsInterface || targets.length === 0) return []
+  const types = currentTypes(records)
+  const fit = new Set(records.byIds(targets)
+    .filter(r => types.get(r.type)?.definition.implements.includes(link.target) && (!readable || readable(r)))
+    .map(r => r.id))
+  return targets.filter(t => !fit.has(t))
+}
+
+/** One answer whether the record does not exist, cannot be read or is of another kind (nothing about it leaks). */
+const interfaceLinkRefusal = (name: string, link: LinkDef) => ({
+  error: `つながり「${link.label}」には、あなたが見られる「${INTERFACES[link.target]?.label ?? link.target}」の記録だけをつなげます`,
+  code: 'BAD_LINK',
+  link: name,
+})
 
 /** May `member` (acting as `actor`) do an action whose `who` is this, on a record with these values? */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean): boolean {
@@ -338,6 +361,14 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder })) {
         return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
       }
+      // The state it starts in: `initial`, or one the type lists in `create_states` (task: `preparing`, the AI's turn).
+      let initial = def.initial
+      if (b.state !== undefined && b.state !== null && b.state !== def.initial) {
+        if (typeof b.state !== 'string' || !(def.createStates ?? []).includes(b.state)) {
+          return bad(`state: ${[def.initial, ...(def.createStates ?? [])].filter(Boolean).join(' / ')}`, 'BAD_STATE')
+        }
+        initial = b.state
+      }
       if (def.implements.includes('request')) {
         fields.requested_by ??= member.userId
         fields.next_actor ??= fields.assignee ?? null
@@ -365,14 +396,18 @@ export function createRecordEngine(deps: RecordEngineDeps) {
             links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
           }
         }
+        if (interfaceLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
+          const r = interfaceLinkRefusal(name, l)
+          return refuse('bad-request', r.error, { code: r.code })
+        }
       }
       const at = clock.now()
       const changes: LedgerChange[] = [
-        { field: 'state', before: null, after: def.initial },
+        { field: 'state', before: null, after: initial },
         ...Object.entries(fields).filter(([, v]) => v !== null).map(([field, after]) => ({ field, before: null, after })),
       ]
       const entry: LedgerEntry = {
-        recordId: id, version: 1, action: 'create', fromState: null, toState: def.initial, actorId: member.userId, actorKind: actor.kind,
+        recordId: id, version: 1, action: 'create', fromState: null, toState: initial, actorId: member.userId, actorKind: actor.kind,
         actorSource: actor.source ?? null, at, note: '', changes, attachments: [], decision: null, isDecision: false,
         typeVersion: def.version, reversesVersion: null, ...provenance(actor),
       }
@@ -382,10 +417,11 @@ export function createRecordEngine(deps: RecordEngineDeps) {
           title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
         })
         records.replaceLinks(id, links)
-        if (!records.writeState({ recordId: id, state: def.initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
+        if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
         records.appendLedger(entry)
       })
-      tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
+      // While it is the AI's turn nobody is told: the person hears when the AI hands it over.
+      if (initial === null || !aiTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       return ok({ record: summaryOf(records, id), entry })
     },
 
@@ -458,6 +494,31 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
       }
 
+      // Record links the action sets (`links` in its definition): readable live records of the link's type or interface.
+      const linkChanges: Array<{ name: string; targets: string[] }> = []
+      if (b.links !== undefined && b.links !== null) {
+        if (typeof b.links !== 'object' || Array.isArray(b.links)) return bad('links must be an object')
+        const types = currentTypes(records)
+        for (const [name, value] of Object.entries(b.links as Record<string, unknown>)) {
+          if (!(action.links ?? []).includes(name)) return bad(`This action does not set the link ${name}`, 'BAD_LINK')
+          const l = def.links[name]
+          const targets = value === null ? [] : Array.isArray(value) ? value : [value]
+          if (l.cardinality === 'one' && targets.length > 1) return bad(`${name}: one record`, 'BAD_LINK')
+          if (targets.length > MAX_LINK_TARGETS || !targets.every(t => typeof t === 'string' && RECORD_ID_RE.test(t))) return bad(`${name}: record ids`, 'BAD_LINK')
+          const ids = [...new Set(targets as string[])]
+          const fit = new Set(records.byIds(ids)
+            .filter(r => (l.targetIsInterface ? types.get(r.type)?.definition.implements.includes(l.target) : r.type === l.target) && reader.record(r))
+            .map(r => r.id))
+          if (ids.some(t => !fit.has(t))) {
+            // One answer for another type, an unreadable record, another company's and a missing id.
+            const label = l.targetIsInterface ? (INTERFACES[l.target]?.label ?? l.target) : (types.get(l.target)?.definition.label ?? l.target)
+            return refuse('bad-request', `つながり「${l.label}」には、あなたが見られる「${label}」の記録だけをつなげます`, { code: 'BAD_LINK', link: name })
+          }
+          linkChanges.push({ name, targets: ids })
+        }
+      }
+      if (action.to === null && Object.keys(action.args).length === 0 && linkChanges.length === 0) return bad('links: the records to link', 'LINKS_REQUIRED')
+
       // Attached files (0.18-1): the versions handed over, checked to exist.
       const attachments: LedgerAttachment[] = []
       if (b.attachments !== undefined) {
@@ -522,6 +583,18 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         const before = current.fields[field] ?? null
         if (before !== after) changes.push({ field, before, after })
       }
+      let nextLinks: RecordLinkRow[] | null = null
+      if (linkChanges.length > 0) {
+        const currentLinks = records.linksFrom([row.id])
+        nextLinks = currentLinks
+        for (const lc of linkChanges) {
+          const target = def.links[lc.name].target
+          const before = linkLedgerValue(target, currentLinks.filter(x => x.name === lc.name))
+          nextLinks = withLinkTargets(row.id, nextLinks, lc.name, target, lc.targets)
+          const after = linkLedgerValue(target, nextLinks.filter(x => x.name === lc.name))
+          if (before !== after) changes.push({ field: `links.${lc.name}`, before, after })
+        }
+      }
       const at = clock.now()
       const entry: LedgerEntry = {
         recordId: row.id, version: current.version + 1, action: actionName, fromState: current.state, toState: nextState,
@@ -533,6 +606,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
       const written = transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, expected)) return false
+        if (nextLinks) records.replaceLinks(row.id, nextLinks)
         records.appendLedger(entry)
         return true
       })
@@ -786,8 +860,13 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
       }
       const at = deps.clock.now()
       const actor = input.actor ?? { id: input.source, kind: 'external' as const, source: input.source, conversationId: null }
-      const linkRows = (id: string): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) =>
-        targets.filter(t => RECORD_ID_RE.test(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null })))
+      const linkRows = (id: string): RecordLinkRow[] => Object.entries(input.links).flatMap(([name, targets]) => {
+        const valid = targets.filter(t => RECORD_ID_RE.test(t))
+        // An interface link (`interface: bundle`) keeps only records implementing it, as every other writer.
+        const link = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
+        const misses = link ? interfaceLinkMisses(records, link, valid) : []
+        return valid.filter(t => !misses.includes(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
+      })
       const tellAbout = (values: Record<string, LedgerValue>, entry: LedgerEntry) => {
         const to = [...new Set([values.assignee, values.next_actor].filter((u): u is string => typeof u === 'string'))]
         if (to.length > 0) { try { deps.notify(companyId, to, { type: def.name, entry, fields: values }) } catch { /* the app's own check catches up */ } }
@@ -1007,6 +1086,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
         links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
       }
+      if (interfaceLinkMisses(records, l, targets).length > 0) return fail('bad-value', `${name}: records implementing ${l.target}`)
     }
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
@@ -1093,6 +1173,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
           if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
           newLinks.push({ sourceId: row.id, name, position: 0, targetId: t, targetPath: null })
         }
+        if (interfaceLinkMisses(records, l, targets).length > 0) return fail('bad-value', `${name}: records implementing ${l.target}`)
         const before = currentLinks.filter(x => x.name === name).map(x => x.targetId).join(',') || null
         const after = targets.join(',') || null
         if (before !== after) changes.push({ field: `links.${name}`, before, after })

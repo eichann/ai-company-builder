@@ -39,8 +39,14 @@ export class FakeWebContents extends EventEmitter {
   loaded: string | null = null
   /** loadFile's options (the consultation window's `?window=chat`). */
   loadOptions: unknown = undefined
-  windowOpenHandler: (() => unknown) | null = null
-  setWindowOpenHandler(handler: () => unknown): void { this.windowOpenHandler = handler }
+  windowOpenHandler: ((details: { url: string }) => unknown) | null = null
+  setWindowOpenHandler(handler: (details: { url: string }) => unknown): void { this.windowOpenHandler = handler }
+  /** Like Chromium before a navigation: true when a 'will-navigate' listener prevented it. */
+  navigate(url: string): boolean {
+    let prevented = false
+    this.emit('will-navigate', { url, preventDefault: () => { prevented = true } })
+    return prevented
+  }
   send(channel: string, ...args: unknown[]): void { this.sent.push({ channel, args }) }
   isDestroyed(): boolean { return this.destroyed }
   startDrag(item: unknown): void { this.drags.push(item) }

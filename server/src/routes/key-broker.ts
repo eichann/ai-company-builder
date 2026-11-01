@@ -11,6 +11,7 @@
  *   PUT    /broker/services/:service      { category, rule, ownKeyHosts }
  *   PUT    /broker/services/:service/own-keys { allowed } the one switch 「メンバーが自分の鍵を使ってよい」
  *   PUT    /broker/services/:service/read-only { readOnly } the relay forwards only reads for the service
+ *   PUT    /broker/services/:service/default-key { keyId } which company key the service uses (null: none chosen)
  *   PUT    /broker/relay-services/:service { label, baseUrl, header, format?, category? } a generic service (K9)
  *   DELETE /broker/relay-services/:service once no key exists for it
  *   PUT    /broker/settings               { memberKeysAllowed?, internalHosts? }
@@ -109,6 +110,12 @@ keyBrokerRoute.put('/broker/services/:service/read-only', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, keyBroker.setReadOnly(member, c.req.param('service'), await jsonBody(c)))
+})
+
+keyBrokerRoute.put('/broker/services/:service/default-key', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, keyBroker.setDefaultKey(member, c.req.param('service'), await jsonBody(c)))
 })
 
 keyBrokerRoute.put('/broker/relay-services/:service', async (c) => {

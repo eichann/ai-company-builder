@@ -100,6 +100,8 @@ export function noticeKind(userId: string, change: RecordChange, final: Readonly
     if (entry.changes.some(c => c.field === 'ok_by' && c.after === userId)) return 'ok_completed'
     if (str(fields.requested_by) === userId) return 'request_done'
   }
+  // What the member asked came back to them (受けられない): not final, but now their turn again.
+  if (stateChanged && str(fields.requested_by) === userId && str(fields.next_actor) === userId && str(fields.assignee) !== userId) return 'request_returned'
   if (str(fields.requested_by) === userId && entry.changes.some(c => c.field === 'due')) return 'due_changed'
   return 'others'
 }
@@ -180,6 +182,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const past = label ? pastTense(label) : null
         return past ? `${actor}が${t}を${past}` : `${t}が終わりました（${actor}）`
       }
+      case 'request_returned': {
+        const label = def?.actions[row.action]?.label
+        return `${actor}が${t}をあなたに戻しました${label ? `（${label}）` : ''}`
+      }
       case 'due_changed': {
         const after = entry()?.changes.find(c => c.field === 'due')?.after
         return typeof after === 'string' ? `${actor}が${t}の期限を${dueText(after)}に変えました` : `${actor}が${t}の期限をなくしました`
@@ -194,6 +200,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (row.action === 'create') return `${actor}が${t}であなたを担当にしました`
         if (row.action === 'undo') return `${actor}が${t}の変更を取り消しました`
         const label = def?.actions[row.action]?.label
+        // 用意ができた: already a sentence about the record.
+        if (label?.endsWith('た')) return `${t}の${label}（${actor}）`
         const past = label ? pastTense(label) : null
         return past ? `${actor}が${t}で${past}` : `${t}が動きました（${actor}）`
       }

@@ -6,6 +6,7 @@ paths:
   - "server/src/adapters/sqlite/connectors.ts"
   - "server/src/services/google-client.ts"
   - "server/src/services/google-connector.ts"
+  - "server/src/services/member-oauth.ts"
   - "server/src/routes/google.ts"
   - "server/src/routes/oauth.ts"
   - "server/tests/integration/google-connector.test.ts"
@@ -22,7 +23,9 @@ paths:
 
 A member allows ACB to use part of their Google account (read their calendar and the Meet
 minutes; send mail they confirmed); the server holds that permission like a key and is the only
-place that talks to Google. Design: 節目4 設計案 §2-2 N1, §3-2, §3-8, §4-5, §4-6, §5-2, §9 q10.
+place that talks to Google. The member's grant, the pending start, the callback and the stops
+are the provider-neutral `services/member-oauth.ts` (`member-oauth.md`); Google is its first
+provider (`createGoogleConnector` registers the descriptor). Design: 節目4 設計案 §2-2 N1, §3-2, §3-8, §4-5, §4-6, §5-2, §9 q10.
 Owner decisions: the member allows it themselves; the Google account must be **the member's own
 ACB email** (case-insensitive), verified, in the company's Workspace domain (no private Gmail);
 ask only for what a feature needs, when first needed; never `drive.readonly`, `gmail.compose`,
@@ -34,8 +37,9 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
   broker's vault (`vault.sealConnector`, purpose `acb-google-client`, bound to the company), its
   last 4, the Workspace domain (lower case), `enabled`, created/updated/by.
 - `connector_grants` (per company, member, provider `google`): `grant_id` (new at every consent),
-  the Google account email, granted scopes (JSON, only `GOOGLE_ALLOWED_SCOPES`), the **refresh
-  token sealed** (purpose `acb-google-grant`, bound to the grant id) — `NULL` unless `active`
+  the Google account email, granted scopes (JSON, only `GOOGLE_ALLOWED_SCOPES`), `features_off`
+  (not yet used, `member-oauth.md`), the **refresh token sealed** (purpose `acb-google-grant` =
+  `grantSealContext('google', …)`, bound to the grant id) — `NULL` unless `active`
   (CHECK) —, `status` active / revoked / stopped + reason, created / updated / `last_used_at`.
 - `oauth_pending`: a started 「Google で許可」 — only the **sha256 of the state**, the **PKCE
   verifier sealed** (purpose `acb-oauth-pending`), member, requested scopes, 10 minutes, single
@@ -57,7 +61,7 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
 `normalizeGrantedScopes` (Google's report → allowed long forms only).
 
-## Routes (`routes/google.ts`, `routes/oauth.ts` → `services/google-connector.ts`)
+## Routes (`routes/google.ts` → `services/google-connector.ts`; `routes/oauth.ts` → `services/member-oauth.ts`)
 
 - Owner/admin, `/api/companies/:id`: `GET /google` (`GoogleAdminView`: configured, client id,
   secret last 4, domain, enabled, the **redirect URI** `<PUBLIC_URL>/api/oauth/google/callback`
@@ -73,8 +77,9 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
   `POST /me/google/connect { features }` → `{ authorizeUrl, expiresAt }` (409
   `GOOGLE_UNAVAILABLE` + reason); `DELETE /me/google` 「許可をやめる」 (revoke at Google — best
   effort —, then the row is deleted; always 200).
-- Public `GET /api/oauth/google/callback?code&state[&error]` (listed in `auth-guards.test.ts`;
-  matrix row: 400 for everyone without a state). Answers a small Japanese page (one sentence,
+- Public `GET /api/oauth/google/callback?code&state[&error]` — the `google` case of
+  `/api/oauth/:provider/callback` (listed in `auth-guards.test.ts`; matrix row: 400 for everyone
+  without a state). This exact path is each company's registered redirect URI: never move it. Answers a small Japanese page (one sentence,
   `no-store`, `no-referrer`, a strict CSP), 200 「許可しました。アプリに戻ってください。」 or 400 with
   a plain refusal; never a secret, nobody's email. The request log prints no query.
 
@@ -86,17 +91,17 @@ base64url of its sha256), `access_type=offline`, `include_granted_scopes=true`, 
 `login_hint` = the member's ACB email, and `prompt=consent` **only when the member has no active
 grant** (a refresh token comes only with a consent).
 
-## The callback (`googleConnector.callback`)
+## The callback (`memberOAuth.callback('google', …)` with Google's descriptor)
 
 1. The state must be `<companyId>.<64 hex>`; the company's handle is opened from it and the
    pending row is taken **inside that company only** by the sha256 of the whole state (the
-   company is inside the hashed value too). Another company's state, a forged, reused or expired
+   company is inside the hashed value too), and must be a `google` start. Another company's state, a forged, reused or expired
    one → 「この許可の手続きは使えません…」, nothing stored. Google's `error` → 「Google で許可され
    ませんでした」.
 2. Switches (operator stop file, client present and on, vault) and membership again.
 3. The code is exchanged with the verifier (`client_secret_post`); userinfo
-   (`www.googleapis.com/oauth2/v3/userinfo`): `email_verified`, `hd` = domain and the email's
-   domain = domain, the email = the member's ACB email (`sameEmail` → `normalizeEmail`). Any
+   (`www.googleapis.com/oauth2/v3/userinfo`, the descriptor's `identify`): `email_verified`,
+   `hd` = domain and the email's domain = domain; then (member-oauth) the email = the member's ACB email (`sameEmail` → `normalizeEmail`). Any
    refusal revokes the tokens Google just issued and stores nothing.
 4. A refresh token → a new grant (`putGrant`, new `grant_id`). None (incremental consent) → the
    stored token is kept and only the scopes change; with no active grant → refused.
@@ -128,10 +133,14 @@ emergency stop (M2) is not checked here: callers decide (a person's send passes,
 ## Stops (each from the next call; test 「every stop works from the next call」)
 
 Company switch off · admin 「止める」 one member · 「すべての鍵を止める」 (`POST /broker/stop-all`
-→ `keyBroker` `onStopAll` → every active grant `stopped` at once, tokens cleared, revoked at
+→ `keyBroker` `onStopAll` → `memberOAuth.stopAll`: every active grant of every provider `stopped` at once, tokens cleared, revoked at
 Google in the background) · the member's 「許可をやめる」 · the operator's stop file · the member
 removed · Google refusing the token. A stopped / revoked grant is resumed only by the member's
 「Google で許可」 again.
+
+Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`) and
+「今日の予定」 (`calendar.md`, `services/google-calendar.ts`: `calendar.events.list` of `primary`
+for today; no answer is an error there — a stop becomes an empty list with a reason).
 
 ## Practice Google (staging)
 

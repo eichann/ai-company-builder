@@ -877,6 +877,8 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
       const def = mappableField(type, fname)
       if (!def) { err(`${where}は、型「${type.name}」のサーバーの欄ではありません`); continue }
       if (!isYamlMap(f)) { err(`${where}は { from, write } の形で書いてください`); continue }
+      // A list of tags has no outside counterpart in the mapping yet (no translation either way).
+      if (def.kind === 'tags') { err(`${where}: タグの欄はまだ外の項目と読み替えられません`); continue }
       unknownKeys(`${where}: `, f, ['from', 'write', 'values', 'people'], err)
       if (typeof f.from !== 'string' || !EXTERNAL_NAME_RE.test(f.from)) { err(`${where}の from は外の項目名です`); continue }
       const write = f.write ?? false

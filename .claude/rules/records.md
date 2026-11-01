@@ -60,10 +60,17 @@ engine the day it is turned on.
   keys or prototype keys — every reader (server, push checker, app) gets the same meaning.
 - A definition can say only what the engine does (案 B, ontology §17.7): `fields` (kind,
   `source: file | server`; a choice may add `option_labels: { <option>: <shown as> }` — display
-  only, values stay the options), `links` (target type or `file`, cardinality, inverse label),
-  `states`, `initial`, `actions` (from / to / who / notify / attach / note / history_line /
-  decision / approval / args / ok_from — "Completing on someone's OK"), `implements` (interfaces, `INTERFACES`: `request` needs
-  `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server), `storage`
+  only, values stay the options; kind `tags` is server-only, "Tags" below), `links` (target type
+  or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
+  cardinality, inverse label),
+  `states`, `initial`, `create_states` (states a create may start in instead — "Task version
+  5"), `actions` (from / to / who / notify / attach / note / history_line /
+  decision / approval / args / ok_from — "Completing on someone's OK" — / links — record links
+  the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`: `request` needs
+  `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server; `bundle`
+  (まとまり) needs `owner` (person) and `purpose` (text) on the server; `prepared` (AI が用意したもの)
+  needs `requested_by` and `assignee` (person) — `outbound_message` v2 and `approval` v3
+  implement it), `storage`
   (`file` / `server` / `either`). Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
   same kind (an action sets them; nothing is computed).
@@ -239,6 +246,96 @@ Task: `complete` has `ok_from: [assignee]`, `notify: [requested_by, ok_by]`; `re
   refused, requester unchanged, OK-giver told and reopening, cleared on reopen, cross-company,
   v4 additive — mutation-checked).
 
+### Tags (stage 2 S1, owner decision 2026-11-01: 「何個も値を持てる項目」を1つ足す)
+
+Field kind `tags` — the one list-valued kind: short words (タグ) on a record.
+
+- Definition: `source: server` only (a file-sourced one is a parser error; record files hold id /
+  type / links only), no `options` / `target`. An action's `args` may set one (same kind).
+  Adding a tags field is additive; changing a field to or from `tags` is a kind change (breaking).
+- Value (`normalizeTagsValue`, `shared/core/record-types.ts`; the engine's `checkValue` for every
+  writer: create, action args, service and external writers): an array of strings; each NFC,
+  trimmed, inner whitespace one space, 1–`TAG_MAX_LENGTH` (40) characters, no control or line
+  separator characters; repeats dropped (first kept, order kept); at most `TAGS_MAX_COUNT` (20).
+  Anything else → 400 `BAD_VALUE`, nothing written. Stored — and in the ledger, before / after —
+  as the **JSON text** of the array (`["急ぎ","見積"]`; none = null), so every record value stays
+  one scalar (replay, undo and equality unchanged). `RecordSummary.fields` carries that text;
+  readers use `parseTagsValue`. The app's tools take a list (`kindSchema`).
+- Query: `fields: { <tags field>: { contains: "<tag>" } }` (one tag, normalized like a stored one).
+  Only types whose field of that name is `tags` are searched (another type's text field of the same
+  name never is); with `type`, a non-tags field → 400, and equality / `in` on a tags field → 400.
+  It narrows the SQL candidates like any filter; read access is applied afterwards as always, so
+  records and `total` (also `countOnly`) hold only what the caller reads, and the company handle
+  keeps it inside the company.
+- A plugin mapping cannot map a tags field (`plugins.md`).
+- Test: `server/tests/unit/record-tags-bundle.test.ts` (bad values refused with nothing written,
+  normalization, contains never returns or counts an unreadable record, never another company's,
+  never a non-tags field, equality refused), `record-types.test.ts` — mutation-checked.
+
+### Links to an interface (stage 2 S1, owner decision 2026-11-01: 取り組みを最初から)
+
+A link may target an interface instead of one type: `links: { bundle: { label: まとまり,
+interface: bundle, cardinality: one } }` — any record whose type implements it (a core 取り組み
+— S9 —, a business plugin's 案件 or 企画). `LinkDef` keeps `target: <interface name>` plus
+`targetIsInterface: true` (absent on every other link, so stored definitions compare equal).
+
+- Parser: `interface` and `target` exclude each other; an interface not in `INTERFACES` is an
+  error (a type target stays a label that may name an undefined type). Switching a link between a
+  type and an interface is breaking, even for the same name.
+- Engine (unlike type targets, which are labels): an interface link holds only live records of
+  this company whose type implements it. The generic create also requires the creator to read the
+  target; a record of another type, an unreadable one, another company's and a missing id all get
+  the same 400 `BAD_LINK` (nothing about the target leaks). The service writer (create /
+  transition) refuses (`bad-value`); the external writer drops such a target. A company's own
+  record file's links are stored as its text says, as every file link (the read side filters).
+- `POST /records/query { implements: bundle }` finds every bundle, whatever its type.
+- Test: `server/tests/unit/record-tags-bundle.test.ts` "a link to an interface",
+  `record-types.test.ts` (unknown interface refused, `bundle` needs its fields, breaking
+  changes) — mutation-checked.
+
+### Task version 5 (stage 2 S2, owner decisions 2026-11-01 §11-12/16/19/35/37)
+
+Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run every action;
+`server/tests/helpers/task-v4.ts` keeps the version 4 text). Adds:
+
+- Fields `tags` (kind `tags`, "Tags"), `wait_until` (kind `date`, day or day + time: when a reply
+  or delivery is expected — what 追いかけ will look at), `prep_summary` (long text: what the AI
+  checked and made). Links `bundle` (`interface: bundle`, one) and `prepared` (`interface:
+  prepared`, many: the mail drafts / approval requests the AI made — 「AI が用意したもの」).
+  Actions `set_tags`, `set_wait_until`, `set_bundle` (requester / assignee / AI; an action
+  arg is required, so a value is cleared with `[]` for tags only).
+- **Preparing, the AI's turn** (§11-35): state `preparing`; `create_states: [preparing]` lets a
+  create (`POST /records/item { state: 'preparing' }`, the AI's `records_create`) start there —
+  any other state → 400 `BAD_STATE`. `finish_prep` (`who: [ai]`, arg `prep_summary`, links
+  `prepared`, `hand_to` / `notify` the assignee) moves it to `todo`. A record created in an
+  AI-turn state tells nobody, and 「あなたの番」 leaves out every AI-turn state
+  (`aiTurnStates`, `shared/core/record-types.ts`: a state some `who: [ai]` action starts from —
+  the same rule as 「AI の番」), so the person sees it when it is ready. **Preparing never hides
+  the work** (owner, 2026-11-01): `hand_over` (`who: [ai]` — the AI, also the AI-turn runner of
+  S10 —, note required: due soon, the preparation failed, information missing; links `prepared`
+  for whatever is ready) hands it to the assignee early; `take_over` (`who: [assignee,
+  requested_by]`, never the AI) lets a person take it from the AI at any time; both go to `todo`
+  as the assignee's turn and tell them. `cancel` also starts from `preparing` (the requester
+  stops it).
+- **受けられない** (`decline`): from todo / in_progress / waiting, `who: [assignee]` only (never
+  the AI, never the requester), note required, `hand_to` and `notify` the requester → state
+  `declined`, **not final**: the requester's turn, who `assign`s someone else, `cancel`s or
+  `reopen`s it (back to the same assignee). The AI never completes or declines.
+- **Action links** (generic syntax `links: [<record link>]` on an action; never a file link —
+  those are "Linking files later"): body `links: { <name>: id | [ids] | null }`, a link left out
+  stays. Each target must be a live record of this company that the actor reads, of the link's
+  type or implementing its interface; another type, an unreadable record, another company's and
+  a missing id get one answer, 400 `BAD_LINK`. An action with no `to` and no args needs a link
+  (400 `LINKS_REQUIRED`). Ledger change `links.<name>` (ids comma-joined, before / after),
+  undone like every link change.
+- `TypeDefinition.createStates` and `ActionDef.links` are absent when empty, so stored
+  definitions of other types compare equal.
+- Tests: `server/tests/unit/record-task-v5.test.ts` (the AI cannot complete or decline, the
+  requester cannot decline; decline needs a note and tells only the requester; preparing tells
+  nobody and stays out of 「あなたの番」, `prepared` refuses alike; `hand_over` needs a reason and
+  `take_over` is a person's, never the AI's; the query's additions never
+  return or count an unreadable record; a version 4 task keeps working — mutation-checked).
+
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 
 ```
@@ -247,7 +344,8 @@ GET     /records/problems          owner/admin (paths may be private: owners/adm
 POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
-POST    /records/query             any member: { type?, implements?, state?, fields?, linkedTo?: { id, hops: 1|2 },
+POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
+                                   link?: { name, id }, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
 GET     /records/item/:recordId    any member: the record + its readable links (both directions)
 ```
@@ -261,8 +359,19 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   (`fromOldConnection`, `notice`) and left out of the query unless `includeOldConnection: true`
   and out of 「あなたの番」 (`plugins.md` "Connections").
 - Fixed shape only — no free SQL (0.23-1): type or interface, states, server-field equality (`{
-  in: [...] }`), links up to 2 hops (traversal passes only through readable records), substring of
+  in: [...] }`), a tag (`{ contains }`, "Tags"), links up to 2 hops (traversal passes only through readable records), substring of
   title / summary. With `type`, field names must be server fields of it.
+- Stage 2 S2 additions: a **range** `{ gte?, lt? }` (gte ≤ value < lt, compared as stored — a
+  day sorts before its own times, so `{ due: { lt: '2026-11-06' } }` is "due by the end of
+  11/5" with or without a time) and **`sort: { field, order? }`** (empty values last, then most
+  recently changed) on date / datetime / number server fields only (only types where that field
+  has such a kind are searched; with `type`, another kind → 400); **`finishedSince`** (now in a
+  final state of its type, entered — a ledger entry into it from another state — at or after the
+  time: 「今日終わったこと」); **`link: { name, id }`** (outgoing link `name` holds `id`: a
+  bundle's tasks) — `id` must be a record the member reads (else the same 404 as a missing one,
+  like `linkedTo`) and a link that may not be followed (public → private) never matches. All of
+  them narrow the SQL candidates; read access is applied afterwards as always, so records and
+  `total` (also `countOnly`) hold only what the caller reads.
 - Cross-company: the handle is `member.companyId`; another company's record id is a record that
   does not exist (permission matrix `CROSS` row, `tests/unit/record-index.test.ts`).
 - The detail route is `/records/item/:recordId`, not `/records/:recordId`: a parameter next to the
@@ -271,7 +380,8 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 
-`task` (タスク: implements `request`; storage `server` — version 2 (2026-11-01; version 1 was
+`task` (タスク: implements `request`; storage `server` — version 5 adds preparing / decline /
+tags / wait_until / bundle / prepared ("Task version 5"); version 2 (2026-11-01; version 1 was
 `either`, a file adopted once it had content, 0.6-1), version 3 (2026-11-01: `set_due` notifies
 the requester; the due may carry a time, above), version 4 (2026-11-01: the assignee completes on
 someone's OK, above; fields `ok_by`, `ok_note`), `purpose` a server field; the content
@@ -305,12 +415,13 @@ Milestone 4 adds four (people by id in person fields):
   `approver_rule` [self, dept_manager, admin], `operation`, `payload_hash`, `payload_version`,
   `reason`, `result_operation_id`; links `about` (target `deal`), `minutes`. pending → approved /
   sent_back / stale / withdrawn / failed; sent_back → withdrawn (version 2: `sent_back` is not
-  final, so a sent-back request is the requester's turn again). **No actions.** Its service:
+  final, so a sent-back request is the requester's turn again; version 3 implements `prepared`). **No actions.** Its service:
   `approvals.md`.
 - `outbound_message` (送るメール, server): `requested_by` / `assignee` (the author), `subject`,
   `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email]; links
   `about`, `minutes`. draft → sent / unknown / discarded; unknown → sent or back to draft
-  (送られていた／送られていなかった). **No actions.**
+  (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
+  the drafts its AI made).
 - `decision` (決めたこと, server — version 2; version 1 was a file, "Decisions" below):
   `recorded_by` [ai, human], `important`, `decided_by` (null when the AI recorded it), `owner`
   (the linked minutes' assignee at creation, else the member — `who` cannot name "the minutes'
@@ -460,7 +571,12 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   with an `act` token, `records_create` (not for service-owned types), `decisions_record`,
   `records_link_file` / `records_unlink_file` (types with a file link that let the AI act), and
   one tool per type × action (none for `SERVICE_STATE_TYPES`) (`task__request_review`: `id`,
-  `expectedVersion`, `note` — required where the type says —, the action's arguments). Wired like
+  `expectedVersion`, `note` — required where the type says —, the action's arguments, and
+  `links` for an action with record links — `task__finish_prep`, `task__set_bundle`);
+  `records_create` takes `state` (a `create_states` one) and `records_query` the ranges, `sort`,
+  `finishedSince` and `link`. `RECORDS_INSTRUCTIONS` says how to prepare a task (create in
+  `preparing`, then `task__finish_prep` with what was checked and the drafts) and that completing
+  and declining are the member's. Wired like
   the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
   decide, nothing is asked), Codex as a loopback endpoint; registry `recordsMcp` /
   `recordActions`. The system prompt says records (tasks, decisions…) live only on the server —
@@ -516,8 +632,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
-member, or with no `next_actor` and the member as `assignee`, not in a `final` state, readable by
-them. Types are not named: a new request type shows up without changing the list.
+member, or with no `next_actor` and the member as `assignee`, not in a `final` state nor in an
+AI-turn state (task `preparing`, "Task version 5"), readable by them. Types are not named: a new request type shows up without changing the list.
 
 `GET /records/ai-turn` (session) and `GET /api/records-ai/ai-turn` (record token, tool
 `records_ai_turn`): records whose current state has an action with `who` exactly `[ai]` (from
@@ -563,6 +679,8 @@ folder, key, links — each mutation-checked),
 where the type lets it, unreadable and private-folder files refused alike without a place,
 cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
+`server/tests/unit/record-task-v5.test.ts` (task version 5 and the query's additions, above),
+`server/tests/unit/record-tags-bundle.test.ts` (tags and links to an interface, above),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named

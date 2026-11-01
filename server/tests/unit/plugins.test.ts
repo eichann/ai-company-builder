@@ -16,7 +16,8 @@
  *   are server-only (imported records create no files, §8-3);
  * - `available_to` limits a package to the listed companies (§8-4);
  * - values translate both ways without loss, and a mapping that could not
- *   write back unambiguously is refused;
+ *   write back unambiguously is refused; a tags field (stored as JSON text)
+ *   is never mapped, so that text never reaches the outside system;
  * - the same mechanism takes a second, differently shaped package (§6-11).
  */
 import { describe, expect, it } from 'vitest'
@@ -361,6 +362,14 @@ describe('available_to (§8-4)', () => {
 describe('translating values', () => {
   const p = crm()
   const hubspotLike = { dealname: '研修導入', dealstage: 'qualifiedtobuy', kakudo: 'medium', next_step: '資料送付', closedate: '2026-12-15T00:00:00Z', amount: '1200000', is_closed_won: 'false', owner_id: '75123001' }
+
+  it('a tags field cannot be mapped either way (its stored JSON text would be written outside as is)', () => {
+    const withTags = { ...p, types: { ...p.types, deal: { ...p.types.deal, fields: { ...p.types.deal.fields, labels: { label: 'タグ', kind: 'tags' as const, source: 'server' as const } } } } }
+    for (const write of [true, false]) {
+      const m = parsePluginMapping(`deal:\n  fields:\n    labels: { from: hs_tag, write: ${write} }\n`, withTags)
+      expect(m.ok ? [] : m.errors.join()).toContain('タグの欄')
+    }
+  })
 
   it('outside → ACB through the mapping', () => {
     const r = externalToAcb(p, p.mapping, 'deal', hubspotLike)

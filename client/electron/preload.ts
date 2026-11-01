@@ -137,6 +137,7 @@ const api: ElectronAPI = {
   withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
+  getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),
   getMinutesNotices: (companyId: string) => invoke('minutes:notices', companyId),

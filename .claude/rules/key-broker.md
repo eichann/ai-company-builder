@@ -99,7 +99,7 @@ up by the owner, 2026-10-30: right after the two dials).
   {requestsPerDay, tokensPerDay, requestsPerMemberPerDay, tokensPerMemberPerDay},
   `allow_private_content`, `status` active|disabled, created/updated/by, `secret_updated_at`),
   `broker_services` (per company and service: `category` person|tool|system, `rule`,
-  `own_key_hosts`), `broker_settings` (`member_keys_allowed`, default on while no row),
+  `own_key_hosts`, `read_only`, `default_key_id` = the chosen company key, below), `broker_settings` (`member_keys_allowed`, default on while no row),
   `broker_history` (every change; JSON without any secret).
 - **Write-only**: `BrokerKeyRepository.list/find` never return the sealed value; only
   `sealed()` does, and only `services/broker-vault.ts` calls it. `vault.reveal()` is for the
@@ -123,7 +123,8 @@ hosts or a generic service's host, required otherwise); `PUT /broker/keys/:keyId
 (an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
 `{ category, rule, ownKeyHosts }`; `PUT /broker/services/:service/own-keys { allowed }` (the one
 switch, below); `PUT /broker/services/:service/read-only { readOnly }` (the relay only reads,
-below); `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
+below); `PUT /broker/services/:service/default-key { keyId | null }` (which company key the
+service uses, below); `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
 answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
 (`BrokerChangeDetail`: create / replace (last4 before → after) / update (changed fields) /
 delete / service / settings; the GET carries the latest 50). Check order who → body → rules;
@@ -233,13 +234,54 @@ without a check and answers no `check`. The words say no more than validity:
   are still in the service's `ownKeyHosts`), so disabling a key, changing who may use it, the
   rule, or removing the member stops the token at once. The grant names the key, its
   destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
-  **Several company keys the member may use**: the one a connector plugin's connection uses for
-  the service (`connectionKeyId`, from `plugins.connectionKeyId`: the managed install's `keyId`),
-  else the first registered. So the relay and the connector send the same key. Staging,
+  **Several company keys the member may use** (see "Which company key a service uses" below):
+  the one a connector plugin's connection uses for the service (`connectionKeyId`, from
+  `plugins.connectionKeyId`: the managed install's `keyId`), else the key the admin chose, else
+  none (`key-not-chosen`) — never the first registered. So the relay and the connector send the
+  same key. Staging,
   2026-11-01: 検証A社 had an older practice key (`pat-fake-…`, 全社・全員) and the real key the
   connection uses; the relay took the older one and the real HubSpot answered every call with 400
   「Invalid request」 (its answer to a malformed `pat-` key) while the connector worked. Test:
   `tests/integration/plugins.test.ts` 「the relay uses the key of the connection」 (mutation-checked).
+
+## Which company key a service uses (owner, 2026-11-01)
+
+Staging had two active HubSpot company keys and the relay took the first registered one (fixed
+for plugins in #354). Owner decision: when a company has several company keys for one service,
+the admin chooses 「このサービスは、この鍵を使う」.
+
+- `PUT /broker/services/:service/default-key { keyId | null }` (owner/admin; `setDefaultKey`,
+  stored as `broker_services.default_key_id`, additive column in `migrateBrokerSettings`; history
+  action `default-key` with the key's name and last 4 only). Only an active company key of this
+  company and this service: another company's key, an own key, another service's key or an
+  unknown id → 404 (the same answer); a stopped key → 400 `KEY_STOPPED`. The view's service
+  carries `defaultKeyId` (only while it names an active company key of the service).
+- **Stopping (also 「すべての鍵を止める」) or deleting the chosen key clears the choice**
+  (`forgetChoiceOf`, history `default-key` with `because: stopped | deleted`); resuming does not
+  bring it back. Another key is never picked silently.
+- **Deciding** (`broker-tokens.ts` `companyKey`): the candidates are the service's company keys
+  the member may use for this consultation (both dials), **stopped ones included** (so stopping
+  the chosen key cannot hand over another). One candidate → it (stopped → `key-stopped` as
+  before). Several → the connector plugin's connection key if active, else the chosen key if it
+  is an active candidate, else `key-not-chosen`; none of them active → `key-stopped`. A company
+  splitting keys by department (dial ①) needs no choice: each member then has one candidate.
+- `key-not-chosen`: token issue still grants the service (source `company`, so released apps
+  put the token, not the 「自分の鍵」 placeholder); the relay answers 403 `ACB_KEY_NOT_CHOSEN`
+  「<サービス> の会社の鍵が複数あり、どれを使うか管理者がまだ選んでいません。…」 **without** the
+  `[ACB_NO_KEY:…]` marker (an own key is not the fix), recorded as guard-denied
+  `key-not-available`. Behaviour change on deploy: a company with two active company keys for a
+  service that the same member may use and no plugin connection gets this answer until an admin
+  chooses (before: the first registered key).
+- Admin page: in 「会社の鍵」, for each service with two or more company keys, a select
+  「<サービス> は、この鍵を使う」 (active keys by name and last 4; 「選んでいない」) and, while
+  nothing is chosen, 「どの鍵を使うか選んでください。…」 (`keyChoices`, `KEY_CHOICE_HELP`,
+  `admin/src/lib/key-broker.ts`). A service with one key shows nothing.
+- Tests: `tests/integration/broker-key-choice.test.ts` (owner/admin only; only this company's
+  active key of the service; none chosen → refused, not the first registered; the chosen key is
+  the one sent upstream; stopped / deleted chosen key → not chosen, stop-all → `ACB_STOPPED`;
+  cross-company; no key value in any answer or table — the decision and the clearing are
+  mutation-checked), `admin/tests/key-broker.test.tsx` (only `{ keyId }` sent, stopped keys not
+  offered, one key → no choice), permission matrix row.
 
 ## The relay (K4)
 
@@ -254,7 +296,8 @@ the sign-in.
    → 404. `validate(token, service)` refusals → 401 `ACB_TOKEN_INVALID` / 403 `ACB_NOT_MEMBER` /
    403 `ACB_NO_KEY` (「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から
    登録してください。 [ACB_NO_KEY:<service>]」, `brokerNoKeyMessage`; the marker names the service
-   only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) / 503
+   only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) /
+   403 `ACB_KEY_NOT_CHOSEN` (several company keys, none chosen: above) / 503
    `ACB_BROKER_OFF`. Error bodies are
    `{ type: 'error', error: { type, code, status, message } }` (read by all three SDKs).
 2. **Destinations**: a built-in key naming any host outside its service's → 403
@@ -415,10 +458,10 @@ who uses it).
   `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
   reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
   「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
-  the history; resuming is per key. It also stops every member's **Google permission** in the
-  company at once (`onStopAll` → `googleConnector.stopAll`: grants `stopped`, the sealed refresh
-  tokens cleared, revoked at Google in the background); a member resumes with 「Google で許可」
-  (`google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
+  the history; resuming is per key. It also stops every member's **OAuth permission (Google, every provider)** in the
+  company at once (`onStopAll` → `memberOAuth.stopAll`: grants `stopped`, the sealed refresh
+  tokens cleared, revoked at the provider in the background); a member resumes with 「Google で許可」
+  (`member-oauth.md`, `google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
   (revoking would answer "token expired").
   A company-wide stop of the whole AI (M2, `agent-stop.md`) also refuses every relay call with
   `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。…」 until it is released.

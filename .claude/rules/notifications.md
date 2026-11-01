@@ -38,9 +38,12 @@ a plugin can never draw a notice (§2-2).
 - Kinds (`shared/types/notifications.ts`, `noticeKind`; generic over types — final states and the
   `request` fields decide, plus the core `approval` type):
   `approval_result` (an approval's state changed, to its requester), `ok_completed` (completed on
-  your OK), `request_done` (what you asked reached a final state), `due_changed` (`due` changed on
-  what you asked), `overdue`, `ai_turn_stuck`, `others` (everything else: handed to you, sent
-  back, cancelled…). **Defaults (E-25)**: all on except `others` (CC and others' affairs). A
+  your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
+  asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `others` (everything else: handed
+  to you — also the AI's 「用意ができた」 / 「先に渡す」 and 「自分で進める」 of task v5 —, sent back,
+  cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
+  assignee hears at the hand-over. **Defaults (E-25)**: all on except `others` (CC and others' affairs). A
   member switches kinds (`PUT /me/notifications/settings`); kept per company × member on the
   server, so both PCs agree. Kinds filter at read time (notices are always stored).
 - Computed when the member reads (no timer on the server, owner decision): **overdue** (A-2) — a

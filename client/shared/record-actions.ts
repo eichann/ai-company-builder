@@ -19,10 +19,12 @@ export interface RecordActionChoice {
    * (`ok_from`; the task's assignee completing): the screen asks for `ok`.
    */
   okFrom: string[]
+  /** Record links the member may set with it (`links`: a task's `set_bundle` → bundle). */
+  links: string[]
 }
 
 export function recordActionChoices(def: TypeDefinition, state: string | null): RecordActionChoice[] {
   return Object.entries(def.actions)
     .filter(([, a]) => a.from === null || (state !== null && a.from.includes(state)))
-    .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args), okFrom: a.okFrom ?? [] }))
+    .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args), okFrom: a.okFrom ?? [], links: a.links ?? [] }))
 }
