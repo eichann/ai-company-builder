@@ -16,7 +16,7 @@
  *
  * Connector plugins (milestone 3 P7, `.claude/rules/plugins.md` "The app"):
  * the operations of the plugins that run for the company become tools on the
- * same server (`hubspot__update_deal`, `hubspot__refresh_deal`), from
+ * same server (`corporate-sales__update_deal`, `corporate-sales__refresh_deal`: the business plugin's id), from
  * `GET /api/records-ai/plugins` — the same way the type definitions do.
  * Writes only with an `act` token (Claude); Codex gets reads. An update's
  * outcome becomes a card in the reply (`client/shared/plugin-operations.ts`)

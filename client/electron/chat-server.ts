@@ -303,7 +303,7 @@ export async function startChatServer(config: ChatServerConfig) {
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
-    // A connector's update (hubspot__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
+    // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
     const records = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions,

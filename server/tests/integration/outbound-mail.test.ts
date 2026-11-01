@@ -176,11 +176,11 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: HUB_KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  const saved = await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['next_step'] })
+  const saved = await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ['next_step'] })
   expect(saved.ok, JSON.stringify(saved)).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['m-sato'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
-  expect((await person('m-owner', 'POST', '/plugins/sample-hub/import')).status).toBe(200)
+  expect((await person('m-owner', 'POST', '/plugins/sample-sales/import')).status).toBe(200)
   dealId = (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND external_id = '1000000001' AND object = 'deal'").get(CO) as Json).record_id
   // The minutes of the sales meeting (made by the minutes service in G7; here through the service writer).
   const { createServiceRecordWriter } = await import('../../src/services/record-engine')

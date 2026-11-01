@@ -1,23 +1,30 @@
 /**
  * Plugins that connect ACB to an outside system (milestone 3, 「つなぎ先の
- * プラグイン」) and the business plugins whose types they map to: one copy of
+ * プラグイン」) and the business plugins that use them: one copy of
  * their shape for the server (the shelf, the connector), the admin console
  * (the mapping editor) and, later, the app.
  *
- * Two roles (owner decision 2026-11-01): **a connector only connects, a
- * business plugin owns the types** (and, later, the flows). A business plugin
- * (「法人営業」, `corporate-sales`) declares `types` and nothing that talks to
- * the outside; a connector (HubSpot) has a `service` and `base_url`, declares
- * no types and names the one business plugin version it maps to (`maps_to:
- * corporate-sales@0.1.0`): its objects' `record_type`s and its mapping are
- * that plugin's types. Business plugins are never shared or inherited between
- * slightly different work: copying a type into another business plugin is fine.
+ * Two roles (owner decision 2026-11-01, revised the same day): **a connector
+ * is a company-wide shared part; a business plugin owns its types and flows
+ * and uses a connector.** A connector (HubSpot) has a `service`, `base_url`,
+ * the account check and its objects and operations — generic windows on the
+ * service (read a deal, update a deal's properties, create a meeting…) — and
+ * knows nothing of business plugins. A business plugin (「法人営業」,
+ * `corporate-sales`) declares `types` and, optionally, the one connector it
+ * can use (`connector: hubspot >= 0.3.0`): which connector objects become
+ * which of its types (`objects`), which connector operations it uses and who
+ * may run them (`operations`), its field policy defaults and its recommended
+ * mapping. The dependency points one way (business → connector);
+ * `combineUse` joins the two into what runs. Business plugins are never
+ * shared or inherited between slightly different work: copying a type into
+ * another business plugin is fine.
  *
  * A plugin is data only (owner decision §6-1): a **declaration**
- * (`plugin.yaml`: where it may send, the fixed paths, the typed operations, the
- * recommended field policies), the **types** it brings (`types/<name>.md`,
- * same format as `.acb/types/`) and a recommended **mapping** (which ACB field
- * is which outside property). The core's one connector performs the calls; a
+ * (`plugin.yaml`: a connector's destination, fixed paths and operations; a
+ * business plugin's types, connector use and recommended field policies), the
+ * **types** a business plugin brings (`types/<name>.md`, same format as
+ * `.acb/types/`) and its recommended **mapping** (which ACB field is which
+ * outside property). The core's one connector performs the calls; a
  * declaration has no place for a program, a destination other than its one
  * `base_url`, a key value, approval rights or a computed value — unknown keys
  * make the whole package unusable.
@@ -77,8 +84,8 @@ export const PLUGIN_CONTRACT = 1
 export type PluginKind = 'official' | 'company'
 /**
  * A connector talks to one outside system and owns no type; a business plugin
- * owns types and talks to nothing. Decided by the declaration: one with a
- * `service` is a connector.
+ * owns types and talks to the outside only through a connector it names.
+ * Decided by the declaration: one with a `service` is a connector.
  */
 export type PluginRole = 'connector' | 'business'
 /** Per-field write policy (0.21): write at once (undoable) / only after a person approves / never. */
@@ -165,6 +172,29 @@ export interface PluginOperation {
   createsRecord: boolean
 }
 
+/**
+ * How a business plugin uses one connector (owner decision 2026-11-01): which
+ * connector, from which version on; which of its objects become which of the
+ * business plugin's types; which of its operations the business plugin uses
+ * and who may run them. A business plugin without one works inside ACB only.
+ */
+export interface ConnectorUse {
+  /** `connector: <id> >= <version>` — the connector it can use and the oldest version that has what it needs. */
+  connector: { id: string; minVersion: string }
+  /** Connector object → the business plugin's type its items become (null: used without a record, e.g. contacts). */
+  objects: Record<string, { recordType: string | null }>
+  /** The connector's operations it uses: only these can run for it, with these people and rules. */
+  operations: Record<string, OperationUse>
+}
+
+export interface OperationUse {
+  who: string[]
+  decision: boolean
+  note: NoteRule
+  /** A create's own policy (null: the default, `prior` when external or creating a record, else `auto`). */
+  policy: FieldPolicy | null
+}
+
 export interface PluginManifest {
   id: string
   label: string
@@ -179,18 +209,25 @@ export interface PluginManifest {
   baseUrl: { host: string; basePath: string }
   scopes: string[]
   operationScopes: Record<string, string[]>
-  /** A business plugin: the types it owns. A connector: none (its record types are `mapsTo`'s). */
+  /** A business plugin: the types it owns. A connector: none. */
   types: string[]
-  /** A connector: the one business plugin version whose types it maps to (`maps_to: <id>@<version>`). */
-  mapsTo: { id: string; version: string } | null
+  /**
+   * A connector: its objects (no record types: it knows no business plugin).
+   * A business plugin: empty (its use of a connector is `uses`). A combined
+   * use (`combineUse`): the objects the business plugin uses, with its types.
+   */
   objects: Record<string, PluginObject>
+  /** Likewise: a connector's operations (who / decision empty), or the combined use's. */
   operations: Record<string, PluginOperation>
+  /** A business plugin's recommended field policies (a connector has none). */
   fieldPolicyDefaults: Record<string, FieldPolicy>
+  /** A business plugin: how it uses its connector; null = it works inside ACB only. */
+  uses: ConnectorUse | null
   /** Company ids that may use the package; null = every company (§8-4). */
   availableTo: string[] | null
   /**
    * The one GET that names the outside account the key belongs to (HubSpot:
-   * the portal id). Required when the package writes (an update or create
+   * the portal id). Required when the connector writes (an update or create
    * operation): a connection is bound to one account, and nothing is ever
    * written to another (review §5.7).
    */
@@ -207,6 +244,14 @@ const SCOPE_RE = /^[a-z][a-z0-9._-]{0,99}$/
 /** Outside property / association / value names: plain tokens, no paths or expressions. */
 const EXTERNAL_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,99}$/
 const PATH_TEMPLATE_RE = /^[A-Za-z0-9/_.{}-]{1,300}$/
+
+/** Compare two `PLUGIN_VERSION_RE` versions numerically (negative: a is older). */
+export function comparePluginVersions(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) if (pa[i] !== pb[i]) return pa[i] - pb[i]
+  return 0
+}
 
 /**
  * Words that name a layer or an origin. A type name made of several words may
@@ -234,10 +279,10 @@ const isStr = (v: YamlValue | undefined): v is string => typeof v === 'string' &
 const strList = (v: YamlValue | undefined): string[] | null =>
   v === undefined || v === null ? [] : Array.isArray(v) && v.every(x => typeof x === 'string') ? (v as string[]) : null
 
-function unknownKeys(where: string, obj: { [k: string]: YamlValue }, allowed: readonly string[], err: (m: string) => void): void {
+function unknownKeys(where: string, obj: { [k: string]: YamlValue }, allowed: readonly string[], err: (m: string) => void, reasons: Record<string, string> = {}): void {
   for (const k of Object.keys(obj)) {
     if (allowed.includes(k)) continue
-    const why = FORBIDDEN_KEY_REASONS[k.toLowerCase()]
+    const why = reasons[k] ?? FORBIDDEN_KEY_REASONS[k.toLowerCase()]
     err(why ? `${where}「${k}」: ${why}` : `${where}知らない項目「${k}」があります`)
   }
 }
@@ -267,7 +312,31 @@ export function checkPluginPathTemplate(path: unknown, endpoint: PluginEndpointN
   return null
 }
 
-/** Parse and validate `plugin.yaml`. Type-dependent checks are in `validatePluginPackage`. */
+const COMMON_KEYS: readonly string[] = ['id', 'label', 'version', 'kind', 'contract', 'description', 'available_to']
+const CONNECTOR_KEYS: readonly string[] = ['service', 'base_url', 'account_info', 'scopes', 'operation_scopes', 'objects', 'operations']
+const BUSINESS_KEYS: readonly string[] = ['types', 'connector', 'objects', 'operations', 'field_policy_defaults']
+
+/** What a connector refuses, with where it belongs now (owner decision 2026-11-01: a connector knows no business plugin). */
+const NOT_IN_CONNECTOR: Record<string, string> = {
+  types: 'つなぎ先のプラグインは型を持ちません。型は業務のプラグインが持ちます',
+  maps_to: 'maps_to はなくなりました。つなぎ先はどの業務のプラグインにも縛られず、業務のプラグインが「connector: <つなぎ先> >= <版>」で使います',
+  field_policy_defaults: '欄の決まりは、つなぎ先を使う業務のプラグインに書きます',
+  connector: 'connector は業務のプラグインに書きます',
+}
+const NOT_IN_CONNECTOR_OBJECT: Record<string, string> = {
+  record_type: 'record_type は、つなぎ先を使う業務のプラグインの objects に書きます（つなぎ先はどの業務の型も知りません）',
+}
+const operationUseKeyReason = (k: string) => `「${k}」は、つなぎ先を使う業務のプラグインの operations に書きます（誰がどう使うかは業務が決めます）`
+const NOT_IN_CONNECTOR_OPERATION: Record<string, string> = {
+  who: operationUseKeyReason('who'), decision: operationUseKeyReason('decision'), note: operationUseKeyReason('note'), policy: operationUseKeyReason('policy'),
+  fields: 'fields は書きません（書き戻せる欄は、業務のプラグインの読み替え表で「書く」にした欄です）',
+}
+/** What a business plugin refuses: it talks to the outside only through a connector. */
+const NOT_IN_BUSINESS: Record<string, string> = Object.fromEntries(
+  ['service', 'base_url', 'account_info', 'scopes', 'operation_scopes', 'maps_to'].map(k => [k, `「${k}」はつなぎ先のプラグイン（service のあるもの）だけに書けます。業務のプラグインは connector でつなぎ先を使います`]),
+)
+
+/** Parse and validate `plugin.yaml`. Type-dependent checks are in `validatePluginPackage`, a business plugin's use of its connector in `combineUse`. */
 export function parsePluginManifest(text: string): PluginParsed<PluginManifest> {
   const yaml = parseYamlLite(text)
   if (!yaml.ok) return { ok: false, errors: [`${yaml.line} 行目: ${yaml.error}`] }
@@ -277,12 +346,8 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   // One with a service connects; one without owns types (owner decision 2026-11-01).
   const role: PluginRole = raw.service === undefined ? 'business' : 'connector'
-  unknownKeys('', raw, ['id', 'label', 'version', 'kind', 'contract', 'description', 'available_to', 'types', ...CONNECTOR_ONLY_KEYS], err)
-  if (role === 'business') {
-    for (const k of CONNECTOR_ONLY_KEYS) {
-      if (raw[k] !== undefined) err(`「${k}」はつなぎ先のプラグイン（service のあるもの）だけに書けます。業務のプラグインが持つのは型（types）だけです`)
-    }
-  } else if (raw.types !== undefined) err('つなぎ先のプラグインは型を持ちません。型は maps_to に書いた業務のプラグインが持ちます')
+  if (role === 'connector') unknownKeys('', raw, [...COMMON_KEYS, ...CONNECTOR_KEYS], err, NOT_IN_CONNECTOR)
+  else unknownKeys('', raw, [...COMMON_KEYS, ...BUSINESS_KEYS], err, NOT_IN_BUSINESS)
 
   const id = raw.id
   if (typeof id !== 'string' || !PLUGIN_ID_RE.test(id) || id.length > 40) err('id は英小文字・数字・- で書いてください（40文字まで）')
@@ -302,34 +367,30 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   }
   if (kind === 'company' && availableTo === null) err('kind: company の包みには available_to（使える会社）が要ります')
 
+  const common = {
+    id: id as string, label: raw.label as string, version: raw.version as string, kind: kind as PluginKind, contract: PLUGIN_CONTRACT,
+    description: typeof raw.description === 'string' ? raw.description : null, availableTo,
+  }
+  const value = role === 'connector' ? parseConnector(raw, err, common) : parseBusiness(raw, err, common)
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, value }
+}
+
+type CommonPart = Pick<PluginManifest, 'id' | 'label' | 'version' | 'kind' | 'contract' | 'description' | 'availableTo'>
+
+/** A connector: one destination, its objects (calls) and operations (generic windows on the service). */
+function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string) => void, common: CommonPart): PluginManifest {
   let baseUrl = { host: '', basePath: '' }
-  let mapsTo: { id: string; version: string } | null = null
-  if (role === 'connector') {
-    if (!isValidBrokerServiceName(raw.service)) err('service に「API キー」のサービス名を書いてください')
-    const base = parseRelayBaseUrl(raw.base_url)
-    if ('error' in base) err(`base_url: ${base.error}`)
-    else {
-      baseUrl = base.value
-      const builtin = typeof raw.service === 'string' ? builtinBrokerService(raw.service) : undefined
-      if (builtin && !builtin.defaultHosts.includes(baseUrl.host)) err(`base_url の送り先は ${builtin.defaultHosts.join(' / ')} です（サービス ${builtin.service} の送り先）`)
-    }
-    mapsTo = parseMapsTo(raw.maps_to)
-    if (!mapsTo) err('maps_to に、読み替える型を持つ業務のプラグインを「id@版」で書いてください（例：corporate-sales@0.1.0）')
-    else if (mapsTo.id === id) err('maps_to に自分自身は書けません')
+  if (!isValidBrokerServiceName(raw.service)) err('service に「API キー」のサービス名を書いてください')
+  const base = parseRelayBaseUrl(raw.base_url)
+  if ('error' in base) err(`base_url: ${base.error}`)
+  else {
+    baseUrl = base.value
+    const builtin = typeof raw.service === 'string' ? builtinBrokerService(raw.service) : undefined
+    if (builtin && !builtin.defaultHosts.includes(baseUrl.host)) err(`base_url の送り先は ${builtin.defaultHosts.join(' / ')} です（サービス ${builtin.service} の送り先）`)
   }
 
   const scopes = strList(raw.scopes)
   if (!scopes || !scopes.every(s => SCOPE_RE.test(s))) err('scopes は権限の名前の並びで書いてください')
-
-  const types = role === 'business' ? strList(raw.types) : []
-  if (!types || !types.every(t => ONTOLOGY_NAME_RE.test(t))) err('types は型の名前の並びで書いてください')
-  else if (role === 'business' && types.length === 0) err('業務のプラグインには types（持つ型の名前）が要ります')
-  else for (const t of types) {
-    const problem = typeNameLayerProblem(t, typeof id === 'string' ? id : undefined)
-    if (problem) err(problem)
-    // Exactly one owner per type name: the core's types are the core's.
-    else if (Object.prototype.hasOwnProperty.call(CORE_TYPE_FILES, t)) err(`型「${t}」は本体の型です。業務のプラグインは同じ名前の型を持てません`)
-  }
 
   const objects: Record<string, PluginObject> = {}
   const rawObjects = raw.objects ?? {}
@@ -337,13 +398,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   else for (const [oname, o] of Object.entries(rawObjects)) {
     if (!ONTOLOGY_NAME_RE.test(oname)) { err(`対象の名前「${oname}」は英小文字・数字・_ で書いてください`); continue }
     if (!isYamlMap(o)) { err(`対象「${oname}」は { … } の形で書いてください`); continue }
-    unknownKeys(`対象「${oname}」: `, o, ['record_type', 'auto_properties', ...Object.keys(PLUGIN_ENDPOINTS)], err)
-    let recordType: string | null = null
-    if (o.record_type !== undefined && o.record_type !== null) {
-      // Which types exist is the business plugin's (checked against it in validatePluginPackage).
-      if (typeof o.record_type !== 'string' || !ONTOLOGY_NAME_RE.test(o.record_type)) err(`対象「${oname}」の record_type は型の名前です`)
-      else recordType = o.record_type
-    }
+    unknownKeys(`対象「${oname}」: `, o, ['auto_properties', ...Object.keys(PLUGIN_ENDPOINTS)], err, NOT_IN_CONNECTOR_OBJECT)
     const autoProperties = strList(o.auto_properties)
     if (!autoProperties || !autoProperties.every(p => EXTERNAL_NAME_RE.test(p))) err(`対象「${oname}」の auto_properties は項目名の並びです`)
     const endpoints: Partial<Record<PluginEndpointName, PluginEndpoint>> = {}
@@ -357,7 +412,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       if (problem) { err(`対象「${oname}」の ${ename}: ${problem}`); continue }
       endpoints[ename] = { method: e.method, path: e.path as string }
     }
-    objects[oname] = { recordType, endpoints, autoProperties: autoProperties ?? [] }
+    objects[oname] = { recordType: null, endpoints, autoProperties: autoProperties ?? [] }
   }
 
   const operations: Record<string, PluginOperation> = {}
@@ -366,26 +421,17 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   else for (const [opname, op] of Object.entries(rawOps)) {
     if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
     if (!isYamlMap(op)) { err(`操作「${opname}」は { … } の形で書いてください`); continue }
-    unknownKeys(`操作「${opname}」: `, op, ['label', 'kind', 'object', 'who', 'fields', 'attach_to', 'reaches', 'undo', 'note', 'policy', 'decision', 'content', 'association_type', 'correlation_property'], err)
+    unknownKeys(`操作「${opname}」: `, op, ['label', 'kind', 'object', 'attach_to', 'reaches', 'undo', 'content', 'association_type', 'correlation_property'], err, NOT_IN_CONNECTOR_OPERATION)
     const where = `操作「${opname}」`
     if (!isStr(op.label)) err(`${where}に label を書いてください`)
     const opKind = op.kind
     if (opKind !== 'read' && opKind !== 'update' && opKind !== 'create') { err(`${where}の kind は read / update / create です`); continue }
     const obj = typeof op.object === 'string' ? objects[op.object] : undefined
     if (!obj) { err(`${where}の object は objects にある名前です`); continue }
-    const who = strList(op.who)
-    if (!who || who.length === 0 || !who.every(w => ONTOLOGY_NAME_RE.test(w))) err(`${where}の who は人の欄の名前か ${PLUGIN_ACTORS.join(' / ')} で書いてください`)
-    else if (who.includes('anyone')) err(`${where}の who に anyone は書けません。記録を読める人なら viewer です`)
-    const decision = op.decision ?? false
-    if (typeof decision !== 'boolean') err(`${where}の decision は true か false です`)
-    else if (decision && opKind === 'read') err(`${where}: 読む操作は decision にできません`)
     const reaches = op.reaches ?? 'internal'
     if (reaches !== 'internal' && reaches !== 'external') err(`${where}の reaches は internal か external です`)
-    const note = op.note ?? 'none'
-    if (note !== 'none' && note !== 'optional' && note !== 'required') err(`${where}の note は none / optional / required です`)
     const undo = op.undo ?? 'none'
     if (undo !== 'none' && undo !== 'restore_previous' && undo !== 'archive') err(`${where}の undo は restore_previous / archive / none です`)
-    let fields: 'mapped' | null = null
     let attachTo: string | null = null
     const content: Partial<Record<CreateContentSlot, string>> = {}
     let associationType: number | null = null
@@ -395,15 +441,12 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       err(`${where}: content / association_type / correlation_property は作る操作だけに書けます`)
     }
     if (opKind === 'read') {
-      if (!obj.endpoints.get || !obj.recordType) err(`${where}: 読む操作の対象には get と record_type が要ります`)
-      if (op.fields !== undefined || op.attach_to !== undefined || op.undo !== undefined || op.policy !== undefined) err(`${where}: 読む操作に fields / attach_to / undo / policy は書けません`)
+      if (!obj.endpoints.get) err(`${where}: 読む操作の対象には get が要ります`)
+      if (op.attach_to !== undefined || op.undo !== undefined) err(`${where}: 読む操作に attach_to / undo は書けません`)
     } else if (opKind === 'update') {
-      if (!obj.endpoints.get || !obj.endpoints.update || !obj.recordType) err(`${where}: 書き換える操作の対象には get・update・record_type が要ります`)
-      if (op.fields !== 'mapped') err(`${where}の fields は mapped です（書けるのは読み替え表で「書く」にした欄だけ）`)
-      else fields = 'mapped'
+      if (!obj.endpoints.get || !obj.endpoints.update) err(`${where}: 書き換える操作の対象には get と update が要ります`)
       if (undo === 'archive') err(`${where}: 書き換えの戻し方は restore_previous か none です`)
       if (op.attach_to !== undefined) err(`${where}: attach_to は作る操作だけに書けます`)
-      if (op.policy !== undefined) err(`${where}: 書き換える操作の決まりは欄ごとです（field_policy_defaults と読み替え表）`)
     } else {
       if (!obj.endpoints.create) err(`${where}: 作る操作の対象には create が要ります`)
       if (undo === 'restore_previous') err(`${where}: 作ったものの戻し方は archive か none です`)
@@ -412,16 +455,13 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
         err(`${where}: 作る操作には correlation_property（ACB の操作の番号を書き込む、外の「一意の値」の項目名）が要ります`)
       } else correlationProperty = op.correlation_property
       if (op.attach_to === undefined) {
-        // Creates a record of the object's own type (create_deal): its fields come from the mapping.
+        // Creates an item that becomes a record of the object's type (create_deal) — the type is the using business plugin's.
         createsRecord = true
-        if (!obj.recordType || !obj.endpoints.get) err(`${where}: 記録を作る操作の対象には get と record_type が要ります`)
-        if (op.fields !== 'mapped') err(`${where}: 記録を作る操作の fields は mapped です（読み替え表の件名と「書く」にした欄）`)
-        else fields = 'mapped'
+        if (!obj.endpoints.get) err(`${where}: 記録を作る操作の対象には get が要ります`)
         if (op.content !== undefined || op.association_type !== undefined) err(`${where}: 記録を作る操作に content / association_type は書けません`)
       } else {
-        if (op.fields !== undefined) err(`${where}: 記録につける作る操作に fields は書けません（content で書きます）`)
         const target = typeof op.attach_to === 'string' ? objects[op.attach_to] : undefined
-        if (!target?.recordType) err(`${where}の attach_to は record_type のある対象の名前です`)
+        if (!target?.endpoints.get) err(`${where}の attach_to は get のある対象の名前です`)
         else attachTo = op.attach_to as string
         if (!isYamlMap(op.content) || Object.keys(op.content).length === 0) err(`${where}の content は「${CREATE_CONTENT_SLOTS.join(' / ')}: 外の項目名」の形で書いてください`)
         else for (const [slot, prop] of Object.entries(op.content)) {
@@ -434,25 +474,19 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
         else associationType = at
       }
     }
-    let policy: FieldPolicy = reaches === 'external' || createsRecord ? 'prior' : 'auto'
-    if (op.policy !== undefined) {
-      if (!FIELD_POLICIES.includes(op.policy as FieldPolicy)) err(`${where}の policy は auto / prior / off です`)
-      else policy = op.policy as FieldPolicy
-    }
-    if (reaches === 'external' && policy === 'auto') err(`${where}: 社外の人に届く操作は「自動」にできません`)
-    if (createsRecord && policy === 'auto') err(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
     operations[opname] = {
       label: isStr(op.label) ? op.label : opname,
       kind: opKind,
       object: op.object as string,
-      who: who ?? [],
-      fields,
+      who: [],
+      // An update writes the mapping's `write: true` fields; a create of a record fills them (the user's mapping).
+      fields: opKind === 'update' || createsRecord ? 'mapped' : null,
       attachTo,
       reaches: reaches as OperationReach,
       undo: undo as UndoKind,
-      note: note as NoteRule,
-      policy,
-      decision: decision === true,
+      note: 'none',
+      policy: reaches === 'external' || createsRecord ? 'prior' : 'auto',
+      decision: false,
       content,
       associationType,
       correlationProperty,
@@ -485,6 +519,80 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     else operationScopes[opname] = l
   }
 
+  return {
+    ...common, role: 'connector', service: raw.service as string, baseUrl, scopes: scopes ?? [], operationScopes,
+    types: [], objects, operations, fieldPolicyDefaults: {}, uses: null, accountInfo,
+  }
+}
+
+/** `connector: <id> >= <version>` — the connector a business plugin can use, from that version on. */
+function parseConnectorRef(v: YamlValue | undefined): { id: string; minVersion: string } | null {
+  const m = typeof v === 'string' ? /^([a-z][a-z0-9-]*)\s*>=\s*(\S+)$/.exec(v.trim()) : null
+  return m && PLUGIN_ID_RE.test(m[1]) && m[1].length <= 40 && PLUGIN_VERSION_RE.test(m[2]) ? { id: m[1], minVersion: m[2] } : null
+}
+
+/** A business plugin: the types it owns and, optionally, how it uses one connector. */
+function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) => void, common: CommonPart): PluginManifest {
+  const id = common.id
+  const types = strList(raw.types)
+  if (!types || !types.every(t => ONTOLOGY_NAME_RE.test(t))) err('types は型の名前の並びで書いてください')
+  else if (types.length === 0) err('業務のプラグインには types（持つ型の名前）が要ります')
+  else for (const t of types) {
+    const problem = typeNameLayerProblem(t, typeof id === 'string' ? id : undefined)
+    if (problem) err(problem)
+    // Exactly one owner per type name: the core's types are the core's.
+    else if (Object.prototype.hasOwnProperty.call(CORE_TYPE_FILES, t)) err(`型「${t}」は本体の型です。業務のプラグインは同じ名前の型を持てません`)
+  }
+
+  let uses: ConnectorUse | null = null
+  if (raw.connector === undefined) {
+    for (const k of ['objects', 'operations', 'field_policy_defaults']) {
+      if (raw[k] !== undefined) err(`「${k}」は、つなぎ先を使う業務のプラグイン（connector のあるもの）だけに書けます`)
+    }
+  } else {
+    const connector = parseConnectorRef(raw.connector)
+    if (!connector) err('connector は「つなぎ先の id >= 版」で書いてください（例：hubspot >= 0.3.0）')
+    else if (connector.id === id) err('connector に自分自身は書けません')
+    const objects: ConnectorUse['objects'] = {}
+    const rawObjects = raw.objects ?? {}
+    if (!isYamlMap(rawObjects)) err('objects は「つなぎ先の対象: { record_type: 型 }」の形で書いてください')
+    else for (const [oname, o] of Object.entries(rawObjects)) {
+      if (!ONTOLOGY_NAME_RE.test(oname)) { err(`対象の名前「${oname}」は英小文字・数字・_ で書いてください`); continue }
+      if (!isYamlMap(o)) { err(`対象「${oname}」は { record_type: 型 } の形で書いてください（型にしないものは {}）`); continue }
+      unknownKeys(`対象「${oname}」: `, o, ['record_type'], err)
+      let recordType: string | null = null
+      if (o.record_type !== undefined && o.record_type !== null) {
+        if (typeof o.record_type !== 'string' || !(types ?? []).includes(o.record_type)) err(`対象「${oname}」の record_type は、この業務のプラグインの types にある型です`)
+        else recordType = o.record_type
+      }
+      objects[oname] = { recordType }
+    }
+    const operations: ConnectorUse['operations'] = {}
+    const rawOps = raw.operations ?? {}
+    if (!isYamlMap(rawOps)) err('operations は「つなぎ先の操作: { who, … }」の形で書いてください')
+    else for (const [opname, op] of Object.entries(rawOps)) {
+      const where = `操作「${opname}」`
+      if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
+      if (!isYamlMap(op)) { err(`${where}は { who, … } の形で書いてください`); continue }
+      unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy'], err)
+      const who = strList(op.who)
+      if (!who || who.length === 0 || !who.every(w => ONTOLOGY_NAME_RE.test(w))) err(`${where}の who は人の欄の名前か ${PLUGIN_ACTORS.join(' / ')} で書いてください`)
+      else if (who.includes('anyone')) err(`${where}の who に anyone は書けません。記録を読める人なら viewer です`)
+      const decision = op.decision ?? false
+      if (typeof decision !== 'boolean') err(`${where}の decision は true か false です`)
+      const note = op.note ?? 'none'
+      if (note !== 'none' && note !== 'optional' && note !== 'required') err(`${where}の note は none / optional / required です`)
+      let policy: FieldPolicy | null = null
+      if (op.policy !== undefined) {
+        if (!FIELD_POLICIES.includes(op.policy as FieldPolicy)) err(`${where}の policy は auto / prior / off です`)
+        else policy = op.policy as FieldPolicy
+      }
+      operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy }
+    }
+    if (Object.keys(operations).length === 0 && Object.keys(objects).length === 0) err('connector を書いたら、使う objects か operations を書いてください')
+    if (connector) uses = { connector, objects, operations }
+  }
+
   const fieldPolicyDefaults: Record<string, FieldPolicy> = {}
   const rawDefaults = raw.field_policy_defaults ?? {}
   if (!isYamlMap(rawDefaults)) err('field_policy_defaults は「欄の名前: auto / prior / off」の形で書いてください')
@@ -493,33 +601,10 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     else if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) err(`field_policy_defaults の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`)
     else fieldPolicyDefaults[f] = p as FieldPolicy
   }
-  for (const [f, p] of Object.entries(fieldPolicyDefaults)) {
-    if (p === 'auto' && externalFieldWriters({ operations }).length > 0) err(`欄「${f}」: 社外の人に届く書き換えの操作があるため、欄の決まりを「自動」にできません`)
-  }
 
-  if (errors.length > 0) return { ok: false, errors }
   return {
-    ok: true,
-    value: {
-      id: id as string,
-      label: raw.label as string,
-      version: raw.version as string,
-      kind: kind as PluginKind,
-      role,
-      contract: PLUGIN_CONTRACT,
-      description: typeof raw.description === 'string' ? raw.description : null,
-      service: role === 'connector' ? raw.service as string : '',
-      baseUrl,
-      scopes: scopes ?? [],
-      operationScopes,
-      types: types ?? [],
-      mapsTo,
-      objects,
-      operations,
-      fieldPolicyDefaults,
-      availableTo,
-      accountInfo,
-    },
+    ...common, role: 'business', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
+    types: types ?? [], objects: {}, operations: {}, fieldPolicyDefaults, uses, accountInfo: null,
   }
 }
 
@@ -530,20 +615,8 @@ function externalFieldWriters(manifest: Pick<PluginManifest, 'operations'>, obje
     .map(([n]) => n)
 }
 
-/** Declaration keys only a connector has (a business plugin owns types and talks to nothing). */
-const CONNECTOR_ONLY_KEYS: readonly string[] = ['service', 'base_url', 'maps_to', 'scopes', 'operation_scopes', 'objects', 'operations', 'field_policy_defaults', 'account_info']
-
-/** `maps_to: <id>@<version>` — one exact version (a new business version needs a new connector version). */
-function parseMapsTo(v: YamlValue | undefined): { id: string; version: string } | null {
-  if (typeof v !== 'string') return null
-  const at = v.lastIndexOf('@')
-  const id = v.slice(0, at)
-  const version = v.slice(at + 1)
-  return at > 0 && PLUGIN_ID_RE.test(id) && id.length <= 40 && PLUGIN_VERSION_RE.test(version) ? { id, version } : null
-}
-
-/** `<id>@<version>` of the business plugin a connector maps to (null for a business plugin). */
-export const mapsToName = (m: Pick<PluginManifest, 'mapsTo'>): string | null => m.mapsTo ? `${m.mapsTo.id}@${m.mapsTo.version}` : null
+/** `<id> >= <version>` of the connector a business plugin uses (null when it uses none). */
+export const connectorName = (m: Pick<PluginManifest, 'uses'>): string | null => m.uses ? `${m.uses.connector.id} >= ${m.uses.connector.minVersion}` : null
 
 /** Whether the package may be used by `companyId` (§8-4): no list = every company. The shelf filters with it (P4). */
 export function pluginAvailableTo(manifest: Pick<PluginManifest, 'availableTo'>, companyId: string): boolean {
@@ -552,79 +625,134 @@ export function pluginAvailableTo(manifest: Pick<PluginManifest, 'availableTo'>,
 
 export interface PluginPackage {
   manifest: PluginManifest
-  /**
-   * A business plugin: the types it owns. A connector: the types of the
-   * business plugin it maps to (`maps_to`), resolved on the shelf — it owns none.
-   */
+  /** A business plugin: the types it owns. A connector: none. */
   types: Record<string, TypeDefinition>
-  /** The recommended mapping, when the package has one (connectors only). */
-  mapping: PluginMapping | null
 }
 
 /**
- * A whole package as found on the shelf: the declaration, the type files it
- * lists (exactly those; a business plugin only) and an optional recommended
- * mapping (a connector only). A connector is checked against the business
- * package it names in `maps_to` (`business`: that exact id and version, found
- * on the shelf by the caller): its `record_type`s, `who` and field policy
- * defaults name that package's types.
+ * A whole package as found on the shelf: the declaration and the type files
+ * it lists (exactly those; a business plugin only). A business plugin's
+ * recommended mapping (`mapping.yaml`) is checked against the connector it is
+ * used with (`combineUse`, then `parsePluginMapping`), so here only its place
+ * is: a connector has none, nor does a business plugin without `connector`.
  */
-export function validatePluginPackage(input: { manifest: string; types: Record<string, string>; mapping?: string | null; business?: PluginPackage | null }): PluginParsed<PluginPackage> {
+export function validatePluginPackage(input: { manifest: string; types: Record<string, string>; mapping?: string | null }): PluginParsed<PluginPackage> {
   const m = parsePluginManifest(input.manifest)
   if (!m.ok) return m
   const manifest = m.value
   const errors: string[] = []
-  if (manifest.role === 'business') {
-    const owned: Record<string, TypeDefinition> = {}
-    for (const name of Object.keys(input.types)) {
-      if (!manifest.types.includes(name)) errors.push(`types/${name}.md は宣言の types にありません`)
-    }
-    for (const name of manifest.types) {
-      const text = input.types[name]
-      if (text === undefined) { errors.push(`型「${name}」のファイル types/${name}.md がありません`); continue }
-      const t = parseTypeFile(name, text)
-      if (!t.ok) errors.push(...t.errors.map(e => `types/${name}.md: ${e}`))
-      else if (t.definition.storage !== 'server') errors.push(`型「${name}」: 取り込んだ記録はファイルを作らないため、storage は server です`)
-      else owned[name] = t.definition
-    }
-    if (input.mapping != null) errors.push('業務のプラグインに読み替え表（mapping.yaml）は置けません。読み替えはつなぎ先のプラグインが持ちます')
-    return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned, mapping: null } }
+  if (manifest.role === 'connector') {
+    if (Object.keys(input.types).length > 0) errors.push('つなぎ先のプラグインは型（types/）を持ちません。型は業務のプラグインが持ちます')
+    if (input.mapping != null) errors.push('つなぎ先のプラグインに読み替え表（mapping.yaml）は置けません。読み替えは、つなぎ先を使う業務のプラグインが持ちます')
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: {} } }
   }
-
-  // A connector owns no type: its record types are the business plugin's (owner decision 2026-11-01).
-  if (Object.keys(input.types).length > 0) errors.push('つなぎ先のプラグインは型（types/）を持ちません。型は maps_to に書いた業務のプラグインが持ちます')
-  const business = input.business ?? null
-  let types: Record<string, TypeDefinition> = {}
-  if (!business || business.manifest.role !== 'business' || business.manifest.id !== manifest.mapsTo?.id || business.manifest.version !== manifest.mapsTo?.version) {
-    errors.push(`maps_to の業務のプラグイン ${mapsToName(manifest)} が棚にありません`)
-  } else types = business.types
-  if (errors.length === 0) {
-    for (const [oname, o] of Object.entries(manifest.objects)) {
-      if (o.recordType !== null && !types[o.recordType]) errors.push(`対象「${oname}」の record_type「${o.recordType}」は ${mapsToName(manifest)} の型ではありません`)
-    }
+  const owned: Record<string, TypeDefinition> = {}
+  for (const name of Object.keys(input.types)) {
+    if (!manifest.types.includes(name)) errors.push(`types/${name}.md は宣言の types にありません`)
   }
+  for (const name of manifest.types) {
+    const text = input.types[name]
+    if (text === undefined) { errors.push(`型「${name}」のファイル types/${name}.md がありません`); continue }
+    const t = parseTypeFile(name, text)
+    if (!t.ok) errors.push(...t.errors.map(e => `types/${name}.md: ${e}`))
+    else if (t.definition.storage !== 'server') errors.push(`型「${name}」: 取り込んだ記録はファイルを作らないため、storage は server です`)
+    else owned[name] = t.definition
+  }
+  if (input.mapping != null && !manifest.uses) errors.push('つなぎ先を使わない業務のプラグイン（connector のないもの）に読み替え表（mapping.yaml）は置けません')
   if (errors.length === 0) {
-    for (const [opname, op] of Object.entries(manifest.operations)) {
-      const typeName = manifest.objects[op.kind === 'create' && op.attachTo ? op.attachTo : op.object].recordType!
-      const type = types[typeName]
-      const persons = new Set(Object.entries(type.fields).filter(([, f]) => f.kind === 'person').map(([n]) => n))
-      for (const w of op.who) {
-        if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w)) errors.push(`操作「${opname}」の who「${w}」は型「${typeName}」の人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
-      }
-    }
-    const allFields = new Set(Object.values(types).flatMap(t => Object.keys(t.fields)))
+    const allFields = new Set(Object.values(owned).flatMap(t => Object.keys(t.fields)))
     for (const f of Object.keys(manifest.fieldPolicyDefaults)) {
       if (!allFields.has(f)) errors.push(`field_policy_defaults の「${f}」は、どの型の欄でもありません`)
     }
+    for (const [opname, use] of Object.entries(manifest.uses?.operations ?? {})) {
+      const persons = new Set(Object.values(owned).flatMap(t => Object.entries(t.fields).filter(([, f]) => f.kind === 'person').map(([n]) => n)))
+      for (const w of use.who) {
+        if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w)) errors.push(`操作「${opname}」の who「${w}」は人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
+      }
+    }
+  }
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned } }
+}
+
+/**
+ * A business plugin's use of one connector version, combined (owner decision
+ * 2026-11-01): the connector's facts (service, destination, calls, account
+ * check, each operation's shape) with the business plugin's choices (which
+ * objects become which of its types, which operations it uses, who may run
+ * them, its field policy defaults). The result is what runs for that business
+ * plugin: its `id` and `version` are the business plugin's, its `label` the
+ * connector's (the outside system's name), and **only the operations and
+ * objects the business plugin declared are in it** — another business plugin
+ * using the same connector gets its own combination, never this one's.
+ * Refused when the connector is another one, too old, or lacks what is used.
+ */
+export function combineUse(business: PluginPackage, connector: PluginManifest): PluginParsed<PluginPackage> {
+  const b = business.manifest
+  const uses = b.uses
+  const errors: string[] = []
+  if (b.role !== 'business' || !uses) return { ok: false, errors: [`「${b.label}」は、つなぎ先を使いません`] }
+  if (connector.role !== 'connector' || connector.id !== uses.connector.id) return { ok: false, errors: [`「${b.label}」が使うつなぎ先は ${uses.connector.id} です`] }
+  if (comparePluginVersions(connector.version, uses.connector.minVersion) < 0) {
+    return { ok: false, errors: [`「${b.label}」には「${connector.label}」${uses.connector.minVersion} 以上が要ります（いまは ${connector.version}）`] }
+  }
+  const types = business.types
+  const objects: Record<string, PluginObject> = {}
+  const useObject = (name: string): PluginObject | null => {
+    const o = connector.objects[name]
+    if (!o) return null
+    objects[name] ??= { ...o, recordType: uses.objects[name]?.recordType ?? null }
+    return objects[name]
+  }
+  for (const name of Object.keys(uses.objects)) {
+    if (!useObject(name)) errors.push(`対象「${name}」は「${connector.label}」${connector.version} にありません`)
+  }
+  const operations: Record<string, PluginOperation> = {}
+  for (const [opname, use] of Object.entries(uses.operations)) {
+    const where = `操作「${opname}」`
+    const op = connector.operations[opname]
+    if (!op) { errors.push(`${where}は「${connector.label}」${connector.version} にありません`); continue }
+    const obj = useObject(op.object)!
+    const target = op.attachTo ? useObject(op.attachTo) : null
+    const recordObject = op.kind === 'create' && op.attachTo ? target : obj
+    if (!recordObject?.recordType) {
+      errors.push(`${where}: 対象「${op.kind === 'create' && op.attachTo ? op.attachTo : op.object}」を objects でこの業務の型（record_type）にしてください`)
+      continue
+    }
+    const type = types[recordObject.recordType]
+    const persons = new Set(Object.entries(type?.fields ?? {}).filter(([, f]) => f.kind === 'person').map(([n]) => n))
+    for (const w of use.who) {
+      if (!persons.has(w) && !(PLUGIN_ACTORS as readonly string[]).includes(w)) errors.push(`${where}の who「${w}」は型「${recordObject.recordType}」の人の欄でも ${PLUGIN_ACTORS.join(' / ')} でもありません`)
+    }
+    if (use.decision && op.kind === 'read') errors.push(`${where}: 読む操作は decision にできません`)
+    if (use.policy !== null && op.kind !== 'create') errors.push(`${where}: policy は作る操作だけに書けます（書き換えの決まりは欄ごと：field_policy_defaults と読み替え表）`)
+    const policy = use.policy ?? op.policy
+    if (op.reaches === 'external' && policy === 'auto') errors.push(`${where}: 社外の人に届く操作は「自動」にできません`)
+    if (op.createsRecord && policy === 'auto') errors.push(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
+    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy }
+  }
+  if (errors.length === 0) {
+    for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {
+      if (p === 'auto' && externalFieldWriters({ operations }).length > 0) errors.push(`欄「${f}」: 社外の人に届く書き換えの操作があるため、欄の決まりを「自動」にできません`)
+    }
   }
   if (errors.length > 0) return { ok: false, errors }
-  let mapping: PluginMapping | null = null
-  if (input.mapping != null) {
-    const r = parsePluginMapping(input.mapping, { manifest, types })
-    if (!r.ok) return { ok: false, errors: r.errors.map(e => `おすすめの読み替え表: ${e}`) }
-    mapping = r.value
+  return {
+    ok: true,
+    value: {
+      types,
+      manifest: {
+        ...b,
+        label: connector.label,
+        service: connector.service,
+        baseUrl: connector.baseUrl,
+        scopes: connector.scopes,
+        operationScopes: Object.fromEntries(Object.entries(connector.operationScopes).filter(([n]) => n in operations)),
+        objects,
+        operations,
+        accountInfo: connector.accountInfo,
+      },
+    },
   }
-  return { ok: true, value: { manifest, types, mapping } }
 }
 
 // ── The mapping (読み替え表): per company, versioned on the server (P4) ──

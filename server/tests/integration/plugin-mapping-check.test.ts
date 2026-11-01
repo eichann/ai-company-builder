@@ -55,8 +55,8 @@ deal:
 
 const ts = () => new Date().toISOString()
 const versions = () => (db.prepare('SELECT COUNT(*) AS n FROM plugin_mappings WHERE company_id = ?').get(CO) as Json).n as number
-const install = () => db.prepare('SELECT * FROM plugin_installs WHERE company_id = ? AND plugin_id = ?').get(CO, 'sample-hub') as Json
-const check = (who: Json, body: unknown) => services.pluginMappingCheck.check(who, 'sample-hub', body)
+const install = () => db.prepare('SELECT * FROM plugin_installs WHERE company_id = ? AND plugin_id = ?').get(CO, 'sample-sales') as Json
+const check = (who: Json, body: unknown) => services.pluginMappingCheck.check(who, 'sample-sales', body)
 
 beforeAll(async () => {
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation((...a: unknown[]) => { logged.push(a.map(String).join(' ')) })
@@ -139,7 +139,7 @@ describe('「HubSpot に聞いて確かめる」', () => {
     try {
       const stopped = await check(owner, { text: MAPPING })
       expect(stopped.ok).toBe(false)
-      expect(stopped.body).toMatchObject({ code: 'PLUGIN_NOT_READY', problem: 'stopped' })
+      expect(stopped.body).toMatchObject({ code: 'PLUGIN_NOT_READY', problem: 'connector-stopped' })
     } finally {
       rmSync(join(shelfDir, 'stopped'), { force: true })
     }

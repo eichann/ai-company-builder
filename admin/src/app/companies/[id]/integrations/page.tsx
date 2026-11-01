@@ -9,6 +9,11 @@
 // needs the workflow acknowledgement — the server refuses without it),
 // importing, and the history. The server decides every rule; the page shows
 // what it says.
+//
+// Two kinds of entry (owner decision 2026-11-01), each used on its own: a
+// connector (HubSpot: version, key, who may read it, on / off) and a business
+// (法人営業: version, on / off and — when it uses a connector — whether it is
+// connected, the mapping and the import).
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ArrowsClockwise, ClockCounterClockwise, LockSimple, PlugsConnected, Warning } from '@phosphor-icons/react'
@@ -41,9 +46,11 @@ import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import {
+  CONNECTOR_PROBLEMS,
   HISTORY_LABELS,
   IMPORT_STATUS_TEXT,
   PROBLEM_TEXT,
+  connectionStopped,
   WRITE_CHOICE_LABELS,
   changeMappingField,
   describeReason,
@@ -89,8 +96,9 @@ export default function IntegrationsPage() {
       <PageHeader title={TITLE} />
       <div className="-mt-2 mb-6 max-w-3xl space-y-2 text-sm text-muted-foreground">
         <p>
-          会社で使っている外のサービス（HubSpot など）とつなぎます。つなぐと、案件などを会社の記録に取り込み、
-          AI が決められた欄だけを書き戻せるようになります。鍵の中身は誰にも表示されません。
+          会社で使っている外のサービス（HubSpot など）とつなぎます。つなぎ先（HubSpot など）と、それを使う業務（法人営業など）は、
+          それぞれ別に使い始めます。つなぐと、案件などを会社の記録に取り込み、AI が決められた欄だけを書き戻せるようになります。
+          鍵の中身は誰にも表示されません。
         </p>
       </div>
       {list.loading ? (
@@ -127,6 +135,8 @@ function labelOf(item: PluginListItem) {
 function StatusBadge({ item }: { item: PluginListItem }) {
   if (!item.install) return <Badge variant="outline">まだ使っていません</Badge>
   if (item.install.problem === null) return <Badge>動いています</Badge>
+  // A business without its connector still works inside ACB: only the exchange with the outside service stops.
+  if (item.install.enabled && packageOf(item)?.role === 'business') return <Badge>使っています</Badge>
   return <Badge variant="outline">{item.install.problem === 'off' ? 'オフ' : '止まっています'}</Badge>
 }
 
@@ -136,16 +146,25 @@ function packageOf(item: PluginListItem) {
 }
 
 /**
- * What a connector needs first (owner decision 2026-11-01): the business it
- * reads and writes the records of (「法人営業」), installed and on.
+ * A business that uses a connector (owner decision 2026-11-01): which one, and
+ * whether the exchange with it runs now (「HubSpot との行き来は止まっています」).
  */
-function NeedsBusiness({ item }: { item: PluginListItem }) {
-  const needs = packageOf(item)?.mapsTo
-  if (!needs) return null
+function ConnectionStatus({ item }: { item: PluginListItem }) {
+  const connector = packageOf(item)?.connector
+  if (!connector) return null
+  const problem = item.install?.problem ?? null
+  if (!item.install) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        {`使い始めると、すぐに案件や顧客などの記録が使えます。${connector.label} との行き来（取り込みと書き戻し）には、「${connector.label}」（${connector.minVersion} 以上）も使い始めて、オンにしてください。`}
+      </p>
+    )
+  }
+  if (problem === null) return <p role="status" className="text-sm">{connector.label} とつながっています。</p>
+  if (!CONNECTOR_PROBLEMS.includes(problem)) return null
   return (
-    <p className="text-sm text-muted-foreground">
-      このつなぎ先を使うには、先に「{needs.label}」（{needs.version}）を使い始めて、オンにしてください。
-      「{needs.label}」を止めると、このつなぎ先の取り込みと書き戻しも止まります。
+    <p role="status" className="text-sm text-muted-foreground">
+      {connectionStopped(connector.label)}：{PROBLEM_TEXT[problem]}。記録はそのまま使えます。
     </p>
   )
 }
@@ -160,8 +179,8 @@ function IntegrationSummary({ item, onOpen }: { item: PluginListItem; onOpen: ()
             {labelOf(item)}
             <StatusBadge item={item} />
           </CardTitle>
-          {item.install?.problem && <CardDescription>{PROBLEM_TEXT[item.install.problem]}</CardDescription>}
-          {!item.install && <NeedsBusiness item={item} />}
+          {item.install?.problem && !CONNECTOR_PROBLEMS.includes(item.install.problem) && <CardDescription>{PROBLEM_TEXT[item.install.problem]}</CardDescription>}
+          <ConnectionStatus item={item} />
         </div>
         <Button variant="outline" size="sm" onClick={onOpen}>開く</Button>
       </CardHeader>
@@ -194,8 +213,10 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
   const install = current.install
   const latest = current.versions[current.versions.length - 1]
   const pkg = current.versions.find((v) => v.version === install?.version) ?? latest
-  // A business (「法人営業」) owns the records' shape and talks to no outside service: no key, readers, mapping or import.
+  // A business (「法人営業」) owns the records' shape: no key or readers of its own (those are its connector's).
+  // When it uses a connector, the mapping and the import are its; a connector has neither.
   const business = pkg?.role === 'business'
+  const uses = business ? pkg?.connector ?? null : null
   const service = broker?.services.find((s) => s.service === pkg?.service)
   const keys = broker?.keys.filter((k) => k.scope === 'company' && k.service === pkg?.service) ?? []
   const [version, setVersion] = useState<string>(install?.version ?? latest?.version ?? '')
@@ -252,7 +273,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         </CardTitle>
         <CardDescription>
           {business ? (
-            '案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）'
+            uses ? `案件や顧客などの記録を扱う業務です（外のサービスとは「${uses.label}」でつなぎます）` : '案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）'
           ) : (
             <>
               送り先：{pkg?.host ?? '—'}
@@ -262,7 +283,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         </CardDescription>
       </CardHeader>
       <div className="space-y-6 border-t px-5 py-4">
-        <NeedsBusiness item={current} />
+        <ConnectionStatus item={current} />
         {service?.practice && (
           <div role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
             <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
@@ -323,7 +344,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         {install && (
           <section className="space-y-2">
             <h3 className="text-sm font-medium">オン・オフ</h3>
-            {install.problem && install.problem !== 'off' && (
+            {install.problem && install.problem !== 'off' && !(business && CONNECTOR_PROBLEMS.includes(install.problem)) && (
               <p className="text-sm text-muted-foreground">いまは動いていません：{PROBLEM_TEXT[install.problem]}</p>
             )}
             {install.enabled ? (
@@ -333,13 +354,13 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
             )}
             <p className="text-xs text-muted-foreground">
               {business
-                ? 'オフにすると、これを使うつなぎ先（HubSpot など）の取り込みと書き戻しも、次の1回から止まります。'
-                : 'オンにすると、この送り先へは決められた書き戻しだけが届くようになります（オフにしても、自由な書き込みには戻りません）。'}
+                ? (uses ? `オフにすると、この業務の ${uses.label} との取り込みと書き戻しも、次の1回から止まります。` : 'オフにしても、記録はそのまま残ります。')
+                : 'オンにすると、この送り先へは決められた書き戻しだけが届くようになります（オフにしても、自由な書き込みには戻りません）。オフにすると、このつなぎ先を使うすべての業務の取り込みと書き戻しが、次の1回から止まります。'}
             </p>
           </section>
         )}
 
-        {install && d && !business && (
+        {install && d && uses && (
           <MappingEditor
             pluginId={item.id}
             detail={d}
@@ -351,7 +372,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         )}
 
         {/* Import */}
-        {install && !business && (
+        {install && uses && (
           <section className="space-y-2">
             <h3 className="text-sm font-medium">取り込む</h3>
             <p className="text-xs text-muted-foreground">読み替え表の範囲の案件を、会社の記録に取り込みます（ファイルは作りません）。</p>
@@ -394,8 +415,8 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         onOpenChange={setConfirmOff}
         title="止めますか？"
         description={business
-          ? 'これを使うつなぎ先（HubSpot など）の取り込みと書き戻しが、次の1回から止まります。記録はそのまま残ります。'
-          : '取り込みと書き戻しが、次の1回から止まります。読み替え表と記録はそのまま残ります。'}
+          ? (uses ? `この業務の ${uses.label} との取り込みと書き戻しが、次の1回から止まります。記録はそのまま残ります。` : '記録はそのまま残ります。')
+          : 'このつなぎ先を使うすべての業務の取り込みと書き戻しが、次の1回から止まります。読み替え表と記録はそのまま残ります。'}
         confirmLabel="止める"
         onConfirm={async () => {
           if (await run('止めました', () => pluginsApi.setEnabled(companyId, item.id, false))) setConfirmOff(false)
@@ -409,7 +430,8 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         confirmLabel="新しく始める"
         onConfirm={async () => {
           try {
-            await pluginsApi.renewConnection(companyId, item.id)
+            // The connection is the connector's (the business shows the import that found the other account).
+            await pluginsApi.renewConnection(companyId, uses?.id ?? item.id)
             setAccountChanged(false)
             setConfirmRenew(false)
             detail.reload()

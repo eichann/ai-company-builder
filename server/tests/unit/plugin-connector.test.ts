@@ -21,7 +21,7 @@ const manifest = (() => {
   return m.value
 })()
 const plugin: ActivePlugin = {
-  pluginId: 'sample-hub', version: '0.1.0', manifest, types: {}, mapping: { objects: {}, people: {}, policy: {} }, mappingVersion: 1,
+  pluginId: 'sample-sales', version: '0.1.0', connectorId: 'sample-hub', connectorVersion: '0.1.0', manifest, types: {}, mapping: { objects: {}, people: {}, policy: {} }, mappingVersion: 1,
   keyId: 'k1', fingerprint: 'f', connectionId: 'c1', accountId: '1',
 }
 

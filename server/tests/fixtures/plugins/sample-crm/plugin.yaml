@@ -1,5 +1,6 @@
 # A fictional CRM shaped like HubSpot, for the public repository's tests
 # (owner decision §6-6: the real HubSpot package lives in acb-plugins).
+# A connector only: sample-crm-sales uses it.
 id: sample-crm
 label: 見本の CRM
 version: 0.1.0
@@ -14,11 +15,9 @@ scopes:
 operation_scopes:
   add_note: [crm.objects.notes.write]
   log_meeting: [crm.objects.deals.write]
-maps_to: sample-sales@0.1.0
 
 objects:
   deal:
-    record_type: deal
     auto_properties: [stage_probability]
     get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
     search: { method: POST,  path: "/crm/objects/2026-03/deals/search" }
@@ -39,23 +38,17 @@ operations:
     label: 最新を取る
     kind: read
     object: deal
-    who: [viewer, ai]
   update_deal:
-    label: 案件の欄を書き戻す
+    label: 取引の項目を書き戻す
     kind: update
     object: deal
-    fields: mapped
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: restore_previous
-    note: optional
-    decision: true
   add_note:
-    label: 案件にメモを残す
+    label: 取引にメモを残す
     kind: create
     object: note
     attach_to: deal
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
     content: { body: hs_note_body, at: hs_timestamp }
@@ -66,7 +59,6 @@ operations:
     kind: create
     object: meeting
     attach_to: deal
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
     content: { title: hs_meeting_title, body: hs_meeting_body, at: hs_timestamp }
@@ -76,16 +68,6 @@ operations:
     label: 取引を新しく作る
     kind: create
     object: deal
-    fields: mapped
-    who: [viewer, ai]
     reaches: internal
     undo: archive
     correlation_property: acb_operation_id
-
-field_policy_defaults:
-  next_step: auto
-  stage: off
-  confidence: auto
-  close_date: auto
-  amount: prior
-  closed: prior

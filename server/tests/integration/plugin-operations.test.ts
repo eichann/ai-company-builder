@@ -75,9 +75,9 @@ async function call(opts: { user?: string; token?: string; method: string; path:
   const res: Response = await app.request(opts.path, { method: opts.method, headers, ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}) })
   return { status: res.status, body: await res.json().catch(() => null) as Json }
 }
-const P = `/api/companies/${CO}/plugins/sample-hub`
+const P = `/api/companies/${CO}/plugins/sample-sales`
 const person = (user: string, method: string, path: string, body?: unknown) => call({ user, method, path: `${P}${path}`, body })
-const ai = (token: string, method: string, path: string, body?: unknown) => call({ token, method, path: `/api/records-ai/plugins/sample-hub${path}`, body })
+const ai = (token: string, method: string, path: string, body?: unknown) => call({ token, method, path: `/api/records-ai/plugins/sample-sales${path}`, body })
 
 async function tokenFor(user: string, agent = 'claude-code'): Promise<string> {
   const r = await call({ user, method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'conv-op', agent, scope: 'act' } })
@@ -135,7 +135,7 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
+  expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['op-member'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
   expect((await person('op-owner', 'POST', '/import')).status).toBe(200)
@@ -154,7 +154,7 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     const claude = await call({ token: await tokenFor('op-member'), method: 'GET', path: '/api/records-ai/plugins' })
     expect(claude.status).toBe(200)
     const [hub] = claude.body.data.plugins
-    expect(hub).toMatchObject({ id: 'sample-hub', label: expect.any(String) })
+    expect(hub).toMatchObject({ id: 'sample-sales', label: expect.any(String) })
     const update = hub.operations.find((o: Json) => o.name === 'update_deal')
     expect(update).toMatchObject({ kind: 'update', recordType: 'deal', decision: true })
     // Written fields with their policy (stage only with approval); fields the mapping does not write are not offered.
@@ -197,7 +197,7 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(fake.deal('1000000001')!.properties).toMatchObject({ juchu_kakudo: 'high', hs_next_step: '11/7 デモ' })
     const entry = services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1)
     expect(entry).toMatchObject({
-      action: 'sample-hub.update_deal', actorId: 'op-member', actorKind: 'ai', actorSource: 'claude-code', conversationId: 'conv-op',
+      action: 'sample-sales.update_deal', actorId: 'op-member', actorKind: 'ai', actorSource: 'claude-code', conversationId: 'conv-op',
       isDecision: true, note: '商談で前向きな反応があったため（相談の 3 通目）', decision: { reason: '商談で前向きな反応があったため（相談の 3 通目）' },
       changes: [{ field: 'confidence', before: 'b', after: 'a' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }],
       receipt: { kind: 'written', operationId: r.body.data.operation.id, accountId: '90000001' },
@@ -218,7 +218,7 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(back.status).toBe(200)
     expect(back.body.data.operation).toMatchObject({ actorKind: 'human', changes: [{ field: 'confidence', before: 'a', after: 'b' }, { field: 'next_step', before: '11/7 デモ', after: '資料送付' }] })
     expect(services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1))
-      .toMatchObject({ action: 'sample-hub.undo', actorKind: 'human', conversationId: 'conv-card' })
+      .toMatchObject({ action: 'sample-sales.undo', actorKind: 'human', conversationId: 'conv-card' })
     expect(back.body.data.operation).toMatchObject({ operation: 'undo', state: 'applied', undoOf: r.body.data.operation.id, undoable: false })
     expect(patches()).toBe(before + 1)
     expect(fake.deal('1000000001')!.properties).toMatchObject({ juchu_kakudo: 'medium', hs_next_step: '資料送付' })
@@ -301,13 +301,13 @@ describe('HubSpot changed meanwhile', () => {
     // The company now reads 確度 from another HubSpot property.
     const remapped = MAPPING.replace('confidence: { from: juchu_kakudo, write: true, values: { high: a, medium: b, low: c } }',
       'confidence: { from: hs_forecast_probability, write: true, values: { "0.8": a, "0.5": b, "0.2": c } }')
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: remapped, acknowledgeAuto: ['confidence'] })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: remapped, acknowledgeAuto: ['confidence'] })).ok).toBe(true)
     const forecastBefore = fake.deal('1000000010')!.properties.hs_forecast_probability ?? null
     const back = await person('op-member', 'POST', `/operations/${w.body.data.operation.id}/undo`)
     expect(back.status).toBe(200)
     expect(fake.deal('1000000010')!.properties.juchu_kakudo).toBe('medium')
     expect(fake.deal('1000000010')!.properties.hs_forecast_probability ?? null).toBe(forecastBefore)
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence'] })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ['confidence'] })).ok).toBe(true)
   })
 
   it('a policy changed while the request waits stops it before the send', async () => {
@@ -316,12 +316,12 @@ describe('HubSpot changed meanwhile', () => {
     fake.faults.delayMs = 60
     const pending = person('op-owner', 'POST', `/records/${id}/operations/update_deal`, update(id, { next_step: '待っている間に止まる' }))
     await new Promise(r => setTimeout(r, 30))
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING.replace('hs_next_step, write: true', 'hs_next_step, write: false') })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING.replace('hs_next_step, write: true', 'hs_next_step, write: false') })).ok).toBe(true)
     const r = await pending
     fake.faults.delayMs = 0
     expect(r.status).not.toBe(200)
     expect(patches()).toBe(n)
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['next_step'] })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ['next_step'] })).ok).toBe(true)
   })
 })
 
@@ -366,7 +366,7 @@ describe('a lost answer', () => {
     const again = await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/reconcile`)
     expect(again).toMatchObject({ status: 200, body: { data: { operation: { state: 'sent-unknown' } } } })
     expect(await person('op-member', 'POST', `/records/${id}/operations/update_deal`, update(id, { next_step: '電話' })))
-      .toMatchObject({ status: 409, body: { code: 'PLUGIN_NOT_ACTIVE', problem: 'off' } })
+      .toMatchObject({ status: 409, body: { code: 'PLUGIN_NOT_ACTIVE', problem: 'connector-stopped' } })
     expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
   })
 })
@@ -379,11 +379,18 @@ describe('every stop acts on the next call', () => {
 
   it('the operator, the company, the key, the AI, the field, the records switch', async () => {
     const n = patches()
+    // The operator stops the connector (every business plugin's use of it) or the business plugin (its own use).
     writeFileSync(join(shelfDir, 'stopped'), 'sample-hub\n')
+    expect(await attempt()).toMatchObject({ status: 409, body: { problem: 'connector-stopped' } })
+    writeFileSync(join(shelfDir, 'stopped'), 'sample-sales\n')
     expect(await attempt()).toMatchObject({ status: 409, body: { problem: 'stopped' } })
     rmSync(join(shelfDir, 'stopped'))
+    // The company turns the business plugin off: its operations stop, the connector stays on.
+    expect((await services.plugins.setEnabled(owner, 'sample-sales', { enabled: false })).ok).toBe(true)
+    expect(await attempt()).toMatchObject({ status: 409, body: { problem: 'off' } })
+    expect((await services.plugins.setEnabled(owner, 'sample-sales', { enabled: true })).ok).toBe(true)
 
-    const keyId = db.prepare('SELECT key_id FROM plugin_installs WHERE company_id = ?').get(CO).key_id
+    const keyId = db.prepare("SELECT key_id FROM plugin_installs WHERE company_id = ? AND plugin_id = 'sample-hub'").get(CO).key_id
     await services.keyBroker.update(owner, keyId, { status: 'disabled' })
     expect(await attempt()).toMatchObject({ status: 409, body: { problem: 'key-stopped' } })
     await services.keyBroker.update(owner, keyId, { status: 'active' })
@@ -393,15 +400,15 @@ describe('every stop acts on the next call', () => {
     const id = recordOf('1000000002')
     expect((await ai(token, 'POST', `/records/${id}/operations/update_deal`, update(id, { next_step: 'x' }))).status).toBe(403)
     // The service itself refuses the AI too (not only the token's door), and still lets people work.
-    const asAi = await services.pluginOperations.run({ companyId: CO, userId: 'op-member', role: 'member' }, { kind: 'ai', source: 'claude-code' }, 'sample-hub', id, 'update_deal', update(id, { next_step: 'x' }))
+    const asAi = await services.pluginOperations.run({ companyId: CO, userId: 'op-member', role: 'member' }, { kind: 'ai', source: 'claude-code' }, 'sample-sales', id, 'update_deal', update(id, { next_step: 'x' }))
     expect(asAi).toMatchObject({ ok: false, body: { code: 'ACB_STOPPED' } })
     const stop = services.agentStops.get(owner).value.active[0].id
     services.agentStops.release(owner, stop)
 
     const off = MAPPING.replace('hs_next_step, write: true', 'hs_next_step, write: false')
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: off })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: off })).ok).toBe(true)
     expect(await attempt()).toMatchObject({ status: 400, body: { code: 'FIELD_NOT_WRITABLE' } })
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING })).ok).toBe(true)
 
     db.prepare('UPDATE record_settings SET enabled = 0 WHERE company_id = ?').run(CO)
     expect(await attempt()).toMatchObject({ status: 404, body: { code: 'RECORDS_DISABLED' } })
@@ -419,7 +426,7 @@ describe('creates (milestone 4): log_meeting on a deal', () => {
   const autoMeetings = `${MAPPING}policy:\n  log_meeting: auto\n`
   /** The company chose automatic meetings and confirmed no HubSpot workflow starts on them (each test stands alone). */
   const useAutoMeetings = async () => {
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: autoMeetings, acknowledgeAuto: [...ACK, 'log_meeting'] })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: autoMeetings, acknowledgeAuto: [...ACK, 'log_meeting'] })).ok).toBe(true)
   }
   /** Pretend the create was sent long enough ago for search to see it (HubSpot's indexing delay). */
   const age = (operationId: string) => db.prepare('UPDATE plugin_operations SET created_at = ? WHERE company_id = ? AND id = ?')
@@ -434,11 +441,11 @@ describe('creates (milestone 4): log_meeting on a deal', () => {
   })
 
   it('auto needs the acknowledgement: refused on save, and a mapping that has none stops the plugin', async () => {
-    const save = await services.plugins.saveMapping(owner, 'sample-hub', { text: autoMeetings, acknowledgeAuto: ACK })
+    const save = await services.plugins.saveMapping(owner, 'sample-sales', { text: autoMeetings, acknowledgeAuto: ACK })
     expect(save).toMatchObject({ ok: false, body: { code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['log_meeting'] } })
     // A mapping version stored without one (e.g. restored by hand): the plugin does not run, nothing is sent.
     const version = (db.prepare('SELECT MAX(version) AS v FROM plugin_mappings WHERE company_id = ?').get(CO) as Json).v + 1
-    db.prepare('INSERT INTO plugin_mappings (company_id, plugin_id, version, text, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(CO, 'sample-hub', version, autoMeetings, ts(), 'op-owner')
+    db.prepare('INSERT INTO plugin_mappings (company_id, plugin_id, version, text, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(CO, 'sample-sales', version, autoMeetings, ts(), 'op-owner')
     const before = (db.prepare('SELECT mapping_version FROM plugin_installs WHERE company_id = ?').get(CO) as Json).mapping_version
     db.prepare('UPDATE plugin_installs SET mapping_version = ? WHERE company_id = ?').run(version, CO)
     const id = recordOf('1000000001')
@@ -464,7 +471,7 @@ describe('creates (milestone 4): log_meeting on a deal', () => {
     expect(fake.meeting(made[0].id)).toMatchObject({ dealIds: ['1000000001'], properties: { hs_meeting_title: '初回商談', hs_timestamp: String(Date.parse('2026-11-05T15:00:00+09:00')), acb_operation_id: op.id } })
     // The deal's ledger notes it (no field changes), with the receipt naming the meeting.
     const entry = services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1)
-    expect(entry).toMatchObject({ action: 'sample-hub.log_meeting', actorKind: 'ai', changes: [], receipt: { kind: 'written', object: 'meeting', externalId: made[0].id, operationId: op.id } })
+    expect(entry).toMatchObject({ action: 'sample-sales.log_meeting', actorKind: 'ai', changes: [], receipt: { kind: 'written', object: 'meeting', externalId: made[0].id, operationId: op.id } })
     // The AI cannot archive it; its owner can — only that meeting.
     expect((await ai(token, 'POST', `/operations/${op.id}/undo`)).status).toBe(404)
     const back = await person('op-member', 'POST', `/operations/${op.id}/undo`)
@@ -523,7 +530,7 @@ describe('creates (milestone 4): log_meeting on a deal', () => {
     expect(fake.withOperationId(again.body.data.operation.id)).toHaveLength(1)
     expect((await person('op-member', 'GET', `/operations/${op.id}`)).body.data.operation).toMatchObject({ replacedBy: again.body.data.operation.id, recreatable: false })
     expect(await person('op-member', 'POST', `/operations/${op.id}/recreate`, { confirm: true })).toMatchObject({ status: 409, body: { code: 'NOT_RECREATABLE' } })
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING })).ok).toBe(true)
   })
 })
 
@@ -548,27 +555,27 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
       return { ok: true, plugin: { ...r.plugin, manifest: { ...r.plugin.manifest, operations }, mapping: { ...r.plugin.mapping, policy: { ...r.plugin.mapping.policy, create_deal: 'auto' } } } }
     })
     try {
-      expect(await services.pluginOperations.createRecord({ companyId: CO, userId: 'op-member', role: 'member' }, { kind: 'human' }, 'sample-hub', 'create_deal', NEW_DEAL))
+      expect(await services.pluginOperations.createRecord({ companyId: CO, userId: 'op-member', role: 'member' }, { kind: 'human' }, 'sample-sales', 'create_deal', NEW_DEAL))
         .toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
     } finally { spy.mockRestore() }
     expect(dealPosts()).toBe(n)
   })
 
   it('similar deals: only records already imported that the member may read', async () => {
-    const r = await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-hub', 'リーダー研修（例示製作所）')
+    const r = await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-sales', 'リーダー研修（例示製作所）')
     expect(r.ok).toBe(true)
     expect(r.value.similar.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
     expect(r.value.similar.every((s: Json) => typeof s.title === 'string')).toBe(true)
     // Cannot read where deals are: nothing is asked outside.
     const asked = fake.requests.length
-    expect(await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-hub', 'リーダー研修')).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-sales', 'リーダー研修')).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
     expect(fake.requests.length).toBe(asked)
   })
 
   it('prepareApproval builds the payload without sending; executeApproved creates the deal as a record, approved by another person', async () => {
     const member = { companyId: CO, userId: 'op-member', role: 'member' }
     const n = dealPosts()
-    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'ai', source: 'claude-code', conversationId: 'conv-op' }, 'sample-hub', null, 'create_deal', NEW_DEAL)
+    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'ai', source: 'claude-code', conversationId: 'conv-op' }, 'sample-sales', null, 'create_deal', NEW_DEAL)
     expect(prepared.ok).toBe(true)
     expect(prepared.value).toMatchObject({
       approver: 'self', folder: '営業部',
@@ -598,7 +605,7 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
 
   it('executeApproved refuses without a reason, and when the requester is no longer a member', async () => {
     const member = { companyId: CO, userId: 'op-member', role: 'member' }
-    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', null, 'create_deal', NEW_DEAL)
+    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-sales', null, 'create_deal', NEW_DEAL)
     const n = dealPosts()
     expect(await services.pluginOperations.executeApproved(owner, { userId: 'op-member', actorKind: 'human', conversationId: null }, prepared.value.payload, ' '))
       .toMatchObject({ ok: false, body: { code: 'REASON_REQUIRED' } })
@@ -614,7 +621,7 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
     const id = recordOf('1000000010') // assignee op-member
     // Bring in what HubSpot holds now (earlier tests change this deal there).
     await person('op-member', 'POST', `/records/${id}/operations/refresh_deal`, {})
-    const r = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', { expectedVersion: versionOf(id), fields })
+    const r = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-sales', id, 'update_deal', { expectedVersion: versionOf(id), fields })
     expect(r.ok).toBe(true)
     return r.value
   }
@@ -625,7 +632,7 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
     const id = recordOf('1000000010')
     await person('op-member', 'POST', `/records/${id}/operations/refresh_deal`, {})
     const n = patches()
-    expect(await services.pluginOperations.run(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', update(id, { stage: 'final' })))
+    expect(await services.pluginOperations.run(member, { kind: 'human' }, 'sample-sales', id, 'update_deal', update(id, { stage: 'final' })))
       .toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
     const prepared = await prepare({ stage: 'final' })
     expect(prepared).toMatchObject({
@@ -633,7 +640,7 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
       payload: { operation: 'update_deal', externalId: '1000000010', changes: [{ field: 'stage', property: 'dealstage', after: 'final', rawBefore: 'presentationscheduled', rawAfter: 'decisionmakerboughtin' }] },
     })
     // Every field auto: no approval needed; an off field: refused.
-    expect(await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', { expectedVersion: versionOf(id), fields: { next_step: 'x' } }))
+    expect(await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-sales', id, 'update_deal', { expectedVersion: versionOf(id), fields: { next_step: 'x' } }))
       .toMatchObject({ ok: false, body: { code: 'APPROVAL_NOT_NEEDED' } })
     expect(patches()).toBe(n)
   })
@@ -650,7 +657,7 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
   it('refuses when the mapping version or the connection changed, or the field became off — nothing sent', async () => {
     const n = patches()
     const a = await prepare({ stage: 'final' })
-    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING })).ok).toBe(true)
     expect(await execute(a.payload)).toMatchObject({ ok: false, body: { code: 'APPROVAL_STALE' } })
     const b = await prepare({ stage: 'final' })
     expect(await execute({ ...b.payload, connectionId: 'another-connection' })).toMatchObject({ ok: false, body: { code: 'APPROVAL_STALE' } })

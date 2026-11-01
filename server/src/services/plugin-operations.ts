@@ -738,7 +738,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       for (const x of r.body.results) {
         if (!isObj(x) || typeof x.id !== 'string' || !EXTERNAL_ID_RE.test(x.id)) continue
         const link = repo.link(plugin.connectionId, account.accountId, op.object, x.id)
-        const row = link ? readable(member, link.recordId) : null
+        const row = link && link.pluginId === plugin.pluginId ? readable(member, link.recordId) : null
         if (row && !similar.some(s => s.recordId === row.id)) similar.push({ recordId: row.id, title: row.title })
       }
       return ok({ similar })

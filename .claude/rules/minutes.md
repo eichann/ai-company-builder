@@ -57,7 +57,7 @@ access itself: `google-connector.md` (G3).
 3. **Reading** — the AI (tool `minutes_read`) or the app reads the text (below), runs
    `minutes__start_reading`, makes the outputs with the existing tools (`records_create` task —
    assignee = attending member ids, due within a year —, `decisions_record` linking minutes /
-   deal, `hubspot__update_deal` — prior fields become approval requests (G6) —, the HubSpot
+   deal, the business plugin's `…__update_deal` (the first message names tools by that ending; `plugins.md` "Two roles") — prior fields become approval requests (G6) —, the HubSpot
    meeting tool (G5), the mail draft (G8)), each citing the minutes text it rests on, then
    `minutes__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote

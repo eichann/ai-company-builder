@@ -40,43 +40,88 @@ paths:
 
 Owner design 「節目3 プラグインの仕組みと HubSpot」 (2026-10-31, every §6 recommendation
 approved, §8 rules 1–4). A connector plugin connects a company to an outside system (HubSpot
-first). Screen plugins (tabs, isolated views) are milestone 5 and not covered here.
+first); a business plugin is a piece of work (「法人営業」) that may use one. Screen plugins (tabs,
+isolated views) are milestone 5 and not covered here.
 
-## Two roles: a connector only connects, a business plugin owns the types (owner, 2026-11-01)
+## Two roles: a connector is a shared part, a business plugin uses it (owner, 2026-11-01)
 
-- A **business plugin** (「法人営業」, `corporate-sales`) owns types (and, later, the flows of that
-  work): its declaration has `id`, `label`, `version`, `kind`, `contract`, `description`,
-  `available_to` and `types`, and `types/<name>.md` — **no** `service`, `base_url`, `maps_to`,
-  `scopes`, `operation_scopes`, `objects`, `operations`, `field_policy_defaults`, `account_info`
-  or `mapping.yaml` (each refused with its reason). It talks to nothing: no key, mapping, read
-  scope, relay switch, import or operation (409 `NOT_A_CONNECTOR`; `active()` →
-  `not-a-connector`).
-- A **connector** (HubSpot) is a declaration with a `service`. It owns **no** type (`types` and a
-  `types/` folder are refused) and names the one business plugin version whose types it maps to:
-  `maps_to: <id>@<version>` — one exact version (a new business version needs a new connector
-  version). Its objects' `record_type`s, `who`, field policy defaults and its mapping are checked
-  against that package's types (`validatePluginPackage({ …, business })`); the shelf resolves it,
-  so `PluginPackage.types` / `ActivePlugin.types` of a connector are the business plugin's.
-  Everything about the connection stays the connector's: the mapping, import, the relay,
-  write-back operations (`log_meeting`, `create_deal` included), its key and hosts.
+The dependency points one way: **business → connector**. (#372's first cut had it the other way —
+`maps_to`, installing HubSpot needed 法人営業 — and the owner found that 「明確におかしい」.)
+
+- A **connector** (HubSpot) is a company-wide shared part, like Google: installed, turned on and
+  stopped on its own; it knows nothing of business plugins. Its declaration (one with a `service`)
+  holds the service, `base_url`, `account_info` (the account check), `scopes` /
+  `operation_scopes`, its `objects` (calls) and its `operations` — generic windows on the service
+  (`refresh_deal` read a deal, `update_deal` update a deal's properties, `log_meeting` / `add_note`
+  create an engagement on a deal, `create_deal`) with what each needs (`kind`, `object`,
+  `attach_to`, `reaches`, `undo`, `content`, `association_type`, `correlation_property`). The
+  company's install of it holds the company key (key broker; never shown), the connection and
+  account, the relay read scope and the relay's read-only switch. It refuses, naming where each
+  belongs now: `types` / `types/`, `maps_to`, an object's `record_type`, an operation's `who` /
+  `decision` / `note` / `policy` / `fields`, `field_policy_defaults`, `mapping.yaml`.
+- A **business plugin** (「法人営業」, `corporate-sales`) owns its types (and, with milestone 5, its
+  flows) and carries **how it uses the connector**:
+  ```yaml
+  types: [deal, customer]
+  connector: hubspot >= 0.3.0          # the one connector it can use, and the oldest version it accepts
+  objects:                             # connector object → its type (`{}`: used without a record, e.g. contacts)
+    deal: { record_type: deal }
+    company: { record_type: customer }
+    contact: {}
+  operations:                          # the connector operations it uses, and who may run them
+    update_deal: { who: [assignee, dept_manager, admin, ai], note: optional, decision: true }
+    log_meeting: { who: [assignee, dept_manager, admin, ai], policy: prior }
+  field_policy_defaults: { next_step: auto, stage: prior, … }
+  ```
+  plus `types/<name>.md` and the recommended `mapping.yaml` (field mapping, fields written back,
+  people tables, policies, approvers). `connector` is the only new key: `objects` / `operations` /
+  `record_type` / `who` / `decision` / `note` / `policy` / `field_policy_defaults` moved here from
+  the connector (§8-1); `maps_to` is gone and `fields: mapped` (it had one value) is implied. A
+  business plugin without `connector` works inside ACB only (then `objects`, `operations`,
+  `field_policy_defaults` and `mapping.yaml` are refused); one never has `service`, `base_url`,
+  `scopes`, `operation_scopes` or `account_info`.
+- **What runs is the combination** (`combineUse(business, connector)`, `shared/core/plugins.ts`):
+  the connector's facts with the business plugin's choices, keyed by the business plugin (its id /
+  version; the connector's label as the outside system's name). **Only the objects and operations
+  the business plugin declared are in it**, each with its `who`, rules and policies, on its own
+  types — two business plugins using one connector each get their own combination and never each
+  other's permissions. Refused (→ `connector-mismatch`) when the connector is another id, older than
+  `connector`'s version, or lacks a used object / operation, or a used operation's object is not
+  one of the business plugin's types.
+- **Keyed by the business plugin** (the server gate is the pair business plugin × connector
+  operation): the mapping, acknowledgements, import, links (`plugin_external_links.plugin_id`),
+  operation records, the ledger's `source` / `action`, routes `/plugins/<business>/…` and the AI's
+  tools (`corporate-sales__update_deal`). The import skips an outside object another business plugin
+  brought in (problem 「ほかの業務の記録」), and refresh / operations / similar deals only use the
+  plugin's own links (`NOT_LINKED`, nothing asked outside).
+- **Turning a business plugin on stores its types at once** (`storeBusinessTypes`, source
+  `plugin`), connector or not. Without its connector (not installed, off, stopped, too old, no
+  key…) it still works inside ACB; only its connector-backed parts (import, relay reads it relies
+  on, write-back) stop, and say so (`connector-*`, the admin's 「HubSpot との行き来は止まっています」).
+  Turning a connector on never needs a business plugin.
 - **One owner per type name**: the core's types (`CORE_TYPE_FILES`) cannot be a business plugin's
   (refused on the shelf); in a company, installing a business plugin owning a type another
   installed business plugin owns is 409 `TYPE_OWNED_ELSEWHERE`. Connectors own none.
 - **Never reused or inherited** across slightly different work (owner): another kind of sales
   gets its own business plugin, copying a type is fine. The core keeps only generic links (a
   link's target is a label, `records.md`).
-- The role is not a new key: a declaration with `service` is a connector (`PluginManifest.role`).
-  The only key added is `maps_to` (§8-1: the declaration does not grow).
+- The role is not a key: a declaration with `service` is a connector (`PluginManifest.role`).
+- Old shapes: `hubspot@0.1.x` (types of its own) and `hubspot@0.2.0` (`maps_to`, record types,
+  `who`) are refused on the shelf with the reason; an install of one shows `not-on-shelf` and every
+  business plugin using it `connector-missing` until an owner / admin chooses a current version.
+  Nothing is migrated (no production data).
 
 ## A plugin is data only
 
 - A package = `plugin.yaml` (the **declaration**) + `types/<name>.md` (a business plugin's types,
-  same format as `.acb/types/`) + optional `mapping.yaml` (a connector's recommended **mapping**). No program:
+  same format as `.acb/types/`) + optional `mapping.yaml` (a business plugin's recommended
+  **mapping**, checked against its connector when it runs). No program:
   the core's one connector (P5) makes the calls the declaration describes. This keeps other
   people's code off the server (0.15) and the line between the AGPL core and paid plugins clear
   (0.17).
 - Shape and rules: `shared/core/plugins.ts` (`parsePluginManifest`, `validatePluginPackage`,
-  `parsePluginMapping`). YAML is the strict `yaml-lite` subset. Keys English, `label`s Japanese.
+  `parsePluginMapping`, `combineUse`). YAML is the strict `yaml-lite` subset. Keys English,
+  `label`s Japanese.
 - **Unknown keys make the whole package unusable**, anywhere (top level, object, endpoint,
   operation, mapping). Keys someone might reach for get a specific reason
   (`FORBIDDEN_KEY_REASONS`): a program (`script`, `code`, `command`, `exec`, `run`, `start`,
@@ -94,7 +139,8 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   placeholder (exactly once for get / update / archive, never for the others), no `?` / `#`, and
   the relay's own path rule (`shared/core/upstream-path.ts` `checkUpstreamPath`, the same
   function `services/broker-relay.ts` uses): no `//`, `..`, `%2f`, `\`, control characters.
-- **Operations** (`kind` read / update / create): `who` (person fields of the record's type or
+- **Operations** (`kind` read / update / create; the connector declares them, the business plugin's
+  `operations` adds who and the rules — "Two roles"): `who` (person fields of the record's type or
   `PLUGIN_ACTORS`: `viewer` = anyone who can read the record, `ai` = the member's AI — only on
   records its owner can read and only what its owner may do —, `dept_manager`, `admin`; a plugin
   never says `anyone`), `reaches` internal / external, `undo` (update: restore_previous / none;
@@ -102,15 +148,16 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   is part of the ledger entry and **the AI must give one** — a note drafted from the
   consultation, citing its basis; optional for people. `update_deal` is a decision,
   `refresh_deal` is not). An update
-  writes `fields: mapped` only (the mapping's `write: true` fields).
+  writes only the mapping's `write: true` fields.
 - **Creates** (milestone 4, design §3-6): every create names `correlation_property` (a unique-value
   custom property the company makes in the outside system, e.g. `acb_operation_id`; the core writes
   the operation id there so a lost answer is looked up, never re-sent). Two shapes: **attached**
   (`attach_to` an object with a record type; `content { title | body | at | outcome: <outside
   property> }` — fixed slots, no expressions — and `association_type`, e.g. HubSpot's 212 meeting →
-  deal: `log_meeting`, `add_note`), or **creating a record** of the object's own type (no
-  `attach_to`, `fields: mapped`, its title from the mapping's `title.from`: `create_deal`). A create
-  may carry its own `policy` (default `auto`, `prior` when external or creating a record); the
+  deal: `log_meeting`, `add_note`), or **creating a record** of the object's type in the business
+  plugin (no `attach_to`, the mapping's written fields, its title from the mapping's `title.from`:
+  `create_deal`). The business plugin's use of a create may carry its own `policy` (default `auto`,
+  `prior` when external or creating a record); the
   company overrides it in the mapping's `policy` by operation name (`log_meeting: auto`,
   `effectiveOperationPolicy(manifest, op, mapping)`). **Creating a record is never `auto`**
   (declaration, mapping, run time), like an external operation.
@@ -147,7 +194,9 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
    (`validatePluginPackage`); the import itself (P5) is tested for it too.
 4. **Company-specific packages are div's (FDE) work**: companies never upload declarations.
    `kind: company` needs `available_to: [<company id>, …]` (unique, 1–200); `kind: official` may
-   have it. Absent = every company may use the package (`pluginAvailableTo`).
+   have it. Absent = every company may use the package (`pluginAvailableTo`). A company-specific
+   mapping or use of a connector is such a business package (its `available_to` on its own; the
+   connector it uses may be official).
    The shelf filters with `pluginAvailableTo` (P4, below): a company not listed neither sees the
    package in any answer nor can install or enable it (`tests/integration/plugins.test.ts`,
    `tests/unit/plugin-shelf.test.ts`, permission matrix `CROSS`).
@@ -155,7 +204,7 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
 ## Field policies (0.21)
 
 - `auto` (write at once, undoable), `prior` (a person approves first — milestone 3 refuses and
-  writes nothing; milestone 4 makes an approval request instead: `approvals.md`), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
+  writes nothing; milestone 4 makes an approval request instead: `approvals.md`), `off`. The business plugin's `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
 - **`stage` is written only after an approval** (`PRIOR_ONLY_FIELDS`; milestone 3 never wrote it,
@@ -193,8 +242,10 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
 
 ## The mapping (読み替え表)
 
-- Per company (versioned on the server, P4); the recommended one ships in the package. Top level:
-  one key per object with a record type, plus `people` and `policy`.
+- Per company and business plugin (versioned on the server, P4); the recommended one ships in the
+  business package. Read against its use of the installed connector (saving needs that connector
+  installed at a version it accepts, else 409 `CONNECTOR_REQUIRED` naming it). Top level: one key per
+  object with a record type, plus `people` and `policy`.
 - Per object: `visible_to_folder` (a company path; not a private folder — checked by the server in
   P4), `import { pipelines, updated_within_days (1–3650), max (≤ 10,000, default 500) }`,
   `fields: { <ACB field>: { from, write, values?, people? } }`, `links: { <link of the type>:
@@ -232,15 +283,12 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   may use).
 - **Server-wide stop** (the operator, kill switch 1): `<PLUGINS_DIR>/stopped`, one `id` or
   `id@version` per line (`#` comments, `*` = every package), read on every plugin call; a file
-  that exists but cannot be read stops everything (fails closed). Stopping a business plugin
-  stops every connector mapping to it (`business-stopped`).
-- **Business first** (`services/plugin-shelf.ts`): business packages are read first; a connector
-  is validated against the exact `maps_to` version on the shelf, else refused (`… が棚にありません`).
-  A connector of the old shape with its own types (`hubspot@0.1.x`) is refused (`型を持ちません`):
-  a company that installed it sees `not-on-shelf` until an owner/admin chooses the new version —
-  which needs the business plugin first (`BUSINESS_PLUGIN_REQUIRED`), no crash, nothing migrated.
-- A connector exists for a company only where its business version does too (`available_to` of
-  both; else the same 404 as anything missing).
+  that exists but cannot be read stops everything (fails closed). Stopping a connector stops
+  every business plugin's use of it (`connector-stopped`); stopping a business plugin stops its
+  own use (`stopped`).
+- Connectors and business plugins are read **on their own** (`services/plugin-shelf.ts`): a business
+  plugin whose connector is not on the shelf is still used (inside ACB); its combination is
+  checked when it runs. Old connector shapes are refused with the reason ("Two roles").
 
 ## A company's install, mapping and history (P4, `services/plugins.ts`)
 
@@ -250,10 +298,11 @@ Owner/admin only (others 403, non-members 404); routes (`routes/plugins.ts`, con
 ```
 GET  /plugins                            the shelf as this company sees it + its installs (problem per install)
 GET  /plugins/:pluginId                  install, mapping in force, versions, effective field policies, mapping errors, history (50)
-PUT  /plugins/:pluginId                  { version, keyId } install (first time: the package's mapping.yaml = version 1) or change
-PUT  /plugins/:pluginId/enabled          { enabled } on / off (needs a read scope)
-PUT  /plugins/:pluginId/read-scope       { departmentIds, userIds } who may read it through the relay (below)
-PUT  /plugins/:pluginId/mapping          { text } a new mapping version (YAML; field policies are its `policy`)
+PUT  /plugins/:pluginId                  { version, keyId } install or change (a connector: its key; a business plugin: keyId null,
+                                         its first version with a mapping.yaml = mapping version 1)
+PUT  /plugins/:pluginId/enabled          { enabled } on / off (a connector needs a read scope; a business plugin stores its types)
+PUT  /plugins/:pluginId/read-scope       { departmentIds, userIds } a connector: who may read it through the relay (below)
+PUT  /plugins/:pluginId/mapping          { text } a business plugin: a new mapping version (YAML; field policies are its `policy`)
 POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved again as the next one
 POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確かめる」 (P8, below)
 ```
@@ -265,43 +314,46 @@ POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確か
   of the same company** (another company's key or a member's own key throws), a mapping only
   under its own company's install, no row moves to another company
   (`tests/unit/company-data.test.ts`).
-- The key: a company key (`scope: company`) of the declaration's `service`, chosen by id; its
-  value is never read here. Another company's key, a member's own key or a key of another
-  service → 400 `KEY_NOT_USABLE`.
+- The key (a connector's): a company key (`scope: company`) of the declaration's `service`, chosen
+  by id; its value is never read here. Another company's key, a member's own key, a key of another
+  service or any key for a business plugin → 400 `KEY_NOT_USABLE`.
 - Server checks of a mapping (on save and on every `active()`): `people` name members of this
   company; `visible_to_folder` is not a private folder nor inside one. → 400 `MAPPING_INVALID`
   with `errors` (Japanese sentences).
-- **Turning on** needs everything `active()` checks (else 409 `PLUGIN_NOT_READY` + `problem`);
+- **Turning a connector on** needs its package usable and its key (else 409 `PLUGIN_NOT_READY` +
+  `problem`) — no business plugin, no mapping;
   it also turns the relay's **read-only switch on** for the plugin's service (owner 0.21: writes
   go only through the plugin's typed operations; recorded in the key broker's history as the
   admin's change; turning the plugin off leaves the switch as it is). It also needs a **read
   scope** (below; else 409 `READ_SCOPE_REQUIRED`, so a forgotten setting never opens the relay to
   everyone). A change of version or key
-  on a plugin that is on must keep it running (409 `PLUGIN_WOULD_STOP`, nothing changed).
-- **The business plugin a connector maps to** (owner, 2026-11-01): installing (or changing to) a
-  connector version needs its `maps_to` business plugin installed **at that version** (else 409
-  `BUSINESS_PLUGIN_REQUIRED` + `plugin` / `version`, the sentence naming its label — 「先に「法人営業」
-  （0.1.0）を入れてオンにしてください…」 — nothing written). Turning the connector on needs it
-  **running** (`PLUGIN_NOT_READY` with `business-missing` / `business-stopped`, the same sentence).
-  `forChecking` needs it installed at that version (its types), not on. A business plugin is
-  installed with `keyId: null` and turned on with nothing else (no read scope, no relay switch,
-  `managed_since` stays null); turning it off always works and stops its connectors from the next
-  call. Changing its version while a connector mapping to it is on → 409 `PLUGIN_WOULD_STOP`
-  (`problem: business-missing`, `dependents`); turn the connector off first.
-- **`active(companyId, pluginId)`** — for the connector (P5) and the typed operations (P6),
-  re-decided on every call, so each kill switch acts from the next call: the operator's stop →
-  `stopped`; the company's switch → `off`; installed version not on the shelf for this company
-  → `not-on-shelf`; changed package → `package-changed`; the business plugin it maps to not
-  installed at that version → `business-missing`, installed but not running (its own operator
-  stop, switch, shelf, fingerprint) → `business-stopped` (collecting facts — reconcile — ignores
-  that plugin's stop and switch like the connector's own); key deleted / not a company key of the
-  service → `no-key`; key stopped (「鍵を止める」, 「すべての鍵を止める」) → `key-stopped`; the key's
-  hosts do not include the declaration's host → `key-destination`; mapping missing or no longer
-  passing → `mapping-invalid`.
+  on a plugin that is on must keep it running (409 `PLUGIN_WOULD_STOP`, nothing changed), and a
+  connector's change must not stop a turned-on business plugin's use of it (409
+  `PLUGIN_WOULD_STOP`, `problem: connector-mismatch`, `dependents`; turn that business plugin off
+  first). **Turning a business plugin on** needs only its package (operator stop, shelf,
+  fingerprint) and stores its types; turning it off always works. Its other answers: `NOT_A_CONNECTOR`
+  for a key, read scope or `connection/renew`; a connector answers `NOT_A_BUSINESS` to a mapping
+  and `not-a-business` to import / operations; a business plugin without `connector`
+  `NO_CONNECTOR` / `no-connector`.
+- **`active(companyId, businessPluginId)`** — the business plugin's use of its connector
+  (`ActivePlugin`: the combined manifest, its types and mapping, the connector's key, connection
+  and account, `fingerprint` = `<business>+<connector>`), for the connector (P5) and the typed
+  operations (P6), re-decided on every call, so each kill switch acts from the next call: the
+  business plugin's operator stop → `stopped`; its switch → `off`; its version not on the shelf for
+  this company → `not-on-shelf`; changed package → `package-changed`; its connector not installed /
+  not on the shelf → `connector-missing`; the connector's operator stop, switch or changed package →
+  `connector-stopped` (collecting facts — reconcile — ignores both plugins' stops and switches);
+  the connector too old or lacking what is used → `connector-mismatch`; key deleted / not a company
+  key of the service → `no-key`; key stopped (「鍵を止める」, 「すべての鍵を止める」) →
+  `key-stopped`; the key's hosts do not include the declaration's host → `key-destination`; mapping
+  missing or no longer passing → `mapping-invalid`; an automatic field not acknowledged →
+  `auto-not-acknowledged`. A connector's id → `not-a-business`; a business plugin without
+  `connector` → `no-connector`. An install's `problem` in the answers is the same evaluation (for a
+  business plugin: about its connector-backed parts — it may be on and in use meanwhile).
 
 ## The relay and a managed connection (review §5.1 / §5.2, P4)
 
-A plugin turned on at least once makes its service a **managed connection** for the company
+A connector turned on at least once makes its service a **managed connection** for the company
 (`plugin_installs.managed_since`, never cleared). From then on, on **every** relay call
 (`services/broker-relay.ts` step 2a, `plugins.relayPolicy`), whatever the token's age or the
 plugin's switch:
@@ -337,8 +389,9 @@ plugin's switch:
 
 ## Connections (review §5.7, §5.8)
 
-- An install is one **connection**: `connection_id` (new at install) and `account_id` (the outside
-  account). A package that writes must declare `account_info` (a GET; the connector reads
+- A connector's install is one **connection**: `connection_id` (new at install) and `account_id`
+  (the outside account), shared by every business plugin using it (`bindAccount` /
+  `connection/renew` act on the connector; the pace below is per connection). A package that writes must declare `account_info` (a GET; the connector reads
   HubSpot's `portalId` from it). The first answer binds the connection (`bindAccount`, a
   compare-and-set; history `account`); on every import and refresh (and before every P6 write)
   the account is read again, and another account → `ACCOUNT_CHANGED`: nothing is read into or
@@ -353,7 +406,7 @@ plugin's switch:
   「前のつなぎ先から取り込んだもの（いまは使われていません）」), left out of `POST /records/query`
   unless `includeOldConnection: true`, never in 「あなたの番」, and nothing runs on them: every
   operation, `refresh_deal` included, is 409 `NOT_LINKED` with nothing asked outside. Old = no
-  link of the record is on its plugin's current connection (`oldConnectionRecordIds`). The AI's
+  link of the record is on a current connection of the company's installs (`oldConnectionRecordIds`). The AI's
   tools say so (`records_query` / `records_get` descriptions, `RECORDS_INSTRUCTIONS`). Test:
   `tests/integration/plugin-import.test.ts` 「records of the earlier connection…」 (each filter
   and the company condition mutation-checked).
@@ -403,8 +456,8 @@ plugin's switch:
 
 ## Import (P5, `services/plugin-import.ts`)
 
-- `POST /plugins/:pluginId/import` (owner/admin; 404 for a plugin the company has not
-  installed): one run per company at a time (409 `IMPORT_RUNNING`), at most 5 minutes, one
+- `POST /plugins/:pluginId/import` (owner/admin, a business plugin; 404 for a plugin the company
+  has not installed): one run per company at a time (409 `IMPORT_RUNNING`), at most 5 minutes, one
   company per run (no server-wide sweep). Needs the plugin running (409 `PLUGIN_NOT_ACTIVE` +
   `problem`) and the records switch on (409 `RECORDS_DISABLED`). The account is checked first.
 - Per mapped object with a `search`: the mapping's window (`pipelines`, `updated_within_days`,
@@ -414,10 +467,10 @@ plugin's switch:
   reported by field name only).
 - Records are written by the engine's **external entry** (`createExternalRecordWriter`,
   `records.md` "Outside systems"): **server-only, no file, no commit** (owner rule §8-3), folder =
-  the mapping's `visible_to_folder`, ledger actor `external` / the plugin id with a **receipt**
-  (`kind: observed`: who changed it outside is not known). The business plugin's types (the
-  connector's `plugin.types`) are stored with source `plugin` unless a version at least as new
-  is there — on import, as before (turning the business plugin on stores nothing yet).
+  the mapping's `visible_to_folder`, ledger actor `external` / the business plugin's id with a
+  **receipt** (`kind: observed`: who changed it outside is not known). An outside object another
+  business plugin already brought in is skipped (「ほかの業務の記録」). The business plugin's types
+  are stored when it is turned on, and again here if a newer version came meanwhile.
 - The report says what happened, not more (review §6.8): per object `seen / created / updated /
   unchanged / truncated` (the `max` cut it) and problem counts; status `complete`, `truncated`,
   `stopped` (a kill switch between requests), `failed`, `timed-out` — kept in the history
@@ -497,9 +550,10 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   (`selfReportedProvenance`, records.md "Provenance"); it lands on the ledger entry and never
   authorizes anything.
 - Notices: the engine's `records` signal (kind + version, no content) to the record's assignee.
-- Kill switches, each from the next call: the operator's stop file, the company's switch, the
-  business plugin's stop or switch (`business-stopped`), the key's stop / 「すべての鍵を止める」,
-  the AI emergency stop (AI only), a field's `off` (the mapping), the records switch.
+- Kill switches, each from the next call (5 levels): the operator's stop file (the connector: every
+  use of it; the business plugin: its own), the company's switch of either, the key's stop /
+  「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the mapping), the
+  records switch.
 
 ## Creates (milestone 4 G5, `services/plugin-operations.ts`; design §3-6, §4-4, §6-3)
 
@@ -586,15 +640,16 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
 
 - `POST /plugins/:pluginId/mapping/check { text? }` (owner/admin; 404 for a plugin not installed):
-  the text being edited (or the mapping in force) parsed for this company like a save (400
+  a business plugin's; the text being edited (or the mapping in force) parsed for this company like a save (400
   `MAPPING_INVALID` + `errors`), then each mapped object's declared `properties_list` read through
   the connector and `checkMappingAgainstProperties` applied → `PluginMappingCheck` (per object
   `errors` / `warnings`, sentences only). HubSpot's answer is read as `{ results: [{ name, type,
   calculated, modificationMetadata.readOnlyValue, options, externalOptions }] }`
   (`propertiesFromAnswer`; owners are `externalOptions`, translated by `people`).
 - It works **before the plugin is on and before its auto fields are acknowledged** (checking
-  comes first): `plugins.forChecking` requires the install, not stopped by the operator, the
-  same package fingerprint and a usable company key (else 409 `PLUGIN_NOT_READY` + `problem`) —
+  comes first): `plugins.forChecking` requires the business plugin's install and its connector's
+  (neither stopped by the operator, the same package fingerprints, a version it accepts) and a
+  usable company key (else 409 `PLUGIN_NOT_READY` + `problem`) —
   asked again as the connector's precheck with the caller's role. It writes nothing (no mapping
   version, no account binding, no record).
 - HubSpot not reachable (key refused, missing scope, 429 / 5xx after the read retries…) →
@@ -619,24 +674,29 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 - `auto` is saved only through the server's 400 `AUTO_NEEDS_ACKNOWLEDGEMENT`: the page lists
   the fields, asks for the `AUTO_ACKNOWLEDGEMENT` checkbox and resends with `acknowledgeAuto`.
 - The practice HubSpot is said on the page (`practice` of the service in `GET /broker`).
-- A connector says what it needs (`PluginPackageView.mapsTo`): 「このつなぎ先を使うには、先に「法人営業」
-  （0.1.0）を使い始めて、オンにしてください。…止めると、このつなぎ先の取り込みと書き戻しも止まります」;
-  `BUSINESS_PLUGIN_REQUIRED` and a `business-*` `PLUGIN_NOT_READY` show the server's sentence. A
-  business (`role: business`) shows only its version and on / off (「案件や顧客などの記録を扱う業務です
-  （外のサービスにはつなぎません）」; turning it off says its connectors stop too).
+- Connector and business are separate entries (owner, 2026-11-01). A connector shows version,
+  key, 「<HubSpot> を読める人」 and on / off (off: every business using it stops its exchange); no
+  mapping or import, and it names no business. A business shows version and on / off and, when it
+  uses a connector (`PluginPackageView.connector`), whether it is connected: 「HubSpot とつながって
+  います」 / 「HubSpot との行き来は止まっています：<reason>。記録はそのまま使えます。」
+  (`connector-*` and key problems, `CONNECTOR_PROBLEMS` in `admin/src/lib/integrations.ts`; its
+  badge stays 「使っています」), before install what the exchange needs; and its mapping and import.
+  `CONNECTOR_REQUIRED` shows the server's sentence; 「新しいつなぎ先として始める」 on a business's
+  import renews the connector's connection. A business inside ACB only shows version and on / off.
 - No jargon on screen (no プラグイン / 型 / オントロジー; test).
 - Tests: `admin/tests/integrations.test.tsx`; the requests in
   `server/tests/integration/admin-contract.test.ts`.
 
 ## The app (P7): the AI's tools and the chat card
 
-- `GET /api/records-ai/plugins` (record token; `plugins.aiTools`): the running plugins'
-  operations the member's AI may call — `who` lists `ai`, and with a `read` token (Codex) no
+- `GET /api/records-ai/plugins` (record token; `plugins.aiTools`): the running business plugins'
+  connector operations the member's AI may call (`id` the business plugin, `label` the outside system) — `who` lists `ai`, and with a `read` token (Codex) no
   update or create; an update lists the fields it may write now (`auto` / `prior`; `off` never);
   a create (milestone 4) its policy now (`off` left out), its content slots or — creating a record
   — its fields. `client/electron/records/tools.ts` `pluginToolSpecs` turns each into a tool on
-  the `acb_records` server (`hubspot__update_deal`, `hubspot__refresh_deal`,
-  `hubspot__log_meeting`, `hubspot__create_deal`), generated each turn like the type tools,
+  the `acb_records` server (`corporate-sales__update_deal`, `corporate-sales__refresh_deal`,
+  `corporate-sales__log_meeting`, `corporate-sales__create_deal`), generated each turn like the type
+  tools (the minutes app's first message names them by their ending, `minutes.md`),
   called with the turn's record token. The app drops writes for a read token too
   (`client/tests/plugin-tools.test.ts`). The create tools say a create is **never re-sent** (an
   `unknown` outcome: do not call again — a duplicate) and that needing approval makes an approval
@@ -684,9 +744,10 @@ P9
 staging (compose wiring of `PLUGINS_DIR`). Milestone 4: approval requests and their card (G6, on
 the seam above), the 「もう一度作る」 button and similar deals on a screen. `add_note` runs like
 `log_meeting` (an attached create) but div does not use it. The real packages live in the
-private `acb-plugins` repository (§6-6): `corporate-sales@0.1.0` (「法人営業」, deal / customer) and
-`hubspot@0.2.0` (`maps_to: corporate-sales@0.1.0`). Turning a business plugin on does not yet
-store its types (the connector's import does); its flows (screens, actions) come with milestone 5.
+private `acb-plugins` repository (§6-6): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
+(「法人営業」: deal / customer, `connector: hubspot >= 0.3.0`, its recommended mapping). Its flows
+(screens, actions) come with milestone 5. A business plugin uses one connector; a second one (Google
+for 法人営業) would need `connector` to become a list — not before it is needed.
 
 ## Tests
 
@@ -718,19 +779,22 @@ policy), similar deals only readable, prepareApproval / executeApproved for crea
 (changed outside, mapping version, connection, field off, raw values sent, requester as actor), no
 key in operation records or ledger), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
-Business and connector (owner, 2026-11-01): `tests/unit/plugins.test.ts` 「a connector only
-connects…」 (types / type files / no or wrong `maps_to` refused, exact business version, record
-types owned by it, a business plugin talks to nothing, core type names), `tests/unit/plugin-shelf.test.ts`
-(business first, a missing business version and the old shape refused, a connector only where its
-business is available), `tests/integration/plugins.test.ts` 「a connector needs the business plugin
-it maps to」 and the kill-switch test (business off / stopped → `business-stopped`, version change
-while a connector is on refused, `TYPE_OWNED_ELSEWHERE`, `NOT_A_CONNECTOR`, the old version's way
-out) — mutation-checked; every integration test installs `sample-sales` first
+Connector and business (owner, 2026-11-01): `tests/unit/plugins.test.ts` 「a connector is a shared
+part; a business plugin uses it」 (what each refuses and where it belongs, the old shapes, `connector`
+syntax, the use refused for another / older connector or what it lacks, **only declared operations
+and objects in a combination**, core type names), `tests/unit/plugin-shelf.test.ts` (read on their
+own, old shapes refused, `available_to` each on its own), `tests/integration/plugins.test.ts`
+「two roles」 and the kill-switch test (connector alone, business types at once, connector off /
+stopped / too old → `connector-*` while the business stays on, `PLUGIN_WOULD_STOP` dependents,
+`TYPE_OWNED_ELSEWHERE`, `NOT_A_CONNECTOR` / `NOT_A_BUSINESS`, `CONNECTOR_REQUIRED`, the old version's
+way out), `tests/integration/plugin-import.test.ts` 「two business plugins on one connector…」 (import,
+refresh, operations, undeclared operation, similar deals) — mutation-checked; integration tests key
+the mapping / import / operations by `sample-sales` and the key / read scope / switch by `sample-hub`
 (`tests/helpers/plugin-packages.ts`).
-`server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-sales`, the
-business plugin owning deal / customer; `sample-crm`, a HubSpot-shaped fictional CRM and
-`sample-hub`, the fake HubSpot's, both `maps_to: sample-sales@0.1.0`; `sample-desk`, a read-only
-company package of another shape, with its business plugin `sample-support`):
+`server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (connectors `sample-hub`
+— the fake HubSpot's —, `sample-crm` — a HubSpot-shaped fictional CRM — and `sample-desk` — a
+read-only company connector of another shape; the business plugins using them `sample-sales`,
+`sample-crm-sales` with its recommended mapping, and `sample-support`):
 unknown / program / destination / key / approval keys, contract, one https destination, unsafe
 paths and methods, external never auto (declaration, mapping, run time), type names without a
 layer, server-only types, `available_to`, translation both ways and per company, unambiguous

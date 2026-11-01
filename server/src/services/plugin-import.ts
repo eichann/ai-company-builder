@@ -19,7 +19,6 @@
  *   Values seen are observations of the outside system: who changed them
  *   there is not known (`receipt.kind: observed`).
  */
-import { canonicalTypeJson } from '../../shared/core/record-types'
 import { externalToAcb, type ExternalProperties } from '../../shared/core/plugins'
 import type { ExternalReceipt, LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
@@ -32,7 +31,7 @@ import type { ActivePlugin, PluginService } from './plugins'
 import { recordReader } from './record-access'
 import type { ExternalRecordWriter } from './record-engine'
 import { RECORD_NOT_FOUND } from './records'
-import { PLUGIN_NOT_FOUND, PLUGINS_FORBIDDEN } from './plugins'
+import { NOT_A_CONNECTOR, PLUGIN_NOT_FOUND, PLUGINS_FORBIDDEN, storeBusinessTypes } from './plugins'
 
 export const IMPORT_TIME_LIMIT_MS = 5 * 60_000
 const PAGE = 100
@@ -76,20 +75,6 @@ export function createPluginImportService(deps: PluginImportDeps) {
   const running = new Set<string>()
 
   /**
-   * Store the types the connector maps to — its business plugin's (`plugin.types`; a connector
-   * owns none, plugins.md "Two roles") — with source plugin, unless a version at least as new is there.
-   */
-  function ensureTypes(companyId: string, plugin: ActivePlugin, at: string) {
-    const records = companyData.forCompany(companyId).records
-    const stored = new Map<string, number>()
-    for (const row of records.typeVersions()) stored.set(row.name, Math.max(stored.get(row.name) ?? 0, row.version))
-    for (const def of Object.values(plugin.types)) {
-      if ((stored.get(def.name) ?? 0) >= def.version) continue
-      records.insertTypeVersion({ name: def.name, version: def.version, definition: canonicalTypeJson(def), source: 'plugin', commitSha: null, createdAt: at })
-    }
-  }
-
-  /**
    * The precheck before every request: the plugin still runs (every kill
    * switch), on the same connection, the records switch is on, and (for a
    * person's run) they still have the role it needs.
@@ -123,10 +108,11 @@ export function createPluginImportService(deps: PluginImportDeps) {
     if (plugin.accountId === null) {
       const repo = companyData.forCompany(companyId).plugins
       const at = clock.now()
-      if (repo.bindAccount(plugin.pluginId, plugin.connectionId, seen, { id: deps.ids.newId(), pluginId: plugin.pluginId, action: 'account', at, by: 'connector', change: JSON.stringify({ connectionId: plugin.connectionId, accountId: seen }) })) {
+      // The connection and its account are the connector's (shared by every business plugin using it).
+      if (repo.bindAccount(plugin.connectorId, plugin.connectionId, seen, { id: deps.ids.newId(), pluginId: plugin.connectorId, action: 'account', at, by: 'connector', change: JSON.stringify({ connectionId: plugin.connectionId, accountId: seen }) })) {
         return { ok: true, accountId: seen }
       }
-      const again = repo.install(plugin.pluginId)
+      const again = repo.install(plugin.connectorId)
       return again?.accountId === seen && again.connectionId === plugin.connectionId ? { ok: true, accountId: seen } : { ok: false, reason: 'account-changed' }
     }
     return { ok: false, reason: 'account-changed' }
@@ -158,6 +144,12 @@ export function createPluginImportService(deps: PluginImportDeps) {
     void _summary
     const repo = companyData.forCompany(companyId).plugins
     const existing = repo.link(plugin.connectionId, accountId, object, item.id)
+    // An outside object another business plugin brought in through the same connector stays that plugin's record:
+    // never rewritten with this plugin's type, mapping or ledger (plugins.md "Two roles").
+    if (existing && existing.pluginId !== plugin.pluginId) {
+      if (report) report.problems['ほかの業務の記録'] = (report.problems['ほかの業務の記録'] ?? 0) + 1
+      return null
+    }
     const updatedAt = typeof item.properties[MODIFIED] === 'string' ? item.properties[MODIFIED] as string : null
     const result = writer.apply(companyId, {
       recordId: existing?.recordId ?? null,
@@ -285,7 +277,7 @@ export function createPluginImportService(deps: PluginImportDeps) {
           report.status = account.reason === 'account-changed' ? 'failed' : 'stopped'
           report.reason = account.reason
         } else {
-          ensureTypes(companyId, plugin, startedAt)
+          storeBusinessTypes(companyData, companyId, plugin.types, startedAt)
           const cache = new Map<string, string | null>()
           for (const object of Object.keys(plugin.mapping.objects)) {
             if (!plugin.manifest.objects[object]?.endpoints.search) continue
@@ -358,7 +350,7 @@ export function createPluginImportService(deps: PluginImportDeps) {
       if (!active.ok) return { ok: false, reason: active.problem }
       const plugin = active.plugin
       if (link.connectionId !== plugin.connectionId) return { ok: false, reason: 'not-linked' }
-      if (!plugins.readAllowed(member.companyId, member.userId, link.pluginId)) return { ok: false, reason: 'read-not-allowed' }
+      if (!plugins.readAllowed(member.companyId, member.userId, plugin.connectorId)) return { ok: false, reason: 'read-not-allowed' }
       if (!plugin.manifest.objects[CONTACT_OBJECT]?.endpoints.get) return { ok: false, reason: 'contacts-not-declared' }
       const check = precheckFor(member.companyId, link.pluginId, plugin.connectionId, { userId: member.userId, needsFullAccess: false })
       const account = await verifyAccount(member.companyId, plugin, check)
@@ -380,12 +372,14 @@ export function createPluginImportService(deps: PluginImportDeps) {
       return { ok: true, contacts }
     },
 
-    /** POST /plugins/:pluginId/connection/renew — owner/admin: the outside account changed on purpose; a new connection. */
+    /** POST /plugins/:pluginId/connection/renew — owner/admin, a connector: the outside account changed on purpose; a new connection. */
     renewConnection(member: Member, pluginId: string): Outcome<{ connectionId: string }> {
       if (!hasFullAccess(member.role)) return refuse('forbidden', PLUGINS_FORBIDDEN)
       const repo = companyData.forCompany(member.companyId).plugins
       const install = typeof pluginId === 'string' ? repo.install(pluginId) : null
       if (!install) return refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
+      // The connection is the connector's (a business plugin has none of its own).
+      if (install.service === '') return refuse('conflict', NOT_A_CONNECTOR.error, { code: NOT_A_CONNECTOR.code })
       const connectionId = deps.ids.newId()
       const at = clock.now()
       repo.renewConnection(pluginId, connectionId, at, member.userId, {

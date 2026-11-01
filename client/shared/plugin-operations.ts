@@ -3,7 +3,7 @@ import type { PluginFieldValue, PluginOperationRecordView } from '../../shared/t
 /**
  * The chat's card for an outside system's write (milestone 3 P7,
  * `.claude/rules/plugins.md` "The app"): when the member's AI calls a
- * connector's update tool (`hubspot__update_deal`), main adds this record to
+ * connector's update tool (`corporate-sales__update_deal`), main adds this record to
  * the reply as a data part; it is stored with the message
  * (`pluginOperations`), so the card — and its 「変更前の値を書き戻す」 button,
  * which the person presses with their own session — survives a restart.
@@ -12,7 +12,7 @@ import type { PluginFieldValue, PluginOperationRecordView } from '../../shared/t
  * lost is `unknown`, a value seen in the outside system but not confirmed as
  * ACB's write is `observed`; neither is called a success.
  *
- * Milestone 4 adds creates (`hubspot__log_meeting`, `hubspot__create_deal`):
+ * Milestone 4 adds creates (`corporate-sales__log_meeting`, `corporate-sales__create_deal`):
  * the card (`kind: 'create'`) shows what was made (title, time); a create
  * whose answer was lost is never re-sent — 「HubSpot で確かめてください」 and
  * 「もう一度確かめる」 (the server looks it up by ACB's correlation value); one
