@@ -145,6 +145,9 @@ Hono change routers (`records.md`). Permission matrix rows + `CROSS` for every `
   「この宛先に送るのは初めてです」, 直す (a new version), 「確かめて送る」 → a confirm step showing
   everything again with 「中身が変わっていないことを確かめて送ります」 → send with the hash shown;
   states sent / unknown (送られていた／送られていなかった) / discarded. No ハッシュ / OAuth on screen.
+- The same card shows a task's draft in the task card's 「AI が用意したもの」
+  (`PreparedMailCard.tsx`: `outboundMail:get` reads the latest version, so a draft is checked and
+  sent from the task without going back to the consultation; `tasks-ui.md` "The card").
 - IPC (main, the session stays there): `outboundMail:get`, `:recipients`, `:update`,
   `:addRecipient`, `:send`, `:resolve`, `:discard` (`client/electron/features/outbound-mail/ipc.ts`;
   ids and hashes checked before anything leaves).

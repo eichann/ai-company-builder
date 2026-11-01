@@ -4,12 +4,21 @@
 //                 client/shared/tasks.ts from the server's answers (nothing filtered here)
 //   tasks:create  the list's one line: a task of the member's own (owner-only)
 //   tasks:act     an action on a record (引き受ける, 完了…): the server's engine decides who may
+//   tasks:card    one task's card (what the AI prepared, actions, 経緯, its runs waiting for a person);
+//                 opening it tells the server (POST …/opened), as the record card does
+//   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
+//                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
 
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
+import type { LedgerEntry } from '../../../../shared/core/record-ledger'
+import type { TypeDefinition } from '../../../../shared/core/record-types'
+import type { AiRunView } from '../../../../shared/types/ai-runs'
+import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
+import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
   type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskWriteResult,
@@ -28,6 +37,9 @@ export interface TasksDeps {
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const ACTION = /^[a-z][a-z0-9_]{0,39}$/
 const MEMBER = /^[A-Za-z0-9_-]{1,100}$/
+/** Run ids and operation keys go into the URL: no separators, and never `.` / `..` alone. */
+const RUN_ID = /^[A-Za-z0-9_-]{1,100}$/
+const opKey = (key: unknown): key is string => typeof key === 'string' && OPERATION_KEY_RE.test(key) && !/^\.+$/.test(key)
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
@@ -117,7 +129,45 @@ export function createTasksApi(deps: TasksDeps) {
     return { success: false, offline: false, code, error: typeof a.json?.error === 'string' ? a.json.error : 'できませんでした。' }
   }
 
+  async function typeDefs(companyId: string): Promise<Map<string, TypeDefinition>> {
+    const a = await call(companyId, 'GET', '/records/types')
+    const list = a?.status === 200 ? (a.json?.data as { types?: RecordTypeView[] }).types ?? [] : []
+    return new Map(list.map(t => [t.definition.name, t.definition]))
+  }
+
   return {
+    async card(companyId: string, recordId: string): Promise<TaskCardResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      const id = encodeURIComponent(recordId)
+      const [me, item, history, defs, names, runs] = await Promise.all([
+        myId(), call(companyId, 'GET', `/records/item/${id}`), call(companyId, 'GET', `/records/item/${id}/history`),
+        typeDefs(companyId), people(companyId), call(companyId, 'GET', '/ai-runs'),
+      ])
+      if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
+      if (item?.status !== 200 || !me) {
+        const f = failure('card', item)
+        return { success: false, offline: f.offline, error: f.error }
+      }
+      // Not awaited: the card never waits for it (records.md "Whose turn it was").
+      void call(companyId, 'POST', `/records/item/${id}/opened`, {})
+      const detail = item.json?.data as RecordDetail
+      const entries = history?.status === 200 ? (history.json?.data as { entries?: LedgerEntry[] }).entries ?? [] : []
+      const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] }).runs ?? [] : []
+      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList }) }
+    },
+
+    async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
+      if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/retry`, {})
+      return a?.status === 200 ? { success: true, recordId: '' } : failure('retry run', a)
+    },
+
+    async reconcile(companyId: string, runId: string, key: string, done: boolean): Promise<TaskWriteResult> {
+      if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId) || !opKey(key) || typeof done !== 'boolean') return BAD_INPUT
+      const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/operations/${encodeURIComponent(key)}/reconcile`, { done })
+      return a?.status === 200 ? { success: true, recordId: '' } : failure('reconcile', a)
+    },
+
     async list(companyId: string): Promise<TaskListResult> {
       if (!COMPANY.test(companyId)) return { success: false, offline: false, error: '入力が正しくありません。' }
       const id = await myId()
@@ -198,4 +248,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:list', (_event, companyId) => api.list(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))
+  ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))
+  ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
+  ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

@@ -1,6 +1,16 @@
-import { FileText, LinkBreak } from '@phosphor-icons/react'
+import { FileText, LinkBreak, LockSimple } from '@phosphor-icons/react'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
+
+/** 「自分だけ」 and 「例外（この件だけ）」: what a record's reader must not miss. */
+export function RecordMarks({ record }: { record: Pick<RecordViewSummary, 'personal' | 'exception'> }) {
+  return (
+    <>
+      {record.personal && <span title="ほかの人には見えません（管理者にも）" className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-gray-200/70 px-1.5 text-[10px] text-gray-600 dark:bg-zinc-700/70 dark:text-zinc-300"><LockSimple size={9} />自分だけ</span>}
+      {record.exception && <span title="この件だけの判断です。ほかの件の前例にしません" className="shrink-0 rounded-full bg-amber-100 px-1.5 text-[10px] text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">例外（この件だけ）</span>}
+    </>
+  )
+}
 
 /** One record to follow: its title, its type in small letters and its state. */
 export function RecordRow({ record, sub }: { record: RecordViewSummary; sub?: string }) {
@@ -12,6 +22,7 @@ export function RecordRow({ record, sub }: { record: RecordViewSummary; sub?: st
     >
       <span className="flex items-center gap-1.5 text-[12px] min-w-0">
         <span className="min-w-0 truncate text-accent group-hover:underline">{record.title}</span>
+        <RecordMarks record={record} />
         {record.stateLabel && <span className="shrink-0 rounded-full bg-gray-200/70 dark:bg-zinc-700/70 px-1.5 text-[10px] text-gray-600 dark:text-zinc-300">{record.stateLabel}</span>}
       </span>
       <span className="block text-[10.5px] text-gray-500 dark:text-zinc-400 truncate">{sub ?? record.typeLabel}</span>

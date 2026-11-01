@@ -1095,7 +1095,7 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   fields, 経緯 (the ledger, newest first: who・what・note) and 「つながっているもの」 (records by kind,
   files; a file link marked `broken` says 「つながりが切れています」). Following a link runs
   `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
-  Generic and without actions: the task card with actions comes from the task screen (S7c).
+  Generic and without actions: a task opens in the task card with actions instead (`tasks-ui.md`).
 - **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
 
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
@@ -1185,8 +1185,8 @@ and (with the ledger's actions) when it finished. Nobody presses 着手 for it.
   only by the operator / a later measurement screen (an owner decision); owner-only records are
   their owner's (the reader's 404 first). Not in the ledger on purpose: an entry would raise the
   record's version (others' `expectedVersion` would conflict) and fill 経緯 with 「開いた」.
-- Not yet: the approval card in a consultation and a task screen (S7c) do not send `opened`
-  (only the record card does); a measurement screen reading these.
+- Not yet: the approval card in a consultation does not send `opened` (the record card and the
+  task card do); a measurement screen reading these.
 - Tests: `server/tests/unit/record-turn-opens.test.ts` (turns from the ledger; kept once per turn
   by the holder only, a new turn its own; the delegate during the absence; final / AI turn keep
   nothing; owner-only, another company's and a missing record the same 404),
@@ -1227,7 +1227,7 @@ important?, exception?, key? }` → 201 `{ record, created: true }` (200 `create
 
 ## Not yet
 
-The task card with actions (S7c; the list is `tasks-ui.md`), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
+The plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 
 ## Tests

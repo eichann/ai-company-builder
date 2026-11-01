@@ -28,6 +28,10 @@ export interface RecordViewSummary {
   summary: string
   stateLabel: string | null
   updatedAt: string
+  /** Owner-only (「自分だけ」): only the member reading it sees it. */
+  personal?: true
+  /** A decision marked 例外（この件だけ）: never a precedent for another case. */
+  exception?: true
 }
 
 /** `available: false`: records are off for this company (nothing to show, no error). */
@@ -85,6 +89,8 @@ export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): 
   return {
     id: r.id, type: r.type, typeLabel: def?.label ?? r.type, kind: recordKindOf(r.type, def),
     title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state), updatedAt: r.updatedAt,
+    ...(r.personal ? { personal: true as const } : {}),
+    ...(r.exceptionNotice ? { exception: true as const } : {}),
   }
 }
 

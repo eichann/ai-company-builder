@@ -52,6 +52,11 @@ import { TitleBarNotices } from '../features/notifications/components/TitleBarNo
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { listShownFor } from '../features/tasks/model'
+import { TaskCard } from '../features/tasks/components/TaskCard'
+import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
+import { ApprovalCard } from '../features/chat/components/ApprovalCard'
+import { RecordRow } from '../features/records/components/RecordRows'
+import type { RecordViewSummary } from '../../shared/record-views'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -232,6 +237,30 @@ export function AppShell() {
   // A file link in a consultation's own window opens here (that window has no editor).
   useFilesFromChatWindows()
 
+  const approvalCard = (approvalId: string, at: string) => currentCompany
+    ? <ApprovalCard key={approvalId} card={{ id: `card-${approvalId}`, companyId: currentCompany.id, conversationId: null, approvalId, origin: 'shown', at }} />
+    : null
+  // What the AI prepared for a task: the same mail and approval cards as in the consultation (the person sends / approves).
+  const renderPrepared = (record: RecordViewSummary) => {
+    if (!currentCompany) return null
+    if (record.type === 'outbound_message') return <PreparedMailCard key={record.id} companyId={currentCompany.id} messageId={record.id} />
+    if (record.type === 'approval') return approvalCard(record.id, record.updatedAt)
+    return <RecordRow record={record} />
+  }
+
+  // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
+  const recordCard = (recordId: string) => {
+    if (!currentCompany || !rootPath) return null
+    if (recordId.startsWith('task-')) {
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} onChanged={taskList.reload} />
+    }
+    const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
+    // An approval request also gets its own card on top: approving or sending back is the person's press.
+    if (recordId.startsWith('approval-')) {
+      return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
+    }
+    return readOnly
+  }
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
     {
@@ -278,7 +307,7 @@ export function AppShell() {
           onPrivateFolderCreated={handlePrivateFolderCreated}
           navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
           overlay={places.recordId && currentCompany && rootPath
-            ? <RecordCard key={places.recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={places.recordId} />
+            ? recordCard(places.recordId)
             : undefined}
           aside={activeFilePath && rootPath
             ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
@@ -296,7 +325,7 @@ export function AppShell() {
           companyId={currentCompany.id}
           list={taskList}
           aiTurns={aiTurnItems}
-          renderCard={recordId => <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />}
+          renderCard={recordCard}
         />
       ) : null,
     },
