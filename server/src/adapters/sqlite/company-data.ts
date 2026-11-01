@@ -6,6 +6,7 @@ import { sqliteAiRunRepository } from './ai-runs'
 import { sqliteCompanyRowsExport } from './company-archive'
 import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
+import { sqliteGoogleDriveRepository } from './google-drive'
 import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteInvitationRepository } from './invitations'
 import { sqliteNotificationRepository } from './notifications'
@@ -34,6 +35,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
         connectors: sqliteConnectorRepository(conn, companyId),
+        googleDrive: sqliteGoogleDriveRepository(conn, companyId),
         outbound: sqliteOutboundMailRepository(conn, companyId),
         fixedPayloads: sqliteFixedPayloadRepository(conn, companyId),
         notifications: sqliteNotificationRepository(conn, companyId),

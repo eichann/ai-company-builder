@@ -43,11 +43,25 @@ export const recordToolId = (name: string) => `mcp__${RECORDS_SERVER}__${name}`
 const TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/
 const MAX_OUTPUT = 60_000
 
-export interface RecordToolSpec {
+/** What an agent registers for a tool (name, words, input schema). */
+export interface RecordToolDescriptor {
   name: string
   description: string
   schema: z.ZodObject<Record<string, ZodTypeAny>>
   readOnly: boolean
+}
+
+/**
+ * Tools of a connector that ride on the record token (Google Drive,
+ * `features/google/drive-tools.ts`): their own execution, on the same MCP server.
+ */
+export interface ExtraRecordTools {
+  specs: RecordToolDescriptor[]
+  execute(name: string, input: unknown): Promise<string>
+  instructions: string
+}
+
+export interface RecordToolSpec extends RecordToolDescriptor {
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
   approvalCard?: boolean
   /** A mail draft made or changed ('changed'), or shown again unchanged ('shown'): the draft becomes a new card in the reply (outbound-mail.md). */
@@ -540,7 +554,7 @@ export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECOR
   `過去の決めたことを前例として使うときは、exception: true（exceptionNotice「例外（この件だけ）」つき）の決めたことを、ほかの件に当てはめないでください。それはつながった件だけの判断です。一回限りの判断を decisions_record で残すときは exception: true にしてください。`
 
 export interface RecordTools {
-  specs: RecordToolSpec[]
+  specs: RecordToolDescriptor[]
   execute(name: string, input: unknown): Promise<string>
   close(): Promise<void>
   instructions: string
@@ -563,6 +577,8 @@ export interface RecordToolsOptions {
   onBundleChoice?: (card: MinutesBundleChoiceCard) => void
   /** A mail draft was made or changed: its card for the reply. */
   onMailDraft?: (card: MailDraftCard) => void
+  /** A connector's tools on the same token (Google Drive); null / a failure = none this turn. */
+  extraTools?: (access: RecordTurnAccess, signal?: AbortSignal) => Promise<ExtraRecordTools | null>
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -589,11 +605,14 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
+  const extra = options.extraTools ? await options.extraTools(access, signal).catch(() => null) : null
+  const extraNames = new Set((extra?.specs ?? []).map(s => s.name).filter(n => TOOL_NAME_RE.test(n) && !byName.has(n)))
   return {
-    specs,
-    instructions: RECORDS_INSTRUCTIONS,
+    specs: [...specs, ...(extra?.specs ?? []).filter(s => extraNames.has(s.name))],
+    instructions: RECORDS_INSTRUCTIONS + (extra && extraNames.size > 0 ? extra.instructions : ''),
     close: () => access.close(),
     async execute(name, input) {
+      if (extra && extraNames.has(name)) return extra.execute(name, input)
       const spec = byName.get(name)
       if (!spec) return JSON.stringify({ error: 'この道具はありません。' })
       const parsed = spec.schema.safeParse(input ?? {})

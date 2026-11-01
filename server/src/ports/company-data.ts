@@ -26,6 +26,7 @@
 import type { AiRunRepository } from './ai-runs'
 import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
+import type { GoogleDriveRepository } from './google-drive'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { InvitationRepository } from './invitations'
 import type { NotificationRepository } from './notifications'
@@ -53,6 +54,8 @@ export interface CompanyData {
   readonly plugins: PluginRepository
   /** The Google connection: the OAuth client, members' grants, pending starts (ports/connectors.ts). */
   readonly connectors: ConnectorRepository
+  /** Google Drive: what members picked with Google Picker, and the puts' receipts (ports/google-drive.ts). */
+  readonly googleDrive: GoogleDriveRepository
   /** Outbound mail: drafts, their recipients per version, typed addresses, send attempts (ports/outbound-mail.ts). */
   readonly outbound: OutboundMailRepository
   /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */

@@ -8,7 +8,7 @@ import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateInvitationClaims } from './schema/company'
-import { connectorSchema, migrateConnectorProviders } from './schema/connectors'
+import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from './schema/connectors'
 import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
 import { migrateNotificationsForUser, notificationSchema } from './schema/notifications'
@@ -85,6 +85,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Core types link to interfaces, `minutes` became `meeting` (records.md "Core interfaces").
   migrateCoreInterfaceLinks(conn)
   migrateConnectorProviders(conn)
+  migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
   migrateRecordContents(conn)
   migrateNotificationsForUser(conn)

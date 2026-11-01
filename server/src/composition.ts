@@ -7,6 +7,7 @@
  * which tests point at a temporary DATA_DIR. Repositories prepare their
  * statements per call, so building them before initDatabase() is safe.
  */
+import { createHash } from 'crypto'
 import type Database from 'better-sqlite3'
 import { db } from './db'
 import { sqliteCompanyRepository } from './adapters/sqlite/companies'
@@ -83,10 +84,12 @@ import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createGoogleDriveService } from './services/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
+import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -370,8 +373,22 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     google: googleClient,
     memberOAuth,
     redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
+    pickerPageUrl: () => `${publicUrl()}${GOOGLE_PICKER_PAGE_PATH}`,
     practiceGoogle: practiceGoogle !== undefined,
     operatorStopped: () => pluginShelf.isStopped('google', ''),
+  })
+
+  // Google Drive (google-drive.md): picked files and folders only (drive.file), through the one Google client.
+  const googleDrive = createGoogleDriveService({
+    ...shared,
+    google: googleClient,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+    vaultEnabled: () => brokerVault.status().enabled,
+    sha256: bytes => createHash('sha256').update(bytes).digest('hex'),
+    // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
+    pickerScriptOrigin: practiceGoogle
+      ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
+      : 'https://apis.google.com',
   })
 
   // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
@@ -444,6 +461,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     outboundMail,
     googleClient,
     googleConnector,
+    googleDrive,
     memberOAuth,
     minutes,
     calendar,

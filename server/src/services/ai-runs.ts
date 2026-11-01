@@ -97,6 +97,11 @@ function outcomeOf(answer: KeyedAnswer): { state: 'done' | 'unknown' | 'none'; r
     if (state === 'failed') return { state: 'none', ref: null }
     return { state: state === 'sent-unknown' ? 'unknown' : 'done', ref: { kind: 'plugin-operation', id: op } }
   }
+  const put = isObj(data.drivePut) ? data.drivePut : null
+  if (put && typeof put.id === 'string') {
+    // A Google Drive put (google-drive.md): unknown = sent, answer lost, not found yet.
+    return { state: put.state === 'unknown' || put.state === 'sending' ? 'unknown' : 'done', ref: { kind: 'drive-put', id: put.id } }
+  }
   for (const [field, kind] of [['approval', 'approval'], ['draft', 'outbound'], ['record', 'record']] as const) {
     const id = idOf(data[field])
     if (id) return { state: 'done', ref: { kind, id } }

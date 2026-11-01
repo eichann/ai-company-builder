@@ -42,7 +42,8 @@ export interface RecordsApiDeps {
 /** One turn's access for the AI: calls with the token, never the session. */
 export interface RecordTurnAccess {
   scope: 'read' | 'act'
-  call(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, signal?: AbortSignal): Promise<unknown>
+  /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
+  call(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
   close(): Promise<void>
 }
@@ -74,6 +75,7 @@ function replayReadPath(path: string, ref: { kind?: unknown; id?: unknown } | nu
   if (ref.kind === 'outbound') return `/outbound/${id}`
   if (ref.kind === 'record') return `/item/${id}`
   if (ref.kind === 'approval') return `/approvals/${id}`
+  if (ref.kind === 'drive-put') return `/google/drive/puts/${id}`
   const plugin = /^\/plugins\/([^/]+)\//.exec(path)
   if (ref.kind === 'plugin-operation' && plugin) return `/plugins/${plugin[1]}/operations/${id}`
   return null
@@ -84,8 +86,8 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
   const timeoutMs = deps.timeoutMs ?? 20_000
   const base = () => deps.baseUrl().replace(/\/+$/, '')
 
-  async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<{ status: number; body: { data?: unknown; error?: string; code?: string; [extra: string]: unknown } }> {
-    const timeout = AbortSignal.timeout(timeoutMs)
+  async function request(url: string, init: RequestInit, signal?: AbortSignal, ownTimeoutMs?: number): Promise<{ status: number; body: { data?: unknown; error?: string; code?: string; [extra: string]: unknown } }> {
+    const timeout = AbortSignal.timeout(ownTimeoutMs ?? timeoutMs)
     let res: Response
     try {
       res = await doFetch(url, { ...init, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
@@ -120,7 +122,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       const token = data.token
       const tokenId = data.tokenId
       let closed = false
-      const send = (method: 'GET' | 'POST' | 'PUT', path: string, body: unknown, signal?: AbortSignal) => request(`${root}/api/records-ai${path}`, {
+      const send = (method: 'GET' | 'POST' | 'PUT', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,
@@ -128,12 +130,12 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
           ...(run && method !== 'GET' ? { 'Idempotency-Key': operationKeyOf(method, path, body) } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      }, signal)
+      }, signal, ownTimeoutMs)
       return {
         scope: data.scope === 'act' ? 'act' : 'read',
-        async call(method, path, body, signal) {
+        async call(method, path, body, signal, opts) {
           if (closed) throw new RecordsApiError('TURN_ENDED', 'この会話のターンは終わりました。')
-          let r = await send(method, path, body, signal)
+          let r = await send(method, path, body, signal, opts?.timeoutMs)
           // Done before with the same request: read back what it made instead of doing it again.
           const replay = r.status === 200 && (r.body.data as { replayed?: unknown } | undefined)?.replayed === true
             ? replayReadPath(path, (r.body.data as { ref?: { kind?: unknown; id?: unknown } | null }).ref ?? null) : null

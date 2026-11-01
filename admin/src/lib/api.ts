@@ -998,9 +998,11 @@ export type {
   GoogleFeature,
   GoogleGrantStatus,
   GoogleGrantSummary,
+  GooglePickerSave,
+  GooglePickerView,
 } from '../../../shared/types/google'
 
-import type { GoogleAdminView, GoogleClientSave } from '../../../shared/types/google'
+import type { GoogleAdminView, GoogleClientSave, GooglePickerSave } from '../../../shared/types/google'
 
 export const googleApi = {
   get: (companyId: string) => getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google`),
@@ -1009,6 +1011,9 @@ export const googleApi = {
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/client`, { method: 'PUT', body: save }),
   setEnabled: (companyId: string, enabled: boolean) =>
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/enabled`, { method: 'PUT', body: { enabled } }),
+  /** Google Picker (Drive, google-drive.md): the API key (left out = keep) and the project number; `appId: null` removes it. */
+  savePicker: (companyId: string, save: GooglePickerSave) =>
+    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/picker`, { method: 'PUT', body: save }),
   /** 「止める」: stops a member's permission (revoked at Google too). */
   stopGrant: (companyId: string, userId: string) =>
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),

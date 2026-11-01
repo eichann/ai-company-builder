@@ -18,7 +18,7 @@ export interface GoogleGrantSummary {
   memberName: string | null
   /** The Google account that was allowed (the member's own ACB email by rule). */
   googleEmail: string
-  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る. */
+  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く. */
   features: GoogleFeature[]
   scopes: string[]
   status: GoogleGrantStatus
@@ -27,7 +27,7 @@ export interface GoogleGrantSummary {
   lastUsedAt: string | null
 }
 
-export type GoogleChangeAction = 'client' | 'enabled' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'stop-all'
+export type GoogleChangeAction = 'client' | 'enabled' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'stop-all'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -64,6 +64,22 @@ export interface GoogleAdminView {
   grants: GoogleGrantSummary[]
   /** Latest 50. */
   history: GoogleChange[]
+  /** Google Picker (Drive: 選んだファイルを読む・置く, google-drive.md): the API key's last 4 and the project number. */
+  picker: GooglePickerView
+}
+
+export interface GooglePickerView {
+  configured: boolean
+  appId: string | null
+  apiKeyLast4: string | null
+  /** The page to allow in the API key's website restrictions (`<PUBLIC_URL>/api/google-picker`). */
+  pageUrl: string
+}
+
+/** PUT /api/companies/:id/google/picker. `apiKey` may be left out to keep the stored one; `null` both = remove. */
+export interface GooglePickerSave {
+  apiKey?: string
+  appId: string | null
 }
 
 /** PUT /api/companies/:id/google/client. `clientSecret` may be left out to keep the stored one. */

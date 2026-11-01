@@ -23,11 +23,19 @@
  *                                      /v2/conferenceRecords/{id}/smartNotes[/{noteId}],
  *                                      /v2/conferenceRecords/{id}/transcripts[/{transcriptId}]
  *   www.googleapis.com            GET  /drive/v3/files/{fileId}, /drive/v3/files/{fileId}/export
+ *                                 GET  /drive/v3/files (appProperties search), /drive/v3/files/{fileId}/permissions
+ *                                 POST /upload/drive/v3/files?uploadType=multipart
+ *   apis.google.com               GET  /js/api.js — a stand-in Google Picker (staging only; picks through /__picker/*)
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
  *
  * Practice values only, recognisable at a glance: client secrets start with
  * `fake-google-secret-`, access tokens `ya29.fake-`, refresh tokens
  * `1//fake-`, authorization codes `4/fake-`. Any other bearer value is 401.
+ *
+ * Drive with `drive.file` (google-drive.md): a file or folder that Meet did
+ * not make is reachable only once the account picked it for this client
+ * (`pick`, or the stand-in Picker) or the client created it — as Google holds
+ * `drive.file`. A refresh may ask for a subset of the granted scopes (`scope`).
  *
  * Stricter than Google where the server is meant to be strict anyway (so a
  * sloppy server fails here): the authorization request must carry `state`
@@ -37,7 +45,7 @@
  */
 import { createHash, randomBytes } from 'crypto'
 import { Hono, type Context } from 'hono'
-import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact } from './seed'
+import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile } from './seed'
 
 export const FAKE_GOOGLE_SECRET_PREFIX = 'fake-google-secret-'
 export const FAKE_ACCESS_TOKEN_PREFIX = 'ya29.fake-'
@@ -52,6 +60,7 @@ export const GOOGLE_SCOPES = {
   meetReadonly: 'https://www.googleapis.com/auth/meetings.space.readonly',
   driveMeetReadonly: 'https://www.googleapis.com/auth/drive.meet.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
+  driveFile: 'https://www.googleapis.com/auth/drive.file',
 } as const
 
 /** The scopes milestone 4 asks for (design §5-2). */
@@ -75,7 +84,7 @@ const KNOWN_SCOPES = new Set<string>([
 const NEEDS = {
   calendar: [GOOGLE_SCOPES.calendarEventsReadonly, `${AUTH}calendar.readonly`, `${AUTH}calendar.events`, `${AUTH}calendar`],
   meet: [GOOGLE_SCOPES.meetReadonly, `${AUTH}meetings.space.created`],
-  drive: [GOOGLE_SCOPES.driveMeetReadonly, `${AUTH}drive.readonly`, `${AUTH}drive`],
+  drive: [GOOGLE_SCOPES.driveMeetReadonly, GOOGLE_SCOPES.driveFile, `${AUTH}drive.readonly`, `${AUTH}drive`],
   gmailSend: [GOOGLE_SCOPES.gmailSend, `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
 }
 /** Drive scopes that reach every file the account can open (not only Meet's). */
@@ -132,6 +141,8 @@ export interface FakeGoogleFaults {
    * the promise stays pending until `close()`. 「届いたか分からない」.
    */
   dropAnswerAfterSend(count?: number): void
+  /** A refresh that asks for fewer scopes gets every granted one anyway (a Google that ignores `scope`). */
+  ignoreRefreshScope: boolean
   reset(): void
 }
 
@@ -159,6 +170,12 @@ export interface FakeGoogle {
   requests: FakeGoogleRequestLog[]
   /** Releases every request held by `dropAnswerAfterSend`. */
   close(): void
+  /** The account picked these files / folders for this client in Google Picker (drive.file now reaches them). */
+  pick(clientId: string, email: string, ids: string[]): void
+  /** A Drive file as it is now (null when unknown); for assertions. */
+  driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null } | null
+  /** Every Drive file the app made (uploads), oldest first. */
+  uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
 }
 
 interface CodeGrant {
@@ -244,7 +261,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     delayMs: 0,
     failNext(count = 1, status = 500) { failCount = count; failStatus = status },
     dropAnswerAfterSend(count = 1) { dropCount = count },
-    reset() { faults.delayMs = 0; failCount = 0; dropCount = 0 },
+    ignoreRefreshScope: false,
+    reset() { faults.delayMs = 0; failCount = 0; dropCount = 0; faults.ignoreRefreshScope = false },
   }
 
   const app = new Hono()
@@ -402,10 +420,14 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     if (form.grant_type === 'refresh_token') {
       const r = refreshTokens.get(form.refresh_token ?? '')
       if (!r || !r.live || r.clientId !== client.clientId) throw oauthError(400, 'invalid_grant', 'Token has been expired or revoked.')
+      // RFC 6749 §6: a subset of the granted scopes may be asked for.
+      const asked = form.scope ? normalizeScopes(form.scope) : null
+      if (asked && asked.some(s => !r.scopes.includes(s))) throw oauthError(400, 'invalid_scope', 'Some requested scopes were not granted.')
+      const scopes = asked && !faults.ignoreRefreshScope ? asked : r.scopes
       return c.json({
-        access_token: issueAccess(client.clientId, r.email, r.scopes, r.token),
+        access_token: issueAccess(client.clientId, r.email, scopes, r.token),
         expires_in: 3599,
-        scope: r.scopes.join(' '),
+        scope: scopes.join(' '),
         token_type: 'Bearer',
         ...(r.scopes.includes(GOOGLE_SCOPES.openid) ? { id_token: idToken(client.clientId, r.email) } : {}),
       })
@@ -645,11 +667,149 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     const id = c.req.param('fileId') ?? ''
     const d = docs.get(id)
     if (!d || !d.readers.some(r => r.toLowerCase() === a.email.toLowerCase())) throw fileNotFound(id)
-    if (!d.createdByMeet && !a.scopes.some(s => DRIVE_FULL.has(s))) throw fileNotFound(id)
+    const full = a.scopes.some(s => DRIVE_FULL.has(s))
+    if (d.createdByMeet ? !(full || a.scopes.includes(GOOGLE_SCOPES.driveMeetReadonly)) : !full) throw fileNotFound(id)
     return { a, d }
   }
 
+  // ---- Drive files that Meet did not make (drive.file: picked or made by the app) ----
+
+  interface LiveDriveFile extends Omit<SeedDriveFile, 'content'> {
+    content: Buffer
+    parents: string[]
+    appProperties: Record<string, string>
+    /** The client that created it (drive.file reaches its own files). */
+    createdBy: string | null
+    /** `clientId|email` of the accounts that picked it for a client in Google Picker. */
+    pickedFor: Set<string>
+    modifiedTime: string
+    headRevisionId: string
+  }
+  const driveFiles = new Map<string, LiveDriveFile>((seed.driveFiles ?? []).map(f => [f.id, {
+    ...f, content: Buffer.from(f.content, 'utf8'), parents: f.parents ?? [], appProperties: {}, createdBy: null, pickedFor: new Set<string>(),
+    modifiedTime: iso(created), headRevisionId: `rev-${randomToken(8)}`,
+  }]))
+  const uploadOrder: string[] = []
+
+  /** The file as the bearer's token may see it (drive.file: picked for this client, or made by it), else 404. */
+  function visibleDriveFile(a: AccessGrant, id: string): LiveDriveFile {
+    const f = driveFiles.get(id)
+    const email = a.email.toLowerCase()
+    if (!f || !f.readers.some(r => r.toLowerCase() === email)) throw fileNotFound(id)
+    const full = a.scopes.some(s => DRIVE_FULL.has(s))
+    const narrow = a.scopes.includes(GOOGLE_SCOPES.driveFile) && (f.createdBy === a.clientId || f.pickedFor.has(`${a.clientId}|${email}`))
+    if (!full && !narrow) throw fileNotFound(id)
+    return f
+  }
+
+  const driveFileOut = (f: LiveDriveFile, viewer: string): Record<string, unknown> => ({
+    kind: 'drive#file', id: f.id, name: f.name, mimeType: f.mimeType, trashed: false, parents: f.parents, modifiedTime: f.modifiedTime,
+    webViewLink: `https://drive.google.com/file/d/${f.id}/view`, appProperties: f.appProperties,
+    ...(f.mimeType.startsWith('application/vnd.google-apps.') ? {} : { headRevisionId: f.headRevisionId, size: String(f.content.byteLength) }),
+    capabilities: { canAddChildren: f.mimeType === 'application/vnd.google-apps.folder' && (f.writers ?? [f.owner]).some(w => w.toLowerCase() === viewer.toLowerCase()) },
+  })
+
+  /** Drive's `fields` selection: top-level names, `capabilities(...)` kept whole. */
+  function selectFields(all: Record<string, unknown>, fields: string | undefined): Record<string, unknown> {
+    if (fields === '*') return all
+    const wanted = fields ? fields.split(/,(?![^(]*\))/).map(f => f.trim()).filter(Boolean) : ['kind', 'id', 'name', 'mimeType']
+    const out: Record<string, unknown> = {}
+    for (const f of wanted) {
+      if (!/^[a-zA-Z]+(\([^)]*\))?$/.test(f)) throw apiError(400, `Invalid field selection ${f}`, 'invalidParameter', { location: 'fields', locationType: 'parameter' })
+      const name = f.replace(/\(.*$/, '')
+      if (name in all) out[name] = all[name]
+    }
+    return out
+  }
+
+  app.get('/drive/v3/files/:fileId/permissions', c => {
+    const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
+    const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+    return c.json({ kind: 'drive#permissionList', permissions: f.permissions.map((p, i) => ({ kind: 'drive#permission', id: `perm-${i}`, ...p })) })
+  })
+
+  app.get('/drive/v3/files', c => {
+    const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
+    const q = c.req.query('q') ?? ''
+    const m = /^appProperties has \{ key='([A-Za-z0-9_-]+)' and value='([A-Za-z0-9_-]+)' \} and trashed = false$/.exec(q)
+    if (!m) throw apiError(400, 'Invalid Value', 'invalid', { location: 'q', locationType: 'parameter' })
+    const hits = [...driveFiles.values()].filter(f => f.appProperties[m[1]] === m[2]).filter(f => {
+      try { visibleDriveFile(a, f.id); return true } catch { return false }
+    })
+    return c.json({ kind: 'drive#fileList', files: hits.map(f => ({ id: f.id, headRevisionId: f.headRevisionId, webViewLink: `https://drive.google.com/file/d/${f.id}/view` })) })
+  })
+
+  app.post('/upload/drive/v3/files', async c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile, `${AUTH}drive`], 'drive.googleapis.com')
+    if (c.req.query('uploadType') !== 'multipart') throw apiError(400, 'Invalid uploadType', 'badRequest')
+    const type = c.req.header('content-type') ?? ''
+    const boundary = /^multipart\/related;\s*boundary=([^;]+)$/i.exec(type)?.[1]
+    if (!boundary) throw apiError(400, 'Bad content type', 'badContent')
+    const raw = Buffer.from(await c.req.arrayBuffer())
+    const parts: Array<{ headers: string; body: Buffer }> = []
+    const sep = Buffer.from(`--${boundary}`)
+    let at = raw.indexOf(sep)
+    while (at >= 0) {
+      const start = at + sep.byteLength
+      if (raw.subarray(start, start + 2).toString() === '--') break
+      const next = raw.indexOf(sep, start)
+      if (next < 0) break
+      const chunk = raw.subarray(start + 2, next - 2) // after CRLF, before CRLF
+      const split = chunk.indexOf('\r\n\r\n')
+      parts.push({ headers: chunk.subarray(0, split).toString('utf8'), body: chunk.subarray(split + 4) })
+      at = next
+    }
+    if (parts.length !== 2) throw apiError(400, 'Multipart body must have 2 parts', 'badContent')
+    const meta = JSON.parse(parts[0].body.toString('utf8')) as { name?: string; parents?: string[]; mimeType?: string; appProperties?: Record<string, string> }
+    const parent = meta.parents?.[0]
+    if (!parent) throw apiError(400, 'A parent is required here', 'badRequest')
+    const folder = visibleDriveFile(a, parent)
+    if (!(driveFileOut(folder, a.email).capabilities as { canAddChildren: boolean }).canAddChildren) throw apiError(403, 'Insufficient permissions for the specified parent.', 'insufficientParentPermissions')
+    const id = `fake-upload-${randomBytes(8).toString('hex')}`
+    driveFiles.set(id, {
+      id, name: meta.name ?? 'Untitled', mimeType: meta.mimeType ?? 'application/octet-stream', owner: a.email, readers: [...folder.readers], content: Buffer.from(parts[1].body),
+      permissions: folder.permissions, parents: [parent], appProperties: { ...(meta.appProperties ?? {}) }, createdBy: a.clientId, pickedFor: new Set(),
+      modifiedTime: iso(now()), headRevisionId: `rev-${randomToken(8)}`,
+    })
+    uploadOrder.push(id)
+    if (dropCount > 0) {
+      dropCount--
+      return dropAnswer(c)
+    }
+    return c.json(selectFields(driveFileOut(driveFiles.get(id)!, a.email), c.req.query('fields')))
+  })
+
+  // ---- the stand-in Google Picker (staging: the Picker page loads <origin>/js/api.js) ----
+
+  const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST' }
+  app.options('/__picker/*', c => c.body(null, 204, cors))
+  app.get('/__picker/files', c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile])
+    const mode = c.req.query('mode')
+    const email = a.email.toLowerCase()
+    const list = [...driveFiles.values()]
+      .filter(f => f.readers.some(r => r.toLowerCase() === email))
+      .filter(f => (mode === 'folder') === (f.mimeType === 'application/vnd.google-apps.folder'))
+      .map(f => ({ id: f.id, name: f.name, mimeType: f.mimeType }))
+    return c.json({ files: list }, 200, cors)
+  })
+  app.post('/__picker/pick', async c => {
+    const a = bearer(c, [GOOGLE_SCOPES.driveFile])
+    const body = await c.req.json().catch(() => ({})) as { ids?: string[] }
+    for (const id of body.ids ?? []) driveFiles.get(id)?.pickedFor.add(`${a.clientId}|${a.email.toLowerCase()}`)
+    return c.json({ ok: true }, 200, cors)
+  })
+  app.get('/js/api.js', c => c.body(FAKE_PICKER_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', ...cors }))
+
   app.get('/drive/v3/files/:fileId/export', c => {
+    if (!docs.has(c.req.param('fileId') ?? '')) {
+      const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
+      const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+      const mimeType = c.req.query('mimeType')
+      if (!f.mimeType.startsWith('application/vnd.google-apps.') || f.mimeType.endsWith('.folder')) throw apiError(403, 'Export only supports Docs Editors files.', 'fileNotExportable')
+      if (mimeType !== 'text/plain' && mimeType !== 'text/csv') throw apiError(400, 'The requested conversion is not supported.', 'badRequest')
+      return c.body('\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n'), 200, { 'content-type': `${mimeType}; charset=UTF-8` })
+    }
     const { d } = visibleDoc(c)
     const mimeType = c.req.query('mimeType')
     if (!mimeType) throw apiError(400, 'Required parameter: mimeType', 'required', { location: 'mimeType', locationType: 'parameter' })
@@ -661,6 +821,15 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   })
 
   app.get('/drive/v3/files/:fileId', c => {
+    if (!docs.has(c.req.param('fileId') ?? '')) {
+      const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
+      const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
+      if (c.req.query('alt') === 'media') {
+        if (f.mimeType.startsWith('application/vnd.google-apps.')) throw apiError(403, 'Only files with binary content can be downloaded. Use Export with Docs Editors files.', 'fileNotDownloadable')
+        return c.body(new Uint8Array(f.content), 200, { 'content-type': f.mimeType })
+      }
+      return c.json(selectFields(driveFileOut(f, a.email), c.req.query('fields')))
+    }
     const { d } = visibleDoc(c)
     // headRevisionId is left out: Drive sets it only for files with binary content, not Google Docs.
     const all: Record<string, unknown> = {
@@ -817,8 +986,68 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     faults,
     requests,
     close() { for (const release of [...held]) release() },
+    pick(clientId, email, ids) {
+      for (const id of ids) {
+        const f = driveFiles.get(id)
+        if (!f) throw new Error(`fake Google: no Drive file ${id}`)
+        f.pickedFor.add(`${clientId}|${email.toLowerCase()}`)
+      }
+    },
+    driveFile(id) {
+      const f = driveFiles.get(id)
+      return f ? { name: f.name, mimeType: f.mimeType, parents: [...f.parents], content: f.content, appProperties: { ...f.appProperties }, createdBy: f.createdBy } : null
+    },
+    uploads() {
+      return uploadOrder.map(id => driveFiles.get(id)!).map(f => ({ id: f.id, name: f.name, parents: [...f.parents], mimeType: f.mimeType }))
+    },
   }
 }
+
+/**
+ * A stand-in for Google Picker (`gapi.load('picker')`, `google.picker.*`), for
+ * staging only: lists what `/__picker/files` returns for the token, and on a
+ * click marks the choice as picked (`/__picker/pick`) and calls back like
+ * Google Picker (`{ action: 'picked', docs: [{ id }] }`).
+ */
+const FAKE_PICKER_SCRIPT = `(function () {
+  var origin = (document.currentScript && new URL(document.currentScript.src).origin) || ''
+  function DocsView(viewId) { this.viewId = viewId }
+  ;['setIncludeFolders', 'setSelectFolderEnabled', 'setMimeTypes', 'setEnableDrives'].forEach(function (m) { DocsView.prototype[m] = function () { return this } })
+  function PickerBuilder() { this.o = {} }
+  PickerBuilder.prototype.addView = function (v) { this.o.view = v; return this }
+  PickerBuilder.prototype.setOAuthToken = function (t) { this.o.token = t; return this }
+  PickerBuilder.prototype.setCallback = function (f) { this.o.cb = f; return this }
+  ;['setDeveloperKey', 'setAppId', 'setOrigin', 'setLocale', 'setTitle', 'enableFeature', 'setMaxItems'].forEach(function (m) { PickerBuilder.prototype[m] = function () { return this } })
+  PickerBuilder.prototype.build = function () {
+    var o = this.o
+    return { setVisible: function () {
+      var mode = o.view.viewId === 'folders' ? 'folder' : 'files'
+      var auth = { authorization: 'Bearer ' + o.token }
+      fetch(origin + '/__picker/files?mode=' + mode, { headers: auth }).then(function (r) { return r.json() }).then(function (j) {
+        var box = document.createElement('div')
+        box.id = 'fake-picker'
+        ;(j.files || []).forEach(function (f) {
+          var b = document.createElement('button')
+          b.textContent = f.name
+          b.setAttribute('data-id', f.id)
+          b.onclick = function () {
+            fetch(origin + '/__picker/pick', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, auth), body: JSON.stringify({ ids: [f.id] }) })
+              .then(function () { o.cb({ action: 'picked', docs: [{ id: f.id, name: f.name, mimeType: f.mimeType }] }) })
+          }
+          box.appendChild(b)
+        })
+        var cancel = document.createElement('button')
+        cancel.textContent = 'キャンセル'
+        cancel.onclick = function () { o.cb({ action: 'cancel' }) }
+        box.appendChild(cancel)
+        document.body.appendChild(box)
+      })
+    } }
+  }
+  window.google = window.google || {}
+  window.google.picker = { DocsView: DocsView, PickerBuilder: PickerBuilder, ViewId: { DOCS: 'all', FOLDERS: 'folders' }, Action: { PICKED: 'picked', CANCEL: 'cancel' }, Feature: { MULTISELECT_ENABLED: 'multiselect' } }
+  window.gapi = { load: function (_name, opts) { setTimeout(function () { (opts.callback || opts)() }, 0) } }
+})()`
 
 // ---- RFC 2822 (what the server's mail builder produces; enough to read it back) ----
 

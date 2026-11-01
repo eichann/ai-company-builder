@@ -53,7 +53,7 @@ export interface ChatServerConfig extends AgentHost {
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
   /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -313,7 +313,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
     const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
-        companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions,
+        companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
         onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
         // An approval request made or shown: the app's own card (approvals.ts), never the AI's text.
         onApprovalCard: card => injector.push({ type: APPROVAL_PART_TYPE, id: `approval-${card.id}`, data: card }),

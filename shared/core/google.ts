@@ -5,16 +5,17 @@
  *
  * Owner decisions (design §5-2, §9 q8/q10): ask only for what a feature
  * needs, when it is first needed (minutes first, `gmail.send` when mail is
- * first used); never `drive.readonly`, `gmail.compose`, `gmail.readonly`,
- * `gmail.metadata` or domain-wide delegation. The Google account must be the
+ * first used, `drive.file` when Drive is first used); never `drive`,
+ * `drive.readonly`, `gmail.compose`, `gmail.readonly`, `gmail.metadata` or
+ * domain-wide delegation (`GOOGLE_NEVER_SCOPES`). The Google account must be the
  * member's own ACB email.
  *
  * Pure: imports nothing outside shared/core.
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail'] as const
-/** minutes = 予定と議事録を読む, mail = メールを送る. */
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive'] as const
+/** minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く (`drive.file` only). */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
 export const GOOGLE_SCOPE = {
@@ -25,7 +26,24 @@ export const GOOGLE_SCOPE = {
   meetReadonly: 'https://www.googleapis.com/auth/meetings.space.readonly',
   driveMeetReadonly: 'https://www.googleapis.com/auth/drive.meet.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
+  /**
+   * Only the files the member picked with Google Picker or ACB created
+   * (owner decision 2026-11-01: least privilege; never `drive` / `drive.readonly`).
+   */
+  driveFile: 'https://www.googleapis.com/auth/drive.file',
 } as const
+
+/** Scopes ACB never asks for, holds or hands out (owner decisions; `google-connector.md`). */
+export const GOOGLE_NEVER_SCOPES: readonly string[] = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/gmail.metadata',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://mail.google.com/',
+]
 
 /** Asked with every feature: to read which account was allowed (and that its address is verified). */
 const IDENTITY_SCOPES = [GOOGLE_SCOPE.openid, GOOGLE_SCOPE.email]
@@ -34,6 +52,7 @@ const IDENTITY_SCOPES = [GOOGLE_SCOPE.openid, GOOGLE_SCOPE.email]
 export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   minutes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.meetReadonly, GOOGLE_SCOPE.driveMeetReadonly],
   mail: [GOOGLE_SCOPE.gmailSend],
+  drive: [GOOGLE_SCOPE.driveFile],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -41,6 +60,7 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...IDENTITY_SCOPES,
   ...GOOGLE_FEATURE_SCOPES.minutes,
   ...GOOGLE_FEATURE_SCOPES.mail,
+  ...GOOGLE_FEATURE_SCOPES.drive,
 ]
 
 /** Google's short names → the long form it reports. */

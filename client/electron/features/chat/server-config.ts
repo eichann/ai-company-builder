@@ -11,6 +11,8 @@ import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import type { RecordsApi } from '../../records/api'
 import { createRecordTools } from '../../records/tools'
+import { createDriveTools, type DrivePicking } from '../google/drive'
+import type { PathGuard } from '../ports'
 import { companyFilesInstructions, createCompanyFileTools } from '../../company-files/tools'
 import { createWebResearchBudget, createWebResearchTools } from '../../web-research/tools'
 import { WEB_RESEARCH_INSTRUCTIONS } from '../../../shared/web-research'
@@ -63,6 +65,10 @@ export interface ChatServerConfigDeps {
   serverUrl: () => string
   /** The key broker's tokens (services/broker-token-store.ts). */
   brokerTokens?: BrokerTokenStore
+  /** Google Drive (features/google/drive.ts): the person's Picker; absent = no Drive tools. */
+  drivePicking?: Pick<DrivePicking, 'pick'>
+  /** The allowed-roots check (a Drive put reads a local file). */
+  paths?: PathGuard
 }
 
 function hostOf(url: string): string | undefined {
@@ -130,9 +136,17 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
-      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }) : null
+      // Google Drive's tools ride on the same token (google-drive.md); only where Drive is set up for the company.
+      const { drivePicking, paths } = deps
+      const extraTools = drivePicking && paths
+        ? (turnAccess: Parameters<typeof createDriveTools>[0], turnSignal?: AbortSignal) => createDriveTools(turnAccess, {
+          picking: drivePicking, companyId, companyRoot: companyRoot ?? null,
+          local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(companyId) },
+        }, turnSignal)
+        : undefined
+      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, extraTools }) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({

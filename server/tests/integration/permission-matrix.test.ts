@@ -394,6 +394,7 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/google', w => ({ path: `${C(w)}/google` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/google/client', w => ({ path: `${C(w)}/google/client`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/google/enabled', w => ({ path: `${C(w)}/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/picker', w => ({ path: `${C(w)}/google/picker`, body: {} }), [404, 404, 403, 403, 404, 401], 'Google is not set up here: the owner / admin pass the role check and find no client'),
   r('DELETE /api/companies/:companyId/google/grants/:userId', w => ({ path: `${C(w)}/google/grants/pm-nobody` }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS),
   r('POST /api/companies/:companyId/me/google/connect', w => ({ path: `${C(w)}/me/google/connect`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -412,6 +413,14 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/notifications/read', w => ({ path: `${C(w)}/me/notifications/read`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // Google Drive (google-drive.md): the member's own Picker token and picks (any member); the AI's routes need a record token.
+  r('POST /api/companies/:companyId/me/google/drive/picker', w => ({ path: `${C(w)}/me/google/drive/picker`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('POST /api/companies/:companyId/me/google/drive/picks', w => ({ path: `${C(w)}/me/google/drive/picks`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/records-ai/google/drive/status', () => ({ path: '/api/records-ai/google/drive/status' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/google/drive/read', () => ({ path: '/api/records-ai/google/drive/read', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/google/drive/put', () => ({ path: '/api/records-ai/google/drive/put', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/google/drive/puts/:putId', () => ({ path: '/api/records-ai/google/drive/puts/drive-put-nosuch' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/google-picker', () => ({ path: '/api/google-picker' }), [200, 200, 200, 200, 200, 200], 'public: the static Picker page; it holds no secret (the token comes only from the app\'s Picker window)'),
   r('GET /api/oauth/:provider/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
   // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
   // another person); Google is not set up here, so the answer is an empty list with a reason.
@@ -553,6 +562,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'POST /api/records-ai/plugins/:pluginId/create/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'GET /api/records-ai/approvals/:approvalId': 'the AI\'s routes: the company comes from the record token, never from the URL (approvals.test.ts)',
+  'GET /api/records-ai/google/drive/puts/:putId': 'the AI\'s routes: the company comes from the record token, never from the URL (another member\'s put: tests/integration/google-drive.test.ts)',
   'GET /api/records-ai/minutes/:recordId/text': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s minutes: tests/integration/minutes.test.ts)',
   'POST /api/records-ai/minutes/:recordId/bundle': 'the AI\'s routes: the company comes from the record token, never from the URL',
 }

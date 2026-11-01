@@ -16,6 +16,7 @@ import {
   googleFeaturesOf, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
   checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
+import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
 import { emailDomain } from '../../shared/core/mail'
 import type {
   GoogleAdminView, GoogleChange, GoogleChangeAction, GoogleConnectStart, GoogleGrantSummary, GoogleUnavailableReason, MyGoogle,
@@ -43,6 +44,8 @@ export interface GoogleConnectorDeps {
   ids: IdGenerator
   /** `<PUBLIC_URL>/api/oauth/google/callback`, read per call (shown to the admin). */
   redirectUri(): string
+  /** `<PUBLIC_URL>/api/google-picker`: the page the Picker's API key must allow (google-drive.md). */
+  pickerPageUrl(): string
   practiceGoogle: boolean
   operatorStopped(): Promise<boolean>
 }
@@ -96,6 +99,10 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       operatorStopped: await deps.operatorStopped(),
       updatedAt: client?.updatedAt ?? null,
       updatedBy: client?.updatedBy ?? null,
+      picker: (() => {
+        const p = connectors.picker()
+        return { configured: p !== null, appId: p?.appId ?? null, apiKeyLast4: p ? p.apiKey.slice(-4) : null, pageUrl: deps.pickerPageUrl() }
+      })(),
       grants: grants.map((g): GoogleGrantSummary => ({
         userId: g.userId,
         memberEmail: people.get(g.userId)?.email ?? null,
@@ -219,6 +226,40 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         connectors.setClientEnabled(body.enabled, clock.now(), member.userId, change('enabled', member.userId, null, { enabled: body.enabled }))
       }
       google.forgetCompany(member.companyId)
+      return ok(await view(member.companyId))
+    },
+
+    /**
+     * PUT …/google/picker { apiKey?, appId } (owner/admin): Google Picker's API key and the
+     * Cloud project number (google-drive.md). `apiKey` left out keeps the stored one;
+     * `appId: null` removes both (Drive picking stops from the next call).
+     */
+    async savePicker(member: Member, body: unknown): Promise<Outcome<GoogleAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
+      const connectors = connectorsOf(member.companyId)
+      const client = connectors.client()
+      if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
+      const before = connectors.picker()
+      if (body.appId === null) {
+        if (before) connectors.savePicker(null, clock.now(), member.userId, change('picker', member.userId, null, { removed: true }))
+        return ok(await view(member.companyId))
+      }
+      const appIdError = checkPickerAppId(body.appId)
+      if (appIdError) return refuse('bad-request', appIdError, { code: 'BAD_PICKER_APP_ID' })
+      const hasKey = body.apiKey !== undefined && body.apiKey !== null && body.apiKey !== ''
+      if (hasKey) {
+        const keyError = checkPickerApiKey(body.apiKey)
+        if (keyError) return refuse('bad-request', keyError, { code: 'BAD_PICKER_API_KEY' })
+      }
+      if (!hasKey && !before) return refuse('bad-request', 'Picker の API キーを入れてください。', { code: 'BAD_PICKER_API_KEY' })
+      const apiKey = hasKey ? (body.apiKey as string).trim() : before!.apiKey
+      const appId = (body.appId as string).trim()
+      connectors.savePicker({ apiKey, appId }, clock.now(), member.userId, change('picker', member.userId, null, {
+        before: before ? { appId: before.appId, apiKeyLast4: before.apiKey.slice(-4) } : null,
+        after: { appId, apiKeyLast4: apiKey.slice(-4) },
+      }))
       return ok(await view(member.companyId))
     },
 

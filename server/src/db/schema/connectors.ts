@@ -71,9 +71,64 @@ export const connectorSchema = `
       change TEXT NOT NULL
     );
 
+    -- Google Drive (google-drive.md): what a person picked with Google Picker
+    -- (only these may be read or written into by ACB; drive.file holds Google to
+    -- the same) — Google's ids, the name and type Google gave; expires.
+    CREATE TABLE IF NOT EXISTS google_drive_picks (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      file_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('folder', 'file')),
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      picked_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, file_id)
+    );
+
+    -- Google Drive puts (操作の控え): written before the upload; one per member
+    -- and request key (the same put is never sent twice). Never content or a
+    -- local path. state: sending → done | unknown (a lost answer; found later
+    -- by the put's id in appProperties, never re-sent). A refused put is removed.
+    CREATE TABLE IF NOT EXISTS google_drive_puts (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      request_key TEXT NOT NULL,
+      actor_kind TEXT NOT NULL CHECK (actor_kind IN ('ai', 'person')),
+      conversation_id TEXT,
+      run_id TEXT,
+      folder_id TEXT NOT NULL,
+      folder_name TEXT NOT NULL,
+      name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('sending', 'done', 'unknown')),
+      file_id TEXT,
+      revision_id TEXT,
+      link TEXT,
+      reason TEXT,
+      created_at TEXT NOT NULL,
+      finished_at TEXT,
+      UNIQUE (company_id, user_id, request_key)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_connector_history_company ON connector_history(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_oauth_pending_expires ON oauth_pending(company_id, expires_at);
 `
+
+/**
+ * Google Picker's registration on the company's Google client (google-drive.md),
+ * added after the table shipped. The API key is the Picker's developer key: it
+ * is sent to the Picker page by design (Google protects it with the key's
+ * website restriction), so it is stored as is; answers show its last 4 only.
+ */
+export function migrateGooglePicker(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('picker_api_key')) conn.exec('ALTER TABLE google_oauth_clients ADD COLUMN picker_api_key TEXT')
+  if (!cols.has('picker_app_id')) conn.exec('ALTER TABLE google_oauth_clients ADD COLUMN picker_app_id TEXT')
+}
 
 /**
  * connector_grants / oauth_pending for every member-level OAuth provider
