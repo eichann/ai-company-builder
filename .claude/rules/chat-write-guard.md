@@ -81,6 +81,19 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   `mcp__acb_web__web_research`, whose question goes out — `web-research.md`). Best-effort by design (Bash it
   cannot parse, scripts, a resumed conversation can slip past); the server's `[RESERVED_PATH]`
   keeps private content out of the company repository either way.
+  - Not public: private folders, `.workspace/`, `.backups/`, outside the company, and anything
+    inside a `.personal/` at any depth (never synced, `[PERSONAL_PATH]`; NFC, A–Z-folded,
+    lexical — `..` out of it is public again) except the `.gitignore` directly in it (shared).
+    Bash asks nothing only when every literal redirect / `tee` target is such a place and
+    nothing opaque is in the command (`cp`/`mv`/scripts/interpreters, `cd … >`, a write after a
+    heredoc). The body of one heredoc fed to a data sink (`cat > .personal/x.md <<'EOF'`) is
+    text, not commands: its words do not trigger a question.
+  - Consent per conversation and kind (`write` = public places, `send` = web / MCP / Web で調べる /
+    `curl`…): 許可 (`recordPrivateConsent`, in `PrivateReadState.consented`, main memory) stops
+    that kind's questions for the rest of the conversation; the other kind still asks once. The
+    member's confirm ends with 「許可すると、この会話ではこれ以降は確認しません。」 (not the AI's
+    refusal). A new conversation, or one reopened after a restart / new chat
+    (`forgetPrivateReads`), asks again. Tests: `client/tests/private-read-guard.test.ts`.
 
 ## Decisions and limits
 
