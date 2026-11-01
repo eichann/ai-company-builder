@@ -22,6 +22,7 @@ import type { MailReader, MailReadFailure } from '../ports/mail'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
+import { NOT_IN_STEP } from './plugin-operation-checks'
 import { recordReader } from './record-access'
 import { RECORDS_DISABLED } from './records'
 
@@ -137,8 +138,11 @@ export function createThreadService(deps: ThreadServiceDeps) {
   }
 
   return {
-    /** GET …/threads/:recordId (a person's session). */
-    async thread(member: Member, recordId: unknown): Promise<Outcome<{ thread: ThreadView }>> {
+    /**
+     * GET …/threads/:recordId. `roleAllowed` (the AI's route): the step gate for the role about to be
+     * used (`mail.read` / `chat.receive`, plugins.md); refused → nothing is read (403 `NOT_IN_STEP`).
+     */
+    async thread(member: Member, recordId: unknown, roleAllowed?: (role: string) => Promise<boolean>): Promise<Outcome<{ thread: ThreadView }>> {
       const handle = companyData.forCompany(member.companyId)
       if (!handle.records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const found = interactionFor(member, recordId)
@@ -154,6 +158,9 @@ export function createThreadService(deps: ThreadServiceDeps) {
         },
       })
       if (!pointer) return unavailable('no-thread')
+      if (roleAllowed && !(await roleAllowed(pointer.kind === 'mail' ? 'mail.read' : 'chat.receive'))) {
+        return refuse('forbidden', NOT_IN_STEP.error, { code: NOT_IN_STEP.code })
+      }
 
       if (pointer.kind === 'chat') {
         const r = await deps.chatReader.thread(member.companyId, member.userId, { channelId: pointer.channelId, threadTs: pointer.threadTs })

@@ -143,6 +143,8 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', (await import('../../src/routes/google')).googleRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/outbound-mail')).outboundMailRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/threads')).threadsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
+  app.route('/api/records-ai/threads', (await import('../../src/routes/threads')).recordsAiThreadsRoute)
   app.route('/api/oauth', (await import('../../src/routes/oauth')).oauthRoute)
 
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'th-owner', ts(), ts())
@@ -223,6 +225,57 @@ describe('元のスレッド: read now, with the viewer\'s own permission, shown
     expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual([`<@U0SATO> ${SLACK_TEXT}`])
     expect(r.body.data.thread.messages[0].mine).toBe(false)
     expect((await person('th-tanaka', 'GET', `/threads/${chatInteraction}`)).status).toBe(404)
+  })
+})
+
+describe('the member\'s AI reads the thread with its record token (B4 / B5)', () => {
+  async function tokenOf(user: string): Promise<string> {
+    const r = await person(user, 'POST', '/me/record-tokens', { conversationId: 'conv-thread', agent: 'claude-code', scope: 'read' })
+    expect(r.status, r.text).toBe(201)
+    return r.body.data.token
+  }
+  const aiGet = async (token: string, recordId: string) => {
+    currentUser.id = null
+    const res: Response = await app.request(`${PUBLIC}/api/records-ai/threads/${recordId}`, { headers: { Authorization: `Bearer ${token}` } })
+    return { status: res.status, body: await res.json() as Json }
+  }
+
+  it('the owner\'s AI reads it; another member\'s AI gets the 404 of a missing record; a session is not a token', async () => {
+    const own = await aiGet(await tokenOf('th-sato'), mailInteraction)
+    expect(own.status).toBe(200)
+    expect(own.body.data.thread.messages.map((m: Json) => m.text)).toEqual([MAIL_TEXT_1, MAIL_TEXT_2])
+    const other = await aiGet(await tokenOf('th-tanaka'), mailInteraction)
+    expect(other.status).toBe(404)
+    expect(other.body.code).toBe('THREAD_NOT_FOUND')
+    expect((await call('th-sato', 'GET', `/api/records-ai/threads/${mailInteraction}`)).status).toBe(401)
+  })
+
+  it('inside a step\'s run the role is asked first: refused → 403 NOT_IN_STEP and nothing read; the role asked follows the channel', async () => {
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const runOf = (id: string, step: string, recordId: string) => {
+      const at = new Date().toISOString()
+      sqliteCompanyData(db).forCompany(CO).aiRuns.insert({
+        id, recordId, step, userId: 'th-sato', state: 'running', generation: 1, deviceId: 'device-th-0001', conversationId: `conv-${id}`,
+        claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0,
+        pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
+      })
+      return id
+    }
+    const member = { companyId: CO, userId: 'th-sato', role: 'member' }
+    const asked: string[] = []
+    // The route's gate (record-ai-auth connectorRoleRefusal → pluginRunGate): a business step that does not declare the role.
+    const gated = (runId: string) => (r: string) => { asked.push(r); return services.pluginRunGate.allowsConnectorRole(member, runId, r) }
+    const before = google.requests.length
+    const refused = await services.threads.thread(member, mailInteraction, gated(runOf('th-run-1', 'sample-sales__work', mailInteraction)))
+    expect(refused).toMatchObject({ ok: false, body: { code: 'NOT_IN_STEP' } })
+    expect(asked).toEqual(['mail.read'])
+    expect(google.requests.length).toBe(before)
+    const chat = await services.threads.thread(member, chatInteraction, gated('th-run-1'))
+    expect(chat).toMatchObject({ ok: false, body: { code: 'NOT_IN_STEP' } })
+    expect(asked).toEqual(['mail.read', 'chat.receive'])
+    // A core step's run (not a business plugin's) keeps what it had.
+    const core = await services.threads.thread(member, mailInteraction, gated(runOf('th-run-2', 'inbox-triage', mailInteraction)))
+    expect(core.ok).toBe(true)
   })
 })
 
