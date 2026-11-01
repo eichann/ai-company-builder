@@ -9,7 +9,9 @@
  * - a decline needs a note and tells only the requester, whose turn it becomes;
  * - a task created in `preparing` tells nobody and is not in 「あなたの番」
  *   until the AI hands it over; `prepared` holds only readable records of a
- *   type implementing `prepared` (one answer otherwise);
+ *   type implementing `prepared` (one answer otherwise); the AI hands it over
+ *   early only with a reason, and the assignee or requester (never the AI)
+ *   can take it over at any time;
  * - ranges, sorting, finishedSince and the link filter return and count only
  *   records the member reads; an unreadable link target answers like a missing one;
  * - tasks made under version 4 stay valid under version 5.
@@ -163,6 +165,25 @@ describe('preparing: the AI’s turn before the person’s', () => {
     expect(r.entry.changes).toEqual(expect.arrayContaining([{ field: 'links.prepared', before: null, after: draft }]))
     expect(notified).toEqual([['a', ['u-bob']]])
     expect(ids(ok(service.myTurn(m('u-bob'))))).toEqual([t.id])
+  })
+})
+
+describe('preparing never hides the work', () => {
+  it('the AI hands it over early only with a reason; the assignee or requester takes it over, never the AI', async () => {
+    const t = task(m('u-alice'), { state: 'preparing' }, AI)
+    expect(await engine.act(m('u-alice'), AI, t.id, 'hand_over', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NOTE_REQUIRED' } })
+    const early = ok(await engine.act(m('u-alice'), AI, t.id, 'hand_over', { expectedVersion: 1, note: '期限が明日のため、先方の空きが分からないまま渡します' }))
+    expect(early.record).toMatchObject({ state: 'todo', fields: { next_actor: 'u-bob' } })
+    expect(early.entry).toMatchObject({ actorKind: 'ai', note: '期限が明日のため、先方の空きが分からないまま渡します' })
+    expect(notified).toEqual([['a', ['u-bob']]])
+    expect(ids(ok(service.myTurn(m('u-bob'))))).toEqual([t.id])
+
+    for (const who of ['u-bob', 'u-alice']) {
+      const p = task(m('u-alice'), { state: 'preparing' }, AI)
+      expect(await engine.act(m(who), AI, p.id, 'take_over', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
+      expect(await engine.act(m('u-mallory'), HUMAN, p.id, 'take_over', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
+      expect(ok(await engine.act(m(who), HUMAN, p.id, 'take_over', { expectedVersion: 1 })).record).toMatchObject({ state: 'todo', fields: { next_actor: 'u-bob' } })
+    }
   })
 })
 

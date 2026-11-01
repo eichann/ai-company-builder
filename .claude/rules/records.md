@@ -310,8 +310,13 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
   `prepared`, `hand_to` / `notify` the assignee) moves it to `todo`. A record created in an
   AI-turn state tells nobody, and 「あなたの番」 leaves out every AI-turn state
   (`aiTurnStates`, `shared/core/record-types.ts`: a state some `who: [ai]` action starts from —
-  the same rule as 「AI の番」), so the person sees it when it is ready. `cancel` also starts
-  from `preparing` (the requester stops it).
+  the same rule as 「AI の番」), so the person sees it when it is ready. **Preparing never hides
+  the work** (owner, 2026-11-01): `hand_over` (`who: [ai]` — the AI, also the AI-turn runner of
+  S10 —, note required: due soon, the preparation failed, information missing; links `prepared`
+  for whatever is ready) hands it to the assignee early; `take_over` (`who: [assignee,
+  requested_by]`, never the AI) lets a person take it from the AI at any time; both go to `todo`
+  as the assignee's turn and tell them. `cancel` also starts from `preparing` (the requester
+  stops it).
 - **受けられない** (`decline`): from todo / in_progress / waiting, `who: [assignee]` only (never
   the AI, never the requester), note required, `hand_to` and `notify` the requester → state
   `declined`, **not final**: the requester's turn, who `assign`s someone else, `cancel`s or
@@ -327,7 +332,8 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
   definitions of other types compare equal.
 - Tests: `server/tests/unit/record-task-v5.test.ts` (the AI cannot complete or decline, the
   requester cannot decline; decline needs a note and tells only the requester; preparing tells
-  nobody and stays out of 「あなたの番」, `prepared` refuses alike; the query's additions never
+  nobody and stays out of 「あなたの番」, `prepared` refuses alike; `hand_over` needs a reason and
+  `take_over` is a person's, never the AI's; the query's additions never
   return or count an unreadable record; a version 4 task keeps working — mutation-checked).
 
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)

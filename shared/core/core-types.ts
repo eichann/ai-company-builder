@@ -22,7 +22,10 @@
  * approval requests the AI made). State `preparing` is the AI's turn
  * (`create_states`: a create may start there; `finish_prep`, AI only, hands
  * it to the assignee), so an AI-prepared task reaches the person only when
- * ready. `decline` (受けられない): the assignee only, with a note, hands it
+ * ready — but never hidden: `hand_over` (AI only, a reason required: due
+ * soon, the preparation failed, information is missing) hands it to the
+ * assignee early with whatever is ready, and `take_over` lets the assignee or
+ * requester take it from the AI at any time. `decline` (受けられない): the assignee only, with a note, hands it
  * back to the requester, who reassigns, cancels or reopens it from
  * `declined` (not final: it is the requester's turn). The AI never
  * completes or declines.
@@ -83,6 +86,8 @@ actions:
   cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
   reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
   finish_prep:    { label: 用意ができた, from: [preparing], to: todo, who: [ai], args: { prep_summary: long_text }, links: [prepared], notify: assignee, hand_to: assignee }
+  hand_over:      { label: 先に渡す, from: [preparing], to: todo, who: [ai], links: [prepared], notify: assignee, note: required, hand_to: assignee }
+  take_over:      { label: 自分で進める, from: [preparing], to: todo, who: [assignee, requested_by], notify: assignee, note: optional, hand_to: assignee }
   decline:        { label: 受けられない, from: [todo, in_progress, waiting], to: declined, who: [assignee], notify: requested_by, note: required, hand_to: requested_by }
   set_tags:       { label: タグを付ける, who: [requested_by, assignee, ai], args: { tags: tags } }
   set_wait_until: { label: 見込みの日時を決める, who: [requested_by, assignee, ai], args: { wait_until: date }, note: optional }
@@ -91,7 +96,7 @@ actions:
 # タスク
 
 ACB に最初からある「依頼」の形。記録はサーバーだけが持ちます（ファイルにはしません）。見積や計画などの中身はふつうのファイルに書き、「関係するファイル」でつなぎます。
-「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
+「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、AI が理由を添えて「先に渡す」で早めに渡します。担当と頼んだ人は「自分で進める」でいつでも引き取れます。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
 `,
   interaction: `---
 label: やりとり
