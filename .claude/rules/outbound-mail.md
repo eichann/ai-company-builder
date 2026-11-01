@@ -167,7 +167,11 @@ the card without the server keeping it.
   (「元の Slack のスレッドに、あなたとして返します。」; editing changes the body only; no recipients
   or subject). The AI's `mail_recipients` / `mail_draft_create` take `interactionId` (`toRefs`
   and `subject` only for a mail).
-- Not yet: an AI route to read the thread (B4 needs one with a record-token guard).
+- **The member's AI** reads the same thread with its record token: `GET /api/records-ai/threads/:recordId`
+  (`aiReads`; a read token is enough), the same rules (the member reads the record and its 連絡; the
+  same 404). Inside a business plugin step's run the role is asked first (`connectorRoleRefusal`:
+  `mail.read` / `chat.receive` by the 連絡's channel); a step that does not declare it → 403
+  `NOT_IN_STEP` and nothing is read. The inbox's AI turns (B4) and follow-up (B5) read threads here.
 
 Tests: `server/tests/integration/threads.test.ts` (fake Google + fake Slack: owner-only, the
 switch, the Gmail thread / headers / recipients, the Slack thread_ts and 返事を送る off, nothing
