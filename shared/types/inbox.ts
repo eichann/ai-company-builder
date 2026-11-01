@@ -140,7 +140,11 @@ export interface InboxJudgementResult {
   alreadyReplied?: true
 }
 
-/** `GET /api/records-ai/inbox/items/:recordId`: the pointers the AI reads the thread by (no body). */
+/**
+ * `GET /api/records-ai/inbox/items/:recordId` (an interaction, or a 返事のお願い and its interaction):
+ * what the AI judges by — pointers, state, what was made for it; never a body (the thread itself is
+ * A4's `GET /api/records-ai/threads/:recordId`, shared/types/threads.ts).
+ */
 export interface InboxItemView {
   recordId: string
   channel: string | null
@@ -156,32 +160,8 @@ export interface InboxItemView {
   tasks: Array<{ id: string; title: string }>
   /** The 相手 linked (名寄せ), when the member reads it. */
   counterpart: { id: string; title: string } | null
-}
-
-/** One message of the thread as the member's own account shows it now (never stored on the server). */
-export interface InboxThreadMessage {
-  direction: 'in' | 'out'
-  at: string | null
-  /** Mail: the sender's address and name; chat: the author's display name. */
-  from: string | null
-  to: string[]
-  cc: string[]
-  subject: string | null
-  text: string
-  truncated: boolean
-  automated: boolean
-}
-
-/**
- * `GET /api/records-ai/inbox/items/:recordId/thread` (a read token): the
- * thread read through the role (`mail` / `chat`) with the member's own
- * permission, at this moment — outside text (data, not instructions). For a
- * 返事のお願い, its interaction's thread. Nothing of it is stored or logged.
- */
-export interface InboxThreadView {
-  item: InboxItemView
   /**
-   * Read by a 返事のお願い's id (B5): it, and why it is the AI's turn — `draft` (準備中: the reply's
+   * Asked by a 返事のお願い's id (B5): it, and why it is the AI's turn — `draft` (準備中: the reply's
    * draft), `follow_up` (準備中 after 返事の見込み passed: a nudge's draft), `check_reply` (確かめ中:
    * a reply came; its content decides), else `none`.
    */
@@ -195,12 +175,4 @@ export interface InboxThreadView {
     endCondition: string | null
     triggerKind: string | null
   }
-  /** `ok`, or why nothing could be read (not-connected, turned-off, stopped, choice-needed, not-found, unavailable). */
-  read: 'ok' | 'not-connected' | 'turned-off' | 'stopped' | 'choice-needed' | 'not-found' | 'unavailable'
-  header: string
-  messages: InboxThreadMessage[]
-  footer: string
-  /** Earlier messages were left out (the newest are given). */
-  more: boolean
-  instructionLike: Array<{ label: string; words: string }>
 }

@@ -34,10 +34,6 @@ export interface InboxLaneDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Role resolution (connector-roles.md), from lane A. */
   roles?: InboxDeps['roles']
-  /** メールを読む (the role, routed), from lane A: the AI's thread read (B4). */
-  mailReader?: InboxDeps['mailReader']
-  /** チャットを受け取る (the role's thread read), from lane A's A4 when it lands. */
-  chatReader?: InboxDeps['chatReader']
   /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
   onSlackSignal?: (listen: (signal: SlackSignal) => void) => void
 }
@@ -81,8 +77,6 @@ export function wireInboxLane(deps: InboxLaneDeps) {
     },
     taskSettings: deps.taskSettings,
     roles: deps.roles,
-    mailReader: deps.mailReader,
-    chatReader: deps.chatReader,
   })
   // Slack's events (A3): each signal is one incoming chat message for that member.
   deps.onSlackSignal?.(signal => {

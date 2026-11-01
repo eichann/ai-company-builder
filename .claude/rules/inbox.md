@@ -59,8 +59,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   exactly one company. Created by the service writer as `INBOX_ACTOR` (`acb:inbox`, external)
   directly in its state (`state`); 届いた (the AI's turn) and やることにしなかった tell nobody
   (`quiet`, signal only); 確認待ち tells its owner (`intake_unsure`).
-- **Each message keeps its pointer** (`inbox_messages.source_ref`, B4; rows from before it fall
-  back to the interaction's `source_ref` for the first message): the AI reads the thread by them.
+- **Each message keeps its pointer** (`inbox_messages.source_ref`, B4; null for rows from before
+  it): pointers only, for later reads by message.
 - **The member's own reply** (B4). Slack sends the member's own message in a DM or a thread as an
   `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). A Slack DM is seldom
   threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
@@ -103,23 +103,20 @@ company's 目安 (`task-settings.ts` `replyTarget`: 翌営業日 / 当日中 + c
 sentence it came from, `end_condition`, links `interaction`, `counterpart`, `bundle`; the
 interaction → `handled`. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
 `PERSON_DECIDED`) when a person's 「やることにする」 / 「自分の担当にする」 put it back into
-`received`; `unsure` → 確認待ち. `GET /items/:recordId` (read) answers the pointers the PC reads the
-thread by (channel, `thread_ref`, `source_ref`, the message ids) — never a body — plus its
-state and version, the tasks and open reply requests made for it and its 相手 (only what the
-member reads). `task` (B4) → `handled`: `taskId` must be a task the member reads whose
+`received`; `unsure` → 確認待ち. `GET /items/:recordId` (read) answers — for an interaction, or a
+返事のお願い and its interaction — the pointers (channel, `thread_ref`, `source_ref`, the message
+ids; never a body), its state and version, the tasks and open reply requests made for it and its 相手 (only what the
+member reads), and for a 返事のお願い `request` (its state, version and `purpose`, B5). `task` (B4) → `handled`: `taskId` must be a task the member reads whose
 `interaction` link is this message (the AI makes it with `records_create`, owner-only); a second
 run sees it in the view and reuses it. `reply` links the 相手 found now by 名寄せ when the message
 had none.
 
-`GET /items/:recordId/thread` (read; B4): the thread read **now** through the role with the
-member's own permission — mail: `mailReader.getMessage` per message pointer (`mailIdOf`: the part
-after the connector prefix), at most `THREAD_READ_MAX` (5) newest; chat: the `chat` role's reader
-(lane A's `ChatReader`, `composition.ts` `chatReader`: Slack `conversations.replies` with the
-member's own token; `InboxChatReader` is its shape) by `chatThreadOf(thread_ref)`. A 返事のお願い's id reads its interaction's thread.
-Answers `InboxThreadView`: `read` (`ok` or the role's failure word, never guessed around), the
-messages between `THREAD_TEXT_HEADER` / `FOOTER` (outside text: data, not instructions) and the
-instruction-like flags. **Nothing of it is stored or logged.** A business plugin's run may use it
-only when its step declares the `mail` / `chat` role (`connectorRoleRefusal`).
+**The thread itself** is read through A4's one AI route, `GET /api/records-ai/threads/:recordId`
+(`outbound-mail.md` "Replies": an interaction or a record linking one, read now with the member's
+own permission, a plugin step's run only with the role declared; nothing stored). The PC's
+`inbox_read` asks both — the item view here, then that thread — and shows the thread to the AI
+between `THREAD_TEXT_HEADER` / `FOOTER` (`intake-settings.ts`; outside text: data, not
+instructions) with instruction-like phrases flagged; not readable → the server's sentence why.
 
 ## The AI's turn on the PC (B4: `inbox-triage`)
 
@@ -148,7 +145,7 @@ side's text not quoted), `reply_request__finish_prep` (`links.prepared` = the dr
   prepared drafts are discarded. A first draft (準備中 not after a `wait_over`) stays.
 - **The PC's step** `client/shared/ai-turn-steps/follow-up.ts`: a `reply_request` in `preparing` or
   `checking` (no start mark; `claim.from` lists both). `inbox_read` with the request's id answers
-  `request.purpose` — `draft`, `follow_up`, `check_reply` — and the AI acts: the draft or nudge as
+  `item.request.purpose` — `draft`, `follow_up`, `check_reply` — and the AI acts: the draft or nudge as
   a reply in the thread (`mail_draft_create { interactionId }`, linked by `finish_prep`'s
   `links.prepared`), `ai_close` (answered / sent / accepted), `await_reply` (+
   `set_wait_until` for a promise such as 「明日送ります」: the clock follows it up), or `hand_over`
@@ -196,8 +193,8 @@ members, owner, admin; CC / several To / shared address / internal / free mail /
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; B4: the thread read through the role by the owner alone with nothing kept,
-the role's failures said, a reply request reads its message, a task counts only when it names the
+「やることにする」 wins; B4: the item view is the owner's alone and a reply request answers its
+message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is
 the person's; polling: first connection, 7-day read-back, the gap shown to its member
