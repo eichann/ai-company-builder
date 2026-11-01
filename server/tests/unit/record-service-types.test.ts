@@ -250,7 +250,7 @@ describe('decisions', () => {
     const closed = ok(await decisions.record(m('u-alice'), HUMAN, body({ folder: '秘書室' }))).record
     expect(ok(service.query(m('u-alice'), { type: 'decision' })).total).toBe(2)
     expect(ok(service.query(m('u-mallory'), { type: 'decision' })).records.map(x => x.id)).toEqual([r.record.id])
-    expect(service.get(m('u-mallory'), closed.id)).toEqual(service.get(m('u-mallory'), 'decision-zzzzzzzz'))
+    expect(await service.get(m('u-mallory'), closed.id)).toEqual(await service.get(m('u-mallory'), 'decision-zzzzzzzz'))
     // Another company's member with the same id sees neither.
     expect(ok(service.query(m('u-alice', 'b'), { type: 'decision' })).total).toBe(0)
   })

@@ -168,22 +168,6 @@ describe('index: type definitions', () => {
   })
 })
 
-describe('index: server-only types never come from files', () => {
-  it('a file claiming task or decision is reported and not indexed; the server record with that id is untouched', () => {
-    const records = source.forCompany('a').records
-    ensureCoreTypes(records, TS)
-    records.upsert({ id: 'task-srv00001', type: 'task', typeVersion: 2, scopeId: null, path: null, folder: '営業部', title: '見積を出す', summary: '', createdAt: TS, updatedAt: TS, removedAt: null })
-    push('a', {
-      '営業部/タスク/見積.md': record('task-srv00001', 'task', '別の件名'),
-      '営業部/意思決定/窓口.md': record('decision-file0001', 'decision', '窓口を3つにする'),
-    })
-    expect(records.find('task-srv00001')).toMatchObject({ path: null, folder: '営業部', title: '見積を出す', removedAt: null })
-    expect(records.find('decision-file0001')).toBeNull()
-    expect(records.problems(50).filter(p => p.kind === 'server_only_type').map(p => p.path).sort())
-      .toEqual(['営業部/タスク/見積.md', '営業部/意思決定/窓口.md'].sort())
-  })
-})
-
 describe('query: only what the caller may read', () => {
   it('a private folder’s records are absent from answers and counts for a member who cannot read it', () => {
     expect(query(owner('a'), { type: 'deal' }).total).toBe(3)
@@ -239,5 +223,21 @@ describe('across companies', () => {
     push('a', { '営業部/他社.md': record('deal-bdeal01', 'deal', 'a から b の id') })
     expect(source.forCompany('b').records.find('deal-bdeal01')).toMatchObject({ path: '営業部/商談/商談1.md', title: 'b 商談1 値引き' })
     expect(source.forCompany('a').records.find('deal-bdeal01')).toMatchObject({ title: 'a から b の id' })
+  })
+})
+
+describe('index: server-only types never come from files', () => {
+  it('a file claiming task or decision is reported and not indexed; the server record with that id is untouched', () => {
+    const records = source.forCompany('a').records
+    ensureCoreTypes(records, TS)
+    records.upsert({ id: 'task-srv00001', type: 'task', typeVersion: 2, scopeId: null, path: null, folder: '営業部', title: '見積を出す', summary: '', createdAt: TS, updatedAt: TS, removedAt: null })
+    push('a', {
+      '営業部/タスク/見積.md': record('task-srv00001', 'task', '別の件名'),
+      '営業部/意思決定/窓口.md': record('decision-file0001', 'decision', '窓口を3つにする'),
+    })
+    expect(records.find('task-srv00001')).toMatchObject({ path: null, folder: '営業部', title: '見積を出す', removedAt: null })
+    expect(records.find('decision-file0001')).toBeNull()
+    expect(records.problems(50).filter(p => p.kind === 'server_only_type').map(p => p.path).sort())
+      .toEqual(['営業部/タスク/見積.md', '営業部/意思決定/窓口.md'].sort())
   })
 })
