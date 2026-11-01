@@ -169,7 +169,7 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
       const body = call.body === undefined ? null : new TextEncoder().encode(JSON.stringify(call.body))
       let waitedInAll = 0
       for (let attempt = 0; ; attempt++) {
-        waitedInAll += await pace(`${companyId}|${plugin.pluginId}|${plugin.connectionId}`, isSearch)
+        waitedInAll += await pace(`${companyId}|${plugin.connectorId}|${plugin.connectionId}`, isSearch)
         const stop = await precheck()
         if (stop) return { ok: false, kind: 'not-sent', reason: stop }
         const key = await deps.reveal(companyId, plugin.keyId)

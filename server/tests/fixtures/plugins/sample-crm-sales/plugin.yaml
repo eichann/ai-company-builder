@@ -1,0 +1,34 @@
+# The business plugin using the fictional CRM (sample-crm): its deal /
+# customer types, how it uses the CRM, and its recommended mapping.
+id: sample-crm-sales
+label: 見本の CRM 営業
+version: 0.1.0
+kind: official
+contract: 1
+types: [deal, customer]
+connector: sample-crm >= 0.1.0
+
+objects:
+  deal: { record_type: deal }
+
+operations:
+  refresh_deal:
+    who: [viewer, ai]
+  update_deal:
+    who: [assignee, dept_manager, admin, ai]
+    note: optional
+    decision: true
+  add_note:
+    who: [assignee, dept_manager, admin, ai]
+  log_meeting:
+    who: [assignee, dept_manager, admin, ai]
+  create_deal:
+    who: [viewer, ai]
+
+field_policy_defaults:
+  next_step: auto
+  stage: off
+  confidence: auto
+  close_date: auto
+  amount: prior
+  closed: prior

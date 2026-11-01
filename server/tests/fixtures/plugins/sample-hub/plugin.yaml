@@ -1,8 +1,9 @@
-# A HubSpot-shaped package for the server's tests against the fake HubSpot
+# A HubSpot-shaped connector for the server's tests against the fake HubSpot
 # (milestone 3 P5 / P6; tests/fakes/hubspot). The real package lives in the
 # private acb-plugins repository (owner decision §6-6). HubSpot's dated API
 # paths (search and pipelines on 2026-09, the rest on 2026-03).
-# It only connects: the deal / customer types are sample-sales's (maps_to).
+# A company-wide shared part (owner decision 2026-11-01): it knows no business
+# plugin and no type — sample-sales uses it (`connector: sample-hub >= 0.1.0`).
 id: sample-hub
 label: 見本の HubSpot
 version: 0.1.0
@@ -20,11 +21,9 @@ scopes:
 operation_scopes:
   add_note: [crm.objects.contacts.read, crm.objects.contacts.write]
   log_meeting: [crm.objects.deals.write]
-maps_to: sample-sales@0.1.0
 
 objects:
   deal:
-    record_type: deal
     auto_properties: [hs_deal_stage_probability]
     get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
     search: { method: POST,  path: "/crm/objects/2026-09/deals/search" }
@@ -34,7 +33,6 @@ objects:
     properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
     stages_list:     { method: GET, path: "/crm/pipelines/2026-09/deals" }
   company:
-    record_type: customer
     get: { method: GET, path: "/crm/objects/2026-03/companies/{id}" }
   # Meetings: no get on purpose — a lost create is looked up by search (60 s after the send),
   # the path for an object whose unique-value property cannot be read directly (design §4-4).
@@ -42,8 +40,7 @@ objects:
     create:  { method: POST,   path: "/crm/objects/2026-03/meetings" }
     search:  { method: POST,   path: "/crm/objects/2026-03/meetings/search" }
     archive: { method: DELETE, path: "/crm/objects/2026-03/meetings/{id}" }
-  # The deal's contacts as mail recipients (outbound-mail.md): read only, no
-  # record type (people are never imported as records).
+  # A deal's contacts (outbound mail's recipients): read only.
   contact:
     get: { method: GET, path: "/crm/objects/2026-03/contacts/{id}" }
   note:
@@ -55,40 +52,30 @@ operations:
     label: HubSpot から最新を取る
     kind: read
     object: deal
-    who: [viewer, ai]
   update_deal:
-    label: 案件の欄を HubSpot に書き戻す
+    label: 取引の項目を HubSpot に書き戻す
     kind: update
     object: deal
-    fields: mapped
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: restore_previous
-    note: optional
-    decision: true
   add_note:
-    label: 案件にメモを残す
+    label: 取引にメモを残す
     kind: create
     object: note
     attach_to: deal
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
     content: { body: hs_note_body, at: hs_timestamp }
     association_type: 214
     correlation_property: acb_operation_id
-    policy: prior
-  # Milestone 4 (design §3-6): a meeting on the deal. Approval by default here; the company
-  # chooses `log_meeting: auto` in its mapping, with the acknowledgement.
+  # Milestone 4 (design §3-6): a meeting on the deal.
   log_meeting:
     label: 商談の記録を残す
     kind: create
     object: meeting
     attach_to: deal
-    who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
-    policy: prior
     content: { title: hs_meeting_title, body: hs_meeting_body, at: hs_timestamp, outcome: hs_meeting_outcome }
     association_type: 212
     correlation_property: acb_operation_id
@@ -97,16 +84,6 @@ operations:
     label: 取引を新しく作る
     kind: create
     object: deal
-    fields: mapped
-    who: [viewer, ai]
     reaches: internal
     undo: archive
     correlation_property: acb_operation_id
-
-field_policy_defaults:
-  next_step: auto
-  stage: prior
-  confidence: auto
-  close_date: auto
-  amount: prior
-  closed: prior

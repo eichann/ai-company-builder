@@ -192,13 +192,13 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: HUBSPOT_KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  const saved = await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step'] })
+  const saved = await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step'] })
   expect(saved.ok, JSON.stringify(saved)).toBe(true)
   const readers = await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['mn-sato', 'mn-tanaka', 'mn-yamada'] })
   expect(readers.ok, JSON.stringify(readers)).toBe(true)
   const enabled = await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })
   expect(enabled.ok, JSON.stringify(enabled)).toBe(true)
-  const imported = await services.pluginImport.run(owner, 'sample-hub')
+  const imported = await services.pluginImport.run(owner, 'sample-sales')
   expect(imported.ok, JSON.stringify(imported)).toBe(true)
   // The customer's domain came in with the import (the fixture's customer type v2, mapping `domain`).
   const customer = db.prepare("SELECT s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'customer' AND r.title = '株式会社サンプル'").get(CO) as Json

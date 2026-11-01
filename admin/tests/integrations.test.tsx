@@ -50,24 +50,34 @@ policy:
   amount: prior
 `
 
+/** The connector (owner decision 2026-11-01): a shared part with the key and who may read it; no mapping. */
 const pkg = {
-  id: 'hubspot', label: 'HubSpot', version: '0.2.0', kind: 'official' as const, role: 'connector' as const, description: null, service: 'hubspot', host: 'api.hubapi.com',
-  scopes: [], operationScopes: {}, types: [], operations: [], fingerprint: 'f', stopped: false,
-  mapsTo: { id: 'corporate-sales', version: '0.1.0', label: '法人営業' },
+  id: 'hubspot', label: 'HubSpot', version: '0.3.0', kind: 'official' as const, role: 'connector' as const, description: null, service: 'hubspot', host: 'api.hubapi.com',
+  scopes: [], operationScopes: {}, types: [], operations: [], fingerprint: 'f', stopped: false, connector: null,
 }
-/** The business the connector maps to (owner decision 2026-11-01): it owns the records' shape and connects to nothing. */
+/** The business using it: the records' shape, the mapping and the import. */
 const salesPkg = {
-  ...pkg, id: 'corporate-sales', label: '法人営業', version: '0.1.0', role: 'business' as const, service: '', host: '', types: ['deal', 'customer'], mapsTo: null,
+  ...pkg, id: 'corporate-sales', label: '法人営業', version: '0.2.0', role: 'business' as const, service: '', host: '', types: ['deal', 'customer'],
+  connector: { id: 'hubspot', minVersion: '0.3.0', label: 'HubSpot' },
 }
 const item: PluginListItem = {
   id: 'hubspot', versions: [pkg],
   install: {
-    version: '0.2.0', enabled: false, keyId: 'k1', mappingVersion: 1, connectionId: 'c1', accountId: null, managedSince: null,
+    version: '0.3.0', enabled: false, keyId: 'k1', mappingVersion: 0, connectionId: 'c1', accountId: null, managedSince: null,
     updatedAt: '2026-10-31T00:00:00.000Z', updatedBy: 'u_owner', problem: 'off',
   },
 }
 const detail: PluginDetail = {
-  plugin: item,
+  plugin: item, mapping: null, mappingVersions: [], policies: [], labels: {}, mappingErrors: [], autoAcknowledgements: [],
+  history: [{ action: 'install', at: '2026-10-31T00:00:00.000Z', by: 'u_owner', change: {} }],
+  readScope: { departmentIds: [], userIds: [] },
+}
+const salesItem: PluginListItem = {
+  id: 'corporate-sales', versions: [salesPkg],
+  install: { ...item.install!, version: '0.2.0', keyId: null, enabled: true, problem: null, mappingVersion: 1, connectionId: 'c2' },
+}
+const salesDetail: PluginDetail = {
+  plugin: salesItem,
   mapping: { version: 1, text: MAPPING, createdAt: '2026-10-31T00:00:00.000Z', createdBy: 'u_owner' },
   mappingVersions: [{ version: 1, createdAt: '2026-10-31T00:00:00.000Z', createdBy: 'u_owner' }],
   policies: [
@@ -112,11 +122,12 @@ const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
 })
 
 type Reply = { status?: number; body: unknown }
-function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call) => Reply)> = {}, practice = false) {
+function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call) => Reply)> = {}, practice = false, plugins: PluginListItem[] = [item]) {
   const routes = {
     ...companyRoutes(caps),
-    [`GET ${base}/plugins`]: { body: ok({ plugins: [item] }) },
+    [`GET ${base}/plugins`]: { body: ok({ plugins }) },
     [`GET ${base}/plugins/hubspot`]: { body: ok(detail) },
+    [`GET ${base}/plugins/corporate-sales`]: { body: ok(salesDetail) },
     [`GET ${base}/broker`]: { body: ok(broker(practice)) },
     [`GET ${base}/google`]: { body: ok(googleView({ configured: false, clientId: null, secretLast4: null, domain: null, enabled: false, grants: [] })) },
     ...extra,
@@ -158,7 +169,7 @@ describe('the table view of the mapping', () => {
     expect(r2.ok && ((r2.value as Record<string, Record<string, Record<string, Record<string, unknown>>>>).deal.fields.amount.write)).toBe(false)
 
     // A policy the text leaves to the package's defaults shows what the server says is in force.
-    const fromServer = mappingRows(MAPPING, detail.policies)
+    const fromServer = mappingRows(MAPPING, salesDetail.policies)
     expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'next_step')?.choice).toBe('auto')
     expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'stage')?.priorOnly).toBe(true)
   })
@@ -181,6 +192,13 @@ describe('つなぎ先', () => {
     renderInCompany(<IntegrationsPage />)
     expect(await screen.findByRole('option', { name: `営業の HubSpot（末尾 ${SECRET.slice(-4)}）` })).toBeInTheDocument()
     expect(await screen.findByText(/練習用の HubSpot につながっています/)).toBeInTheDocument()
+    const text = document.body.textContent ?? ''
+    for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
+  })
+
+  it("the business's mapping as a table: each field by its Japanese name, the stage never automatic, no jargon", async () => {
+    stubApi(ownerCapabilities, {}, false, [salesItem])
+    renderInCompany(<IntegrationsPage />)
     // The mapping table arrives with the detail (its own request).
     expect(await screen.findByText('受注・失注につながるため、自動にはできません')).toBeInTheDocument()
     const stage = screen.getByRole('combobox', { name: 'stage の書き戻し' })
@@ -195,15 +213,15 @@ describe('つなぎ先', () => {
   it('an automatic field is saved only after the workflow check is ticked, then sent as acknowledgeAuto', async () => {
     const saves: Call[] = []
     const calls = stubApi(ownerCapabilities, {
-      [`PUT ${base}/plugins/hubspot/mapping`]: (call) => {
+      [`PUT ${base}/plugins/corporate-sales/mapping`]: (call) => {
         saves.push(call)
         const body = call.body as { acknowledgeAuto: string[] }
         if (!body.acknowledgeAuto.includes('confidence')) {
           return { status: 400, body: { error: 'x', code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['confidence'], acknowledgement: 'この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました' } }
         }
-        return { body: ok({ ...detail, mapping: { ...detail.mapping!, version: 2, text: (call.body as { text: string }).text } }) }
+        return { body: ok({ ...salesDetail, mapping: { ...salesDetail.mapping!, version: 2, text: (call.body as { text: string }).text } }) }
       },
-    })
+    }, false, [salesItem])
     renderInCompany(<IntegrationsPage />)
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'confidence の書き戻し' }), 'auto')
     await userEvent.click(screen.getByRole('button', { name: '保存（新しい版にする）' }))
@@ -222,10 +240,10 @@ describe('つなぎ先', () => {
 
   it('「HubSpot に聞いて確かめる」 sends the text being edited and shows what does not match', async () => {
     const calls = stubApi(ownerCapabilities, {
-      [`POST ${base}/plugins/hubspot/mapping/check`]: () => ({
+      [`POST ${base}/plugins/corporate-sales/mapping/check`]: () => ({
         body: ok({ reachable: true, reason: null, checkedAt: '2026-10-31T00:00:00.000Z', objects: { deal: { errors: ['欄「next_step」の項目「hs_next_stepp」は、つなぎ先にありません'], warnings: [] } } }),
       }),
-    })
+    }, false, [salesItem])
     renderInCompany(<IntegrationsPage />)
     const input = await screen.findByRole('textbox', { name: 'next_step の HubSpot の項目' })
     await userEvent.clear(input)
@@ -240,8 +258,8 @@ describe('つなぎ先', () => {
 
   it('when HubSpot cannot be asked it says so in plain words', async () => {
     stubApi(ownerCapabilities, {
-      [`POST ${base}/plugins/hubspot/mapping/check`]: { body: ok({ reachable: false, reason: 'key-rejected', checkedAt: '2026-10-31T00:00:00.000Z', objects: {} }) },
-    })
+      [`POST ${base}/plugins/corporate-sales/mapping/check`]: { body: ok({ reachable: false, reason: 'key-rejected', checkedAt: '2026-10-31T00:00:00.000Z', objects: {} }) },
+    }, false, [salesItem])
     renderInCompany(<IntegrationsPage />)
     await userEvent.click(await screen.findByRole('button', { name: 'HubSpot に聞いて確かめる' }))
     expect(await screen.findByText(/HubSpot に聞けませんでした：鍵が受け付けられませんでした/)).toBeInTheDocument()
@@ -272,48 +290,81 @@ describe('つなぎ先', () => {
   })
 })
 
-describe('つなぎ先 and the business it needs (owner decision 2026-11-01)', () => {
-  const salesItem: PluginListItem = {
-    id: 'corporate-sales', versions: [salesPkg],
-    install: { ...item.install!, version: '0.1.0', keyId: null, enabled: true, problem: null, mappingVersion: 0 },
-  }
-  const salesDetail: PluginDetail = { ...detail, plugin: salesItem, mapping: null, mappingVersions: [], policies: [], labels: {}, history: [] }
-
-  it('a connector says plainly which business must be used and on first', async () => {
-    stubApi(ownerCapabilities)
+describe('つなぎ先 and the business using it, each on its own (owner decision 2026-11-01)', () => {
+  it('a connector shows its key, readers and switch, no mapping or import, and names no business', async () => {
+    const calls = stubApi(ownerCapabilities)
     renderInCompany(<IntegrationsPage />)
-    expect(await screen.findByText(/先に「法人営業」（0\.1\.0）を使い始めて、オンにしてください/)).toBeInTheDocument()
-    expect(screen.getByText(/「法人営業」を止めると、このつなぎ先の取り込みと書き戻しも止まります/)).toBeInTheDocument()
+    expect(await screen.findByRole('combobox', { name: '鍵' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'HubSpot を読める人' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取り込む' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'HubSpot に聞いて確かめる' })).toBeNull()
+    expect(screen.getByText(/このつなぎ先を使うすべての業務の取り込みと書き戻しが、次の1回から止まります/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/先に「法人営業」/)
+    expect(calls.some((c) => c.url.includes('/mapping'))).toBe(false)
   })
 
-  it('installing the connector before the business: the server names what is needed, nothing else is said', async () => {
-    const fresh: PluginListItem = { ...item, install: null }
-    const sentence = '先に「法人営業」（0.1.0）を入れてオンにしてください（このつなぎ先は「法人営業」の記録を読み書きします）'
+  it('a business says whether it is connected; while the connector is stopped it says so plainly and its records stay', async () => {
+    const stopped: PluginListItem = { ...salesItem, install: { ...salesItem.install!, problem: 'connector-stopped' } }
     stubApi(ownerCapabilities, {
-      [`GET ${base}/plugins`]: { body: ok({ plugins: [fresh] }) },
-      [`GET ${base}/plugins/hubspot`]: { body: ok({ ...detail, plugin: fresh, mapping: null }) },
-      [`PUT ${base}/plugins/hubspot`]: { status: 409, body: { error: sentence, code: 'BUSINESS_PLUGIN_REQUIRED', plugin: 'corporate-sales', version: '0.1.0' } },
-    })
+      [`GET ${base}/plugins/corporate-sales`]: { body: ok({ ...salesDetail, plugin: stopped }) },
+    }, false, [stopped])
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByText('HubSpot との行き来は止まっています：つなぎ先がオフか、止まっています。記録はそのまま使えます。')).toBeInTheDocument()
+    expect(screen.getByText('使っています')).toBeInTheDocument()
+    expect(screen.getByText('案件や顧客などの記録を扱う業務です（外のサービスとは「HubSpot」でつなぎます）')).toBeInTheDocument()
+    // No key or readers of its own: those are the connector's.
+    expect(screen.queryByRole('combobox', { name: '鍵' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'HubSpot を読める人' })).toBeNull()
+    expect(screen.getByRole('button', { name: '取り込む' })).toBeDisabled()
+    const text = document.body.textContent ?? ''
+    for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
+  })
+
+  it('a business not yet used says its records come at once and what the exchange with HubSpot needs', async () => {
+    const fresh: PluginListItem = { ...salesItem, install: null }
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins/corporate-sales`]: { body: ok({ ...salesDetail, plugin: fresh, mapping: null }) },
+    }, false, [fresh])
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByText(/使い始めると、すぐに案件や顧客などの記録が使えます。HubSpot との行き来（取り込みと書き戻し）には、「HubSpot」（0\.3\.0 以上）も使い始めて、オンにしてください/)).toBeInTheDocument()
+  })
+
+  it("saving the mapping before the connector is there: the server's sentence names what is needed", async () => {
+    const sentence = '先に「HubSpot」（0.3.0 以上）を入れてください（読み替え表は「HubSpot」の項目と照らし合わせます）'
+    stubApi(ownerCapabilities, {
+      [`PUT ${base}/plugins/corporate-sales/mapping`]: { status: 409, body: { error: sentence, code: 'CONNECTOR_REQUIRED', plugin: 'hubspot', minVersion: '0.3.0' } },
+    }, false, [salesItem])
     const error = vi.spyOn(toast, 'error')
     renderInCompany(<IntegrationsPage />)
-    await userEvent.click(await screen.findByRole('button', { name: '使い始める' }))
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'amount の書き戻し' }), 'read')
+    await userEvent.click(screen.getByRole('button', { name: '保存（新しい版にする）' }))
     await waitFor(() => expect(error).toHaveBeenCalledWith('保存できませんでした', { description: sentence }))
   })
 
-  it('the business shows only its version and switch: no key, readers, mapping or import; no jargon', async () => {
+  it('another HubSpot account found by the import: a new connection is started on the connector', async () => {
     const calls = stubApi(ownerCapabilities, {
-      [`GET ${base}/plugins`]: { body: ok({ plugins: [salesItem] }) },
-      [`GET ${base}/plugins/corporate-sales`]: { body: ok(salesDetail) },
-    })
+      [`POST ${base}/plugins/corporate-sales/import`]: { status: 409, body: { error: 'x', code: 'ACCOUNT_CHANGED' } },
+      [`POST ${base}/plugins/hubspot/connection/renew`]: { body: ok({ connectionId: 'c3' }) },
+    }, false, [salesItem])
+    renderInCompany(<IntegrationsPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '取り込む' }))
+    await userEvent.click(await screen.findByRole('button', { name: '新しいつなぎ先として始める' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '新しく始める' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/plugins/hubspot/connection/renew'))).toBe(true))
+    expect(calls.some((c) => c.url.endsWith('/plugins/corporate-sales/connection/renew'))).toBe(false)
+  })
+
+  it('a business inside ACB only shows its version and switch: no key, readers, mapping or import', async () => {
+    const acbOnly: PluginListItem = { ...salesItem, id: 'minutes-pack', versions: [{ ...salesPkg, id: 'minutes-pack', label: '会議の記録', connector: null }], install: { ...salesItem.install!, mappingVersion: 0 } }
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins/minutes-pack`]: { body: ok({ ...salesDetail, plugin: acbOnly, mapping: null, mappingVersions: [], policies: [], labels: {} }) },
+    }, false, [acbOnly])
     renderInCompany(<IntegrationsPage />)
     expect(await screen.findByText('案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '版' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '鍵' })).toBeNull()
     expect(screen.queryByRole('button', { name: '取り込む' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'HubSpot に聞いて確かめる' })).toBeNull()
-    expect(screen.getByText(/これを使うつなぎ先（HubSpot など）の取り込みと書き戻しも、次の1回から止まります/)).toBeInTheDocument()
-    const text = document.body.textContent ?? ''
-    for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
     expect(calls.some((c) => c.url.includes('/read-scope') || c.url.includes('/mapping'))).toBe(false)
   })
 })

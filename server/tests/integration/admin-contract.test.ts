@@ -393,13 +393,13 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
 
   it('つなぎ先 (connector plugins)', async () => {
     await expectShape('Plugins', USERS.owner, 'GET', `${base}/plugins`)
-    // The business plugin the connector maps to comes first (owner decision 2026-11-01).
+    // A business plugin and the connector it uses, each on its own (owner decision 2026-11-01).
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales`, { version: '0.1.0', keyId: null })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales/enabled`, { enabled: true })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub`, { version: '0.1.0', keyId: null })
     await expectShape('Plugin', USERS.owner, 'GET', `${base}/plugins/sample-hub`)
-    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
-    await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-hub/mapping/restore`, { version: 1 })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
+    await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-sales/mapping/restore`, { version: 1 })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/read-scope`, { departmentIds: [], userIds: [USERS.owner] })
   })
@@ -570,14 +570,14 @@ describe('the admin console\'s requests do what the admin means on the server', 
     await A.pluginsApi.install(CO, 'sample-hub', '0.1.0', null)
     expect(row('SELECT version, key_id FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub')).toEqual({ version: '0.1.0', key_id: null })
     const text = CONTRACT_MAPPING.replace('amount:    { from: amount, write: true }', 'amount:    { from: amount, write: false }')
-    const saved = await A.pluginsApi.saveMapping(CO, 'sample-hub', text, ['next_step'])
-    expect(row('SELECT text FROM plugin_mappings WHERE company_id = ? AND plugin_id = ? AND version = ?', CO, 'sample-hub', saved.mapping!.version).text).toBe(text)
-    expect(row('SELECT acknowledged_by FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? AND field = ?', CO, 'sample-hub', 'next_step').acknowledged_by).toBe(USERS.owner)
-    const restored = await A.pluginsApi.restoreMapping(CO, 'sample-hub', saved.mapping!.version - 1)
+    const saved = await A.pluginsApi.saveMapping(CO, 'sample-sales', text, ['next_step'])
+    expect(row('SELECT text FROM plugin_mappings WHERE company_id = ? AND plugin_id = ? AND version = ?', CO, 'sample-sales', saved.mapping!.version).text).toBe(text)
+    expect(row('SELECT acknowledged_by FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? AND field = ?', CO, 'sample-sales', 'next_step').acknowledged_by).toBe(USERS.owner)
+    const restored = await A.pluginsApi.restoreMapping(CO, 'sample-sales', saved.mapping!.version - 1)
     expect(restored.mapping!.version).toBe(saved.mapping!.version + 1)
     // 「HubSpot に聞いて確かめる」 and the import reach their routes (no key chosen: refused before anything is sent).
-    await expect(A.pluginsApi.checkMapping(CO, 'sample-hub', text)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY', body: { problem: 'no-key' } })
-    await expect(A.pluginsApi.import(CO, 'sample-hub')).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_ACTIVE' })
+    await expect(A.pluginsApi.checkMapping(CO, 'sample-sales', text)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY', body: { problem: 'no-key' } })
+    await expect(A.pluginsApi.import(CO, 'sample-sales')).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_ACTIVE' })
     await expect(A.pluginsApi.setEnabled(CO, 'sample-hub', true)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY' })
     expect((await A.pluginsApi.setReadScope(CO, 'sample-hub', { departmentIds: [], userIds: [USERS.owner] })).readScope).toEqual({ departmentIds: [], userIds: [USERS.owner] })
     expect(row('SELECT enabled FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub').enabled).toBe(0)

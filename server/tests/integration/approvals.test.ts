@@ -90,9 +90,9 @@ const fixedRows = (id: string) => db.prepare('SELECT version, hash FROM fixed_pa
 /** The member's AI asks to change a deal's amount: an approval request (202). */
 async function aiAsksAmount(externalId: string, amount: number, note = '先方が対象を広げたいと言ったため（議事録の引用）') {
   const id = recordOf(externalId)
-  await call({ user: 'ap-member', method: 'POST', path: `/api/companies/${CO}/plugins/sample-hub/records/${id}/operations/refresh_deal`, body: {} })
+  await call({ user: 'ap-member', method: 'POST', path: `/api/companies/${CO}/plugins/sample-sales/records/${id}/operations/refresh_deal`, body: {} })
   const r = await call({
-    token: await tokenFor('ap-member'), method: 'POST', path: `/api/records-ai/plugins/sample-hub/records/${id}/operations/update_deal`,
+    token: await tokenFor('ap-member'), method: 'POST', path: `/api/records-ai/plugins/sample-sales/records/${id}/operations/update_deal`,
     body: { expectedVersion: versionOf(id), fields: { amount }, note },
   })
   expect(r.status).toBe(202)
@@ -154,10 +154,10 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
+  expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['ap-member'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
-  expect((await services.pluginImport.run(owner, 'sample-hub')).ok).toBe(true)
+  expect((await services.pluginImport.run(owner, 'sample-sales')).ok).toBe(true)
 })
 
 afterAll(async () => {
@@ -205,7 +205,7 @@ describe('making a request', () => {
     const id = recordOf('1000000002')
     const stopped = vi.spyOn(services.agentStops, 'companyStopped').mockReturnValue(true)
     try {
-      const r = await services.approvals.request({ companyId: CO, userId: 'ap-member', role: 'member' }, { kind: 'ai', source: 'claude-code' }, 'sample-hub', id, 'update_deal', { expectedVersion: versionOf(id), fields: { amount: 900000 }, note: 'x' })
+      const r = await services.approvals.request({ companyId: CO, userId: 'ap-member', role: 'member' }, { kind: 'ai', source: 'claude-code' }, 'sample-sales', id, 'update_deal', { expectedVersion: versionOf(id), fields: { amount: 900000 }, note: 'x' })
       expect(r).toMatchObject({ ok: false, body: { code: 'ACB_STOPPED' } })
     } finally { stopped.mockRestore() }
   })

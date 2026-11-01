@@ -487,7 +487,7 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `client/shared/record-actions.ts` `recordActionChoices` lists the actions that can start from a
   record's state. The push channel's `records` event reaches the app's `onRecords` listener
   (`wireAgentControl`), which only re-asks for received minutes (`minutes.md` "The app").
-- Connector plugins' operations become tools on the same server (`hubspot__update_deal`; writes
+- A business plugin's use of its connector becomes tools on the same server (`corporate-sales__update_deal`, named by the business plugin; writes
   only with an `act` token) and an update's outcome a card in the reply: `plugins.md` "The app".
 - Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);
   pushing an action's attached files before calling it (0.18-1 — the tools send no
@@ -515,7 +515,7 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   this entry (`recordId: null`, the requester as actor, a decision when approved); a meeting
   logged on a deal adds an entry **without field changes** (`entryWithoutChanges`) to the deal's
   ledger, its receipt naming the meeting — the version goes up, nothing else changes.
-- A business plugin's types (`plugins.md` "Two roles"; written by its connector's import) are stored with source `plugin` (`record_types.source`; a table made
+- A business plugin's types (`plugins.md` "Two roles"; written when it is turned on, and by its import for a newer version) are stored with source `plugin` (`record_types.source`; a table made
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
 

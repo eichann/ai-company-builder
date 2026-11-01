@@ -446,12 +446,12 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/plugins/:pluginId/mapping', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping`, body: { text: 'deal: {}' } }), w => w.other.plugin, 'no-such-plugin'),
   x('PUT /api/companies/:companyId/plugins/:pluginId/read-scope', (w, id) => ({ path: `${C(w)}/plugins/${id}/read-scope`, body: { userIds: [] } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/import', (w, id) => ({ path: `${C(w)}/plugins/${id}/import`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
-  x('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', (w, id) => ({ path: `${C(w)}/plugins/other-crm/records/${id}/operations/update_deal`, body: { expectedVersion: 1, fields: { next_step: '乗っ取り' } } }), w => w.other.record, 'deal-nosuch01'),
-  x('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}` }), w => w.other.operation, 'no-such-op'),
-  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/undo`, body: {} }), w => w.other.operation, 'no-such-op'),
-  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', (w, id) => ({ path: `${C(w)}/plugins/other-sales/records/${id}/operations/update_deal`, body: { expectedVersion: 1, fields: { next_step: '乗っ取り' } } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}` }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/undo`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', (w, id) => ({ path: `${C(w)}/plugins/${id}/create/create_deal`, body: { title: '乗っ取り', fields: {} } }), w => w.other.plugin, 'no-such-plugin'),
-  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/text', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/text` }), w => w.other.record, 'minutes-nosuch01'),
   x('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/deal`, body: { dealId: id } }), w => w.other.record, 'minutes-nosuch01'),
   x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
@@ -644,23 +644,23 @@ async function seed(): Promise<World> {
   db.prepare("INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at) VALUES ('rt-other-1', ?, ?, 'hash-other', 'act', 'claude', 'conv', ?, ?)")
     .run(other, otherMember, expires, expires)
 
-  // The shelf: a package only the other company may use, installed there (with its mapping).
+  // The shelf: a connector and the business plugin using it, both only for the other company, installed there
+  // (the business plugin with its recommended mapping; owner decision 2026-11-01).
   const { cpSync, readFileSync: readText } = await import('fs')
   cpSync(join(__dirname, '../fixtures/plugins/sample-crm'), join(shelfDir, 'other-crm@0.1.0'), { recursive: true })
   const manifest = join(shelfDir, 'other-crm@0.1.0/plugin.yaml')
   writeFileSync(manifest, readText(manifest, 'utf8').replace('id: sample-crm', 'id: other-crm') + `\navailable_to: [${other}]\n`)
-  // The business plugin it maps to (owner decision 2026-11-01), also only for the other company.
-  cpSync(join(__dirname, '../fixtures/plugins/sample-sales'), join(shelfDir, 'sample-sales@0.1.0'), { recursive: true })
-  const business = join(shelfDir, 'sample-sales@0.1.0/plugin.yaml')
-  writeFileSync(business, readText(business, 'utf8') + `available_to: [${other}]\n`)
+  cpSync(join(__dirname, '../fixtures/plugins/sample-crm-sales'), join(shelfDir, 'other-sales@0.1.0'), { recursive: true })
+  const business = join(shelfDir, 'other-sales@0.1.0/plugin.yaml')
+  writeFileSync(business, readText(business, 'utf8').replace('id: sample-crm-sales', 'id: other-sales').replace('connector: sample-crm >=', 'connector: other-crm >=') + `available_to: [${other}]\n`)
   await services.pluginShelf.load()
   const otherOwner = { companyId: other, userId: USER.outsider, role: 'owner' }
-  if (!(await services.plugins.install(otherOwner, 'sample-sales', { version: '0.1.0', keyId: null })).ok) throw new Error('business plugin')
-  const installed = await services.plugins.install(otherOwner, 'other-crm', { version: '0.1.0', keyId: null })
+  if (!(await services.plugins.install(otherOwner, 'other-crm', { version: '0.1.0', keyId: null })).ok) throw new Error('connector')
+  const installed = await services.plugins.install(otherOwner, 'other-sales', { version: '0.1.0', keyId: null })
   if (!installed.ok) throw new Error(`plugin: ${JSON.stringify(installed)}`)
   db.prepare(`INSERT INTO plugin_operations (company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object,
     external_id, record_id, actor_id, actor_kind, state, fields, written, previous, created_at, updated_at)
-    VALUES (?, 'op-other-1', 'other-crm', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
+    VALUES (?, 'op-other-1', 'other-sales', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
     .run(other, USER.outsider, expires, expires)
   // An approval request of the other company, waiting for its owner.
   db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, 'approval-other001', 'approval', '金額の変更', ?, ?)").run(other, expires, expires)
@@ -702,7 +702,7 @@ async function seed(): Promise<World> {
       invitation: otherInv.id,
       record: 'deal-other001',
       recordToken: 'rt-other-1',
-      plugin: 'other-crm',
+      plugin: 'other-sales',
       operation: 'op-other-1',
       googleGrant: otherMember,
       approval: 'approval-other001',

@@ -26,12 +26,16 @@ export type PluginProblem =
   | 'mapping-invalid'
   /** A field would write automatically without the recorded acknowledgement (no HubSpot workflow is triggered by it). */
   | 'auto-not-acknowledged'
-  /** A connector: the business plugin it maps to (`maps_to`) is not installed at that exact version. */
-  | 'business-missing'
-  /** A connector: the business plugin it maps to is installed but does not run (off, stopped, changed, not on the shelf). */
-  | 'business-stopped'
-  /** A business plugin: it owns types and connects to nothing (no import, relay, mapping or operations). */
-  | 'not-a-connector'
+  /** A business plugin: the connector it uses is not installed (or not at a version it accepts, or no longer on the shelf). */
+  | 'connector-missing'
+  /** A business plugin: its connector is installed but does not run (off, stopped by the operator, its package changed). */
+  | 'connector-stopped'
+  /** A business plugin: the installed connector version lacks an object or operation it uses. */
+  | 'connector-mismatch'
+  /** A business plugin that uses no connector: it works inside ACB only (no import, mapping or operations). */
+  | 'no-connector'
+  /** A connector asked for what only a business plugin has (import, mapping, operations on records). */
+  | 'not-a-business'
 
 export interface PluginOperationView {
   name: string
@@ -46,7 +50,7 @@ export interface PluginPackageView {
   label: string
   version: string
   kind: PluginKind
-  /** `connector` (talks to one outside system, owns no type) or `business` (owns types, talks to nothing). */
+  /** `connector` (talks to one outside system, owns no type) or `business` (owns types, may use one connector). */
   role: PluginRole
   description: string | null
   /** The key broker's service whose company key it uses ('' for a business plugin). */
@@ -58,10 +62,12 @@ export interface PluginPackageView {
   /** The types it owns (a business plugin); a connector owns none. */
   types: string[]
   /**
-   * A connector: the business plugin version it needs installed and on first
-   * (its label from the shelf as this company sees it; the id when not there).
+   * A business plugin: the connector it can use and the oldest version it
+   * accepts (the connector's label from the shelf as this company sees it;
+   * the id when not there). null for a connector and for a business plugin
+   * that works inside ACB only.
    */
-  mapsTo: { id: string; version: string; label: string } | null
+  connector: { id: string; minVersion: string; label: string } | null
   operations: PluginOperationView[]
   fingerprint: string
   /** Stopped for every company by the operator. */
