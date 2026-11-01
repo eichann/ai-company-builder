@@ -4,18 +4,8 @@
 // becomes after a run. The hook (hooks/useAiTurnRunner.ts) only carries them out.
 import { agentCan } from '../../../shared/agents/registry'
 import type { AiTurnItemView, AutoTurnSettings } from '../../../shared/ai-turns'
+import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 import type { RateLimitSnapshot } from '../../../shared/rate-limits'
-
-/** A record waiting for the member's AI (today: received minutes). */
-export interface AiTurnCandidate {
-  id: string
-  title: string
-  version: number
-  /** When it is due (ISO), if the record has a due date. */
-  dueAt?: string | null
-  /** The meeting's time (ISO) for minutes. */
-  meetingAt?: string | null
-}
 
 /** What the runner remembers per member and company (localStorage; lost = a fresh day). */
 export interface AiTurnLog {
@@ -254,28 +244,4 @@ export function aiTurnNoticeText(wait: AiTurnWait, ctx: { log: AiTurnLog; settin
     default:
       return null
   }
-}
-
-/**
- * The first message of an automatic minutes reading (the app's, not the
- * member's words). The app already marked the start (its claim), and no one
- * is watching: the AI must end with finish_reading or fail_reading. The run
- * has no records_get, so the message names the record's version after the
- * start (`version`, from the claim; null when the server did not say).
- */
-export function autoMinutesFirstMessage(base: string, version: number | null): string {
-  return [
-    '（アプリが AI の番として自動で始めた相談です。私はいま画面を見ていません。）',
-    '',
-    base,
-    '',
-    '自動で進めるときの決まり：',
-    '- 読み始めの印（meeting__start_reading）はアプリがつけました。もう一度つけないでください。',
-    ...(version !== null
-      ? [`- 読み始めの印をつけたあとの会議の version は ${version} です。会議の操作（meeting__finish_reading など）の expectedVersion にはこれを使い、minutes_link_bundle でまとまりをつないだら、その答えの version を使ってください。`]
-      : ['- 会議の操作（meeting__finish_reading など）の expectedVersion には、minutes_read の答えの version を使ってください。']),
-    '- 「ほかの人が先に変えました」と断られたら、その答えの version でもう一度だけ試してください。',
-    '- どのまとまり（案件など）の会議か決まらないときや私に聞きたいことがあるときは、作業を止めずに、最後に私へのお願いとしてまとめてください。',
-    '- 最後に必ず meeting__finish_reading（読めなかったときは meeting__fail_reading）にしてください。',
-  ].join('\n')
 }

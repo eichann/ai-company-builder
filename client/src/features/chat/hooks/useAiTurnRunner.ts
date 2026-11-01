@@ -1,13 +1,14 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AiTurnItemsView, AiTurnItemView, AutoTurnSettings } from '../../../../shared/ai-turns'
-import { minutesConsultationTitle, minutesFirstMessage, type MinutesNotice } from '../../../../shared/minutes-app'
+import { aiTurnStepForRecord } from '../../../../shared/ai-turn-steps/registry'
+import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
 import { claimAiTurn, getAutoTurnSettings, retryAiTurn, settleAiTurn } from '../api'
 import {
-  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, autoMinutesFirstMessage, handUrgent, handedOver, logForToday,
+  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, handUrgent, handedOver, logForToday,
   nextAiTurn, recordOutcome, recordStarted, resumed, retried, usageLimitReached, usagePauseUntil, type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -30,8 +31,8 @@ interface Running {
 export interface AiTurnRunnerOptions {
   companyId: string
   userId: string
-  /** Received minutes waiting for the member's AI (「AI の番」), from main's minutes check. */
-  queue: readonly MinutesNotice[]
+  /** Records waiting for the member's AI (「AI の番」) whose kind has a step (`aiTurnQueue`, ai-turn-steps/registry.ts). */
+  queue: readonly AiTurnCandidate[]
   authMode: string
   /** The chosen AI is installed and signed in (the chat's setup check). */
   agentReady: boolean
@@ -86,8 +87,10 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     running.current = null
   }, [latest, loadLog, saveLog])
 
-  const start = useCallback((notice: MinutesNotice, now: number) => {
+  const start = useCallback((notice: AiTurnCandidate, now: number) => {
     const o = latest.current
+    const step = aiTurnStepForRecord(notice.id)
+    if (!step) return
     const tabId = o.openBackgroundTab()
     const run: Running = { recordId: notice.id, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false }
     running.current = run
@@ -95,9 +98,9 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     pass.current.started += 1
     o.deliver(tabId, {
       kind: 'aiTurn',
-      step: 'minutes-reading',
-      title: minutesConsultationTitle(notice),
-      minutesId: notice.id,
+      step: step.step,
+      title: step.consultationTitle(notice),
+      ...(step.linksMinutes ? { minutesId: notice.id } : {}),
       claim: async (conversationId: string) => {
         const result = await claimAiTurn(o.companyId, notice.id, notice.version, conversationId).catch(() => ({ claimed: false as const, reason: 'unavailable' as const }))
         if (running.current !== run) return null
@@ -111,7 +114,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
         run.phase = 'running'
         run.since = Date.now()
         // The message names the version the claim left the record at (the AI cannot look it up).
-        return { message: autoMinutesFirstMessage(minutesFirstMessage(notice), result.version) }
+        return { message: step.firstMessage(notice, result.version) }
       },
     })
   }, [latest, loadLog, saveLog])

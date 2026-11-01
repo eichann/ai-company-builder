@@ -1,7 +1,7 @@
 // 「AI の番」 run automatically (stage 2 S10, .claude/rules/ai-turns.md): main's
 // part. The run is a hidden consultation in the main window; here main only
 //   - claims the record before the AI starts: the type's first AI action
-//     (meeting: start_reading) with a record token of that consultation, at the
+//     (its step's `claim`, ai-turn-steps/; meeting: start_reading) with a record token of that consultation, at the
 //     version the app saw — the server's compare-and-set lets one PC win;
 //   - looks at the record after the turn and puts an unfinished one back to
 //     「AI の番」 (`retry`, the member's own action, with the session).
@@ -18,7 +18,8 @@
 
 import type { AgentId } from '../../../shared/agents/registry'
 import { agentCan } from '../../../shared/agents/registry'
-import { AI_TURN_CLAIM_ACTIONS, AI_TURN_CLAIM_FROM, AI_TURN_KIND_STEPS, aiTurnKindOf, readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
+import { aiTurnStepForRecord } from '../../../shared/ai-turn-steps/registry'
+import { readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 
@@ -113,22 +114,22 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * was put back), and claiming at it would be refused every time.
      */
     async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string): Promise<AiTurnClaimResult> {
-      const kind = aiTurnKindOf(recordId)
-      if (!COMPANY.test(companyId) || !kind || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
+      const step = aiTurnStepForRecord(recordId)
+      if (!COMPANY.test(companyId) || !step || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
         return { claimed: false, reason: 'not-allowed' }
       }
       const agent = deps.agent()
       if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(agent, 'recordActions')) return { claimed: false, reason: 'not-allowed' }
       const now = await recordOf(companyId, recordId)
       // No longer waiting for the AI (another PC read it, a person skipped it): nothing to claim.
-      if (now && now.state !== AI_TURN_CLAIM_FROM[kind]) {
+      if (now && now.state !== step.claim.from) {
         deps.recordMovedOn?.(companyId)
         return { claimed: false, reason: 'taken' }
       }
       const expectedVersion = now?.version ?? noticeVersion
       // The server's execution run first: one PC holds it (another PC, a run waiting for a person
       // or for reconciliation → taken; the server is the authority).
-      const claimed = await session(companyId, 'POST', '/ai-run-claims', { recordId, step: AI_TURN_KIND_STEPS[kind], deviceId: deps.deviceId, conversationId })
+      const claimed = await session(companyId, 'POST', '/ai-run-claims', { recordId, step: step.step, deviceId: deps.deviceId, conversationId })
       if (!claimed || claimed.status >= 500) return { claimed: false, reason: 'unavailable' }
       const run = claimed.status < 300 ? (claimed.data as { run?: { id?: unknown; generation?: unknown } } | undefined)?.run : undefined
       if (!run || typeof run.id !== 'string' || typeof run.generation !== 'number') return { claimed: false, reason: 'taken' }
@@ -155,7 +156,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
           await finishRun(companyId, recordId, { class: 'permission', code: 'READ_ONLY_TOKEN' })
           return { claimed: false, reason: 'not-allowed' }
         }
-        const started = await access.call('POST', `/item/${encodeURIComponent(recordId)}/actions/${AI_TURN_CLAIM_ACTIONS[kind]}`, { expectedVersion }) as { record?: { version?: unknown } } | undefined
+        const started = await access.call('POST', `/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(step.claim.action)}`, { expectedVersion }) as { record?: { version?: unknown } } | undefined
         const version = started?.record?.version
         return { claimed: true, version: typeof version === 'number' ? version : null }
       } catch (error) {
@@ -176,7 +177,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * retried later) back to the AI. One with an unknown outside result stays until reconciled.
      */
     async retry(companyId: string, recordId: string): Promise<{ ok: boolean }> {
-      if (!COMPANY.test(companyId) || !aiTurnKindOf(recordId)) return { ok: false }
+      if (!COMPANY.test(companyId) || !aiTurnStepForRecord(recordId)) return { ok: false }
       const list = await session(companyId, 'GET', '/ai-runs')
       const runs = list?.status === 200 ? (list.data as { runs?: Array<{ id?: unknown; recordId?: unknown }> } | undefined)?.runs ?? [] : []
       const run = runs.find(r => r.recordId === recordId && typeof r.id === 'string')
@@ -187,31 +188,34 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
 
     /** After the automatic turn: finished, failed, or still in progress → back to 「AI の番」. */
     async settle(companyId: string, recordId: string): Promise<AiTurnSettleResult> {
-      if (!COMPANY.test(companyId) || !aiTurnKindOf(recordId)) return { outcome: 'unknown' }
+      const step = aiTurnStepForRecord(recordId)
+      if (!COMPANY.test(companyId) || !step) return { outcome: 'unknown' }
+      const { settle } = step
       const record = await recordOf(companyId, recordId)
       if (!record) {
         await finishRun(companyId, recordId, { class: 'temporary', code: 'NOT_READABLE' })
         return { outcome: 'unknown' }
       }
-      if (record.state === 'read') {
+      if (settle.done.includes(record.state)) {
         await finishRun(companyId, recordId, null)
         return { outcome: 'done' }
       }
       // The AI said it could not (missing or bad input): a person looks (waiting_person on the server).
-      if (record.state === 'failed' || record.state === 'skipped') {
-        await finishRun(companyId, recordId, record.state === 'failed' ? { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } : null)
+      const couldNot = settle.couldNot.includes(record.state)
+      if (couldNot || settle.closed.includes(record.state)) {
+        await finishRun(companyId, recordId, couldNot ? { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } : null)
         return { outcome: 'failed' }
       }
       // Stopped without finishing: tried again later (a few times, then a person — the server counts).
       // Finishing the run puts the reading back (the ledger names the run, not the member).
       const ran = held.has(heldKey(companyId, recordId))
       await finishRun(companyId, recordId, { class: 'temporary', code: 'UNFINISHED' })
-      if (record.state !== 'reading') return { outcome: 'unknown' }
+      if (record.state !== settle.working) return { outcome: 'unknown' }
       const after = ran ? await recordOf(companyId, recordId) : record
-      if (after && after.state === 'received') return { outcome: 'put-back' }
-      if (!after || after.state !== 'reading') return { outcome: 'unknown' }
+      if (after && after.state === step.claim.from) return { outcome: 'put-back' }
+      if (!after || after.state !== settle.working) return { outcome: 'unknown' }
       // An older server leaves it reading: put it back with the member's session, as before.
-      const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/retry`, { expectedVersion: after.version })
+      const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(settle.putBack)}`, { expectedVersion: after.version })
       if (!r || r.status >= 300) log.warn(`[ai-turns] retry: answered ${r?.status ?? 'nothing'}`)
       return { outcome: r && r.status < 300 ? 'put-back' : 'unknown' }
     },

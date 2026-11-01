@@ -20,7 +20,7 @@ import { consultationStatusOf } from '../consultationStatusStore'
 import { publishChatPane, showInOtherChatPane } from '../chatPanes'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
-import type { MinutesNotice } from '../../../../shared/minutes-app'
+import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
 import { AiTurnNotice } from './AiTurnNotice'
@@ -39,12 +39,12 @@ interface ChatPanelProps {
    * 「AI の番」 waiting for the member's AI (received minutes). Given to the main window's main
    * pane only: its runner starts them automatically in hidden consultations (ai-turns.md).
    */
-  aiTurnQueue?: readonly MinutesNotice[]
+  aiTurnQueue?: readonly AiTurnCandidate[]
   /** Each waiting record's state and the member's 「もう一度」 / 「人に渡す」 (shown by the screens that list them). */
   onAiTurnItems?: (view: AiTurnItemsView) => void
 }
 
-const NO_AI_TURNS: readonly MinutesNotice[] = []
+const NO_AI_TURNS: readonly AiTurnCandidate[] = []
 
 export function ChatPanel(props: ChatPanelProps) {
   const userId = useAuthStore(s => s.user?.id)
