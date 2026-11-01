@@ -66,6 +66,9 @@ import type { StoppableTurns } from './services/agent-stop'
 // lane A ▼
 import { registerSlackIpc } from './features/slack/ipc'
 import { registerThreadsIpc } from './features/threads/ipc'
+import { registerPluginBridgeIpc } from './features/plugins/bridge-ipc'
+import { createPluginFileServer } from './features/plugins/protocol'
+import { servePluginFiles } from './electron-adapter'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -333,6 +336,12 @@ registerAiTurnsIpc(ipc, {
 // lane A ▼
 registerSlackIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
 registerThreadsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// A plugin's screen (plugin-frame.md): acb-plugin:// from the verified packages only, and its bridge.
+servePluginFiles(createPluginFileServer({ packages: { keptPackage: (id, version) => agentControl.pluginPackages.keptPackage(id, version) } }))
+registerPluginBridgeIpc(ipc, {
+  baseUrl: getServerApiUrl, cookies: session.cookies, isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+  keeps: (id, version, companyId) => agentControl.pluginPackages.keptPackage(id, version, companyId) !== null,
+})
 // lane A ▲
 // lane B ▼
 // lane B ▲

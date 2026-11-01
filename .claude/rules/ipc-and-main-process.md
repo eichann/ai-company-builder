@@ -72,7 +72,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
   `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
   the page and web preferences; `createMainWindowHost`: the main window with its close guard;
-  `createChatWindowHost`) and the `local-file://` protocol registration.
+  `createChatWindowHost`), the `local-file://` protocol registration and `acb-plugin://` (a
+  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.

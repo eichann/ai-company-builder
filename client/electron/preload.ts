@@ -23,6 +23,7 @@ import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-win
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackFeature } from '../shared/slack'
+import type { PluginPackageRef } from '../shared/plugin-bridge'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -338,6 +339,7 @@ const api: ElectronAPI = {
   markGoogleSeen: (companyId: string) => invoke('google:markSeen', companyId),
   markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),
   getRecordThread: (companyId: string, recordId: string) => invoke('threads:get', companyId, recordId),
+  callPluginBridge: (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => invoke('plugins:bridge', companyId, plugin, op, args),
   // lane A ▲
   // lane B ▼
   // lane B ▲

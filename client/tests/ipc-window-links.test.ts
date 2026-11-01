@@ -43,3 +43,33 @@ test('the main window never navigates away from the app\'s page; a web link goes
   assert.equal(main.navigate('file:///Users/me/Downloads/dropped.html'), true)
   assert.deepEqual(fake.openedExternal, ['https://example.com/'])
 })
+
+// A plugin's screen (plugin-frame.md): the acb-plugin scheme never bypasses the frame's CSP and is
+// served by the package protocol; a frame showing a plugin's page navigates nowhere, and nothing it
+// asks to open reaches the browser.
+test('acb-plugin:// is registered without CSP bypass or fetch, and served once the app is ready', () => {
+  assert.deepEqual(fake.privilegedSchemes.find(s => (s as { scheme: string }).scheme === 'acb-plugin'),
+    { scheme: 'acb-plugin', privileges: { standard: true, secure: true, corsEnabled: true } })
+  assert.ok(fake.protocolHandlers.get('acb-plugin'))
+})
+
+test('a plugin\'s frame cannot navigate, and its window.open never reaches the browser', () => {
+  const main = BrowserWindow.all[0].webContents
+  const frameNavigate = (frameUrl: string, url: string) => {
+    let prevented = false
+    main.emit('will-frame-navigate', { url, isMainFrame: false, frame: { url: frameUrl }, preventDefault: () => { prevented = true } })
+    return prevented
+  }
+  const page = 'acb-plugin://planning/0.1.0/ui/index.html'
+  assert.equal(frameNavigate('', page), false)
+  for (const url of ['acb-plugin://planning/0.1.0/ui/b.html', 'acb-plugin://other/1.0.0/ui/index.html', 'https://example.com/', 'file:///etc/passwd']) {
+    assert.equal(frameNavigate(page, url), true, url)
+  }
+  assert.equal(frameNavigate('', 'acb-plugin://planning/0.1.0/plugin.yaml'), true)
+
+  fake.openedExternal.length = 0
+  assert.deepEqual(main.windowOpenHandler?.({ url: 'https://example.com/', referrer: { url: page } } as { url: string }), { action: 'deny' })
+  assert.deepEqual(main.windowOpenHandler?.({ url: page } as { url: string }), { action: 'deny' })
+  assert.equal(main.navigate(page), true)
+  assert.deepEqual(fake.openedExternal, [])
+})

@@ -140,6 +140,7 @@ contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
 contract.invoke pluginSteps:onRecord
 contract.invoke pluginSteps:start
+contract.invoke plugins:bridge
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
@@ -283,6 +284,7 @@ contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<
 contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
 contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
+contract.type ElectronAPI.callPluginBridge = callPluginBridge: Invoke<'plugins:bridge'>
 contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
@@ -685,6 +687,7 @@ contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginSteps:onRecord' = 'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
 contract.type IpcInvokeChannels.'pluginSteps:start' = 'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
+contract.type IpcInvokeChannels.'plugins:bridge' = 'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
@@ -924,6 +927,7 @@ main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (compa
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
 main.handle pluginSteps:onRecord @ features/plugin-steps/ipc.ts (companyId, recordId)
 main.handle pluginSteps:start @ features/plugin-steps/ipc.ts (companyId, recordId, pluginId, step, companyRoot)
+main.handle plugins:bridge @ features/plugins/bridge-ipc.ts (companyId, plugin, op, args)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
@@ -1000,6 +1004,8 @@ preload backupOpenFolder -> invoke backup:openFolder($0)
 preload backupOpenFolder : (backupPath: string) => Promise<SimpleResult>
 preload backupRestore -> invoke backup:restore($0, $1, $2)
 preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
+preload callPluginBridge -> invoke plugins:bridge($0, $1, $2, $3)
+preload callPluginBridge : (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => Promise<PluginBridgeAnswer>
 preload checkMinutes -> invoke minutes:check($0)
 preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
 preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3, $4)
