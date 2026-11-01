@@ -281,6 +281,7 @@ contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMail:get'>
 contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
+contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => string
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
@@ -923,6 +924,8 @@ preload getOutboundMail -> invoke outboundMail:get($0, $1)
 preload getOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload getOutboundMailRecipients -> invoke outboundMail:recipients($0, $1)
 preload getOutboundMailRecipients : (companyId: string, messageId: string) => Promise<OutboundMailResult>
+preload getPathForFile -> (no IPC)
+preload getPathForFile : (file: File) => string
 preload getPermissionMode -> invoke config:getPermissionMode()
 preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)

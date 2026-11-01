@@ -90,7 +90,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
   `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
-  drop: takes a file from anywhere on the computer), `ReservedNameOutbound` (the typed name goes to
+  drop: takes a file from anywhere on the computer; where the dropped file lies comes from
+  `getPathForFile`, preload's `webUtils.getPathForFile`, no IPC — `File.path` is gone since
+  Electron 32), `ReservedNameOutbound` (the typed name goes to
   the server's `paths/check`), `FileDragOutbound` (Alt-drag hands a file to another app), plus the
   private-folder ports (`private-folders-client.md`).
 - **Nothing is replaced by accident** (owner, 2026-10-31: 新規ファイル with an existing name emptied

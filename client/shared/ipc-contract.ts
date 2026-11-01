@@ -665,6 +665,12 @@ export interface ElectronAPI {
   renameItem: Invoke<'fs:rename'>
   moveItem: Invoke<'fs:move'>
   moveFromExternal: Invoke<'fs:moveFromExternal'>
+  /**
+   * Where a file dropped from Finder lies on this computer ('' for a file that has
+   * none). Not a channel: preload asks Electron (`webUtils.getPathForFile`; the
+   * renderer's `File.path` was removed in Electron 32).
+   */
+  getPathForFile: (file: File) => string
   copyItem: Invoke<'fs:copy'>
   getStats: Invoke<'fs:stat'>
 

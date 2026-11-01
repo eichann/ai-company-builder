@@ -9,7 +9,8 @@ runs:
     # pnpm-workspace.yaml (those are pnpm 10+/11 features). pnpm 10+ would see
     # the fd-slicer patch, find it missing from the lockfile, and refuse a
     # --frozen-lockfile install. Bump this together with regenerating the
-    # lockfile on the newer pnpm.
+    # lockfile on the newer pnpm. (Since Electron 45 nothing depends on
+    # fd-slicer any more; the patch can go with that bump.)
     - uses: pnpm/action-setup@v6
       with:
         version: 9
@@ -21,11 +22,10 @@ runs:
         node-version: 20
         cache: pnpm
 
+    # CI never launches Electron: typecheck uses the bundled .d.ts and the
+    # client tests run under plain Node via tsx. Since Electron 42 the
+    # `electron` package downloads its binary only on first use (not in
+    # postinstall), so the install fetches no binary.
     - name: Install dependencies
       shell: bash
-      env:
-        # CI never launches Electron: typecheck uses the bundled .d.ts and the
-        # client tests run under plain Node via tsx. Skipping the ~100MB
-        # binary download keeps installs fast and off a flaky network path.
-        ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       run: pnpm install --frozen-lockfile

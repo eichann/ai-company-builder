@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { boundaryCrossing, crossingMessage } from '../../../../shared/private-folder-ui'
-import { getStats, moveFromExternal, moveItem, startDrag } from '../api'
+import { droppedFilePath, getStats, moveFromExternal, moveItem, startDrag } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
@@ -65,7 +65,8 @@ export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSe
     let moved = 0
 
     for (const file of Array.from(fileList)) {
-      if (!file.path) continue
+      const sourcePath = droppedFilePath(file)
+      if (!sourcePath) continue
 
       // Extension and size validation (skip for entries without extension — likely folders)
       const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
@@ -81,7 +82,7 @@ export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSe
       }
 
       const destPath = await resolveUniquePath(destDir, file.name)
-      const result = await moveFromExternal(file.path, destPath)
+      const result = await moveFromExternal(sourcePath, destPath)
       if (result.success) {
         moved++
       } else {

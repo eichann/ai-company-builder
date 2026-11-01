@@ -72,7 +72,7 @@ docker compose up -d
 
 This starts two containers: the API server (http://localhost:3001) and the admin panel (http://localhost:3100). Open http://localhost:3100 in your browser, sign up (this becomes the first account), and create a company — the full server-side experience now runs on your machine.
 
-To also try the desktop client (Electron), keep the server running and run the following from the repository root (requires Node.js 20+ and pnpm 9+):
+To also try the desktop client (Electron), keep the server running and run the following from the repository root (requires Node.js 22.12+ and pnpm 9+; the app runs on macOS 13 or later):
 
 ```bash
 pnpm install   # first time only

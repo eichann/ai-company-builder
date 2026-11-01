@@ -21,7 +21,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
@@ -107,6 +107,9 @@ let chatTurns: ({ runningCount(): number } & StoppableTurns) | null = null
 // local-file:// (images etc. from the company folder); the scheme must be
 // registered before app.whenReady().
 registerLocalFileScheme()
+// Web permissions: only what the app's own page uses (permission-policy.ts),
+// on every session, before any window exists.
+guardEverySession(appPages.page())
 
 app.on('before-quit', () => mainWindowHost.quitting())
 // The main window's answer to app:closeRequested (only that window may answer).
