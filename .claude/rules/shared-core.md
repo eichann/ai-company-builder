@@ -38,6 +38,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId`, `appendHistoryLine` |
 | `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
 | `core-types.ts` | the core types `task` and `interaction`, in the definition format |
+| `slack.ts` | the Slack connection's member features (`SLACK_FEATURES`), host, callback / events paths, practice values (`isPracticeSlackSecret`) (`slack-connector.md`) |
 | `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 | `fixed-content.ts` | `canonicalJson` (sorted keys, NFC, nothing trimmed): what the server hashes (`sha256:…`) to fix approved / sent content; the app only echoes a hash |
 | `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |

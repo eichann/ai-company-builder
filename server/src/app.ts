@@ -41,6 +41,7 @@ import { oauthRoute } from './routes/oauth'
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { coreConnectorsRoute } from './routes/core-connectors'
+import { slackEventsRoute, slackRoute } from './routes/slack-connection'
 // lane A ▲
 // lane B ▼
 import { identitiesRoute } from './routes/identities'
@@ -153,6 +154,10 @@ app.route('/api', invitationsRoute)
 // lane A ▼
 // 「つないでいるサービス」: the core connectors and the roles they serve (connector-roles.md).
 app.route('/api/companies/:companyId', coreConnectorsRoute)
+// The Slack connection (slack-connector.md): the company's app, a member's own permission.
+app.route('/api/companies/:companyId', slackRoute)
+// Slack's events (public: the company's own signing secret is the proof; the URL never changes).
+app.route('/api/slack', slackEventsRoute)
 // lane A ▲
 // lane B ▼
 // Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.

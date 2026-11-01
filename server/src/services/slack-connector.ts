@@ -12,9 +12,12 @@
  * - notice DMs are sent by the company's bot (its token is registered by the
  *   admin with the app).
  *
- * Not wired yet (A3: composition, routes for the admin and the app, screens).
+ * Wired in composition/connectors.ts (A3); routes: routes/slack-connection.ts.
  */
+import { BUILTIN_CONNECTORS } from '../../shared/core/builtin-connectors'
 import { sameEmail } from '../../shared/core/google'
+import { isPracticeSlackSecret, PRACTICE_SLACK_CLIENT_SECRET_PREFIX, PRACTICE_SLACK_SIGNING_SECRET_PREFIX } from '../../shared/core/slack'
+import type { MySlack, SlackAdminView, SlackUnavailableReason } from '../../shared/types/slack'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -33,32 +36,7 @@ export const SLACK_FORBIDDEN = 'Only owners and admins can manage the Slack conn
 const HISTORY_LIMIT = 50
 const NOTICE_MAX = 3000
 
-export type SlackUnavailableReason = 'operator-stopped' | 'not-configured' | 'off' | 'vault-off'
-
-export interface SlackAdminView {
-  vaultEnabled: boolean
-  configured: boolean
-  teamId: string | null
-  clientId: string | null
-  clientSecretLast4: string | null
-  hasBotToken: boolean
-  enabled: boolean
-  operatorStopped: boolean
-  /** Where Slack sends the browser back (registered in the company's Slack app). */
-  redirectUri: string
-  /** Where Slack sends events (fixed: registered in the company's Slack app). */
-  eventsUrl: string
-  grants: Array<{ userId: string; memberEmail: string | null; slackEmail: string; features: SlackFeature[]; status: string; lastUsedAt: string | null }>
-  history: Array<{ id: string; action: string; at: string; by: string; userId: string | null; detail: Record<string, unknown> }>
-}
-
-export interface MySlack {
-  available: boolean
-  reason: SlackUnavailableReason | null
-  connected: boolean
-  status: 'active' | 'revoked' | 'stopped' | null
-  features: SlackFeature[]
-}
+export type { MySlack, SlackAdminView, SlackUnavailableReason } from '../../shared/types/slack'
 
 export interface SlackConnectorDeps {
   companyData: CompanyDataSource
@@ -75,6 +53,8 @@ export interface SlackConnectorDeps {
   eventsUrl(companyId: string): string
   operatorStopped(): Promise<boolean>
   isMember(companyId: string, userId: string): boolean
+  /** The practice Slack is on (staging): only practice values are saved (400 `REAL_KEY_ON_PRACTICE`). */
+  practiceSlack?: boolean
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -125,11 +105,13 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       hasBotToken: app?.hasBotToken ?? false,
       enabled: app?.enabled ?? false,
       operatorStopped: await deps.operatorStopped(),
+      practice: deps.practiceSlack === true,
       redirectUri: deps.redirectUri(),
       eventsUrl: deps.eventsUrl(companyId),
       grants: grants.map(g => ({
         userId: g.userId, memberEmail: people.get(g.userId)?.email ?? null, slackEmail: g.accountEmail,
-        features: slackFeaturesOf(g.scopes), status: g.status, lastUsedAt: g.lastUsedAt,
+        features: slackFeaturesOf(g.scopes), featuresOff: slackFeaturesOf(g.scopes).filter(f => g.featuresOff.includes(f)),
+        status: g.status, lastUsedAt: g.lastUsedAt,
       })),
       history: history.map(h => {
         let detail: Record<string, unknown> = {}
@@ -148,6 +130,8 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       connected: grant?.status === 'active',
       status: grant?.status ?? null,
       features: grant?.status === 'active' ? slackFeaturesOf(grant.scopes) : [],
+      featuresOff: grant?.status === 'active' ? slackFeaturesOf(grant.scopes).filter(f => grant.featuresOff.includes(f)) : [],
+      practice: deps.practiceSlack === true,
     }
   }
 
@@ -183,12 +167,12 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
     /**
      * Slack as the core connector of the `chat` role (connector-roles.md):
      * usable while the company's app is set up and on, the vault on, and the
-     * operator has not stopped Slack. A3 registers it.
+     * operator has not stopped Slack (registered in composition/connectors.ts).
      */
     roleConnector(): RoleConnector {
       return {
-        id: 'slack',
-        servings: [{ role: 'chat', operations: ['receive', 'reply'], capabilities: [] }],
+        id: BUILTIN_CONNECTORS.slack.id,
+        servings: BUILTIN_CONNECTORS.slack.servings,
         usable: async companyId => (await unavailableReason(companyId)) === null,
       }
     },
@@ -220,6 +204,12 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       }
       if (given('botToken') && !BOT_TOKEN_RE.test((body.botToken as string).trim())) {
         return refuse('bad-request', 'ボットのトークン（xoxb- で始まる）を入れてください。', { code: 'BAD_BOT_TOKEN' })
+      }
+      if (deps.practiceSlack) {
+        const real = (['clientSecret', 'signingSecret', 'botToken'] as const).some(k => given(k) && !isPracticeSlackSecret(body[k] as string))
+        if (real) {
+          return refuse('bad-request', `練習用の Slack につながっているため、練習用の値（${PRACTICE_SLACK_CLIENT_SECRET_PREFIX}… / ${PRACTICE_SLACK_SIGNING_SECRET_PREFIX}… / xoxb-fake-…）だけを保存できます。`, { code: 'REAL_KEY_ON_PRACTICE' })
+        }
       }
       const store = slackData.forCompany(member.companyId)
       const before = store.app()
@@ -304,6 +294,21 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
       })))
     },
 
+    /** PUT …/me/slack/features { feature, on }: the member turns an allowed feature off / on (知らせの DM …). */
+    async setFeature(member: Member, body: unknown): Promise<Outcome<MySlack>> {
+      if (!isObject(body) || !isSlackFeature(body.feature) || typeof body.on !== 'boolean') {
+        return refuse('bad-request', `feature must be one of: ${SLACK_FEATURES.join(', ')}; on must be true or false`)
+      }
+      const grant = companyData.forCompany(member.companyId).connectors.grant('slack', member.userId)
+      if (!grant || grant.status !== 'active') return refuse('conflict', 'まだ Slack で許可していません。', { code: 'SLACK_NOT_CONNECTED' })
+      if (!slackFeaturesOf(grant.scopes).includes(body.feature)) {
+        return refuse('conflict', 'この機能はまだ許可していません。先に「Slack で許可」で足してください。', { code: 'SLACK_FEATURE_NOT_GRANTED' })
+      }
+      const r = memberOAuth.setFeatureOff('slack', member, body.feature, !body.on)
+      if (!r.ok) return refuse('conflict', 'まだ Slack で許可していません。', { code: 'SLACK_NOT_CONNECTED' })
+      return ok(await myView(member))
+    },
+
     /** DELETE …/me/slack: 「許可をやめる」 — revoked at Slack too (best effort), then nothing kept. */
     async disconnect(member: Member): Promise<Outcome<MySlack>> {
       await memberOAuth.disconnect('slack', member)
@@ -314,12 +319,14 @@ export function createSlackConnector(deps: SlackConnectorDeps) {
      * A notice DM from the company's bot to a member (大事な知らせ: approval
      * requests, an outside reply due today — the caller decides which). Only
      * to a member with an active Slack grant (their Slack account is known
-     * from it); `text` is the notice's own sentence, never stored or logged.
+     * from it) who has not turned 知らせの DM (`notices`) off; `text` is the
+     * notice's own sentence, never stored or logged.
      */
     async sendNoticeDm(companyId: string, userId: string, text: string): Promise<SlackResult> {
       if (!deps.isMember(companyId, userId)) return { ok: false, kind: 'not-sent', reason: 'not-member' }
       const grant = companyData.forCompany(companyId).connectors.grant('slack', userId)
       if (!grant || grant.status !== 'active') return { ok: false, kind: 'not-sent', reason: 'no-grant' }
+      if (!slackFeaturesOf(grant.scopes).includes('notices') || grant.featuresOff.includes('notices')) return { ok: false, kind: 'not-sent', reason: 'feature-off' }
       const slackUserId = slackData.forCompany(companyId).slackUserOfEmail(grant.accountEmail)
       const account = accounts.byIds([userId]).get(userId)
       // The Slack account must still be the member's own address (as at the grant).

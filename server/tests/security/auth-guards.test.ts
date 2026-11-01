@@ -31,7 +31,8 @@ const ROUTES_DIR = join(__dirname, '../../src/routes')
 const PUBLIC_ENDPOINTS: Record<string, string> = {
   'invitations.ts GET /invitations/:token': 'the sign-up page validates an invitation link before an account exists',
   'google-drive.ts GET /': 'the static Google Picker page (google-drive.md): it holds no secret; the token reaches it only from the app\'s own Picker window',
-  'oauth.ts GET /:provider/callback': 'the provider (Google) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
+  'slack-connection.ts POST /events/:companyId': 'Slack sends a company\'s events without an ACB session; the company\'s own signing secret (HMAC of the exact body, 5 minutes) is the proof — anything unsigned answers an empty 401 (slack-connector.md)',
+  'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 
 interface Endpoint { file: string; method: string; path: string; app: Hono }

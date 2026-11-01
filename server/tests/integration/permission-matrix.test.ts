@@ -442,6 +442,17 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/connectors/:connectorId/enabled', w => ({ path: `${C(w)}/connectors/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
   // 受信を読む … off / on (google-connector.md): any member, their own grant only.
   r('PUT /api/companies/:companyId/me/google/features', w => ({ path: `${C(w)}/me/google/features`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // The Slack connection (slack-connector.md): the company's app and members' grants are owner/admin;
+  // a member's own permission is theirs. Slack's events are public: an unsigned request is an empty 401 for everyone.
+  r('GET /api/companies/:companyId/slack', w => ({ path: `${C(w)}/slack` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/slack/app', w => ({ path: `${C(w)}/slack/app`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/slack/enabled', w => ({ path: `${C(w)}/slack/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/slack/grants/:userId', w => ({ path: `${C(w)}/slack/grants/pm-nobody` }), [404, 404, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/me/slack', w => ({ path: `${C(w)}/me/slack` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/slack/connect', w => ({ path: `${C(w)}/me/slack/connect`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('PUT /api/companies/:companyId/me/slack/features', w => ({ path: `${C(w)}/me/slack/features`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('DELETE /api/companies/:companyId/me/slack', w => ({ path: `${C(w)}/me/slack` }), MEMBERS, 'nothing to stop: answers the member\'s own (empty) state'),
+  r('POST /api/slack/events/:companyId', w => ({ path: `/api/slack/events/${w.co}`, body: {} }), [401, 401, 401, 401, 401, 401], 'public: Slack signs with the company\'s own signing secret; unsigned → 401'),
   // lane A ▲
   // lane B ▼
   // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
@@ -562,6 +573,8 @@ const CROSS: CrossRow[] = [
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // Another company's member (with a grant there) is missing here, like nobody.
+  x('DELETE /api/companies/:companyId/slack/grants/:userId', (w, id) => ({ path: `${C(w)}/slack/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
   // lane A ▲
   // lane B ▼
   x('GET /api/companies/:companyId/identities/records/:recordId', (w, id) => ({ path: `${C(w)}/identities/records/${id}` }), w => w.other.record, 'deal-nosuch01'),

@@ -21,6 +21,7 @@ import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import { slackSchema } from './schema/slack'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -75,6 +76,8 @@ const SCHEMA = [
   skillUseSchema,
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // The Slack connection (slack-connector.md).
+  slackSchema,
   // lane A ▲
   // lane B ▼
   identitySchema,

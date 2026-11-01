@@ -11,12 +11,28 @@
  *   and its role implementations, and the routed role ports the core services
  *   take (calendar, minutes, outbound mail; the inbox later).
  * - `wireConnectorsLane` (the lane's line under `// lane A ▼`): what the lane
- *   adds to `services`.
+ *   adds to `services` — Slack (A3, slack-connector.md: the client, the
+ *   connector registered with member-oauth and as the `chat` role's
+ *   connector, the events receiver, notice DMs) and 「つないでいるサービス」
+ *   with both built-in connectors' switches.
  */
 import type Database from 'better-sqlite3'
 import { BUILTIN_CONNECTORS } from '../../shared/core/builtin-connectors'
+import { SLACK_CALLBACK_PATH, SLACK_HOST, slackEventsPath } from '../../shared/core/slack'
+import { nodeHmacSigner } from '../adapters/hmac'
+import { sqliteSlackData } from '../adapters/sqlite/slack'
+import type { PracticeUpstream } from '../lib/config'
+import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { NotificationRow } from '../ports/notifications'
+import type { UpstreamClient } from '../ports/upstream'
+import type { BrokerVault } from '../services/broker-vault'
+import type { MemberOAuth } from '../services/member-oauth'
+import { createSlackClient } from '../services/slack-client'
+import { createSlackConnector } from '../services/slack-connector'
+import { createSlackEvents, type SlackSignal } from '../services/slack-events'
+import { createSlackNotices } from '../services/slack-notices'
 import type { ConnectorRoleChoiceRepository } from '../ports/connector-roles'
 import { createConnectorRoles } from '../services/connector-roles'
 import { createRoleProviders } from '../services/connector-role-providers'
@@ -57,15 +73,7 @@ export function wireCoreConnectors(deps: CoreConnectorsWiringDeps) {
     },
   })
 
-  // 「つないでいるサービス」: each built-in connector's own switches (Google: its client's on / off, the operator's stop file).
-  const coreConnectors = createCoreConnectors({
-    roles: connectorRoles,
-    switches: {
-      google: { state: companyId => googleConnector.state(companyId), setEnabled: (member, body) => googleConnector.setEnabled(member, body) },
-    },
-  })
-
-  return { connectorRoles, roleProviders, coreConnectors }
+  return { connectorRoles, roleProviders, googleConnector }
 }
 
 export type CoreConnectorsWiring = ReturnType<typeof wireCoreConnectors>
@@ -73,12 +81,85 @@ export type CoreConnectorsWiring = ReturnType<typeof wireCoreConnectors>
 export interface ConnectorsLaneDeps {
   conn: Database.Database
   core: CoreConnectorsWiring
+  companyData: CompanyDataSource
+  accounts: AccountDirectory
+  clock: Clock
+  ids: IdGenerator
+  brokerVault: BrokerVault
+  /** The server's way out (with staging's practice redirects). */
+  upstream: UpstreamClient
+  /** Staging's practice upstreams that are on (`ACB_FAKE_SLACK_URL` → service `slack`). */
+  practiceList: readonly PracticeUpstream[]
+  memberOAuth: MemberOAuth
+  isMember(companyId: string, userId: string): boolean
+  /** The operator's stop file names this connector (or `*`). */
+  operatorStopped(connectorId: string): Promise<boolean>
+  /** One AI-action-log line per Slack call (no content). */
+  recordCall(companyId: string, userId: string | null, e: { operation: string; host: string; status: number | null; ok: boolean }): void
+  publicUrl(): string
 }
 
 export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
+  const { companyData, accounts, clock, ids, brokerVault, memberOAuth, isMember } = deps
+  const slackData = sqliteSlackData(deps.conn)
+  const operatorStopped = () => deps.operatorStopped(BUILTIN_CONNECTORS.slack.id)
+
+  // Slack (A3, slack-connector.md): slack-client.ts is the one place that talks to Slack;
+  // on staging slack.com may go to the fake Slack (`pnpm fake:slack`).
+  const practiceSlack = deps.practiceList.find(u => u.service === 'slack' && u.host === SLACK_HOST)
+  const slackClient = createSlackClient({
+    companyData, slackData, brokerVault, upstream: deps.upstream, hmac: nodeHmacSigner, clock, isMember, operatorStopped,
+    record: deps.recordCall,
+    practiceSlack: practiceSlack !== undefined,
+    authorizeOrigin: practiceSlack
+      ? `${practiceSlack.target.protocol}//${practiceSlack.target.hostname === 'host.docker.internal' ? 'localhost' : practiceSlack.target.hostname}:${practiceSlack.target.port}`
+      : `https://${SLACK_HOST}`,
+  })
+  const slackConnector = createSlackConnector({
+    companyData, slackData, brokerVault, slack: slackClient, memberOAuth, accounts, clock, ids, isMember, operatorStopped,
+    redirectUri: () => `${deps.publicUrl()}${SLACK_CALLBACK_PATH}`,
+    eventsUrl: companyId => `${deps.publicUrl()}${slackEventsPath(companyId)}`,
+    practiceSlack: practiceSlack !== undefined,
+  })
+  // Slack serves the core role チャットの連絡を受け取る・返す (resolved per call, so registering here is in time).
+  deps.core.connectorRoles.register(slackConnector.roleConnector())
+
+  // Events (POST /api/slack/events/:companyId): signals go to whoever subscribed (lane B's 来た連絡);
+  // until then they are dropped. A signal never carries the text.
+  const signalListeners: Array<(signal: SlackSignal) => void> = []
+  const slackEvents = createSlackEvents({
+    companyData, slackData, slack: slackClient, clock, isMember, operatorStopped,
+    vaultEnabled: () => brokerVault.status().enabled,
+    onSignal: signal => { for (const listen of signalListeners) listen(signal) },
+  })
+
+  // 大事な知らせを Slack の DM で (notifications.md `outside`): 「あなたの番」 notices, by the company's bot.
+  const slackNotices = createSlackNotices({ companyData, sendNoticeDm: (companyId, userId, text) => slackConnector.sendNoticeDm(companyId, userId, text) })
+
+  // 「つないでいるサービス」: each built-in connector's own switches (its app's / client's on / off, the operator's stop file).
+  const coreConnectors = createCoreConnectors({
+    roles: deps.core.connectorRoles,
+    switches: {
+      google: { state: companyId => deps.core.googleConnector.state(companyId), setEnabled: (member, body) => deps.core.googleConnector.setEnabled(member, body) },
+      slack: {
+        state: async companyId => {
+          const app = slackData.forCompany(companyId).app()
+          return { configured: app !== null, enabled: app?.enabled ?? false, operatorStopped: await operatorStopped() }
+        },
+        setEnabled: (member, body) => slackConnector.setEnabled(member, body),
+      },
+    },
+  })
+
   return {
     connectorRoles: deps.core.connectorRoles,
-    coreConnectors: deps.core.coreConnectors,
+    coreConnectors,
+    slackConnector,
+    slackEvents,
+    /** Lane B subscribes here for Slack's signals (a DM, a mention, an @channel for a member). */
+    onSlackSignal(listen: (signal: SlackSignal) => void): void { signalListeners.push(listen) },
+    /** The notices service's `outside` hook (composition.ts). */
+    noticesOutside: (companyId: string, rows: NotificationRow[]) => slackNotices.outside(companyId, rows),
     /** メールを読む (the role, routed): the inbox (lane B) reads mail through this, never through Gmail. */
     mailReader: deps.core.roleProviders.mailReader,
   }

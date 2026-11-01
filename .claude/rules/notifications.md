@@ -81,8 +81,9 @@ a plugin can never draw a notice (§2-2).
   looks at up to `limit` waiting records per company; the read-time safety net uses the same rule.
 - `wait_over` (on by default): the clock moved a wait that is over to the follow-up's turn — to
   the assignee (「…見込みの日時が過ぎました。追いかけてください」 / 「AI が追いかけを用意します」).
-- `outside` (dependency of the service, not wired): where stage 3's Slack DMs (E-26) plug in —
-  called with the notices just written (kind, record, member; no text).
+- `outside`: stage 3's Slack DMs (E-26) — called with the notices just written (kind, record,
+  member; no text), bound in `composition.ts` to lane A's `services/slack-notices.ts`, which DMs
+  only notices whose record now waits for the member (`slack-connector.md` "Notice DMs").
 - Read access is checked **when read** (`recordReader` with today's rules): a record the member
   can no longer read (rules changed, private folder) or that was removed drops out of the list
   and of `unread`; nothing of it is shown. Records off → `{ available: false }` (no bell).
@@ -179,6 +180,6 @@ record; the dot goes; 「あなたの番」 lists what waits) — each mutation-
 
 ## Not yet
 
-Slack DM for important notices (E-26, stage 3: the `outside` hook); opening the consultation a record belongs to
+Opening the consultation a record belongs to
 (S12); a per-company time zone (none in S6 either: `timeZoneOf` is the one place); notices for a reply to an
 interaction or a stopped HubSpot exchange (their events come with stage 3).

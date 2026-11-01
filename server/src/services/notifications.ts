@@ -52,8 +52,11 @@ export interface NotificationServiceDeps {
   /** The company's own days off (`YYYY-MM-DD`, task settings): an overdue notice waits for a business morning. */
   holidaysOf?: (companyId: string) => string[]
   /**
-   * Stage 3 (E-26): Slack DMs for important notices plug in here — called with
-   * the notices just written (no text: kind, record, member). Not wired yet.
+   * Stage 3 (E-26): Slack DMs for important notices plug in here
+   * (services/slack-notices.ts, wired in composition.ts) — called with the
+   * notices just written (no text: kind, record, member), whatever the bell's
+   * kind switches: the DM is about 「あなたの番」 (like the Mac notification)
+   * and has its own switch (Slack's 知らせの DM). Must not block.
    */
   outside?: (companyId: string, rows: NotificationRow[]) => void
   /**

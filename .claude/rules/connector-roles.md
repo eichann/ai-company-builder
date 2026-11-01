@@ -34,10 +34,12 @@ operation), else the admin's choice for the role among the usable ones
 a guess; a chosen connector that is off is not replaced while two remain; a choice is per
 company. An optional capability is asked (`hasRoleCapability`), never assumed. Wired in
 `composition/connectors.ts` (`wireCoreConnectors`, called once from the Google block of
-`composition.ts` before the core services that take the roles); A3 registers Slack there.
+`composition.ts` before the core services that take the roles); Slack (A3) is registered in
+`wireConnectorsLane` (resolution is per call, so a later registration is in time), which also
+builds 「つないでいるサービス」 with both connectors' switches.
 Tests: `server/tests/unit/connector-roles.test.ts`.
 
-## Built-in connectors (A1: Google)
+## Built-in connectors (A1: Google, A3: Slack)
 
 `shared/core/builtin-connectors.ts` (`BUILTIN_CONNECTORS`) declares the core connectors whose
 code ships with ACB: id (= the role resolver's connector id and the operator stop file's name),
@@ -48,7 +50,8 @@ the company's on / off (Google: its client's `enabled`) and the operator's stop 
 (`<PLUGINS_DIR>/stopped` naming `google` or `*`). Google stays where its code is (`google-*.ts`,
 plan §5-2); it registers with `usable` = set up, on, vault on, not operator-stopped
 (`googleConnector.usable`). Google serves `calendar` read, `mail` read + send, `meetings` read
-(capabilities `transcript`, `attendees`).
+(capabilities `transcript`, `attendees`). Slack serves `chat` receive + reply (`slack-connector.md`;
+usable = its app set up and on, vault on, not operator-stopped).
 
 The admin's 「つないでいるサービス」 (`services/core-connectors.ts`, `routes/core-connectors.ts`,
 owner / admin; members 403): `GET /api/companies/:id/connectors` (`CoreConnectorsView`: each
