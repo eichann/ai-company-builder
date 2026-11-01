@@ -103,7 +103,10 @@ engine the day it is turned on.
   keys or prototype keys — every reader (server, push checker, app) gets the same meaning.
 - A definition can say only what the engine does (案 B, ontology §17.7): `fields` (kind,
   `source: file | server`; a choice may add `option_labels: { <option>: <shown as> }` — display
-  only, values stay the options; kind `tags` is server-only, "Tags" below), `links` (target type
+  only, values stay the options; kind `tags` is server-only, "Tags" below; a server `number` may
+  say `money: true` — written only through an approval request: no action's `args` may name it,
+  a create may not fill it (400 `MONEY_NEEDS_APPROVAL`), removing it is breaking — `plugins.md`
+  "Money", tests `tests/unit/record-types.test.ts`, `record-money-field.test.ts`), `links` (target type
   or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
   cardinality, inverse label),
   `states`, `initial`, `create_states` (states a create may start in instead — "Task version

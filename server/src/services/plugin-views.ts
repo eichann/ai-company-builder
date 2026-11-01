@@ -84,7 +84,7 @@ export function createPluginViews(
         const mapping = parsed!.mapping
         policies = Object.entries(m.operations).filter(([, op]) => op.kind === 'update').flatMap(([name, op]) =>
           Object.entries(mapping.objects[op.object]?.fields ?? {}).filter(([, f]) => f.write)
-            .map(([field]) => ({ operation: name, object: op.object, field, policy: effectiveFieldPolicy(m, mapping, name, field) })))
+            .map(([field]) => ({ operation: name, object: op.object, field, policy: effectiveFieldPolicy(editing.use, mapping, name, field) })))
       }
     }
     return {

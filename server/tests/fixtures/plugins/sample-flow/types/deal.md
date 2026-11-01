@@ -9,7 +9,7 @@ fields:
   confidence: { label: 確度, kind: choice, options: [a, b, c], option_labels: { a: A（高）, b: B（中）, c: C（低） }, source: server }
   next_step:  { label: 次のアクション, kind: text, source: server }
   close_date: { label: 受注予定日, kind: date, source: server }
-  amount:     { label: 金額, kind: number, source: server }
+  amount:     { label: 金額, kind: number, source: server, money: true }
   closed:     { label: 受注, kind: boolean, source: server }
   assignee:   { label: 担当, kind: person, source: server }
   owner:      { label: 責任者, kind: person, source: server }

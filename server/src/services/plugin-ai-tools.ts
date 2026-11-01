@@ -116,7 +116,7 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
             for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
               const f = def.fields[field]
               if (!rule.write || !f) continue
-              const policy = effectiveFieldPolicy(manifest, mapping, name, field)
+              const policy = effectiveFieldPolicy({ manifest, types }, mapping, name, field)
               if (policy !== 'auto' && policy !== 'prior') continue
               fields.push({ name: field, label: f.label, kind: f.kind, ...(f.options ? { options: [...f.options] } : {}), ...(f.optionLabels ? { optionLabels: { ...f.optionLabels } } : {}), policy })
             }

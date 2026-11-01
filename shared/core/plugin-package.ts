@@ -9,7 +9,7 @@ import {
   type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
 } from './plugin-declaration'
 import { parsePluginManifest } from './plugin-manifest'
-import { parseTypeFile, type TypeDefinition } from './record-types'
+import { isMoneyField, parseTypeFile, type TypeDefinition } from './record-types'
 
 /**
  * A whole package as found on the shelf: the declaration and the type files
@@ -58,8 +58,10 @@ export function validatePluginPackage(input: {
   if (input.mapping != null && !manifest.uses) errors.push('つなぎ先を使わない業務のプラグイン（connector のないもの）に読み替え表（mapping.yaml）は置けません')
   if (errors.length === 0) {
     const allFields = new Set(Object.values(owned).flatMap(t => Object.keys(t.fields)))
-    for (const f of Object.keys(manifest.fieldPolicyDefaults)) {
+    for (const [f, p] of Object.entries(manifest.fieldPolicyDefaults)) {
       if (!allFields.has(f)) errors.push(`field_policy_defaults の「${f}」は、どの型の欄でもありません`)
+      // A money field asks first whichever operation writes it (plugins.md "Money"): `auto` cannot be written.
+      else if (p === 'auto' && Object.values(owned).some(t => isMoneyField(t, f))) errors.push(`field_policy_defaults の「${f}」: お金の欄（money: true）は「自動」にできません（書くときは必ず承認のお願いになります）`)
     }
     for (const [opname, use] of Object.entries(manifest.uses?.operations ?? {})) {
       const persons = new Set(Object.values(owned).flatMap(t => Object.entries(t.fields).filter(([, f]) => f.kind === 'person').map(([n]) => n)))

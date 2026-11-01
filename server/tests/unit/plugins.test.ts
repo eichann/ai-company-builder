@@ -177,16 +177,16 @@ describe('operations that reach people outside the company are never automatic',
     const manifest = { ...p.manifest, operations: { ...p.manifest.operations } }
     manifest.operations.update_deal = { ...manifest.operations.update_deal, reaches: 'external' }
     manifest.operations.add_note = { ...manifest.operations.add_note, reaches: 'external', policy: 'auto' }
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'next_step')).toBe('auto')
-    expect(effectiveFieldPolicy(manifest, p.mapping, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'next_step')).toBe('auto')
+    expect(effectiveFieldPolicy({ ...p, manifest }, p.mapping, 'update_deal', 'next_step')).toBe('prior')
     expect(effectiveOperationPolicy(manifest, 'add_note')).toBe('prior')
   })
 
   it('a field the mapping does not write is off; the company overrides the default', () => {
     const p = crm()
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'closed')).toBe('off')
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'close_date')).toBe('prior')
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'amount')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'closed')).toBe('off')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'close_date')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'amount')).toBe('prior')
   })
 })
 
@@ -312,17 +312,17 @@ describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
     const p = crm()
     const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
     if (!write.ok) throw new Error(write.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, write.value, 'update_deal', 'stage')).toBe('prior')
+    expect(effectiveFieldPolicy(p, write.value, 'update_deal', 'stage')).toBe('prior')
     expect(manifestErrors(salesWith('  stage: off', '  stage: auto')).join()).toContain('auto）にできません')
     const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
     expect(policy.ok ? [] : policy.errors.join()).toContain('auto）にできません')
     // Whatever is stored: a mapping object built by hand still answers prior.
     const forged = { ...write.value, policy: { stage: 'auto' as const } }
-    expect(effectiveFieldPolicy(p.manifest, forged, 'update_deal', 'stage')).toBe('prior')
+    expect(effectiveFieldPolicy(p, forged, 'update_deal', 'stage')).toBe('prior')
     // A field reading the same property as the stage cannot be written automatically either.
     const shared = parsePluginMapping('deal:\n  fields:\n    next_step: { from: dealstage, write: true }\n    stage: { from: dealstage, write: false, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
     if (!shared.ok) throw new Error(shared.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
   })
 
   it('the policy is judged on the outside property: an auto field cannot reach what a stricter field reads', () => {
@@ -330,10 +330,10 @@ describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
     // `closed` (prior) and `next_step` (auto) read the same outside property: writing next_step is prior.
     const m = parsePluginMapping('deal:\n  fields:\n    next_step: { from: shared_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
     if (!m.ok) throw new Error(m.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, m.value, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, m.value, 'update_deal', 'next_step')).toBe('prior')
     const alone = parsePluginMapping('deal:\n  fields:\n    next_step: { from: own_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
     if (!alone.ok) throw new Error(alone.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, alone.value, 'update_deal', 'next_step')).toBe('auto')
+    expect(effectiveFieldPolicy(p, alone.value, 'update_deal', 'next_step')).toBe('auto')
   })
 
   it('decision: only on operations that write; update_deal is one', () => {

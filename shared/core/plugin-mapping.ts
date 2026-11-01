@@ -6,7 +6,7 @@
  */
 import { APPROVER_RULES, type ApproverRule, type ApproverSpec } from './approvals'
 import { roleRefName } from './plugin-roles'
-import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, asksFirst, priorFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
+import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, asksFirst, moneyField, priorFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
 import { EXTERNAL_NAME_RE, strList, unknownKeys } from './plugin-declaration-rules'
 import { normalizeRepoPath } from './paths'
 import { ONTOLOGY_NAME_RE, type FieldDef, type TypeDefinition } from './record-types'
@@ -201,6 +201,10 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     }
     if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) { err(`policy の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`); continue }
     if (!Object.values(objects).some(o => o.fields[f])) { err(`policy の「${f}」は読み替え表にない欄です`); continue }
+    if (p === 'auto' && Object.entries(objects).some(([on, o]) => o.fields[f] && moneyField(pkg, on, f))) {
+      err(`policy の「${f}」: お金の欄（money: true）は「自動」にできません（書くときは必ず承認のお願いになります）`)
+      continue
+    }
     if (p === 'auto' && Object.entries(objects).some(([on, o]) => o.fields[f]?.write && priorFieldWriters(manifest, on).length > 0)) {
       err(`policy の「${f}」: 社外の人に届く操作やお金が動く操作で書かれる欄は「自動」にできません`)
       continue
