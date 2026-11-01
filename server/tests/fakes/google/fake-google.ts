@@ -29,6 +29,7 @@
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
  *                                 GET  /gmail/v1/users/{userId}/messages (q `after:<seconds>`, labelIds, maxResults, pageToken)
  *                                 GET  /gmail/v1/users/{userId}/messages/{id} (format minimal | metadata | full)
+ *                                 GET  /gmail/v1/users/{userId}/threads/{id} (format full)
  *
  * Practice values only, recognisable at a glance: client secrets start with
  * `fake-google-secret-`, access tokens `ya29.fake-`, refresh tokens
@@ -930,6 +931,22 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       ...(m.html !== undefined ? [{ partId: '1', mimeType: 'text/html', filename: '', headers: [{ name: 'Content-Type', value: 'text/html; charset=UTF-8' }], body: { size: Buffer.byteLength(m.html), data: b64urlText(Buffer.from(m.html, 'utf8')) } }] : []),
     ]
     return c.json({ ...base, payload: { partId: '', mimeType: 'multipart/alternative', filename: '', headers: allHeaders, body: { size: 0 }, parts } })
+  })
+
+  // One conversation of the token's own mailbox, oldest first (users.threads.get, format full).
+  app.get('/gmail/v1/users/:userId/threads/:id', async c => {
+    const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    const inThread = mails
+      .filter(x => x.threadId === c.req.param('id') && x.account.toLowerCase() === box)
+      .sort((x, y) => Date.parse(x.receivedAt) - Date.parse(y.receivedAt))
+    if (inThread.length === 0) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    const messages: unknown[] = []
+    for (const m of inThread) {
+      const res = await app.request(`/gmail/v1/users/me/messages/${m.id}?format=full`, { headers: { authorization: c.req.header('authorization') ?? '' } })
+      messages.push(await res.json())
+    }
+    return c.json({ id: c.req.param('id'), historyId: '1', messages })
   })
 
   /** The send happened; the answer does not arrive. */

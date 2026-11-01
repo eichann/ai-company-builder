@@ -81,7 +81,8 @@ export function readMailDraft(data: unknown): OutboundMailView | undefined {
   if (to.some(r => !r) || cc.some(r => !r)) return undefined
   const body = typeof d.body === 'string' && d.body.length <= 50_000 ? d.body : null
   return {
-    id: d.id, state: d.state as OutboundMailState, version: d.version, hash: d.hash, from: d.from,
+    id: d.id, state: d.state as OutboundMailState, version: d.version, hash: d.hash,
+    channel: d.channel === 'slack' ? 'slack' : 'email', interactionId: nul(d.interactionId, 80), from: d.from,
     to: to as MailRecipientView[], cc: cc as MailRecipientView[], subject: d.subject, body, bodyDeleted: body === null,
     linkCount: typeof d.linkCount === 'number' ? d.linkCount : 0,
     meetingId: nul(d.meetingId, 80), bundleId: nul(d.bundleId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),

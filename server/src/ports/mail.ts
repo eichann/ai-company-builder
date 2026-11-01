@@ -66,11 +66,25 @@ export interface MailListQuery {
   max?: number
 }
 
+/**
+ * A conversation in the member's own mailbox, read on demand (the card's 元のスレッド,
+ * `.claude/rules/outbound-mail.md` "Replies"): its messages oldest first, the newest
+ * ones at most (`more` when earlier ones were left out). Nothing is kept.
+ */
+export interface MailThread {
+  /** The provider's conversation id (opaque). */
+  id: string
+  messages: MailMessage[]
+  more: boolean
+}
+
 export interface MailReader {
   /** The member's own received messages (inbox, newest first), header facts only. */
   listMessages(companyId: string, userId: string, query: MailListQuery): Promise<MailRead<{ messages: MailSummary[]; nextPageToken: string | null }>>
   /** One of the member's own messages with its text. */
   getMessage(companyId: string, userId: string, messageId: string): Promise<MailRead<MailMessage>>
+  /** One conversation of the member's own mailbox with each message's text. */
+  getThread(companyId: string, userId: string, threadId: string): Promise<MailRead<MailThread>>
 }
 
 /** A send's outcome (never retried by the provider: `unknown` may have been sent). */
@@ -87,6 +101,9 @@ export type MailSenderAccount =
 export interface MailSender {
   /** The account a send would go out from (the member's own permission), or why not. */
   senderAccount(companyId: string, userId: string): Promise<MailSenderAccount>
-  /** Sends an RFC 5322 message (base64url) once; never retried. */
-  send(companyId: string, userId: string, raw: string): Promise<MailSendResult>
+  /**
+   * Sends an RFC 5322 message (base64url) once; never retried. `threadId`: a reply
+   * into the member's own conversation (its headers carry In-Reply-To / References).
+   */
+  send(companyId: string, userId: string, raw: string, options?: { threadId?: string }): Promise<MailSendResult>
 }

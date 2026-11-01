@@ -6,6 +6,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildMailMessage, encodeHeaderWords, gmailRaw } from '../../src/lib/mail-message'
+import { coreTypeDefinitions } from '../../../shared/core/core-types'
+import { mailContentCanonical } from '../../../shared/core/mail'
+import { compareTypeDefinitions, parseTypeFile } from '../../../shared/core/record-types'
 
 const base = { from: 'sato@div.example', to: ['suzuki@a-corp.example'], cc: [], subject: 'お礼', body: '本文', date: new Date('2026-11-05T06:52:00Z') }
 const headersOf = (m: string) => m.slice(0, m.indexOf('\r\n\r\n')).replace(/\r\n /g, ' ').split('\r\n')
@@ -41,3 +44,61 @@ describe('buildMailMessage', () => {
     expect(encodeHeaderWords('=?UTF-8?B?x?=')).toMatch(/^=\?UTF-8\?B\?/)
   })
 })
+
+describe('a reply (outbound-mail.md "Replies")', () => {
+  it('carries its own Message-ID, In-Reply-To and References', () => {
+    const h = headersOf(buildMailMessage({ ...base, messageId: '<acb.1@div.example>', inReplyTo: '<m2@a.example>', references: ['<m1@a.example>', '<m2@a.example>'] }))
+    expect(h).toContain('Message-ID: <acb.1@div.example>')
+    expect(h).toContain('In-Reply-To: <m2@a.example>')
+    expect(h).toContain('References: <m1@a.example> <m2@a.example>')
+  })
+
+  it('a message id from the thread that could end the header or add another is refused, not sent', () => {
+    expect(() => buildMailMessage({ ...base, inReplyTo: '<m2@a.example>\r\nBcc: spy@attacker.example' })).toThrow()
+    expect(() => buildMailMessage({ ...base, references: ['<m1@a.example> <x@y>'] })).toThrow()
+    expect(() => buildMailMessage({ ...base, messageId: 'no-brackets@a.example' })).toThrow()
+  })
+
+  it('a draft made before replies keeps its hash; a reply\'s thread is part of what is hashed', () => {
+    const content = { from: 'sato@div.example', to: ['suzuki@a-corp.example'], cc: [], subject: 'お礼', body: '本文' }
+    expect(mailContentCanonical(content)).toBe('{"attachments":[],"body":"本文","cc":[],"from":"sato@div.example","subject":"お礼","to":["suzuki@a-corp.example"],"v":1}')
+    const a = mailContentCanonical({ ...content, reply: { threadId: 't1', inReplyTo: '<m2@a.example>', references: ['<m2@a.example>'] } })
+    const b = mailContentCanonical({ ...content, reply: { threadId: 't2', inReplyTo: '<m2@a.example>', references: ['<m2@a.example>'] } })
+    expect(a).not.toBe(b)
+  })
+
+  it('outbound_message 4 only adds to 3 (the interaction it answers, the Slack thread)', () => {
+    const before = parseTypeFile('outbound_message', OUTBOUND_MESSAGE_V3_TEXT)
+    if (!before.ok) throw new Error(before.errors.join())
+    const now = coreTypeDefinitions().find(d => d.name === 'outbound_message')!
+    const change = compareTypeDefinitions(before.definition, now)
+    expect(change.breaking).toEqual([])
+    expect(change.versionProblem).toBeNull()
+    expect(now.version).toBe(4)
+    expect(now.links.interaction.target).toBe('interaction')
+  })
+})
+
+const OUTBOUND_MESSAGE_V3_TEXT = `---
+label: 送るもの
+version: 3
+implements: [prepared]
+storage: server
+fields:
+  requested_by:        { label: 作った人, kind: person, source: server }
+  assignee:            { label: 担当, kind: person, source: server }
+  subject:             { label: 件名, kind: text, source: server }
+  payload_hash:        { label: 内容の印, kind: text, source: server }
+  payload_version:     { label: 中身の版, kind: number, source: server }
+  sent_at:             { label: 送った日時, kind: datetime, source: server }
+  provider_message_id: { label: 送った先での番号, kind: text, source: server }
+  channel:             { label: 経路, kind: choice, options: [email, slack], option_labels: { email: メール, slack: Slack }, source: server }
+links:
+  bundle:              { label: まとまり, interface: bundle, cardinality: one, inverse: messages }
+  meeting:             { label: 会議, target: meeting, cardinality: one, inverse: messages }
+states: [draft, sent, unknown, discarded]
+initial: draft
+final: [sent, discarded]
+---
+# 送るもの
+`

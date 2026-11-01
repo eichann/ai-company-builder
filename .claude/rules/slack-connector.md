@@ -4,6 +4,7 @@ paths:
   - "server/src/services/slack-connector.ts"
   - "server/src/services/slack-events.ts"
   - "server/src/services/slack-notices.ts"
+  - "server/src/services/slack-chat.ts"
   - "server/src/routes/slack.ts"
   - "server/src/routes/slack-connection.ts"
   - "shared/core/slack.ts"
@@ -94,6 +95,15 @@ counts only when all its scopes are granted (`slackFeaturesOf`).
 - `sendNoticeDm(companyId, userId, text)`: only to a current member with an active grant whose
   `notices` is not off (`feature-off`), to the Slack user remembered for the grant's address, by
   the company's bot (`conversations.open`, `chat.postMessage`); the text is never stored or logged.
+
+## Threads and replies (A4, `services/slack-chat.ts`: the `chat` role's implementation)
+
+Registered in `wireConnectorsLane` (`roleProviders.provide('slack', …)`). `thread`: only with
+`read` granted and not off; `conversations.replies` (the history scope of the channel kind), the
+newest 30, each ≤ 8,000 characters, names through `users.info` (≤ 10 per thread), `mine` = the
+Slack user remembered for the grant's address. `reply`: only with `reply` granted and not off;
+`chat.postMessage { channel, thread_ts, text }` (≤ 4,000), a write: never re-sent. Nothing stored
+or logged (`outbound-mail.md` "Replies").
 
 ## Notice DMs (大事な知らせを Slack の DM で, E-26; `services/slack-notices.ts`)
 

@@ -72,9 +72,10 @@ service that does it, a choice only when two could. No role / connector / plugin
 
 `services/connector-role-providers.ts` (`createRoleProviders(resolver, implementations)`) gives
 one provider-neutral port per role, resolving the connector **per call** and handing the call to
-that connector's implementation: `calendar` (`ports/calendar.ts` `CalendarReader`), `meetings`
+that connector's implementation (a connector wired later adds its own with `provide`): `calendar` (`ports/calendar.ts` `CalendarReader`), `meetings`
 (`ports/meeting-records.ts` `MeetingRecordsReader`, errors `MeetingReadFailed`), `mailReader`
-(`ports/mail.ts` `MailReader`) and `mailSender` (`MailSender`). No usable connector: the calendar
+(`ports/mail.ts` `MailReader`, incl. `getThread`), `mailSender` (`MailSender`, `send(…, { threadId })`),
+`chatReader` / `chatSender` (`ports/chat.ts`, Slack: `slack-chat.ts`). No usable connector: the calendar
 answers `stopped`, mail reading `stopped`, a send `not-sent` `no-connector` (and `senderAccount`
 `unavailable`), meetings throw `not-sent` `no-connector`; two without the admin's choice:
 `choice-needed` — nothing is called. Users: 「今日の予定」 (`calendar.md`), the minutes intake

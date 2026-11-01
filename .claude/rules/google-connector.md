@@ -170,13 +170,15 @@ Drive through the role ports (`connector-roles.md`).
   List-Unsubscribe, Precedence, Auto-Submitted, X-Autoreply) → `MailSummary` (addresses lower
   case, RFC 2047 subjects decoded, `bulk` = a list / newsletter or the promotions / social /
   forums category, `automated`); `getMessage` → `format=full`, the first text/plain part (else
-  the HTML's text), decoded by its charset (ISO-2022-JP too), NFC, at most 20,000 characters.
+  the HTML's text), decoded by its charset (ISO-2022-JP too), NFC, at most 20,000 characters;
+  `getThread` → `users/me/threads/<id>?format=full` (the card's 元のスレッド: the newest 20, 8,000
+  characters each).
   Only `users/me`. **Nothing stored, nothing of a message logged** (the client's action-log line
   names `gmail.messages.list` / `.get` only). Failures: `not-connected`, `turned-off`, `stopped`,
   `not-found`, `unavailable`.
 - **Send** (`mail`, `gmail.send`; `MailSender`): `senderAccount` (the active grant with
   `gmail.send` and `mail` not off → the Google email; else `consent-needed` / `turned-off`) and
-  `send` (`POST users/me/messages/send`, never retried).
+  `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`).
 
 ## Practice Google (staging)
 

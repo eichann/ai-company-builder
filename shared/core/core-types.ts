@@ -235,7 +235,7 @@ final: [approved, stale, withdrawn, failed]
 `,
   outbound_message: `---
 label: 送るもの
-version: 3
+version: 4
 implements: [prepared]
 storage: server
 fields:
@@ -247,16 +247,19 @@ fields:
   sent_at:             { label: 送った日時, kind: datetime, source: server }
   provider_message_id: { label: 送った先での番号, kind: text, source: server }
   channel:             { label: 経路, kind: choice, options: [email, slack], option_labels: { email: メール, slack: Slack }, source: server }
+  slack_thread:        { label: Slack のスレッド, kind: text, source: server }
 links:
   bundle:              { label: まとまり, interface: bundle, cardinality: one, inverse: messages }
   meeting:             { label: 会議, target: meeting, cardinality: one, inverse: messages }
+  interaction:         { label: 返事をする連絡, target: interaction, cardinality: one, inverse: replies }
 states: [draft, sent, unknown, discarded]
 initial: draft
 final: [sent, discarded]
 ---
 # 送るもの
 
-社外に送るもの（メール、のちに Slack の返事）の下書き。送るのは作った人本人だけで、送る画面から行います（AI は送れません）。
+社外に送るもの（メール、Slack の返事）の下書き。送るのは作った人本人だけで、送る画面から行います（AI は送れません）。
+来た連絡への返事は「返事をする連絡」につながり、同じスレッドに返します（メールは同じスレッドへの返信、Slack はスレッドへの返事）。
 `,
   decision: `---
 label: 決めたこと

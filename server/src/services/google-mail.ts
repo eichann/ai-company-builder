@@ -25,6 +25,9 @@ import type { GoogleRequester } from './google-meetings'
 /** The longest text handed out for one message (characters); longer is cut with a notice. */
 export const MAIL_TEXT_MAX = 20_000
 const TRUNCATED = '\n【長いため、ここから先は省きました】'
+/** A thread on the card: at most this many of its newest messages, each at most this long. */
+export const THREAD_MESSAGES_MAX = 20
+export const THREAD_TEXT_MAX = 8_000
 const PAGE_MAX = 50
 const PAGE_DEFAULT = 25
 const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
@@ -242,6 +245,26 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       return { ok: true, value: message }
     },
 
+    async getThread(companyId, userId, threadId) {
+      if (!ID_RE.test(threadId)) return { ok: false, reason: 'not-found' }
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'GET', path: `/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}`,
+        query: { format: 'full' },
+        scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.threads.get',
+      })
+      if (!r.ok) return { ok: false, reason: mailReadReasonOf(r) }
+      const body = isObj(r.json) ? r.json : {}
+      const all = (Array.isArray(body.messages) ? body.messages : [])
+        .map(raw => {
+          const summary = mailSummaryOf(raw)
+          return summary ? { ...summary, ...mailTextOf(raw, THREAD_TEXT_MAX) } : null
+        })
+        .filter((m): m is MailMessage => m !== null)
+      // Gmail lists a thread oldest first; only the newest ones are handed out.
+      const messages = all.slice(-THREAD_MESSAGES_MAX)
+      return { ok: true, value: { id: threadId, messages, more: all.length > messages.length } }
+    },
+
     async senderAccount(companyId, userId): Promise<MailSenderAccount> {
       const grant = deps.companyData.forCompany(companyId).connectors.grant('google', userId)
       if (!grant || grant.status !== 'active' || !grant.scopes.includes(GOOGLE_SCOPE.gmailSend)) return { ok: false, reason: 'consent-needed' }
@@ -249,9 +272,11 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       return { ok: true, account: grant.accountEmail }
     },
 
-    send(companyId, userId, raw) {
+    send(companyId, userId, raw, options) {
+      const threadId = options?.threadId && ID_RE.test(options.threadId) ? options.threadId : null
       return request(companyId, userId, {
-        api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
+        api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send',
+        body: threadId ? { raw, threadId } : { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: threadId ? 'gmail.send.reply' : 'gmail.send',
       })
     },
   }

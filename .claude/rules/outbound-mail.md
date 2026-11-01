@@ -16,6 +16,11 @@ paths:
   - "client/tests/outbound-mail-tools.test.ts"
   - "client/tests/mail-draft-card-ui.*"
   - "client/tests/ui/mail-draft-card.spec.ts"
+  - "server/src/services/threads.ts"
+  - "server/src/routes/threads.ts"
+  - "shared/types/threads.ts"
+  - "server/src/ports/chat.ts"
+  - "server/tests/integration/threads.test.ts"
 ---
 
 # Outbound mail (milestone 4 G8: お礼メールを確かめて送る; the type is 「送るもの」)
@@ -52,11 +57,11 @@ of the company went to (`outbound.sentDomains()`).
 
 ## Drafts and versions
 
-- Record `outbound_message` (「送るもの」, version 3; server only, `records.md`), created / changed
+- Record `outbound_message` (「送るもの」, version 4; server only, `records.md`), created / changed
   only through the service writer; folder = the まとまり's (else the meeting's) folder;
   `requested_by` / `assignee` = the author; fields `subject`, `payload_hash`, `payload_version`,
-  `channel: email` (the type also offers `slack` for stage 3's Slack replies — one type for every
-  channel, no second type; nothing sends to Slack yet); links `bundle`, `meeting`. The outbound
+  `channel: email` | `slack` (one type for every channel; Slack replies: "Replies" below),
+  `slack_thread`; links `bundle`, `meeting`, `interaction` (the 連絡 it answers). The outbound
   tables keep their column names `minutes_id` / `deal_id` (the port calls them `meetingId` /
   `bundleId`).
 - Every change is a new version: the canonical content (`mailContentCanonical` — From = the
@@ -105,6 +110,54 @@ The AI emergency stop does not block a person's send (design §4-5); the Google 
 does stop the AI's drafting: every record token is refused while the company's AI is stopped
 (403 `ACB_STOPPED`, `records.md`).
 `POST …/discard` (draft / unknown → `discarded`) is the person's too.
+
+## Replies into the same thread (stage 3 A4)
+
+A 来た連絡 (`interaction`, `inbox.md`) is answered where it came from, and its thread is shown on
+the card without the server keeping it.
+
+- **元のスレッド** (`services/threads.ts`, `routes/threads.ts`, contract `shared/types/threads.ts`):
+  `GET /api/companies/:companyId/threads/:recordId` (session, `companyMember`) for an interaction
+  or a record linking one (`interaction` link: a 返事のお願い, a task). The member must read the
+  record **and** the 連絡 (`recordReader`; an owner-only 連絡 is its owner's — another member, the
+  company's owner / admins: the same 404 `THREAD_NOT_FOUND` as a missing record). The pointer is
+  the 連絡's `thread_ref` (`gmail:<thread id>`, `slack:<channel>:<thread ts>`), else its
+  `source_ref` (`threadPointerOf`). Read now with the **viewer's own** permission through the
+  roles: `MailReader.getThread` (Gmail `users.threads.get`, the newest 20, 8,000 characters each)
+  or `ChatReader.thread` (`ports/chat.ts`; Slack `conversations.replies` with the member's token,
+  `slack-connector.md`). Not readable → `unavailable { reason, text, allow }` (`not-connected` /
+  `turned-off` say where to allow it). Also lists the member's own reply drafts to the 連絡.
+  **Nothing of a thread is stored or logged** (test: marked texts in no table, no log line).
+- **A reply draft**: `POST /outbound { interactionId, … }` (session or the AI's token). The
+  interaction must be readable; its まとまり is taken along; link `interaction`. Place: an
+  owner-only 連絡's reply is owner-only (`personalOwner`), else the まとまり's / meeting's / 連絡's
+  folder. No thread pointer → 409 `THREAD_UNKNOWN`.
+  - Mail: recipients from the thread (source `thread` 「スレッドの相手」: From / To / CC of its
+    messages in the member's own mailbox, the member left out; re-read before sending like every
+    source); the reply headers are fixed with the draft (`MailReplyHeaders` in the canonical
+    content, so the hash covers them): Gmail `threadId`, `In-Reply-To` = the thread's newest
+    Message-ID, `References` (≤ 20, each `MESSAGE_ID_RE`; `lib/mail-message.ts` throws on
+    anything else). Thread unreadable at drafting → 409 `THREAD_UNREADABLE`. A draft made before
+    replies keeps its canonical text (no `reply` key).
+  - Slack (`channel: slack`): body only (≤ 4,000), no recipients (400 if any), no subject; the
+    thread (`slack_thread`, `chatReplyCanonical`) fixed with it.
+- **Sending** is the same person's 「確かめて送る」 (hash, send row first, never retried, `unknown`
+  → 送られていた／送られていなかった). Mail: `MailSender.send(…, { threadId })`, our own
+  Message-ID `<acb.<send id>@<domain>>`. Slack: `ChatSender.replierAccount` (返事を送る granted and
+  on, else 409 `SLACK_CONSENT_NEEDED` `needsSlackConsent: 'reply'` / `SLACK_FEATURE_OFF`; none →
+  503 `SLACK_UNAVAILABLE`), the account still the draft's From (`FROM_CHANGED`), then one
+  `chat.postMessage` with `thread_ts` as the member; `provider_message_id` = its ts.
+- After a reply leaves, **no new やりとり** (one per thread): `outboundMail.onReplySent` hands the
+  inbox the company's own message in that thread (`replyAsIncoming`, `composition/connectors.ts`;
+  `outgoing`, references = the 連絡's own message id), which moves its 返事のお願い as for any
+  reply of ours (`inbox.md` "The thread went on").
+- Not yet: an AI route to read the thread (B4 needs one with a record-token guard), the app's
+  panel (`RecordSourcePanel`) and the AI tools' `interactionId`.
+
+Tests: `server/tests/integration/threads.test.ts` (fake Google + fake Slack: owner-only, the
+switch, the Gmail thread / headers / recipients, the Slack thread_ts and 返事を送る off, nothing
+stored or logged), `server/tests/unit/mail-message.test.ts` (reply headers, injection, old hashes,
+v4 additive), permission matrix + `CROSS`.
 
 ## Retention (§9 q9)
 
