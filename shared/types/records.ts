@@ -66,9 +66,18 @@ export interface RecordQuery {
   /**
    * Server-sourced field → one value or several (`{ in: [...] }`); a field of
    * kind `tags` → `{ contains: tag }` (records whose tags hold it, normalized
-   * as stored; only types where that field holds tags are searched).
+   * as stored; only types where that field holds tags are searched); a field
+   * of kind date / datetime / number → `{ gte?, lt? }` (gte ≤ value < lt,
+   * compared as stored: `{ lt: '2026-11-06' }` = due by the end of 11/5, with
+   * or without a time; only types where that field has such a kind).
    */
-  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] } | { contains: string }>
+  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] } | { contains: string } | { gte?: string | number; lt?: string | number }>
+  /** Order by a date / datetime / number server field (empty values last); default most recently changed first. */
+  sort?: { field: string; order?: 'asc' | 'desc' }
+  /** Only records now in a final state of their type that they entered at or after this time (「今日終わったこと」). */
+  finishedSince?: string
+  /** Only records whose outgoing link `name` points at `id` (a bundle's tasks); `id` must be readable (else 404). */
+  link?: { name: string; id: string }
   /** Records linked to this one (either direction), up to `hops` (1 or 2, default 1). */
   linkedTo?: { id: string; hops?: 1 | 2 }
   /** Substring of the title or summary (0.23-1: not the full text). */
@@ -169,6 +178,8 @@ export interface CreateRecordRequest {
   /** Server-field values (requested_by defaults to the creator for request types). */
   fields?: Record<string, RecordFieldValue>
   links?: Record<string, string | string[]>
+  /** The state to start in instead of the type's `initial`: one of its `create_states` (task: `preparing`). */
+  state?: string
   actor?: RecordActor
 }
 
@@ -178,6 +189,8 @@ export interface ActionRequest {
   note?: string
   /** The action's arguments: each sets the server field of the same name. */
   args?: Record<string, RecordFieldValue>
+  /** Record links the action sets (its definition's `links`): ids, null / [] = none; a link left out stays. */
+  links?: Record<string, string | string[] | null>
   /** Files (of the action's `attach` links) handed over, at the commit that was pushed. */
   attachments?: Array<{ link: string; path: string; commit: string }>
   /**

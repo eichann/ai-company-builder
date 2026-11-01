@@ -77,6 +77,7 @@ import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
@@ -169,8 +170,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
     // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
     managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
-    // 「すべての鍵を止める」 stops members' Google permissions too (bound below).
-    onStopAll: (companyId, by) => { void googleConnector.stopAll(companyId, by) },
+    // 「すべての鍵を止める」 stops members' permissions at every OAuth provider too (bound below).
+    onStopAll: (companyId, by) => { void memberOAuth.stopAll(companyId, by) },
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -317,12 +318,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       : `https://${GOOGLE_AUTHORIZE_HOST}`,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   })
+  // Members' own OAuth permissions, provider-neutral (member-oauth.md); Google registers below.
+  const memberOAuth = createMemberOAuth({
+    ...shared,
+    brokerVault,
+    tokenDigest: sha256TokenDigest,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    redirectUri: provider => `${publicUrl()}${oauthCallbackPath(provider)}`,
+  })
   const googleConnector = createGoogleConnector({
     ...shared,
     brokerVault,
     google: googleClient,
-    tokenDigest: sha256TokenDigest,
-    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    memberOAuth,
     redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
     practiceGoogle: practiceGoogle !== undefined,
     operatorStopped: () => pluginShelf.isStopped('google', ''),
@@ -390,6 +398,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     outboundMail,
     googleClient,
     googleConnector,
+    memberOAuth,
     minutes,
     calendar,
     pluginShelf,

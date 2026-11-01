@@ -130,6 +130,9 @@ describe('the practice HubSpot (staging only)', () => {
     if (!real.ok) throw new Error('view refused')
     expect(real.value.services.filter(s => s.practice)).toEqual([])
 
+    // Earlier checks left several HubSpot keys: the admin chooses which one the service uses.
+    const latest = view.value.keys.filter(k => k.service === 'hubspot' && k.scope === 'company').at(-1)!
+    expect(services.keyBroker.setDefaultKey(owner, 'hubspot', { keyId: latest.id }).ok).toBe(true)
     const member = { companyId: CO, userId: 'pu-owner', role: 'owner' }
     const token = services.brokerTokens.issue(member, { conversationId: 'c-pu', services: ['hubspot'] }).value!.token as string
     const { Hono } = await import('hono')
@@ -184,7 +187,9 @@ describe('the practice HubSpot (staging only)', () => {
     const view = services.keyBroker.get(owner)
     if (!view.ok) throw new Error('view refused')
     expect(view.value.services.filter(s => s.practice)).toEqual([])
-    // The relay too: HubSpot through the real way out.
+    // The relay too: HubSpot through the real way out (this key chosen among the test's several).
+    const keyId = made.ok ? made.value.keys.find(k => k.service === 'hubspot' && k.last4 === REAL.slice(-4))!.id : ''
+    expect(services.keyBroker.setDefaultKey(owner, 'hubspot', { keyId }).ok).toBe(true)
     const token = services.brokerTokens.issue(owner, { conversationId: 'c-pu-g', services: ['hubspot'] }).value!.token as string
     const { Hono } = await import('hono')
     const { brokerRelayRoutes } = await import('../../src/routes/broker-relay')

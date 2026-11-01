@@ -165,6 +165,14 @@ export interface ActionDef {
    * (left out of the definition then, so existing stored JSON compares equal).
    */
   okFrom?: string[]
+  /**
+   * YAML `links`: record links (not file links) the action may set (task
+   * version 5: `set_bundle` → `bundle`, `finish_prep` → `prepared`). The body
+   * gives `links: { <name>: id | [ids] | null }`; a link left out stays as it
+   * is. Each target must be a live record of this company the actor reads,
+   * of the link's type (or implementing its interface). Absent = none.
+   */
+  links?: string[]
 }
 
 export interface TypeDefinition {
@@ -179,6 +187,11 @@ export interface TypeDefinition {
   initial: string | null
   /** States in which nothing is waiting for anyone (done, cancelled…): not anyone's turn. */
   final: string[]
+  /**
+   * YAML `create_states`: states a create may start in instead of `initial`
+   * (task version 5: `preparing`, the AI's turn before the person's). Absent = only `initial`.
+   */
+  createStates?: string[]
   actions: Record<string, ActionDef>
 }
 
@@ -205,6 +218,30 @@ export const INTERFACES: Record<string, { label: string; fields: Record<string, 
     label: 'まとまり',
     fields: { owner: 'person', purpose: 'text' },
   },
+  /**
+   * 「AI が用意したもの」 (stage 2 S2): what an AI made for a person to check
+   * and act on — a mail draft (`outbound_message`), an approval request — that
+   * a task links under `prepared`. Who made it and whose it is to act on.
+   */
+  prepared: {
+    label: 'AI が用意したもの',
+    fields: { requested_by: 'person', assignee: 'person' },
+  },
+}
+
+/**
+ * The states where it is the AI's turn: a state some action only the AI may
+ * do (`who` exactly `[ai]`) starts from (from null = every non-final state).
+ * 「AI の番」 lists them; 「あなたの番」 leaves them out (the person's turn
+ * comes when the AI hands the record over).
+ */
+export function aiTurnStates(def: TypeDefinition): Set<string> {
+  const states = new Set<string>()
+  for (const a of Object.values(def.actions)) {
+    if (a.who.length !== 1 || a.who[0] !== 'ai') continue
+    for (const s of a.from ?? def.states.filter(x => !def.final.includes(x))) states.add(s)
+  }
+  return states
 }
 
 /** Names a field may not take: the record's own keys and the index columns. */
@@ -230,7 +267,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -325,6 +362,13 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   if (!finalRaw || !finalRaw.every(f => typeof f === 'string' && states.includes(f))) err('final は states の名前の並びで書いてください')
   else final.push(...(finalRaw as string[]))
 
+  let createStates: string[] | undefined
+  if (raw.create_states !== undefined && raw.create_states !== null) {
+    const c = list(raw.create_states)
+    if (!c || !c.every(s => typeof s === 'string' && states.includes(s) && !final.includes(s))) err('create_states は states のうち final でない状態の名前の並びで書いてください')
+    else if (c.length > 0) createStates = [...new Set(c as string[])]
+  }
+
   const implementsRaw = list(raw.implements)
   const implementsList: string[] = []
   if (!implementsRaw) err('implements は共通の型の名前の並びで書いてください')
@@ -347,7 +391,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'links']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -402,7 +446,13 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
           err(`操作「${aname}」に ok_from を書くときは、欄「${OK_FIELDS.by}」（kind: person, source: server）と「${OK_FIELDS.note}」（kind: text, source: server）が要ります`)
         } else okFrom = o as string[]
       }
-      if (to === null && Object.keys(args).length === 0) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かのどちらかが要ります`)
+      let actionLinks: string[] | undefined
+      if (a.links !== undefined && a.links !== null) {
+        const l = list(a.links)
+        if (!l || l.length === 0 || !l.every(n => typeof n === 'string' && links[n] !== undefined && links[n].target !== 'file')) err(`操作「${aname}」の links は記録へのつながり（file でないもの）の名前で書いてください`)
+        else actionLinks = [...new Set(l as string[])]
+      }
+      if (to === null && Object.keys(args).length === 0 && !actionLinks) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かつながりを決める（links）かのどれかが要ります`)
       actions[aname] = {
         label: isStr(a.label) ? a.label : aname,
         from,
@@ -417,6 +467,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         args,
         handTo,
         ...(okFrom ? { okFrom } : {}),
+        ...(actionLinks ? { links: actionLinks } : {}),
       }
     }
   }
@@ -436,6 +487,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       states,
       initial,
       final,
+      ...(createStates ? { createStates } : {}),
       actions,
     },
   }
