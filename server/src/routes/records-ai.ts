@@ -28,7 +28,7 @@
  *
  *   POST /outbound-recipients             verified mail recipients of a minutes / deal (read; tool mail_recipients)
  *   POST /outbound                        a mail draft (act; mail_draft_create)
- *   GET  /outbound/:messageId             the member's own draft (read)
+ *   GET  /outbound/:messageId             the member's own draft (read; mail_draft_show)
  *   PUT  /outbound/:messageId             a new version of it (act; mail_draft_update)
  *   There is deliberately no send, resolve, discard or typed address here
  *   (outbound-mail.md): sending reaches outside and is a person's, with their session.

@@ -8,6 +8,7 @@
  *   to the AI's route with the turn's record token, never the session;
  * - a draft becomes the app-drawn card (data part, stored with the message), and the AI is told
  *   the mail is NOT sent;
+ * - mail_draft_show puts a new card of the current draft (any state) and changes nothing;
  * - the card's send goes with the person's session and carries exactly the hash shown;
  *   a malformed hash never leaves the app.
  */
@@ -46,6 +47,7 @@ function fakeServer(scope: 'read' | 'act') {
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [{ definition: { name: 'outbound_message', storage: 'server', actions: {}, fields: {} } as unknown as TypeDefinition }] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
     if (url.endsWith('/api/records-ai/outbound')) return json(201, { draft: draft() })
+    if (url.endsWith(`/api/records-ai/outbound/${draft().id}`) && (init.method ?? 'GET') === 'GET') return json(200, { draft: draft({ state: 'sent', version: 3 }) })
     return json(200, { ok: true })
   }) as unknown as typeof globalThis.fetch
   return { api: createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch }), seen }
@@ -61,9 +63,9 @@ async function turn(scope: 'read' | 'act') {
 
 test('the AI drafts and looks up recipients; no tool sends; Codex only looks up', async () => {
   const claude = (await turn('act')).tools.specs.map(s => s.name).filter(n => n.startsWith('mail_'))
-  assert.deepEqual(claude.sort(), ['mail_draft_create', 'mail_draft_update', 'mail_recipients'])
+  assert.deepEqual(claude.sort(), ['mail_draft_create', 'mail_draft_show', 'mail_draft_update', 'mail_recipients'])
   const codex = (await turn('read')).tools.specs.map(s => s.name).filter(n => n.startsWith('mail_'))
-  assert.deepEqual(codex, ['mail_recipients'])
+  assert.deepEqual(codex.sort(), ['mail_draft_show', 'mail_recipients'])
   const all = (await turn('act')).tools.specs.map(s => s.name)
   assert.equal(all.some(n => /send|resolve|discard/.test(n)), false)
 })
@@ -90,6 +92,21 @@ test('a draft carries refs only (an address is refused), goes with the record to
   assert.equal(stored.mailDrafts?.length, 1)
   const back = sessionMessageToUIMessage(stored).parts.find(p => p.type === MAIL_DRAFT_PART_TYPE) as { data: unknown }
   assert.deepEqual(readMailDraftCard(back.data), cards[0])
+})
+
+test('showing a draft again only reads it and adds a new card in its current state', async () => {
+  const { tools, cards, seen } = await turn('read')
+  const before = seen.length
+  const told = JSON.parse(await tools.execute('mail_draft_show', { id: draft().id }))
+  const calls = seen.slice(before)
+  assert.deepEqual(calls.map(c => [c.method, c.url]), [['GET', `https://acb.example.jp/api/records-ai/outbound/${draft().id}`]])
+  assert.equal(calls[0].headers.Cookie, undefined)
+  assert.equal(cards.length, 1)
+  assert.equal(cards[0].draft.state, 'sent')
+  assert.equal(cards[0].draft.version, 3)
+  assert.equal(told.state, 'sent')
+  assert.match(told.instruction, /nothing was changed/)
+  assert.doesNotMatch(told.instruction, /NOT sent/)
 })
 
 test('the card\'s send goes with the session and carries exactly the hash shown; a malformed hash never leaves', async () => {
