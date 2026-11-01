@@ -36,3 +36,30 @@ test('the requester (not the approver) has no approve or send-back button, only 
   await expect(card.getByRole('button', { name: '取り下げる' })).toBeVisible()
   expectNoPageErrors(state)
 })
+
+test('a new deal with similar ones: the approver first says whether it is the same; 「同じ」 makes nothing and links the meeting', async ({ page }) => {
+  const state = await openPreview(page, 'approval-card', { kind: 'create' })
+  const card = page.getByRole('group', { name: '承認のお願い' })
+  const similar = card.getByRole('list', { name: '似ているもの' })
+  await expect(similar).toContainText('研修導入（プレビュー株式会社）')
+  await expect(similar).toContainText('提案・担当 佐藤さん・更新 2026-10-30・同じ相手')
+  await expect(similar).toContainText('名前が似ています')
+  await card.getByRole('textbox').fill('新しい研修の相談のため')
+  // Not before choosing: approving a possible duplicate is one click away from a second deal.
+  await expect(card.getByRole('button', { name: '承認' })).toBeDisabled()
+  await card.getByRole('button', { name: '別の案件として作る' }).click()
+  await expect(card.getByRole('button', { name: '承認' })).toBeEnabled()
+  await expect(card.getByRole('button', { name: 'これと同じ案件です（作らない）' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('「これと同じ案件です（作らない）」 sends that record and, by default, the meeting link', async ({ page }) => {
+  const state = await openPreview(page, 'approval-card', { kind: 'create' })
+  const card = page.getByRole('group', { name: '承認のお願い' })
+  await card.getByRole('button', { name: 'これと同じ案件です（作らない）' }).first().click()
+  await expect(page.locator('#sent')).toHaveText(JSON.stringify({ recordId: 'deal-preview02', linkMeeting: true }))
+  await expect(card).toContainText('作りませんでした。会議もこの記録につなぎました。')
+  await expect(card).toContainText('取り下げられました')
+  await expect(card.getByRole('button', { name: '承認' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

@@ -343,8 +343,8 @@ describe('runs, stops and connections', () => {
       .toMatchObject({ ok: false, body: { code: 'OPERATION_NOT_FOUND' } })
     expect(way.sent.length).toBe(sent)
     // Similar deals for its create: HubSpot answers with sample-sales's deals, which are not this plugin's records.
-    expect(await services.pluginOperations.similarDeals(owner, 'sample-leads', '研修導入（株式会社サンプル）')).toEqual({ ok: true, value: { similar: [] } })
-    expect((await services.pluginOperations.similarDeals(owner, 'sample-sales', '研修導入（株式会社サンプル）')).value.similar.length).toBeGreaterThan(0)
+    expect(await services.pluginOperations.similarRecords(owner, 'sample-leads', 'create_deal', { title: '研修導入（株式会社サンプル）', meetingId: null })).toMatchObject({ ok: true, value: { items: [] } })
+    expect((await services.pluginOperations.similarRecords(owner, 'sample-sales', 'create_deal', { title: '研修導入（株式会社サンプル）', meetingId: null })).value.items.length).toBeGreaterThan(0)
     // Its AI tools: none (its operations do not list ai), while sample-sales's are unchanged.
     const tools = (await services.plugins.aiTools(owner, 'act')).value.plugins
     expect(tools.map((p: Json) => p.id)).toEqual(['sample-sales'])

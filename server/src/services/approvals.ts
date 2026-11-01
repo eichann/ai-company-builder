@@ -42,7 +42,7 @@ import type { LedgerValue } from '../../shared/core/record-ledger'
 import type { FieldDef, TypeDefinition } from '../../shared/core/record-types'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
 import type {
-  ApprovalFieldView, ApprovalListItem, ApprovalMaterial, ApprovalPrecedent, ApprovalRequested, ApprovalState, ApprovalView,
+  ApprovalFieldView, ApprovalListItem, ApprovalMaterial, ApprovalPrecedent, ApprovalRequested, ApprovalState, ApprovalView, SameAsResult, SimilarRecords,
 } from '../../shared/types/approvals'
 import { CONTENT_CHANGED_TEXT } from '../../shared/types/approvals'
 import type { PluginFieldValue, PluginOperationRecordView } from '../../shared/types/plugins'
@@ -65,6 +65,8 @@ const TYPE = 'approval'
 export const APPROVAL_NOT_FOUND = { error: '承認のお願いが見つかりません', code: 'APPROVAL_NOT_FOUND' }
 /** Refusing an approver who cannot see the record — never naming the place (like ASSIGNEE_CANNOT_READ). */
 export const APPROVER_CANNOT_READ = { error: '承認する人がこの記録を見られないため、お願いできません。管理者に相談してください。', code: 'APPROVER_CANNOT_READ' }
+/** The ledger note when a create is found to be the same as an existing record (never names it: the link holds it). */
+export const SAME_AS_NOTE = 'すでにある記録と同じため、作りませんでした'
 export const STALE_TEXT = 'HubSpot 側で変わっています。もう一度お願いし直してください'
 /** Codes of executeApproved meaning "what was approved no longer matches": the request is used up as stale. */
 const STALE_CODES = new Set(['CHANGED_OUTSIDE', 'APPROVAL_STALE', 'VERSION_CONFLICT', 'ACCOUNT_CHANGED', 'NOT_LINKED'])
@@ -80,8 +82,11 @@ export interface ApprovalOperations {
     Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverSpec; folder: string | null }>>
   executeApproved(approver: Member, requestedFor: { userId: string; actorKind: 'human' | 'ai'; conversationId: string | null; source?: string | null },
     payload: PluginApprovalPayload, reason: string): Promise<Outcome<PluginOperationRecordView>>
-  similarDeals(member: Member, pluginId: string, title: string): Promise<Outcome<{ similar: Array<{ recordId: string; title: string | null }> }>>
+  similarRecords(member: Member, pluginId: string, operation: string, input: { title: string; meetingId: string | null }): Promise<Outcome<SimilarRecords>>
 }
+
+/** Choosing the まとまり of a meeting (services/minutes.ts `linkBundle`: the meeting's assignee or an admin), bound by composition. */
+export type MeetingBundleLink = (member: Member, meetingId: string, bundleId: string) => Outcome<unknown>
 
 export interface ApprovalDeps {
   companyData: CompanyDataSource
@@ -152,6 +157,8 @@ export function createApprovalService(deps: ApprovalDeps) {
   const { companyData, writer, fixed, operations } = deps
   /** Business roles' holders, bound once by composition/plugins.ts (`useRoles`); none until then (a role then falls back to owners / admins). */
   let roles: ApprovalRoleHolders | null = null
+  /** Bound once by composition (`useMeetingLink`); without it 「同じ」 never links the meeting. */
+  let meetingLink: MeetingBundleLink | null = null
   const holdsRole = (companyId: string, a: Pick<Loaded, 'rule' | 'pluginId' | 'bundle'>, userId: string): boolean => {
     const role = roleOfSpec(a.rule)
     return role !== null && roles !== null && roles.holders(companyId, a.pluginId, role, a.bundle).includes(userId)
@@ -361,8 +368,8 @@ export function createApprovalService(deps: ApprovalDeps) {
     // Before approving a new record: what already looks like it (only records the viewer may read).
     let similar: ApprovalView['similar'] = null
     if (payload.create && payload.record === null && a.state === 'pending') {
-      const found = await operations.similarDeals(viewer, payload.plugin.id, payload.create.title).catch(() => null)
-      similar = found && found.ok ? found.value.similar : null
+      const found = await operations.similarRecords(viewer, payload.plugin.id, payload.operation, { title: payload.create.title, meetingId: a.meeting ?? payload.basis?.meetingId ?? null }).catch(() => null)
+      similar = found && found.ok ? found.value : null
     }
     const pending = a.state === 'pending'
     return {
@@ -437,6 +444,8 @@ export function createApprovalService(deps: ApprovalDeps) {
   const service = {
     /** Bound once by the plugins lane (composition/plugins.ts): who holds a business role (plan C3). */
     useRoles(r: ApprovalRoleHolders): void { roles = r },
+    /** Bound once by composition: choosing a meeting's まとまり (minutes.ts `linkBundle`). */
+    useMeetingLink(f: MeetingBundleLink): void { meetingLink = f },
 
     /**
      * A plugin operation through the person's or AI's route: run it; when its
@@ -657,6 +666,58 @@ export function createApprovalService(deps: ApprovalDeps) {
         const v = await view(member, load(member, a.row.id) ?? a)
         return v ? ok({ approval: v }) : notFound()
       })
+    },
+
+    /**
+     * 「これと同じ…です（作らない）」 (plugins.md "Similar records"): a create of a
+     * record is the same as an existing record. The requester (pending or sent
+     * back) or whoever qualifies to approve (pending) ends the request without
+     * creating anything (`withdrawn`, action `same_as_existing`; the record is
+     * kept as its `bundle` link when it is a まとまり). `{ recordId, linkMeeting? }`:
+     * a live record of the create's type the person may read (else 400
+     * BAD_LINK, the same for one that does not exist); `linkMeeting: true` also
+     * makes the request's meeting belong to it (only as `linkBundle` allows).
+     */
+    async sameAs(member: Member, id: string, body: unknown): Promise<Outcome<SameAsResult>> {
+      const outcome = await serialised(`${member.companyId}|${id}`, async (): Promise<Outcome<{ a: Loaded; recordId: string; linkMeeting: boolean }>> => {
+        const a = load(member, id)
+        if (!a) return notFound()
+        const b = isObj(body) ? body : {}
+        for (const k of Object.keys(b)) if (k !== 'recordId' && k !== 'linkMeeting') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
+        if (b.linkMeeting !== undefined && typeof b.linkMeeting !== 'boolean') return refuse('bad-request', 'linkMeeting: true or false', { code: 'BAD_REQUEST' })
+        const isRequester = a.requestedBy === member.userId
+        const approves = a.state === 'pending' && standing(member, a).ok
+        if (!isRequester && !approves) return refuse('forbidden', '「同じもの」にできるのは、お願いした人か承認する人だけです', { code: 'NOT_APPROVER' })
+        if (a.state !== 'pending' && !(isRequester && a.state === 'sent_back')) return refuse('conflict', 'このお願いはもう決まっています', { code: 'NOT_PENDING', state: a.state })
+        const fp = payloadOf(member.companyId, a.row.id)
+        if (!fp || !fp.payload.create || fp.payload.record !== null) return refuse('bad-request', '新しく作るお願いではありません', { code: 'NOT_A_CREATE' })
+        const handle = companyData.forCompany(member.companyId)
+        const plugin = await deps.plugin(member.companyId, fp.payload.plugin.id).catch(() => null)
+        const recordType = plugin?.manifest.objects[fp.payload.object]?.recordType ?? null
+        const target = typeof b.recordId === 'string' && RECORD_ID_RE.test(b.recordId) ? handle.records.byIds([b.recordId])[0] : undefined
+        if (!target || target.removedAt !== null || recordType === null || target.type !== recordType || !recordReader(member, handle.scopes.listWithRules()).record(target)) {
+          return refuse('bad-request', 'recordId: an existing record of the same kind you can read', { code: 'BAD_LINK' })
+        }
+        const isBundle = currentTypes(handle.records).get(target.type)?.definition.implements.includes('bundle') === true
+        const input = {
+          recordId: a.row.id, action: 'same_as_existing', expectedVersion: a.version, to: 'withdrawn', fields: { next_actor: null },
+          links: isBundle ? { bundle: [target.id] } : undefined,
+          actor: { id: member.userId, kind: 'human' as const, source: null }, note: SAME_AS_NOTE,
+          notify: [a.requestedBy, str(a.fields.assignee) ?? ''].filter(u => u && u !== member.userId),
+        }
+        const t = writer.transition(member.companyId, input)
+        if (!t.ok) return writeFailure(t)
+        return ok({ a, recordId: target.id, linkMeeting: b.linkMeeting === true })
+      })
+      if (!outcome.ok) return outcome
+      const { a, recordId, linkMeeting } = outcome.value
+      let meeting: SameAsResult['meeting'] = 'not-asked'
+      if (linkMeeting && a.meeting) {
+        const linked = meetingLink ? meetingLink(member, a.meeting, recordId) : null
+        meeting = linked?.ok ? 'linked' : 'not-linked'
+      }
+      const v = await view(member, load(member, a.row.id) ?? a)
+      return v ? ok({ approval: v, meeting }) : notFound()
     },
 
     /** 「取り下げる」: the requester, while pending or sent back. */

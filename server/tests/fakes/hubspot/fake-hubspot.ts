@@ -772,8 +772,14 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
   }
 
   function matches(d: StoredObject, f: { propertyName?: string; operator?: string; value?: unknown; values?: unknown[] }): boolean {
-    const actual = d.properties[f.propertyName!] ?? null
     const op = f.operator!
+    // `associations.<object>` (HubSpot's search on an association): EQ an associated object's id — what ACB's
+    // "similar records" search by 相手 sends (plugins.md "Similar records").
+    if (f.propertyName === 'associations.company') {
+      const ids = 'companyIds' in d ? (d as unknown as Deal).companyIds : []
+      return op === 'EQ' ? ids.includes(String(f.value)) : op === 'NEQ' ? !ids.includes(String(f.value)) : false
+    }
+    const actual = d.properties[f.propertyName!] ?? null
     if (op === 'HAS_PROPERTY') return actual !== null && actual !== ''
     if (op === 'NOT_HAS_PROPERTY') return actual === null || actual === ''
     if (op === 'IN' || op === 'NOT_IN') {

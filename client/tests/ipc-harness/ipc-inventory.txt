@@ -31,6 +31,7 @@ contract.invoke api:getDepartments
 contract.invoke app:closeResponse
 contract.invoke approvals:approve
 contract.invoke approvals:get
+contract.invoke approvals:sameAs
 contract.invoke approvals:sendBack
 contract.invoke approvals:withdraw
 contract.invoke auth:getSession
@@ -417,6 +418,7 @@ contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Inv
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
 contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
 contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
+contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
@@ -582,6 +584,7 @@ contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { a
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
 contract.type IpcInvokeChannels.'approvals:approve' = 'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:get' = 'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+contract.type IpcInvokeChannels.'approvals:sameAs' = 'approvals:sameAs': { args: [companyId: string, approvalId: string, recordId: string, linkMeeting: boolean]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:sendBack' = 'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:withdraw' = 'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'auth:getSession' = 'auth:getSession': { args: []; result: SessionResult }
@@ -823,6 +826,7 @@ main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
 main.handle approvals:approve @ features/approvals/ipc.ts (companyId, approvalId, hash, reason)
 main.handle approvals:get @ features/approvals/ipc.ts (companyId, approvalId)
+main.handle approvals:sameAs @ features/approvals/ipc.ts (companyId, approvalId, recordId, linkMeeting)
 main.handle approvals:sendBack @ features/approvals/ipc.ts (companyId, approvalId, reason)
 main.handle approvals:withdraw @ features/approvals/ipc.ts (companyId, approvalId)
 main.handle auth:getSession @ features/auth/ipc.ts ()
@@ -1274,6 +1278,8 @@ preload retryAiTurn -> invoke aiTurns:retry($0, $1)
 preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
 preload retryTaskRun -> invoke tasks:retryRun($0, $1)
 preload retryTaskRun : (companyId: string, runId: string) => Promise<TaskWriteResult>
+preload sameAsApproval -> invoke approvals:sameAs($0, $1, $2, $3)
+preload sameAsApproval : (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => Promise<ApprovalResult>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
 preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
 preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)

@@ -61,16 +61,17 @@
  */
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { acbToExternal, externalToAcb, type AcbValue, type PluginOperation } from '../../shared/core/plugins'
+import type { SimilarRecords } from '../../shared/types/approvals'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { EXTERNAL_ID_RE } from './plugin-connector'
 import { createOperationApprovals } from './plugin-operation-approvals'
+import { createOperationSimilar } from './plugin-operation-similar'
 import { createOperationChecks, createPolicy, fieldsAuto, notAuto } from './plugin-operation-checks'
 import {
   RECREATE_WARNING, approvalRequired, conflict, createSerialiser, isObj, opNotFound, operationOff, rawOf, same,
   type OperationActor, type OperationView, type PluginOperationDeps, type RunAnswer,
 } from './plugin-operation-common'
-import { TITLE_MAX, attachedInput, noteOf, recordInput } from './plugin-operation-inputs'
+import { attachedInput, noteOf, recordInput } from './plugin-operation-inputs'
 import { createOperationRecords, kindOf } from './plugin-operation-records'
 import { createOperationSending } from './plugin-operation-sending'
 import { createOperationUndo } from './plugin-operation-undo'
@@ -82,16 +83,17 @@ export {
 } from './plugin-operation-common'
 
 export function createPluginOperationService(deps: PluginOperationDeps) {
-  const { companyData, clock, plugins, connector, importer } = deps
+  const { companyData, clock, plugins, importer } = deps
   const serialised = createSerialiser()
   const checks = createOperationChecks(deps)
-  const { readable, valuesOf, precheckFor, recordChecks, newRecordChecks, opFor, approvalStepRefusal } = checks
+  const { valuesOf, precheckFor, recordChecks, newRecordChecks, opFor, approvalStepRefusal } = checks
   const records = createOperationRecords({ ...deps, valuesOf })
   const { newRow, view, answerFor } = records
   const sending = createOperationSending({ ...deps, valuesOf, newRow, answerFor })
   const { readOutside, sendAndSettle, sendCreate, reconcileUpdate, reconcileCreate, reconcileArchive, sendNewRecord } = sending
   const undoing = createOperationUndo({ ...deps, checks, records, sending, serialised })
   const approvals = createOperationApprovals({ ...deps, checks, records, sending, serialised })
+  const similar = createOperationSimilar({ ...deps, checks })
 
   /** A create attached to a record, run directly (policy `auto`) — also 「もう一度作る」. */
   async function runAttached(
@@ -214,41 +216,13 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     },
 
     /**
-     * Similar existing records before a create of a record (design §6-3: show
-     * them before creating a deal): a declared `search` on the object by the
-     * title's words (HubSpot `CONTAINS_TOKEN` on the mapping's title property),
-     * returning only records already imported through the current connection
-     * that the member may read — never an outside object the member cannot see.
+     * Similar existing records before a create of a record (design §6-3,
+     * plugins.md "Similar records"; `plugin-operation-similar.ts`): by the
+     * operation's `similar` — the same 相手 in ACB, the connector's search, the
+     * title's words — only records the member may read, at most SIMILAR_MAX.
      */
-    async similarDeals(member: Member, pluginId: string, title: string): Promise<Outcome<{ similar: Array<{ recordId: string; title: string | null }> }>> {
-      const running = await plugins.active(member.companyId, pluginId)
-      const creating = running.ok ? Object.entries(running.plugin.manifest.operations).find(([, o]) => o.kind === 'create' && o.createsRecord)?.[0] : undefined
-      const c = await newRecordChecks(member, { kind: 'human' }, pluginId, creating ?? '')
-      if (c.refusal) return c.refusal
-      if (typeof title !== 'string' || title.trim() === '' || title.length > TITLE_MAX) return refuse('bad-request', `title: 1–${TITLE_MAX} characters`)
-      const { plugin, op } = c
-      const titleFrom = plugin.mapping.objects[op.object]?.fields.title?.from
-      if (!titleFrom || !plugin.manifest.objects[op.object].endpoints.search) return ok({ similar: [] })
-      const words = [...new Set(title.normalize('NFC').split(/[\s\u3000（）()「」『』【】・,、。/]+/).filter(w => w.length >= 2))].slice(0, 3)
-      if (words.length === 0) return ok({ similar: [] })
-      const precheck = precheckFor(member, { kind: 'human' }, plugin, ['viewer'], null, c.place, () => true)
-      const account = await importer.verifyAccount(member.companyId, plugin, precheck)
-      if (!account.ok) return conflict('HubSpot のアカウントを確かめられません', 'ACCOUNT_CHANGED', { reason: account.reason })
-      const r = await connector.call(member.companyId, plugin, {
-        endpoint: 'search', object: op.object,
-        body: { filterGroups: words.map(w => ({ filters: [{ propertyName: titleFrom, operator: 'CONTAINS_TOKEN', value: `*${w}*` }] })), properties: [titleFrom], limit: 20 },
-      }, precheck)
-      if (!r.ok || !isObj(r.body) || !Array.isArray(r.body.results)) return refuse('unavailable', 'HubSpot を探せませんでした', { code: 'OUTSIDE_UNAVAILABLE' })
-      const repo = companyData.forCompany(member.companyId).plugins
-      const similar: Array<{ recordId: string; title: string | null }> = []
-      for (const x of r.body.results) {
-        if (!isObj(x) || typeof x.id !== 'string' || !EXTERNAL_ID_RE.test(x.id)) continue
-        const link = repo.link(plugin.connectionId, account.accountId, op.object, x.id)
-        const row = link && link.pluginId === plugin.pluginId ? readable(member, link.recordId) : null
-        if (row && !similar.some(s => s.recordId === row.id)) similar.push({ recordId: row.id, title: row.title })
-      }
-      return ok({ similar })
-    },
+    similarRecords: (member: Member, pluginId: string, operation: string, input: { title: string; meetingId: string | null }): Promise<Outcome<SimilarRecords>> =>
+      similar(member, pluginId, operation, input),
 
     /** The operation (only for someone who may read its record). */
     async get(member: Member, pluginId: string, operationId: string): Promise<Outcome<{ operation: OperationView }>> {

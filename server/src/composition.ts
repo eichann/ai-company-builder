@@ -423,6 +423,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
 
+  // 「これと同じ…です（作らない）」 may also make the request's meeting belong to that record (plugins.md "Similar records").
+  approvals.useMeetingLink((member, meetingId, bundleId) => minutes.linkBundle(member, { kind: 'human', source: null }, meetingId, { bundleId }))
+
   // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the role
   // 予定を読む (Google's specifics stay in google-calendar.ts).
   const calendar = createCalendarService({

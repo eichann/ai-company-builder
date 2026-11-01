@@ -10,6 +10,7 @@
  *   POST /approvals/:approvalId/approve     { hash, reason }   the person who qualifies; runs the operation once
  *   POST /approvals/:approvalId/send-back   { reason }         back to the requester's turn
  *   POST /approvals/:approvalId/withdraw                       the requester
+ *   POST /approvals/:approvalId/same-as     { recordId, linkMeeting? }   「これと同じ…です（作らない）」: requester or approver
  *
  * A request the member may not read (another company's, or not theirs to
  * see) is the same 404 as one that does not exist.
@@ -53,4 +54,9 @@ approvalsRoute.post('/approvals/:approvalId/send-back', companyMember, serviceBo
 approvalsRoute.post('/approvals/:approvalId/withdraw', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, await approvals.withdraw(member, c.req.param('approvalId')))
+})
+
+approvalsRoute.post('/approvals/:approvalId/same-as', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await approvals.sameAs(member, c.req.param('approvalId'), c.var.body))
 })

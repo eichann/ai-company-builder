@@ -72,7 +72,8 @@ export {
   comparePluginVersions, connectorName, pluginAvailableTo,
   type ConnectorUse, type CreateContentSlot, type FieldPolicy, type OperationKind, type OperationReach, type OperationUse, type PluginEndpoint,
   type PluginEndpointName, type PluginKind, type PluginManifest, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
-  PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, noFlow,
+  PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, SIMILAR_BY, noFlow,
+  type PluginSearch, type SimilarBy, type SimilarRule,
   type FlowPart, type PluginSetting,
   type PluginRole, type PluginRoleDeclaration, type PluginStatePoint, type PluginStep, type PluginStepProcedure, type PluginStepProcedurePin, type PluginStepStart, type PluginUi, type PluginUpgrade, type UndoKind,
 } from './plugin-declaration'

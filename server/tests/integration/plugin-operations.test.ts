@@ -563,13 +563,14 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
   })
 
   it('similar deals: only records already imported that the member may read', async () => {
-    const r = await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-sales', 'リーダー研修（例示製作所）')
+    const r = await services.pluginOperations.similarRecords({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-sales', 'create_deal', { title: 'リーダー研修（例示製作所）', meetingId: null })
     expect(r.ok).toBe(true)
-    expect(r.value.similar.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
-    expect(r.value.similar.every((s: Json) => typeof s.title === 'string')).toBe(true)
+    expect(r.value.items.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
+    expect(r.value.items.every((s: Json) => typeof s.title === 'string')).toBe(true)
+    expect(r.value.outside).toBe('checked')
     // Cannot read where deals are: nothing is asked outside.
     const asked = fake.requests.length
-    expect(await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-sales', 'リーダー研修')).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(await services.pluginOperations.similarRecords({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-sales', 'create_deal', { title: 'リーダー研修', meetingId: null })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
     expect(fake.requests.length).toBe(asked)
   })
 

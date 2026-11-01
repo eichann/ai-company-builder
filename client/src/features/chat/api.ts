@@ -234,7 +234,7 @@ export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFro
 export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation' | 'recreatePluginOperation'>
 
 /** The approval card: reading a request and the person's own acts on it, with their session (never the AI's). */
-export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval'>
+export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval' | 'sameAsApproval'>
 
 export function getApproval(companyId: string, approvalId: string, outbound: ApprovalOutbound = window.electronAPI) {
   return outbound.getApproval(companyId, approvalId)
@@ -250,6 +250,10 @@ export function sendBackApproval(companyId: string, approvalId: string, reason: 
 
 export function withdrawApproval(companyId: string, approvalId: string, outbound: ApprovalOutbound = window.electronAPI) {
   return outbound.withdrawApproval(companyId, approvalId)
+}
+
+export function sameAsApproval(companyId: string, approvalId: string, recordId: string, linkMeeting: boolean, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.sameAsApproval(companyId, approvalId, recordId, linkMeeting)
 }
 
 export function undoPluginOperation(companyId: string, pluginId: string, operationId: string, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {

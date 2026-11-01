@@ -6,8 +6,10 @@
 //   approvals:approve    「承認」 with the reason and the hash the card shows
 //   approvals:sendBack   「差し戻す」 with the reason
 //   approvals:withdraw   「取り下げる」 (the requester)
+//   approvals:sameAs     「これと同じ…です（作らない）」 (the requester or an approver; plugins.md "Similar records")
 
 import { APPROVALS_OFFLINE_TEXT, namedMembers, type ApprovalResult } from '../../../shared/approvals'
+import { RECORD_ID_RE } from '../../../../shared/core/records'
 import type { ApprovalView } from '../../../../shared/types/approvals'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -59,7 +61,7 @@ export function createApprovalsApi(deps: ApprovalsDeps) {
     return names
   }
 
-  async function request(companyId: string, approvalId: string, suffix: '' | '/approve' | '/send-back' | '/withdraw', body?: unknown): Promise<ApprovalResult> {
+  async function request(companyId: string, approvalId: string, suffix: '' | '/approve' | '/send-back' | '/withdraw' | '/same-as', body?: unknown): Promise<ApprovalResult> {
     if (!COMPANY.test(companyId) || !APPROVAL.test(approvalId)) return { success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
     const r = await call(companyId, `/approvals/${approvalId}${suffix}`, suffix === '' ? 'GET' : 'POST', body)
     if (!r) {
@@ -67,9 +69,10 @@ export function createApprovalsApi(deps: ApprovalsDeps) {
       log.warn(`[approvals] ${suffix || 'get'}: the server could not be reached`)
       return { success: false, offline: true, code: null, error: APPROVALS_OFFLINE_TEXT }
     }
-    const data = r.json?.data as { approval?: ApprovalView } | undefined
+    const data = r.json?.data as { approval?: ApprovalView; meeting?: unknown } | undefined
     if (r.status >= 200 && r.status < 300 && data?.approval) {
-      return { success: true, approval: data.approval, names: await namesFor(companyId, data.approval) }
+      const meeting = data.meeting === 'linked' || data.meeting === 'not-linked' || data.meeting === 'not-asked' ? data.meeting : undefined
+      return { success: true, approval: data.approval, names: await namesFor(companyId, data.approval), ...(meeting ? { meeting } : {}) }
     }
     const code = typeof r.json?.code === 'string' ? r.json.code : null
     log.warn(`[approvals] ${suffix || 'get'}: answered ${r.status}${code ? ` ${code}` : ''}`)
@@ -94,6 +97,10 @@ export function createApprovalsApi(deps: ApprovalsDeps) {
         ? request(companyId, approvalId, '/send-back', { reason })
         : Promise.resolve<ApprovalResult>({ success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }),
     withdraw: (companyId: string, approvalId: string) => request(companyId, approvalId, '/withdraw'),
+    sameAs: (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) =>
+      typeof recordId === 'string' && RECORD_ID_RE.test(recordId) && typeof linkMeeting === 'boolean'
+        ? request(companyId, approvalId, '/same-as', { recordId, linkMeeting })
+        : Promise.resolve<ApprovalResult>({ success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }),
   }
 }
 
@@ -103,4 +110,5 @@ export function registerApprovalsIpc(ipc: IpcRegistrar, deps: ApprovalsDeps) {
   ipc.handle('approvals:approve', (_event, companyId, approvalId, hash, reason) => api.approve(companyId, approvalId, hash, reason))
   ipc.handle('approvals:sendBack', (_event, companyId, approvalId, reason) => api.sendBack(companyId, approvalId, reason))
   ipc.handle('approvals:withdraw', (_event, companyId, approvalId) => api.withdraw(companyId, approvalId))
+  ipc.handle('approvals:sameAs', (_event, companyId, approvalId, recordId, linkMeeting) => api.sameAs(companyId, approvalId, recordId, linkMeeting))
 }

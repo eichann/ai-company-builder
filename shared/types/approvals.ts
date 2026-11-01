@@ -62,8 +62,8 @@ export interface ApprovalView {
   changes: ApprovalFieldView[]
   /** A create: what would be made. */
   create: { title: string; fields: Array<{ label: string; shown: string }> } | null
-  /** A create of a record: similar records already in ACB that the viewer may read (design §6-3), so a duplicate is noticed before approving; null when not a create or HubSpot could not be asked. */
-  similar: Array<{ recordId: string; title: string | null }> | null
+  /** A create of a record, while pending: similar records already in ACB that the viewer may read (design §6-3, plugins.md "Similar records"), so a duplicate is noticed before approving; null otherwise. */
+  similar: SimilarRecords | null
   /** Where the request came from: the quote of a meeting's minutes (when the viewer may read the meeting, its title too). */
   basis: { meetingId: string | null; meetingTitle: string | null; quote: string | null }
   precedents: { total: number; items: ApprovalPrecedent[] }
@@ -90,6 +90,39 @@ export interface ApprovalView {
   /** How it ended (state other than pending). */
   /** `onBehalfOf`: the person decided as the delegate of this absent member (「代わりに承認（本来は X）」). */
   outcome: { at: string; by: string; onBehalfOf: string | null; note: string | null; resultOperationId: string | null } | null
+}
+
+/** One existing record that looks like the one a create would make (never one the viewer cannot read). */
+export interface SimilarRecord {
+  recordId: string
+  title: string
+  /** The declared status field's label (`similar.status`, e.g. the stage), else the record's state; null when unknown. */
+  status: string | null
+  /** The record's `assignee` (member id), when its type has one. */
+  assignee: string | null
+  /** When it last changed (ISO). */
+  updatedAt: string
+  /** Why it is shown: the same 相手 (名寄せ), the title's words, or the outside system's search. */
+  matchedBy: 'counterpart' | 'name' | 'outside'
+}
+
+export interface SimilarRecords {
+  /** At most `SIMILAR_MAX`, the same 相手 first. */
+  items: SimilarRecord[]
+  /** The record type's label (「案件」), for 「これと同じ案件です（作らない）」. */
+  typeLabel: string
+  /** Whether the outside system was asked too: `unavailable` = it could not be asked now (only ACB's records are shown). */
+  outside: 'checked' | 'not-asked' | 'unavailable'
+}
+
+/** At most this many similar records are shown. */
+export const SIMILAR_MAX = 5
+
+/** What 「これと同じ…です（作らない）」 answers (POST …/approvals/:id/same-as). */
+export interface SameAsResult {
+  approval: ApprovalView
+  /** The request's meeting now belongs to that record (`linked`), could not be (`not-linked`: not a まとまり, or not the viewer's to choose), or was not asked. */
+  meeting: 'linked' | 'not-linked' | 'not-asked'
 }
 
 export interface ApprovalListItem {
