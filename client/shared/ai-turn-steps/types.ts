@@ -48,6 +48,12 @@ export interface AiTurnStepDefinition<Step extends string = string> {
    */
   listedBy: 'minutes' | 'ai-turn'
   /**
+   * Only a record the server clock put in this state because its wait was over (the task list's
+   * `waitOver`; the server's claim checks the same, `enteredByWaitOver`). A record that reached the
+   * state another way (a consultation created a task in 準備中 and prepares it) is never queued.
+   */
+  onlyWaitOver?: true
+  /**
    * The type's first AI action, run by main at the version read just before, and the state it
    * starts from. `action: null`: the type has no start mark (an interaction in 届いた) — the
    * server's execution run alone decides which PC runs it, and the run's own writes are compared

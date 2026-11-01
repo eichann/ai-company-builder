@@ -120,6 +120,25 @@ describe('claiming a record’s AI step', () => {
   })
 })
 
+describe('a task whose wait is over (the PC\'s task-wait-over step)', () => {
+  it('only a task the clock put in 準備中 is listed as such and claimable by that step; one a consultation made in 準備中 is not', async () => {
+    const made = await preparingTask('相談で作った下ごしらえ')
+    const t = await session('u-bob', 'POST', '/records/item', { type: 'task', title: '見積の返事', fields: { assignee: 'u-bob' } })
+    const id = t.body.data.record.id as string
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/set_wait_until`, { expectedVersion: 1, args: { wait_until: '2020-01-06' } })).status).toBe(200)
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/wait`, { expectedVersion: 2, args: { waiting_on: '先方の見積' } })).status).toBe(200)
+    // 自動で進める is on by default: the clock moves it to the AI's turn.
+    await services.serverClock.runOnce()
+    const list = (await session('u-bob', 'GET', '/records/ai-turn')).body.data.records as Json[]
+    expect(list.find(r => r.id === id)).toMatchObject({ state: 'preparing', waitOver: true })
+    expect(list.find(r => r.id === made)).not.toHaveProperty('waitOver')
+
+    const wait = (recordId: string, deviceId: string) => session('u-bob', 'POST', '/ai-run-claims', { recordId, step: 'task-wait-over', deviceId, conversationId: `conv-${deviceId}` })
+    expect(await wait(made, 'device-wwww')).toMatchObject({ status: 409, body: { code: 'NOT_AI_TURN' } })
+    expect((await wait(id, 'device-wwww')).status).toBe(201)
+  })
+})
+
 describe('fencing: a re-claim refuses the older generation', () => {
   it('after the claim expired and another PC took it over, the first PC’s token reaches nothing and writes nothing', async () => {
     const id = await preparingTask('お礼状の下ごしらえ')

@@ -13,6 +13,7 @@ const RECORD = 'minutes-0a1b2c3d4e5f6071'
 const MINUTES = RECORD
 const INTERACTION = 'interaction-0a1b2c3d4e5f6071'
 const REPLY_REQUEST = 'reply_request-0a1b2c3d4e5f6071'
+const TASK = 'task-0a1b2c3d4e5f6071'
 
 function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES) {
   const record = { ...initial }
@@ -181,9 +182,9 @@ test('Codex, a closed main window or the emergency stop: nothing is claimed and 
   }
 })
 
-test('only a minutes record can be claimed (no other record kind is driven by the runner yet)', async () => {
+test('a record kind without a step is never claimed and the server is not asked', async () => {
   const server = fakeServer()
-  assert.equal((await claimsFor(server).claim(COMPANY, 'task-0a1b2c3d4e5f', 3, 'conversation-aaaa')).claimed, false)
+  assert.equal((await claimsFor(server).claim(COMPANY, 'decision-0a1b2c3d4e5f', 3, 'conversation-aaaa')).claimed, false)
   assert.deepEqual(server.calls, [])
 })
 
@@ -269,6 +270,26 @@ test('a 返事のお願い is claimed from 準備中 or 確かめ中 (no start m
   const waitingReply = fakeServer({ state: 'waiting_reply', version: 4 }, undefined, REPLY_REQUEST)
   assert.deepEqual(await claimsFor(waitingReply).claim(COMPANY, REPLY_REQUEST, 4, 'conversation-cccc'), { claimed: false, reason: 'taken' })
   assert.equal(waitingReply.calls.filter(c => c.endsWith('/ai-run-claims')).length, 0)
+})
+
+test('a task whose wait is over is claimed from 準備中 as the wait-over step (no start mark); handed to the person: done, cancelled: closed, left in 準備中: given back', async () => {
+  const server = fakeServer({ state: 'preparing', version: 5 }, undefined, TASK)
+  const pc = claimsFor(server)
+  assert.deepEqual(await pc.claim(COMPANY, TASK, 5, 'conversation-aaaa'), { claimed: true, version: 5 })
+  // The server's run of that step is the claim (the server checks the clock put it there); no record action ran.
+  assert.deepEqual(server.run.steps, ['task-wait-over'])
+  assert.equal(server.calls.filter(c => c.includes('/actions/')).length, 0)
+  assert.deepEqual(await pc.settle(COMPANY, TASK), { outcome: 'put-back' })
+  for (const [state, outcome] of [['todo', 'done'], ['cancelled', 'failed']] as const) {
+    server.record.state = 'preparing'
+    assert.equal((await pc.claim(COMPANY, TASK, 5, `conversation-${state}`)).claimed, true)
+    server.record.state = state
+    assert.deepEqual(await pc.settle(COMPANY, TASK), { outcome })
+  }
+  // Still waiting (返事待ち): not the AI's turn, nothing claimed.
+  const waiting = fakeServer({ state: 'waiting', version: 4 }, undefined, TASK)
+  assert.deepEqual(await claimsFor(waiting).claim(COMPANY, TASK, 4, 'conversation-cccc'), { claimed: false, reason: 'taken' })
+  assert.equal(waiting.calls.filter(c => c.endsWith('/ai-run-claims')).length, 0)
 })
 
 test('a meeting whose まとまり was chosen after the reading: the claim takes its まとまり\'s part (that step, that start), and a finished one claims nothing again', async () => {

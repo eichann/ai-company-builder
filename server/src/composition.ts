@@ -464,7 +464,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor })
   // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
   const aiRuns = createAiRunService({
-    ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId) => records.aiTurnOf(member, recordId),
+    ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
     // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
     afterFailedRun: (member, run) => { if (run.step === 'minutes-reading' || run.step === 'minutes-bundle') minutes.putBackAfterRun(member, run.recordId, run.id) },
   })

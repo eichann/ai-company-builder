@@ -13,6 +13,7 @@ import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permiss
 import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import { turnsOf } from '../../shared/core/record-turns'
+import { enteredByWaitOver, TASK_WAIT_OVER_STEP } from '../../shared/core/core-types'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -510,7 +511,10 @@ export function createRecordService(deps: RecordServiceDeps) {
         const userId = people.includes(member.userId) ? member.userId : people.find((v): v is string => typeof v === 'string' && ids.includes(v)) ?? member.userId
         return { row, userId }
       })
-      return ok(turnAnswer(records, member, waiting))
+      const answer = turnAnswer(records, member, waiting)
+      // A wait that is over (the clock put it here): what the PC's wait-over step runs.
+      for (const r of answer.records) if (enteredByWaitOver(records.ledger(r.id))) r.waitOver = true
+      return ok(answer)
     },
 
     /**
@@ -519,7 +523,7 @@ export function createRecordService(deps: RecordServiceDeps) {
      * (services/ai-runs.ts) — by the delegate's app too during an absence.
      * Unreadable = not found.
      */
-    aiTurnOf(member: Member, recordId: string): 'yes' | 'not-ai-turn' | 'not-found' | 'disabled' {
+    aiTurnOf(member: Member, recordId: string, step?: string): 'yes' | 'not-ai-turn' | 'not-found' | 'disabled' {
       const records = handleOf(member).records
       if (!records.settings().enabled) return 'disabled'
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
@@ -532,7 +536,11 @@ export function createRecordService(deps: RecordServiceDeps) {
       // The member's own, or an absent member's they cover today (records.md "Absence and the delegate").
       const ids = [member.userId, ...actsFor(member)]
       const mine = ids.includes(fields.assignee as string) || ids.includes(fields.next_actor as string)
-      return mine && aiTurnStates(def).has(state.state ?? '') ? 'yes' : 'not-ai-turn'
+      if (!mine || !aiTurnStates(def).has(state.state ?? '')) return 'not-ai-turn'
+      // The wait-over step runs only a task the clock put in the AI's turn (a task a consultation
+      // created in 準備中 is that consultation's to prepare).
+      if (step === TASK_WAIT_OVER_STEP && (row.type !== 'task' || !enteredByWaitOver(records.ledger(row.id)))) return 'not-ai-turn'
+      return 'yes'
     },
 
     /**

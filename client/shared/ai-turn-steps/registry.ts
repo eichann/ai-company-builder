@@ -11,6 +11,7 @@ import { minutesReading } from './minutes-reading'
 import { minutesBundle } from './minutes-bundle'
 // lane C ▼
 import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
+import { taskWaitOver } from './task-wait-over'
 // lane C ▲
 import { claimStates, type AiTurnCandidate, type AiTurnStepDefinition } from './types'
 
@@ -25,6 +26,7 @@ const STEPS = [
   followUp,
   // lane B ▲
   // lane C ▼
+  taskWaitOver,
   // lane C ▲
 ] as const satisfies readonly AiTurnStepDefinition[]
 
@@ -102,13 +104,18 @@ export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): bool
 export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[] }): AiTurnCandidate[] {
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
+  // lane C ▼
+  // One claim per record: a record a business plugin's step covers runs that step, never a core one too.
+  const byPlugin = new Set((input.plugins ?? []).map(t => t.recordId))
+  // lane C ▲
   for (const n of input.minutes) {
-    if (aiTurnStepForRecord(n.id, 'received')?.listedBy !== 'minutes' || seen.has(n.id)) continue
+    if (aiTurnStepForRecord(n.id, 'received')?.listedBy !== 'minutes' || byPlugin.has(n.id) || seen.has(n.id)) continue
     seen.add(n.id)
     queue.push({ id: n.id, title: n.title, version: n.version, meetingAt: n.meetingAt, state: 'received' })
   }
   for (const r of input.tasks) {
-    if (r.turn !== 'ai' || aiTurnStepForRecord(r.id, r.state)?.listedBy !== 'ai-turn' || seen.has(r.id)) continue
+    const step = r.turn === 'ai' ? aiTurnStepForRecord(r.id, r.state) : null
+    if (step?.listedBy !== 'ai-turn' || (step.onlyWaitOver && !r.waitOver) || byPlugin.has(r.id) || seen.has(r.id)) continue
     seen.add(r.id)
     queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due, state: r.state })
   }
