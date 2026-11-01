@@ -102,8 +102,8 @@ compare-and-set and ledger), and writes notices.
   only those state changes (never a field-only change). A task someone moved meanwhile is
   `stale` and left alone.
 - **Notices**: `notifications.sweep(companyId, limit)` (overdue and stuck AI turns, above).
-- **Expired content**: `expireContent` is the hook for the content store's expiry (not wired:
-  that store has not landed yet).
+- **Expired content**: `expireContent` — the content store's retention, per company
+  (`RecordContentEraser.eraseExpired`, reason `retention`; `records.md` "The content store").
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
   task is no longer waiting; a notice's dedupe key is already there), so a second run writes
   nothing. A run while one is going returns `ran: false`. Per company and run at most 50 moves

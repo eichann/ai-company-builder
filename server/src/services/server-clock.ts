@@ -11,7 +11,7 @@
  *    actor, `CLOCK_ACTOR`), which tells the assignee (a notice, S5);
  * 2. writes the overdue (A-2) and stuck-AI-turn (C-18) notices
  *    (`notifications.sweep`);
- * 3. lets expired content go (the content store's expiry, when it lands).
+ * 3. erases expired content (the content store's retention, `expireContent`).
  *
  * Everything is derived from stored data (no state kept between runs is
  * needed for correctness): running twice changes nothing more — a moved task
@@ -45,8 +45,8 @@ export interface ServerClockDeps {
   taskSettings: (companyId: string) => TaskSettings
   timeZoneOf: (companyId: string) => string
   /**
-   * The content store's expiry (its own PR): forget what expired in this
-   * company, the number gone. Not wired until that store lands.
+   * The content store's retention (records.md "The content store"): erase
+   * what expired in this company (reason `retention`), the number erased.
    */
   expireContent?: (companyId: string) => number | Promise<number>
   /** Let the event loop serve requests between companies. */

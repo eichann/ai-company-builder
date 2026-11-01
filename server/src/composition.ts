@@ -20,6 +20,7 @@ import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
+import { sqliteRecordContentEraser } from './adapters/sqlite/record-contents'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
@@ -232,6 +233,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
   })
+  // The content store's eraser: only the server clock's retention run here (no route; records.md).
+  const contentEraser = sqliteRecordContentEraser(conn)
   const decisions = createDecisionService({
     ...shared,
     writer: serviceRecords,
@@ -442,7 +445,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       notifications,
       taskSettings: companyId => taskSettings.settingsOf(companyId),
       timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
-      // expireContent: the content store's expiry plugs in here when it lands.
+      // The content store's retention (records.md "The content store"): reason `retention`, per company.
+      expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

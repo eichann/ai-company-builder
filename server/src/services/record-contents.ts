@@ -3,8 +3,9 @@
  * the operator's procedure and the retention run. Owner decision 2026-11-01:
  * no delete in the product — no route, screen or AI reaches this; the
  * operator runs src/cli/erase-content.ts and keeps its output (the erased
- * ids) in the erasure log outside the product, and the future server clock
- * calls `eraseExpired`.
+ * ids) in the erasure log outside the product. The retention run is the
+ * server clock's (services/server-clock.ts, per company through the eraser);
+ * `eraseExpired` here is the operator's (`erase-content.ts expired`).
  *
  * Erasing a record's content also clears the text of its fixed content
  * (an approval's payload, a mail's body: `fixed_payloads`, approvals.md /

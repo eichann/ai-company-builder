@@ -638,8 +638,9 @@ erase it without rewriting history. Table `record_contents` (behind the company 
   `interaction` (owner decision G-33: 3 years). A copy of such a text of at least 20 characters
   stored for another record of the company (same hash) inherits the original's expiry.
   `services/record-contents.ts` `eraseExpired()` erases what has expired in every company
-  (reason `retention`); nothing schedules it yet — the future server clock (or the operator,
-  `erase-content.ts expired`) runs it.
+  (reason `retention`); the server clock runs the eraser's `eraseExpired` per company every 5
+  minutes (`notifications.md` "The server clock"); the operator can too (`erase-content.ts
+  expired`).
 - **Migration**: at startup (`db/index.ts` `migrateRecordContents`) every company not yet marked
   (`record_settings.content_store`) gets its older titles, summaries, content fields, notes and
   reasons moved in; values already referencing their own content are skipped, so it is idempotent.
