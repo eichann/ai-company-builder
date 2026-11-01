@@ -30,15 +30,16 @@
  */
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
 import {
-  countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS, normalizeEmail,
-  type RecipientSource,
+  chatReplyCanonical, chatReplyProblems, countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS,
+  MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX, type MailReplyHeaders, type RecipientSource,
 } from '../../shared/core/mail'
 import { MEETING_TYPE } from '../../shared/core/minutes'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 import type { Clock, IdGenerator } from '../ports/clock'
-import type { MailSendResult, MailSender } from '../ports/mail'
+import type { ChatSender, ChatSendResult } from '../ports/chat'
+import type { MailReader, MailSendResult, MailSender, MailThread } from '../ports/mail'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { OutboundMailRow, OutboundRecipientRow } from '../ports/outbound-mail'
 import type { RecordRow } from '../ports/records'
@@ -52,6 +53,7 @@ import { recordReader } from './record-access'
 import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
+import { fieldsOf, mailThreadIdOf, threadPointerOf, type ThreadPointer } from './threads'
 
 /** How long a sent / discarded mail's body stays on the server (§9 q9). */
 export const MAIL_BODY_RETENTION_DAYS = 30
@@ -87,9 +89,34 @@ export interface OutboundMailDeps {
   bundleContacts: (member: Member, bundleId: string) => Promise<{ ok: true; contacts: Array<{ email: string | null; name: string | null }> } | { ok: false; reason: string }>
   /** The core role メールを送る (connector-roles.md): the member's own permission at the company's mail connector; never retried. */
   mail: MailSender
+  /** メールを読む (the role): a reply's thread — its recipients (source `thread`) and its In-Reply-To / References. */
+  mailReader?: Pick<MailReader, 'getThread' | 'getMessage'>
+  /** チャットに返す (the role): a Slack reply, the member's own permission; never retried. */
+  chat?: ChatSender
   /** Every company (the retention run opens each one's handle). */
   companyIds: () => string[]
 }
+
+/** A reply that left (a person's confirmed send, or 「送られていた」): the inbox hears it as the company's own message in the thread. */
+export interface ReplySent {
+  companyId: string
+  userId: string
+  interactionId: string
+  channel: 'email' | 'chat'
+  /** This message's id in the inbox's terms (mail: its Message-ID; chat: `<channel>:<ts>`). */
+  messageId: string
+  sourceRef: string
+  /** The 連絡's own message id (the inbox finds its interaction by it). */
+  references: string[]
+  occurredAt: string
+  from: string
+}
+
+const CHAT_REPLY_TITLE = 'Slack の返事'
+const CHAT_UNKNOWN_TEXT = '届いたか分かりません。Slack のスレッドを確かめてください。'
+const SLACK_CONSENT = '返事を Slack に送るには、Slack で「返事を送る許可」が要ります（設定 → Slack）。何も送っていません。'
+const SLACK_TURNED_OFF = '「返事を送る」をオフにしています。アプリの「設定」→「Slack」でオンにしてから、もう一度押してください。何も送っていません。'
+const SLACK_UNAVAILABLE = 'いまは Slack に返事を送れません（止められているか、つながりません）。何も送っていません。'
 
 const bad = (error: string, code = 'BAD_REQUEST', extra: Record<string, unknown> = {}) => refuse('bad-request', error, { code, ...extra })
 const notFound = () => refuse('not-found', MAIL_NOT_FOUND.error, { code: MAIL_NOT_FOUND.code })
@@ -123,7 +150,43 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   const refOf = (scope: string, source: RecipientSource, email: string) => `r${deps.digest(`${scope}\n${source}\n${email}`).slice(0, 24)}`
-  const contextScope = (userId: string, meetingId: string | null, bundleId: string | null) => `${userId}|${meetingId ?? ''}|${bundleId ?? ''}`
+  // A reply's 連絡 is part of its context (a draft without one keeps the scope — and the refs — it always had).
+  const contextScope = (userId: string, meetingId: string | null, bundleId: string | null, interactionId: string | null = null) =>
+    `${userId}|${meetingId ?? ''}|${bundleId ?? ''}${interactionId ? `|${interactionId}` : ''}`
+  const replyListeners: Array<(r: ReplySent) => void> = []
+
+  /** The 連絡 a draft answers (its `interaction` link), or null. */
+  const interactionOf = (companyId: string, messageId: string): string | null =>
+    companyData.forCompany(companyId).records.linksFrom([messageId]).find(l => l.name === 'interaction')?.targetId ?? null
+
+  /** The 連絡's thread pointer and its own message id. */
+  function pointerOf(companyId: string, interactionId: string): { pointer: ThreadPointer | null; messageId: string | null } {
+    const { fields } = fieldsOf(companyData.forCompany(companyId), interactionId)
+    return { pointer: threadPointerOf(fields), messageId: typeof fields.message_id === 'string' ? fields.message_id : null }
+  }
+
+  /** The reply's mail thread in the member's own mailbox, read now (null: cannot be read). */
+  async function mailThreadOf(member: Member, interactionId: string): Promise<MailThread | null> {
+    const reader = deps.mailReader
+    const { pointer } = pointerOf(member.companyId, interactionId)
+    if (!reader || pointer?.kind !== 'mail') return null
+    try {
+      const id = await mailThreadIdOf(reader, member, pointer)
+      if (!id.ok) return null
+      const t = await reader.getThread(member.companyId, member.userId, id.threadId)
+      return t.ok ? t.value : null
+    } catch (err) {
+      logError('outbound-mail', 'thread could not be read', err)
+      return null
+    }
+  }
+
+  /** In-Reply-To / References of a reply: the thread's newest message and its ids (well-formed ones only). */
+  function replyHeadersOf(thread: MailThread): MailReplyHeaders | null {
+    const ids = thread.messages.map(m => m.messageIdHeader).filter((m): m is string => m !== null && MESSAGE_ID_RE.test(m))
+    if (ids.length === 0) return null
+    return { threadId: thread.id, inReplyTo: ids[ids.length - 1], references: ids.slice(-REPLY_REFERENCES_MAX) }
+  }
 
   function enabled(companyId: string): Refusal | null {
     return companyData.forCompany(companyId).records.settings().enabled
@@ -134,14 +197,16 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * A record the member may read, of `kind`: a meeting (type `meeting`) or a まとまり
    * (any type implementing `bundle`), or null.
    */
-  function readable(member: Member, id: unknown, kind: 'meeting' | 'bundle'): RecordRow | null {
+  function readable(member: Member, id: unknown, kind: 'meeting' | 'bundle' | 'interaction'): RecordRow | null {
     if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) return null
     const handle = companyData.forCompany(member.companyId)
     const row = handle.records.byIds([id])[0]
     if (!row || row.removedAt !== null) return null
     const fits = kind === 'meeting'
       ? row.type === MEETING_TYPE
-      : currentTypes(handle.records).get(row.type)?.definition.implements.includes('bundle') === true
+      : kind === 'interaction'
+        ? row.type === 'interaction'
+        : currentTypes(handle.records).get(row.type)?.definition.implements.includes('bundle') === true
     if (!fits) return null
     return recordReader(member, handle.scopes.listWithRules()).record(row) ? row : null
   }
@@ -157,10 +222,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * in `need` (default all). A source that cannot be read is reported and offers nothing.
    */
   async function collect(
-    member: Member, ctx: { meetingId: string | null; bundleId: string | null; messageId: string | null; from: string },
+    member: Member, ctx: Ctx,
     need: ReadonlySet<RecipientSource> | null = null,
-  ): Promise<{ recipients: OutboundRecipientRow[]; unreadable: RecipientSource[] }> {
-    const scope = contextScope(member.userId, ctx.meetingId, ctx.bundleId)
+  ): Promise<{ recipients: OutboundRecipientRow[]; unreadable: RecipientSource[]; thread: MailThread | null }> {
+    const scope = contextScope(member.userId, ctx.meetingId, ctx.bundleId, ctx.interactionId)
     const out: OutboundRecipientRow[] = []
     const unreadable: RecipientSource[] = []
     const seen = new Set<string>()
@@ -192,8 +257,24 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (ctx.messageId && wants('typed')) {
       for (const t of companyData.forCompany(member.companyId).outbound.typedRecipients(ctx.messageId)) add('typed', t.email, t.name, `typed|${ctx.messageId}`)
     }
-    return { recipients: out, unreadable }
+    // A reply: everyone on the thread in the member's own mailbox, read now (the member left out).
+    let thread: MailThread | null = null
+    if (ctx.interactionId && wants('thread')) {
+      thread = await mailThreadOf(member, ctx.interactionId)
+      if (thread === null) unreadable.push('thread')
+      else {
+        for (const m of thread.messages) {
+          for (const a of [...(m.from ? [m.from] : []), ...m.to, ...m.cc]) if (normalizeEmail(a.email) !== ctx.from) add('thread', a.email, a.name || null)
+        }
+      }
+    }
+    return { recipients: out, unreadable, thread }
   }
+
+  interface Ctx { meetingId: string | null; bundleId: string | null; interactionId: string | null; messageId: string | null; from: string }
+  const draftCtx = (companyId: string, mail: OutboundMailRow): Ctx => ({
+    meetingId: mail.meetingId, bundleId: mail.bundleId, interactionId: interactionOf(companyId, mail.messageId), messageId: mail.messageId, from: mail.fromEmail,
+  })
 
   function viewOf(companyId: string, mail: OutboundMailRow, recordId: string): OutboundMailView | null {
     const handle = companyData.forCompany(companyId)
@@ -224,6 +305,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       state: s.state as OutboundMailState,
       version,
       hash: payload.hash,
+      channel: fields.channel === 'slack' ? 'slack' : 'email',
+      interactionId: interactionOf(companyId, mail.messageId),
       from: mail.fromEmail,
       to: v.to.map(shown),
       cc: v.cc.map(shown),
@@ -264,24 +347,31 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return me ? normalizeEmail(me.email) : null
   }
 
-  /** The draft context from a request: a meeting and/or a まとまり the member may read (a meeting's まとまり is taken along). */
-  function contextOf(member: Member, body: Record<string, unknown>): { meetingId: string | null; bundleId: string | null; meeting: RecordRow | null; bundle: RecordRow | null } | Refusal {
-    const meeting = body.meetingId === undefined || body.meetingId === null ? null : readable(member, body.meetingId, 'meeting')
-    if ((body.meetingId !== undefined && body.meetingId !== null) && !meeting) return refuse('not-found', '会議が見つかりません', { code: 'RECORD_NOT_FOUND' })
-    let bundle = body.bundleId === undefined || body.bundleId === null ? null : readable(member, body.bundleId, 'bundle')
-    if ((body.bundleId !== undefined && body.bundleId !== null) && !bundle) return refuse('not-found', 'まとまり（案件など）が見つかりません', { code: 'RECORD_NOT_FOUND' })
-    if (!bundle && meeting) {
-      const linked = companyData.forCompany(member.companyId).records.linksFrom([meeting.id]).find(l => l.name === 'bundle')
+  /**
+   * The draft context from a request: a meeting, a まとまり and/or the 来た連絡 it answers, each one the
+   * member may read (a meeting's or 連絡's まとまり is taken along; an owner-only 連絡 is its owner's only).
+   */
+  function contextOf(member: Member, body: Record<string, unknown>): { meetingId: string | null; bundleId: string | null; interactionId: string | null; meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null } | Refusal {
+    const given = (v: unknown) => v !== undefined && v !== null
+    const meeting = given(body.meetingId) ? readable(member, body.meetingId, 'meeting') : null
+    if (given(body.meetingId) && !meeting) return refuse('not-found', '会議が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    const interaction = given(body.interactionId) ? readable(member, body.interactionId, 'interaction') : null
+    if (given(body.interactionId) && !interaction) return refuse('not-found', '返事をする連絡が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    let bundle = given(body.bundleId) ? readable(member, body.bundleId, 'bundle') : null
+    if (given(body.bundleId) && !bundle) return refuse('not-found', 'まとまり（案件など）が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    for (const from of [meeting, interaction]) {
+      if (bundle || !from) continue
+      const linked = companyData.forCompany(member.companyId).records.linksFrom([from.id]).find(l => l.name === 'bundle')
       bundle = linked?.targetId ? readable(member, linked.targetId, 'bundle') : null
     }
-    if (!meeting && !bundle) return bad('meetingId or bundleId: the meeting or まとまり the mail is about', 'MAIL_CONTEXT_REQUIRED')
-    return { meetingId: meeting?.id ?? null, bundleId: bundle?.id ?? null, meeting, bundle }
+    if (!meeting && !bundle && !interaction) return bad('meetingId, bundleId or interactionId: the meeting, まとまり or 連絡 the mail is about', 'MAIL_CONTEXT_REQUIRED')
+    return { meetingId: meeting?.id ?? null, bundleId: bundle?.id ?? null, interactionId: interaction?.id ?? null, meeting, bundle, interaction }
   }
 
   /** Resolve refs: from `known` first (kept from the current version), else from fresh sources (read once, lazily). */
   async function resolveRefs(
     member: Member, refs: { to: string[]; cc: string[] }, known: OutboundRecipientRow[],
-    ctx: { meetingId: string | null; bundleId: string | null; messageId: string | null; from: string },
+    ctx: Ctx,
   ): Promise<{ to: OutboundRecipientRow[]; cc: OutboundRecipientRow[] } | Refusal> {
     const byRef = new Map(known.map(r => [r.ref, r]))
     if ([...refs.to, ...refs.cc].some(r => !byRef.has(r))) {
@@ -294,9 +384,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return { to: refs.to.map(r => byRef.get(r)!), cc: refs.cc.map(r => byRef.get(r)!) }
   }
 
-  function contentCheck(from: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], subject: unknown, body: unknown): { canonical: string; subject: string } | Refusal {
+  function contentCheck(from: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], subject: unknown, body: unknown, reply?: MailReplyHeaders): { canonical: string; subject: string } | Refusal {
     if (typeof subject !== 'string' || typeof body !== 'string') return bad('subject and body: text', 'MAIL_INVALID')
-    const content = { from, to: to.map(r => r.email), cc: cc.map(r => r.email), subject, body }
+    const content = { from, to: to.map(r => r.email), cc: cc.map(r => r.email), subject, body, ...(reply ? { reply } : {}) }
     const problems = mailContentProblems(content)
     if (problems.length > 0) return bad(problems[0], 'MAIL_INVALID', { problems })
     return { canonical: mailContentCanonical(content), subject: subject.normalize('NFC') }
@@ -330,7 +420,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const view = viewOf(member.companyId, d.mail, d.mail.messageId)
       return refuse('conflict', '内容が変わりました。もう一度確かめてください。', { code: 'CONTENT_CHANGED', ...(view ? { draft: view } : {}) })
     }
-    let content: { from: string; to: string[]; cc: string[]; subject: string; body: string }
+    if (d.fields.channel === 'slack') return chatSendStep(member, d, version, body.hash, payload.canonical)
+    let content: { from: string; to: string[]; cc: string[]; subject: string; body: string; reply?: MailReplyHeaders }
     try { content = JSON.parse(payload.canonical) as typeof content } catch { return notFound() }
     // 2. The member's permission to send mail (the role メールを送る), from the account the draft names.
     const sender = await deps.mail.senderAccount(member.companyId, member.userId)
@@ -346,7 +437,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     // 3. Every recipient is still at its source right now.
     const all = [...v.to, ...v.cc]
     const need = new Set(all.map(r => r.source))
-    const fresh = await collect(member, { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail }, need)
+    const fresh = await collect(member, draftCtx(member.companyId, d.mail), need)
     if (all.some(r => fresh.unreadable.includes(r.source))) return refuse('conflict', UNVERIFIABLE, { code: 'RECIPIENTS_UNVERIFIABLE' })
     const now = new Set(fresh.recipients.map(r => `${r.ref}|${r.email}`))
     const gone = all.filter(r => !now.has(`${r.ref}|${r.email}`)).map(r => r.ref)
@@ -359,11 +450,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash: body.hash, by: member.userId, startedAt, outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null })) {
       return refuse('conflict', 'このメールはいま送っている途中か、すでに送られています。', { code: 'SEND_IN_PROGRESS' })
     }
-    // 5. Gmail, once.
+    // 5. Gmail, once (a reply: into the member's own conversation, with the thread's ids).
     let result: MailSendResult
     try {
-      const raw = gmailRaw(buildMailMessage({ from: content.from, to: content.to, cc: content.cc, subject: content.subject, body: content.body, date: new Date(deps.clock.nowMs()) }))
-      result = await deps.mail.send(member.companyId, member.userId, raw)
+      const raw = gmailRaw(buildMailMessage({
+        from: content.from, to: content.to, cc: content.cc, subject: content.subject, body: content.body, date: new Date(deps.clock.nowMs()),
+        messageId: ourMessageId(sendId, content.from),
+        ...(content.reply ? { inReplyTo: content.reply.inReplyTo, references: content.reply.references } : {}),
+      }))
+      result = await deps.mail.send(member.companyId, member.userId, raw, content.reply ? { threadId: content.reply.threadId } : undefined)
     } catch (err) {
       // Whether it left is not known (the build cannot fail for a stored version; a throw in the call can be after sending).
       logError('outbound-mail', 'send threw', err, { message: d.mail.messageId })
@@ -374,7 +469,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (result.ok) {
       const gmailId = isObj(result.json) && typeof result.json.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.id) ? result.json.id : null
       handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)
-      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor)
+      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId)
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
       handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)
@@ -394,7 +489,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   /** The record → sent, the retention clock, and the 「やりとり」 on its まとまり (design §1-6 step 19). */
-  function finishSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }): Outcome<MailSendAnswer> {
+  function finishSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }, sendId: string | null): Outcome<MailSendAnswer> {
     const handle = companyData.forCompany(member.companyId)
     const moved = writer.transition(member.companyId, {
       recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor,
@@ -402,7 +497,85 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     })
     if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
     handle.outbound.setFinished(mail.messageId, at)
-    recordInteraction(member, mail, at, gmailId, recipients)
+    const interactionId = interactionOf(member.companyId, mail.messageId)
+    // A reply belongs to its 連絡's thread (one interaction per thread, inbox.md): the inbox hears it; no new receipt.
+    if (interactionId) tellReplySent(member, interactionId, 'email', sendId ? ourMessageId(sendId, mail.fromEmail) : null, gmailId ? `gmail:${gmailId}` : null, at, mail.fromEmail)
+    else recordInteraction(member, mail, at, gmailId, recipients)
+    const view = viewOf(member.companyId, mail, mail.messageId)
+    return view ? ok({ outcome: 'sent', draft: view }) : notFound()
+  }
+
+  /** The Message-ID ACB gives a mail it sends (known afterwards, for the inbox's thread). */
+  const ourMessageId = (sendId: string, from: string) => `<acb.${sendId.replace(/[^A-Za-z0-9.-]/g, '')}@${emailDomain(from)}>`
+
+  function tellReplySent(member: Member, interactionId: string, channel: 'email' | 'chat', messageId: string | null, sourceRef: string | null, at: string, from: string) {
+    const own = pointerOf(member.companyId, interactionId).messageId
+    if (!own || !messageId) return
+    const reply: ReplySent = {
+      companyId: member.companyId, userId: member.userId, interactionId, channel, messageId, sourceRef: sourceRef ?? `acb:${messageId}`, references: [own], occurredAt: at, from,
+    }
+    for (const listen of replyListeners) {
+      try { listen(reply) } catch (err) { logError('outbound-mail', 'reply listener failed', err) }
+    }
+  }
+
+  /** 「確かめて送る」 of a Slack reply: the member's permission to reply, the send row first, one post into the thread. */
+  async function chatSendStep(member: Member, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, hash: string, canonical: string): Promise<Outcome<MailSendAnswer>> {
+    const handle = companyData.forCompany(member.companyId)
+    let content: { from: string; thread: { channel: string; ts: string }; body: string }
+    try { content = JSON.parse(canonical) as typeof content } catch { return notFound() }
+    if (!deps.chat) return refuse('unavailable', SLACK_UNAVAILABLE, { code: 'SLACK_UNAVAILABLE', reason: 'no-connector' })
+    const account = await deps.chat.replierAccount(member.companyId, member.userId)
+    if (!account.ok && account.reason === 'consent-needed') return refuse('conflict', SLACK_CONSENT, { code: 'SLACK_CONSENT_NEEDED', needsSlackConsent: 'reply' })
+    if (!account.ok && account.reason === 'turned-off') return refuse('conflict', SLACK_TURNED_OFF, { code: 'SLACK_FEATURE_OFF', feature: 'reply' })
+    if (!account.ok) return refuse('unavailable', SLACK_UNAVAILABLE, { code: 'SLACK_UNAVAILABLE', reason: 'no-connector' })
+    if (normalizeEmail(account.account) !== normalizeEmail(content.from)) {
+      return refuse('conflict', 'Slack の許可が下書きを作ったときと違うアカウントのものです。下書きを作り直してください。', { code: 'FROM_CHANGED' })
+    }
+    const sendId = deps.ids.newId()
+    if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash, by: member.userId, startedAt: deps.clock.now(), outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null })) {
+      return refuse('conflict', 'この返事はいま送っている途中か、すでに送られています。', { code: 'SEND_IN_PROGRESS' })
+    }
+    const ref = { channelId: content.thread.channel, threadTs: content.thread.ts }
+    let result: ChatSendResult
+    try {
+      result = await deps.chat.reply(member.companyId, member.userId, ref, content.body)
+    } catch (err) {
+      logError('outbound-mail', 'chat reply threw', err, { message: d.mail.messageId })
+      result = { ok: false, kind: 'unknown', reason: 'error' }
+    }
+    const at = deps.clock.now()
+    const actor = { id: member.userId, kind: 'human' as const, source: null }
+    if (result.ok) {
+      handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)
+      return finishChatSent(member, d.mail, d.recordVersion, at, result.ts, ref, actor)
+    }
+    if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
+      handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)
+      if (result.kind === 'not-sent' && ['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted'].includes(result.reason)) {
+        return refuse('conflict', SLACK_CONSENT, { code: 'SLACK_CONSENT_NEEDED', needsSlackConsent: 'reply' })
+      }
+      if (result.kind === 'not-sent' && result.reason === 'feature-off') return refuse('conflict', SLACK_TURNED_OFF, { code: 'SLACK_FEATURE_OFF', feature: 'reply' })
+      if (result.kind === 'not-sent') return refuse('unavailable', SLACK_UNAVAILABLE, { code: 'SLACK_UNAVAILABLE', reason: result.reason })
+      return refuse('conflict', 'Slack が受け付けませんでした。何も送っていません。', { code: 'SEND_REFUSED' })
+    }
+    // A lost answer or a 5xx: it may have been posted. Never re-sent; the person looks at the thread.
+    handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)
+    const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor })
+    if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
+    const view = viewOf(member.companyId, d.mail, d.mail.messageId)
+    return view ? ok({ outcome: 'unknown', draft: view, message: CHAT_UNKNOWN_TEXT }) : notFound()
+  }
+
+  function finishChatSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, ts: string | null, ref: { channelId: string; threadTs: string }, actor: { id: string; kind: 'human'; source: null }): Outcome<MailSendAnswer> {
+    const moved = writer.transition(member.companyId, {
+      recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor,
+      fields: { sent_at: at, ...(ts ? { provider_message_id: ts } : {}) },
+    })
+    if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
+    companyData.forCompany(member.companyId).outbound.setFinished(mail.messageId, at)
+    const interactionId = interactionOf(member.companyId, mail.messageId)
+    if (interactionId && ts) tellReplySent(member, interactionId, 'chat', `${ref.channelId}:${ts}`, `slack:${ref.channelId}:${ts}`, at, mail.fromEmail)
     const view = viewOf(member.companyId, mail, mail.messageId)
     return view ? ok({ outcome: 'sent', draft: view }) : notFound()
   }
@@ -432,6 +605,76 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (!made.ok) logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: made.reason })
   }
 
+  /** Who may see the draft's record: an owner-only 連絡's reply stays its owner's; else the まとまり's / meeting's / 連絡's folder. */
+  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null }): { folder: string | null } | { personalOwner: string } {
+    if (ctx.interaction?.personalOwner) return { personalOwner: ctx.interaction.personalOwner }
+    return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? null }
+  }
+
+  const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null }) => ({
+    ...(ctx.bundleId ? { bundle: [ctx.bundleId] } : {}),
+    ...(ctx.meetingId ? { meeting: [ctx.meetingId] } : {}),
+    ...(ctx.interactionId ? { interaction: [ctx.interactionId] } : {}),
+  })
+
+  function chatCheck(from: string, ref: { channelId: string; threadTs: string }, body: unknown): { canonical: string } | Refusal {
+    if (typeof body !== 'string') return bad('body: text', 'MAIL_INVALID')
+    const problems = chatReplyProblems({ body })
+    if (problems.length > 0) return bad(problems[0], 'MAIL_INVALID', { problems })
+    return { canonical: chatReplyCanonical({ from, channelId: ref.channelId, threadTs: ref.threadTs, body }) }
+  }
+
+  /** A Slack reply's draft: no recipients, no subject; the thread fixed with it. */
+  async function createChatReply(member: Member, actor: ActorInput, body: Record<string, unknown>, ctx: Exclude<ReturnType<typeof contextOf>, Refusal>, ref: Extract<ThreadPointer, { kind: 'chat' }>): Promise<Outcome<{ draft: OutboundMailView }>> {
+    const given = (v: unknown) => Array.isArray(v) && v.length > 0
+    if (given(body.toRefs) || given(body.ccRefs)) return bad('Slack への返事には宛先がありません（スレッドに返します）。', 'MAIL_INVALID')
+    const from = fromOf(member)
+    if (!from) return notFound()
+    const checked = chatCheck(from, ref, body.body)
+    if ('ok' in checked) return checked
+    const messageId = `outbound_message-${deps.ids.newToken().slice(0, 16)}`
+    const at = deps.clock.now()
+    const handle = companyData.forCompany(member.companyId)
+    const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, meetingId: ctx.meetingId, bundleId: ctx.bundleId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
+    const made = tryWrite(() => {
+      const fixed = deps.payloads.fix(member.companyId, KIND, messageId, checked.canonical)
+      if (!fixed || fixed.version !== 1) throw new WriteFailed({ ok: false, reason: 'exists' })
+      const r = writer.create(member.companyId, {
+        type: 'outbound_message', id: messageId, title: CHAT_REPLY_TITLE,
+        ...placeOf(ctx),
+        fields: { requested_by: member.userId, assignee: member.userId, subject: '', payload_hash: fixed.hash, payload_version: 1, channel: 'slack', slack_thread: `${ref.channelId}:${ref.threadTs}` },
+        links: linksOf(ctx),
+        actor: { id: member.userId, ...actor, source: actor.source ?? null },
+      })
+      if (!r.ok) throw new WriteFailed(r)
+      handle.outbound.insertMail(mail)
+      handle.outbound.insertVersion({ messageId, version: 1, to: [], cc: [], actorKind: actor.kind, createdAt: at })
+      return r
+    })
+    if (!made.ok) return writeFailed(made)
+    return draftAnswer(member, mail)
+  }
+
+  /** A new version of a draft: the content, the record's fields and the recipients, all or nothing. */
+  function newVersion(member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, canonical: string, subject: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[]): Outcome<{ draft: OutboundMailView }> {
+    const handle = companyData.forCompany(member.companyId)
+    const next = version + 1
+    const at = deps.clock.now()
+    const moved = tryWrite(() => {
+      const fixed = deps.payloads.fix(member.companyId, KIND, d.mail.messageId, canonical)
+      if (!fixed || fixed.version !== next) throw new WriteFailed({ ok: false, reason: 'stale' })
+      const r = writer.transition(member.companyId, {
+        recordId: d.mail.messageId, action: 'edit', expectedVersion: d.recordVersion, to: null,
+        fields: { subject, payload_hash: fixed.hash, payload_version: next }, actor: { id: member.userId, ...actor, source: actor.source ?? null },
+      })
+      if (!r.ok) throw new WriteFailed(r)
+      handle.outbound.insertVersion({ messageId: d.mail.messageId, version: next, to, cc, actorKind: actor.kind, createdAt: at })
+      return r
+    })
+    if (!moved.ok) return writeFailed(moved)
+    return draftAnswer(member, d.mail)
+  }
+
   return {
     /** Verified recipients of a context (POST /outbound-recipients; the AI's mail_recipients). */
     async recipients(member: Member, rawBody: unknown): Promise<Outcome<MailRecipientsView>> {
@@ -441,7 +684,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if ('ok' in ctx) return ctx
       const from = fromOf(member)
       if (!from) return notFound()
-      const got = await collect(member, { meetingId: ctx.meetingId, bundleId: ctx.bundleId, messageId: null, from })
+      const got = await collect(member, { meetingId: ctx.meetingId, bundleId: ctx.bundleId, interactionId: ctx.interactionId, messageId: null, from })
       const sent = new Set(companyData.forCompany(member.companyId).outbound.sentDomains())
       const internal = internalDomains(member.companyId, from)
       return ok({
@@ -456,7 +699,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (off) return off
       const d = ownDraft(member, messageId)
       if (!d) return notFound()
-      const got = await collect(member, { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail })
+      const got = await collect(member, draftCtx(member.companyId, d.mail))
       const sent = new Set(companyData.forCompany(member.companyId).outbound.sentDomains())
       const internal = internalDomains(member.companyId, d.mail.fromEmail)
       return ok({
@@ -472,15 +715,25 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const body = isObj(rawBody) ? rawBody : {}
       const ctx = contextOf(member, body)
       if ('ok' in ctx) return ctx
+      // A reply answers its 連絡 in the same thread: Slack → a reply in the thread; mail → a reply in the member's own conversation.
+      const pointer = ctx.interactionId ? pointerOf(member.companyId, ctx.interactionId).pointer : null
+      if (ctx.interactionId && !pointer) return refuse('conflict', 'この連絡には、返事をするスレッドがありません。', { code: 'THREAD_UNKNOWN' })
+      if (pointer?.kind === 'chat') return createChatReply(member, actor, body, ctx, pointer)
       const to = refList(body.toRefs, MAIL_LIMITS.to, 'toRefs')
       if (!Array.isArray(to)) return to
       const cc = refList(body.ccRefs, MAIL_LIMITS.cc, 'ccRefs')
       if (!Array.isArray(cc)) return cc
       const from = fromOf(member)
       if (!from) return notFound()
-      const resolved = await resolveRefs(member, { to, cc }, [], { meetingId: ctx.meetingId, bundleId: ctx.bundleId, messageId: null, from })
+      const resolved = await resolveRefs(member, { to, cc }, [], { meetingId: ctx.meetingId, bundleId: ctx.bundleId, interactionId: ctx.interactionId, messageId: null, from })
       if ('ok' in resolved) return resolved
-      const checked = contentCheck(from, resolved.to, resolved.cc, body.subject, body.body)
+      let reply: MailReplyHeaders | undefined
+      if (ctx.interactionId) {
+        const thread = await mailThreadOf(member, ctx.interactionId)
+        reply = thread ? replyHeadersOf(thread) ?? undefined : undefined
+        if (!reply) return refuse('conflict', 'いまは返事をするメールのスレッドを読めません。少し待ってから、もう一度作ってください。', { code: 'THREAD_UNREADABLE' })
+      }
+      const checked = contentCheck(from, resolved.to, resolved.cc, body.subject, body.body, reply)
       if ('ok' in checked) return checked
       const messageId = `outbound_message-${deps.ids.newToken().slice(0, 16)}`
       const at = deps.clock.now()
@@ -493,9 +746,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         const hash = fixed.hash
         const r = writer.create(member.companyId, {
         type: 'outbound_message', id: messageId, title: titleOf(checked.subject),
-        folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? null,
+        ...placeOf(ctx),
         fields: { requested_by: member.userId, assignee: member.userId, subject: checked.subject, payload_hash: hash, payload_version: 1, channel: 'email' },
-        links: { ...(ctx.bundleId ? { bundle: [ctx.bundleId] } : {}), ...(ctx.meetingId ? { meeting: [ctx.meetingId] } : {}) },
+        links: linksOf(ctx),
         actor: { id: member.userId, ...actor, source: actor.source ?? null },
         })
         if (!r.ok) throw new WriteFailed(r)
@@ -535,29 +788,23 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const current = handle.outbound.version(d.mail.messageId, version)
       const payload = deps.payloads.current(member.companyId, KIND, d.mail.messageId)
       if (!current || !payload || payload.canonical === null || payload.version !== version) return notFound()
-      let old: { subject: string; body: string }
+      let old: { subject: string; body: string; reply?: MailReplyHeaders; from?: string; thread?: { channel: string; ts: string } }
       try { old = JSON.parse(payload.canonical) as typeof old } catch { return notFound() }
+      if (d.fields.channel === 'slack') {
+        if ((toRefs?.length ?? 0) > 0 || (ccRefs?.length ?? 0) > 0) return bad('Slack への返事には宛先がありません（スレッドに返します）。', 'MAIL_INVALID')
+        if (!old.thread || !old.from) return notFound()
+        const chatChecked = chatCheck(old.from, { channelId: old.thread.channel, threadTs: old.thread.ts }, body.body ?? old.body)
+        if ('ok' in chatChecked) return chatChecked
+        return newVersion(member, actor, d, version, chatChecked.canonical, '', [], [])
+      }
       const resolved = await resolveRefs(member, { to: toRefs ?? current.to.map(r => r.ref), cc: ccRefs ?? current.cc.map(r => r.ref) },
         [...current.to, ...current.cc, ...handle.outbound.typedRecipients(d.mail.messageId)],
-        { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail })
+        draftCtx(member.companyId, d.mail))
       if ('ok' in resolved) return resolved
-      const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body)
+      // A reply keeps the thread it was drafted for (the hash covers it).
+      const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body, old.reply)
       if ('ok' in checked) return checked
-      const next = version + 1
-      const at = deps.clock.now()
-      const moved = tryWrite(() => {
-        const fixed = deps.payloads.fix(member.companyId, KIND, d.mail.messageId, checked.canonical)
-        if (!fixed || fixed.version !== next) throw new WriteFailed({ ok: false, reason: 'stale' })
-        const r = writer.transition(member.companyId, {
-          recordId: d.mail.messageId, action: 'edit', expectedVersion: d.recordVersion, to: null,
-          fields: { subject: checked.subject, payload_hash: fixed.hash, payload_version: next }, actor: { id: member.userId, ...actor, source: actor.source ?? null },
-        })
-        if (!r.ok) throw new WriteFailed(r)
-        handle.outbound.insertVersion({ messageId: d.mail.messageId, version: next, to: resolved.to, cc: resolved.cc, actorKind: actor.kind, createdAt: at })
-        return r
-      })
-      if (!moved.ok) return writeFailed(moved)
-      return draftAnswer(member, d.mail)
+      return newVersion(member, actor, d, version, checked.canonical, checked.subject, resolved.to, resolved.cc)
     },
 
     /** A person types an address (「あなたが入力」): POST /outbound/:id/recipients { email, name? }. Session only. */
@@ -585,6 +832,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     /** 「確かめて送る」: POST /outbound/:id/send { hash }. A person's session only (no AI route exists). */
     send: sendStep,
 
+    /** Who hears a reply that left (the inbox: the company's own message in the thread). Bound once at wiring. */
+    onReplySent(listen: (reply: ReplySent) => void): void { replyListeners.push(listen) },
+
     /** After an unknown send: POST /outbound/:id/resolve { sent }. sent → `sent`; not sent → back to `draft` (sending again needs 確かめて送る again). */
     resolve(member: Member, messageId: unknown, rawBody: unknown): Outcome<{ draft: OutboundMailView }> {
       const off = enabled(member.companyId)
@@ -603,7 +853,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         let to: string[] = []
         const v = last ? handle.outbound.version(d.mail.messageId, last.version) : null
         if (v) to = [...v.to, ...v.cc].map(r => r.email)
-        const r = finishSent(member, d.mail, d.recordVersion, at, null, to, actor)
+        const r = d.fields.channel === 'slack'
+          ? finishChatSent(member, d.mail, d.recordVersion, at, null, { channelId: '', threadTs: '' }, actor)
+          : finishSent(member, d.mail, d.recordVersion, at, null, to, actor, last?.id ?? null)
         return r.ok ? ok({ draft: r.value.draft }) : r
       }
       const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'not_sent', expectedVersion: d.recordVersion, to: 'draft', actor })

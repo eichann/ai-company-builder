@@ -8,7 +8,7 @@
  * subject with a line break, throws instead of being sent.
  */
 import { randomBytes } from 'crypto'
-import { canonicalMailText, normalizeEmail } from '../../shared/core/mail'
+import { canonicalMailText, MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX } from '../../shared/core/mail'
 
 export interface MailMessageInput {
   from: string
@@ -20,6 +20,16 @@ export interface MailMessageInput {
   date: Date
   /** The right-hand side of Message-ID (the From's domain). */
   messageIdDomain?: string
+  /** This message's own Message-ID (`<…>`); a random one when absent. */
+  messageId?: string
+  /** A reply (outbound-mail.md "Replies"): the message it answers and the thread's ids. */
+  inReplyTo?: string
+  references?: readonly string[]
+}
+
+function messageIdHeader(value: string): string {
+  if (!MESSAGE_ID_RE.test(value)) throw new Error('mail-message: not one message id')
+  return value
 }
 
 /** `=?UTF-8?B?…?=` words of at most 75 characters, split on whole characters. */
@@ -58,7 +68,9 @@ export function buildMailMessage(m: MailMessageInput): string {
     ...(cc.length > 0 ? [`Cc: ${cc.join(', ')}`] : []),
     `Subject: ${encodeHeaderWords(canonicalMailText(m.subject))}`,
     `Date: ${m.date.toUTCString().replace('GMT', '+0000')}`,
-    `Message-ID: <${randomBytes(16).toString('hex')}@${domain}>`,
+    `Message-ID: ${m.messageId ? messageIdHeader(m.messageId) : `<${randomBytes(16).toString('hex')}@${domain}>`}`,
+    ...(m.inReplyTo ? [`In-Reply-To: ${messageIdHeader(m.inReplyTo)}`] : []),
+    ...(m.references && m.references.length > 0 ? [`References: ${m.references.slice(-REPLY_REFERENCES_MAX).map(messageIdHeader).join('\r\n ')}`] : []),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64',

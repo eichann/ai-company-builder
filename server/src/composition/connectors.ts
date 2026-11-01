@@ -29,10 +29,13 @@ import type { NotificationRow } from '../ports/notifications'
 import type { UpstreamClient } from '../ports/upstream'
 import type { BrokerVault } from '../services/broker-vault'
 import type { MemberOAuth } from '../services/member-oauth'
+import { createSlackChat } from '../services/slack-chat'
 import { createSlackClient } from '../services/slack-client'
 import { createSlackConnector } from '../services/slack-connector'
 import { createSlackEvents, type SlackSignal } from '../services/slack-events'
 import { createSlackNotices } from '../services/slack-notices'
+import { createThreadService } from '../services/threads'
+import type { ReplySent } from '../services/outbound-mail'
 import type { ConnectorRoleChoiceRepository } from '../ports/connector-roles'
 import { createConnectorRoles } from '../services/connector-roles'
 import { createRoleProviders } from '../services/connector-role-providers'
@@ -42,6 +45,23 @@ import type { GoogleClient } from '../services/google-client'
 import type { GoogleConnector } from '../services/google-connector'
 import { createGoogleMail } from '../services/google-mail'
 import { createGoogleMeetings, type GoogleRequester } from '../services/google-meetings'
+
+/**
+ * A reply sent from the card (outbound-mail.md "Replies") as the inbox's message: the company's
+ * own (`outgoing`), answering the 連絡's own message id — pointers only, never the text.
+ */
+export function replyAsIncoming(r: ReplySent) {
+  return {
+    channel: r.channel,
+    messageId: r.messageId,
+    references: r.references,
+    sourceRef: r.sourceRef,
+    occurredAt: r.occurredAt,
+    from: { address: r.from, memberId: r.userId },
+    to: [],
+    outgoing: true,
+  }
+}
 
 export interface CoreConnectorsWiringDeps {
   companyData: CompanyDataSource
@@ -123,6 +143,11 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
   })
   // Slack serves the core role チャットの連絡を受け取る・返す (resolved per call, so registering here is in time).
   deps.core.connectorRoles.register(slackConnector.roleConnector())
+  // …and implements it: one thread read on demand, a reply into it (slack-chat.ts; the member's own token).
+  deps.core.roleProviders.provide(BUILTIN_CONNECTORS.slack.id, (() => {
+    const chat = createSlackChat({ slack: slackClient, companyData, slackData })
+    return { chatReader: chat, chatSender: chat }
+  })())
 
   // Events (POST /api/slack/events/:companyId): signals go to whoever subscribed (lane B's 来た連絡);
   // until then they are dropped. A signal never carries the text.
@@ -151,9 +176,18 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
     },
   })
 
+  // The card's 元のスレッド (outbound-mail.md "Replies"): read now through the roles, with the viewer's own permission.
+  const threads = createThreadService({
+    companyData,
+    mailReader: deps.core.roleProviders.mailReader,
+    chatReader: deps.core.roleProviders.chatReader,
+    emailOf: (_companyId, userId) => accounts.byIds([userId]).get(userId)?.email?.toLowerCase() ?? null,
+  })
+
   return {
     connectorRoles: deps.core.connectorRoles,
     coreConnectors,
+    threads,
     slackConnector,
     slackEvents,
     /** Lane B subscribes here for Slack's signals (a DM, a mention, an @channel for a member). */
@@ -162,5 +196,8 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
     noticesOutside: (companyId: string, rows: NotificationRow[]) => slackNotices.outside(companyId, rows),
     /** メールを読む (the role, routed): the inbox (lane B) reads mail through this, never through Gmail. */
     mailReader: deps.core.roleProviders.mailReader,
+    /** チャットの連絡を受け取る・返す (the role, routed): the card's thread and its replies (outbound-mail.md "Replies"). */
+    chatReader: deps.core.roleProviders.chatReader,
+    chatSender: deps.core.roleProviders.chatSender,
   }
 }

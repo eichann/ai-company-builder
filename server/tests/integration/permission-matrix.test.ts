@@ -453,6 +453,8 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/me/slack/features', w => ({ path: `${C(w)}/me/slack/features`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('DELETE /api/companies/:companyId/me/slack', w => ({ path: `${C(w)}/me/slack` }), MEMBERS, 'nothing to stop: answers the member\'s own (empty) state'),
   r('POST /api/slack/events/:companyId', w => ({ path: `/api/slack/events/${w.co}`, body: {} }), [401, 401, 401, 401, 401, 401], 'public: Slack signs with the company\'s own signing secret; unsigned → 401'),
+  // The card's 元のスレッド (outbound-mail.md "Replies"): any member, only a record they read; a missing one is 404.
+  r('GET /api/companies/:companyId/threads/:recordId', w => ({ path: `${C(w)}/threads/interaction-nosuch01` }), [404, 404, 404, 404, 404, 401]),
   // lane A ▲
   // lane B ▼
   // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
@@ -592,6 +594,8 @@ const CROSS: CrossRow[] = [
   // lane A ▼
   // Another company's member (with a grant there) is missing here, like nobody.
   x('DELETE /api/companies/:companyId/slack/grants/:userId', (w, id) => ({ path: `${C(w)}/slack/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
+  // Another company's record is missing here (an unreadable / owner-only one: tests/integration/threads.test.ts).
+  x('GET /api/companies/:companyId/threads/:recordId', (w, id) => ({ path: `${C(w)}/threads/${id}` }), w => w.other.record, 'interaction-nosuch01'),
   // lane A ▲
   // lane B ▼
   x('GET /api/companies/:companyId/identities/records/:recordId', (w, id) => ({ path: `${C(w)}/identities/records/${id}` }), w => w.other.record, 'deal-nosuch01'),

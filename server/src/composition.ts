@@ -90,7 +90,7 @@ import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
-import { wireConnectorsLane, wireCoreConnectors } from './composition/connectors'
+import { replyAsIncoming, wireConnectorsLane, wireCoreConnectors } from './composition/connectors'
 import { wireInboxLane } from './composition/inbox'
 import { wirePluginsLane } from './composition/plugins'
 
@@ -453,6 +453,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     bundleContacts: (member, bundleId) => pluginImport.recordContacts(member, bundleId),
     // The role メールを送る (the member's own permission at the company's mail connector).
     mail: coreConnectors.roleProviders.mailSender,
+    // A reply into its 連絡's thread (outbound-mail.md "Replies"): the thread read through メールを読む; Slack's チャットに返す.
+    mailReader: coreConnectors.roleProviders.mailReader,
+    chat: coreConnectors.roleProviders.chatSender,
     companyIds: () => repos.companies.allIds(),
   })
 
@@ -488,6 +491,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
     publicUrl,
   })
+  // A reply sent from the card (A4) is the company's own message in its 連絡's thread: the inbox (lane B,
+  // built below; called only after construction) moves the 返事のお願い as for any reply of ours.
+  outboundMail.onReplySent(reply => { inboxLane.inbox.receive(reply.companyId, reply.userId, replyAsIncoming(reply)) })
   // lane B ▼
   const inboxLane = wireInboxLane({
     conn, ...shared, memberships: repos.memberships, serviceRecords,

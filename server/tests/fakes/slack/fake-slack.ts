@@ -25,7 +25,9 @@ import { Hono, type Context } from 'hono'
 export interface FakeSlackUser { id: string; email: string; teamId: string }
 export interface FakeSlackApp { clientId: string; clientSecret: string; signingSecret: string; teamId: string; botToken: string; botUserId: string; rotation?: boolean }
 
-export interface FakeSlackSeed { users: FakeSlackUser[]; apps: FakeSlackApp[] }
+/** A thread's messages in a channel of a workspace (conversations.replies); the root is the one whose ts is the thread's. */
+export interface FakeSlackThread { teamId: string; channel: string; ts: string; messages: Array<{ ts: string; user: string; text: string }> }
+export interface FakeSlackSeed { users: FakeSlackUser[]; apps: FakeSlackApp[]; threads?: FakeSlackThread[] }
 
 export function defaultSlackSeed(): FakeSlackSeed {
   return {
@@ -57,7 +59,7 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
   const tokens = new Map<string, UserToken>()
   let counter = 0
   /** What the bots and members posted (test assertions only). */
-  const posted: Array<{ teamId: string; by: string; channel: string; text: string }> = []
+  const posted: Array<{ teamId: string; by: string; channel: string; text: string; threadTs?: string }> = []
   const revokedTokens: string[] = []
 
   const appByClient = (clientId: string) => seed.apps.find(a => a.clientId === clientId)
@@ -163,8 +165,14 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
     if (who.kind === 'user' && !who.t.scopes.includes('chat:write')) return fail(c, 'missing_scope')
     const f = await form(c)
     if (!f.channel || !f.text) return fail(c, 'no_text')
-    posted.push({ teamId: who.kind === 'bot' ? who.app.teamId : who.t.teamId, by: who.kind === 'bot' ? who.app.botUserId : who.t.userId, channel: f.channel, text: f.text })
-    return c.json({ ok: true, channel: f.channel, ts: `${1_793_500_000 + counter++}.000100` })
+    const teamId = who.kind === 'bot' ? who.app.teamId : who.t.teamId
+    const by = who.kind === 'bot' ? who.app.botUserId : who.t.userId
+    const ts = `${1_793_500_000 + counter++}.000100`
+    posted.push({ teamId, by, channel: f.channel, text: f.text, ...(f.thread_ts ? { threadTs: f.thread_ts } : {}) })
+    // A reply joins its thread (what conversations.replies answers next).
+    const thread = f.thread_ts ? (seed.threads ?? []).find(t => t.teamId === teamId && t.channel === f.channel && t.ts === f.thread_ts) : undefined
+    thread?.messages.push({ ts, user: by, text: f.text })
+    return c.json({ ok: true, channel: f.channel, ts })
   })
 
   app.post('/api/conversations.replies', async c => {
@@ -173,7 +181,11 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
     if (who.kind === 'user' && !who.t.scopes.some(s => s.endsWith(':history'))) return fail(c, 'missing_scope')
     const f = await form(c)
     if (!f.channel || !f.ts) return fail(c, 'invalid_arguments')
-    return c.json({ ok: true, messages: [] })
+    const team = who.kind === 'bot' ? who.app.teamId : who.t.teamId
+    const thread = (seed.threads ?? []).find(t => t.teamId === team && t.channel === f.channel && t.ts === f.ts)
+    // A thread nobody seeded reads as empty (the connector's switch tests only need the call to pass).
+    if (!thread) return c.json({ ok: true, messages: [] })
+    return c.json({ ok: true, messages: thread.messages.map(m => ({ type: 'message', ...m, thread_ts: thread.ts })), has_more: false })
   })
 
   return { app, seed, issueCode, posted, revokedTokens, tokens }
