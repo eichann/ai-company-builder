@@ -54,7 +54,7 @@ export function FilesPanel(props: Props) {
           onSelectFile={props.onOpenFile}
           onDoubleClickFile={props.onPinFile}
           onPrivateFolderCreated={props.onPrivateFolderCreated}
-          onLinkToTask={companyId ? path => { const rel = companyPathOf(path); if (rel) linkToTask.open(rel) } : undefined}
+          onLinkToTask={companyId && linkToTask.available ? path => { const rel = companyPathOf(path); if (rel) linkToTask.open(rel) } : undefined}
         />
       ) : (
         <TabbedEditorPanel

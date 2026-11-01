@@ -44,7 +44,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
   (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
   「議事録が届きました」 checked with the session in main, `minutes.md` "The app"), `tasks`
-  (tasks:open / linkFile: the file tree's 「やることにつなぐ…」, with the session in main;
+  (tasks:available / open / linkFile: the file tree's 「やることにつなぐ…」, with the session in main;
   `records.md` "Linking files later").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its

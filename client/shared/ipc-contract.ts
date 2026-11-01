@@ -482,6 +482,8 @@ export interface IpcInvokeChannels {
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
   // 「やることにつなぐ…」 (records.md "Linking files later"): with the member's session in main.
+  /** Whether the company uses tasks (records on, a `task` type); false offline or unsure. */
+  'tasks:available': { args: [companyId: string]; result: boolean }
   /** The member's open tasks (they request, do or review it, or it is their turn). */
   'tasks:open': { args: [companyId: string]; result: OpenTasksResult }
   /** Link a company path (relative to the company folder) to a task; `seenVersion` is the task's version as listed. */
@@ -781,6 +783,7 @@ export interface ElectronAPI {
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「やることにつなぐ…」 from the file tree.
+  getTasksAvailable: Invoke<'tasks:available'>
   getOpenTasks: Invoke<'tasks:open'>
   linkFileToTask: Invoke<'tasks:linkFile'>
   getOutboundMail: Invoke<'outboundMail:get'>

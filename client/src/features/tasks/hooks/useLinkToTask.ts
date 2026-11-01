@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react'
 import type { TaskChoice } from '../../../../shared/task-links'
 import { getOpenTasks, linkFileToTask } from '../api'
+import { subscribeTasksAvailable, tasksAvailable } from '../tasksAvailableStore'
 
 export type LinkToTaskPhase =
   | { kind: 'loading' }
@@ -18,10 +19,14 @@ export interface LinkToTaskState {
  * 「やることにつなぐ…」's flow for one file at a time: `open` loads the member's
  * open tasks, `choose` links the file to one. Loading starts in the handler
  * that opened it (no effect); an answer for a file no longer open is dropped.
+ * `available`: the company uses tasks (records on); the menu item shows only
+ * then (tasksAvailableStore.ts; unknown or offline counts as no).
  */
 export function useLinkToTask(companyId: string | undefined) {
   const [state, setState] = useState<LinkToTaskState | null>(null)
   const current = useRef(0)
+  const subscribe = useCallback((listener: () => void) => (companyId ? subscribeTasksAvailable(companyId, listener) : () => {}), [companyId])
+  const available = useSyncExternalStore(subscribe, () => !!companyId && tasksAvailable(companyId))
 
   const open = useCallback((companyPath: string) => {
     if (!companyId) return
@@ -46,5 +51,5 @@ export function useLinkToTask(companyId: string | undefined) {
 
   const close = useCallback(() => { current.current++; setState(null) }, [])
 
-  return { state, open, choose, close }
+  return { available, state, open, choose, close }
 }

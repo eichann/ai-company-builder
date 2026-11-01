@@ -11,8 +11,8 @@ const row = (page: Page, name: string | RegExp) => page.getByRole('button', { na
 const calls = (page: Page) => page.evaluate(() => (window as unknown as { __acbCalls: unknown[][] }).__acbCalls)
 const tree = (page: Page) => page.locator('main > div').first()
 
-async function open(page: Page) {
-  const state = await openPreview(page, 'file-tree')
+async function open(page: Page, query: Record<string, string> = {}) {
+  const state = await openPreview(page, 'file-tree', query)
   await expect(row(page, '提案書')).toBeVisible()
   return state
 }
@@ -220,5 +220,13 @@ test('「やることにつなぐ…」 links the right-clicked file, as a compa
   expect((await calls(page)).filter(c => c[0] === 'linkFileToTask')).toEqual([['linkFileToTask', 'demo', 'task-aaaaaa02', '営業部/提案書/見積.xlsx', 1]])
   await dialog.getByRole('button', { name: '閉じる' }).click()
   await expect(dialog).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('in a company that does not use tasks (records off), the menu has no 「やることにつなぐ…」', async ({ page }) => {
+  const state = await open(page, { tasks: 'off' })
+  await row(page, '見積.xlsx').click({ button: 'right' })
+  await expect(page.getByRole('button', { name: /^名前を変更/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'やることにつなぐ…' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
