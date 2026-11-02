@@ -30,7 +30,7 @@ export function RolesSection({ pluginId, members, nameOf }: {
       <h3 className="flex items-center gap-2 text-sm font-medium"><IdentificationBadge size={14} />役割</h3>
       <p className="text-xs text-muted-foreground">
         この業務で決まった仕事をする人（承認する人など）を、役割ごとに選びます。案件ごとに別の人にしたいときは、アプリの案件から変えられます。
-        誰も選ばないと、その役割の承認は管理者にお願いが届きます。本人・部署の責任者・管理者は最初から決まっています。
+        誰も選ばないと、その役割の承認は管理者にお願いが届きます。本人・部署の管理役・管理者は最初から決まっています。
       </p>
       {view.roles.map((r) => (
         <RoleHolders key={`${r.name}:${r.userIds.join(',')}`} pluginId={pluginId} role={r} members={members}

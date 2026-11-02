@@ -238,7 +238,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                   {viewerIds.map(id => (
                     <li key={id} className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white pl-2.5 pr-1 text-[12px] text-zinc-800 dark:border-white/10 dark:bg-zinc-950 dark:text-zinc-200">
                       <span className="max-w-40 truncate">{nameOf(id)}</span>
-                      {context.managerIds.includes(id) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">責任者</span>}
+                      {context.managerIds.includes(id) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
                       {id === meId ? <span className="w-1" /> : (
                         <button type="button" aria-label={`${nameOf(id)}を外す`} onClick={() => toggleViewer(id)} className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-white/10 dark:hover:text-zinc-200">
                           <X size={11} weight="bold" />
@@ -390,7 +390,7 @@ function MemberPicker({ members, chosen, managerIds, meId, onToggle }: {
                 <li key={m.userId}>
                   <button type="button" role="menuitemcheckbox" aria-checked={on} onClick={() => onToggle(m.userId)} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-white/[0.04]">
                     <span className="min-w-0 flex-1 truncate">{m.name || m.email || '名前未設定'}</span>
-                    {managerIds.includes(m.userId) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">責任者</span>}
+                    {managerIds.includes(m.userId) && <span className="rounded bg-zinc-100 px-1 text-[10px] text-zinc-500 dark:bg-white/10 dark:text-zinc-400">管理役</span>}
                     <Check size={13} weight="bold" className={on ? 'text-indigo-600 dark:text-indigo-400' : 'opacity-0'} />
                   </button>
                 </li>

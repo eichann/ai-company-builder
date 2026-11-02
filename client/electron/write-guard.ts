@@ -114,7 +114,7 @@ function isUnsharedPath(rel: string): boolean {
 }
 
 export function instructionFileMessage(path: string): string {
-  return `このファイル（${path}）はAIへの指示ファイルのため、管理者（部署内は部署の責任者）だけが変更できます。変更が必要な場合は、管理者か部署の責任者に依頼してください。`
+  return `このファイル（${path}）はAIへの指示ファイルのため、管理者（部署内は部署の管理役）だけが変更できます。変更が必要な場合は、管理者か部署の管理役に依頼してください。`
 }
 
 export function typeDefinitionMessage(path: string): string {

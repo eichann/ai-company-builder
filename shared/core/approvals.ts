@@ -56,7 +56,7 @@ export function mayApprove(rule: ApproverSpec, who: { isRequester: boolean; isDe
 
 export const APPROVER_LABELS: Record<ApproverRule, string> = {
   self: '本人',
-  dept_manager: '部署の責任者',
+  dept_manager: '部署の管理役',
   admin: '管理者',
 }
 

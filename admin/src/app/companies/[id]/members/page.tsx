@@ -230,7 +230,7 @@ export default function MembersPage() {
                 <TableRow className="hover:bg-transparent">
                   <SortableHead label="メンバー" k="name" sort={sort} onSort={toggleSort} className="pl-4" />
                   <SortableHead label="役割" k="role" sort={sort} onSort={toggleSort} />
-                  <TableHead>部署の責任者</TableHead>
+                  <TableHead>部署の管理役</TableHead>
                   {isAdmin && <SortableHead label="アプリ" k="app" sort={sort} onSort={toggleSort} />}
                   {isAdmin && <SortableHead label="最終同期" k="lastSync" sort={sort} onSort={toggleSort} />}
                   {isAdmin && (

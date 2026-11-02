@@ -183,7 +183,7 @@ export function createPluginRoleService(deps: PluginRoleDeps) {
       const isBundle = readable && m.types.includes(row.type) && currentTypes(handle.records).get(row.type)?.definition.implements.includes('bundle') === true
       if (!row || !isBundle) return refuse('not-found', 'このまとまりはありません', { code: 'BUNDLE_NOT_FOUND' })
       const manages = row.folder !== null && deps.managedFolders(member.companyId, member.userId).some(f => isSameOrAncestorPath(f, row.folder!.normalize('NFC')))
-      if (!hasFullAccess(member.role) && !manages) return refuse('forbidden', 'まとまりの役割を変えられるのは、オーナー・管理者と部署の責任者だけです')
+      if (!hasFullAccess(member.role) && !manages) return refuse('forbidden', 'まとまりの役割を変えられるのは、オーナー・管理者と部署の管理役だけです')
       const ids = holdersFrom(member.companyId, body, true)
       if (ids === undefined) return refuse('bad-request', ROLE_HOLDERS_INVALID, { code: 'ROLE_HOLDERS_INVALID' })
       handle.pluginRoles.setOverride(pluginId, role, row.id, ids, deps.clock.now(), member.userId)

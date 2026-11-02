@@ -197,7 +197,7 @@ export default function DepartmentsPage() {
         <Card className="overflow-hidden py-0">
           {!!managers.error && (
             <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
-              責任者を読み込めませんでした。
+              管理役を読み込めませんでした。
               <Button variant="ghost" size="sm" onClick={managers.reload}>
                 再読み込み
               </Button>
@@ -332,7 +332,7 @@ function DepartmentRow({
               {d.folder}
             </span>
           )}
-          {isMine && <Badge variant="brand">あなたが責任者</Badge>}
+          {isMine && <Badge variant="brand">あなたが管理役</Badge>}
         </div>
         {d.description && <p className="truncate text-sm text-muted-foreground">{d.description}</p>}
       </div>
@@ -354,10 +354,10 @@ function DepartmentRow({
                 </span>
               </span>
             </TooltipTrigger>
-            <TooltipContent>責任者: {managers.map((m) => m.name || m.email).join('、')}</TooltipContent>
+            <TooltipContent>管理役: {managers.map((m) => m.name || m.email).join('、')}</TooltipContent>
           </Tooltip>
         ) : (
-          <span className="text-sm text-muted-foreground">責任者なし</span>
+          <span className="text-sm text-muted-foreground">管理役なし</span>
         )}
       </div>
 
@@ -375,7 +375,7 @@ function DepartmentRow({
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onManagers}>
               <UserGear />
-              責任者を設定
+              管理役を設定
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={onDelete}>

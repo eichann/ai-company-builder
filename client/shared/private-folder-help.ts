@@ -15,7 +15,7 @@ export const PRIVATE_FOLDER_HELP_TITLE = '非公開フォルダについて'
 export const PRIVATE_FOLDER_HELP: readonly PrivateFolderHelpItem[] = [
   {
     title: '見られる人を変えられる人',
-    body: 'オーナーと管理者は、すべての非公開フォルダを常に見られます。部署の責任者は、自分の部署の中にある非公開フォルダの「見られる人」を変更でき、自分を加えることもできます。',
+    body: 'オーナーと管理者は、すべての非公開フォルダを常に見られます。部署の管理役は、自分の部署の中にある非公開フォルダの「見られる人」を変更でき、自分を加えることもできます。',
   },
   {
     title: '見られる人から外したとき',
@@ -48,4 +48,4 @@ export const REMOVED_VIEWER_CAVEAT =
   'ただし、それまでにその人のPCに届いた内容（コピー、バックアップ、AIとの会話の記録）は取り消せません。'
 
 /** Under 見られる人 for a folder inside a department (create / members dialogs). */
-export const MANAGERS_MAY_CHANGE_VIEWERS = 'この部署の責任者は、見られる人をあとから変更でき、自分を加えることもできます。'
+export const MANAGERS_MAY_CHANGE_VIEWERS = 'この部署の管理役は、見られる人をあとから変更でき、自分を加えることもできます。'

@@ -13,7 +13,7 @@
  *   company's; never merged). A role nobody holds matches no one (fails
  *   closed); an approval falls back to an owner / admin.
  * - The **core roles** stay built in, not assignable here: 本人 (`self`),
- *   部署の責任者 (`dept_manager`, the department managers), 管理者 (`admin`,
+ *   部署の管理役 (`dept_manager`, the department managers), 管理者 (`admin`,
  *   owners and admins).
  */
 import { ROLE_WHO_PREFIX } from './plugin-declaration'
@@ -29,7 +29,7 @@ export const ROLE_HOLDERS_MAX = 20
 /** The core roles, built in (not assigned per company here). */
 export const CORE_ROLE_LABELS: Readonly<Record<'self' | 'dept_manager' | 'admin', string>> = {
   self: '本人',
-  dept_manager: '部署の責任者',
+  dept_manager: '部署の管理役',
   admin: '管理者',
 }
 

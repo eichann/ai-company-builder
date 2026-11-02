@@ -15,7 +15,7 @@ paths:
 Not the connector roles (`connector-roles.md`): these are the people roles a business plugin
 declares (who approves, who closes a 案件). Owner decision (統合版 「役割（段階4a）」): ① the business
 plugin declares the roles it needs ② the company (FDE) assigns who holds each ③ the core keeps,
-per まとまり, who holds which role. The core roles 本人 (`self`), 部署の責任者 (`dept_manager`), 管理者
+per まとまり, who holds which role. The core roles 本人 (`self`), 部署の管理役 (`dept_manager`), 管理者
 (`admin`) stay built in (`CORE_ROLE_LABELS`) and are not assigned here.
 
 ## Declaring and naming

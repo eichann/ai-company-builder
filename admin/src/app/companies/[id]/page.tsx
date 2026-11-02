@@ -338,7 +338,7 @@ function MemberOverview() {
           </CardHeader>
           {managed.length > 0 && (
             <div className="border-t px-5 py-4">
-              <div className="mb-2 text-xs font-medium text-muted-foreground">責任者を務めている部署</div>
+              <div className="mb-2 text-xs font-medium text-muted-foreground">管理役を務めている部署</div>
               <ul className="flex flex-wrap gap-2">
                 {managed.map((d) => (
                   <li key={d.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm">

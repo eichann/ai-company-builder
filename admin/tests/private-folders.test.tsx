@@ -215,7 +215,7 @@ describe('非公開フォルダ: create', () => {
   it('a manager starts in their own department and cannot make folders public', async () => {
     mockApi(routes({}, companyRoutes(managerCapabilities)))
     renderInCompany(<PrivateFoldersPage />)
-    expect(await screen.findByText('あなたが責任者を務める部署の中だけで作成・変更できます。')).toBeInTheDocument()
+    expect(await screen.findByText('あなたが管理役を務める部署の中だけで作成・変更できます。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /のその他の操作/ })).not.toBeInTheDocument()
     await userEvent.click((await screen.findAllByRole('button', { name: /非公開フォルダを作成/ }))[0])
     const dialog = await screen.findByRole('dialog')
@@ -320,7 +320,7 @@ describe('非公開フォルダ: 非公開フォルダについて', () => {
     renderInCompany(<PrivateFoldersPage />)
     const dialog = await openCreateAndPickSales()
     expect(dialog).toHaveTextContent('オーナーと管理者は常に見られます。')
-    expect(dialog).toHaveTextContent('この部署の責任者は、見られる人をあとから変更でき、自分を加えることもできます。')
+    expect(dialog).toHaveTextContent('この部署の管理役は、見られる人をあとから変更でき、自分を加えることもできます。')
     await userEvent.click(within(dialog).getByRole('button', { name: '非公開フォルダについて' }))
     expect(await screen.findByRole('dialog', { name: '非公開フォルダについて' })).toBeInTheDocument()
   })

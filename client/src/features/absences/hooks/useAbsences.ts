@@ -33,7 +33,7 @@ export function useAbsences(companyId: string) {
       const r = await addAbsence(companyId, input)
       if (!r.success) { setMessage(r.error); return false }
       const n = r.created.delegateCannotRead
-      setMessage(n > 0 ? `代わりの人が見られないものが ${n} 件あります。部署の責任者に知らせました。` : '追加しました。')
+      setMessage(n > 0 ? `代わりの人が見られないものが ${n} 件あります。部署の管理役に知らせました。` : '追加しました。')
       await reload()
       return true
     } finally {
