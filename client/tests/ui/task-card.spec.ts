@@ -183,3 +183,28 @@ test('its 案件: ［変える］ picks another, ［外す］ takes it off with 
   await expect(page.getByRole('status').filter({ hasText: '「A社 問い合わせ対応の効率化」から外しました' })).toBeVisible()
   expectNoPageErrors(state)
 })
+
+test('「議事録を確認する」: the summary, the AI\'s proposals added all at once or picked, put away and back, decisions checked', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { task: 'review' })
+  const card = page.getByTestId('task-card')
+  await expect(card.getByRole('region', { name: '要約（AI）' })).toContainText('窓口を3つに増やす方向で合意。')
+  await expect(card.getByRole('button', { name: '確認を終える' })).toBeVisible()
+  const proposals = card.getByRole('region', { name: 'AI のタスクの案' })
+  await expect(proposals).toContainText('見積を直す佐藤さん・11/7 17:00')
+  await proposals.getByRole('button', { name: '全部足す' }).click()
+  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1')
+
+  await proposals.getByRole('button', { name: '選んで足す' }).click()
+  await proposals.getByLabel('見積を直す を選ぶ').uncheck()
+  await proposals.getByRole('button', { name: '選んだものを足す' }).click()
+  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1,adopt@1')
+
+  await proposals.getByRole('listitem').filter({ hasText: '会食の店を探す' }).getByRole('button', { name: '戻す' }).click()
+  await expect(page.locator('#acted')).toContainText('propose_again@2')
+
+  const decisions = card.getByRole('region', { name: '決めたこと（AI が残した）' })
+  await expect(decisions.getByRole('listitem').filter({ hasText: '4月から始める' }).getByRole('button')).toHaveCount(1)
+  await decisions.getByRole('listitem').filter({ hasText: '窓口は3つにする' }).getByRole('button', { name: '確かめる' }).click()
+  await expect(page.locator('#acted')).toContainText('confirm@3')
+  expectNoPageErrors(state)
+})

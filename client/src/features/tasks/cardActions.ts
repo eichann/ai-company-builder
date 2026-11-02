@@ -37,10 +37,12 @@ export function placeActions(card: TaskCardData, team: boolean): ActionPlacement
   let main: TaskCardAction | null = null
   let status: string | null = null
   if (state === 'done') status = '完了'
+  else if (state === 'dismissed') status = 'しまった'
   else if (state === 'review' && !card.roles.reviewer && !card.roles.requester) status = `${card.names.reviewer ?? '確かめる人'}さんが確かめています`
   // While someone else checks it (or it is done) the word stands alone; 完了 stays in 「…」.
   if (!status) {
-    main = find('take_over')
+    main = find('adopt')
+      ?? find('take_over')
       ?? find('accept')
       ?? (card.whenDone === 'check' && card.roles.assignee ? find('request_review') : null)
       ?? find('complete', a => !a.needsOk)
@@ -56,9 +58,12 @@ function isHandToChecker(card: TaskCardData, a: TaskCardAction): boolean {
 }
 
 /** The words on a button or a menu row. */
-export function actionText(a: TaskCardAction): string {
+export function actionText(a: TaskCardAction, card?: Pick<TaskCardData, 'review'>): string {
   switch (a.action) {
-    case 'complete': return a.needsOk ? '完了にする（OK をもらった）' : '完了にする'
+    case 'complete': return a.needsOk ? '完了にする（OK をもらった）' : card?.review ? '確認を終える' : '完了にする'
+    case 'adopt': return '足す'
+    case 'dismiss': return '要らない（AI の案を外す）'
+    case 'propose_again': return '案に戻す'
     case 'request_review': return '終わったので見てもらう'
     case 'start': return '進めている印をつける'
     case 'assign': return '人に頼む（担当を替える）'
@@ -81,6 +86,9 @@ export function actionHint(a: TaskCardAction, card: TaskCardData): string | unde
     case 'send_back': return '理由を添えて、担当に戻します'
     case 'decline': return `わけを添えて、${requester}に返します`
     case 'cancel': return '消しません。「やり直す」で戻せます'
+    case 'adopt': return 'AI の案を、ふつうのやることにします'
+    case 'dismiss': return '消しません。「案に戻す」で戻せます'
+    case 'propose_again': return 'しまった案を、もう一度案にします'
     default: return undefined
   }
 }
@@ -119,6 +127,9 @@ export function doneWords(a: TaskCardAction, card: TaskCardData): string {
     case 'take_over': return 'AI から引き取りました'
     case 'start': return '進めている印をつけました'
     case 'reopen': return 'やり直しにしました'
+    case 'adopt': return 'やることに足しました'
+    case 'dismiss': return 'しまいました（「案に戻す」で戻せます）'
+    case 'propose_again': return '案に戻しました'
     case 'send_back': return '差し戻しました'
     default: return `${a.title}：しました`
   }

@@ -34,9 +34,9 @@ export function TaskActions({ card, busy, team, onRun }: Props) {
   return (
     <>
       {status && <Chip tone={status === '完了' ? 'green' : 'amber'}>{status === '完了' && <CheckCircle size={11} weight="fill" />}{status}</Chip>}
-      {main && <button type="button" disabled={busy} onClick={() => void press(main)} className={MAIN_BUTTON}>{mainIcon}{actionText(main)}</button>}
+      {main && <button type="button" disabled={busy} onClick={() => void press(main)} className={MAIN_BUTTON}>{mainIcon}{actionText(main, card)}</button>}
       <MoreMenu compact items={more.map(a => ({
-        label: actionText(a), hint: actionHint(a, card), danger: a.action === 'decline' || a.action === 'cancel',
+        label: actionText(a, card), hint: actionHint(a, card), danger: a.action === 'decline' || a.action === 'cancel',
         onClick: () => { if (!busy) void press(a) },
       }))} />
       {error && <p role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">{error}</p>}
@@ -77,7 +77,7 @@ function ActionDialog({ card, action, busy, onClose, onRun }: { card: TaskCardDa
     if (failure) setError(failure)
     else onClose()
   }
-  const title = words?.title ?? actionText(action)
+  const title = words?.title ?? actionText(action, card)
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/25" onClick={onClose}>
       <div role="dialog" aria-label={title} onClick={e => e.stopPropagation()} className="w-[420px] space-y-3 rounded-xl bg-white p-4 text-[13px] text-gray-800 shadow-2xl dark:bg-zinc-800 dark:text-zinc-100">
@@ -119,7 +119,7 @@ function ActionDialog({ card, action, busy, onClose, onRun }: { card: TaskCardDa
         {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || !ready} onClick={() => void run()} className={MAIN_BUTTON}>{actionText(action)}</button>
+          <button type="button" disabled={busy || !ready} onClick={() => void run()} className={MAIN_BUTTON}>{actionText(action, card)}</button>
         </div>
       </div>
     </div>

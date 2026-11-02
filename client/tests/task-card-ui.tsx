@@ -23,6 +23,8 @@ const done = params.get('task') === 'done'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
 const conflict = params.get('conflict') === '1'
+// `?task=review`: 「議事録を確認する」 with its meeting's summary, two proposals (one put away) and decisions.
+const reviewing = params.get('task') === 'review'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -33,7 +35,17 @@ const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り�
 }, shared ? {} : { personal: true })
 const entries = (conflict ? [{ version: 4, action: 'set_due', actorId: 'u-abe', actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: null, toState: null, changes: [{ field: 'due', before: '2026-11-07T17:00', after: '2026-11-08T12:00' }] }] : done ? [{ version: 4, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done', changes: [{ field: 'ok_by', before: null, after: 'u-abe' }, { field: 'ok_note', before: null, after: '電話で' }] }] : []) as unknown as LedgerEntry[]
 const runs = [{ id: 'run-1', recordId: 'task-0000aa', needsPerson: true, label: '外への操作の結果が分かりません。相手先で確かめてから続きを進めます', operations: [{ key: 'mail-send-1', kind: 'outbound', state: 'unknown', ref: null, updatedAt: '' }] }] as unknown as AiRunView[]
-const card = taskCardOf({
+const meeting = rec('meeting-0000mm', 'meeting', 'A社 研修導入のお打ち合わせ', 'read', { summary_text: '窓口を3つに増やす方向で合意。' })
+const reviewCard = taskCardOf({
+  me: ME, defs, def: defs.get('task'), people, entries: [], runs: [],
+  detail: { record: rec('task-0000rv', 'task', '議事録を確認する：A社 研修導入のお打ち合わせ', 'todo', { assignee: ME, requested_by: ME, task_kind: 'minutes_review' }),
+    links: [{ name: 'meeting', direction: 'out', fixed: true, record: meeting }] },
+  meeting: { record: meeting, links: [
+    { name: 'meeting', direction: 'in', record: rec('decision-000001', 'decision', '窓口は3つにする', 'unconfirmed', { owner: ME }) },
+    { name: 'meeting', direction: 'in', record: rec('decision-000002', 'decision', '4月から始める', 'unconfirmed', { owner: 'u-abe' }) },
+  ] },
+})
+const card = reviewing ? reviewCard : taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
   detail: {
     record: task,
@@ -55,6 +67,11 @@ installElectronAPI({
   linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
+  getTaskProposals: async () => ({ success: true, proposals: [
+    { id: 'task-0000p1', title: '見積を直す', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: '2026-11-07T17:00' },
+    { id: 'task-0000p2', title: 'セキュリティ資料を送る', state: 'proposed', version: 1, assignee: 'u-abe', assigneeName: '阿部', due: null },
+    { id: 'task-0000p3', title: '会食の店を探す', state: 'dismissed', version: 2, assignee: ME, assigneeName: '佐藤', due: null },
+  ] }),
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
@@ -73,7 +90,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
-      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
+      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId={card.record.id} renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
         renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null}
         shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
         onConsult={r => show('acted', `consult ${r.id}`)}
