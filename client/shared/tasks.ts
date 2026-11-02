@@ -133,8 +133,16 @@ export interface TaskActInput {
   ok?: { by?: string; note?: string }
 }
 
+/** A record link set or taken off later (`tasks:linkRecord` / `tasks:unlinkRecord`): the link's name on the record and the other record. */
+export interface RecordLinkInput {
+  link: string
+  target: string
+  expectedVersion: number
+}
+
 export type TaskWriteResult =
-  | { success: true; recordId: string }
+  /** `entryVersion`: the ledger entry the change made (取り消す undoes it); absent when nothing changed or not known. */
+  | { success: true; recordId: string; entryVersion?: number }
   | { success: false; offline: boolean; code: string | null; error: string }
 
 /** What the server answered, in the shapes the list sorts. */

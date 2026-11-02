@@ -102,3 +102,32 @@ test('「取り消す」 undoes exactly the version it names: a malformed id or 
   assert.equal((await api.undo('co1', 'task-0000aa', 5, 5)).success, true)
   assert.deepEqual(seen, [{ url: 'https://acb.test/api/companies/co1/records/item/task-0000aa/undo', body: JSON.stringify({ version: 5, expectedVersion: 5 }) }])
 })
+
+test('a link can be taken off only where it is not where the task came from; the record holding it is the one changed', () => {
+  const other = (id: string, type: string): RecordSummary => ({ ...task('todo', {}), id, type, title: id, version: 7 })
+  const detail: RecordDetail = {
+    record: task('todo', { assignee: ME, requested_by: BOSS }),
+    links: [
+      { name: 'related', direction: 'out', record: other('task-0000bb', 'task') },
+      { name: 'meeting', direction: 'out', fixed: true, record: other('meeting-0000cc', 'meeting') },
+      { name: 'related', direction: 'in', record: other('task-0000dd', 'task') },
+    ],
+  }
+  const c = taskCardOf({ me: ME, detail, def: defs.get('task'), defs, entries: [], people, runs: [] })
+  assert.deepEqual(c.links.map(l => l.removable ?? null), [
+    { source: 'task-0000aa', sourceVersion: 4, link: 'related', target: 'task-0000bb' },
+    null,
+    { source: 'task-0000dd', sourceVersion: 7, link: 'related', target: 'task-0000aa' },
+  ])
+  assert.equal(c.canSetBundle, true)
+  assert.equal(card(task('done', { assignee: ME, requested_by: BOSS })).canSetBundle, false)
+})
+
+test('a record link\'s name and ids are checked before anything reaches the server', async () => {
+  let calls = 0
+  const api = createTasksApi({ baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, fetch: (async () => { calls++; return new Response('{}') }) as unknown as typeof fetch })
+  for (const input of [{ link: '../x', target: 'task-0000bb', expectedVersion: 1 }, { link: 'bundle', target: 'deal/../x', expectedVersion: 1 }, { link: 'bundle', target: 'deal-0001ab', expectedVersion: 1.5 }]) {
+    assert.equal((await api.linkRecord('co1', 'task-0000aa', input, false)).success, false)
+  }
+  assert.equal(calls, 0)
+})

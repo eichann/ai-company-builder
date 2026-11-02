@@ -43,7 +43,7 @@ import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesRe
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
-import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
+import type { BundleChoicesResult, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
@@ -527,6 +527,9 @@ export interface IpcInvokeChannels {
   /** What the member found in the outside system about an operation whose result was unknown. */
   'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
   /** 「取り消す」 right after the member's own action: the ledger's undo of that version (the server checks the actor and later changes). */
+  /** A link between records set later (a `one` link such as bundle is replaced) or taken off; the server decides. */
+  'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+  'tasks:unlinkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
   'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
@@ -925,6 +928,8 @@ export interface ElectronAPI {
   suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   undoTaskAction: Invoke<'tasks:undo'>
+  linkRecordToRecord: Invoke<'tasks:linkRecord'>
+  unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>

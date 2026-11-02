@@ -19,7 +19,7 @@ import type { MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
-import type { TaskActInput, TaskCreateInput } from '../shared/tasks'
+import type { RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
@@ -170,6 +170,8 @@ const api: ElectronAPI = {
   suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
   retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),
   reconcileTaskRun: (companyId: string, runId: string, key: string, done: boolean) => invoke('tasks:reconcile', companyId, runId, key, done),
+  linkRecordToRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:linkRecord', companyId, recordId, input),
+  unlinkRecordFromRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:unlinkRecord', companyId, recordId, input),
   undoTaskAction: (companyId: string, recordId: string, version: number, expectedVersion: number) => invoke('tasks:undo', companyId, recordId, version, expectedVersion),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),

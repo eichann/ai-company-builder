@@ -3,14 +3,14 @@
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import { ChatCircleDots, CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import type { TaskCardData } from '../../../../shared/task-card'
-import type { RecordViewSummary } from '../../../../shared/record-views'
-import type { TaskActInput } from '../../../../shared/tasks'
+import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
+import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
 import { CALM } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
 import { fileRow, recordRow } from '../../records/components/linkRows'
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
+import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { whenDoneLine } from '../cardActions'
@@ -18,7 +18,8 @@ import { companyNow, companyPathOf } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { TaskActions } from './TaskActions'
-import { BundleLine, ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
+import { BundleField } from './BundleField'
+import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
 import { TagSuggestions } from './TagSuggestions'
 
@@ -43,13 +44,16 @@ interface Props {
   team?: boolean
   /** The member changed something (the list reads again). */
   onChanged?: () => void
+  /** The name of the department's kind of 案件・プロジェクト, for ［〇〇につなぐ］ while none is linked. */
+  bundleWord?: string
   /** Read: its title and kind, for its tab in the middle. */
   onLoaded?: (look: CardLook) => void
 }
 
 /** What the member's last press left on the card. */
 type Notice =
-  | { kind: 'done'; text: string; undoVersion: number | null }
+  /** `undo`: the ledger entry 取り消す reverses (on this task, or on the other record holding a link). */
+  | { kind: 'done'; text: string; undo: { recordId: string; version: number } | null }
   | { kind: 'conflict'; since: number }
 
 /**
@@ -57,7 +61,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team = true, onChanged, onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team = true, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -88,13 +92,20 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
       at += 1
     }
     // Only a one-step press is undone in one step.
-    setNotice(done ? { kind: 'done', text: done, undoVersion: steps.length === 1 ? at : null } : null)
+    setNotice(done ? { kind: 'done', text: done, undo: steps.length === 1 ? { recordId, version: at } : null } : null)
     return null
   })
-  const undo = (undoVersion: number) => change(async () => {
-    const r = await undoTaskAction(companyId, recordId, undoVersion, version)
-    setNotice(r.success ? { kind: 'done', text: '取り消しました', undoVersion: null } : null)
+  const undo = (target: { recordId: string; version: number }) => change(async () => {
+    const r = await undoTaskAction(companyId, target.recordId, target.version, target.version)
+    setNotice(r.success ? { kind: 'done', text: '取り消しました', undo: null } : null)
     return r.success ? null : r.error
+  })
+  // A link between records set or taken off (the 案件's ［変える］［外す］, a row's 「つながりを外す」), with 取り消す.
+  const recordLink = (source: string, input: RecordLinkInput, remove: boolean, done: string) => change(async () => {
+    const r = await setRecordLink(companyId, source, input, remove)
+    if (!r.success) return r.error
+    setNotice({ kind: 'done', text: done, undo: r.entryVersion ? { recordId: source, version: r.entryVersion } : null })
+    return null
   })
   const fileLink = (companyPath: string, remove: boolean) => change(async () => {
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
@@ -111,10 +122,14 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
   const top = notice?.kind === 'conflict'
     ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
     : notice?.kind === 'done'
-      ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undoVersion !== null ? () => void undo(notice.undoVersion!) : null} />
+      ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
   return <CardBody card={card} top={top} team={team} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
+    companyId={companyId} bundleWord={bundleWord}
+    onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
+    onSetBundle={b => recordLink(recordId, { link: 'bundle', target: b.id, expectedVersion: version }, false, `「${b.title}」につなぎました`)}
+    onRemoveBundle={() => card.bundle ? recordLink(recordId, { link: 'bundle', target: card.bundle.id, expectedVersion: version }, true, `「${card.bundle.title}」から外しました`) : Promise.resolve(null)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
 }
@@ -133,6 +148,11 @@ interface BodyProps {
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
   onLinkFile: (companyPath: string) => Promise<string | null>
   onUnlinkFile: (companyPath: string) => Promise<string | null>
+  companyId: string
+  bundleWord: string
+  onUnlinkRecord: (link: RemovableLink, label: string) => Promise<string | null>
+  onSetBundle: (bundle: BundleChoice) => Promise<string | null>
+  onRemoveBundle: () => Promise<string | null>
   /** Offered only for an owner-only task (empty otherwise). */
   shareFolders: ShareFolder[]
   onShare: (folder: string) => Promise<string | null>
@@ -140,7 +160,7 @@ interface BodyProps {
   tagSuggestions: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -164,7 +184,11 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
   }
   // The 案件 is at the head of the card, so it is not repeated on the right.
   const rows: LinkedRow[] = [
-    ...card.links.flatMap(l => (l.record ? [recordRow(l.record, l.label)] : [])),
+    ...card.links.flatMap(l => (l.record ? [{
+      ...recordRow(l.record, l.label),
+      // Where it came from (もとの会議・もとの連絡) has no 「…」: it is history.
+      ...(l.removable ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => { if (!busy) void onUnlinkRecord(l.removable!, l.record!.title).then(setLinkError) } }] } : {}),
+    }] : [])),
     ...card.files.map(f => ({
       ...fileRow(rootPath, f.path, f.broken),
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
@@ -234,7 +258,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         </section>
       )}
 
-      <BundleLine card={card} />
+      <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle} />
       <DueAndTags card={card} now={now} busy={busy}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
       {tagSuggestions}
