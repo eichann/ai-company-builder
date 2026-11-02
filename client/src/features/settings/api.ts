@@ -66,9 +66,10 @@ export function writeGitignore(rootPath: string, content: string, writes: Gitign
 /**
  * May this member edit the company .gitignore on the settings page? It applies to everyone
  * once synced, so only owners and admins get the editor; anyone else (or an unknown role:
- * offline, company not listed) sees it read-only. Only the page: sync's own lines (essentials,
- * large files, a new skill kept private) are still written for every member, and the server
- * does not check who changes the file yet (.claude/rules/sync-guards.md "Shared files").
+ * offline, company not listed) sees it read-only. Only the page: sync's essentials and the
+ * .env lines are still written for every member (large files and private skills now go to
+ * .git/info/exclude), and the server does not check who changes the file yet
+ * (.claude/rules/sync-guards.md "Shared files").
  */
 export async function canEditCompanyGitignore(companyId: string, reads: GitignoreEditorReads = window.electronAPI): Promise<boolean> {
   try {
