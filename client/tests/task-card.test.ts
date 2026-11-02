@@ -165,3 +165,22 @@ test('「議事録を確認する」 carries its meeting\'s summary and decision
     { summary: '合意しました', decisions: ['decision-000001:true', 'decision-000002:false'] })
   assert.equal(taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME }), links: [] }, meeting: meetingDetail, def: defs.get('task'), defs, entries: [], people, runs: [] }).review, null)
 })
+
+test('見られる人 on the task card is the server\'s answer for that task only; one left out shows nothing', async () => {
+  const cardWith = async (viewers: unknown) => {
+    const api = createTasksApi({
+      baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} },
+      fetch: (async (url: string) => {
+        const path = new URL(url).pathname
+        if (path === '/api/me') return new Response(JSON.stringify({ data: { id: ME } }), { status: 200 })
+        if (path.endsWith('/viewers')) return new Response(JSON.stringify({ data: viewers }), { status: 200 })
+        if (path.endsWith('/records/item/task-0000aa')) return new Response(JSON.stringify({ data: { record: task('todo', { assignee: ME }), links: [] } }), { status: 200 })
+        return new Response(JSON.stringify({ data: { entries: [], types: [], runs: [] } }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    const r = await api.card('co1', 'task-0000aa')
+    return r.success ? r.card.viewers ?? null : 'failed'
+  }
+  assert.deepEqual(await cardWith({ records: { 'task-0000aa': { kind: 'department', text: '営業部のみんな', count: 4 } }, files: {} }), { kind: 'department', text: '営業部のみんな', count: 4 })
+  assert.equal(await cardWith({ records: { 'task-other': { kind: 'company', text: '会社のみんな', count: 9 } }, files: {} }), null)
+})

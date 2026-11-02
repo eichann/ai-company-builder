@@ -7,6 +7,7 @@
 import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
+import type { ViewersLabel } from '../../shared/types/viewers'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
 import { recordActionChoices } from './record-actions'
 import {
@@ -80,6 +81,8 @@ export interface TaskCardData {
   /** The member may change the task's 案件 (its type's `bundle` link can be set by hand, the task not finished). */
   canSetBundle: boolean
   origin: TaskCardOrigin | null
+  /** 見られる人 (`POST …/viewers`), only when the server answered it for this task. */
+  viewers?: ViewersLabel
   /** Set on 「議事録を確認する」 (`task_kind: minutes_review`), else null. */
   review: MinutesReviewView | null
   actions: TaskCardAction[]

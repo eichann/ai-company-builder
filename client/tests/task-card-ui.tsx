@@ -45,7 +45,7 @@ const reviewCard = taskCardOf({
     { name: 'meeting', direction: 'in', record: rec('decision-000002', 'decision', '4月から始める', 'unconfirmed', { owner: 'u-abe' }) },
   ] },
 })
-const card = reviewing ? reviewCard : taskCardOf({
+const shownCard = reviewing ? reviewCard : taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
   detail: {
     record: task,
@@ -59,6 +59,7 @@ const card = reviewing ? reviewCard : taskCardOf({
     ],
   },
 })
+const card = reviewing ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
 const acted: string[] = []
 const show = (id: string, line: string) => { acted.push(line); document.getElementById(id)!.textContent = acted.join(',') }
 
@@ -93,7 +94,8 @@ function Preview() {
       <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId={card.record.id} renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
         renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null}
         shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
-        onConsult={r => show('acted', `consult ${r.id}`)}
+        onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
+        consultations={[{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} />
     </main>
   )

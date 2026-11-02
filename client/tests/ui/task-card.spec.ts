@@ -208,3 +208,14 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   await expect(page.locator('#acted')).toContainText('confirm@3')
   expectNoPageErrors(state)
 })
+
+test('who can see it at the top right; 「AIへの相談」 on the right with ［相談する］［＋新しい相談］', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  await expect(card.locator('[data-seen]')).toHaveText('あなただけ')
+  const group = card.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
+  await expect(group).toContainText('見積の相談')
+  await group.getByRole('button', { name: '新しい相談' }).click()
+  await expect(page.locator('#acted')).toHaveText('consult task-0000aa fresh')
+  expectNoPageErrors(state)
+})

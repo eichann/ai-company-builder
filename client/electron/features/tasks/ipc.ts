@@ -34,6 +34,7 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { MyWorkSwitches } from '../../../../shared/types/work-switches'
+import type { ViewersAnswer } from '../../../../shared/types/viewers'
 import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
@@ -160,9 +161,10 @@ export function createTasksApi(deps: TasksDeps) {
     async card(companyId: string, recordId: string): Promise<TaskCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return { success: false, offline: false, error: '入力が正しくありません。' }
       const id = encodeURIComponent(recordId)
-      const [me, item, history, defs, names, runs, switches] = await Promise.all([
+      const [me, item, history, defs, names, runs, switches, viewers] = await Promise.all([
         myId(), call(companyId, 'GET', `/records/item/${id}`), call(companyId, 'GET', `/records/item/${id}/history`),
         typeDefs(companyId), people(companyId), call(companyId, 'GET', '/ai-runs'), call(companyId, 'GET', '/me/work-switches'),
+        call(companyId, 'POST', '/viewers', { records: [recordId] }),
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200 || !me) {
@@ -181,7 +183,10 @@ export function createTasksApi(deps: TasksDeps) {
         ? detail.links.find(l => l.direction === 'out' && l.name === 'meeting' && l.record)?.record?.id : undefined
       const meetingAnswer = meetingId ? await call(companyId, 'GET', `/records/item/${encodeURIComponent(meetingId)}`) : null
       const meeting = meetingAnswer?.status === 200 ? meetingAnswer.json?.data as RecordDetail : undefined
-      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, ...(meeting ? { meeting } : {}) }) }
+      // 見られる人: only the server's answer for this task (one left out shows nothing).
+      const seen = viewers?.status === 200 ? (viewers.json?.data as ViewersAnswer | undefined)?.records?.[recordId] : undefined
+      const card = taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, ...(meeting ? { meeting } : {}) })
+      return { success: true, card: seen && typeof seen.text === 'string' ? { ...card, viewers: seen } : card }
     },
 
     async bundles(companyId: string): Promise<BundleChoicesResult> {
