@@ -7,6 +7,7 @@ import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
+import { stateWord, thingName } from './thing-words'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
 export type RecordKind = 'bundle' | 'task' | 'decision' | 'interaction' | 'other'
@@ -21,7 +22,7 @@ export const RECORD_VIEWS_OFFLINE_TEXT = 'サーバーにつながらないた�
 export interface RecordViewSummary {
   id: string
   type: string
-  /** The type's own label (タスク, 会議, 案件…), shown small. */
+  /** The kind's plain name (やること, 会議の記録, 案件…: `thingName`), shown small. */
   typeLabel: string
   kind: RecordKind
   title: string
@@ -71,24 +72,16 @@ export function recordKindOf(type: string, def?: Pick<TypeDefinition, 'implement
   return 'other'
 }
 
-/** The core types' states in members' words (definitions carry no state labels); others as they are. */
-const STATE_LABELS: Record<string, string> = {
-  todo: '未着手', in_progress: '進めている', review: '確認待ち', waiting: '返事待ち', done: '完了', cancelled: '中止',
-  received: '届いた', handled: '対応済み', reading: '読んでいる', read: '読んだ', skipped: '読まない', failed: 'うまくいかなかった', bundle_waiting: 'まとまりの分を待っている', bundle_working: 'まとまりの分を進めている',
-  pending: '承認待ち', approved: '承認済み', sent_back: '差し戻し', stale: '古くなった', withdrawn: '取り下げ',
-  draft: '下書き', sent: '送った', unknown: '送れたか不明', discarded: '捨てた',
-  unconfirmed: '未確認', confirmed: '確かめ済み', retracted: '取り消し',
-  preparing: 'AI が用意している', declined: '受けられない', awaiting_acceptance: '引き受け待ち',
-}
-export const stateLabel = (state: string | null): string | null => (state === null ? null : STATE_LABELS[state] ?? state)
+/** States in members' words, per type (`thing-words.ts`); a state no table knows as it is. */
+export const stateLabel = (state: string | null, type?: string): string | null => stateWord(state, type)
 
 /** Fields kept for the machinery (hashes, outside ids, pointers): never on the card. */
 const HIDDEN_FIELDS = new Set(['source_ref', 'source_key', 'payload_hash', 'payload_version', 'result_operation_id', 'provider_message_id', 'doc_version', 'next_actor', 'attendees', 'approver_rule', 'approver_role', 'operation'])
 
 export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): RecordViewSummary {
   return {
-    id: r.id, type: r.type, typeLabel: def?.label ?? r.type, kind: recordKindOf(r.type, def),
-    title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state), updatedAt: r.updatedAt,
+    id: r.id, type: r.type, typeLabel: thingName({ type: r.type, typeLabel: def?.label, implements: def?.implements, state: r.state }), kind: recordKindOf(r.type, def),
+    title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state, r.type), updatedAt: r.updatedAt,
     ...(r.personal ? { personal: true as const } : {}),
     ...(r.exceptionNotice ? { exception: true as const } : {}),
   }
