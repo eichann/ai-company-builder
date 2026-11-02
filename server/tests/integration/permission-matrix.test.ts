@@ -239,6 +239,9 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', w => ({ path: `${C(w)}/agent-sandbox/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
 
   // Task settings (tasks.md): every member reads, owner/admin change
+  // The admin console's home: owner/admin; a department manager sees their departments' attention only
+  r('GET /api/companies/:companyId/home', w => ({ path: `${C(w)}/home` }), [200, 200, 403, 200, 404, 401]),
+  r('PUT /api/companies/:companyId/home/holidays-checked', w => ({ path: `${C(w)}/home/holidays-checked`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   // 自分の設定 (受信を読む, AI が自動で進める; tasks.md): any member, their own only.

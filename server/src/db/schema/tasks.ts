@@ -52,6 +52,17 @@ export const taskSchema = `
       PRIMARY KEY (company_id, id)
     );
     CREATE INDEX IF NOT EXISTS idx_member_absences_company_until ON member_absences(company_id, until_day);
+
+    -- Marks the admin console's home sets by hand (「最初にやること」, server.md "Admin home"):
+    -- one row per company and mark (today only \`holidays-checked\`: 会社の休みを確かめた).
+    -- Behind the company handle (ports/task-settings.ts).
+    CREATE TABLE IF NOT EXISTS admin_setup_marks (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      mark TEXT NOT NULL,
+      done_at TEXT NOT NULL,
+      done_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, mark)
+    );
 `
 
 /**

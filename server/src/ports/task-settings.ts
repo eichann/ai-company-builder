@@ -59,4 +59,9 @@ export interface TaskSettingsRepository {
   addAbsence(absence: StoredAbsence): void
   /** Mark one standing absence removed (never deleted); false when there is none with that id here. */
   removeAbsence(id: string, by: string, at: string): boolean
+
+  /** A mark of the admin console's home (server.md "Admin home"), null while never set. */
+  setupMark(mark: string): { at: string; by: string } | null
+  /** Set a home mark (the first time counts: setting it again keeps the first). */
+  saveSetupMark(mark: string, by: string, at: string): void
 }

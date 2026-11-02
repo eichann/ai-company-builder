@@ -108,6 +108,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // Task settings and department membership (tasks.md).
   task_settings: ['adapters/sqlite/task-settings.ts'],
   department_members: ['adapters/sqlite/task-settings.ts'],
+  admin_setup_marks: ['adapters/sqlite/task-settings.ts'],
   member_absences: ['adapters/sqlite/task-settings.ts'],
   // Each member's own switches (tasks.md); db/schema/tasks.ts: the one-time carry-over when the table is made.
   member_work_switches: ['adapters/sqlite/task-settings.ts', 'db/schema/tasks.ts'],

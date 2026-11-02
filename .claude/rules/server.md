@@ -235,6 +235,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
+                              GET /home, PUT /home/holidays-checked           admin-home.ts
+                                                                (管理画面のホーム: "Admin home" below)
                               POST /viewers (見られる人)                      viewers.ts
                                                                 (やることの一覧の設定: tasks.md)
                               GET|POST /agent-stops, DELETE /agent-stops/:stopId,
@@ -413,6 +415,24 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
   process group, hook included, and fails the change (a seeding failure fails the whole
   company creation, below).
+
+## Admin home
+
+`GET /api/companies/:companyId/home` (`routes/admin-home.ts` → `services/admin-home.ts`) is the
+admin console's home (管理画面の見直し 2-1): 「最初にやること」 and 「対応が必要なこと」 in one answer.
+
+- Owner / admin: six steps, each judged from the company's own data — a department exists; two
+  or more members; every department has someone who belongs to it (所属; a 部署の管理役 is only
+  counted as a hint); Google usable (`byOperator`: the operator registers it, owner decision
+  2026-11-02); a minutes folder chosen; 「会社の休みを確かめた」. The last is the one mark set by
+  hand (`PUT /home/holidays-checked { checked: true }`, owner/admin; table `admin_setup_marks`
+  behind the handle's `tasks`; the first time is kept). Attention: the overview's lists
+  (`permission-views.ts`) plus the count of one meeting's outputs made twice and the plugins that
+  are on but cannot run.
+- A department manager who is not an owner / admin: no steps; only the sync and app state of the
+  members who belong to the departments they manage. Blocked syncs and orphaned rules are left
+  out (their paths may name a private folder the manager does not read). Anyone else 403.
+  Test: `tests/integration/admin-home.test.ts`.
 
 ## Request log
 

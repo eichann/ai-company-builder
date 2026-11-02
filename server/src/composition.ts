@@ -42,6 +42,7 @@ import { createInvitationService } from './services/invitations'
 import { createClientActivityService } from './services/client-activity'
 import { createPushRejectionRecorder } from './services/push-rejections'
 import { createDepartmentService } from './services/departments'
+import { createAdminHomeService } from './services/admin-home'
 import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
@@ -569,6 +570,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   })
   // lanes ▲
 
+  // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
+  const meetingOutputs = createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) })
+
   return {
     ...connectorsLane,
     ...inboxLane,
@@ -612,6 +616,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
+    // The admin console's home (server.md "Admin home").
+    adminHome: createAdminHomeService({
+      ...repos, ...shared,
+      overview: m => permissionViews.overview(m),
+      googleUsable: companyId => googleConnector.usable(companyId),
+      meetingDuplicates: m => { const r = meetingOutputs.duplicates(m); return r.ok ? r.value.groups.length : null },
+      stoppedPlugins: async m => {
+        const r = await plugins.list(m)
+        if (!r.ok) return []
+        return r.value.plugins.filter(p => p.install?.enabled && p.install.problem)
+          .map(p => ({ id: p.id, label: p.versions.at(-1)?.label ?? p.id, problem: p.install!.problem as string }))
+      },
+    }),
     permissionEditor: createPermissionEditorService({
       ...repos,
       ...shared,
@@ -659,8 +676,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     skillUses: createSkillUseService(shared),
     notifications,
     decisions,
-    // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
-    meetingOutputs: createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) }),
+    meetingOutputs,
     recordAiTokens: createRecordAiTokenService({
       ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped, runs: aiRuns,
     }),
