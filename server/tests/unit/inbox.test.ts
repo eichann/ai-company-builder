@@ -694,3 +694,96 @@ describe('B5: 追いかけ (following up)', () => {
     expect(ok(inbox.item(m('u-alice'), rr)).request?.purpose).toBe('draft')
   })
 })
+
+describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their answer")', () => {
+  const OURS = '<acb.send-1@acme.example>'
+  /** A task in 営業部 (u-carol cannot read it), assigned to `assignee`. */
+  function task(assignee: string, folder = '営業部') {
+    const t = serviceWriter.create('a', {
+      type: 'task', title: '見積を出す', folder, fields: { assignee, requested_by: assignee },
+      actor: { id: assignee, kind: 'human', source: null }, quiet: true,
+    })
+    if (!t.ok) throw new Error(t.reason)
+    return t.record.id
+  }
+  /** What the mail service does after a send with the box ticked: the receipt (handled, our Message-ID), then the inbox waits. */
+  function sentWaiting(taskId: string | null, waitUntil = '2026-11-05T09:00') {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: 'お見積りのご送付', folder: '営業部',
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    told = []
+    const rr = inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId: made.record.id, channel: 'email', messageId: OURS, sourceRef: 'gmail:s1',
+      occurredAt: TS, waitUntil, title: 'お見積りのご送付', waitingOn: '田中さんからの返事', to: 'tanaka@client.example', taskId,
+    })
+    if (!rr) throw new Error('no reply request')
+    return { interactionId: made.record.id, rr }
+  }
+  const linkOf = (id: string, name: string) => handle().records.linksFrom([id]).find(l => l.name === name)?.targetId ?? null
+
+  it('a 返事のお願い in 返事待ち until the picked morning, the sender\'s, linked to the mail\'s やりとり and its task; nobody told', () => {
+    const t = task('u-bob')
+    const { interactionId, rr } = sentWaiting(t)
+    expect(stateOf(rr).state).toBe('waiting_reply')
+    expect(fieldsOf(rr)).toMatchObject({ assignee: 'u-alice', requested_by: 'u-alice', wait_until: '2026-11-05T09:00', waiting_on: '田中さんからの返事' })
+    expect(linkOf(rr, 'interaction')).toBe(interactionId)
+    expect(linkOf(rr, 'task')).toBe(t)
+    // Placed like the mail (営業部): u-carol does not see it.
+    expect(canRead('u-alice', rr)).toBe(true)
+    expect(canRead('u-carol', rr)).toBe(false)
+    expect(notices()).toEqual([])
+    // Our message is the thread's: told twice, it is taken once.
+    expect(inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId, channel: 'email', messageId: OURS, sourceRef: 'gmail:s1',
+      occurredAt: TS, waitUntil: '2026-11-05T09:00', title: 'x', waitingOn: 'x', to: null, taskId: null,
+    })).toBeNull()
+  })
+
+  it('a task the sender cannot read is not linked', () => {
+    // u-carol's own task (持ち主だけ): u-alice cannot read it.
+    const t = serviceWriter.create('a', {
+      type: 'task', title: '私用', personalOwner: 'u-carol', fields: { assignee: 'u-carol' }, actor: { id: 'u-carol', kind: 'human', source: null }, quiet: true,
+    })
+    if (!t.ok) throw new Error(t.reason)
+    const { rr } = sentWaiting(t.record.id)
+    expect(linkOf(rr, 'task')).toBeNull()
+  })
+
+  it('their reply in the thread: the AI checks it, the sender and the task\'s assignee hear 「返事が来た」; an automatic reply is no reply', () => {
+    const { rr } = sentWaiting(task('u-bob'))
+    expect(inbox.receive('a', 'u-alice', mail({ references: [OURS], automated: true }))).toBe('continued')
+    expect(stateOf(rr).state).toBe('waiting_reply')
+    expect(inbox.receive('a', 'u-alice', mail({ references: [OURS] }))).toBe('continued')
+    expect(stateOf(rr).state).toBe('checking')
+    expect(fieldsOf(rr)).toMatchObject({ trigger_kind: 'their_reply' })
+    expect(notices().sort((a, b) => a.userId.localeCompare(b.userId))).toEqual([
+      { userId: 'u-alice', kind: 'reply_arrived' }, { userId: 'u-bob', kind: 'reply_arrived' },
+    ])
+    expect(ok(inbox.item(m('u-alice'), rr)).request?.purpose).toBe('check_reply')
+  })
+
+  it('a task assignee who cannot read the 返事のお願い is not told', () => {
+    const { rr } = sentWaiting(task('u-carol', ''))
+    inbox.receive('a', 'u-alice', mail({ references: [OURS] }))
+    expect(stateOf(rr).state).toBe('checking')
+    expect(notices()).toEqual([{ userId: 'u-alice', kind: 'reply_arrived' }])
+  })
+
+  it('silence: never before the picked morning; after it the clock hands the nudge to the AI (follow_up)', async () => {
+    const { rr } = sentWaiting(null, '2026-11-05T09:00')
+    const clock = (autoRun: boolean) => createServerClock({
+      companyIds: () => ['a'], companyData: source, clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }, writer: serviceWriter,
+      notifications: { sweep: () => 0 }, autoRunFor: () => autoRun, timeZoneOf: () => 'Asia/Tokyo', yieldNow: async () => {}, log: () => {},
+    })
+    nowMs = Date.parse('2026-11-04T23:59:00.000Z') // 2026-11-05 08:59 in Tokyo
+    await clock(true).runOnce()
+    expect(stateOf(rr).state).toBe('waiting_reply')
+    nowMs = Date.parse('2026-11-05T00:01:00.000Z') // 09:01
+    await clock(true).runOnce()
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(ok(inbox.item(m('u-alice'), rr)).request).toMatchObject({ purpose: 'follow_up', waitUntil: '2026-11-05T09:00' })
+  })
+})

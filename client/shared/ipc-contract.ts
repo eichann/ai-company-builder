@@ -47,7 +47,7 @@ import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordL
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
-import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
+import type { MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
@@ -578,7 +578,7 @@ export interface IpcInvokeChannels {
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
   'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
-  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
   'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
   'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }

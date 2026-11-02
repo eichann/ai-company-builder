@@ -82,7 +82,14 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `received` (the AI judges again). A reply of the company (`outgoing`, or a member sender) moves
   open / preparing reply requests to `checking` (`member_replied`, `memberReply: ai_checks`,
   default — spec §7-3: the reply's content decides) or ends them (`close`); `replied_by` is named
-  only when that member can read the record.
+  only when that member can read the record. A 返事のお願い with a `task` link (a mail we sent
+  first from a task) also tells that task's assignee (`reply_arrived`; a notice reaches readers only).
+- **We sent first** (`awaitOwnMessage`, owner decision 2026-11-03; `outbound-mail.md` "Waiting for
+  their answer"): a new mail sent with 「返事を待つ」 registers our message in its interaction's
+  thread (once per message id) and makes a 返事のお願い straight in 返事待ち (the service writer's
+  `state`; `SERVICE_TRANSITIONS` preparing → waiting_reply for that create only — no service moves
+  one there), the sender's, until the picked morning. Their reply / silence then work as above and
+  in "Following up", unchanged.
 
 ## Connections (reconnecting, spec §7-5)
 
@@ -184,7 +191,8 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here
   (`ai_close`, `who: [ai]`, from preparing / checking, `close_reason`); the person's `close`,
   `drop`, `reopen`, `resume` are the assignee's; `await_reply` (assignee or AI). Follow-up on
-  `wait_until` is B5.
+  `wait_until` is B5. v4 (additive): the origin link `task` (もとのタスク: the やること a mail we sent
+  first came from).
 - `task` v8: link `interaction` (もとの連絡), additive. A promise to wait for uses `waiting` /
   `wait_until` as before.
 - The service writer may now create an owner-only record (`personalOwner`, a member; not with a

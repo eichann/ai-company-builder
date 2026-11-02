@@ -281,9 +281,13 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
       ccRefs: z.array(mailRef).max(20).optional(),
       subject: z.string().min(1).max(200).optional().describe('メールの件名（Slack への返事にはない） / a mail\'s subject (none for a Slack reply)'),
       body: z.string().min(1).max(20000).describe('テキストだけ（添付なし） / plain text only, no attachments'),
+      taskId: recordRef('task').optional().describe('このメールが関わるやること（タスクについての相談ならそのタスクの id）。相手の返事を待つとき、そのタスクにつながる / the task this mail is for (in a consultation about a task, its id); a waited answer links to it'),
+      expectsReply: z.boolean().optional().describe('新しく送るメールで、相手に返事をもらう必要があるなら true（質問・お願い・日程調整など）。送る画面の「返事を待つ」に最初からチェックが入る。返事には使わない / true for a new mail that asks for an answer (a question, a request, scheduling): pre-ticks 「返事を待つ」 on the send screen; not for replies'),
     }).strict(),
-    description: 'メールの下書きを作る（送らない）。来た連絡への返事は interactionId を渡す：メールなら同じスレッドへの返信（宛先は mail_recipients のスレッドの相手から）、Slack ならそのスレッドへの返事（本文だけ）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。\n' +
-      'Create a mail draft (NOT sent). To answer an incoming message pass interactionId: a mail replies in its thread (recipients from mail_recipients\' thread), a Slack message gets a reply in its thread (body only). It appears as a card; only the member sends it from the card. Never say it was sent.',
+    description: 'メールの下書きを作る（送らない）。来た連絡への返事は interactionId を渡す：メールなら同じスレッドへの返信（宛先は mail_recipients のスレッドの相手から）、Slack ならそのスレッドへの返事（本文だけ）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。' +
+      '新しく送るメールが相手の返事を必要とするなら expectsReply: true（メンバーが送るときに「返事を待つ」を選べ、返事が来なければ催促を用意する流れになる）。\n' +
+      'Create a mail draft (NOT sent). To answer an incoming message pass interactionId: a mail replies in its thread (recipients from mail_recipients\' thread), a Slack message gets a reply in its thread (body only). It appears as a card; only the member sends it from the card. Never say it was sent. ' +
+      'For a new mail that needs their answer set expectsReply: true (the member may then choose 「返事を待つ」 when sending; silence leads to a follow-up draft).',
     request: input => ({ method: 'POST', path: '/outbound', body: input }),
   },
   {
@@ -294,6 +298,7 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
       expectedVersion: z.number().int().min(1).describe('下書きの version / the draft\'s version'),
       toRefs: z.array(mailRef).min(1).max(20).optional(), ccRefs: z.array(mailRef).max(20).optional(),
       subject: z.string().min(1).max(200).optional(), body: z.string().min(1).max(20000).optional(),
+      expectsReply: z.boolean().optional().describe('相手の返事が要るメールか（「返事を待つ」の最初のチェック） / whether the mail needs their answer (pre-ticks 「返事を待つ」)'),
     }).strict(),
     description: 'メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。メンバーに頼まれた変更だけにする。前の下書きを見せたいだけなら mail_draft_show。\nChange a mail draft (a new version; NOT sent). Pass only what changes, and only what the member asked for; to just show a draft again use mail_draft_show.',
     request: input => {

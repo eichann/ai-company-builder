@@ -731,7 +731,7 @@ contract.type IpcInvokeChannels.'outboundMail:discard' = 'outboundMail:discard':
 contract.type IpcInvokeChannels.'outboundMail:get' = 'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:recipients' = 'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:resolve' = 'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
-contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
@@ -990,7 +990,7 @@ main.handle outboundMail:discard @ features/outbound-mail/ipc.ts (companyId, mes
 main.handle outboundMail:get @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:recipients @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:resolve @ features/outbound-mail/ipc.ts (companyId, messageId, sent)
-main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash)
+main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply)
 main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, messageId, edit, conversationId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
@@ -1389,8 +1389,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
-preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2)
-preload sendOutboundMail : (companyId: string, messageId: string, hash: string) => Promise<OutboundMailResult>
+preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3)
+preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)

@@ -10,7 +10,7 @@
  *   PUT  /outbound/:messageId               MailDraftChange → { draft }
  *   GET  /outbound/:messageId/recipients    → MailRecipientsView (the draft's sources, typed ones included)
  *   POST /outbound/:messageId/recipients    { email, name? } → { recipient, draft } (「あなたが入力」, a person only)
- *   POST /outbound/:messageId/send          { hash } → MailSendAnswer        (a person only)
+ *   POST /outbound/:messageId/send          { hash, awaitReply?: { until } } → MailSendAnswer (a person only)
  *   POST /outbound/:messageId/resolve       { sent: boolean } → { draft }    (after an unknown send; a person only)
  *   POST /outbound/:messageId/discard       {} → { draft }                   (a person only)
  *
@@ -32,6 +32,12 @@
  * thread to answer), THREAD_UNREADABLE (409: the thread cannot be read now),
  * SLACK_CONSENT_NEEDED (409, `needsSlackConsent: 'reply'`), SLACK_FEATURE_OFF (409),
  * SLACK_UNAVAILABLE (503).
+ *
+ * Waiting for their answer (owner decision 2026-11-03, outbound-mail.md "Waiting for their
+ * answer"): a new mail (not a reply, not Slack) may be sent with `awaitReply: { until }` (a day,
+ * `YYYY-MM-DD`): after the send the server makes a 返事のお願い in 返事待ち until that day's morning.
+ * The view's `awaitReply` offers it (absent: not offered). Codes: AWAIT_REPLY_NOT_OFFERED (400),
+ * AWAIT_REPLY_DATE (400). An app that sends only `{ hash }` waits for nothing (as before).
  */
 import type { RecipientSource, VerifiedRecipient } from '../core/mail'
 
@@ -75,6 +81,13 @@ export interface OutboundMailView {
   /** The member wrote it on the screen, or their AI (the latest version's author). */
   lastChangedBy: 'human' | 'ai'
   updatedAt: string
+  /**
+   * 「返事を待つ」 at 確かめて送る — only for a new mail (absent for a reply, a Slack reply, or from an
+   * older server). `expected`: the drafting AI marked it as expecting an answer (pre-ticked);
+   * `defaultUntil`: the third business day from now (`YYYY-MM-DD`); `chosenUntil`: the day chosen
+   * when it was sent (null: not waited for).
+   */
+  awaitReply?: { expected: boolean; defaultUntil: string; chosenUntil: string | null }
 }
 
 export interface MailRecipientsView {
@@ -90,6 +103,10 @@ export interface MailDraftInput {
   bundleId?: string
   /** The 来た連絡 it answers in its own thread (its まとまり is taken along); its channel decides mail or Slack. */
   interactionId?: string
+  /** The やること it is for (a consultation about a task): its まとまり is taken along; a waited answer links to it. */
+  taskId?: string
+  /** The drafting AI's mark: the mail asks something the other side should answer (pre-ticks 「返事を待つ」). */
+  expectsReply?: boolean
   /** Mail only (a Slack reply has no recipients). */
   toRefs: string[]
   ccRefs?: string[]
@@ -104,6 +121,14 @@ export interface MailDraftChange {
   ccRefs?: string[]
   subject?: string
   body?: string
+  expectsReply?: boolean
+}
+
+/** 「確かめて送る」's body. */
+export interface MailSendInput {
+  hash: string
+  /** 「返事を待つ」 ticked: the day to notice silence (`YYYY-MM-DD`, today … 180 days). A new mail only. */
+  awaitReply?: { until: string }
 }
 
 export type MailSendAnswer =

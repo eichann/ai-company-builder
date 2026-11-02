@@ -521,6 +521,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     mailReader: coreConnectors.roleProviders.mailReader,
     chat: coreConnectors.roleProviders.chatSender,
     companyIds: () => repos.companies.allIds(),
+    // 「返事を待つ」's default day counts the company's business days (task settings).
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
   })
 
   const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor })
@@ -559,6 +561,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // A reply sent from the card (A4) is the company's own message in its 連絡's thread: the inbox (lane B,
   // built below; called only after construction) moves the 返事のお願い as for any reply of ours.
   outboundMail.onReplySent(reply => { inboxLane.inbox.receive(reply.companyId, reply.userId, replyAsIncoming(reply)) })
+  // A new mail sent with 「返事を待つ」 (outbound-mail.md "Waiting for their answer"): the inbox waits for their answer.
+  outboundMail.onAwaitingReply(a => { inboxLane.inbox.awaitOwnMessage({ ...a, channel: 'email' }) })
   // lane B ▼
   const inboxLane = wireInboxLane({
     conn, ...shared, memberships: repos.memberships, serviceRecords,

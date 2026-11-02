@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { createOutboundMailApi } from '../electron/features/outbound-mail/ipc'
-import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../shared/outbound-mail'
+import { MAIL_DRAFT_PART_TYPE, readMailDraft, readMailDraftCard, type MailDraftCard } from '../shared/outbound-mail'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import type { OutboundMailView } from '../../shared/types/outbound-mail'
 import type { TypeDefinition } from '../../shared/core/record-types'
@@ -136,6 +136,20 @@ test('the card\'s send goes with the session and carries exactly the hash shown;
   for (const bad of ['sha256:abc', '', 'x'.repeat(71)]) assert.equal((await api.send('co', draft().id, bad)).success, false)
   assert.equal((await api.send('co', '../../x', HASH)).success, false)
   assert.equal(seen.length, 1)
+  // 「返事を待つ」: only a day leaves with the hash; anything else stops the send in main.
+  await api.send('co', draft().id, HASH, { until: '2026-11-06' })
+  assert.deepEqual(JSON.parse(seen[1].body!), { hash: HASH, awaitReply: { until: '2026-11-06' } })
+  for (const bad of [{ until: '2026-11-06T09:00' }, { until: '2026-11-06', to: 'x@y' }, { until: 20261106 }, 'yes'] as unknown[]) {
+    assert.equal((await api.send('co', draft().id, HASH, bad as { until: string })).success, false)
+  }
+  assert.equal(seen.length, 2)
+})
+
+test('a stored card keeps 「返事を待つ」 as offered; one stored before (or a reply) offers nothing', () => {
+  const offered = readMailDraft({ ...draft(), awaitReply: { expected: true, defaultUntil: '2026-11-06', chosenUntil: null } })
+  assert.deepEqual(offered?.awaitReply, { expected: true, defaultUntil: '2026-11-06', chosenUntil: null })
+  assert.equal(readMailDraft(draft())?.awaitReply, undefined)
+  assert.equal(readMailDraft({ ...draft(), awaitReply: { expected: true, defaultUntil: 'soon' } })?.awaitReply, undefined)
 })
 
 test('an unreadable stored card is dropped, not drawn', () => {

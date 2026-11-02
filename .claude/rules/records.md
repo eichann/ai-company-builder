@@ -327,7 +327,7 @@ Additive over version 10 (two states, one field, three actions, a wider `dismiss
 - **Origin links** (出どころ): a link definition may say `origin: true` — where the record came
   from, which is history rather than filing. Core: task v10 `meeting` (もとの会議), `interaction`
   (もとの連絡), `prepared` (AI が用意したもの); decision v5 `meeting`, `approval`; reply_request v3
-  `interaction`, `prepared`. They are set when the record is made (create, the service writer, the
+  `interaction`, `prepared` (v4 also `task`, the やること a mail we sent first came from). They are set when the record is made (create, the service writer, the
   action that makes them — `finish_prep`'s `prepared`) and are never linked or removed through these
   routes: 400 `LINK_IS_ORIGIN`, nothing written. Adding or dropping the mark is not breaking. The
   filing links (bundle, counterpart, related, files) can be.
@@ -851,7 +851,7 @@ Milestone 4 adds four (people by id in person fields):
   one type for every channel; Slack is not sent yet]; links `bundle`, `meeting`. draft → sent /
   unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
-  the drafts its AI made).
+  the drafts its AI made). Version 5 (2026-11-03, `outbound-mail.md` "Waiting for their answer") adds `expects_reply`, `reply_wait_until` and the link `task`.
 - `decision` (決めたこと, server — version 5 marks `meeting` / `approval` as origin links; version 1 was a file, "Decisions" below):
   `recorded_by` [ai, human], `important`, `exception` (例外（この件だけ）, version 4), `decided_by` (null when the AI recorded it), `owner`
   (the linked meeting's assignee at creation, else the member — `who` cannot name "the meeting's

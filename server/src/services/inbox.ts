@@ -95,6 +95,32 @@ export interface InboxDeps {
   roles?: { resolve(companyId: string, role: ConnectorRole, operation?: string | null): Promise<RoleResolution> }
 }
 
+/** A message we sent first and wait an answer to (outbound-mail.md "Waiting for their answer"). */
+export interface OwnMessageAwaiting {
+  companyId: string
+  /** The sender: the 返事のお願い's assignee. */
+  userId: string
+  /** The interaction the mail service recorded for the sent mail. */
+  interactionId: string
+  channel: InboxChannel
+  /** Our message's id in the inbox's terms (mail: the Message-ID we gave it). */
+  messageId: string
+  sourceRef: string
+  occurredAt: string
+  /** 返事の見込み (`wait_until`): the day the member picked, its morning. */
+  waitUntil: string
+  title: string
+  /** 待っているもの: 「〇〇さんからの返事」. */
+  waitingOn: string
+  /** The first To address (名寄せ when the interaction has no 相手). */
+  to: string | null
+  /** The task the mail came from, when there is one. */
+  taskId: string | null
+}
+
+/** What a 返事のお願い for a mail we sent first ends on (the AI checks their answer against it). */
+export const AWAITED_END_CONDITION = '送ったメールに相手から返事が来て、こちらがすることがなくなったら終わり（返事の中身で、次にすることがあれば担当に渡す）'
+
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 // eslint-disable-next-line no-control-regex
@@ -206,6 +232,14 @@ export function createInboxService(deps: InboxDeps) {
     return handle.records.candidates({ types: ['reply_request'], link: { name: 'interaction', id: interactionId } }, 50)
       .map(r => ({ id: r.id, ...fieldsOf(handle, r.id) }))
       .filter(r => r.state !== 'closed' && r.state !== 'dropped')
+  }
+
+  /** The assignee of the task a 返事のお願い came from (its `task` link: a mail we sent first from a task), if any. */
+  function taskAssigneeOf(handle: CompanyData, replyRequestId: string): string[] {
+    const task = handle.records.linksFrom([replyRequestId]).find(l => l.name === 'task' && l.targetId)?.targetId
+    if (!task) return []
+    const assignee = fieldsOf(handle, task).fields.assignee
+    return typeof assignee === 'string' && assignee !== '' ? [assignee] : []
   }
 
   /** The interaction itself, or a 返事のお願い's interaction — both read by the member; else null. */
@@ -330,7 +364,8 @@ export function createInboxService(deps: InboxDeps) {
         recordId: r.id, action: INBOX_ACTIONS.replyArrived, expectedVersion: r.version, to: 'checking',
         fields: { trigger_kind: 'their_reply', trigger_ref: msg.sourceRef }, actor: INBOX_ACTOR, note: '',
         // The assignee hears 「返事が来た」 (notice `reply_arrived`); the AI's check is their AI's turn.
-        notify: typeof r.fields.assignee === 'string' ? [r.fields.assignee] : [],
+        // A mail we sent first from a task: that task's assignee hears it too (a notice reaches only a reader).
+        notify: [...(typeof r.fields.assignee === 'string' ? [r.fields.assignee] : []), ...taskAssigneeOf(handle, r.id)],
       })
       logFailure('reply arrived', moved)
       // A nudge drafted for it is no longer wanted: never offered to send.
@@ -431,6 +466,48 @@ export function createInboxService(deps: InboxDeps) {
     return 'created'
   }
 
+  /**
+   * We sent first and wait for their answer (outbound-mail.md "Waiting for their answer"): our own
+   * message joins the interaction the mail service recorded for it (its id is what their reply
+   * references), and a 返事のお願い starts in 返事待ち until `waitUntil` for the sender — placed like
+   * the interaction, linked to it, its まとまり, the 相手 (the interaction's, else 名寄せ of `to`) and
+   * the task the mail came from. From here the machinery is the usual one: their reply → `checking`,
+   * silence past `waitUntil` → the clock's follow-up (B5). Never throws; null when nothing was made.
+   */
+  function awaitOwnMessage(input: OwnMessageAwaiting): string | null {
+    const { companyId, userId } = input
+    const handle = handleOf(companyId)
+    if (!handle.records.settings().enabled) return null
+    const member = memberOf(companyId, userId)
+    if (!member) return null
+    const interaction = handle.records.byIds([input.interactionId])[0]
+    if (!interaction || interaction.removedAt !== null || interaction.type !== 'interaction') return null
+    if (handle.inbox.message(input.channel, input.messageId)) return null
+    handle.inbox.insertMessage({
+      channel: input.channel, messageId: input.messageId, interactionId: interaction.id, direction: 'out', occurredAt: input.occurredAt, seenAt: clock.now(),
+      sourceRef: input.sourceRef,
+    })
+    const links = handle.records.linksFrom([interaction.id])
+    const linked = (name: string) => links.filter(l => l.name === name && l.targetId).map(l => l.targetId as string).slice(0, 1)
+    const counterpart = linked('counterpart').length > 0 ? linked('counterpart') : counterpartOf(member, input.to)
+    // The task only when the sender reads it (the mail service checked; checked again here).
+    const task = input.taskId ? readable(member, input.taskId, 'task') : null
+    const made = deps.writer.create(companyId, {
+      type: 'reply_request', title: oneLine(input.title, INBOX_LIMITS.title) || SUBJECT_NONE,
+      ...(interaction.personalOwner !== null ? { personalOwner: interaction.personalOwner } : { folder: interaction.folder }),
+      fields: {
+        assignee: userId, occurred_at: input.occurredAt, wait_until: input.waitUntil,
+        waiting_on: oneLine(input.waitingOn, 200) || null, end_condition: AWAITED_END_CONDITION,
+      },
+      links: { interaction: [interaction.id], counterpart, bundle: linked('bundle'), ...(task ? { task: [task.row.id] } : {}) },
+      actor: { id: userId, kind: 'human', source: null }, state: 'waiting_reply',
+      // The sender chose it on the send screen: nobody else's turn, nothing to tell.
+      quiet: true,
+    })
+    if (!made.ok) { logFailure('awaited reply request', made); return null }
+    return made.record.id
+  }
+
   /** The role's connector for the inbox's channel, or why there is none. */
   async function sourceFor(companyId: string): Promise<InboxSource | null> {
     if (!deps.roles) return null
@@ -487,6 +564,8 @@ export function createInboxService(deps: InboxDeps) {
     },
 
     receive,
+
+    awaitOwnMessage,
 
     /**
      * The engine wrote an action (composition.ts `afterAct`): the person's 「もう返した」 (a reply ACB

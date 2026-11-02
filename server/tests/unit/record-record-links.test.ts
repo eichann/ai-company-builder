@@ -162,7 +162,7 @@ describe('an origin link (出どころ) stays', () => {
     const origins = Object.fromEntries(coreTypeDefinitions().map(d => [d.name, Object.entries(d.links).filter(([, l]) => l.origin).map(([n]) => n).sort()]))
     expect(origins.task).toEqual(['interaction', 'meeting', 'prepared'])
     expect(origins.decision).toEqual(['approval', 'meeting'])
-    expect(origins.reply_request).toEqual(['interaction', 'prepared'])
+    expect(origins.reply_request).toEqual(['interaction', 'prepared', 'task'])
     const text = (origin: string) => `---\nlabel: メモ\nversion: 1\nstorage: server\nlinks:\n  from: { label: もと, target: task, cardinality: one, origin: ${origin} }\nstates: [open]\n---\n`
     expect(parseTypeFile('memo', text('true')).ok).toBe(true)
     expect(parseTypeFile('memo', text('yes')).ok).toBe(false)
