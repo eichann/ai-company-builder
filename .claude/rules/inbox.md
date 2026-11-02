@@ -11,7 +11,7 @@ paths:
   - "server/src/db/schema/inbox.ts"
   - "server/tests/unit/inbox.test.ts"
   - "server/tests/unit/intake-core.test.ts"
-  - "admin/src/app/companies/*/task-list/intake-settings.tsx"
+  - "admin/src/components/advanced/intake-settings.tsx"
   - "client/electron/features/inbox/**"
   - "client/shared/ai-turn-steps/inbox-triage.ts"
   - "client/shared/ai-turn-steps/follow-up.ts"
@@ -170,7 +170,7 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
 `GET /inbox/department` (unclaimed messages the member reads), `POST /inbox/items/:recordId/claim
 { expectedVersion }` (引き受ける: a reader of it; unreadable → the missing 404 before 409
 `NOT_UNCLAIMED`). Admin: 「来た連絡」 card on the やることの一覧 page
-(`admin/src/app/companies/[id]/task-list/intake-settings.tsx`).
+(`admin/src/components/advanced/intake-settings.tsx`, page 「詳しい設定 › 来た連絡の決まり」 `/advanced/inbox`).
 
 ## Core types (`shared/core/core-types.ts`, reserved versions)
 

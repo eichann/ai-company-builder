@@ -13,7 +13,7 @@ paths:
   - "client/tests/agent-event-sender.test.ts"
   - "client/src/shared/lib/agentLogNotice.ts"
   - "client/src/features/chat/components/AgentLogNotice.tsx"
-  - "admin/src/app/companies/*/agent-events/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/events/**"
   - "admin/src/components/agent-events/**"
   - "admin/src/lib/agent-events.ts"
   - "admin/tests/agent-events.test.tsx"
@@ -119,7 +119,10 @@ event loop between chunks; `lib/agent-event-retention.ts` runs it 5 s after star
 the committer date (UTC) of #206's merge commit, `20261024181341`; the admin log page lists the
 members whose app is older.
 
-## Admin console (「AI の操作の記録」, `admin/src/app/companies/[id]/agent-events/page.tsx`)
+## Admin console (「AI の操作の記録」, `admin/src/app/companies/[id]/advanced/ai-safety/events/page.tsx`)
+
+Inside 「詳しい設定 › AI の安全」 (管理画面の見直し 2-4; `/agent-events` redirects, keeping `?tab=`). A department
+manager the viewer setting allows opens it from the home (the menu shows them ホーム・部署・フォルダ only).
 
 - **Navigation**: `NAV_ITEMS` entry `agent-events`, shown when `isAdmin || canViewAgentEvents`.
   `GET /me/capabilities` carries `canViewAgentEvents` (`agentEvents.canRead(member)`, composed

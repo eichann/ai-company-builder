@@ -6,8 +6,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import MembersPage from '@/app/companies/[id]/members/page'
 import { PermissionsView as PermissionsPage } from '@/components/folders/permissions-view'
-import SecurityPage from '@/app/companies/[id]/security/page'
-import SettingsPage from '@/app/companies/[id]/settings/page'
+import SecurityPage from '@/app/companies/[id]/advanced/info/rules/page'
+import SettingsPage from '@/app/companies/[id]/advanced/info/page'
 import { toast } from 'sonner'
 
 import { ApiError, type Member } from '@/lib/api'

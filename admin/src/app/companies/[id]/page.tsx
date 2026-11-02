@@ -42,7 +42,7 @@ function AdminOverview() {
 
   return (
     <>
-      <PageHeader title="概要" description="対応が必要なことだけを表示しています。" />
+      <PageHeader title="ホーム" description="対応が必要なことだけを表示しています。" />
       {overview.loading ? (
         <OverviewSkeleton bare />
       ) : overview.error && !overview.data ? (
@@ -306,7 +306,7 @@ function StatCard({ icon: IconComponent, label, value, href }: { icon: Icon; lab
 
 /** Members, and managers who are members, see their own place in the company. */
 function MemberOverview() {
-  const { companyId, role, managedDepartmentIds, company } = useCompany()
+  const { companyId, role, managedDepartmentIds, company, canViewAgentEvents } = useCompany()
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const base = `/companies/${companyId}`
@@ -314,7 +314,7 @@ function MemberOverview() {
 
   return (
     <>
-      <PageHeader title="概要" description={`${company.data?.name ?? ''} でのあなたの役割と担当です。`} />
+      <PageHeader title="ホーム" description={`${company.data?.name ?? ''} でのあなたの役割と担当です。`} />
       <div className="space-y-8">
         <div className="grid gap-3 sm:grid-cols-2">
           {members.data ? (
@@ -350,6 +350,11 @@ function MemberOverview() {
             </div>
           )}
         </Card>
+
+        {canViewAgentEvents && (
+          // The log is inside 「詳しい設定」 (owners and admins); a manager the setting lets read it opens it from here.
+          <FooterLink href={`${base}/advanced/ai-safety/events`}>AI の操作の記録</FooterLink>
+        )}
 
         {!!departments.error && !departments.data && <ErrorState error={departments.error} onRetry={departments.reload} />}
       </div>

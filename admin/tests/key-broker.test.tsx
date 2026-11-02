@@ -14,8 +14,8 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
-import ApiKeysPage from '@/app/companies/[id]/api-keys/page'
-import { NAV_ITEMS } from '@/components/app/app-shell'
+import ApiKeysPage from '@/app/companies/[id]/advanced/ai-safety/keys/page'
+import { ADVANCED_ITEM } from '@/components/app/app-shell'
 import type { BrokerKeySummary, BrokerView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -73,10 +73,9 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
 
 describe('API キー', () => {
   it('is in the menu for owners and admins only, and a member never loads the keys', async () => {
-    const item = NAV_ITEMS.find((i) => i.segment === 'api-keys')!
-    expect(item.label).toBe('API キー')
-    expect(item.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
-    expect(item.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
+    // In the menu only through 「詳しい設定」 (owners and admins).
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
     const calls = stubApi(managerCapabilities)
     renderInCompany(<ApiKeysPage />)
     expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()

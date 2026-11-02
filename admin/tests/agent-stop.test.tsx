@@ -6,10 +6,10 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import AgentStopPage from '@/app/companies/[id]/agent-stop/page'
+import AgentStopPage from '@/app/companies/[id]/advanced/ai-safety/stop/page'
 import { AgentStopProvider } from '@/components/agent-stop/agent-stop-context'
 import { StopBar } from '@/components/agent-stop/stop-bar'
-import { NAV_ITEMS } from '@/components/app/app-shell'
+import { ADVANCED_ITEM } from '@/components/app/app-shell'
 import type { AgentStopEntry, AgentStopView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -47,10 +47,9 @@ const renderPage = () => renderInCompany(<AgentStopProvider><StopBar /><AgentSto
 
 describe('AI の緊急停止', () => {
   it('is for owners and admins only: a manager sees neither the button nor the page, and nothing is loaded', async () => {
-    const item = NAV_ITEMS.find((i) => i.segment === 'agent-stop')!
-    expect(item.label).toBe('AI の緊急停止')
-    expect(item.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
-    expect(item.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
+    // In the menu only through 「詳しい設定」 (owners and admins).
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
     const calls = stubApi(managerCapabilities)
     renderPage()
     expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()

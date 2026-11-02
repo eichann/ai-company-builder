@@ -1,12 +1,14 @@
-// やることの一覧の設定 (stage 2 S6): who sees the page, that a department
-// manager never loads (or changes) the company settings and may change
-// membership only where the server says so, and what a save sends.
+// The company's task settings (stage 2 S6), since 管理画面の見直し in 「詳しい設定 › 仕事の進め方」 and
+// 「会社の暦」: who sees the menu, that a department manager never loads (or changes) the company
+// settings and may change membership (now on 「部署」) only where the server says so, and what a save sends.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import TaskListSettingsPage from '@/app/companies/[id]/task-list/page'
-import { NAV_ITEMS } from '@/components/app/app-shell'
+import CalendarSettingsPage from '@/app/companies/[id]/advanced/calendar/page'
+import WorkSettingsPage from '@/app/companies/[id]/advanced/work/page'
+import { MembershipCard } from '@/components/advanced/task-settings-page'
+import { ADVANCED_ITEM, NAV_ITEMS, type NavContext } from '@/components/app/app-shell'
 import type { AbsenceCreated, Capabilities, DepartmentMembersView, MemberAbsencesView, TaskSettingsView } from '@/lib/api'
 import { defaultTaskSettings } from '../../shared/core/task-settings'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -15,7 +17,7 @@ import type { Call } from './mock-api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  usePathname: () => `/companies/co_123/task-list`,
+  usePathname: () => `/companies/co_123/advanced/work`,
   useSearchParams: () => new URLSearchParams(),
 }))
 
@@ -38,21 +40,25 @@ function stubApi(caps: Capabilities, membership: (id: string) => DepartmentMembe
   return calls
 }
 
-describe('やることの一覧の設定', () => {
-  it('is in the menu for owners, admins and department managers only', () => {
-    const item = NAV_ITEMS.find((i) => i.segment === 'task-list')!
-    expect(item.visible?.({ isAdmin: false, isManager: false, canViewAgentEvents: true })).toBe(false)
-    expect(item.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: false })).toBe(true)
-    expect(item.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
-  })
+describe('the menu (管理画面の見直し 2-3)', () => {
+  const shown = (c: NavContext) => [...NAV_ITEMS, ADVANCED_ITEM].filter((i) => !i.visible || i.visible(c)).map((i) => i.label)
 
-  it('a manager sees no company settings and may change only the departments the server allows', async () => {
+  it('owners and admins: the five places and 「詳しい設定」; a department manager ホーム・部署・フォルダ; a member ホーム・部署', () => {
+    expect(shown({ isAdmin: true, isManager: false, canViewAgentEvents: true })).toEqual(['ホーム', 'メンバー', '部署', 'フォルダ', 'つなぎ先', '詳しい設定'])
+    expect(shown({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toEqual(['ホーム', '部署', 'フォルダ'])
+    expect(shown({ isAdmin: false, isManager: false, canViewAgentEvents: false })).toEqual(['ホーム', '部署'])
+  })
+})
+
+describe('仕事の進め方・会社の暦', () => {
+  it('a manager sees no company settings and may change membership only in the departments the server allows', async () => {
     const calls = stubApi(managerCapabilities, (id) => ({ members: [], canEdit: id === 'd_sales' }))
-    renderInCompany(<TaskListSettingsPage />)
+    renderInCompany(<WorkSettingsPage />)
+    expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()
+    renderInCompany(<MembershipCard departments={departments} error={null} onRetry={() => {}} />)
     const list = await screen.findByRole('list', { name: '部署に所属する人' })
     await waitFor(() => expect(within(list).getAllByRole('button', { name: '所属する人を変える' })).toHaveLength(1))
     expect(within(list).getByText('営業部').closest('li')).toContainElement(within(list).getByRole('button', { name: '所属する人を変える' }))
-    expect(screen.queryByText('届いた連絡に締め切りが書いていないとき、いつまでに返しますか？')).not.toBeInTheDocument()
     expect(calls.some((c) => c.url.endsWith('/task-settings'))).toBe(false)
   })
 
@@ -60,29 +66,40 @@ describe('やることの一覧の設定', () => {
     const calls = stubApi(ownerCapabilities, () => ({ members: [], canEdit: true }), {
       [`PUT ${base}/task-settings`]: (call) => ({ body: ok({ ...view, settings: call.body, updatedAt: '2026-11-01T00:00:00.000Z' }) }),
     })
-    renderInCompany(<TaskListSettingsPage />)
+    renderInCompany(<WorkSettingsPage />)
     await userEvent.click(await screen.findByRole('radio', { name: /その日のうち/ }))
     const cutoff = screen.getByLabelText(/この時刻より後に届いたものは/)
     await userEvent.clear(cutoff)
     await userEvent.type(cutoff, '16:30')
     await userEvent.click(screen.getByRole('radio', { name: /選んだ部署だけ/ }))
     await userEvent.click(screen.getByRole('checkbox', { name: '営業部' }))
-    await userEvent.type(screen.getByLabelText('日付'), '2026-12-29')
-    await userEvent.type(screen.getByLabelText(/名前/), '年末')
-    await userEvent.click(screen.getByRole('button', { name: '休みに足す' }))
+    // The holidays are 「会社の暦」's.
+    expect(screen.queryByRole('button', { name: '休みに足す' })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({
       ...defaultTaskSettings(),
       taskListDepartmentIds: ['d_sales'],
       reply: { rule: 'same-day', sameDayCutoff: '16:30' },
-      companyHolidays: [{ date: '2026-12-29', name: '年末' }],
     })
+  })
+
+  it('会社の暦 saves the holidays in the same document', async () => {
+    const calls = stubApi(ownerCapabilities, () => ({ members: [], canEdit: true }), {
+      [`PUT ${base}/task-settings`]: (call) => ({ body: ok({ ...view, settings: call.body, updatedAt: '2026-11-01T00:00:00.000Z' }) }),
+    })
+    renderInCompany(<CalendarSettingsPage />)
+    await userEvent.type(await screen.findByLabelText('日付'), '2026-12-29')
+    await userEvent.type(screen.getByLabelText(/名前/), '年末')
+    await userEvent.click(screen.getByRole('button', { name: '休みに足す' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ ...defaultTaskSettings(), companyHolidays: [{ date: '2026-12-29', name: '年末' }] })
   })
 
   it('a daily limit outside the allowed range cannot be saved', async () => {
     const calls = stubApi(ownerCapabilities, () => ({ members: [], canEdit: true }))
-    renderInCompany(<TaskListSettingsPage />)
+    renderInCompany(<WorkSettingsPage />)
     await userEvent.click(await screen.findByRole('radio', { name: /進めさせる/ }))
     const limit = screen.getByLabelText('1人につき、1日に何回まで進めますか？')
     await userEvent.clear(limit)
@@ -104,7 +121,7 @@ describe('やることの一覧の設定', () => {
       [`GET ${base}/absences?userId=u_member`]: { body: ok(absences) },
       [`POST ${base}/absences`]: { status: 201, body: ok(created) },
     })
-    renderInCompany(<TaskListSettingsPage />)
+    renderInCompany(<MembershipCard departments={departments} error={null} onRetry={() => {}} />)
     const list = await screen.findByRole('list', { name: '部署に所属する人' })
     await waitFor(() => expect(within(list).getAllByRole('button', { name: /不在・代わりの人/ })).toHaveLength(1))
     expect(within(list).queryByRole('button', { name: '鈴木 一郎さんの不在・代わりの人' })).not.toBeInTheDocument()
