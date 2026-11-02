@@ -14,9 +14,10 @@ import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
   cardFields, historyLines, RECORD_VIEWS_OFFLINE_TEXT, summaryView,
-  type RecordCardLink, type RecordCardResult, type RecordListResult,
+  type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
-import { DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
+import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
+import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface RecordViewsDeps {
@@ -35,6 +36,7 @@ type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: 
 export function createRecordViewsApi(deps: RecordViewsDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
+  let me: { cookies: string; id: string } | null = null
 
   async function call(companyId: string, method: 'GET' | 'POST', path: string, body?: unknown): Promise<Answer> {
     const base = deps.baseUrl().replace(/\/+$/, '')
@@ -89,11 +91,13 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
     async card(companyId: string, recordId: string): Promise<RecordCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       const id = encodeURIComponent(recordId)
-      const [item, history, defs, members] = await Promise.all([
+      const [item, history, defs, members, runs, me] = await Promise.all([
         call(companyId, 'GET', `/records/item/${id}`),
         call(companyId, 'GET', `/records/item/${id}/history`),
         types(companyId),
         memberNames(companyId),
+        call(companyId, 'GET', '/ai-runs'),
+        myId(),
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200) return failure(item)
@@ -110,8 +114,12 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           ? { label, record: summaryView(l.record, defs.get(l.record.type)) }
           : { label, path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) }
       })
-      const view = recordDetailOf(detail.record, members)
-      const shownElsewhere = DETAIL_FIELDS[detail.record.type]
+      const isBundle = def?.implements.includes('bundle') ?? false
+      const view = isBundle
+        ? bundleDetailOf(detail.record, detail.links.flatMap(l => (l.record ? [l.record] : [])), me, members)
+        : recordDetailOf(detail.record, members)
+      const shownElsewhere = DETAIL_FIELDS[isBundle ? 'bundle' : detail.record.type]
+      const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] } | undefined)?.runs ?? [] : []
       const rest = shownElsewhere ? { ...detail.record, fields: Object.fromEntries(Object.entries(detail.record.fields).filter(([k]) => !shownElsewhere.has(k))) } : detail.record
       return {
         success: true,
@@ -121,9 +129,27 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           fields: cardFields(rest, def, members),
           history: historyLines(entries, def, members),
           links,
+          ai: aiOnRecord(recordId, runList, entries, def, members),
         },
       }
     },
+  }
+
+  /** The member's own id (for 「あなたの番」), cached per session; null when unreachable. */
+  async function myId(): Promise<string | null> {
+    const cookies = deps.cookies().join('; ')
+    if (me && me.cookies === cookies) return me.id
+    const base = deps.baseUrl().replace(/\/+$/, '')
+    if (!base || !cookies) return null
+    try {
+      const res = await doFetch(`${base}/api/me`, { redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 20_000), headers: { Cookie: cookies } })
+      const id = ((await res.json().catch(() => null)) as { data?: { id?: unknown } } | null)?.data?.id
+      if (res.status !== 200 || typeof id !== 'string') return null
+      me = { cookies, id }
+      return id
+    } catch {
+      return null
+    }
   }
 
   /** Member ids → names (any member may list the company's members); empty when unreachable. */
@@ -147,6 +173,19 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       return {}
     }
   }
+}
+
+/**
+ * The AI on a record (plan I.4): a run of it the AI holds or may pick up now is 「反映しています」;
+ * otherwise, when the newest change is the AI's, what it did. Nothing about the run's contents.
+ */
+export function aiOnRecord(recordId: string, runs: AiRunView[], entries: LedgerEntry[], def: TypeDefinition | undefined, people: Record<string, string>): RecordCardView['ai'] {
+  const working = runs.some(r => r.recordId === recordId && (r.state === 'running' || r.state === 'open'))
+  const newest = [...entries].sort((a, b) => b.version - a.version)[0]
+  const done = !working && newest?.actorKind === 'ai'
+    ? { at: newest.at, text: historyLines([newest], def, people)[0].text.replace(/^AI：/, '') }
+    : null
+  return { working, done }
 }
 
 export function registerRecordViewsIpc(ipc: IpcRegistrar, deps: RecordViewsDeps): void {

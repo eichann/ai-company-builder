@@ -1,9 +1,13 @@
 // A meeting's and a 来た連絡's own parts (client/shared/record-details.ts). Guards: only well-formed
 // ids from the record's pointer ever become a link out (a crafted id cannot point elsewhere); no
-// body text is made up — a 連絡's summary only; a Slack sender id is never shown as a name.
+// body text is made up — a 連絡's summary only; a Slack sender id is never shown as a name; a
+// bundle's やること are grouped by whose turn; the AI band says only what the run and 経緯 say.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { recordDetailOf } from '../shared/record-details'
+import type { LedgerEntry } from '../../shared/core/record-ledger'
+import type { AiRunView } from '../../shared/types/ai-runs'
+import { aiOnRecord } from '../electron/features/record-views/ipc'
+import { bundleDetailOf, recordDetailOf } from '../shared/record-details'
 
 const people = { 'u-sato': '佐藤', 'u-abe': '阿部' }
 
@@ -30,4 +34,33 @@ test('a 来た連絡 opens the original in Slack or Gmail only from a well-forme
     const d = recordDetailOf({ type: 'interaction', summary: '', fields: { source_ref: ref } }, people)
     assert.equal(d?.kind === 'incoming' && d.open, null, ref)
   }
+})
+
+test('a bundle\'s やること by whose turn: 「あなたの番」 only for the member, the checker\'s turn while checked, finished apart', () => {
+  const t = (id: string, state: string, fields: Record<string, string>) =>
+    ({ id, type: 'task', typeVersion: 9, title: id, summary: '', path: null, state, fields, version: 1, updatedAt: '' })
+  const linked = [
+    t('mine', 'todo', { assignee: 'u-sato' }), t('abe', 'in_progress', { assignee: 'u-abe', due: '2026-11-07T17:00' }),
+    t('checked', 'review', { assignee: 'u-abe', reviewer: 'u-sato' }), t('prep', 'preparing', { assignee: 'u-sato' }),
+    t('over', 'done', { assignee: 'u-abe' }),
+    { id: 'approval-1', type: 'approval', typeVersion: 5, title: '金額', summary: '', path: null, state: 'pending', fields: {}, version: 1, updatedAt: '' },
+    { id: 'approval-2', type: 'approval', typeVersion: 5, title: '前の', summary: '', path: null, state: 'approved', fields: {}, version: 1, updatedAt: '' },
+  ]
+  const b = bundleDetailOf({ fields: { owner: 'u-abe', purpose: '窓口を3つに' } }, linked, 'u-sato', people)
+  assert.deepEqual(b.groups.map(g => [g.title, g.tasks.map(x => `${x.id}:${x.turn}`)]), [
+    ['あなたの番', ['mine:あなたの番', 'checked:あなたの番']],
+    ['AI の番', ['prep:AI の番']],
+    ['ほかの人の番・返事待ち', ['abe:阿部さんの番']],
+    ['終わったこと', ['over:null']],
+  ])
+  assert.deepEqual([b.owner, b.purpose, b.done, b.total, b.pendingApprovals], ['阿部', '窓口を3つに', 1, 5, ['approval-1']])
+})
+
+test('the AI on a record: working while its run is held or open; 「反映しました」 only when the newest change is the AI\'s', () => {
+  const run = (state: string, recordId = 'deal-1') => ({ recordId, state }) as unknown as AiRunView
+  const entry = (version: number, actorKind: string) => ({ version, action: 'create', actorId: 'x', actorKind, at: '2026-11-05T06:38:00Z', note: '', changes: [] }) as unknown as LedgerEntry
+  assert.deepEqual(aiOnRecord('deal-1', [run('running')], [entry(2, 'ai')], undefined, {}), { working: true, done: null })
+  assert.equal(aiOnRecord('deal-1', [run('done')], [entry(1, 'human'), entry(2, 'ai')], undefined, {})?.done?.text, '作りました')
+  assert.equal(aiOnRecord('deal-1', [run('waiting_person')], [entry(2, 'ai'), entry(3, 'human')], undefined, {})?.done, null)
+  assert.equal(aiOnRecord('deal-1', [run('running', 'deal-2')], [], undefined, {})?.working, false)
 })

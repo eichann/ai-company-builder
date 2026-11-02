@@ -168,7 +168,7 @@ POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeetin
   (a create), 「AI のまとめ（参考）」, the reason box prefilled with the draft (editable), 「承認」 /
   「差し戻す」 for a viewer who may approve — 「承認」 sends **the hash of the content shown**
   (`approvals:approve`) with 「中身が変わっていないことを確かめて承認します」 — 「取り下げる」 for the
-  requester; state lines 「承認待ち：<name>さんにお願いしました」 / 「承認されました。HubSpot の金額も …
+  requester; state lines 「<name>さんの承認待ち」 (an approval never says 確かめる, owner 2026-11-02) / 「承認されました。HubSpot の金額も …
   になりました」 / 「差し戻されました：理由」 / 「HubSpot 側で変わっています。…」. No jargon (プラグイン /
   型 / オントロジー / ハッシュ).
 - IPC (`client/electron/features/approvals/ipc.ts`, session only): `approvals:get`,

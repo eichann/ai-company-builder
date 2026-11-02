@@ -48,3 +48,27 @@ test('a 来た連絡 from Slack: its summary (the body stays in Slack), 「Slack
   await expect(page.locator('#opened')).toHaveText('https://slack.com/archives/C0123ABCD/p1730800000123456')
   expectNoPageErrors(state)
 })
+
+test('a 案件: what for, who and how far, the approval request as its card, everyone\'s やること by turn, what the AI did', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'bundle' })
+  const card = page.getByTestId('record-card')
+  const body = card.getByRole('article')
+  await expect(body).toContainText('なんのため新人研修の窓口を3つにする')
+  await expect(body).toContainText('責任者阿部さん')
+  await expect(body).toContainText('進み具合3つのうち 1つ終わった')
+  await expect(page.getByTestId('approval')).toHaveText('承認のお願いのカード：approval-0000dd')
+  const everyone = body.getByRole('region', { name: 'みんなのやること' })
+  await expect(everyone.getByRole('region', { name: 'あなたの番' })).toContainText('見積書を作り直すあなたの番・11/7 17:00')
+  await expect(everyone.getByRole('region', { name: 'ほかの人の番・返事待ち' })).toContainText('スケジュール案を出す阿部さんの番')
+  await expect(everyone.getByRole('region', { name: '終わったこと' })).toContainText('お礼メールを送る')
+  await expect(card.getByRole('status')).toContainText('AI が反映しました：承認のお願い 1件を作りました')
+  // The right column starts with the 案件's own やること, each saying whose turn it is.
+  const side = card.getByRole('complementary', { name: 'つながっているもの' })
+  await expect(side.getByRole('region').first()).toHaveAccessibleName('やること')
+  await expect(side.getByRole('region', { name: 'やること' })).toContainText('スケジュール案を出す阿部さんの番')
+  expectNoPageErrors(state)
+
+  const working = await openPreview(page, 'record-card', { record: 'bundle', ai: 'working' })
+  await expect(page.getByTestId('record-card').getByRole('status')).toHaveText('AI が反映しています…（あと少し）')
+  expectNoPageErrors(working)
+})

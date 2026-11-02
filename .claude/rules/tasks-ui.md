@@ -153,6 +153,14 @@ meeting's day: ACB keeps no calendar id to build the event's own link), the summ
 返事が要る, 「要約（本文は Slack にあります）」 — ACB keeps no body — 「Slack で開く」 / 「Gmail で開く」
 (only from a well-formed `slack:<channel>:<ts>` / `gmail:<id>` pointer), and the screen's thread slot
 (`renderSource`: the thread around it and the reply draft). Links out go through `shell:openExternal`.
+A **案件・プロジェクト** (any type implementing `bundle`, `bundleDetailOf`): なんのため (`purpose`), 責任者
+(`owner`, else `assignee`), 進み具合 (its やること done of all), its approval requests still waiting as
+the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんなのやること** by whose turn —
+あなたの番 (the member's id from `/api/me`), AI の番, ほかの人の番・返事待ち, 終わったこと — each row saying
+whose turn and the due and opening the task; the right column starts with its やること, each with
+whose turn. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
+open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
+「AI が反映しました：<what>」 with its time.
 Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)

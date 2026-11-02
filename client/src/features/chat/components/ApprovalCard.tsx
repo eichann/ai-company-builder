@@ -181,7 +181,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
         <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{mustChoose ? '似ているものと同じかどうかを先に選んでください。' : APPROVE_HASH_NOTE}</p>
         <div className="mt-1 flex flex-wrap gap-2">
           <button type="button" disabled={busy || reason.trim() === '' || mustChoose} title={mustChoose ? '似ているものと同じかどうかを先に選んでください' : undefined} onClick={() => void act('approve')}
-            className={`${BUTTON} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}>{busy ? '確かめています…' : '承認'}</button>
+            className={`${BUTTON} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}>{busy ? '承認しています…' : '承認'}</button>
           <button type="button" disabled={busy || reason.trim() === ''} onClick={() => void act('send-back')}
             className={`${BUTTON} border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800`}>差し戻す</button>
         </div>
