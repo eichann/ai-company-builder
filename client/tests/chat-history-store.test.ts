@@ -255,10 +255,14 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
     { id: 'q', role: 'user', content: 'ＡＰＩの接続', timestamp: '2020-01-01T00:00:00Z' },
     { id: 'r', role: 'assistant', content: long, timestamp: '2020-01-01T00:00:00Z' },
   ] }))
+  // The app's instruction to the AI (app-instruction.ts) is not the member's words: not searched.
+  store.save(company, session('c', { updatedAt: '2019-01-01T00:00:00Z', messages: [
+    { id: 'k', role: 'user', content: 'まず records_get で task-0000aa を読み', timestamp: '2019-01-01T00:00:00Z', appInstruction: { kind: 'task', recordId: 'task-0000aa', title: '見積' } },
+  ] }))
   store.save(company, session('b', { draftInput: '未送信の計画' }))
   store.patch(company, 'b', { pinned: true })
   const summaries = store.summaries(company)
-  assert.deepEqual(summaries.map(s => s.id), ['b', 'a'])
+  assert.deepEqual(summaries.map(s => s.id), ['b', 'a', 'c'])
   const a = summaries.find(s => s.id === 'a')!
   assert.equal('messages' in a, false)
   assert.equal(a.messageCount, 3)
@@ -269,6 +273,7 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
   assert.deepEqual(store.search(company, '未送信'), ['b'])
   assert.deepEqual(store.search(company, '月次'), ['a'])
   assert.deepEqual(store.search(company, '該当なし'), [])
+  assert.deepEqual(store.search(company, 'records_get'), [])
   assert.deepEqual(store.search(company, '  '), [])
 })
 

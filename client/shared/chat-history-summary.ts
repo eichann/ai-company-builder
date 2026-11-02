@@ -7,7 +7,8 @@ export const SUMMARY_PREVIEW_CHARS = 120
 export function sessionPreview(session: Pick<ChatSession, 'messages'>): string {
   for (let i = session.messages.length - 1; i >= 0; i--) {
     const message = session.messages[i]
-    if (message.id === '1' || !message.content.trim()) continue
+    // The app's instruction to the AI is not the member's words (app-instruction.ts).
+    if (message.id === '1' || message.appInstruction || !message.content.trim()) continue
     // Clean only a bounded head: a reply can be tens of KB and only 120 characters are shown.
     return message.content.slice(0, SUMMARY_PREVIEW_CHARS * 8)
       .replace(/\[Tool:[^\]]*\]/g, '').replace(/\s+/g, ' ').trim().slice(0, SUMMARY_PREVIEW_CHARS)

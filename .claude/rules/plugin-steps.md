@@ -18,7 +18,9 @@ paths:
 A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target type and state,
 `start`, procedure, tools, connector roles). When a record is at a step's (type, state):
 `start: ai_turn` → the member's app runs the AI turn on the member's PC with only that step's tools;
-`start: person` → a button on the record's card opens a consultation with the step's procedure.
+`start: person` → a button on the record's card opens a consultation with the step's procedure
+(the app's instruction to the AI: sent, shown only as 「この手順についての相談：…」, `tasks-ui.md`
+"Consulting about a task").
 
 ## Server (`services/plugin-steps.ts`, wired in `composition/plugins.ts`)
 

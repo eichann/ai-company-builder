@@ -10,6 +10,7 @@ import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
 import { toolRowOf } from './toolRows'
+import { appInstructionOf, readAppInstruction } from '../../../shared/app-instruction'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
 // stored history (shared/chat-history.ts ChatSession). Pure; the history
@@ -34,6 +35,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
   const toolLines: Record<string, StoredToolLine> = {}
+  const appInstruction = appInstructionOf(msg)
   for (const part of msg.parts) {
     if (part.type === APPROVAL_PART_TYPE) {
       const ref = readApprovalCardRef((part as { data?: unknown }).data)
@@ -95,6 +97,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
+    ...(appInstruction ? { appInstruction } : {}),
   }
 }
 
@@ -154,9 +157,11 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     const record = readReviewRecord(review)
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })
   }
+  const appInstruction = readAppInstruction(msg.appInstruction)
   return {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
+    ...(appInstruction ? { metadata: { appInstruction } } : {}),
     parts,
   }
 }
@@ -206,7 +211,7 @@ export function greetingMessages(text: string): UIMessage[] {
  * six messages, empty ones dropped.
  */
 export function titleTranscript(messages: UIMessage[]): GenerateTitleRequest['messages'] {
-  return messages.slice(1, 7).map(m => ({
+  return messages.slice(1, 7).filter(m => !appInstructionOf(m)).map(m => ({
     role: m.role as 'user' | 'assistant',
     content: messageText(m),
   })).filter(m => m.content.trim().length > 0)

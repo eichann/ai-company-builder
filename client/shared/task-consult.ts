@@ -27,7 +27,8 @@ export function taskConsultTitle(title: string): string {
 }
 
 /**
- * The first message (the member's, composed by the app). With the record tools the AI looks the
+ * The first message: the app's instruction to the AI (app-instruction.ts — sent, never shown as the
+ * member's words; the chat shows 「このやることについての相談：…」). With the record tools the AI looks the
  * task up itself — its state, whose turn it is, what it links to and what the AI prepared —
  * rather than having it pasted in. Without them it is only told what the consultation is about.
  */
