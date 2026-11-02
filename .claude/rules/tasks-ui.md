@@ -61,13 +61,12 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   the department on screen (`null` = every department; 全社 = any department shows it:
   `listShownFor`). The list itself is the member's, across the company (records carry no
   department the app could filter by).
-- `TaskListPanel`: the list on the left, the opened item's card on the right (`renderCard`,
-  composed by AppShell: the records feature's card). A まとまり chip opens that まとまり there too.
-  On the main screen the card opens **where a file opens**: AppShell's `frame` puts the list and
-  the card in the ファイル tab's split (`layout.files`: the list takes the file tree's width, the
-  card the editor area's, one divider for both), so with the consultation open the card is never
-  a strip between the list and the chat. Test: `tests/ui/tasks-layout.spec.ts` (the card area at
-  least the editor area's width, 「＋ファイルをつなぐ」 left of the consultation).
+- `TaskListPanel`: the list, in the narrow column where the file tree sits. A row opens its item
+  in a tab in the middle, next to the open files (`onOpen`; `files-and-editor.md` "Files and
+  records share the middle's tabs"), and switching the left tab keeps it; the row of the active
+  tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
+  the card by the version the list knows, so a change made from the list shows on the card.
+  Test: `tests/ui/tasks-layout.spec.ts`.
 - `useTaskList` (in AppShell): read at mount, on `notifications:changed` for the company (the title
   bar keeps main watching), every 2 minutes and after the member's own change. `useCalendarToday`:
   at mount and every 10 minutes.
@@ -263,6 +262,5 @@ a department without the list gets its meetings in the title bar (`notifications
 `title-bar-notices.spec.ts`). `tests/ui/ai-turns.spec.ts`
 and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list left of the
 consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
-the real `AppShell`): with the consultation open the やること tab fills the left side from the tab
-strip to the bottom, the consultation stays where it is for ファイル and 検索, and a card opens
-beside the list.
+the real `AppShell`): the list is the narrow column, a task opens as a tab beside the open files,
+stays when the left tab changes, ← → go between them and a restart brings it back.

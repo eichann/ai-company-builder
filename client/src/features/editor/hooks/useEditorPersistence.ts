@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { fileExists } from '../api'
+import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, type RecordTabLook } from '../editorTabs'
 
-// Per company, in localStorage under `editor:<company id>`: the open file tabs,
-// the active one, and the left panel tab. The left tab lives in the same entry
+// Per company, in localStorage under `editor:<company id>`: the open tabs (files
+// and records, `editorTabs.ts`), the active one, the open records' titles and the left panel tab. The left tab lives in the same entry
 // because existing installs saved it there. Any saved id is kept: the left
 // panel's registry shows the default for an id no panel has (an extension's
 // tab may register later).
@@ -12,6 +13,8 @@ type PersistedEditorState = {
   openFiles: string[]
   activeFilePath: string | null
   leftTab: string
+  /** The open record tabs' titles and kinds, so they show at once after a restart. */
+  records: Record<string, RecordTabLook>
 }
 
 function safeReadEditorState(companyId: string, defaultLeftTab: string): PersistedEditorState | null {
@@ -24,6 +27,7 @@ function safeReadEditorState(companyId: string, defaultLeftTab: string): Persist
       openFiles: parsed.openFiles.filter((p: unknown): p is string => typeof p === 'string'),
       activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
       leftTab: typeof parsed.leftTab === 'string' && parsed.leftTab ? parsed.leftTab : defaultLeftTab,
+      records: parseRecordLooks(parsed.records),
     }
   } catch {
     return null
@@ -39,7 +43,7 @@ function safeWriteEditorState(companyId: string, state: PersistedEditorState): v
 }
 
 /**
- * The open file tabs, the active tab and the left panel tab of the open
+ * The open tabs (files and records), the active tab and the left panel tab of the open
  * company, restored when the company opens and saved on every change. Tabs of
  * files deleted meanwhile are dropped in the background.
  */
@@ -54,6 +58,7 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
   const [leftTab, setLeftTab] = useState<string>(() => initialEditorState?.leftTab ?? defaultLeftTab)
   const [openFiles, setOpenFiles] = useState<string[]>(() => initialEditorState?.openFiles ?? [])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(() => initialEditorState?.activeFilePath ?? null)
+  const [recordLooks, setRecordLooks] = useState<Record<string, RecordTabLook>>(() => initialEditorState?.records ?? {})
 
   // editorRestoredForId tracks which company we've finished validating files for.
   // It gates the persist effect to prevent any transient cross-company state from
@@ -80,6 +85,7 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
       setOpenFiles(persisted?.openFiles ?? [])
       setActiveFilePath(persisted?.activeFilePath ?? null)
       setLeftTab(persisted?.leftTab ?? defaultLeftTab)
+      setRecordLooks(persisted?.records ?? {})
     }
 
     if (!persisted || persisted.openFiles.length === 0) {
@@ -89,7 +95,8 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
     let cancelled = false
     void (async () => {
       const checks = await Promise.all(
-        persisted.openFiles.map((p) => fileExists(p).catch(() => false))
+        // A record tab stays: the record itself says so when it can no longer be read.
+        persisted.openFiles.map((p) => recordIdOfTab(p) ? Promise.resolve(true) : fileExists(p).catch(() => false))
       )
       if (cancelled) return
       const allValid = checks.every(Boolean)
@@ -115,8 +122,9 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
       openFiles,
       activeFilePath,
       leftTab,
+      records: looksOfOpenTabs(openFiles, recordLooks),
     })
-  }, [companyId, editorRestoredForId, openFiles, activeFilePath, leftTab])
+  }, [companyId, editorRestoredForId, openFiles, activeFilePath, leftTab, recordLooks])
 
-  return { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab }
+  return { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks }
 }

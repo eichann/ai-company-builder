@@ -1,7 +1,7 @@
-// The places the editor area showed, for ← → like a browser (design §7-4): open files and
-// record cards. Pure; usePlaceHistory holds it.
+// The places the middle showed, for ← → like a browser (design §7-4): its tabs, files and
+// records alike (a record by its tab key, `editorTabs.ts`). Pure; usePlaceHistory holds it.
 
-export type EditorPlace = { kind: 'file'; path: string } | { kind: 'record'; id: string }
+export type EditorPlace = { kind: 'file'; path: string }
 
 export interface PlaceHistory {
   entries: EditorPlace[]
@@ -13,8 +13,7 @@ const MAX_PLACES = 50
 export const EMPTY_PLACES: PlaceHistory = { entries: [], index: -1 }
 
 export function samePlace(a: EditorPlace | undefined, b: EditorPlace): boolean {
-  if (!a || a.kind !== b.kind) return false
-  return a.kind === 'file' ? a.path === (b as { path: string }).path : a.id === (b as { id: string }).id
+  return !!a && a.path === b.path
 }
 
 /** A new place: the forward entries are dropped (as a browser does); the same place again changes nothing. */

@@ -1,5 +1,8 @@
 import { X } from '@phosphor-icons/react'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
+import { RecordIcon } from '../../../shared/ui/ThingIcon'
+import { thingName } from '../../../../shared/thing-words'
+import { recordIdOfTab, type RecordTabLook } from '../editorTabs'
 import { fileNameOf } from '../fileKinds'
 import type { OpenFile } from '../hooks/useOpenFiles'
 
@@ -10,28 +13,41 @@ interface Props {
   previewFilePath?: string | null
   /** Department label for tabs whose file is outside the selected department. */
   tabLabels?: Record<string, string>
+  /** Record tabs' titles and kinds (by record id); a record not read yet shows 「読み込んでいます」. */
+  recordLooks?: Readonly<Record<string, RecordTabLook>>
   onSelect: (path: string) => void
   onPin?: (path: string) => void
   onClose: (e: React.MouseEvent, path: string) => void
 }
 
-/** One tab per open file: a preview tab in italics, a dot while unsaved, the department of a file from elsewhere. */
-export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, onSelect, onPin, onClose }: Props) {
+/**
+ * One tab per open file or record: a preview tab in italics, a dot while unsaved, the department of
+ * a file from elsewhere; a record by its kind's icon and its title (plan A, no 「ファイルではありません」 line).
+ */
+export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, recordLooks, onSelect, onPin, onClose }: Props) {
   return (
     <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50 overflow-x-auto">
-      <div className="flex">
+      <div className="flex" role="tablist" aria-label="開いているもの">
         {openFiles.map((filePath) => {
-          const fileName = fileNameOf(filePath)
+          const recordId = recordIdOfTab(filePath)
+          const look = recordId ? recordLooks?.[recordId] : undefined
+          const fileName = recordId ? (look?.title ?? '読み込んでいます') : fileNameOf(filePath)
           const file = fileContents.get(filePath)
           const isActive = filePath === activeFilePath
           const isModified = file && file.content !== file.originalContent
           const isPreview = filePath === previewFilePath
           const FileIcon = getFileIcon(fileName, false)
+          const icon = recordId
+            ? (look ? <RecordIcon record={look} size={14} /> : null)
+            : <FileIcon size={14} className="flex-shrink-0" />
           const deptLabel = tabLabels?.[filePath]
 
           return (
             <div
               key={filePath}
+              role="tab"
+              aria-selected={isActive}
+              data-tab={recordId ? `record:${recordId}` : 'file'}
               onClick={() => onSelect(filePath)}
               onDoubleClick={() => { if (isPreview && onPin) onPin(filePath) }}
               className={`
@@ -43,17 +59,18 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
                 }
               `}
             >
-              <FileIcon size={14} className="flex-shrink-0" />
+              {icon}
               {deptLabel && (
                 <span data-tab-dept className="text-[11px] text-gray-400 dark:text-zinc-500 truncate max-w-[96px] flex-shrink-[2]" title={`${deptLabel} のファイル`}>
                   {deptLabel} /
                 </span>
               )}
-              <span className={`text-xs truncate ${isPreview ? 'italic' : ''} ${deptLabel ? '-ml-1' : ''}`} title={filePath}>{fileName}</span>
+              <span className={`text-xs truncate ${isPreview ? 'italic' : ''} ${deptLabel ? '-ml-1' : ''}`} title={recordId ? (look ? `${thingName(look)}：${look.title}` : undefined) : filePath}>{fileName}</span>
               {isModified && (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
               )}
               <button
+                type="button"
                 onClick={(e) => onClose(e, filePath)}
                 className={`
                   p-0.5 rounded hover:bg-white/10 flex-shrink-0

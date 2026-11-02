@@ -9,7 +9,7 @@ import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, shareTaskToFolder, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
-import { useTaskCard } from '../hooks/useTaskCard'
+import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { companyNow, companyPathOf, dueText, dueWhen } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
@@ -36,6 +36,8 @@ interface Props {
   tagsInUse?: string[]
   /** The member changed something (the list reads again). */
   onChanged?: () => void
+  /** Read: its title and kind, for its tab in the middle. */
+  onLoaded?: (look: CardLook) => void
 }
 
 /**
@@ -43,8 +45,8 @@ interface Props {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], onChanged }: Props) {
-  const { result, reload } = useTaskCard(companyId, recordId)
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], onChanged, onLoaded }: Props) {
+  const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込んでいます</div>
   if (!result.success) return <div role="alert" className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400">{result.error}</div>

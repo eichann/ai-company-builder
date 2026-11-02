@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPANY_ROOT_LABEL, departmentOfFile, tabDepartmentLabels } from './editorTabs'
+import { COMPANY_ROOT_LABEL, departmentOfFile, fileTabsOf, looksOfOpenTabs, parseRecordLooks, recordIdOfTab, recordTabKey, tabDepartmentLabels } from './editorTabs'
 
 const root = '/Users/me/ACB/会社'
 const departments = [
@@ -40,4 +40,22 @@ test('the company-wide tab shows every department, so no tab is labelled', () =>
 
 test('files outside the company folder are not labelled', () => {
   assert.deepEqual(tabDepartmentLabels(['/tmp/other.md', `${root}-old/x.md`], { rootPath: root, departments, selectedDeptId: 'd-sales' }), {})
+})
+
+test('a record tab is never taken for a file: only file tabs load text, and no file path reads as a record', () => {
+  const tabs = [script, recordTabKey('task-abc123'), proposal]
+  assert.deepEqual(fileTabsOf(tabs), [script, proposal])
+  assert.equal(recordIdOfTab(recordTabKey('task-abc123')), 'task-abc123')
+  assert.equal(recordIdOfTab(script), null)
+  assert.equal(recordIdOfTab('C:\\ACB\\会社\\a.md'), null)
+  assert.deepEqual(tabDepartmentLabels(tabs, { rootPath: root, departments, selectedDeptId: 'd-sales' }), { [script]: 'コンテンツG' })
+})
+
+test('saved record titles: only the open record tabs keep theirs; a malformed entry is dropped', () => {
+  const looks = { 'task-a00001': { title: 'A', type: 'task' }, 'task-b00002': { title: 'B', type: 'task' } }
+  assert.deepEqual(looksOfOpenTabs([recordTabKey('task-a00001'), script], looks), { 'task-a00001': looks['task-a00001'] })
+  assert.deepEqual(parseRecordLooks({ ok: { title: 'x', type: 'deal', typeLabel: '案件', implements: ['bundle', 3] }, bad: { title: 1 }, nul: null }), {
+    ok: { title: 'x', type: 'deal', typeLabel: '案件', implements: ['bundle'] },
+  })
+  assert.deepEqual(parseRecordLooks('nonsense'), {})
 })

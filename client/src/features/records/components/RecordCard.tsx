@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
-import type { RecordCardView } from '../../../../shared/record-views'
+import type { RecordCardView, RecordViewSummary } from '../../../../shared/record-views'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { LinkedColumn } from '../../../shared/ui/LinkedColumn'
 import { linkRows } from './linkRows'
@@ -14,14 +14,16 @@ interface Props {
   recordId: string
   /** Business plugins' sections for the record's type (plugin-frame.md "The four slots"), drawn by the screen. */
   renderSections?: (record: { id: string; type: string }) => ReactNode
+  /** Read: its title and kind, for its tab in the middle. */
+  onLoaded?: (record: RecordViewSummary) => void
 }
 
 /**
  * The card a record opens in when it has no screen of its own, read only: what it is, its
  * summary, fields and 経緯 folded, and 「つながっているもの」 to follow.
  */
-export function RecordCard({ companyId, rootPath, recordId, renderSections }: Props) {
-  const result = useRecordCard(companyId, recordId)
+export function RecordCard({ companyId, rootPath, recordId, renderSections, onLoaded }: Props) {
+  const result = useRecordCard(companyId, recordId, onLoaded)
   if (result === null) {
     return <div className="h-full flex items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込んでいます</div>
   }
