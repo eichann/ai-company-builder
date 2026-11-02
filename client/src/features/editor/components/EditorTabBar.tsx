@@ -71,7 +71,6 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
               )}
               <button
                 type="button"
-                aria-label={`${fileName} を閉じる`}
                 onClick={(e) => onClose(e, filePath)}
                 className={`
                   p-0.5 rounded hover:bg-white/10 flex-shrink-0
