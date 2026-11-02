@@ -97,6 +97,11 @@ export interface BundleChoice {
   typeLabel: string
 }
 
+/** `tasks:bundleKinds`: what each department makes as its 束ねるもの, and the names (records.md "Bundle kinds"). */
+export type BundleKindsAnswer =
+  | { success: true; kinds: BundleKindsResult }
+  | { success: false; offline: boolean; error: string }
+
 export type BundleChoicesResult =
   | { success: true; bundles: BundleChoice[] }
   | { success: false; offline: boolean; error: string }
