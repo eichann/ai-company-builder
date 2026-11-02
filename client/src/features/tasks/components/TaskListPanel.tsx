@@ -72,7 +72,13 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       list.reload()
     }
   }
-  const finish = (item: TaskListItem) => run(item, item.state === 'in_progress' || item.state === 'review' ? [{ action: 'complete' }] : [{ action: 'start' }, { action: 'complete' }])
+  // ☑ (task v9): complete from any state but 準備中 — no made-up start; 確かめてから → 見てもらう; done → やり直す.
+  const press = (item: TaskListItem) => {
+    const c = item.check
+    if (!c) return
+    if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
+    else void run(item, [{ action: c.action }])
+  }
   // A file from the file tree dropped on a task row is linked to it (the first one the server may take).
   const dropFiles = async (item: TaskListItem, paths: string[]) => {
     const path = paths.map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
@@ -131,12 +137,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       extra.push({ label: '自分で読み取る', run: () => meetingActions.read(i.id) })
       extra.push({ label: '今は読まない', run: () => void meetingActions.skip(i.id).then(e => { setMessage(e); list.reload() }) })
     }
-    const canFinish = i.own && i.turn === 'mine' && ['todo', 'in_progress', 'review', 'waiting'].includes(i.state ?? '')
     return (
       <TaskRow
         key={i.id} item={i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
         onOpen={onOpen}
-        onFinish={canFinish ? () => void finish(i) : null}
+        onFinish={i.check ? () => press(i) : null}
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
         onHand={ai?.canHand ? () => aiTurns?.handOver(i.id) : null}

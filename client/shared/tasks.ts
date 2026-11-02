@@ -61,6 +61,32 @@ export interface TaskListItem {
   suggestedBundle?: { id: string; title: string }
   /** 「AI の番」 only: the server clock put it there because its wait is over (the PC's wait-over step runs it). */
   waitOver?: true
+  /**
+   * What the row's ☑ does (task v9, 言葉の決まり 5.): `complete` from any state but 準備中;
+   * `request_review` (「終わったので見てもらう」) when the member was asked and 確かめてから; `reopen`
+   * (「やり直す」) on a finished one the member asked or checked. Absent: no ☑ (the card decides).
+   * The server still decides each press.
+   */
+  check?: { action: 'complete' } | { action: 'request_review'; reviewer: string } | { action: 'reopen' }
+}
+
+const COMPLETE_FROM = new Set(['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'])
+const ASK_TO_CHECK_FROM = new Set(['todo', 'in_progress', 'waiting', 'awaiting_acceptance'])
+
+/** The ☑ of a task row for the member (task v9 `complete` / `request_review` / `reopen`, who_unless). */
+export function checkOf(r: RecordSummary, me: string): TaskListItem['check'] {
+  if (r.type !== 'task' || !r.state) return undefined
+  const f = r.fields
+  const assignee = f.assignee === me
+  const asker = (f.requested_by ?? me) === me
+  const checker = f.reviewer === me
+  if (r.state === 'done') return asker || checker ? { action: 'reopen' } : undefined
+  const reviewer = typeof f.reviewer === 'string' && f.reviewer ? f.reviewer : typeof f.requested_by === 'string' ? f.requested_by : null
+  // 確かめてから: the one asked shows it to the checker instead (who_unless: { assignee: { when_done: check } }).
+  if (assignee && !asker && !checker && f.when_done === 'check') {
+    return ASK_TO_CHECK_FROM.has(r.state) && reviewer ? { action: 'request_review', reviewer } : undefined
+  }
+  return COMPLETE_FROM.has(r.state) && (assignee || asker || checker) ? { action: 'complete' } : undefined
 }
 
 /** A まとまり the member may choose for a meeting (unfinished, readable). */
@@ -229,6 +255,8 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
+      // ☑ on the member's own rows (and a check waiting for them), never on what they asked of someone else.
+      ...((turn !== 'ai' && (turn !== 'others' || r.fields.assignee === src.me)) && checkOf(r, src.me) ? { check: checkOf(r, src.me) } : {}),
     })
   }
   for (const r of src.myTurn) {

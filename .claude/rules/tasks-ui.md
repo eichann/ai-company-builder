@@ -93,9 +93,11 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
   whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is
   struck through. A kind finished elsewhere gets its one button (確かめて送る, 確かめる: opens it).
-  引き受ける on 引き受け待ち rows; ☑ 完了にする
-  only on the member's own tasks (`own`: start first when not started, then complete, each at
-  the version it moved to — the list never states someone's OK; that is the card's). An AI-turn
+  引き受ける on 引き受け待ち rows. The ☑ is `TaskListItem.check` (`checkOf`, task v9): 完了にする from
+  any state but 準備中 (no made-up start), on the member's rows (and a check waiting for them as
+  確かめる人), never on what they asked of someone else; asked of them with 確かめてから →
+  「終わったので見てもらう」 (`request_review` to the 確かめる人); a finished one they asked or checked →
+  やり直す. The list never states someone's OK; that is the card's. An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with
   「もう一度」 / 「人に渡す」 when stopped.
 - `QuickAdd` + `quickAdd.ts` (no window, owner 2026-11-02): while the line has the focus, chips show

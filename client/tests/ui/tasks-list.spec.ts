@@ -42,11 +42,16 @@ test('accepting and finishing from the list; a row opens its card', async ({ pag
   await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('セキュリティのチェックシート')
   await expect(page.getByRole('region', { name: '引き受け待ち' })).toHaveCount(0)
 
-  // Only the member's own task offers ☑ 完了にする; it is started first, then completed.
+  // ☑ completes at once from any state (task v9: no made-up start); not offered where the card decides.
   await expect(page.getByRole('button', { name: '「お礼メールを確かめて送る」を完了にする' })).toHaveCount(0)
   await page.getByRole('button', { name: '「見積書を作り直す」を完了にする' }).click()
-  await expect(page.locator('#acted')).toHaveText('task-acc001:accept@2,task-mine02:start@2,task-mine02:complete@3')
+  await expect(page.locator('#acted')).toHaveText('task-acc001:accept@2,task-mine02:complete@2')
   await expect(page.getByRole('region', { name: '今日終わったこと' })).toContainText('見積書を作り直す')
+  await expect(page.getByRole('button', { name: '「見積書を作り直す」をやり直す' })).toBeVisible()
+  // Asked with 確かめてから: the ☑ is 「終わったので見てもらう」 and it becomes the checker's turn.
+  await page.getByRole('button', { name: '「提案書の数字を直す」を終わったので見てもらう' }).click()
+  await expect(page.locator('#acted')).toContainText('task-chk001:request_review@2>u-abe')
+  await expect(page.getByRole('region', { name: 'ほかの人の番・返事待ち' })).toContainText('提案書の数字を直す')
 
   await page.getByRole('button', { name: /日程の候補を探す/ }).click()
   await expect(page.getByTestId('card')).toHaveText('カード：task-ai0001')

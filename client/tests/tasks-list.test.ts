@@ -1,8 +1,7 @@
 // The task list in main (electron/features/tasks/ipc.ts, client/shared/tasks.ts,
 // .claude/rules/tasks-ui.md). Guards: each record is shown once and in the right place (a
 // request the member must accept is not 「あなたの番」 work yet, a reply they wait for is not
-// something to do now); only a task the member asked of themselves can be finished from the
-// list; the one-line add makes a task only the member sees, assigned to them; an action name
+// something to do now); what the row's ☑ does (task v9); the one-line add makes a task only the member sees, assigned to them; an action name
 // never reaches the server's URL as a path; records off is no list, not an error.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -47,10 +46,28 @@ test('each item carries the interfaces its type implements (a plugin\'s peek lis
   assert.equal(items.find(i => i.id === 'meeting-ab1234')?.implements, undefined)
 })
 
-test('only a task the member asked of themselves may be finished from the list', () => {
-  const items = classifyTasks(src({ myTurn: [rec('task-own001', 'todo'), rec('task-from01', 'todo', { requested_by: 'u-tanaka' })] }))
-  assert.equal(items.find(i => i.id === 'task-own001')?.own, true)
-  assert.equal(items.find(i => i.id === 'task-from01')?.own, false)
+test('☑ (task v9): 完了 from any state but 準備中; asked with 確かめてから → 見てもらう; done → やり直す only for who asked; never on what the member asked of someone', () => {
+  const items = classifyTasks(src({
+    myTurn: [
+      rec('task-own001', 'todo'), rec('task-acc001', 'awaiting_acceptance', { requested_by: 'u-tanaka' }),
+      rec('task-tell01', 'todo', { requested_by: 'u-tanaka', when_done: 'notify' }),
+      rec('task-chk001', 'in_progress', { requested_by: 'u-tanaka', when_done: 'check', reviewer: 'u-tanaka' }),
+      rec('task-rev001', 'review', { assignee: 'u-tanaka', requested_by: ME, when_done: 'check', reviewer: ME }),
+    ],
+    aiTurn: [rec('task-prep01', 'preparing')],
+    asked: [rec('task-ask001', 'in_progress', { assignee: 'u-tanaka' })],
+    doneToday: [rec('task-done01', 'done'), rec('task-done02', 'done', { requested_by: 'u-tanaka' })],
+  }))
+  const check = (id: string) => items.find(i => i.id === id)?.check
+  assert.deepEqual(check('task-own001'), { action: 'complete' })
+  assert.deepEqual(check('task-acc001'), { action: 'complete' })
+  assert.deepEqual(check('task-tell01'), { action: 'complete' })
+  assert.deepEqual(check('task-chk001'), { action: 'request_review', reviewer: 'u-tanaka' })
+  assert.deepEqual(check('task-rev001'), { action: 'complete' })
+  assert.equal(check('task-prep01'), undefined)
+  assert.equal(check('task-ask001'), undefined)
+  assert.deepEqual(check('task-done01'), { action: 'reopen' })
+  assert.equal(check('task-done02'), undefined)
 })
 
 function harness(answers: Record<string, { status: number; body: unknown }>) {
