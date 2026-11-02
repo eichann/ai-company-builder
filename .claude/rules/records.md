@@ -1098,8 +1098,15 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
 
 - **Kinds** people see (`recordKindOf`): まとまり (any type implementing `bundle`: a 案件, a 企画),
   やること (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `meeting`,
-  `outbound_message`), そのほか; the type's own label is shown small. Core states have member words
-  (`stateLabel`; definitions carry no state labels); machinery fields (hashes, outside ids,
+  `outbound_message`), そのほか (search's grouping, to be replaced by kind chips).
+- **Words and icons** (言葉の決まり, owner 2026-11-02): one plain name and one icon per kind of
+  thing, the same on every screen — `client/shared/thing-words.ts` (`thingName`: やること, 議事録を確認する,
+  会議の記録, 来た連絡, 送るメールの下書き / 送る Slack の返事 / 送ったもの, 承認のお願い, 返事のお願い; a bundle or
+  a company's type by its own label, never its id; `stateWord` per type; `CALM` for waiting, empty and
+  failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,
+  `RecordIcon`, `SourceIcon`, `SeenBy`). No 「型」, category word (やりとり, まとまり) or machine name on a
+  member's screen (`tests/thing-words.test.ts`). `typeLabel` / `stateLabel` in the views and the task list
+  carry these words; machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
   (`GET /companies/:id/members`).
 - **検索**: `POST /records/query { text, limit: 100 }` next to the file search, grouped by kind,

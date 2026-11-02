@@ -8,6 +8,7 @@ import { parseTagsValue } from '../../shared/core/record-types'
 import type { RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { stateLabel } from './record-views'
+import { thingName } from './thing-words'
 
 /**
  * Where an item stands for the member:
@@ -22,7 +23,7 @@ export type TaskTurn = 'mine' | 'acceptance' | 'ai' | 'others' | 'done'
 export interface TaskListItem {
   id: string
   type: string
-  /** The type's own label (タスク, 承認のお願い, 会議…). */
+  /** The kind's plain name (やること, 承認のお願い, 会議の記録…: `thingName`). */
   typeLabel: string
   /** The interfaces its type implements (`request`…), when any: a plugin's peek lists by them (A6). */
   implements?: string[]
@@ -171,9 +172,9 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({
-      id: r.id, type: r.type, typeLabel: src.typeLabels[r.type] ?? r.type,
+      id: r.id, type: r.type, typeLabel: thingName({ type: r.type, typeLabel: src.typeLabels[r.type], implements: src.typeImplements?.[r.type], state: r.state }),
       ...(src.typeImplements?.[r.type] ? { implements: src.typeImplements[r.type] } : {}),
-      title: r.title || '（名前なし）', state: r.state, stateLabel: stateLabel(r.state), version: r.version,
+      title: r.title || '（名前なし）', state: r.state, stateLabel: stateLabel(r.state, r.type), version: r.version,
       due: typeof r.fields.due === 'string' && r.fields.due ? r.fields.due : null,
       tags: parseTagsValue(r.fields.tags),
       turn, waitingFor, personal: r.personal === true,
