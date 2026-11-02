@@ -728,6 +728,8 @@ export interface IpcEventChannels {
   'minutes:changed': [data: { companyId: string }]
   /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
   'notifications:changed': [data: { companyId: string }]
+  /** The morning's 「今日のあなたの番」 Mac notification was clicked: show the task list. */
+  'notifications:openTasks': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -970,6 +972,7 @@ export interface ElectronAPI {
   getNotificationSettings: Invoke<'notifications:settings'>
   setNotificationSetting: Invoke<'notifications:setSetting'>
   onNotificationsChanged: Subscribe<'notifications:changed'>
+  onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
   searchRecords: Invoke<'recordViews:search'>
   getRecordCard: Invoke<'recordViews:card'>
   getRecordsForFile: Invoke<'recordViews:forFile'>

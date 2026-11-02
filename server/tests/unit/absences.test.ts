@@ -170,9 +170,9 @@ describe('the delegate acts only during the absence', () => {
     ok(away('u-alice', 'u-bob'))
     for (const u of ['u-alice', 'u-bob']) ok(notices.setSettings(m(u), { kinds: { others: true } }))
     const t = taskForAlice()
-    expect(ok(notices.list(m('u-alice'))).items.map(i => i.text)).toEqual(['Ownerさんが「請求書を確かめる」であなたを担当にしました'])
+    expect(ok(notices.list(m('u-alice'))).items.map(i => i.text)).toEqual(['Ownerさんから「請求書を確かめる」を頼まれました'])
     expect(ok(notices.list(m('u-bob'))).items.map(i => [i.recordId, i.forUserId, i.text]))
-      .toEqual([[t.id, 'u-alice', '（Aliceさんの代わり）Ownerさんが「請求書を確かめる」であなたを担当にしました']])
+      .toEqual([[t.id, 'u-alice', '（Aliceさんの代わり）Ownerさんから「請求書を確かめる」を頼まれました']])
   })
 })
 
@@ -197,7 +197,7 @@ describe('the delegate\'s own permissions', () => {
     ok(notices.setSettings(m('u-bob'), { kinds: { others: true } }))
     const later = taskForAlice({ folder: '経理', title: '経費の精算' })
     expect(conn.prepare('SELECT user_id, kind FROM notifications WHERE record_id = ? ORDER BY user_id').all(later.id))
-      .toEqual([{ user_id: 'u-alice', kind: 'others' }, { user_id: 'u-carol', kind: 'delegate_stopped' }])
+      .toEqual([{ user_id: 'u-alice', kind: 'asked' }, { user_id: 'u-carol', kind: 'delegate_stopped' }])
     // Alice, setting it herself, is told of all three.
     ok(absences.remove(m('u-alice'), ok(absences.view(m('u-alice'))).absences[0].id))
     expect(ok(away('u-alice', 'u-bob')).delegateCannotRead).toBe(3)

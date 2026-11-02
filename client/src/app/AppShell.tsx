@@ -55,7 +55,7 @@ import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
 import { MeetingBundleBar } from '../features/minutes/components/MeetingBundleBar'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
-import { useNotices } from '../features/notifications/hooks/useNotices'
+import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
 import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
@@ -382,6 +382,9 @@ export function AppShell() {
     if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
     setLeftTab(id)
   }
+  // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
+  const openTasks = () => { if (tasksShown) selectLeftTab('tasks') }
+  useOpenTasksRequest(currentCompany?.id, openTasks)
   // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
   const openSkillFromPalette = (id: string) => {
     if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
@@ -482,6 +485,7 @@ export function AppShell() {
             state={notices}
             meetings={titleBarMeetings}
             onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
+            onOpenTasks={openTasks}
           />
         ) : undefined}
       />

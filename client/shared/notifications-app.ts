@@ -99,6 +99,43 @@ export function desktopNoticeFor(item: TurnItem): { title: string; body: string 
       : { title: 'あなたの番に新しく来ました', body: item.title }
 }
 
+/** What clicking a Mac notification opens: the task list (the morning summary), else just the app. */
+export type DesktopTarget = 'tasks' | 'app'
+
+export interface DesktopNotice {
+  /** The notice's id (kept as shown on this PC), or `turn:<item key>` for a new item in あなたの番. */
+  key: string
+  title: string
+  body: string
+  target: DesktopTarget
+}
+
+/** At most this many Mac notifications per check. */
+export const DESKTOP_NOTICES_PER_CHECK = 3
+
+/**
+ * The Mac notifications of one check (E-27, owner decision 2026-11-03), all
+ * from what the server answered (never from a signal):
+ * - the server's fresh notices (`desktop`: 「今日のあなたの番」, 「明日が期限」,
+ *   「〇〇さんから頼まれました」) not yet shown on this PC (`shown`, kept across
+ *   restarts) — also on the first look, since the server decides freshness;
+ * - the items new in 「あなたの番」 (`newTurnItems`: never on the first look),
+ *   except a record whose `asked` notice speaks for it — one notification for
+ *   one request, in the asker's words.
+ */
+export function desktopNoticesOf(before: ReadonlySet<string> | null, turn: TurnItem[], notices: readonly NotificationItem[], shown: ReadonlySet<string>): DesktopNotice[] {
+  const fresh = notices.filter(n => n.desktop && !n.read)
+  const askedFor = new Set(fresh.filter(n => n.kind === 'asked').map(n => n.recordId))
+  const out: DesktopNotice[] = fresh.filter(n => !shown.has(n.id)).map(n => ({
+    key: n.id, title: n.desktop!.title, body: n.desktop!.body, target: n.kind === 'morning_summary' ? 'tasks' as const : 'app' as const,
+  }))
+  for (const item of newTurnItems(before, turn)) {
+    if (askedFor.has(item.id) && !item.waitCameBack) continue
+    out.push({ key: `turn:${turnItemKey(item)}`, ...desktopNoticeFor(item), target: 'app' })
+  }
+  return out.slice(0, DESKTOP_NOTICES_PER_CHECK)
+}
+
 /**
  * What the task list would show about meetings, for a department that does not show the list
  * (tasks-ui.md "Minutes and AI turns"): the title bar carries it instead, so nothing waits

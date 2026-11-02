@@ -39,6 +39,14 @@ test('a notice opens its record and is read on the server; the dot goes; 「あ�
   expectNoPageErrors(state)
 })
 
+test('the morning’s 「今日のあなたの番」 opens the task list, not a record', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices')
+  await page.getByRole('button', { name: /^起きたこと/ }).click()
+  await page.getByRole('menu', { name: '起きたこと' }).getByRole('menuitem', { name: /今日のあなたの番 2件/ }).click()
+  await expect(page.locator('#opened')).toHaveText('task list')
+  expectNoPageErrors(state)
+})
+
 test('a department without the task list: meetings waiting for the member are in 「あなたの番」 with their buttons; one the AI reads is in the bell', async ({ page }) => {
   const state = await openPreview(page, 'title-bar-notices', { meetings: '1' })
   const turn = page.getByRole('button', { name: /あなたの番/ })

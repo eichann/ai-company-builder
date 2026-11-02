@@ -142,7 +142,7 @@ describe('返事待ち with its 見込み (task version 12)', () => {
     // 「あなたの番」 marks it, with when the wait began.
     const row = mine().find(r => r.id === id)
     expect(row?.waitCameBack).toEqual({ waitedSince: new Date(jst('2026-11-02T10:00')).toISOString(), overAt: new Date(jst('2026-11-07T00:05')).toISOString() })
-    expect(ok(notices.list(m('u-bob'))).items.map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。追いかけてください'])
+    expect(ok(notices.list(m('u-bob'))).items.filter(i => i.kind === 'wait_over').map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。追いかけてください'])
   })
 
   it('［もう少し待つ］ waits again until a new 見込み (the passed one is not kept), and the mark goes', async () => {

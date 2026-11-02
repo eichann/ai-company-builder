@@ -89,7 +89,10 @@ export function engineContext(deps: RecordEngineDeps) {
   }
 
   function tell(member: Member, userIds: Array<LedgerValue | undefined>, change: RecordChange) {
-    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== member.userId))]
+    // The member's own AI acting: the member did not do it, so they are told too — the notices
+    // then keep only what someone else asked of them (`asked`, notifications.md); a person never hears their own act.
+    const self = change.entry.actorKind === 'ai'
+    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && (self || u !== member.userId)))]
     if (to.length > 0) {
       try { deps.notify(member.companyId, to, change) } catch { /* the 60 s check catches up */ }
     }

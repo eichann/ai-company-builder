@@ -6,6 +6,15 @@ import { NO_NOTICES, type NoticesState } from '../../../shared/notifications-app
 
 /** Following a company's turn and notices: main checks with the server (start, every 5 minutes, signals). */
 export type NoticesReads = ElectronPort<'watchNotifications' | 'getNotificationsState' | 'onNotificationsChanged' | 'getNotificationSettings'>
+/** A Mac notification that opens the task list was clicked (the morning's 「今日のあなたの番」). */
+export type NoticesClicks = ElectronPort<'onNotificationsOpenTasks'>
+
+/** `listener` hears when this company's task list should be shown (a clicked Mac notification). */
+export function subscribeOpenTasks(companyId: string, listener: () => void, clicks: NoticesClicks = window.electronAPI): () => void {
+  const stop = clicks.onNotificationsOpenTasks(e => { if (e.companyId === companyId) listener() })
+  return () => { stop?.() }
+}
+
 /** The member's own read state and kind switches (kept on the server, shared by their PCs). */
 export type NoticesWrites = ElectronPort<'markNotificationsRead' | 'setNotificationSetting'>
 

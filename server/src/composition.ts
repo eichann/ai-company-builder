@@ -262,6 +262,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
     managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
     activeAbsences: companyId => absences.activeToday(companyId),
+    // 「今日のあなたの番」 (the clock): every member, and whom each covers today (their あなたの番 has those too).
+    membersOf: companyId => repos.memberships.listByCompany(companyId).map(m => m.user_id),
+    actsFor,
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
     // No per-company zone yet (calendar.md): the one place a setting would replace.
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
