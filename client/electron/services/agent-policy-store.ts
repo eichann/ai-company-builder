@@ -7,6 +7,8 @@
  *
  * - Sandbox: memory only (this app run); with no answer at all the sandbox
  *   stays off for that turn (logged).
+ * - 「もう一方の AI に聞く」 (`secondOpinion`): memory only; allowed only when the last answer
+ *   says `allowed: true` (no answer / an older server = not allowed, `secondOpinionAllowed`).
  * - Stop: the last stop part received is also kept on disk per account and
  *   company (`<dir>/<user>/<company>.json`, 0600), so a restart while offline
  *   still knows it. Never received (no answer, an older server without `stop`)
@@ -19,6 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parseAgentSandboxSettings } from '../../../shared/core/agent-sandbox'
 import type { AgentPolicy, AgentSandboxPolicy } from '../../../shared/types/agent-sandbox'
+import type { SecondOpinionPolicy } from '../../../shared/types/second-opinion'
 import { AGENT_STOP_SUPPORT_HEADER, parseAgentStopPolicy, type AgentStopPolicy } from '../../shared/agent-stop'
 import { parseDistributedPlugins } from '../../shared/plugin-packages'
 
@@ -64,7 +67,25 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   const stop = parseAgentStopPolicy(value.stop)
   // Plugin packages (plan C2): absent or unreadable = the app keeps what it has.
   const plugins = parseDistributedPlugins((value as { plugins?: unknown }).plugins)
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}) }
+  // 「もう一方の AI に聞く」: only an explicit `allowed: true` is kept; anything else = not allowed.
+  const secondOpinion = parseSecondOpinionPolicy((value as { secondOpinion?: unknown }).secondOpinion)
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}), ...(secondOpinion ? { secondOpinion } : {}) }
+}
+
+/** The policy's `secondOpinion` part, or undefined when absent or not a boolean (= not allowed). */
+export function parseSecondOpinionPolicy(value: unknown): SecondOpinionPolicy | undefined {
+  const allowed = (value as { allowed?: unknown } | null | undefined)?.allowed
+  return typeof allowed === 'boolean' ? { allowed } : undefined
+}
+
+/**
+ * 「もう一方の AI に聞く」 is allowed for this company only when the policy, as last received,
+ * says so. No policy (offline, never answered), an older server without the field, or anything
+ * unreadable = not allowed (owner decision 2026-11-02: a company may be contracted with one AI
+ * vendor only, so in doubt nothing is sent to the other).
+ */
+export function secondOpinionAllowed(policy: AgentPolicy | undefined): boolean {
+  return policy?.secondOpinion?.allowed === true
 }
 
 const sameStop = (a: AgentStopPolicy | undefined, b: AgentStopPolicy | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)

@@ -112,6 +112,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   member_absences: ['adapters/sqlite/task-settings.ts'],
   // Each member's own switches (tasks.md); db/schema/tasks.ts: the one-time carry-over when the table is made.
   member_work_switches: ['adapters/sqlite/task-settings.ts', 'db/schema/tasks.ts'],
+  // 「もう一方の AI に聞く」 (chat-and-agents.md); db/schema/agents.ts: the one-time 'on' for the companies existing when the table is made.
+  second_opinion_settings: ['adapters/sqlite/second-opinion.ts', 'db/schema/agents.ts'],
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // 「仕事の道具をつなぐ」: features already shown to a member (google-connector.md).
@@ -145,6 +147,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
 const HANDLE_FACTORIES = [
   'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
+  'sqliteSecondOpinionSettingRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

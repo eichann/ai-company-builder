@@ -70,6 +70,19 @@ export interface SecondOpinionTools {
   execute(name: string, args: unknown): Promise<string>
 }
 
+/**
+ * The company's word on this turn (owner decision 2026-11-02, the admin's 「もう一方の AI に聞く」):
+ * the agents the member named (`askedTargets`) are offered only when the company allows it.
+ * Not allowed, no way to ask (`companyAllows` absent), or the check fails = no tool at all, and
+ * `forbidden` says the member named one (the AI is told it cannot ask). The check runs only
+ * when the member named an agent.
+ */
+export async function secondOpinionTurn(named: readonly AgentId[], companyAllows: (() => Promise<boolean>) | undefined): Promise<{ targets: AgentId[]; forbidden: boolean }> {
+  if (named.length === 0) return { targets: [], forbidden: false }
+  const allowed = companyAllows ? await companyAllows().then(answer => answer === true, () => false) : false
+  return allowed ? { targets: [...named], forbidden: false } : { targets: [], forbidden: true }
+}
+
 /** Calls per conversation, in memory (an app restart resets it). */
 export interface SecondOpinionBudget { take(conversationId: string): boolean }
 

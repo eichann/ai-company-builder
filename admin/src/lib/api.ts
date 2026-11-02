@@ -17,6 +17,7 @@ import {
   agentEventViewersSchema,
   agentSandboxSchema,
   agentStopSchema,
+  secondOpinionSchema,
   brokerSchema,
   capabilitiesSchema,
   clientActivitiesSchema,
@@ -766,6 +767,19 @@ export const agentSandboxApi = {
   /** A member's own mode (staged rollout); null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: AgentSandboxMode | null) =>
     getData(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, agentSandboxSchema, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「もう一方の AI に聞く」 (chat-and-agents.md "Asking the other AI"): shapes from
+// shared/types/second-opinion.ts. Owners/admins; the apps enforce it.
+// ---------------------------------------------------------------------------
+
+export type { SecondOpinionView } from '../../../shared/types/second-opinion'
+
+export const secondOpinionApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema),
+  update: (companyId: string, allowed: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema, { method: 'PUT', body: { allowed } }),
 }
 
 // ---------------------------------------------------------------------------

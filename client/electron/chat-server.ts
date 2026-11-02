@@ -9,9 +9,9 @@ import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import type { WebResearchTools } from './web-research/tools'
-import { createSecondOpinionBudget, createSecondOpinionTools } from './agents/second-opinion'
+import { createSecondOpinionBudget, createSecondOpinionTools, secondOpinionTurn } from './agents/second-opinion'
 import type { SecondOpinionRequest, SecondOpinionResult } from './agents/second-opinion-runner'
-import { SECOND_OPINION_PART_TYPE, askedTargets, secondOpinionInstructions } from '../shared/agents/second-opinion'
+import { SECOND_OPINION_PART_TYPE, askedTargets, secondOpinionForbiddenInstructions, secondOpinionInstructions } from '../shared/agents/second-opinion'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -81,6 +81,12 @@ export interface ChatServerConfig extends AgentHost {
    * CLI, no tools). Offered only in a turn whose member message names that agent.
    */
   runSecondOpinion?: (target: AgentId, request: Omit<SecondOpinionRequest, 'host'>) => Promise<SecondOpinionResult>
+  /**
+   * Whether the company allows 「もう一方の AI に聞く」 (its policy's `secondOpinion`, the admin's
+   * 「詳しい設定 › AI の安全」). Asked only for a turn whose member message names the other agent;
+   * false, absent, unknown (offline, an older server) or a failure = not allowed: no tool at all.
+   */
+  secondOpinionAllowed?: (companyId: string) => Promise<boolean>
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -375,9 +381,15 @@ export async function startChatServer(config: ChatServerConfig) {
     const stopSecondOpinion = () => secondOpinionAbort.abort()
     if (c.req.raw.signal.aborted) stopSecondOpinion(); else c.req.raw.signal.addEventListener('abort', stopSecondOpinion, { once: true })
     const runSecondOpinion = config.runSecondOpinion
-    const secondOpinion = !aiTurnStep && connection.ownsConversation && runSecondOpinion && appSessionId && companyRootPath
+    const namedTargets = !aiTurnStep && connection.ownsConversation && runSecondOpinion && appSessionId && companyRootPath ? askedTargets(authMode, messages) : []
+    // The company decides first (owner decision 2026-11-02): forbidden or unknown = no tool, so
+    // nothing of the company reaches the other vendor from this turn.
+    const secondOpinionAllowed = config.secondOpinionAllowed
+    const secondOpinionChoice = await secondOpinionTurn(namedTargets, companyId && secondOpinionAllowed ? () => secondOpinionAllowed(companyId) : undefined)
+    if (secondOpinionChoice.forbidden) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionForbiddenInstructions(namedTargets)
+    const secondOpinion = runSecondOpinion && appSessionId && companyRootPath
       ? createSecondOpinionTools({
-        asker: authMode, targets: askedTargets(authMode, messages), conversationId: appSessionId, messages, root: companyRootPath,
+        asker: authMode, targets: secondOpinionChoice.targets, conversationId: appSessionId, messages, root: companyRootPath,
         notDownloaded: writeGuard?.getNotDownloaded, privateReads: privateContext ? { context: privateContext, state: privateState } : undefined,
         requestApproval: config.requestToolApproval
           ? (toolId, reason) => config.requestToolApproval!(toolId, {}, crypto.randomUUID(), appSessionId, reason).then(answer => answer.approved)

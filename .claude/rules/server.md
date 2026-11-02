@@ -234,6 +234,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET|PUT /second-opinion                         second-opinion.ts
+                                                                (もう一方の AI に聞く: chat-and-agents.md)
                               GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
                               GET /home, PUT /home/holidays-checked           admin-home.ts
                                                                 (管理画面のホーム: "Admin home" below)

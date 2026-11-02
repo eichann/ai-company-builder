@@ -77,6 +77,7 @@ const TYPES: Record<string, string> = {
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
   AgentStops: 'AgentStopView',
+  SecondOpinion: 'SecondOpinionView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
@@ -232,6 +233,7 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { secondOpinionRoute } = await import('../../src/routes/second-opinion')
   const { taskSettingsRoute } = await import('../../src/routes/task-settings')
   const { inboxRoute } = await import('../../src/routes/inbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
@@ -250,6 +252,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
   app.route('/api/companies/:companyId', inboxRoute)
@@ -386,6 +389,11 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
+  })
+
+  it('「もう一方の AI に聞く」', async () => {
+    await expectShape('SecondOpinion', USERS.owner, 'GET', `${base}/second-opinion`)
+    await expectShape('SecondOpinion', USERS.admin, 'PUT', `${base}/second-opinion`, { allowed: true })
   })
 
   it('emergency stop (「AI の緊急停止」)', async () => {

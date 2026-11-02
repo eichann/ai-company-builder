@@ -6,6 +6,7 @@
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
 import type { AgentStopPolicy } from './agent-stop'
 import type { DistributedPlugin } from './plugins'
+import type { SecondOpinionPolicy } from './second-opinion'
 
 /** A member whose mode differs from the company's (rollout: owner's PC → a department → everyone). */
 export interface AgentSandboxOverride {
@@ -65,4 +66,9 @@ export interface AgentPolicy {
    * the app then leaves what it keeps as it is.
    */
   plugins?: DistributedPlugin[]
+  /**
+   * 「もう一方の AI に聞く」 for this company (second-opinion.ts). Absent from an older server or
+   * unreadable: the app treats it as not allowed.
+   */
+  secondOpinion?: SecondOpinionPolicy
 }

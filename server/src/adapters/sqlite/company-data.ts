@@ -14,6 +14,7 @@ import { sqliteOutboundMailRepository } from './outbound-mail'
 import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
+import { sqliteSecondOpinionSettingRepository } from './second-opinion'
 import { sqliteSkillUseRepository } from './skill-uses'
 import { sqliteTaskSettingsRepository } from './task-settings'
 
@@ -54,6 +55,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         tasks: sqliteTaskSettingsRepository(conn, companyId),
         aiRuns: sqliteAiRunRepository(conn, companyId),
         skillUses: sqliteSkillUseRepository(conn, companyId),
+        secondOpinion: sqliteSecondOpinionSettingRepository(conn, companyId),
         // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
         // lane A ▼
         // lane A ▲

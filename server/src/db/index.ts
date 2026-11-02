@@ -5,7 +5,7 @@ import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
 import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
 import { TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
-import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
+import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
 import { brokerSchema, migrateBrokerSettings } from './schema/broker'
 import { companySchema, migrateInvitationClaims } from './schema/company'
@@ -44,6 +44,7 @@ export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
+export { migrateSecondOpinionSetting } from './schema/agents'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -107,6 +108,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordLedgerProvenance(conn)
   migrateRecordPersonalOwner(conn)
   migrateAgentEventSandbox(conn)
+  // 「もう一方の AI に聞く」: made once, on for the companies that exist then (agents.ts).
+  migrateSecondOpinionSetting(conn)
   migrateBrokerSettings(conn)
   migratePluginInstallKeyReference(conn)
   migratePluginOperationCreates(conn)

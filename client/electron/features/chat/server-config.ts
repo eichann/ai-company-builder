@@ -24,7 +24,7 @@ import type { HandoffStore } from '../../handoff/store'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
-import type { AgentPolicyStore } from '../../services/agent-policy-store'
+import { secondOpinionAllowed, type AgentPolicyStore } from '../../services/agent-policy-store'
 import type { AgentStop } from '../../services/agent-stop'
 import type { SkillUseReporter } from '../../services/skill-use-reporter'
 import type { BrokerTokenStore } from '../../services/broker-token-store'
@@ -115,6 +115,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     },
     getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>
       deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
+    // 「もう一方の AI に聞く」: the company's setting from the policy (unknown = not allowed).
+    secondOpinionAllowed: async companyId => secondOpinionAllowed(await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })),
     getAgentSandbox: async (companyId, root) => {
       const policy = await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })
       if (!policy) return undefined

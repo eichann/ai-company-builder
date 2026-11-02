@@ -21,6 +21,7 @@ import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
+import { secondOpinionRoute } from './routes/second-opinion'
 import { taskSettingsRoute } from './routes/task-settings'
 import { adminHomeRoute } from './routes/admin-home'
 import { absencesRoute } from './routes/absences'
@@ -151,6 +152,7 @@ app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
+app.route('/api/companies/:companyId', secondOpinionRoute)
 app.route('/api/companies/:companyId', taskSettingsRoute)
 app.route('/api/companies/:companyId', adminHomeRoute)
 app.route('/api/companies/:companyId', absencesRoute)

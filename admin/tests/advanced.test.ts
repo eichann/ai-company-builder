@@ -41,5 +41,8 @@ describe('「初期値のまま」 or 「変えています」', () => {
     expect(aiSafetyChanged({ sandbox: sandbox({ settings: { ...DEFAULT_AGENT_SANDBOX_SETTINGS, mode: 'observe' } }) })).toBe(true)
     expect(aiSafetyChanged({ sandbox: sandbox({ overrides: [{ userId: 'u_member' }] as unknown as AgentSandboxView['overrides'] }) })).toBe(true)
     expect(aiSafetyChanged({ eventsUpdatedAt: '2026-11-01T00:00:00.000Z' })).toBe(true)
+    // 「もう一方の AI に聞く」 starts as 「聞かない」: allowing it is a change.
+    expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: false, updatedAt: null, updatedByName: null } })).toBe(false)
+    expect(aiSafetyChanged({ sandbox: sandbox(), secondOpinion: { allowed: true, updatedAt: null, updatedByName: null } })).toBe(true)
   })
 })
