@@ -53,6 +53,11 @@ export interface TaskListItem {
    * or more of them as one row 「まとまりを選ぶ会議 n件」 (the server groups them).
    */
   bundleGroup?: { key: string; label: string }
+  /**
+   * With `needsBundle`: the 相手's one open まとまり (the server's suggestion) — 「『…』の会議ですか？」
+   * with はい (the same link as choosing by hand), ちがう／選ぶ and まとまりはない. Never linked before はい.
+   */
+  suggestedBundle?: { id: string; title: string }
   /** 「AI の番」 only: the server clock put it there because its wait is over (the PC's wait-over step runs it). */
   waitOver?: true
 }
@@ -71,6 +76,8 @@ export type BundleChoicesResult =
 
 /** The words of the 「あなたの番」 item for a meeting read without a まとまり. */
 export const MEETING_NEEDS_BUNDLE_TEXT = 'どのまとまり（案件など）の会議か選んでください'
+/** The words when the server suggests one まとまり. */
+export const meetingSuggestedBundleText = (title: string) => `『${title}』の会議ですか？`
 
 export interface TaskListData {
   /** false: records are off for the company (no list at all). */
@@ -160,7 +167,7 @@ function waitingWords(r: RecordSummary, me: string, people: Record<string, strin
 export function classifyTasks(src: TaskSources): TaskListItem[] {
   const seen = new Set<string>()
   const out: TaskListItem[] = []
-  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null, bundleGroup: TaskListItem['bundleGroup'] | null = null) => {
+  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null, bundleGroup: TaskListItem['bundleGroup'] | null = null, suggested: TaskListItem['suggestedBundle'] | null = null) => {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({
@@ -175,6 +182,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       bundle: src.bundles[r.id] ?? null,
       finishedAt,
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
+      ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
     })
   }
@@ -189,7 +197,8 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       id: q.recordId, type: 'meeting', typeVersion: null, title: q.title, summary: '', path: null, state: 'read', version: q.version,
       fields: q.meetingAt ? { meeting_at: q.meetingAt } : {}, updatedAt: q.readAt,
     }
-    add(r, 'mine', MEETING_NEEDS_BUNDLE_TEXT, null, q.group)
+    const suggested = q.suggested ? { id: q.suggested.id, title: q.suggested.title || '（名前なし）' } : null
+    add(r, 'mine', suggested ? meetingSuggestedBundleText(suggested.title) : MEETING_NEEDS_BUNDLE_TEXT, null, q.group, suggested)
   }
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))

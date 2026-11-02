@@ -14,6 +14,8 @@ export type MinutesWrites = ElectronPort<'skipMinutes'>
 export type MeetingBundleQuestionReads = ElectronPort<'getMeetingBundleQuestion'>
 /** 「まとまりはない（社内の会議など）」: the server records the person's choice on the shared meeting. */
 export type MeetingNoBundleWrites = ElectronPort<'declineMinutesBundle'>
+/** はい to 「『…』の会議ですか？」: the same link as choosing by hand (nothing goes outside). */
+export type MeetingBundleLinkWrites = ElectronPort<'linkMinutesBundle'>
 
 const NONE: MinutesNoticesResult = { available: false, notices: [] }
 
@@ -51,4 +53,8 @@ export async function getMeetingBundleQuestion(companyId: string, meetingId: str
 
 export function declineMeetingBundle(companyId: string, meetingId: string, writes: MeetingNoBundleWrites = window.electronAPI) {
   return writes.declineMinutesBundle(companyId, meetingId)
+}
+
+export function linkSuggestedBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleLinkWrites = window.electronAPI) {
+  return writes.linkMinutesBundle(companyId, meetingId, bundleId)
 }

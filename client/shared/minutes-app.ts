@@ -34,7 +34,7 @@ export type MinutesActionResult =
 
 /** A meeting's 「どのまとまりの会議ですか？」 for its card (the server decides; see minutes.md). */
 export type MeetingBundleQuestionResult =
-  | { success: true; title: string; canChoose: boolean; noBundle: boolean }
+  | { success: true; title: string; canChoose: boolean; noBundle: boolean; suggested: { id: string; title: string } | null }
   | { success: false; error: string }
 
 export const MINUTES_OFFLINE_TEXT = 'サーバーに接続できないため、いまは議事録を確かめられません（オフラインの可能性があります）。'

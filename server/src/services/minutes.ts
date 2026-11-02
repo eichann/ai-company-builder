@@ -69,6 +69,12 @@ export interface MinutesServiceDeps {
   members: (companyId: string) => MinutesMember[]
   clock: Clock
   tokenDigest: TokenDigest
+  /**
+   * 名寄せ (identity.md, B1): the 相手 records of an address's company (by its domain, never free
+   * mail), readable by that member. Used when no まとまり was linked at intake: the outside
+   * participants' company becomes the meeting's 相手, and its one open まとまり is suggested.
+   */
+  resolveAddress?: (member: Member, address: string) => Outcome<{ person: string[]; company: string[] }>
 }
 
 /** How far back the calendar is read (design §1-2: the last few days). */
@@ -282,6 +288,46 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return { key: key(`t:${squash(row.title)}`), label: row.title }
   }
 
+  /**
+   * The outside participants' company (名寄せ, identity.md resolveAddress): when every participant
+   * who resolves at all resolves to the same 相手 records, the first of them; else null.
+   */
+  function participantsCompany(member: Member, emails: string[]): string | null {
+    if (!deps.resolveAddress) return null
+    const sets = new Set<string>()
+    let first: string | null = null
+    for (const email of emails) {
+      const r = deps.resolveAddress(member, email)
+      if (!r.ok || r.value.company.length === 0) continue
+      const ids = [...r.value.company].sort()
+      sets.add(ids.join(','))
+      first ??= ids[0]
+    }
+    return sets.size === 1 ? first : null
+  }
+
+  /**
+   * 「『…』の会議ですか？」 (owner 2026-11-02): the one open まとまり of the meeting's 相手 that the
+   * member reads, or null (none, two or more, or a 相手 the member does not read). Never linked
+   * without the person's click.
+   */
+  function suggestedBundle(handle: CompanyData, reader: RecordReader, meetingId: string): MeetingBundleQuestion['suggested'] {
+    const records = handle.records
+    const cp = records.linksFrom([meetingId]).find(l => l.name === 'counterpart' && l.targetId)
+    const cpRow = cp ? records.byIds([cp.targetId as string]).find(r => r.removedAt === null && reader.record(r)) : undefined
+    if (!cpRow) return null
+    const bundles = typesImplementing(handle, 'bundle')
+    const old = new Set(handle.plugins.oldConnectionRecordIds())
+    const rows = records.byIds([...new Set(records.linksTo([cpRow.id]).map(l => l.sourceId))])
+    const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s.state]))
+    const open = rows.filter(r => {
+      const def = bundles.get(r.type)
+      return !!def && r.removedAt === null && !old.has(r.id) && reader.record(r) && !def.final.includes(states.get(r.id) ?? def.initial ?? '')
+    })
+    if (open.length !== 1) return null
+    return { id: open[0].id, title: open[0].title, typeLabel: bundles.get(open[0].type)?.label ?? open[0].type }
+  }
+
   /** Is the member the minutes' assignee or an attendee? */
   function isYours(fields: Record<string, LedgerValue>, userId: string): boolean {
     return fields.assignee === userId || attendeeIds(fields.attendees).includes(userId)
@@ -429,7 +475,9 @@ export function createMinutesService(deps: MinutesServiceDeps) {
             const assigneeReader = recordReader({ companyId: member.companyId, userId: assignee, role }, handle.scopes.listWithRules())
             const candidates = bundleCandidates(handle, assigneeReader, [...new Set(external.map(a => emailDomain(a.email)))], event.title)
             const bundle = candidates.length === 1 ? candidates[0] : null
-            const counterpart = bundle ? counterpartOf(handle, bundle.id) : null
+            // No まとまり: the outside participants' company (名寄せ) is still the meeting's 相手 — never a まとまり without a click.
+            const counterpart = bundle ? counterpartOf(handle, bundle.id)
+              : participantsCompany({ companyId: member.companyId, userId: assignee, role }, external.map(a => a.email))
             const input = {
               ...base,
               fields: {
@@ -604,7 +652,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         questions.push({
           recordId: row.id, title: row.title, version: now.version,
           meetingAt: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null,
-          readAt, group: bundleGroup(handle, reader, row, now.fields),
+          readAt, group: bundleGroup(handle, reader, row, now.fields), suggested: suggestedBundle(handle, reader, row.id),
         })
       }
       questions.sort((a, b) => (b.readAt < a.readAt ? -1 : b.readAt > a.readAt ? 1 : 0))
@@ -618,10 +666,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(handle.records, row.id)
+      const canChoose = mayChooseBundle(member, now.fields) && !hasBundleLink(handle, row.id)
+      const reader = recordReader(member, handle.scopes.listWithRules())
       return ok({
-        recordId: row.id, title: row.title, version: now.version,
-        canChoose: mayChooseBundle(member, now.fields) && !hasBundleLink(handle, row.id),
+        recordId: row.id, title: row.title, version: now.version, canChoose,
         noBundle: noBundleChosen(handle, row.id),
+        suggested: canChoose ? suggestedBundle(handle, reader, row.id) : null,
       })
     },
 

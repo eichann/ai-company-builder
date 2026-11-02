@@ -126,6 +126,12 @@ export interface MeetingBundleQuestion {
    * shows them as one row 「まとまりを選ぶ会議 n件」. `label` names the group (the series' title).
    */
   group: { key: string; label: string }
+  /**
+   * 「『…』の会議ですか？」: the one open まとまり (readable by the member) of the meeting's 相手 — the
+   * outside participants' company found by 名寄せ. Null: none, or two or more (the plain question).
+   * Never linked until the person says はい (the same `…/bundle` as choosing by hand).
+   */
+  suggested: { id: string; title: string; typeLabel: string } | null
 }
 
 /** `GET /api/companies/:id/me/minutes/item/:recordId/bundle-question` — one meeting's question, for its card. */
@@ -137,6 +143,8 @@ export interface MeetingBundleQuestionState {
   canChoose: boolean
   /** 「まとまりはない」 was chosen earlier (a まとまり can still be chosen). */
   noBundle: boolean
+  /** As `MeetingBundleQuestion.suggested` (only while a まとまり may be chosen). */
+  suggested: MeetingBundleQuestion['suggested']
 }
 
 /** `POST …/minutes/item/:recordId/no-bundle { expectedVersion? }` — 「まとまりはない（社内の会議など）」. */

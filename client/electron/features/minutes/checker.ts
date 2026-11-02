@@ -238,9 +238,11 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
       if (!COMPANY.test(companyId) || !MINUTES.test(minutesId)) return { success: false, error: '入力が正しくありません。' }
       const r = await call(companyId, 'GET', `/me/minutes/item/${encodeURIComponent(minutesId)}/bundle-question`)
       if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
-      const d = r.body?.data as { title?: unknown; canChoose?: unknown; noBundle?: unknown } | undefined
+      const d = r.body?.data as { title?: unknown; canChoose?: unknown; noBundle?: unknown; suggested?: { id?: unknown; title?: unknown } | null } | undefined
       if (r.status !== 200 || typeof d?.canChoose !== 'boolean') return { success: false, error: memberText(r.body, `読めませんでした（サーバーの応答 ${r.status}）。`) }
-      return { success: true, title: typeof d.title === 'string' && d.title ? d.title.slice(0, 200) : '会議', canChoose: d.canChoose, noBundle: d.noBundle === true }
+      const s = d.suggested
+      const suggested = s && typeof s.id === 'string' && RECORD.test(s.id) ? { id: s.id, title: typeof s.title === 'string' && s.title ? s.title.slice(0, 200) : '（名前なし）' } : null
+      return { success: true, title: typeof d.title === 'string' && d.title ? d.title.slice(0, 200) : '会議', canChoose: d.canChoose, noBundle: d.noBundle === true, suggested }
     },
 
     /** Sign-out / quit: forget everything and stop the loop. */

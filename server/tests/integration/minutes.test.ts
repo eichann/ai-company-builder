@@ -263,6 +263,8 @@ let salesId: string
 describe('discovery', () => {
   it('an internal-only meeting creates nothing and its Meet record is never looked up', async () => {
     at('2026-11-06T09:00:00+09:00')
+    // The 顧客 says it is a company (名寄せ matches a company by its domain, identity.md).
+    db.prepare("UPDATE record_state SET fields = json_set(fields, '$.counterpart_kind', 'company') WHERE company_id = ? AND record_id IN (SELECT id FROM records WHERE company_id = ? AND type = 'customer')").run(CO, CO)
     google.requests.length = 0
     const r = await check('mn-tanaka')
     expect(r.status, r.text).toBe(200)
@@ -300,6 +302,9 @@ describe('discovery', () => {
 
   it('two open deal candidates: nothing is linked; the text names both and a person chooses', async () => {
     expect(linkOf(salesId, 'bundle')).toBeNull()
+    // 名寄せ: the outside participants' company is the meeting's 相手 even without a まとまり (never a まとまり without a click).
+    const customer = (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'customer'").get(CO) as Json).id as string
+    expect(linkOf(salesId, 'counterpart')).toBe(customer)
     const t = await textOf('mn-sato', salesId)
     expect(t.status, t.text).toBe(200)
     expect(t.body.data.bundle).toBeNull()
@@ -605,5 +610,33 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/bundle`, { bundleId: deal })).status).toBe(200)
     const again = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})
     expect([again.status, again.body.code]).toEqual([409, 'MINUTES_HAS_BUNDLE'])
+  })
+
+  it('「『…』の会議ですか？」: the 相手\'s one open まとまり the member reads is suggested, never linked until はい', async () => {
+    const suggestedOf = async (user: string) => (await questions(user)).questions.find(q => q.recordId === salesId)?.suggested
+    // Two open deals of the 相手: the plain question.
+    expect(await suggestedOf('mn-sato')).toBeNull()
+    const other = dealIdOf('生成AI研修 2期（株式会社サンプル）')
+    const deal = dealIdOf('研修導入（株式会社サンプル）')
+    db.prepare("UPDATE record_state SET state = 'lost' WHERE company_id = ? AND record_id = ?").run(CO, other)
+    expect(await suggestedOf('mn-sato')).toEqual({ id: deal, title: '研修導入（株式会社サンプル）', typeLabel: '案件' })
+    expect((await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toMatchObject({ id: deal })
+    // Not the assignee: nothing to choose, nothing suggested.
+    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toBeNull()
+    // Suggesting changed nothing: no まとまり, still read.
+    expect(linkOf(salesId, 'bundle')).toBeNull()
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
+    // A まとまり the member does not read is never suggested (nor named).
+    db.prepare('UPDATE records SET personal_owner = ? WHERE company_id = ? AND id = ?').run('mn-tanaka', CO, deal)
+    const hidden = await call('mn-sato', 'GET', `${C()}/me/minutes/bundle-questions`)
+    expect(hidden.text, hidden.text).not.toContain(deal)
+    expect(hidden.text).not.toContain('研修導入（株式会社サンプル）')
+    expect((await questions('mn-sato')).questions.find(q => q.recordId === salesId)?.suggested).toBeNull()
+    db.prepare('UPDATE records SET personal_owner = NULL WHERE company_id = ? AND id = ?').run(CO, deal)
+    // はい: the same link as choosing by hand, and the まとまり's part goes to the AI.
+    expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(200)
+    expect(linkOf(salesId, 'bundle')).toBe(deal)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('bundle_waiting')
+    db.prepare("UPDATE record_state SET state = 'open' WHERE company_id = ? AND record_id = ?").run(CO, other)
   })
 })
