@@ -1,8 +1,8 @@
 // .gitignore files are merged line by line (git's built-in `union` driver)
 // instead of by "server wins".
 //
-// Sync appends lines to .gitignore itself (nested-repo and large-file
-// exclusions, the essential patterns). When two members change .gitignore at
+// Sync appends lines to .gitignore itself (the essential patterns; older
+// apps also nested-repo and large-file exclusions, now in .git/info/exclude). When two members change .gitignore at
 // the same time the rebase conflicts on it, and "server wins" threw away the
 // member's side — including the lines sync had just added — so the member was
 // asked about the same nested repository again at the next sync, and a team

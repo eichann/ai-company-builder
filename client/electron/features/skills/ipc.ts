@@ -1,7 +1,8 @@
 // Skills in the company folder: the scan behind the skills list (company
 // root → 全社, each department and its nested folders → groups), cached for
 // plain tab switches, and the three edits the UI makes (publish / keep
-// private through the root .gitignore, the 育成中 status in SKILL.md).
+// private on this computer through .git/info/exclude — older apps used the
+// shared root .gitignore, still honoured —, the 育成中 status in SKILL.md).
 //   skills:list, skills:publish, skills:makePrivate, skills:toggleNurturing
 
 import fs from 'fs'
@@ -11,6 +12,7 @@ import { SkillsCache } from '../../../shared/skills-refresh'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PathGuard } from '../ports'
+import { readLocalPrivateSkills, removeSharedLines, setLocalPrivateSkill } from '../../sync/local-ignores'
 
 // Tool (Web app) info
 interface ToolInfo {
@@ -111,7 +113,7 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
   // Gitignore cache per rootPath to avoid repeated file reads
   const gitignoreCache = new Map<string, { lines: string[]; mtime: number }>()
 
-  function getGitignoreLines(rootPath: string): string[] {
+  function getSharedGitignoreLines(rootPath: string): string[] {
     const gitignorePath = path.join(rootPath, '.gitignore')
     try {
       if (!fs.existsSync(gitignorePath)) return []
@@ -125,6 +127,23 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
     } catch {
       return []
     }
+  }
+
+  /** Private-skill lines: this computer's (.git/info/exclude) and those older apps put in the shared .gitignore. */
+  function getGitignoreLines(rootPath: string): string[] {
+    return [...readLocalPrivateSkills(rootPath), ...getSharedGitignoreLines(rootPath)]
+  }
+
+  /** The company folder's .git/info/exclude, refused when .git is not a folder in it (or links out). */
+  function localExcludeOf(rootPath: string): void {
+    const gitDir = path.join(rootPath, '.git')
+    let isDir = false
+    try { isDir = fs.lstatSync(gitDir).isDirectory() } catch { /* missing */ }
+    if (!isDir) throw new Error('Not a company folder')
+    const infoDir = path.join(gitDir, 'info')
+    if (fs.existsSync(infoDir)) paths.validate(infoDir)
+    const exclude = path.join(infoDir, 'exclude')
+    if (fs.existsSync(exclude)) paths.validate(exclude)
   }
 
   function invalidateGitignoreCache(rootPath: string): void {
@@ -328,30 +347,23 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
     return value
   }
 
-  // Publish a skill (remove from .gitignore, one-way / irreversible)
+  // Publish a skill (one-way / irreversible): its line leaves this computer's
+  // .git/info/exclude and, when an older app put it there, the shared .gitignore.
   ipc.handle('skills:publish', async (_, rootPath: string, skillRelativePath: string) => {
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
-      const gitignorePath = paths.validate(path.join(rootPath, '.gitignore'))
-      if (!fs.existsSync(gitignorePath)) return { success: true }
-
-      const content = fs.readFileSync(gitignorePath, 'utf-8')
-      const lines = content.split('\n')
-      const filtered = lines.filter(l => l.trim() !== skillRelativePath)
-
-      // Remove empty "# Private skills" header if no more entries follow
-      const cleanedLines: string[] = []
-      for (let i = 0; i < filtered.length; i++) {
-        if (filtered[i].trim() === '# Private skills') {
-          const nextNonEmpty = filtered.slice(i + 1).find(l => l.trim() !== '')
-          if (!nextNonEmpty || !nextNonEmpty.includes('.claude/skills/')) {
-            continue
-          }
-        }
-        cleanedLines.push(filtered[i])
+      if (fs.existsSync(path.join(rootPath, '.git'))) {
+        localExcludeOf(rootPath)
+        setLocalPrivateSkill(rootPath, skillRelativePath, false)
       }
-      fs.writeFileSync(gitignorePath, cleanedLines.join('\n'))
+      const gitignorePath = paths.validate(path.join(rootPath, '.gitignore'))
+      if (fs.existsSync(gitignorePath)) {
+        const lines = fs.readFileSync(gitignorePath, 'utf-8').split('\n')
+        if (lines.some(l => l.trim() === skillRelativePath)) {
+          fs.writeFileSync(gitignorePath, removeSharedLines(lines.map(l => (l.trim() === skillRelativePath ? skillRelativePath : l)), new Set([skillRelativePath])).join('\n'))
+        }
+      }
       invalidateGitignoreCache(rootPath)
       invalidateSkillsCache(rootPath)
       return { success: true }
@@ -361,30 +373,18 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
     }
   })
 
-  // Add skill to .gitignore (used when creating a new skill). Never for a
-  // skill the company already has: the line would not stop sync from sharing
-  // it, and the app would show 「非公開」 for something everyone gets.
+  // Keep a new skill on this computer (used when creating one): a line in
+  // .git/info/exclude, never the shared .gitignore (every teammate's skill of
+  // that name would stop syncing, and only admins should change that file).
+  // Never for a skill the company already has: the line would not stop sync
+  // from sharing it, and the app would show 「非公開」 for something everyone gets.
   ipc.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
       if (await isShared(rootPath, skillRelativePath)) return { success: false, error: SKILL_ALREADY_SHARED, code: 'already_shared' as const }
-      const gitignorePath = paths.validate(path.join(rootPath, '.gitignore'))
-      const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
-      const lines = content.split('\n')
-
-      if (!lines.some(l => l.trim() === skillRelativePath)) {
-        const header = '# Private skills'
-        const headerIndex = lines.findIndex(l => l.trim() === header)
-        if (headerIndex >= 0) {
-          lines.splice(headerIndex + 1, 0, skillRelativePath)
-        } else {
-          lines.push('', header, skillRelativePath)
-        }
-        fs.writeFileSync(gitignorePath, lines.join('\n'))
-        invalidateGitignoreCache(rootPath)
-        invalidateSkillsCache(rootPath)
-      }
+      localExcludeOf(rootPath)
+      if (setLocalPrivateSkill(rootPath, skillRelativePath, true)) invalidateSkillsCache(rootPath)
       return { success: true }
     } catch (error) {
       console.error('Make private error:', error)

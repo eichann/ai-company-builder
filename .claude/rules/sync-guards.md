@@ -109,6 +109,34 @@ what git actually sees through the app's `createGit`.
   "a folder one member keeps local still syncs for a teammate…", "a nested-repo line an older
   app wrote…", "no window…", "deleting the nested repository…"; partial-clone "…stays excluded
   across settings changes and reopening"; findings "concurrent nested-repo exclusions converge…".
+- Ignore lines the app writes for one member — large files (step 4) and a skill kept private
+  while it is written (`skills:makePrivate`) — go to managed blocks of that member's
+  `.git/info/exclude` (`sync/local-ignores.ts`), never the shared `.gitignore`: a line there
+  stopped a teammate's file at the same path from syncing, and kept the shared `.gitignore`
+  something every member's app writes. Lines older apps wrote there (`# Auto-ignored: Large
+  files (>100MB)` sections, `<folder>/.claude/skills/<name>/`) move at the member's own sync,
+  before anything is staged, only when they are this member's: the file is here and over the
+  limit / the skill folder is here and neither tracked nor on `origin/main`. Local line first,
+  then the shared one goes, so nothing stops being ignored. A teammate with a file at the same
+  path still has the line when their sync starts (the move runs before their pull) and keeps
+  their own copy. Two removals of neighbouring lines meet in the union merge, which can bring a
+  line back; its member moves it again right after the pull (after step 11.5), so the file converges.
+  A large file kept here whose path a teammate now shares is copied to
+  `.backups/<ts>_large_file/` before the pull (as for nested repositories). Not moved: lines
+  for files this computer does not have (someone else's, or nobody's any more — an owner may
+  delete them). Known gap: an OLDER app does not move anything, so if it keeps a private skill
+  at exactly the path of a teammate's moved one, that skill starts syncing once the line is
+  gone (both made one with the same name in the same department). Scenarios:
+  `large-files.test.ts` 「a large-file line an older app wrote…」, 「a teammate who has a large
+  file at the same path…」, 「…the pull does not lose this computer's version」;
+  `private-skills.test.ts`. Unit: `ipc-app.test.ts` 「skills: the scan…」.
+  **Making the shared root `.gitignore` owner/admin-only in the push checker** is the next
+  step and is not done yet. Condition: no app version that still writes it is in use — every
+  active member's build includes this change (check `client_activity` builds), since older
+  apps append large-file and private-skill lines and would hit `[PROTECTED_CONFIG]` on every
+  sync (a private skill would be shared after the restore). Sync's essentials (step 3), the
+  `.env` lines (`electron/features/env/ipc.ts`) and the union tidy (11.5) still write the shared
+  file from every app and must be allowed for members (or moved) at that point too.
 - The app's temporary save files (`.<name>.acb-tmp-<random>`: the document review writes one
   next to a sidecar and renames it over, `client/shared/temp-save-file.ts`) are never shared. A
   sync in that moment would commit a half-written file, and the next one its removal. Every
@@ -117,19 +145,19 @@ what git actually sees through the app's `createGit`.
   the shared `.gitignore`; one that still reached the index (a shared `!.*` outranks
   `info/exclude`) is unstaged after the `git add`, like `.backups/`. The file stays on disk
   untouched. Tests: `client/tests/sync/temp-save-files.test.ts`, `client/tests/temp-save-file.test.ts`.
-- Who may change the shared root `.gitignore` — **open hole, client-side only so far**. The
+- Who may change the shared root `.gitignore` — **still an open hole on the server**. The
   settings page's editor (「同期しないファイル」) is offered to owners / admins only
-  (`download-choices.md`); the push checker does **not** restrict the file, so any member (a
-  hand edit, the AI, an older app) can still push a line such as `*.xlsx` that stops new files
-  syncing for everyone. It cannot simply be made owner/admin-only on the server, because the app
-  itself writes that file for every member: sync's essentials (step 3), large files (step 4),
-  the `.env` lines (`electron/features/env/ipc.ts`), a new skill kept private / published
-  (`skills:makePrivate` / `skills:publish`) and the union-merge tidy (11.5). A
-  `[PROTECTED_CONFIG]` rejection there would restore the server's version — a private skill
-  would be shared on the next sync, a large-file line re-added and refused every sync. The real
-  fix (owner's plan 2026-11-02): move those automatic lines to `.git/info/exclude` (as nested
-  repositories were), and once no released app writes the shared `.gitignore` any more, make it
-  owner/admin-only in the push checker.
+  (`download-choices.md`), and this version of the app no longer writes large-file or
+  private-skill lines there (they are on each member's computer: "Ignore lines the app writes
+  for one member" above). But the push
+  checker does **not** restrict the file yet, so any member (a hand edit, the AI, an older app)
+  can still push a line such as `*.xlsx` that stops new files syncing for everyone. What still
+  has to happen before the server can make it owner/admin-only is at the end of that bullet
+  ("Making the shared root `.gitignore` owner/admin-only…"): older apps out of use, and sync's own
+  remaining writes (essentials, `.env` lines, the union tidy) allowed for members or moved. A
+  `[PROTECTED_CONFIG]` rejection of an older app's automatic line would restore the server's
+  version — a private skill would be shared on the next sync, a large-file line re-added and
+  refused every sync.
 - `.gitignore` merges with the `union` driver, declared in the repository-local
   `.git/info/attributes` (never committed, outranks `.gitattributes`, any depth;
   `sync/gitignore-merge.ts`). After replayed commits, duplicate lines the merge added are removed

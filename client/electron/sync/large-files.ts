@@ -1,5 +1,6 @@
 // Step 4 of git:sync: files over 100 MB are kept out of what sync shares by
-// a line in the root .gitignore (.claude/rules/sync.md, step 4).
+// a line in this computer's .git/info/exclude (./local-ignores.ts; older
+// apps wrote it into the shared root .gitignore — .claude/rules/sync.md, step 4).
 //
 // The scan used to walk and stat the whole company folder — .workspace/, app
 // bundles and other ignored trees included — pruned by a substring test on
@@ -53,7 +54,7 @@ export interface LargeFileScanOptions {
   /**
    * Repository-relative paths never reported (and never entered): the
    * readable private folders' clones and the local-only folders. A large file
-   * there must not be named in the shared .gitignore.
+   * there must not be named in the company repository's ignore lines.
    */
   skip?: (relPath: string) => boolean
 }

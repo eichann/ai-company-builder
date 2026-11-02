@@ -1020,7 +1020,7 @@ POST /ai-runs/:runId/operations/:key/reconcile   { done }
   --no-optional-locks --porcelain` of the folder is not empty (the tree id then names what it
   started from). **Nothing is reported** for a skill inside a private folder (a `.git` on the way:
   its name never leaves the PC, `private-folders.md`), one not in HEAD (only on this PC, e.g.
-  kept private by the root `.gitignore`), one found in two places on the way or shadowed by the
+  kept private on this computer through `.git/info/exclude`), one found in two places on the way or shadowed by the
   member's own `~/.claude/skills/<name>` (which one ran is unknown), or an invalid name. Sent:
   `{ conversationId, name, tree, dirty }` only — no path, no content; once per version per
   consultation (in memory); failures logged once without names, never in the AI's path.

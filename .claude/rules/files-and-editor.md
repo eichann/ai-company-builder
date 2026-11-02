@@ -152,7 +152,9 @@ broke the block) and changes one entry in place (`setFrontmatterField`, the copy
 `skills:list` caches one scan per root + department folder (`''` = company-wide) for 5 s, for
 plain tab switches only. A scan is stale after any event at/under a `.claude/skills/` it reads
 (root → company-wide; inside a department → that department), the `.claude` folder itself, the
-root `.gitignore` (private marks → every scan), or a folder added/removed in the department.
+root `.gitignore` (older apps' private marks → every scan), or a folder added/removed in the department.
+Private marks are kept in this computer's `.git/info/exclude` (`ACB private skills` block,
+`sync/local-ignores.ts`); `skills:makePrivate` / `skills:publish` invalidate the scans themselves.
 Main drops stale scans in `sendFileChanges`; the renderer rescans the shown list and the
 company-wide skills behind slash commands with `{ force: true }` (coalesced 120 ms, deferred
 ≤ 1 s while typing in chat; `src/features/skills/hooks/useSkillsAutoRefresh.ts`) and after every
@@ -161,11 +163,13 @@ successful sync, keeping the list on screen.
 The renderer reaches skills only through `src/features/skills/api.ts`: ports `SkillReads` (list,
 read a file), `SkillToolRuns` (start / stop a skill's tool), `SkillOutbound` (open the tool's
 page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillSharingWrites` (private /
-publish: the `.gitignore` line that decides whether the next sync shares the skill).
+publish: the `.git/info/exclude` line — or an older app's line in the shared `.gitignore`, which
+publish also removes — that decides whether the next sync shares the skill; a company folder
+without a `.git` folder is refused).
 New skill and copy never replace a skill folder that exists (checked first, then main's
 `fs:createFile` / `fs:copy`); a new skill is marked private before anything is written, and
 `skills:makePrivate` refuses (`already_shared`) a folder the index or `origin/main` already has —
-a `.gitignore` line does not stop sync from sharing tracked files (`features/skills/shared-check.ts`,
+an ignore line does not stop sync from sharing tracked files (`features/skills/shared-check.ts`,
 test `ipc-app.test.ts` 「skills:makePrivate never marks…」). The wizard and the copy modal wait for
 the result, disable their buttons meanwhile and show the reason (`role="alert"`); preview
 `client/tests/keep-work-ui.html?view=skills` (`tests/ui/keep-work.spec.ts`).

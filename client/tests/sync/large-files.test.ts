@@ -1,5 +1,8 @@
 // Step 4 of git:sync: files over the size limit are kept out of what sync
-// shares by an anchored, literal line in the root .gitignore. The scan only
+// shares by an anchored, literal line in this computer's .git/info/exclude
+// (never the shared .gitignore: a teammate's file at the same path would stop
+// syncing; lines older apps wrote there move to the member they belong to —
+// client/electron/sync/local-ignores.ts). The scan only
 // looks at what git lists (index entries + untracked files no rule ignores)
 // and asks git whether a path is already ignored. See
 // client/electron/sync/large-files.ts and step 4 in
@@ -9,7 +12,8 @@
 import { describe, test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { World, privateMarker, type SyncOutcome } from '../sync-harness/world'
+import path from 'node:path'
+import { World, privateMarker, ESSENTIAL_GITIGNORE, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck } from '../sync-harness/invariants'
 import { largeFilePattern } from '../../electron/sync/large-files'
 
@@ -27,7 +31,14 @@ function ok(outcome: SyncOutcome, who = ''): SyncOutcome {
 }
 
 const serverIgnore = (world: World) => world.serverFile('.gitignore')?.toString('utf-8') ?? ''
-const lines = (text: string) => text.split('\n')
+/** The member's own large-file lines (.git/info/exclude, managed block). */
+const localLines = (m: Member, dir = '') => {
+  let text = ''
+  try { text = fs.readFileSync(m.path(`${dir ? `${dir}/` : ''}.git/info/exclude`), 'utf-8') } catch { return [] }
+  const all = text.split('\n')
+  const begin = all.indexOf('# >>> ACB large files (managed by the app, local only) >>>')
+  return begin < 0 ? [] : all.slice(begin + 1, all.indexOf('# <<< ACB large files <<<', begin))
+}
 
 describe('largeFilePattern', () => {
   test('anchored, literal, unchanged for a plain path with a folder', () => {
@@ -50,10 +61,8 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.result.ignoredLargeFiles, ['big.bin', 'media/huge.mov'])
     assert.match(out.result.message ?? '', /（2個の大容量ファイルを同期対象外にしました）/)
-    const ignore = lines(serverIgnore(world))
-    assert.ok(ignore.includes('# Auto-ignored: Large files (>100MB)'))
-    assert.ok(ignore.includes('/big.bin'), 'a root file is anchored')
-    assert.ok(ignore.includes('media/huge.mov'))
+    assert.equal(serverIgnore(world), ESSENTIAL_GITIGNORE, 'nothing is written into the shared .gitignore')
+    assert.deepEqual(localLines(a), ['/big.bin', 'media/huge.mov'], 'a root file is anchored')
     assert.equal(world.serverFile('big.bin'), null)
     assert.equal(world.serverFile('media/huge.mov'), null)
     assert.equal(world.serverFile('media/small.txt')?.toString(), SMALL)
@@ -63,8 +72,9 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     a.write('media/small.txt', 'small v2\n')
     const again = ok(await a.sync(), 'a')
     assert.deepEqual(again.result.ignoredLargeFiles, [])
-    assert.equal(lines(serverIgnore(world)).filter(l => l === '/big.bin').length, 1)
+    assert.deepEqual(localLines(a), ['/big.bin', 'media/huge.mov'])
     ok(await b.sync(), 'b')
+    assert.deepEqual(localLines(b), [])
     assert.equal(b.exists('media/huge.mov'), false)
     await settleAndCheck(world)
   })
@@ -80,8 +90,8 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     assert.equal(world.serverFile('data.mp4'), null)
     assert.equal(world.serverFile('営業部/new.mp4'), null, 'the old substring test skipped every file under 営業部')
     assert.equal(world.serverFile('営業部/memo.md')?.toString(), SMALL)
-    const ignore = lines(serverIgnore(world))
-    assert.ok(ignore.includes('/data.mp4') && ignore.includes('営業部/new.mp4'))
+    assert.deepEqual(localLines(a), ['/data.mp4', '営業部/new.mp4'])
+    assert.equal(serverIgnore(world), gitignore)
     await settleAndCheck(world)
   })
 
@@ -109,15 +119,14 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     const [a, b] = world.members
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.result.ignoredLargeFiles, ['営業部/動画.mp4'])
-    assert.ok(lines(serverIgnore(world)).includes('営業部/動画.mp4'))
+    assert.deepEqual(localLines(a), ['営業部/動画.mp4'])
     assert.ok(world.serverFile('営業部/動画.mp4')?.equals(LARGE), 'still tracked on the server')
     a.write('x.md', 'x2\n')
     assert.deepEqual(ok(await a.sync(), 'a').result.ignoredLargeFiles, [], 'not added twice')
-    // b scans before it pulls a's line (step 4 precedes the fetch), as before;
-    // the union merge keeps one copy.
-    ok(await b.sync(), 'b')
+    // Each member keeps their own line; the shared .gitignore never changes.
+    assert.deepEqual(ok(await b.sync(), 'b').result.ignoredLargeFiles, ['営業部/動画.mp4'])
     assert.deepEqual(ok(await b.sync(), 'b').result.ignoredLargeFiles, [])
-    assert.equal(lines(serverIgnore(world)).filter(l => l === '営業部/動画.mp4').length, 1)
+    assert.equal(serverIgnore(world), ESSENTIAL_GITIGNORE)
     assert.ok(b.read('営業部/動画.mp4').equals(LARGE))
     await settleAndCheck(world)
   })
@@ -144,8 +153,8 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']])
     assert.deepEqual(out.result.ignoredLargeFiles, ['top.bin'], 'the kept-local repository is already ignored when the scan runs')
-    assert.equal(serverIgnore(world), `${before}\n# Auto-ignored: Large files (>100MB)\n/top.bin\n`)
-    assert.ok(!serverIgnore(world).includes('ext-tool'))
+    assert.equal(serverIgnore(world), before)
+    assert.deepEqual(localLines(a), ['/top.bin'])
     ok(await b.sync(), 'b')
     await settleAndCheck(world)
   })
@@ -170,7 +179,9 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     assert.deepEqual(out.result.ignoredLargeFiles, [])
     const ignore = serverIgnore(world)
     assert.doesNotMatch(ignore, /big\.bin|評価|Auto-ignored: Large/)
-    assert.ok(lines(world.scopeFile(HR, '.gitignore')?.toString() ?? '').includes('/big.bin'), 'ignored inside the scope repository instead')
+    assert.doesNotMatch(world.scopeFile(HR, '.gitignore')?.toString() ?? '', /big\.bin/)
+    assert.deepEqual(localLines(reader, HR), ['/big.bin'], 'ignored in the private folder\'s own clone instead')
+    assert.deepEqual(localLines(reader), [])
     assert.equal(world.scopeFile(HR, 'big.bin'), null)
     await settleAndCheck(world)
   })
@@ -194,6 +205,71 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
     assert.equal(world.serverFile('開発部/new-huge.bin'), null)
     assert.equal(world.serverFile('営業部/memo.md')?.toString(), SMALL)
     assert.ok(p.exists('開発部/new-huge.bin'), 'ignored, so left where it is (as before)')
+    await settleAndCheck(world)
+  })
+
+  // Lines older apps wrote into the shared .gitignore (`# Auto-ignored: Large
+  // files` sections) move to the member whose file it is, before anything is
+  // staged; a line for a file this computer does not have stays.
+  scenario('a large-file line an older app wrote moves to its member\'s computer; a teammate\'s line stays until theirs moves', async t => {
+    const legacy = `${ESSENTIAL_GITIGNORE}\n# Auto-ignored: Large files (>100MB)\n/a.bin\n営業部/b.mov\n/gone.bin\n`
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], largeFileThreshold: LIMIT, gitignore: legacy, seed: { '営業部/提案.md': '提案\n' } })
+    const [a, b, c] = world.members
+    a.write('a.bin', LARGE)
+    b.write('営業部/b.mov', LARGE)
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.result.ignoredLargeFiles, [], 'already ignored: not counted again')
+    assert.deepEqual(localLines(a), ['/a.bin'])
+    assert.equal(serverIgnore(world), `${ESSENTIAL_GITIGNORE}\n# Auto-ignored: Large files (>100MB)\n営業部/b.mov\n/gone.bin\n`, 'only a\'s own line left the shared file')
+    assert.equal(world.serverFile('a.bin'), null, 'never shared on the way')
+    ok(await b.sync(), 'b')
+    assert.deepEqual(localLines(b), ['営業部/b.mov'])
+    assert.equal(world.serverFile('営業部/b.mov'), null)
+    // Two removals of neighbouring lines meet in the union merge, which keeps
+    // both sides (the accepted trade-off, gitignore-merge.ts): a line can come
+    // back; its member moves it again at the next sync, and it stays ignored throughout.
+    ok(await a.sync(), 'a')
+    ok(await b.sync(), 'b')
+    assert.equal(serverIgnore(world), `${ESSENTIAL_GITIGNORE}\n# Auto-ignored: Large files (>100MB)\n/gone.bin\n`, 'a line for a file nobody here has stays')
+    assert.deepEqual(localLines(a), ['/a.bin'])
+    assert.deepEqual(localLines(b), ['営業部/b.mov'])
+    ok(await c.sync(), 'c')
+    assert.deepEqual(localLines(c), [])
+    assert.ok(a.exists('a.bin') && b.exists('営業部/b.mov'), 'kept on disk')
+    await settleAndCheck(world)
+  })
+
+  scenario('a teammate who has a large file at the same path copies the line before the pull that removes it', async t => {
+    const legacy = `${ESSENTIAL_GITIGNORE}\n# Auto-ignored: Large files (>100MB)\n/same.bin\n`
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], largeFileThreshold: LIMIT, gitignore: legacy })
+    const [a, b] = world.members
+    a.write('same.bin', LARGE)
+    b.write('same.bin', Buffer.alloc(LIMIT + 9, 3)).write('note.md', 'b\n')
+    ok(await a.sync(), 'a')
+    assert.doesNotMatch(serverIgnore(world), /same\.bin/)
+    // b's copy of the shared file still has the line when b's sync starts.
+    ok(await b.sync(), 'b')
+    assert.deepEqual(localLines(b), ['/same.bin'])
+    assert.equal(world.serverFile('same.bin'), null, 'neither member\'s large file was shared')
+    assert.equal(world.serverFile('note.md')?.toString(), 'b\n')
+    await settleAndCheck(world)
+  })
+
+  scenario('a teammate shares a file at the path of a large file kept on this computer: the pull does not lose this computer\'s version', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], largeFileThreshold: LIMIT, seed: { 'x.md': 'x\n' } })
+    const [a, b] = world.members
+    a.write('media/clip.mov', LARGE)
+    assert.deepEqual(ok(await a.sync(), 'a').result.ignoredLargeFiles, ['media/clip.mov'])
+    b.write('media/clip.mov', SMALL)
+    ok(await b.sync(), 'b')
+    assert.equal(world.serverFile('media/clip.mov')?.toString(), SMALL, 'the line no longer stops a teammate\'s file')
+    const out = ok(await a.sync(), 'a')
+    assert.match(out.result.message ?? '', /このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版を \.backups に保存しました（1件）/)
+    const [backup] = a.backups().filter(x => x.metadata.reason === 'large_file_overwrite')
+    assert.ok(backup, 'backed up before the pull')
+    assert.deepEqual(backup.metadata.files, ['media/clip.mov'])
+    assert.ok(fs.readFileSync(path.join(a.dir, '.backups', backup.folder, 'media/clip.mov')).equals(LARGE))
+    assert.equal(a.read('media/clip.mov').toString(), SMALL)
     await settleAndCheck(world)
   })
 })
