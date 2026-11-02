@@ -61,6 +61,12 @@ export interface RecordEngineDeps {
    * into the engine; nothing is undone when it fails.
    */
   afterAct?: (companyId: string, change: RecordChange) => void
+  /**
+   * The company's now (`YYYY-MM-DDTHH:MM`, its time zone) and its own holidays, for a core
+   * argument default counted in business days (`ARG_DEFAULTS`, task version 12). Without it:
+   * the default zone's now and no company holidays.
+   */
+  companyDay?: (companyId: string) => { now: string; holidays: string[] }
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */

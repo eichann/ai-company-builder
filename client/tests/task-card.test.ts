@@ -200,3 +200,19 @@ test('見られる人 on the task card is the server\'s answer for that task onl
   assert.deepEqual(await cardWith({ records: { 'task-0000aa': { kind: 'department', text: '営業部のみんな', count: 4 } }, files: {} }), { kind: 'department', text: '営業部のみんな', count: 4 })
   assert.equal(await cardWith({ records: { 'task-other': { kind: 'company', text: '会社のみんな', count: 9 } }, files: {} }), null)
 })
+
+test('返事待ち (task version 12): the card shows the 見込み and ［見込みを変える］ while waiting; once the clock gave it back, what came back and 「もう少し待つ」', () => {
+  const waiting = card(task('waiting', { assignee: ME, requested_by: BOSS, waiting_on: '先方からの返事', wait_until: '2026-11-06' }))
+  assert.deepEqual(waiting.wait, { on: '先方からの返事', until: '2026-11-06', cameBack: null, canChange: true })
+  const e = (version: number, action: string, fromState: string | null, toState: string | null, actorId = ME, at = '2026-11-02T01:00:00.000Z') =>
+    ({ recordId: 'task-0000aa', version, action, fromState, toState, actorId, actorKind: actorId.startsWith('acb:') ? 'external' : 'human', actorSource: null, at, note: '', changes: [], attachments: [], decision: null, isDecision: false, typeVersion: 12, reversesVersion: null }) as unknown as LedgerEntry
+  const entries = [e(1, 'create', null, 'todo', BOSS), e(2, 'wait', 'todo', 'waiting'), e(3, 'wait_over', 'waiting', 'todo', 'acb:clock', '2026-11-07T00:00:00.000Z')]
+  const back = card(task('todo', { assignee: ME, requested_by: BOSS, waiting_on: '先方からの返事', wait_until: '2026-11-06' }), { entries, holidays: ['2026-11-05'] })
+  assert.deepEqual(back.wait, { on: '先方からの返事', until: '2026-11-06', cameBack: { waitedSince: '2026-11-02T01:00:00.000Z' }, canChange: false })
+  assert.deepEqual(back.holidays, ['2026-11-05'])
+  assert.ok(back.actions.some(a => a.action === 'wait'))
+  // Moved on by a person after it came back: nothing of the wait shows.
+  assert.equal(card(task('in_progress', { assignee: ME, wait_until: '2026-11-06' }), { entries: [...entries, e(4, 'start', 'todo', 'in_progress')] }).wait, null)
+  // Someone who may not change it (not requester nor assignee) gets no ［見込みを変える］.
+  assert.equal(card(task('waiting', { assignee: 'u-tanaka', requested_by: BOSS, wait_until: '2026-11-06' })).wait?.canChange, false)
+})

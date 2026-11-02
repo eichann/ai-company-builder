@@ -22,7 +22,7 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
-import { consultationAbout, taskConsultFirstMessage, taskConsultTitle } from '../../../../shared/task-consult'
+import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
 import { agentCan } from '../../../../shared/agents/registry'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
 import { AiTurnNotice } from './AiTurnNotice'
@@ -111,12 +111,13 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
-  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh }) => {
-    const existing = fresh ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
+  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose }) => {
+    // A purpose (［催促の下書きを作る］) always starts its own consultation.
+    const existing = fresh || purpose ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
     if (existing) { openOrFocus(existing); return }
     setInputRequest({
-      kind: 'newConsultation', title: taskConsultTitle(title), topicRecordId: recordId,
-      message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp')),
+      kind: 'newConsultation', title: purpose ? taskConsultPurposeTitle(title, purpose) : taskConsultTitle(title), topicRecordId: recordId,
+      message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp'), purpose),
       instruction: { kind: 'task', recordId, title },
     })
   }, { target: paneId })

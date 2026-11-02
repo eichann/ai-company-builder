@@ -6,7 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTasksApi } from '../electron/features/tasks/ipc'
-import { classifyTasks, type TaskSources } from '../shared/tasks'
+import { cameBackLine, classifyTasks, defaultWaitUntil, waitChoices, type TaskSources } from '../shared/tasks'
 import type { RecordSummary } from '../../shared/types/records'
 
 const ME = 'u-me'
@@ -35,6 +35,39 @@ test('each record is placed once: 引き受け待ち, the member\'s turn, a repl
   assert.deepEqual(at['task-ask002'], ['others', '田中さんに頼んだ・引き受け待ち'])
   assert.deepEqual(at['task-done01'], ['done', null])
   assert.equal(items.find(i => i.id === 'task-todo01')?.bundle?.title, 'AI の仕組みづくり')
+})
+
+test('返事待ち (task version 12): the row says its 見込み; once the clock gave it back, 「…が来ていません（n日）」 in business days', () => {
+  const items = classifyTasks(src({
+    today: '2026-11-09', holidays: [],
+    myTurn: [
+      rec('task-wait01', 'waiting', { waiting_on: '先方からの返事', wait_until: '2026-11-06' }),
+      // Began Tue 11-03 (文化の日) 10:00 JST; today Mon 11-09 → Wed, Thu, Fri, Mon = 4.
+      rec('task-back01', 'todo', { waiting_on: '先方からの返事', wait_until: '2026-11-06' }, { waitCameBack: { waitedSince: '2026-11-03T01:00:00.000Z', overAt: '2026-11-07T00:00:00.000Z' } }),
+      rec('task-back02', 'todo', { wait_until: '2026-11-06' }, { waitCameBack: { waitedSince: null, overAt: '2026-11-07T00:00:00.000Z' } }),
+      // A past 見込み alone (no mark from the server) is not 「来ていません」.
+      rec('task-todo01', 'todo', { waiting_on: 'x', wait_until: '2026-11-01' }),
+    ],
+  }))
+  const at = Object.fromEntries(items.map(i => [i.id, [i.turn, i.waitingFor]]))
+  assert.deepEqual(at['task-wait01'], ['others', '返事待ち：先方からの返事（11/6 ごろまで）'])
+  assert.deepEqual(at['task-back01'], ['mine', '先方からの返事が来ていません（4日）'])
+  assert.deepEqual(at['task-back02'], ['mine', '返事が来ていません'])
+  assert.deepEqual(at['task-todo01'], ['mine', null])
+  // The company's own holiday is not counted.
+  assert.equal(cameBackLine('先方からの返事', '2026-11-03T01:00:00.000Z', '2026-11-09', ['2026-11-05']), '先方からの返事が来ていません（3日）')
+})
+
+test('「いつごろ来そうか」 chips: 明日 (the next business day), 3日後 (3 business days, the default), 来週 (same weekday, or the next business day)', () => {
+  // Monday 11-02; 11-03 文化の日.
+  assert.deepEqual(waitChoices('2026-11-02').map(c => [c.label, c.until]), [['次の営業日', '2026-11-04'], ['3日後', '2026-11-06'], ['来週', '2026-11-09']])
+  assert.equal(defaultWaitUntil('2026-11-02'), '2026-11-06')
+  // Wednesday 11-04 with the company's own holiday on Friday 11-06.
+  assert.deepEqual(waitChoices('2026-11-04', ['2026-11-06']).map(c => [c.label, c.until]), [['明日', '2026-11-05'], ['3日後', '2026-11-10'], ['来週', '2026-11-11']])
+  // Friday → 明日 is Saturday: the next business day is Monday; 来週 Friday 11-13.
+  assert.deepEqual(waitChoices('2026-11-06').map(c => [c.label, c.until]), [['次の営業日', '2026-11-09'], ['3日後', '2026-11-11'], ['来週', '2026-11-13']])
+  // 来週 on a holiday (11-23 勤労感謝の日, Monday) → the business day after it.
+  assert.equal(waitChoices('2026-11-16').find(c => c.key === 'next-week')?.until, '2026-11-24')
 })
 
 test('each item carries the interfaces its type implements (a plugin\'s peek lists by them, A6)', () => {

@@ -278,3 +278,75 @@ test('no 案件 yet: 〇〇 is the department\'s kind; ［新しい案件にす�
   await expect(page.locator('#acted')).toHaveText('create deal A社 見積書を 150万円 で作り直す folder=営業部,link task-0000aa bundle=deal-0009zz@3')
   expectNoPageErrors(state)
 })
+
+// 返事待ち with its 見込み (task version 12, tasks-ui.md "返事待ち and its 見込み"). Screenshots for the PR:
+// SCREENSHOTS=<dir> writes the wait chooser and the came-back card there.
+const shots = process.env.SCREENSHOTS
+
+test('返事待ちにする asks what and until when: chips set the date; nothing chosen sends none (the server sets 3 business days)', async ({ page }) => {
+  // Monday 2026-11-02 10:00 in Japan (11-03 is 文化の日).
+  await page.clock.install({ time: new Date('2026-11-02T01:00:00Z') })
+  const state = await openPreview(page, 'task-card', { task: 'todo-team' })
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /返事待ちにする/ }).click()
+  const dialog = page.getByRole('dialog', { name: '返事待ちにしますか？' })
+  const chips = dialog.getByRole('group', { name: 'いつごろ来そうか' })
+  await expect(chips.getByRole('button', { name: /次の営業日/ })).toContainText('11/4')
+  await expect(chips.getByRole('button', { name: /3日後/ })).toContainText('11/6')
+  await expect(chips.getByRole('button', { name: /来週/ })).toContainText('11/9')
+  await expect(dialog).toContainText('選ばなければ 3営業日後（11/6）にします')
+  await dialog.getByLabel('待っているもの').fill('先方からの返事')
+  await chips.getByRole('button', { name: /来週/ }).click()
+  if (shots) await dialog.screenshot({ path: `${shots}/wait-chooser.png` })
+  await dialog.getByRole('button', { name: '返事待ちにする' }).click()
+  await expect(page.locator('#acted')).toHaveText('wait@3:on=先方からの返事:until=2026-11-09')
+  await expect(page.getByRole('status').filter({ hasText: '返事待ちにしました（11/9 ごろまで）' })).toBeVisible()
+
+  // Nothing chosen: no date goes (the server's default).
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /返事待ちにする/ }).click()
+  await page.getByLabel('待っているもの').fill('見積の回答')
+  await page.getByRole('dialog', { name: '返事待ちにしますか？' }).getByRole('button', { name: '返事待ちにする' }).click()
+  await expect(page.locator('#acted')).toHaveText('wait@3:on=先方からの返事:until=2026-11-09,wait@3:on=見積の回答')
+  expectNoPageErrors(state)
+})
+
+test('while waiting the card shows the 見込み, and ［見込みを変える］ sets a new one', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-02T01:00:00Z') })
+  const state = await openPreview(page, 'task-card', { task: 'waiting' })
+  const band = page.getByRole('region', { name: '返事待ち' })
+  await expect(band).toContainText('返事待ち：先方からの返事（11/6 ごろまで）')
+  await band.getByRole('button', { name: '見込みを変える' }).click()
+  await expect(band.getByRole('button', { name: 'この日にする' })).toBeDisabled()
+  await band.getByRole('button', { name: '日を選ぶ' }).click()
+  await band.getByLabel('見込みの日').fill('2026-11-12')
+  await band.getByRole('button', { name: 'この日にする' }).click()
+  await expect(page.locator('#acted')).toHaveText('set_wait_until@3:until=2026-11-12')
+  expectNoPageErrors(state)
+})
+
+test('given back by the clock: 「先方からの返事が来ていません（3日）」, 経緯 says why, and 催促の下書き / もう少し待つ / 完了にする', async ({ page }) => {
+  // Saturday 2026-11-07 09:00 in Japan: waited since Mon 11-02 → Wed, Thu, Fri (Tue was 文化の日).
+  await page.clock.install({ time: new Date('2026-11-07T00:00:00Z') })
+  const state = await openPreview(page, 'task-card', { task: 'back' })
+  const card = page.getByTestId('task-card')
+  const band = card.getByRole('region', { name: '返事が来ていません' })
+  await expect(band).toContainText('先方からの返事が来ていません（3日）')
+  await expect(band).toContainText('返事の見込み（11/6）を過ぎたので、あなたの番に戻りました。')
+  await card.getByRole('button', { name: /経緯/ }).click()
+  await expect(card.getByRole('region', { name: '経緯' })).toContainText('ACB の時計：返事の見込み（11/6）を過ぎました')
+  if (shots) await card.screenshot({ path: `${shots}/came-back-card.png` })
+
+  await band.getByRole('button', { name: '催促の下書きを作る' }).click()
+  await expect(page.locator('#acted')).toHaveText('nudge task-0000ww')
+  await band.getByRole('button', { name: 'もう少し待つ' }).click()
+  const again = page.getByRole('dialog', { name: 'もう少し待ちますか？' })
+  await expect(again.getByLabel('待っているもの')).toHaveValue('先方からの返事')
+  await again.getByRole('group', { name: 'いつごろ来そうか' }).getByRole('button', { name: /3日後/ }).click()
+  await again.getByRole('button', { name: 'もう少し待つ' }).click()
+  await expect(page.locator('#acted')).toHaveText('nudge task-0000ww,wait@3:on=先方からの返事:until=2026-11-11')
+  await band.getByRole('button', { name: '完了にする' }).click()
+  await expect(page.locator('#acted')).toContainText('complete@3')
+  expectNoPageErrors(state)
+})

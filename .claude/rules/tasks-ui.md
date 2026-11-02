@@ -159,7 +159,7 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    for an OK from outside ACB — since task version 9 only on a task to be checked first, `records.md`
    "Task version 9").
    Never the AI's own steps (`who: [ai]`: finish_prep, hand_over) nor actions needing a record
-   chooser (set_bundle) or the list's own editors (tags, wait_until). **One main button** beside
+   chooser (set_bundle) or their own editors (tags; wait_until: 「返事待ち and its 見込み」 below). **One main button** beside
    the title (新しい画面のデモ C, J; `placeActions`): 自分で進める (AI が用意している) → 引き受ける →
    終わったので見てもらう (確かめてから, the assignee) → 完了にする — but on a task returned to its requester
    (受けられないと返した) the requester's main action is 担当を替える, with 「やり直す（同じ人にもう一度）」 and
@@ -230,6 +230,34 @@ open → 「AI が反映しています…（あと少し）」; otherwise, when
 and passes only what the server answered for that record (`viewers`); a record left out shows
 nothing (`client/tests/record-card-viewers.test.ts`).
 Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
+
+## 返事待ち and its 見込み (task version 12, owner decision 2026-11-03 「②」; server `records.md` "Task version 12")
+
+- **Making it wait** (the card's 返事待ちにする, still offered as before — チームの進め方 on, a task someone
+  else is in — and 「もう少し待つ」): `WaitDialog` (`components/WaitParts.tsx`): 何が起きるか / 知らせる人,
+  「何を待っていますか」 (`waiting_on`, prefilled) and 「いつごろ来そうか」 (`WaitChooser`): ［明日］ (the next
+  business day; 「次の営業日」 when that is not tomorrow) ［3日後］ (3 business days) ［来週］ (same weekday,
+  or the next business day) ［日を選ぶ］ — each chip with its date (`waitChoices`, `client/shared/tasks.ts`,
+  from the company's today and holidays: `tasks:card` reads `GET /task-settings` → `card.holidays`).
+  One `wait` with both args; **nothing chosen sends no date** and the server sets 3 business days
+  (「選ばなければ 3営業日後（11/6）にします」, `defaultWaitUntil`).
+- **While waiting** (`card.wait`, `WaitBand`): 「返事待ち：先方からの返事（11/6 ごろまで）」 (`waitingLine`) and
+  ［見込みを変える］ (`set_wait_until`, a date must be chosen; `card.wait.canChange`: who the type allows).
+  The list's row says the same (`waitingWords`).
+- **Given back by the clock** (`card.wait.cameBack`, from the 経緯 with core `waitCameBack`; the list from
+  the server's `waitCameBack` on 「あなたの番」): row and card read 「先方からの返事が来ていません（3日）」
+  (`cameBackLine`: `waiting_on` + business days since the wait began, up to today; 「返事が来ていません」
+  without it), the card adds 「返事の見込み（11/6）を過ぎたので、あなたの番に戻りました。」 and ［催促の下書きを作る］
+  (`onNudge` → `chat.consultAbout` with `purpose: 'nudge'`: always a new consultation 「<title> の催促」 whose
+  first message (`taskConsultFirstMessage(…, 'nudge')`) has the AI read the task and draft a short nudge —
+  a reply draft when the original mail is linked — that the member checks and sends; the AI never sends)
+  ［もう少し待つ］ (the same window, a new 見込み) ［完了にする］. 経緯 shows the clock's note as one line
+  (「ACB の時計：返事の見込み（11/6）を過ぎました」, `historyLines`).
+- Tests: `client/tests/tasks-list.test.ts` (the row words, business days, the chips' dates),
+  `task-card.test.ts` (`card.wait`), `tests/ui/task-card.spec.ts` (`?task=todo-team|waiting|back`: chips
+  set the date, nothing chosen sends none, ［見込みを変える］, the came-back band and its three buttons;
+  `SCREENSHOTS=<dir>` writes the chooser and the came-back card), `task-consult.test.ts` (the nudge
+  message never lets the AI send).
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 

@@ -194,6 +194,8 @@ export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undef
   return historyEntries(entries, def).map(e => {
     const what = def?.actions[e.action]?.label ?? ENGINE_ACTIONS[e.action] ?? e.action
     const who = e.actorKind === 'ai' ? 'AI' : e.actorKind === 'external' ? (e.actorSource ?? '外のサービス') : (people[e.actorId] ?? 'メンバー')
+    // The clock's note already says why (「返事の見込み（11/6）を過ぎました」): one line, not two.
+    if (e.action === WAIT_OVER_ACTION && e.note) return { at: e.at, text: `${who}：${e.note}`, ai: false, version: e.version, who }
     return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }
   })
 }

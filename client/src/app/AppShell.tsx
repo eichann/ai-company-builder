@@ -315,6 +315,8 @@ export function AppShell() {
   const shareFolders = rootPath ? departments.filter(d => d.folder && !isReadOnly(`${rootPath}/${d.folder}`)).map(d => ({ folder: d.folder, name: d.name })) : []
   // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
   const consultAbout = (task: { id: string; title: string }, fresh = false) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, ...(fresh ? { fresh } : {}) }).catch(() => {}) }
+  // ［催促の下書きを作る］ on a task whose 返事の見込み passed: a new consultation that drafts the nudge (the member sends it).
+  const draftNudge = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'nudge' }).catch(() => {}) }
   // A record's 「つながっているもの」 lists the consultations about it (this PC's history).
   const recordConsultations = useLinkedConsultations(currentCompany?.id)
   // Business plugins' four slots (plugin-frame.md "The four slots"): only verified packages the company lists now.
@@ -330,7 +332,7 @@ export function AppShell() {
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} />
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} />
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
     const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')

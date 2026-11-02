@@ -151,3 +151,24 @@ export function nextBusinessDay(date: string, companyHolidays: Iterable<string> 
   for (let i = 0; i < 400 && !isBusinessDay(next, own); i++) next = addDays(next, 1)
   return next
 }
+
+/** The business day `n` business days after `date` (n ≥ 1; 0 or less → `date`). */
+export function addBusinessDays(date: string, n: number, companyHolidays: Iterable<string> = []): string {
+  const own = new Set(companyHolidays)
+  let at = date
+  for (let i = 0; i < n; i++) at = nextBusinessDay(at, own)
+  return at
+}
+
+/**
+ * How many business days lie after `from` up to and including `to` (both `YYYY-MM-DD`): a wait
+ * begun on a Tuesday and looked at on Saturday has lasted 3 (Wed, Thu, Fri). 0 when `to` is not
+ * after `from`; counted up to 400 days.
+ */
+export function businessDaysBetween(from: string, to: string, companyHolidays: Iterable<string> = []): number {
+  const own = new Set(companyHolidays)
+  let n = 0
+  let at = addDays(from, 1)
+  for (let i = 0; i < 400 && at <= to; i++, at = addDays(at, 1)) if (isBusinessDay(at, own)) n++
+  return n
+}

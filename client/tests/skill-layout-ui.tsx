@@ -194,7 +194,7 @@ const api: Partial<ElectronAPI> = {
       files: [{ path: '営業部/提案書/A社_提案.md' }],
       links: [{ label: '決めたこと', record: RECORD_DECISION }],
       history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
-      runs: [], people: [],
+      runs: [], people: [], wait: null, holidays: [],
     } }
     : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
   getRecordsForFile: async (_companyId: string, companyPath: string) => {

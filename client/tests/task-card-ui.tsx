@@ -3,7 +3,9 @@
 // card is built by the real `taskCardOf` from core type definitions. `?task=done` shows a task
 // completed on someone's OK; `?shared=1` a task already shown to a department (no 「部署に出す」); `?source=1` gives the card a source
 // (what a connector draws in the slot); `?conflict=1` answers every action with 「ほかの人が先に変えました」 after 阿部さん
-// changed the due. Actions sent show in `#acted`, run answers in `#runs`.
+// changed the due. Actions sent show in `#acted`, run answers in `#runs`. `?task=waiting`: 返事待ち with its 見込み
+// (task version 12); `?task=back`: the clock gave it back (見込み 11/6 passed); `?task=todo-team`: a plain task with
+// チームの進め方 on (返事待ちにする in 「…」). The wait tests install the page clock (Mon 11-02 or Sat 11-07).
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -27,6 +29,8 @@ const conflict = params.get('conflict') === '1'
 const reviewing = params.get('task') === 'review'
 // `?bundle=none`: no 案件 yet, in a department that makes 案件 (［案件につなぐ］［新しい案件にする］).
 const noBundle = params.get('bundle') === 'none'
+// 返事待ち (task version 12): waiting, given back by the clock, or a plain task to make wait.
+const waitMode = params.get('task') === 'waiting' || params.get('task') === 'back' || params.get('task') === 'todo-team' ? params.get('task') : null
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -47,7 +51,20 @@ const reviewCard = taskCardOf({
     { name: 'meeting', direction: 'in', record: rec('decision-000002', 'decision', '4月から始める', 'unconfirmed', { owner: 'u-abe' }) },
   ] },
 })
-const shownCard = reviewing ? reviewCard : taskCardOf({
+const waitEntries = [
+  { version: 1, action: 'create', actorId: 'u-abe', actorKind: 'human', at: '2026-11-02T00:00:00.000Z', note: '', fromState: null, toState: 'todo', changes: [] },
+  { version: 2, action: 'wait', actorId: ME, actorKind: 'human', at: '2026-11-02T01:00:00.000Z', note: '', fromState: 'todo', toState: 'waiting', changes: [] },
+  ...(waitMode === 'back' ? [{ version: 3, action: 'wait_over', actorId: 'acb:clock', actorKind: 'external', actorSource: 'ACB の時計', at: '2026-11-06T15:00:00.000Z', note: '返事の見込み（11/6）を過ぎました', fromState: 'waiting', toState: 'todo', changes: [] }] : []),
+] as unknown as LedgerEntry[]
+const waitCard = waitMode ? taskCardOf({
+  me: ME, defs, def: defs.get('task'), people, runs: [], teamMode: true, holidays: [],
+  entries: waitMode === 'todo-team' ? [] : waitEntries,
+  detail: { record: rec('task-0000ww', 'task', 'A社 見積の回答をもらう', waitMode === 'waiting' ? 'waiting' : 'todo', {
+    assignee: ME, requested_by: 'u-abe', due: '2026-11-13',
+    ...(waitMode === 'todo-team' ? {} : { waiting_on: '先方からの返事', wait_until: '2026-11-06' }),
+  }), links: [] },
+}) : null
+const shownCard = waitCard ?? (reviewing ? reviewCard : taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
   detail: {
     record: task,
@@ -60,8 +77,8 @@ const shownCard = reviewing ? reviewCard : taskCardOf({
       { name: 'meeting', direction: 'out', fixed: true, record: rec('meeting-0000cc', 'meeting', 'A社 打ち合わせ', 'read') },
     ],
   },
-})
-const card = reviewing ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
+}))
+const card = reviewing || waitCard ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
 const acted: string[] = []
 const show = (id: string, line: string) => { acted.push(line); document.getElementById(id)!.textContent = acted.join(',') }
 
@@ -80,7 +97,7 @@ installElectronAPI({
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     // A tag the server refuses: the card shows its words.
     if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
-    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
+    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
     return { success: true, recordId }
   },
   undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },
@@ -100,6 +117,7 @@ function Preview() {
         renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null}
         shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
         onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
+        onNudge={r => show('acted', `nudge ${r.id}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} />

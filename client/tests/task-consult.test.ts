@@ -5,7 +5,7 @@
 // it with the record tools — it never carries the record's contents; an id that is not one is refused.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { consultationAbout, taskConsultFirstMessage } from '../shared/task-consult'
+import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle } from '../shared/task-consult'
 import { summarizeSession } from '../shared/chat-history-summary'
 import type { ChatSession, ChatSessionSummary } from '../shared/chat-history'
 
@@ -37,4 +37,15 @@ test('the first message names the task by id and has the AI read it; nothing of 
   // An agent without the record tools is only told what the consultation is about.
   assert.equal(taskConsultFirstMessage({ id: 'task-0000aa', title: '見積書' }, false), '「見積書」（やること：task-0000aa）について相談させてください。')
   assert.throws(() => taskConsultFirstMessage({ id: '../task', title: 'x' }, true))
+})
+
+test('［催促の下書きを作る］ (purpose nudge): the AI drafts a short nudge for the member to send — never sends; names the task by id only', () => {
+  const text = taskConsultFirstMessage({ id: 'task-0000aa', title: 'A社 見積の返事' }, true, 'nudge')
+  assert.match(text, /task-0000aa/)
+  assert.match(text, /催促の下書き/)
+  assert.match(text, /送るのは私です。あなたは送らないでください/)
+  assert.match(text, /wait_until/)
+  assert.match(taskConsultFirstMessage({ id: 'task-0000aa', title: 'x' }, false, 'nudge'), /あなたは送らないでください/)
+  assert.equal(taskConsultPurposeTitle('A社 見積の返事', 'nudge'), 'A社 見積の返事 の催促')
+  assert.throws(() => taskConsultFirstMessage({ id: '../x', title: 'x' }, true, 'nudge'))
 })

@@ -262,6 +262,32 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
 
+### Task version 12: 返事待ち says until when (owner decision 2026-11-03 「②」)
+
+- `wait` (返事待ちにする) gains the arg `wait_until` (kind `date`): the 見込み is set with the wait, in
+  one entry. **Left out or null** (an app released before 12, the AI giving none) the engine fills it
+  (`ARG_DEFAULTS` + `argDefaultValue` in `shared/core/core-types.ts`, applied in
+  `record-engine/act.ts`): a 見込み still ahead of the company's now stays (an older client that ran
+  `set_wait_until` first), anything else — none, or one that passed (「もう少し待つ」 after the clock
+  gave it back) — becomes **3 business days** after the company's today (weekends, public holidays and
+  the company's own holidays skipped: `business-days.ts` `addBusinessDays`; the engine dep
+  `companyDay` = the company's now + `TaskSettings.companyHolidays`, composition.ts; without it the
+  default zone and no company holidays). `ARG_DEFAULTS` is the core's only: a type file cannot say it.
+- When it passes, the server clock gives it back (`WAIT_OVER.task`, `notifications.md` "The server
+  clock"), its 経緯 note 「返事の見込み（11/6）を過ぎました」 (`waitOverNote`). **「あなたの番」 marks it**:
+  `waitCameBack { waitedSince, overAt }` on a record in `WAIT_OVER[type].personTurn` whose newest state
+  change is the clock's `wait_over`, or whose only later state changes went from the AI's turn back to
+  the person (the AI handed the nudge draft over) — `waitCameBack` in core-types; a person's move,
+  a reassignment accepted back, a `wait_over` by anyone but the clock → not marked. A waiting task
+  without `wait_until` (waited before 12) is never moved nor marked.
+- The AI's tool `task__wait` (`client/electron/records/tools.ts`): `wait_until` optional in the
+  schema with a description telling the AI to always give it (left out → the default); only defaulted
+  args are optional (`set_wait_until` still requires its date).
+- Migration: `TASK_VERSION` 12 (below). Tests: `server/tests/unit/record-task-wait-until.test.ts`
+  (default skipping public and company holidays; an old body; a 見込み ahead kept, a passed one
+  replaced; moved exactly once, never before, with the line; もう少し待つ; the mark; old waiting tasks
+  untouched; `waitCameBack` cases) — mutation-checked; `server-clock.test.ts`, `ai-runs.test.ts`.
+
 ### Task version 11: the AI's proposals (案) and 「議事録を確認する」 (owner decision 2026-11-02, plan F)
 
 Additive over version 10 (two states, one field, three actions, a wider `dismiss`):
@@ -404,8 +430,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 11 since "Task version
-  11"): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 12 since "Task version
+  12"): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
