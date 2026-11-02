@@ -72,8 +72,13 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
      **/.personal/* + !**/.personal/.gitignore
 5    nested git repositories → ask the member BEFORE changing anything; "don't share" (default)
      → this computer's .git/info/exclude, never the shared .gitignore (nested-repos.ts)
-4    files >100 MB → a literal line in .gitignore (large-files.ts; details below). Runs after 5,
-     so a repository kept local is already ignored and never named
+3.9  lines older apps wrote into the shared .gitignore for THIS member move to .git/info/exclude
+     (local-ignores.ts): a large-file line whose file is here and over the limit, a
+     private-skill line whose folder is here and not shared; local line first, then the shared
+     one is removed. Others' lines stay (details: sync-guards.md "Shared files")
+4    files >100 MB → a literal line in this computer's .git/info/exclude (managed block; never
+     the shared .gitignore; large-files.ts, details below). Runs after 5, so a repository kept
+     local is already ignored and never named
 6    git fetch --progress origin
 6.5  hold back files created in not-downloaded folders → .backups/<ts>_outside_checkout/
 6.3  company repo: stop (nothing changed) if origin/main turned a readable private folder or an
@@ -86,14 +91,16 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
      save file (index only) → commit (AI message, below) → record localHash
 9.5  files at paths of a locally excluded nested repo that origin/main now has (a teammate's
      same-path folder) and that differ → copied to .backups/<ts>_nested_repo/ (the pull would
-     overwrite them: they are ignored); a failed check stops before the pull
+     overwrite them: they are ignored); a failed check stops before the pull. The same for
+     large files kept on this computer → .backups/<ts>_large_file/
 10   git pull --rebase --progress origin main  (stopped mid-rebase → 11)
 11   conflict loop until the rebase finishes:
        a back up the local version of newly conflicted files
        b classify unmerged entries by stage 2: present → checkout --ours + add -f;
          absent → rm --force (the server deleted it)
        c rebase --continue
-11.5 if commits were replayed: drop duplicate lines union merging left in .gitignore → commit
+11.5 if commits were replayed: drop duplicate lines union merging left in .gitignore → commit;
+     after every pull, step 3.9 again (a moved line the union merge brought back) → commit
 12   restore department folders deleted locally
 13   push --set-upstream --progress (also when only older unpushed commits remain);
      on failure see "Push results" below
@@ -103,8 +110,11 @@ Large-file scan (step 4): stat only what git lists (`ls-files --cached` + `--oth
 --exclude-standard`, plus nested repos / gitlinks); never `.git`, `node_modules`,
 `.backups`/`.workspace` at any depth, or a private folder. "Already ignored" means
 `git check-ignore --no-index`. The line is the path as a literal pattern (glob characters,
-leading `#`/`!`, trailing spaces escaped; a root file anchored as `/name`). Tracked files over
-the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileThreshold`.
+leading `#`/`!`, trailing spaces escaped; a root file anchored as `/name`), kept in the
+`ACB large files` block of `.git/info/exclude` (a private folder's clone: its own); lines of
+files that are gone are dropped. Tracked files over the limit still get their line and stay
+tracked. The sync message still counts the newly ignored files. Threshold:
+`SyncDeps.largeFileThreshold`. Tests: `client/tests/sync/large-files.test.ts`.
 
 ## Conflict resolution
 
@@ -173,7 +183,9 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   `_editor_overwrite/` (disk version an editor tab overwrote), `_before_restore/` (what a
   復元 replaced), `_before_revert/` (the member's version 「元に戻す」 removed or replaced), `_nested_repo/` (reason
   `nested_repo_overwrite`, `repos`, `files`: this computer's version of files in a locally
-  excluded nested repo that a teammate shared at the same path).
+  excluded nested repo that a teammate shared at the same path), `_large_file/` (reason
+  `large_file_overwrite`, `files`: a large file kept on this computer that a teammate shared at
+  the same path).
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
   `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.

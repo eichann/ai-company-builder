@@ -85,3 +85,14 @@ export function readExcludeBlock(repoPath: string, block: ExcludeBlock): string[
   }
   return [...out]
 }
+
+/** The raw lines of `block` (empty when the file or the block is missing). */
+export function readExcludeLines(repoPath: string, block: ExcludeBlock): string[] {
+  let text = ''
+  try { text = fs.readFileSync(excludeFile(repoPath), 'utf-8') } catch { return [] }
+  const lines = text.split('\n').map(l => l.replace(/\r$/, ''))
+  const begin = lines.indexOf(block.begin)
+  const end = begin >= 0 ? lines.indexOf(block.end, begin) : -1
+  if (begin < 0 || end < 0) return []
+  return lines.slice(begin + 1, end).filter(l => l !== '')
+}
