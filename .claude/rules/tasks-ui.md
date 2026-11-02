@@ -151,7 +151,7 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    the title (新しい画面のデモ C, J; `placeActions`): 自分で進める (AI が用意している) → 引き受ける →
    終わったので見てもらう (確かめてから, the assignee) → 完了にする; while someone else checks it, a word
    instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
-   one line on what it does (`actionHint`). **チームの進め方** (`team`, on until its setting exists):
+   one line on what it does (`actionHint`). **チームの進め方** (the company's `teamMode`, off by default: `tasks:card` reads `GET /me/work-switches` `teamMode.on`, unreadable = off; `card.teamMode`):
    off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける, 返事待ち,
    見てもらう and 差し戻す — how the card looks, not a permission (the server allows them either way);
    引き受ける and 受けられない stay on any task someone asked of the member. Actions that take the task off the member's turn (受けられない,
