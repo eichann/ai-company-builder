@@ -69,6 +69,10 @@ export interface RecordCardLink {
   removable?: RemovableLink
   /** The record's own 案件・プロジェクト (its `bundle` link): shown at its head, not on the right. */
   bundle?: true
+  /** The record's own 相手 (its `counterpart` link). */
+  counterpart?: true
+  /** The linked record's version now (to change it, e.g. put a meeting's 宿題 into a new 案件). */
+  recordVersion?: number
 }
 
 /** What `recordLinks:remove` needs to take one link off (and `tasks:undo` to put it back). */

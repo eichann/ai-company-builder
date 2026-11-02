@@ -39,7 +39,7 @@ import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
-  type BundleChoicesResult, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
+  type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
@@ -337,6 +337,24 @@ export function createTasksApi(deps: TasksDeps) {
       }
     },
 
+    async createBundle(companyId: string, input: BundleCreateInput): Promise<TaskWriteResult> {
+      const title = typeof input?.title === 'string' ? input.title.normalize('NFC').trim() : ''
+      if (!COMPANY.test(companyId) || !title || title.length > 200 || typeof input.type !== 'string' || !ACTION.test(input.type)) return BAD_INPUT
+      if (input.counterpart != null && (typeof input.counterpart !== 'string' || !RECORD_ID_RE.test(input.counterpart))) return BAD_INPUT
+      const folder = input.folder == null || input.folder === '' ? null : typeof input.folder === 'string' ? fileLinkPath(input.folder) : null
+      if (input.folder != null && input.folder !== '' && !folder) return BAD_INPUT
+      const me = await myId()
+      if (!me) return { success: false, offline: true, code: null, error: TASKS_OFFLINE_TEXT }
+      // The 責任者 is not filled in by the server: the member who makes it.
+      const a = await call(companyId, 'POST', '/records/item', {
+        type: input.type, title, fields: { owner: me }, ...(folder ? { folder } : {}),
+        ...(input.counterpart ? { links: { counterpart: input.counterpart } } : {}),
+      })
+      const record = (a?.json?.data as { record?: { id?: unknown } } | undefined)?.record
+      if ((a?.status === 201 || a?.status === 200) && typeof record?.id === 'string') return { success: true, recordId: record.id }
+      return failure('create bundle', a)
+    },
+
     async create(companyId: string, input: TaskCreateInput): Promise<TaskWriteResult> {
       const title = typeof input?.title === 'string' ? input.title.normalize('NFC').trim() : ''
       if (!COMPANY.test(companyId) || !title || title.length > 200) return BAD_INPUT
@@ -406,6 +424,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
+  ipc.handle('tasks:createBundle', (_event, companyId, input) => api.createBundle(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))
   ipc.handle('tasks:unlinkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, true))
   ipc.handle('tasks:undo', (_event, companyId, recordId, version, expectedVersion) => api.undo(typeof companyId === 'string' ? companyId : '', recordId, version, expectedVersion))

@@ -3,11 +3,13 @@
 // process whose card is built by the real `summaryView` / `recordDetailOf`. `?record=meeting` (the
 // default) is a meeting with its decisions, homework and many links; `?record=slack` a 来た連絡
 // from Slack with the thread slot filled; `?record=bundle` a 案件 with everyone's やること, an approval
-// request and what the AI last did (`?ai=working`: while it works). Links opened outside show in `#opened`.
+// request and what the AI last did (`?ai=working`: while it works); `?field=real` draws the meeting's real
+// 案件・プロジェクト field (no 案件 yet: 「新しいプロジェクトにする」). Links opened outside show in `#opened`.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { RecordCard } from '../src/features/records/components/RecordCard'
+import { renderRecordBundleField } from '../src/app/recordBundleField'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { RecordSummary } from '../../shared/types/records'
 import { bundleDetailOf, recordDetailOf } from '../shared/record-details'
@@ -31,13 +33,16 @@ const slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い
   channel: 'slack', occurred_at: '2026-11-05T17:30:00Z', counterpart_text: '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456',
 }, '先日の打ち合わせ資料を送ってほしいとのこと。')
 
-const task = (n: number, state = 'todo') => ({ label: 'もとの会議', record: view(rec(`task-00000${n}`, 'task', `宿題 ${n}`, state)) })
+const realField = params.get('field') === 'real'
+const task = (n: number, state = 'todo') => ({ label: 'もとの会議', recordVersion: 2, record: view(rec(`task-00000${n}`, 'task', `宿題 ${n}`, state)) })
 const links: RecordCardLink[] = kind === 'slack' ? [] : [
   task(1), task(2), task(3), task(4, 'done'),
   { label: '会議', record: view(rec('decision-000001', 'decision', '窓口は3つにする', 'unconfirmed')),
     removable: { source: 'decision-000001', sourceVersion: 3, link: 'meeting', target: 'meeting-0000aa' } },
-  { label: 'まとまり', bundle: true, record: view(rec('deal-0000ee', 'deal', 'A社 研修導入', 'open')),
-    removable: { source: 'meeting-0000aa', sourceVersion: 3, link: 'bundle', target: 'deal-0000ee' } },
+  ...(realField
+    ? [{ label: '相手', counterpart: true as const, record: view(rec('company-0000ff', 'company', '株式会社エー（A社）', null)) }]
+    : [{ label: 'まとまり', bundle: true as const, record: view(rec('deal-0000ee', 'deal', 'A社 研修導入', 'open')),
+      removable: { source: 'meeting-0000aa', sourceVersion: 3, link: 'bundle', target: 'deal-0000ee' } }]),
 ]
 const tasks = [
   rec('task-0000b1', 'task', '見積書を作り直す', 'todo', { assignee: 'u-sato', due: '2026-11-07T17:00' }),
@@ -63,6 +68,10 @@ installElectronAPI({
   openExternal: async url => { opened.push(url); document.getElementById('opened')!.textContent = opened.join('\n'); return { success: true } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { say(`unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   undoTaskAction: async (_c, recordId, version, expected) => { say(`undo ${recordId} ${version}@${expected}`); return { success: true, recordId } },
+  getBundleChoices: async () => ({ success: true, bundles: [{ id: 'project-000011', title: 'A社 研修導入の相談（去年）', typeLabel: 'プロジェクト' }, { id: 'project-000012', title: 'B社 新人研修', typeLabel: 'プロジェクト' }] }),
+  createBundle: async (_c, input) => { say(`create ${input.type} ${input.title} folder=${input.folder ?? ''} counterpart=${input.counterpart ?? ''}`); return { success: true, recordId: 'project-0000nn' } },
+  linkMinutesBundle: async (_c, meetingId, bundleId) => { say(`linkMeeting ${meetingId}=${bundleId}`); return { success: true } },
+  linkRecordToRecord: async (_c, recordId, input) => { say(`link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
 })
 function say(line: string) { opened.push(line); document.getElementById('opened')!.textContent = opened.join('\n') }
 
@@ -75,7 +84,9 @@ function Preview() {
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
         consultations={[{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         onConsult={(r, fresh) => { opened.push(`consult ${r.id} ${fresh}`); document.getElementById('opened')!.textContent = opened.join('\n') }}
-        renderBundleField={f => <div data-testid="bundle-field">{f.bundle?.title ?? 'なし'}・{f.removable ? '外せる' : '外せない'}</div>} />
+        renderBundleField={f => (realField
+          ? renderRecordBundleField('co-preview', f, { type: 'project', name: 'プロジェクト', source: 'core' }, '営業部')
+          : <div data-testid="bundle-field">{f.bundle?.title ?? 'なし'}・{f.removable ? '外せる' : '外せない'}</div>)} />
     </main>
   )
 }

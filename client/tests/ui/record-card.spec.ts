@@ -97,3 +97,24 @@ test('a meeting\'s 案件 sits at its head (not on the right); a link is taken o
   await expect(page.locator('#opened')).toHaveText('unlink decision-000001 meeting=meeting-0000aa@3\nundo decision-000001 4@4')
   expectNoPageErrors(state)
 })
+
+test('「新しいプロジェクトにする」: the name from the meeting, its 相手, similar ones first, and the 宿題 put in', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { field: 'real' })
+  const field = page.getByTestId('record-card').getByRole('group', { name: 'プロジェクト' })
+  await field.getByRole('button', { name: '新しいプロジェクトにする' }).click()
+  const dialog = page.getByRole('dialog', { name: '新しいプロジェクトにする' })
+  await expect(dialog.getByLabel('名前')).toHaveValue('A社 研修導入のお打ち合わせ')
+  await expect(dialog).toContainText('株式会社エー（A社）')
+  await expect(dialog.getByRole('group', { name: '似たプロジェクト' })).toContainText('A社 研修導入の相談（去年）')
+  await expect(dialog.getByRole('group', { name: '似たプロジェクト' })).not.toContainText('B社 新人研修')
+  await expect(dialog.getByRole('checkbox')).toBeChecked()
+  await expect(dialog).toContainText('この会議の宿題（3）も入れる')
+  await dialog.getByRole('button', { name: '作る' }).click()
+  await expect(page.locator('#opened')).toHaveText([
+    'create project A社 研修導入のお打ち合わせ folder=営業部 counterpart=company-0000ff',
+    'linkMeeting meeting-0000aa=project-0000nn',
+    'link task-000001 bundle=project-0000nn@2', 'link task-000002 bundle=project-0000nn@2', 'link task-000003 bundle=project-0000nn@2',
+  ].join('\n'))
+  await expect(page.getByRole('status')).toContainText('「A社 研修導入のお打ち合わせ」を作り、つなぎました（宿題 3件も入れました）')
+  expectNoPageErrors(state)
+})

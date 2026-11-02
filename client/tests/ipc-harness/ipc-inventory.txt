@@ -169,6 +169,7 @@ contract.invoke tasks:bundleKinds
 contract.invoke tasks:bundles
 contract.invoke tasks:card
 contract.invoke tasks:create
+contract.invoke tasks:createBundle
 contract.invoke tasks:linkFile
 contract.invoke tasks:linkRecord
 contract.invoke tasks:list
@@ -307,6 +308,7 @@ contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'
 contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
 contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
+contract.type ElectronAPI.createBundle = createBundle: Invoke<'tasks:createBundle'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
 contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
@@ -744,6 +746,7 @@ contract.type IpcInvokeChannels.'tasks:bundleKinds' = 'tasks:bundleKinds': { arg
 contract.type IpcInvokeChannels.'tasks:bundles' = 'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
 contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
 contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:createBundle' = 'tasks:createBundle': { args: [companyId: string, input: BundleCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
@@ -997,6 +1000,7 @@ main.handle tasks:bundleKinds @ features/tasks/ipc.ts (companyId)
 main.handle tasks:bundles @ features/tasks/ipc.ts (companyId)
 main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
+main.handle tasks:createBundle @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
@@ -1078,6 +1082,8 @@ preload connectSlack -> invoke slack:connect($0, $1)
 preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload createBundle -> invoke tasks:createBundle($0, $1)
+preload createBundle : (companyId: string, input: BundleCreateInput) => Promise<TaskWriteResult>
 preload createCompany -> invoke api:createCompany($0)
 preload createCompany : (name: string) => Promise<CompanyResult>
 preload createDirectory -> invoke fs:createDirectory($0)

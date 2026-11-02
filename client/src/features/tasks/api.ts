@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
+import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -16,6 +16,8 @@ export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** Setting or taking off a link between two records (the server decides which links may change). */
 export type RecordLinkWrites = ElectronPort<'linkRecordToRecord' | 'unlinkRecordFromRecord'>
+/** 「新しい〇〇にする」: making a 案件・プロジェクト (shared state on the server). */
+export type BundleWrites = ElectronPort<'createBundle'>
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
 export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */
@@ -129,4 +131,9 @@ export function setRecordLink(companyId: string, recordId: string, input: Record
 /** The AI's proposals (案) from one meeting, proposed and put away. */
 export function getTaskProposals(companyId: string, meetingId: string, reads: TaskCardReads = window.electronAPI): Promise<TaskProposalsResult> {
   return reads.getTaskProposals(companyId, meetingId)
+}
+
+/** A new 案件・プロジェクト of the department's kind, the member its 責任者; answers its id. */
+export function createBundle(companyId: string, input: BundleCreateInput, writes: BundleWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.createBundle(companyId, input)
 }

@@ -316,6 +316,9 @@ export function AppShell() {
   const pluginScreens = usePluginScreens(currentCompany?.id)
   const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
   const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
+  // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
+  const bundleKinds = taskList.data?.bundleKinds
+  const deptBundleKind = bundleKinds ? (bundleKinds.departments.find(d => d.folder === effectiveDeptFolder)?.kind ?? bundleKinds.core) : null
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
@@ -328,7 +331,7 @@ export function AppShell() {
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
-      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, 'プロジェクト')} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>

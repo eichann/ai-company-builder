@@ -9,10 +9,11 @@ import { runCommand } from '../../../shared/commands/commands'
 import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useBundleChoices } from '../hooks/useBundleChoices'
+import { NewBundleDialog, type NewBundleSource } from './NewBundleDialog'
 
 const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
-export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove }: {
+export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, onCreate }: {
   companyId: string
   bundle: RecordViewSummary | null
   /** The kind's name where none is linked yet (「案件」「プロジェクト」). */
@@ -24,8 +25,12 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
   /** null = done; else the reason in words. */
   onSet: (bundle: BundleChoice) => Promise<string | null>
   onRemove: () => Promise<string | null>
+  /** 「新しい〇〇にする」 while none is linked: what the window starts from, and making it (null = done). */
+  newFrom?: NewBundleSource
+  onCreate?: (title: string, withHomework: boolean) => Promise<string | null>
 }) {
   const [picking, setPicking] = useState(false)
+  const [making, setMaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   if (!bundle && !canSet) return null
   const name = bundle?.typeLabel ?? word
@@ -40,11 +45,13 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
         {canSet && (
           <span className="ml-auto flex gap-1">
             <button type="button" disabled={busy} onClick={() => setPicking(true)} className={SMALL_BUTTON}>{bundle ? '変える' : `${name}につなぐ`}</button>
+            {!bundle && newFrom && onCreate && <button type="button" disabled={busy} onClick={() => setMaking(true)} className={SMALL_BUTTON}>新しい{name}にする</button>}
             {bundle && canRemove && <button type="button" disabled={busy} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
           </span>
         )}
       </div>
       {error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+      {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
       {picking && <BundlePicker companyId={companyId} word={name} current={bundle?.id ?? null} onClose={() => setPicking(false)} onChoose={onSet} />}
     </div>
   )

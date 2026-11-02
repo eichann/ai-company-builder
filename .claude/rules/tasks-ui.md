@@ -304,7 +304,17 @@ record that holds the link). Tests: `client/tests/task-card.test.ts`, `tests/ui/
 same 案件・プロジェクト field at its head (the screen's `renderBundleField`, `src/app/recordBundleField.tsx`:
 a meeting is linked through `minutes:linkBundle` so its 案件's step follows, anything else through
 `tasks:linkRecord`; ［外す］ only where the link can be removed). Tests: `client/tests/record-card-links.test.ts`,
-`tests/ui/record-card.spec.ts`. Main sends only a path inside the
+`tests/ui/record-card.spec.ts`. **〇〇** is what the department on screen makes (`tasks:bundleKinds`,
+the list's `bundleKinds`: its business plugin's kind, else the company's own name; 全社 → the company's).
+**「新しい〇〇にする」** (meeting / 来た連絡, while none is linked; `NewBundleDialog.tsx`): the name from the
+meeting's or the 連絡's title, the 相手 from its `counterpart` link, 「この会議の宿題（n）も入れる」 (its
+unfinished tasks; on at first), and 「似た〇〇があります」 with ［そちらにつなぐ］ — existing ones the
+member reads sharing a word of the name (`similarBundles`; the server's own check answers only inside
+an approval). 作る → `tasks:createBundle` (`POST /records/item { type: kind.type, title, fields: { owner:
+the member }, folder: the department's, links: { counterpart } }`; the server does not fill in the
+責任者), then the record is linked (a meeting through `minutes:linkBundle`) and each 宿題 gets the new one
+as its `bundle` at its version. Tests: `client/tests/bundle-create.test.ts`,
+`src/features/tasks/similarBundles.test.ts`, `tests/ui/record-card.spec.ts` (`?field=real`). Main sends only a path inside the
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
