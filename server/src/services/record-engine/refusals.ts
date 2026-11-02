@@ -6,6 +6,8 @@ export const conflict = (error: string, code: string, extra: Record<string, unkn
 
 /** Says nothing about where the record is (a private folder's name never leaks). */
 export const ASSIGNEE_CANNOT_READ = 'この人はこの記録を見られないため、担当にできません。見られる人を選んでください。'
+/** The same for the person who checks the work (確かめる人, task `reviewer`): their turn would be a record they cannot open. */
+export const REVIEWER_CANNOT_READ = 'この人はこの記録を見られないため、確かめる人にできません。見られる人を選んでください。'
 export const bad = (error: string, code = 'BAD_REQUEST') => refuse('bad-request', error, { code })
 
 /**

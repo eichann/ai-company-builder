@@ -10,6 +10,7 @@
  * - 完了 from 引き受け待ち by the assignee records 「引き受けた」 in the same entry; anyone else's
  *   完了 does not;
  * - only the requester (or an admin) decides 終わったら — never the assignee, never the AI;
+ * - 確かめる人 must be able to open the task (create, set_reviewer, request_review), naming no place;
  * - `who_unless` is parsed strictly (an entry of `who`, a server choice field, one of its options);
  * - startup moves every task to version 9 (the core definition stored first), once, without a
  *   ledger entry, and leaves other types and other companies' rows alone.
@@ -27,7 +28,7 @@ import { TASK_VERSION } from '../../../shared/core/core-types'
 import { actionWho, parseTypeFile } from '../../../shared/core/record-types'
 
 const TS = '2026-11-02T00:00:00.000Z'
-const MEMBERS: Record<string, string[]> = { a: ['u-owner', 'u-alice', 'u-bob', 'u-carol'], b: ['u-owner', 'u-zed'] }
+const MEMBERS: Record<string, string[]> = { a: ['u-owner', 'u-alice', 'u-bob', 'u-carol', 'u-mallory'], b: ['u-owner', 'u-zed'] }
 let conn: Database.Database
 let source: CompanyDataSource
 let engine: RecordEngine
@@ -136,6 +137,28 @@ describe('確かめてから: the checker’s OK completes it', () => {
     expect(await engine.act(m('u-alice'), AI, t.id, 'set_when_done', { expectedVersion: 1, args: { when_done: 'notify' } })).toMatchObject({ ok: false, kind: 'forbidden' })
     ok(await engine.act(m('u-alice'), HUMAN, t.id, 'set_when_done', { expectedVersion: 1, args: { when_done: 'notify' } }))
     expect(ok(await engine.act(m('u-bob'), HUMAN, t.id, 'complete', { expectedVersion: 2 })).record.state).toBe('done')
+  })
+})
+
+describe('確かめる人 must be able to open the task', () => {
+  it('is refused on create, set_reviewer and request_review, naming no place, with nothing written', async () => {
+    // 経理: closed to u-mallory by scope rules.
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-acc', 'a', '経理', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-e', 'a-acc', 'everyone', NULL, 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-m', 'a-acc', 'user', 'u-mallory', 0, 0, ?)").run(TS)
+    const body = (reviewer: string) => ({ type: 'task', title: '経理の締め', folder: '経理', fields: { assignee: 'u-bob', when_done: 'check', reviewer } })
+    const created = engine.create(m('u-alice'), HUMAN, body('u-mallory'))
+    expect(created).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'REVIEWER_CANNOT_READ' } })
+    expect(JSON.stringify(created)).not.toMatch(/経理/)
+
+    const t = ok(engine.create(m('u-alice'), HUMAN, body('u-carol'))).record
+    for (const [who, action] of [['u-alice', 'set_reviewer'], ['u-bob', 'request_review']] as const) {
+      const r = await engine.act(m(who), HUMAN, t.id, action, { expectedVersion: 1, args: { reviewer: 'u-mallory' } })
+      expect(r, action).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'REVIEWER_CANNOT_READ' } })
+      expect(JSON.stringify(r)).not.toMatch(/経理/)
+    }
+    expect(ledger(t.id)).toHaveLength(1)
+    expect(ok(await engine.act(m('u-bob'), HUMAN, t.id, 'request_review', { expectedVersion: 1, args: { reviewer: 'u-carol' } })).record.fields.next_actor).toBe('u-carol')
   })
 })
 
