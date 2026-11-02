@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag } from './model'
+import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag } from './model'
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
@@ -54,15 +54,31 @@ test('by turn: only the member\'s own far future folds; meetings to come join th
   assert.deepEqual(by.done.events.map(e => e.event.id), ['e1'])
 })
 
-test('by date: overdue, today, this week, later (folded), no due — whoever holds it', () => {
+test('by date: overdue, today, tomorrow, this week, later (folded), no due — whoever holds it', () => {
   const sections = listSections([
-    item('late', 'others', '2026-11-03'), item('today', 'mine', '2026-11-05T18:00'), item('week', 'ai', '2026-11-07'),
-    item('later', 'mine', '2026-11-20'), item('none', 'mine', null),
+    item('late', 'others', '2026-11-03'), item('today', 'mine', '2026-11-05T18:00'), item('tomorrow', 'mine', '2026-11-06T09:00'),
+    item('week', 'ai', '2026-11-07'), item('later', 'mine', '2026-11-20'), item('none', 'mine', null),
   ], [], 'date', NOW)
   assert.deepEqual(sections.map(s => [s.key, s.items.map(i => i.id)]), [
-    ['overdue', ['late']], ['today', ['today']], ['week', ['week']], ['later', ['later']], ['none', ['none']],
+    ['overdue', ['late']], ['today', ['today']], ['tomorrow', ['tomorrow']], ['week', ['week']], ['later', ['later']], ['none', ['none']],
   ])
   assert.equal(sections.find(s => s.key === 'later')?.foldable, true)
+})
+
+test('by bundle: each one with its open items, then the ones in none; the word is the kinds in the list', () => {
+  const deal = { id: 'deal-a00001', title: 'A社 研修導入', typeLabel: '案件' }
+  const proj = { id: 'project-b00001', title: '新サービス', typeLabel: 'プロジェクト' }
+  const items = [
+    { ...item('a2', 'others', '2026-11-09'), bundle: deal }, { ...item('a1', 'mine', '2026-11-06'), bundle: deal },
+    { ...item('p1', 'mine', null), bundle: proj }, item('loose', 'mine', null), { ...item('fin', 'done', null), bundle: deal },
+  ]
+  const sections = listSections(items, [], 'bundle', NOW)
+  assert.deepEqual(sections.map(s => [s.title, s.items.map(i => i.id)]), [
+    ['A社 研修導入', ['a1', 'a2']], ['新サービス', ['p1']], ['案件・プロジェクトなし', ['loose']], ['今日終わったこと', ['fin']],
+  ])
+  assert.equal(sections[0].bundle?.id, 'deal-a00001')
+  assert.equal(bundleListWord([{ ...item('x', 'mine', null), bundle: deal }]), '案件')
+  assert.equal(bundleListWord([item('x', 'mine', null)]), 'プロジェクト')
 })
 
 test('a tag keeps only items carrying it', () => {

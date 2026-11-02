@@ -26,7 +26,11 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
   const filesDivider = await box(chatDivider(page))
   const treeDivider = await box(page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' }))
 
+  // No count on the やること tab (the title bar's あなたの番 has it): a dot for what is new, gone once seen.
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toBeVisible()
+  await expect(leftTab(page, /^やること/)).not.toContainText(/\d/)
   await leftTab(page, /^やること/).click()
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toHaveCount(0)
   const list = page.getByRole('region', { name: 'やることの一覧' })
   await expect(list.getByText('A社 提案書を仕上げる')).toBeVisible()
   // The list is the narrow column, under the tab strip and down to the bottom; the consultation stays.
@@ -48,8 +52,9 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
   await expect(page.getByText('ファイルではありません')).toHaveCount(0)
   await expect(list).toBeVisible()
 
-  // Switching the left tab keeps the record tab open in the middle.
+  // Switching the left tab keeps the record tab open in the middle; what was seen gets no dot.
   await leftTab(page, /^ファイル$/).click()
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toHaveCount(0)
   await expect(taskTab).toHaveAttribute('aria-selected', 'true')
   await expect(card).toBeVisible()
 

@@ -1,8 +1,7 @@
 // The task list in main (electron/features/tasks/ipc.ts, client/shared/tasks.ts,
 // .claude/rules/tasks-ui.md). Guards: each record is shown once and in the right place (a
 // request the member must accept is not 「あなたの番」 work yet, a reply they wait for is not
-// something to do now); only a task the member asked of themselves can be finished from the
-// list; the one-line add makes a task only the member sees, assigned to them; an action name
+// something to do now); what the row's ☑ does (task v9); the one-line add makes a task only the member sees, assigned to them; an action name
 // never reaches the server's URL as a path; records off is no list, not an error.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -47,10 +46,28 @@ test('each item carries the interfaces its type implements (a plugin\'s peek lis
   assert.equal(items.find(i => i.id === 'meeting-ab1234')?.implements, undefined)
 })
 
-test('only a task the member asked of themselves may be finished from the list', () => {
-  const items = classifyTasks(src({ myTurn: [rec('task-own001', 'todo'), rec('task-from01', 'todo', { requested_by: 'u-tanaka' })] }))
-  assert.equal(items.find(i => i.id === 'task-own001')?.own, true)
-  assert.equal(items.find(i => i.id === 'task-from01')?.own, false)
+test('☑ (task v9): 完了 from any state but 準備中; asked with 確かめてから → 見てもらう; done → やり直す only for who asked; never on what the member asked of someone', () => {
+  const items = classifyTasks(src({
+    myTurn: [
+      rec('task-own001', 'todo'), rec('task-acc001', 'awaiting_acceptance', { requested_by: 'u-tanaka' }),
+      rec('task-tell01', 'todo', { requested_by: 'u-tanaka', when_done: 'notify' }),
+      rec('task-chk001', 'in_progress', { requested_by: 'u-tanaka', when_done: 'check', reviewer: 'u-tanaka' }),
+      rec('task-rev001', 'review', { assignee: 'u-tanaka', requested_by: ME, when_done: 'check', reviewer: ME }),
+    ],
+    aiTurn: [rec('task-prep01', 'preparing')],
+    asked: [rec('task-ask001', 'in_progress', { assignee: 'u-tanaka' })],
+    doneToday: [rec('task-done01', 'done'), rec('task-done02', 'done', { requested_by: 'u-tanaka' })],
+  }))
+  const check = (id: string) => items.find(i => i.id === id)?.check
+  assert.deepEqual(check('task-own001'), { action: 'complete' })
+  assert.deepEqual(check('task-acc001'), { action: 'complete' })
+  assert.deepEqual(check('task-tell01'), { action: 'complete' })
+  assert.deepEqual(check('task-chk001'), { action: 'request_review', reviewer: 'u-tanaka' })
+  assert.deepEqual(check('task-rev001'), { action: 'complete' })
+  assert.equal(check('task-prep01'), undefined)
+  assert.equal(check('task-ask001'), undefined)
+  assert.deepEqual(check('task-done01'), { action: 'reopen' })
+  assert.equal(check('task-done02'), undefined)
 })
 
 function harness(answers: Record<string, { status: number; body: unknown }>) {
@@ -78,6 +95,27 @@ test('the one-line add makes a task only the member sees, assigned to them, with
   const sent = h.requests.find(q => q.url.endsWith('/records/item'))
   assert.deepEqual(sent?.body, { type: 'task', title: '見積を直す', personal: true, fields: { assignee: ME, due: '2026-11-06T15:00', tags: ['営業'] } })
   assert.equal((await h.api.create('co1', { title: 'x', due: '明日' })).success, false)
+})
+
+test('「頼む」 from the one line: shared with the department\'s readers (never owner-only), 終わったら, and the checker when 確かめてから', async () => {
+  const h = harness({ '/api/me': { status: 200, body: { data: { id: ME } } }, 'POST /api/companies/co1/records/item': { status: 201, body: { data: { record: { id: 'task-new002' } } } } })
+  const sent = () => h.requests.filter(q => q.url.endsWith('/records/item')).at(-1)?.body
+  await h.api.create('co1', { title: '見積を直す', assignee: 'u-tanaka', whenDone: 'check', folder: '営業部', bundleId: 'deal-a00001' })
+  assert.deepEqual(sent(), {
+    type: 'task', title: '見積を直す', folder: '営業部', links: { bundle: 'deal-a00001' },
+    fields: { assignee: 'u-tanaka', when_done: 'check', reviewer: ME },
+  })
+  // 知らせるだけ is the default; 全社 (no folder) is the whole company, as records made before.
+  await h.api.create('co1', { title: '資料を送る', assignee: 'u-tanaka' })
+  assert.deepEqual(sent(), { type: 'task', title: '資料を送る', fields: { assignee: 'u-tanaka', when_done: 'notify' } })
+  // The member themselves as 担当 is their own task: owner-only, no 終わったら.
+  await h.api.create('co1', { title: '自分の', assignee: ME, whenDone: 'check' })
+  assert.deepEqual(sent(), { type: 'task', title: '自分の', personal: true, fields: { assignee: ME } })
+  const before = h.requests.length
+  for (const bad of [{ assignee: '../x' }, { whenDone: 'later' }, { folder: '../営業部' }, { folder: '/Users/me/会社' }, { bundleId: 'deal/../x' }]) {
+    assert.equal((await h.api.create('co1', { title: 'x', assignee: 'u-tanaka', ...bad } as never)).success, false, JSON.stringify(bad))
+  }
+  assert.equal(h.requests.length, before)
 })
 
 test('an action name or record id that is not one never reaches the server', async () => {
@@ -179,4 +217,20 @@ test('which meetings ask is the server\'s answer: the app adds none and drops no
     // No meeting is looked up to decide it here.
     assert.equal(asked.some(a => a.includes('/records/item/meeting-')), false)
   }
+})
+
+test('a row\'s 案件・プロジェクト chip names the kind as the company calls it (bundle kinds), else the type\'s label', () => {
+  const items = classifyTasks(src({
+    myTurn: [rec('task-a00001', 'todo'), rec('task-b00001', 'todo')],
+    typeLabels: { task: 'タスク', project: 'プロジェクト', deal: '案件' },
+    bundles: { 'task-a00001': { id: 'project-abc123', title: '新サービス' }, 'task-b00001': { id: 'deal-abc123', title: 'A社' } },
+    bundleKindNames: { project: '取り組み' },
+  }))
+  assert.equal(items.find(i => i.id === 'task-a00001')?.bundle?.typeLabel, '取り組み')
+  assert.equal(items.find(i => i.id === 'task-b00001')?.bundle?.typeLabel, '案件')
+})
+
+test('an AI proposal put away (dismissed) is not among today\'s done', () => {
+  const items = classifyTasks(src({ doneToday: [rec('task-done01', 'done'), rec('task-prop01', 'dismissed')] }))
+  assert.deepEqual(items.map(i => i.id), ['task-done01'])
 })

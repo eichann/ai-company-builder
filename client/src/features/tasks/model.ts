@@ -5,8 +5,10 @@ import type { CalendarEvent } from '../../../shared/calendar'
 import type { TaskListItem } from '../../../shared/tasks'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
+import { bundleWords } from '../../../shared/thing-words'
 
-export type ListMode = 'turn' | 'date'
+/** 番ごと ｜ 〇〇ごと (what the items belong to: 案件, プロジェクト…) ｜ 日付ごと. */
+export type ListMode = 'turn' | 'bundle' | 'date'
 
 /** The company's clock now: its date, time and day of the week (0 = Sunday). */
 export interface CompanyNow {
@@ -104,13 +106,16 @@ export interface ListSection {
   foldable: boolean
   /** A small note at the right of its title. */
   note?: string
+  /** 〇〇ごと: the bundle this section is (its title opens it). */
+  bundle?: { id: string; title: string; typeLabel?: string }
 }
 
 /**
  * The sections of the list. By turn: 引き受け待ち, あなたの番 (today's meetings to come mixed
  * in), AI の番, ほかの人の番・返事待ち, 先のこと (the member's own far-future items, folded),
- * 今日終わったこと (with today's meetings that are over). By date: 期限切れ, 今日まで, 今週,
- * 来週以降 (folded), 期限なし, 今日終わったこと. Empty sections are left out.
+ * 今日終わったこと (with today's meetings that are over). By date: 期限切れ, 今日,
+ * 明日, 今週, あとで (folded), 期限なし, 今日終わったこと. By bundle: each one with its open items,
+ * then 「〇〇なし」. Empty sections are left out.
  */
 export function listSections(items: readonly TaskListItem[], events: readonly ListEvent[], mode: ListMode, now: CompanyNow): ListSection[] {
   const open = items.filter(i => i.turn !== 'done')
@@ -129,18 +134,39 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
       { key: 'others', title: 'ほかの人の番・返事待ち', items: sorted(open.filter(i => i.turn === 'others')), events: [], foldable: false },
       { key: 'later', title: '先のこと', items: sorted(later), events: [], foldable: true, note: `${dueText(addDays(weekEnd(now), 1), now)}から` },
     )
+  } else if (mode === 'bundle') {
+    // Each bundle with open items, in the order of its earliest due; then those in none.
+    const groups = new Map<string, TaskListItem[]>()
+    for (const i of sorted(open)) if (i.bundle) groups.set(i.bundle.id, [...(groups.get(i.bundle.id) ?? []), i])
+    for (const [id, list] of groups) {
+      const b = list[0].bundle!
+      sections.push({ key: `bundle:${id}`, title: b.title, items: list, events: [], foldable: false, note: b.typeLabel, bundle: b })
+    }
+    sections.push({ key: 'no-bundle', title: `${bundleListWord(items)}なし`, items: sorted(open.filter(i => !i.bundle)), events: [], foldable: false })
   } else {
-    const at = (w: ReturnType<typeof dueWhen>) => sorted(open.filter(i => dueWhen(i.due, now) === w))
+    // 期限切れ・今日・明日・今週・あとで (folded)・期限なし (言葉の決まり 5.).
+    const tomorrow = addDays(now.date, 1)
+    const at = (w: ReturnType<typeof dueWhen>) => open.filter(i => dueWhen(i.due, now) === w)
+    const week = at('week')
     sections.push(
-      { key: 'overdue', title: '期限切れ', items: at('overdue'), events: [], foldable: false },
-      { key: 'today', title: '今日まで', items: at('today'), events: coming, foldable: false },
-      { key: 'week', title: `今週（〜${dueText(weekEnd(now), now)}）`, items: at('week'), events: [], foldable: false },
-      { key: 'later', title: `${dueText(addDays(weekEnd(now), 1), now)}から`, items: at('later'), events: [], foldable: true },
-      { key: 'none', title: '期限なし', items: at('none'), events: [], foldable: false },
+      { key: 'overdue', title: '期限切れ', items: sorted(at('overdue')), events: [], foldable: false },
+      { key: 'today', title: '今日', items: sorted(at('today')), events: coming, foldable: false },
+      { key: 'tomorrow', title: '明日', items: sorted(week.filter(i => i.due!.slice(0, 10) === tomorrow)), events: [], foldable: false },
+      { key: 'week', title: `今週（〜${dueText(weekEnd(now), now)}）`, items: sorted(week.filter(i => i.due!.slice(0, 10) !== tomorrow)), events: [], foldable: false },
+      { key: 'later', title: 'あとで', items: sorted(at('later')), events: [], foldable: true, note: `${dueText(addDays(weekEnd(now), 1), now)}から` },
+      { key: 'none', title: '期限なし', items: sorted(at('none')), events: [], foldable: false },
     )
   }
   sections.push({ key: 'done', title: '今日終わったこと', items: done, events: over, foldable: false, note: 'あしたの朝に空になります' })
   return sections.filter(s => s.items.length + s.events.length > 0)
+}
+
+/**
+ * The word of 「〇〇ごと」: the member's list crosses departments, so it is the kinds actually in
+ * it (「案件」, 「案件・プロジェクト」); with none, the company's name for its own kind.
+ */
+export function bundleListWord(items: readonly TaskListItem[], companyWord = 'プロジェクト'): string {
+  return bundleWords(items.map(i => i.bundle?.typeLabel), companyWord)
 }
 
 /** Tags in use, most used first, with how many items carry each. */

@@ -5,7 +5,7 @@
  * not read); this only sorts and words it. Pure: main, the renderer and tests import it.
  */
 import { parseTagsValue } from '../../shared/core/record-types'
-import type { RecordSummary } from '../../shared/types/records'
+import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { stateLabel } from './record-views'
 import { thingName } from './thing-words'
@@ -43,8 +43,8 @@ export interface TaskListItem {
   own: boolean
   /** The absent member it waits for, when it is in this list as their delegate (代わりの人). */
   actingFor: string | null
-  /** The まとまり (取り組み・案件・企画) it belongs to. */
-  bundle: { id: string; title: string } | null
+  /** What it belongs to (a 案件, a 番組, a プロジェクト) and that kind's name, for its small chip. */
+  bundle: { id: string; title: string; typeLabel?: string } | null
   /** `done` only: when it finished (ISO), as far as the list knows (its last change). */
   finishedAt: string | null
   /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
@@ -61,6 +61,32 @@ export interface TaskListItem {
   suggestedBundle?: { id: string; title: string }
   /** 「AI の番」 only: the server clock put it there because its wait is over (the PC's wait-over step runs it). */
   waitOver?: true
+  /**
+   * What the row's ☑ does (task v9, 言葉の決まり 5.): `complete` from any state but 準備中;
+   * `request_review` (「終わったので見てもらう」) when the member was asked and 確かめてから; `reopen`
+   * (「やり直す」) on a finished one the member asked or checked. Absent: no ☑ (the card decides).
+   * The server still decides each press.
+   */
+  check?: { action: 'complete' } | { action: 'request_review'; reviewer: string } | { action: 'reopen' }
+}
+
+const COMPLETE_FROM = new Set(['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'])
+const ASK_TO_CHECK_FROM = new Set(['todo', 'in_progress', 'waiting', 'awaiting_acceptance'])
+
+/** The ☑ of a task row for the member (task v9 `complete` / `request_review` / `reopen`, who_unless). */
+export function checkOf(r: RecordSummary, me: string): TaskListItem['check'] {
+  if (r.type !== 'task' || !r.state) return undefined
+  const f = r.fields
+  const assignee = f.assignee === me
+  const asker = (f.requested_by ?? me) === me
+  const checker = f.reviewer === me
+  if (r.state === 'done') return asker || checker ? { action: 'reopen' } : undefined
+  const reviewer = typeof f.reviewer === 'string' && f.reviewer ? f.reviewer : typeof f.requested_by === 'string' ? f.requested_by : null
+  // 確かめてから: the one asked shows it to the checker instead (who_unless: { assignee: { when_done: check } }).
+  if (assignee && !asker && !checker && f.when_done === 'check') {
+    return ASK_TO_CHECK_FROM.has(r.state) && reviewer ? { action: 'request_review', reviewer } : undefined
+  }
+  return COMPLETE_FROM.has(r.state) && (assignee || asker || checker) ? { action: 'complete' } : undefined
 }
 
 /** A まとまり the member may choose for a meeting (unfinished, readable). */
@@ -107,6 +133,14 @@ export interface TaskListData {
   /** The company setting 「一覧を出す部署」: department ids, or null = every department. */
   listDepartmentIds: string[] | null
   items: TaskListItem[]
+  /**
+   * What each department makes as its 束ねるもの and the names (`GET /records/bundle-kinds`): the one
+   * line's ［〇〇］ for the department on screen, 「〇〇ごと」 with none in the list. Absent: an older server.
+   */
+  bundleKinds?: BundleKindsResult
+  /** The member's own id and the company's members (the one line's 「担当」 picker); absent from an older main. */
+  me?: string
+  members?: Array<{ id: string; name: string }>
 }
 
 export type TaskListResult =
@@ -115,11 +149,23 @@ export type TaskListResult =
 
 export const TASKS_OFFLINE_TEXT = 'サーバーにつながらないため、やることを表示できません。'
 
-/** A new task from the list's one line: the member's own (owner-only), assigned to them. */
+/**
+ * A new task from the list's one line: the member's own (owner-only), assigned to them — or, with
+ * an `assignee` other than the member, asked of that person (「頼む」, task v9): shown to the readers
+ * of `folder` (the department on screen; none = the whole company), with 「終わったら」.
+ */
 export interface TaskCreateInput {
   title: string
   due?: string | null
   tags?: string[]
+  /** A member id; the member themselves or absent = their own task. */
+  assignee?: string | null
+  /** 「終わったら」 when asking: 知らせるだけ (default) or 確かめてから (the member checks). */
+  whenDone?: 'notify' | 'check'
+  /** The department folder whose readers see an asked task (a company path). */
+  folder?: string | null
+  /** What it belongs to (a 案件, a プロジェクト): a record id. */
+  bundleId?: string | null
 }
 
 /** An action the list or the card runs on a record (the server decides who may). */
@@ -136,6 +182,15 @@ export interface TaskActInput {
 export type TaskWriteResult =
   | { success: true; recordId: string }
   | { success: false; offline: boolean; code: string | null; error: string }
+
+/** A record's bundle with its kind's name (a record id starts with its type: `deal-…`). */
+function bundleOf(src: TaskSources, recordId: string): TaskListItem['bundle'] {
+  const b = src.bundles[recordId]
+  if (!b) return null
+  const type = b.id.slice(0, b.id.indexOf('-'))
+  const label = src.bundleKindNames?.[type] ?? src.typeLabels[type]
+  return label ? { ...b, typeLabel: label } : b
+}
 
 /** What the server answered, in the shapes the list sorts. */
 export interface TaskSources {
@@ -157,6 +212,8 @@ export interface TaskSources {
   typeImplements?: Record<string, string[]>
   /** Member id → display name. */
   people: Record<string, string>
+  /** A bundle type → its name as the company calls it (a plugin's own label, the core's 「プロジェクト」 or the company's name). */
+  bundleKindNames?: Record<string, string>
   /** Record id → its まとまり, when it has one. */
   bundles: Record<string, { id: string; title: string }>
 }
@@ -201,11 +258,13 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       turn, waitingFor, personal: r.personal === true,
       own: r.type === 'task' && r.fields.assignee === src.me && (r.fields.requested_by ?? src.me) === src.me,
       actingFor: r.actingFor ? nameOf(src.people, r.actingFor) : null,
-      bundle: src.bundles[r.id] ?? null,
+      bundle: bundleOf(src, r.id),
       finishedAt,
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
+      // ☑ on the member's own rows (and a check waiting for them), never on what they asked of someone else.
+      ...((turn !== 'ai' && (turn !== 'others' || r.fields.assignee === src.me)) && checkOf(r, src.me) ? { check: checkOf(r, src.me) } : {}),
     })
   }
   for (const r of src.myTurn) {
@@ -224,7 +283,8 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
   }
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))
-  for (const r of src.doneToday) add(r, 'done', null, r.updatedAt)
+  // An AI proposal put away (「要らない」, `dismissed`) was never done: it stays out of 今日終わったこと.
+  for (const r of src.doneToday) if (r.state !== 'dismissed') add(r, 'done', null, r.updatedAt)
   return out
 }
 

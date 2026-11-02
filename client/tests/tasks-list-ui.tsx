@@ -17,11 +17,13 @@ const day = (n: number) => addDays(now.date, n)
 const base = { type: 'task', typeLabel: 'タスク', version: 2, tags: [] as string[], waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, stateLabel: null }
 const it = (over: Partial<TaskListItem> & Pick<TaskListItem, 'id' | 'title' | 'turn'>): TaskListItem => ({ ...base, state: 'todo', due: null, ...over })
 let data: TaskListData = {
-  available: true, listDepartmentIds: null,
+  available: true, listDepartmentIds: null, me: 'u-me', members: [{ id: 'u-me', name: '佐藤' }, { id: 'u-tanaka', name: '田中' }, { id: 'u-abe', name: '阿部' }],
   items: [
     it({ id: 'task-acc001', title: 'セキュリティのチェックシート', turn: 'acceptance', state: 'awaiting_acceptance', due: day(5) }),
-    it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応' } }),
-    it({ id: 'task-mine02', title: '見積書を作り直す', turn: 'mine', due: day(1), tags: ['営業', '見積'], own: true, personal: true }),
+    it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応', typeLabel: '案件' } }),
+    it({ id: 'task-mine02', title: '見積書を作り直す', turn: 'mine', due: day(1), tags: ['営業', '見積'], own: true, personal: true, check: { action: 'complete' } }),
+    // Asked with 確かめてから: the ☑ shows it to the checker instead of completing.
+    it({ id: 'task-chk001', title: '提案書の数字を直す', turn: 'mine', state: 'in_progress', check: { action: 'request_review', reviewer: 'u-abe' } }),
     it({ id: 'task-far001', title: '来期の研修メニューを見直す', turn: 'mine', due: day(40), tags: ['社内'] }),
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
@@ -50,6 +52,8 @@ installElectronAPI({
     },
   }),
   createTask: async (_companyId, input) => {
+    acted.push(`create ${JSON.stringify(input)}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
     data = { ...data, items: [it({ id: 'task-new001', title: input.title, turn: 'mine', due: input.due ?? null, tags: input.tags ?? [], own: true, personal: true }), ...data.items] }
     return { success: true, recordId: 'task-new001' }
   },
@@ -74,10 +78,11 @@ installElectronAPI({
     return { success: true, recordId }
   },
   actOnTask: async (_companyId, recordId, input) => {
-    acted.push(`${recordId}:${input.action}@${input.expectedVersion}`)
+    acted.push(`${recordId}:${input.action}@${input.expectedVersion}${input.args?.reviewer ? `>${input.args.reviewer}` : ''}`)
     document.getElementById('acted')!.textContent = acted.join(',')
     if (input.action === 'accept') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'mine' as const, state: 'todo' } : i)) }
-    if (input.action === 'complete') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'done', finishedAt: new Date().toISOString() } : i)) }
+    if (input.action === 'request_review') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'others' as const, state: 'review', waitingFor: '阿部さんの番', check: undefined } : i)) }
+    if (input.action === 'complete') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'done', finishedAt: new Date().toISOString(), check: { action: 'reopen' as const } } : i)) }
     return { success: true, recordId }
   },
 })

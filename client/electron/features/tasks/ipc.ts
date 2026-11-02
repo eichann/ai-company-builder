@@ -26,7 +26,7 @@
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
-import type { RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
+import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
@@ -251,7 +251,7 @@ export function createTasksApi(deps: TasksDeps) {
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
       const since = new Date(dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).from).toISOString()
-      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions] = await Promise.all([
+      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions, kinds] = await Promise.all([
         call(companyId, 'GET', '/records/my-turn'),
         call(companyId, 'GET', '/records/ai-turn'),
         call(companyId, 'POST', '/records/query', { type: 'task', state: [...OPEN_TASK_STATES], fields: { requested_by: id }, limit: 200 }),
@@ -262,6 +262,8 @@ export function createTasksApi(deps: TasksDeps) {
         call(companyId, 'GET', '/task-settings'),
         // 「どのまとまりの会議ですか？」: the server decides which meetings ask (minutes.md).
         call(companyId, 'GET', '/me/minutes/bundle-questions'),
+        // What each department makes as its 束ねるもの and their names (records.md "Bundle kinds").
+        call(companyId, 'GET', '/records/bundle-kinds'),
       ])
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
@@ -284,13 +286,20 @@ export function createTasksApi(deps: TasksDeps) {
       // An older server without the route, or no answer: nothing asks (the list itself still shows).
       const bundleQuestions = questions?.status === 200 ? (questions.json?.data as MeetingBundleQuestions | undefined)?.questions ?? [] : []
       const linked = await bundles(companyId, [...mine, ...ai, ...askedList, ...doneToday])
+      // An older server without the route: the types' own labels name them (as before).
+      const bundleKinds = kinds?.status === 200 ? (kinds.json?.data as BundleKindsResult | undefined) ?? null : null
       return {
         success: true,
         data: {
           available: true,
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
+          me: id,
+          ...(bundleKinds ? { bundleKinds } : {}),
+          members: Object.entries(names).map(([memberId, name]) => ({ id: memberId, name })),
           items: classifyTasks({
-            me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
+            me: id,
+          ...(bundleKinds ? { bundleKinds } : {}), myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
+            ...(bundleKinds ? { bundleKindNames: Object.fromEntries(bundleKinds.kinds.map(k => [k.type, k.name])) } : {}),
             bundleQuestions,
           }),
         },
@@ -303,12 +312,28 @@ export function createTasksApi(deps: TasksDeps) {
       if (input.due != null && (typeof input.due !== 'string' || !isDateValue(input.due))) return BAD_INPUT
       const tags = input.tags && input.tags.length > 0 ? normalizeTagsValue(input.tags) : null
       if (tags !== null && typeof tags !== 'string') return BAD_INPUT
+      if (input.assignee != null && (typeof input.assignee !== 'string' || !MEMBER.test(input.assignee))) return BAD_INPUT
+      if (input.whenDone != null && input.whenDone !== 'notify' && input.whenDone !== 'check') return BAD_INPUT
+      if (input.bundleId != null && (typeof input.bundleId !== 'string' || !RECORD_ID_RE.test(input.bundleId))) return BAD_INPUT
+      const folder = input.folder == null || input.folder === '' ? null : typeof input.folder === 'string' ? fileLinkPath(input.folder) : null
+      if (input.folder != null && input.folder !== '' && !folder) return BAD_INPUT
       const id = await myId()
       if (!id) return { success: false, offline: true, code: null, error: TASKS_OFFLINE_TEXT }
-      const fields: Record<string, unknown> = { assignee: id }
+      // Asked of someone else: shared with the folder's readers, never owner-only (they could not read it).
+      const asking = !!input.assignee && input.assignee !== id
+      const fields: Record<string, unknown> = { assignee: asking ? input.assignee : id }
       if (input.due) fields.due = input.due
       if (tags) fields.tags = JSON.parse(tags) as string[]
-      const a = await call(companyId, 'POST', '/records/item', { type: 'task', title, personal: true, fields })
+      if (asking) {
+        fields.when_done = input.whenDone ?? 'notify'
+        if (input.whenDone === 'check') fields.reviewer = id
+      }
+      const body = {
+        type: 'task', title, fields,
+        ...(asking ? (folder ? { folder } : {}) : { personal: true }),
+        ...(input.bundleId ? { links: { bundle: input.bundleId } } : {}),
+      }
+      const a = await call(companyId, 'POST', '/records/item', body)
       const record = (a?.json?.data as { record?: { id?: unknown } } | undefined)?.record
       if (a?.status === 201 && typeof record?.id === 'string') return { success: true, recordId: record.id }
       return failure('create', a)
