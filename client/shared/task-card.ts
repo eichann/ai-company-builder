@@ -7,7 +7,7 @@
 import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
-import type { RecordDetail } from '../../shared/types/records'
+import type { RecordDetail, RecordSummary } from '../../shared/types/records'
 import { recordActionChoices } from './record-actions'
 import {
   cardFields, historyLines, summaryView,
@@ -42,6 +42,21 @@ export interface TaskCardRun {
   unknown: Array<{ key: string; kind: string }>
 }
 
+/** Where a task came from (言葉の決まり 7.): the meeting or the 連絡 it was made of. */
+export interface TaskCardOrigin {
+  kind: 'meeting' | 'interaction'
+  recordId: string
+  title: string
+  /** `YYYY-MM-DD…` of the meeting or the 連絡, when known. */
+  at: string | null
+  /** The AI made it (from a meeting's minutes, a mail…). */
+  byAi: boolean
+  /** The person who made it, when a person did (or confirmed the AI's suggestion). */
+  addedBy: string | null
+  /** The words it rests on (the note the AI wrote when it made it). */
+  basis: string | null
+}
+
 export interface TaskCardData {
   record: RecordViewSummary & { state: string | null; version: number }
   /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, or null. */
@@ -51,7 +66,16 @@ export interface TaskCardData {
   purpose: string | null
   fields: RecordCardField[]
   /** The member's place in it. */
-  roles: { assignee: boolean; requester: boolean; okGiver: boolean }
+  roles: { assignee: boolean; requester: boolean; okGiver: boolean; reviewer: boolean }
+  /** People by name (null = nobody, or not a member any more). */
+  names: { assignee: string | null; requester: string | null; reviewer: string | null }
+  /** The checker's member id (「終わったので見てもらう」 hands it to them). */
+  reviewerId: string | null
+  /** 終わったら (task version 9): 知らせるだけ or 確かめてから; null before version 9 or unset. */
+  whenDone: 'notify' | 'check' | null
+  /** The task's 案件 / プロジェクト (its `bundle` link), shown at its head rather than in 「つながっているもの」. */
+  bundle: RecordViewSummary | null
+  origin: TaskCardOrigin | null
   actions: TaskCardAction[]
   /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
   canSetTags: boolean
@@ -100,7 +124,10 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   const { me, def, people } = src
   const r = src.detail.record
   const holds = (field: string) => r.fields[field] === me
-  const roles = { assignee: holds('assignee'), requester: holds('requested_by'), okGiver: holds('ok_by') }
+  const roles = { assignee: holds('assignee'), requester: holds('requested_by'), okGiver: holds('ok_by'), reviewer: holds('reviewer') }
+  const personName = (field: string) => { const id = str(r.fields[field]); return id ? people[id] ?? null : null }
+  const names = { assignee: personName('assignee'), requester: personName('requested_by'), reviewer: personName('reviewer') }
+  const whenDone = r.fields.when_done === 'check' ? 'check' as const : r.fields.when_done === 'notify' ? 'notify' as const : null
   const personMay = (who: string[]) => who.includes('anyone') || who.some(w => def?.fields[w]?.kind === 'person' && holds(w))
   const offer = (state: string | null, startFirst: boolean): TaskCardAction[] => (def ? recordActionChoices(def, state) : [])
     .filter(c => !NOT_ON_CARD.has(c.action) && c.links.length === 0)
@@ -144,6 +171,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
 
   const links: RecordCardLink[] = []
   const prepared: RecordViewSummary[] = []
+  let bundle: RecordViewSummary | null = null
+  let originLink: { kind: 'meeting' | 'interaction'; record: RecordSummary } | null = null
   const files: Array<{ path: string; broken?: boolean }> = []
   for (const l of src.detail.links) {
     if (l.path !== undefined) {
@@ -153,6 +182,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     if (!l.record) continue
     const view = summaryView(l.record, src.defs.get(l.record.type))
     if (l.direction === 'out' && l.name === 'prepared') { prepared.push(view); continue }
+    if (l.direction === 'out' && l.name === 'bundle') { bundle = view; continue }
+    if (l.direction === 'out' && (l.name === 'meeting' || l.name === 'interaction')) originLink ??= { kind: l.name, record: l.record }
     const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : src.defs.get(l.record.type)?.label ?? l.name
     links.push({ label, record: view })
   }
@@ -163,13 +194,22 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     return { runId: x.id, label: x.label, canRetry: unknown.length === 0, unknown }
   })
 
+  const created = src.entries.find(e => e.version === 1) ?? null
+  const origin: TaskCardOrigin | null = originLink ? {
+    kind: originLink.kind, recordId: originLink.record.id, title: originLink.record.title || '（名前なし）',
+    at: str(originLink.record.fields.meeting_at) ?? str(originLink.record.fields.occurred_at),
+    byAi: created?.actorKind === 'ai' || created?.proposedBy === 'ai',
+    addedBy: created && created.actorKind === 'human' ? nameOf(people, created.actorId) : null,
+    basis: created && created.actorKind === 'ai' ? str(created.note) : null,
+  } : null
+
   return {
     record: { ...summaryView(r, def), state: r.state, version: r.version },
     due: str(r.fields.due),
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
-    roles, actions, canSetTags, okLine,
+    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin, actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),

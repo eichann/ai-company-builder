@@ -68,7 +68,8 @@ test('what the AI prepared is apart from the other links; a run with an unknown 
   const runs = [{ id: 'run-1', recordId: 'task-0000aa', needsPerson: true, label: '外への操作の結果が分かりません', operations: [{ key: 'mail-send-1', kind: 'outbound', state: 'unknown', ref: null, updatedAt: '' }] }] as unknown as AiRunView[]
   const c = taskCardOf({ me: ME, detail, def: defs.get('task'), defs, entries: [], people, runs })
   assert.deepEqual(c.prepared.map(p => p.id), ['outbound_message-01'])
-  assert.deepEqual(c.links.map(l => l.record?.id), ['deal-0001ab'])
+  assert.deepEqual(c.links.map(l => l.record?.id), [])
+  assert.equal(c.bundle?.id, 'deal-0001ab')
   assert.deepEqual(c.files, [{ path: '営業/見積.xlsx', broken: false }])
   assert.deepEqual(c.runs, [{ runId: 'run-1', label: '外への操作の結果が分かりません', canRetry: false, unknown: [{ key: 'mail-send-1', kind: 'outbound' }] }])
 })
@@ -87,4 +88,17 @@ test('「タグの候補」 adds tags only where the member may set them: reques
   assert.equal(card(task('in_progress', { assignee: 'u-tanaka', requested_by: ME })).canSetTags, true)
   assert.equal(card(task('todo', { assignee: 'u-tanaka', requested_by: BOSS })).canSetTags, false)
   assert.equal(card(task('done', { assignee: ME, requested_by: BOSS })).canSetTags, false)
+})
+
+test('「取り消す」 undoes exactly the version it names: a malformed id or version never reaches the server', async () => {
+  const seen: Array<{ url: string; body: string }> = []
+  const api = createTasksApi({ baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} },
+    fetch: (async (url: string, init: RequestInit) => { seen.push({ url, body: String(init.body) }); return new Response('{}', { status: 200 }) }) as unknown as typeof fetch })
+  assert.equal((await api.undo('co1', '../x', 5, 5)).success, false)
+  assert.equal((await api.undo('co1', 'task-0000aa', 1, 5)).success, false)
+  assert.equal((await api.undo('co1', 'task-0000aa', 5.5, 6)).success, false)
+  assert.equal((await api.undo('co1', 'task-0000aa', 6, 5)).success, false)
+  assert.equal(seen.length, 0)
+  assert.equal((await api.undo('co1', 'task-0000aa', 5, 5)).success, true)
+  assert.deepEqual(seen, [{ url: 'https://acb.test/api/companies/co1/records/item/task-0000aa/undo', body: JSON.stringify({ version: 5, expectedVersion: 5 }) }])
 })

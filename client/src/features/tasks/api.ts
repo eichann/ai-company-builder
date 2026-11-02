@@ -13,7 +13,7 @@ export type CalendarReads = ElectronPort<'getCalendarToday'>
 /** Reading the list, and hearing that the member's turn or notices may have changed. */
 export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
-export type TaskWrites = ElectronPort<'createTask' | 'actOnTask'>
+export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** One task's card. */
 export type TaskCardReads = ElectronPort<'getTaskCard'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */
@@ -106,4 +106,9 @@ export function shareTaskToFolder(companyId: string, recordId: string, folder: s
 /** Only suggestions: the member chooses. Never fails (no AI → the app's own matching). */
 export function suggestTaskTags(companyId: string, title: string, tagsInUse: string[], reads: TagSuggestionReads = window.electronAPI): Promise<TagSuggestions> {
   return reads.suggestTaskTags(companyId, title, tagsInUse)
+}
+
+/** 「取り消す」 right after the member's own action: undoes ledger `version` (the server decides). */
+export function undoTaskAction(companyId: string, recordId: string, version: number, expectedVersion: number, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.undoTaskAction(companyId, recordId, version, expectedVersion)
 }

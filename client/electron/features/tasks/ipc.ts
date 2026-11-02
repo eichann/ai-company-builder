@@ -15,6 +15,8 @@
 //                 (records.md "Owner-only records"; the server checks the owner and the folder)
 //   tasks:suggestTags  tags in use that fit a title: a Haiku model through the company's key, else
 //                 the app's own matching (tag-suggest.ts; only the title and the tags are sent)
+//   tasks:undo    「取り消す」 right after the member's own action (POST …/undo; the server allows
+//                 only the entry's actor and refuses when something changed since)
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
@@ -199,6 +201,13 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId } : failure('share', a)
     },
 
+    async undo(companyId: string, recordId: string, version: number, expectedVersion: number): Promise<TaskWriteResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
+      if (!Number.isInteger(version) || version < 2 || !Number.isInteger(expectedVersion) || expectedVersion < version) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/undo`, { version, expectedVersion })
+      return a?.status === 200 || a?.status === 201 ? { success: true, recordId } : failure('undo', a)
+    },
+
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/retry`, {})
@@ -313,5 +322,6 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
+  ipc.handle('tasks:undo', (_event, companyId, recordId, version, expectedVersion) => api.undo(typeof companyId === 'string' ? companyId : '', recordId, version, expectedVersion))
   ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

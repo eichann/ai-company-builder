@@ -2,7 +2,8 @@
 // Preview page for the task card (features/tasks): the real card over a fake main process whose
 // card is built by the real `taskCardOf` from core type definitions. `?task=done` shows a task
 // completed on someone's OK; `?shared=1` a task already shown to a department (no 「部署に出す」); `?source=1` gives the card a source
-// (what a connector draws in the slot). Actions sent show in `#acted`, run answers in `#runs`.
+// (what a connector draws in the slot); `?conflict=1` answers every action with 「ほかの人が先に変えました」 after 阿部さん
+// changed the due. Actions sent show in `#acted`, run answers in `#runs`.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -21,6 +22,7 @@ const params = new URLSearchParams(location.search)
 const done = params.get('task') === 'done'
 const withSource = params.get('source') === '1'
 const shared = params.get('shared') === '1'
+const conflict = params.get('conflict') === '1'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -29,7 +31,7 @@ const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り�
   prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
   ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
 }, shared ? {} : { personal: true })
-const entries = (done ? [{ version: 4, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done', changes: [{ field: 'ok_by', before: null, after: 'u-abe' }, { field: 'ok_note', before: null, after: '電話で' }] }] : []) as unknown as LedgerEntry[]
+const entries = (conflict ? [{ version: 4, action: 'set_due', actorId: 'u-abe', actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: null, toState: null, changes: [{ field: 'due', before: '2026-11-07T17:00', after: '2026-11-08T12:00' }] }] : done ? [{ version: 4, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T07:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done', changes: [{ field: 'ok_by', before: null, after: 'u-abe' }, { field: 'ok_note', before: null, after: '電話で' }] }] : []) as unknown as LedgerEntry[]
 const runs = [{ id: 'run-1', recordId: 'task-0000aa', needsPerson: true, label: '外への操作の結果が分かりません。相手先で確かめてから続きを進めます', operations: [{ key: 'mail-send-1', kind: 'outbound', state: 'unknown', ref: null, updatedAt: '' }] }] as unknown as AiRunView[]
 const card = taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
@@ -49,9 +51,11 @@ const show = (id: string, line: string) => { acted.push(line); document.getEleme
 installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
   actOnTask: async (_c, recordId, input) => {
+    if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
     return { success: true, recordId }
   },
+  undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },
   linkFileToTask: async (_c, recordId, companyPath, version) => { show('acted', `link ${companyPath}@${version}`); return { success: true, recordId } },
   unlinkFileFromTask: async (_c, recordId, companyPath, version) => { show('acted', `unlink ${companyPath}@${version}`); return { success: true, recordId } },
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
