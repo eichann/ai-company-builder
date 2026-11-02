@@ -46,7 +46,8 @@ import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDi
 import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { startMinutesReading } from '../features/minutes/startReading'
-import { skipMinutes } from '../features/minutes/api'
+import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
+import { MeetingBundleBar } from '../features/minutes/components/MeetingBundleBar'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices } from '../features/notifications/hooks/useNotices'
@@ -107,8 +108,10 @@ export function AppShell() {
     [minutes.available, minutes.notices, taskList.data, pluginTurns],
   )
   const { isReadOnly } = useWriteAccess()
-  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list).
+  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or a meeting's card.
   const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
+  // Bumped when a まとまり is chosen, so an open meeting card asks the server again.
+  const [bundleRev, setBundleRev] = useState(0)
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const [fileAction, setFileAction] = useState<FileActionOpen | null>(null)
@@ -289,8 +292,12 @@ export function AppShell() {
     if (recordId.startsWith('task-')) {
       return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
     }
+    // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
+    const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
+      ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} onChoose={setChoosingBundle} onChanged={taskList.reload} />
+      : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} /></div>
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
@@ -300,7 +307,10 @@ export function AppShell() {
   // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
   const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? []).map(m => {
     const actions: MeetingTurnRow['actions'] = []
-    if (m.kind === 'bundle') actions.push({ label: 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+    if (m.kind === 'bundle') {
+      actions.push({ label: 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+      actions.push({ label: 'まとまりはない', run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
+    }
     if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
       actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
       actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
@@ -494,7 +504,14 @@ export function AppShell() {
           onChoose={async b => {
             const r = await linkMeetingBundle(currentCompany.id, choosingBundle.id, b.id)
             taskList.reload()
+            setBundleRev(n => n + 1)
             return r?.success ? null : (r?.error ?? 'できませんでした。')
+          }}
+          onNoBundle={async () => {
+            const r = await declineMeetingBundle(currentCompany.id, choosingBundle.id)
+            taskList.reload()
+            setBundleRev(n => n + 1)
+            return r.success ? null : r.error
           }}
           onClose={() => setChoosingBundle(null)}
         />

@@ -4,6 +4,8 @@
 //   minutes:notices   the received minutes waiting for the member (no text, ever)
 //   minutes:skip      「今は読まない」 (the type's skip, with the session)
 //   minutes:linkBundle  「どのまとまりの会議ですか？」 (the session; nothing is written outside)
+//   minutes:noBundle    「まとまりはない（社内の会議など）」: the question closed for good
+//   minutes:bundleQuestion  the meeting card's question (may a まとまり be chosen)
 // Everything goes with the member's session, which stays in main.
 
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -22,4 +24,6 @@ export function registerMinutesIpc(ipc: IpcRegistrar, minutes: MinutesChecker): 
   ipc.handle('minutes:skip', (_event, companyId, minutesId) => str(companyId) && str(minutesId) ? minutes.skip(companyId, minutesId) : invalid)
   ipc.handle('minutes:linkBundle', (_event, companyId, minutesId, bundleId) =>
     str(companyId) && str(minutesId) && str(bundleId) ? minutes.linkBundle(companyId, minutesId, bundleId) : invalid)
+  ipc.handle('minutes:noBundle', (_event, companyId, minutesId) => str(companyId) && str(minutesId) ? minutes.noBundle(companyId, minutesId) : invalid)
+  ipc.handle('minutes:bundleQuestion', (_event, companyId, minutesId) => str(companyId) && str(minutesId) ? minutes.bundleQuestion(companyId, minutesId) : invalid)
 }

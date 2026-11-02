@@ -516,3 +516,94 @@ describe('which meetings are read (a company setting)', () => {
     expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'external' })).status).toBe(200)
   })
 })
+
+describe('「どのまとまりの会議ですか？」 (the server decides what asks)', () => {
+  const questions = async (user: string) => {
+    const r = await call(user, 'GET', `${C()}/me/minutes/bundle-questions`)
+    expect(r.status, r.text).toBe(200)
+    return r.body.data as { days: number; questions: Json[] }
+  }
+  const versionOf = async (id: string) => (await call('mn-owner', 'GET', `${C()}/records/item/${id}`)).body.data.record.version as number
+  async function readWithoutBundle(id: string, user: string) {
+    db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name IN ('bundle', 'counterpart')").run(CO, id)
+    const state = minutesRows().find(r => r.id === id).state
+    if (state === 'read') return
+    const token = await tokenFor(user)
+    if (state === 'received') expect((await call(null, 'POST', `/api/records-ai/item/${id}/actions/start_reading`, { expectedVersion: await versionOf(id) }, token)).status).toBe(200)
+    const read = await call(null, 'POST', `/api/records-ai/item/${id}/actions/finish_reading`, { expectedVersion: await versionOf(id), args: { summary_text: '要約' } }, token)
+    expect(read.status, read.text).toBe(200)
+  }
+  let followUpId: string
+  let internalId: string
+
+  it('asks the assignee only for read meetings with someone from outside and no まとまり; the same 相手 is one group', async () => {
+    at('2026-11-14T09:00:00+09:00')
+    const rows = minutesRows()
+    followUpId = rows.find(r => r.title.includes('2回目')).id
+    internalId = rows.find(r => JSON.parse(r.fields).external_count === 0).id
+    const internalAssignee = JSON.parse(rows.find(r => r.id === internalId).fields).assignee as string
+    await readWithoutBundle(salesId, 'mn-sato')
+    await readWithoutBundle(followUpId, 'mn-sato')
+    await readWithoutBundle(internalId, internalAssignee)
+
+    const mine = await questions('mn-sato')
+    expect(mine.days).toBe(7)
+    expect(mine.questions.map(q => q.recordId).sort()).toEqual([salesId, followUpId].sort())
+    // An internal meeting never asks, whoever is its assignee.
+    expect((await questions(internalAssignee)).questions.map(q => q.recordId)).not.toContain(internalId)
+    // Tanaka attended but is not the assignee: not his question.
+    expect((await questions('mn-tanaka')).questions.map(q => q.recordId)).not.toContain(salesId)
+    // Different titles, no 相手: two groups. The same 相手: one group, named after it; no calendar id in the answer.
+    const [a, b] = mine.questions
+    expect(a.group.key).not.toBe(b.group.key)
+    const customerId = (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'customer'").get(CO) as Json).id as string
+    for (const id of [salesId, followUpId]) {
+      db.prepare("INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path) VALUES (?, ?, 'counterpart', 0, ?, NULL)").run(CO, id, customerId)
+    }
+    const grouped = await questions('mn-sato')
+    expect(new Set(grouped.questions.map(q => q.group.key)).size).toBe(1)
+    expect(grouped.questions[0].group.label).toBe('株式会社サンプル')
+    expect(JSON.stringify(grouped)).not.toContain(GOOGLE_SEED.salesEvent)
+    expect(JSON.stringify(grouped)).not.toContain(GOOGLE_SEED.followUpEvent)
+  })
+
+  it('leaves あなたの番 after the company\'s days (owner/admin setting); the card can still choose', async () => {
+    expect((await call('mn-sato', 'PUT', `${C()}/google/minutes-folder`, { bundleQuestionDays: 14 })).status).toBe(403)
+    for (const bad of [0, 31, 2.5, '7']) expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { bundleQuestionDays: bad })).status).toBe(400)
+    at('2026-11-24T09:00:00+09:00')
+    expect((await questions('mn-sato')).questions).toEqual([])
+    const card = await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)
+    expect(card.status, card.text).toBe(200)
+    expect(card.body.data).toMatchObject({ recordId: salesId, canChoose: true, noBundle: false })
+    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.canChoose).toBe(false)
+    const set = await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { bundleQuestionDays: 30 })
+    expect(set.status, set.text).toBe(200)
+    expect(set.body.data).toMatchObject({ bundleQuestionDays: 30, folder: '営業部' })
+    expect((await questions('mn-sato')).questions.map(q => q.recordId).sort()).toEqual([salesId, followUpId].sort())
+  })
+
+  it('「まとまりはない」 closes the question for good: the person\'s choice in the ledger, no state change, no AI turn', async () => {
+    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})).status).toBe(403)
+    expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, { extra: 1 })).status).toBe(400)
+    const before = await versionOf(followUpId)
+    const r = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, { expectedVersion: before })
+    expect(r.status, r.text).toBe(200)
+    expect(r.body.data.version).toBe(before + 1)
+    expect((await questions('mn-sato')).questions.map(q => q.recordId)).toEqual([salesId])
+    expect(minutesRows().find(row => row.id === followUpId).state).toBe('read')
+    const entries = (await call('mn-sato', 'GET', `${C()}/records/item/${followUpId}/history`)).body.data.entries as Json[]
+    const last = entries.reduce((x: Json, y: Json) => (y.version > x.version ? y : x))
+    expect([last.action, last.actorId, last.fromState, last.toState]).toEqual(['no_bundle', 'mn-sato', 'read', 'read'])
+    expect((await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: followUpId, step: 'minutes-bundle', deviceId: 'app-device-c', conversationId: 'conv-nb' })).body.code).toBe('NOT_AI_TURN')
+    // Asked again (a second window): nothing more is written. The text tells the AI not to ask.
+    expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})).body.data.version).toBe(before + 1)
+    expect((await textOf('mn-sato', followUpId)).body.data.noBundle).toBe(true)
+    expect((await textOf('mn-sato', salesId)).body.data.noBundle).toBe(false)
+    // A まとまり can still be chosen from the card; then 「まとまりはない」 is refused.
+    expect((await call('mn-sato', 'GET', `${C()}/me/minutes/item/${followUpId}/bundle-question`)).body.data).toMatchObject({ canChoose: true, noBundle: true })
+    const deal = dealIdOf('研修導入（株式会社サンプル）')
+    expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/bundle`, { bundleId: deal })).status).toBe(200)
+    const again = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})
+    expect([again.status, again.body.code]).toEqual([409, 'MINUTES_HAS_BUNDLE'])
+  })
+})

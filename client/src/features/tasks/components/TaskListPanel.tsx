@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { CaretDown, CaretRight } from '@phosphor-icons/react'
+import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask, linkFileToTask, linkMeetingBundle } from '../api'
+import { actOnTask, createTask, declineMeetingBundle, linkFileToTask, linkMeetingBundle } from '../api'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { companyNow, companyPathOf, filterByTag, listEvents, listSections, tagCounts, type ListMode, type ListSection } from '../model'
+import { companyNow, companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
 import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
@@ -86,6 +86,18 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
       list.reload()
     }
   }
+  // 「まとまりはない（社内の会議など）」: the server closes the question for good; no AI turn follows.
+  const noBundle = async (item: TaskListItem) => {
+    setBusy(item.id)
+    setMessage(null)
+    try {
+      const r = await declineMeetingBundle(companyId, item.id)
+      if (!r.success) setMessage(r.error)
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+  }
   const add = async (input: TaskCreateInput): Promise<string | null> => {
     const r = await createTask(companyId, input)
     if (!r.success) return r.error
@@ -96,7 +108,10 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
   const row = (i: TaskListItem) => {
     const ai = i.turn === 'ai' ? aiOf(i.id) : null
     const extra: Array<{ label: string; run: () => void }> = []
-    if (i.needsBundle) extra.push({ label: 'まとまりを選ぶ', run: () => setChoosing(i) })
+    if (i.needsBundle) {
+      extra.push({ label: 'まとまりを選ぶ', run: () => setChoosing(i) })
+      extra.push({ label: 'まとまりはない', run: () => void noBundle(i) })
+    }
     if (i.type === 'meeting' && i.turn === 'ai' && i.state === 'received' && meetingActions && ai?.state !== 'running') {
       extra.push({ label: '自分で読み取る', run: () => meetingActions.read(i.id) })
       extra.push({ label: '今は読まない', run: () => void meetingActions.skip(i.id).then(e => { setMessage(e); list.reload() }) })
@@ -116,6 +131,25 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
       />
     )
   }
+  // 「まとまりを選ぶ会議 n件」: one row for the meetings of one 相手 or series, opened to show each.
+  const listRow = (r: ListRow) => {
+    if (r.kind === 'item') return row(r.item)
+    const open = unfolded[`group:${r.key}`] === true
+    return (
+      <div key={`group:${r.key}`} data-testid="bundle-group">
+        <button type="button" aria-expanded={open} onClick={() => setUnfolded(u => ({ ...u, [`group:${r.key}`]: !open }))}
+          className="flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-800">
+          <Briefcase size={15} className="mt-[2px] shrink-0 text-gray-400" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] text-gray-800 dark:text-zinc-200">まとまりを選ぶ会議 {r.items.length}件</span>
+            <span className="block truncate text-[11px] text-gray-500 dark:text-zinc-400">{r.label}</span>
+          </span>
+          {open ? <CaretDown size={10} className="mt-1.5" /> : <CaretRight size={10} className="mt-1.5" />}
+        </button>
+        {open && <div className="ml-4 space-y-0.5">{r.items.map(row)}</div>}
+      </div>
+    )
+  }
   const section = (s: ListSection) => {
     const open = !s.foldable || unfolded[s.key] === true
     const header = <>
@@ -128,7 +162,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
         {s.foldable ? (
           <button type="button" aria-expanded={open} onClick={() => setUnfolded(u => ({ ...u, [s.key]: !open }))} className={HEADER}>{header}</button>
         ) : <h3 className={HEADER}>{header}</h3>}
-        {open && <div className="space-y-0.5">{s.events.map(e => <EventRow key={e.event.id} e={e} />)}{s.items.map(row)}</div>}
+        {open && <div className="space-y-0.5">{s.events.map(e => <EventRow key={e.event.id} e={e} />)}{listRows(s.items).map(listRow)}</div>}
       </section>
     )
   }
@@ -142,6 +176,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
             const r = await linkMeetingBundle(companyId, choosing.id, b.id)
             list.reload()
             return r?.success ? null : (r?.error ?? 'できませんでした。')
+          }}
+          onNoBundle={async () => {
+            const r = await declineMeetingBundle(companyId, choosing.id)
+            list.reload()
+            return r.success ? null : r.error
           }}
           onClose={() => setChoosing(null)}
         />

@@ -1,7 +1,7 @@
 import { memo, useState } from 'react'
 import { Briefcase, CheckCircle } from '@phosphor-icons/react'
 import type { MinutesBundleChoiceCard as Card } from '../../../../shared/minutes-app'
-import { linkMinutesBundle } from '../api'
+import { declineMinutesBundle, linkMinutesBundle } from '../api'
 
 /**
  * 「どのまとまりの会議ですか？」 (design §1-8): minutes read with no まとまり (a 案件,
@@ -13,6 +13,21 @@ export const MinutesBundleChoiceCard = memo(function MinutesBundleChoiceCard({ c
   const [done, setDone] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const [declined, setDeclined] = useState(false)
+  // 「まとまりはない（社内の会議など）」: never asked again for this meeting (no AI turn follows).
+  const decline = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const result = await declineMinutesBundle(card.companyId, card.minutesId)
+      if (result.success) setDeclined(true)
+      else setError(result.error)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const choose = async () => {
     if (!chosen || busy) return
@@ -34,12 +49,23 @@ export const MinutesBundleChoiceCard = memo(function MinutesBundleChoiceCard({ c
         どのまとまりの会議ですか？
       </div>
       <p className="mt-1 text-xs text-gray-600 dark:text-zinc-400">「{card.meetingTitle}」の議事録です。選ぶまで、外のシステム（HubSpot など）には何も書きません。</p>
-      {done !== null ? (
+      {declined ? (
+        <p role="status" className="mt-2 flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
+          <CheckCircle size={13} weight="bold" aria-hidden />まとまりはない会議として残しました。もう聞きません。
+        </p>
+      ) : done !== null ? (
         <p role="status" className="mt-2 flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400">
           <CheckCircle size={13} weight="bold" aria-hidden />「{done}」につなぎました。続きは AI に話しかけてください。
         </p>
       ) : card.candidates.length === 0 ? (
-        <p className="mt-2 text-xs text-gray-700 dark:text-zinc-300">候補が見つかりませんでした。どの案件（まとまり）の会議か、AI に伝えてください。</p>
+        <>
+          <p className="mt-2 text-xs text-gray-700 dark:text-zinc-300">候補が見つかりませんでした。どの案件（まとまり）の会議か、AI に伝えてください。</p>
+          {error && <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+          <button type="button" disabled={busy} onClick={() => void decline()}
+            className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            まとまりはない（社内の会議など）
+          </button>
+        </>
       ) : (
         <>
           <ul className="mt-2 space-y-1">
@@ -56,6 +82,10 @@ export const MinutesBundleChoiceCard = memo(function MinutesBundleChoiceCard({ c
           <button type="button" disabled={!chosen || busy} onClick={() => void choose()}
             className="mt-2 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
             {busy ? 'つないでいます…' : 'これにする'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => void decline()}
+            className="ml-2 mt-2 rounded-lg px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            まとまりはない（社内の会議など）
           </button>
         </>
       )}

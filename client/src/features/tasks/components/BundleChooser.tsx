@@ -8,20 +8,22 @@ interface Props {
   meetingTitle: string
   /** null = linked; else the reason in words. */
   onChoose: (bundle: BundleChoice) => Promise<string | null>
+  /** 「まとまりはない（社内の会議など）」: null = done; else the reason in words. Absent: not offered. */
+  onNoBundle?: () => Promise<string | null>
   onClose: () => void
 }
 
 /** 「どのまとまりの会議ですか？」 from 「あなたの番」: the unfinished まとまり the member reads. Nothing goes outside. */
-export function BundleChooser({ companyId, meetingTitle, onChoose, onClose }: Props) {
+export function BundleChooser({ companyId, meetingTitle, onChoose, onNoBundle, onClose }: Props) {
   const choices = useBundleChoices(companyId)
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const shown = choices?.success ? choices.bundles.filter(b => !q.trim() || b.title.includes(q.trim())) : []
-  const choose = async (b: BundleChoice) => {
+  const choose = async (b: BundleChoice | null) => {
     setBusy(true)
     setError(null)
-    const failure = await onChoose(b)
+    const failure = b ? await onChoose(b) : await onNoBundle?.() ?? null
     setBusy(false)
     if (failure) setError(failure)
     else onClose()
@@ -51,6 +53,12 @@ export function BundleChooser({ companyId, meetingTitle, onChoose, onClose }: Pr
             </li>
           ))}
         </ul>
+        {onNoBundle && (
+          <button type="button" disabled={busy} onClick={() => void choose(null)}
+            className="w-full border-t border-gray-100 px-3 py-1.5 text-left text-[12px] text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-700">
+            まとまりはない（社内の会議など）
+          </button>
+        )}
         {error && <p role="alert" className="border-t border-gray-100 px-3 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
         <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-700">選ぶと、この会議がそのまとまりにつながります。外のサービス（HubSpot など）には書きません。</p>
       </div>

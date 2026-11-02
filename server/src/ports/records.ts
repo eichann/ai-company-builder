@@ -141,6 +141,9 @@ export interface RecordRepository {
   /** Which meetings the intake reads (minutes.md "Which meetings"): the stored value, null = the default. */
   meetingIntake(): string | null
   setMeetingIntake(value: string, by: string, at: string): void
+  /** Days 「どのまとまりの会議ですか？」 asks after a meeting is read (minutes.md): the stored value, null = the default. */
+  meetingBundleDays(): number | null
+  setMeetingBundleDays(days: number, by: string, at: string): void
 
   /** Every stored version of every type, oldest first per name. */
   typeVersions(): RecordTypeRow[]

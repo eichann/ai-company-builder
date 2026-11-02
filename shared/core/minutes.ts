@@ -31,6 +31,35 @@ export function meetingIsRead(intake: MeetingIntake, externalAttendees: number):
   return intake === 'all' || externalAttendees > 0
 }
 
+/**
+ * 「どのまとまりの会議ですか？」 (minutes.md "The まとまり question", owner FB 28): a meeting read
+ * without a まとまり asks its assignee for this many days after it was read (a company setting,
+ * `MEETING_BUNDLE_DAYS_MIN`–`MAX`); later it leaves あなたの番, and the meeting can still get a
+ * まとまり from its card.
+ */
+export const DEFAULT_MEETING_BUNDLE_DAYS = 7
+export const MEETING_BUNDLE_DAYS_MIN = 1
+export const MEETING_BUNDLE_DAYS_MAX = 30
+
+/** The stored value as days (anything else, null included, is the default). */
+export function meetingBundleDaysOf(raw: unknown): number {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= MEETING_BUNDLE_DAYS_MIN && raw <= MEETING_BUNDLE_DAYS_MAX ? raw : DEFAULT_MEETING_BUNDLE_DAYS
+}
+
+/**
+ * The meeting's ledger action of 「まとまりはない（社内の会議など）」: the person closed the question
+ * for good (no field, no state, no AI turn). Not an action of the type: only the minutes service writes it.
+ */
+export const MEETING_NO_BUNDLE_ACTION = 'no_bundle'
+
+/**
+ * Whether a meeting asks 「どのまとまりの会議ですか？」 at all: only one with someone from outside
+ * (an internal meeting has no 案件 to name), never one whose question was closed or that has its まとまり.
+ */
+export function meetingAsksBundle(m: { externalAttendees: number; hasBundle: boolean; noBundleChosen: boolean }): boolean {
+  return m.externalAttendees > 0 && !m.hasBundle && !m.noBundleChosen
+}
+
 /** The record's summary of a meeting's minutes (characters). */
 export const MINUTES_SUMMARY_MAX = 300
 /** Longest minutes text handed to the AI (characters); the rest is cut with a notice. */

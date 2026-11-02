@@ -306,4 +306,4 @@ export const slackSchema = topLevel<SlackAdminView>({
   grants: list, history: list,
 })
 export const coreConnectorsSchema = topLevel<CoreConnectorsView>({ connectors: list, roles: list })
-export const minutesFolderSchema = topLevel<MinutesFolderSetting>({ folder: nullableStr, choices: list, meetings: str })
+export const minutesFolderSchema = topLevel<MinutesFolderSetting>({ folder: nullableStr, choices: list, meetings: str, bundleQuestionDays: num })

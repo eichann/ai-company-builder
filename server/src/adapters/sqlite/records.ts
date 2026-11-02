@@ -194,6 +194,17 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         ON CONFLICT(company_id) DO UPDATE SET meeting_intake = excluded.meeting_intake, updated_at = excluded.updated_at, updated_by = excluded.updated_by
       `).run(companyId, at, by, value)
     },
+    meetingBundleDays() {
+      const r = conn.prepare('SELECT meeting_bundle_days FROM record_settings WHERE company_id = ?').get(companyId) as { meeting_bundle_days: number | null } | undefined
+      return r?.meeting_bundle_days ?? null
+    },
+    setMeetingBundleDays(days, by, at) {
+      // A new row keeps the feature off (enabled 0); an existing row keeps its switch.
+      conn.prepare(`
+        INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, meeting_bundle_days) VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET meeting_bundle_days = excluded.meeting_bundle_days, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, at, by, days)
+    },
 
     typeVersions() {
       return (conn.prepare('SELECT name, version, definition, source, commit_sha, created_at FROM record_types WHERE company_id = ? ORDER BY name, version')

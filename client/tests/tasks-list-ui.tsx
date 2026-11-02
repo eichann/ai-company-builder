@@ -25,7 +25,10 @@ let data: TaskListData = {
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
     it({ id: 'task-done01', title: '経費の申請', turn: 'done', state: 'done', finishedAt: new Date().toISOString() }),
-    it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true }),
+    it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-c', label: 'C社 打ち合わせ' } }),
+    // Two meetings of one series (the server's group): one row 「まとまりを選ぶ会議 2件」.
+    it({ id: 'meeting-00bb21', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第1回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
+    it({ id: 'meeting-00bb22', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第2回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
   ],
 }
 const changed = emitter<{ companyId: string }>()
@@ -52,6 +55,12 @@ installElectronAPI({
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-c00001', title: 'C社 研修導入', typeLabel: '案件' }, { id: 'deal-c00002', title: 'C社 追加', typeLabel: '案件' }] }),
   linkMinutesBundle: async (_companyId, meetingId, bundleId) => {
     acted.push(`${meetingId}:bundle ${bundleId}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
+    data = { ...data, items: data.items.filter(i => i.id !== meetingId) }
+    return { success: true }
+  },
+  declineMinutesBundle: async (_companyId, meetingId) => {
+    acted.push(`${meetingId}:no bundle`)
     document.getElementById('acted')!.textContent = acted.join(',')
     data = { ...data, items: data.items.filter(i => i.id !== meetingId) }
     return { success: true }

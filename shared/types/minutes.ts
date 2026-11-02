@@ -73,6 +73,8 @@ export interface MinutesText {
   bundle: MinutesBundleSummary | null
   /** Unfinished まとまり the meeting may be about (only when none is linked; readable ones only). */
   candidates: Array<{ id: string; title: string; typeLabel: string }>
+  /** A person said 「まとまりはない（社内の会議など）」: nobody is asked which まとまり it is. */
+  noBundle: boolean
   /** Instruction-like phrases found in the text (labels and their words); a flag, nothing removed. */
   instructionLike: Array<{ label: string; words: string }>
 }
@@ -96,4 +98,49 @@ export interface MinutesFolderSetting {
   choices: string[]
   /** Which meetings are read: `external` (default) = with someone from outside, `all`. */
   meetings: MeetingIntake
+  /** Days 「どのまとまりの会議ですか？」 stays in あなたの番 after a meeting is read (default 7, 1–30). */
+  bundleQuestionDays: number
+}
+
+/**
+ * `GET /api/companies/:id/me/minutes/bundle-questions` — the member's 「どのまとまりの会議ですか？」
+ * items of あなたの番, decided by the server: meetings they are the assignee of, read within the
+ * company's days, with someone from outside, no まとまり linked and the question not closed, in a
+ * company that has some まとまり. Ids, titles and times only.
+ */
+export interface MeetingBundleQuestions {
+  days: number
+  questions: MeetingBundleQuestion[]
+}
+
+export interface MeetingBundleQuestion {
+  recordId: string
+  title: string
+  version: number
+  /** When the meeting took place (ISO), or null. */
+  meetingAt: string | null
+  /** When it was read (ISO): it leaves あなたの番 `days` after. */
+  readAt: string
+  /**
+   * Meetings of the same counterpart or series share it (an opaque key, no Google id): the list
+   * shows them as one row 「まとまりを選ぶ会議 n件」. `label` names the group (the series' title).
+   */
+  group: { key: string; label: string }
+}
+
+/** `GET /api/companies/:id/me/minutes/item/:recordId/bundle-question` — one meeting's question, for its card. */
+export interface MeetingBundleQuestionState {
+  recordId: string
+  title: string
+  version: number
+  /** A まとまり may be chosen now (none linked; the member is the assignee or an admin). */
+  canChoose: boolean
+  /** 「まとまりはない」 was chosen earlier (a まとまり can still be chosen). */
+  noBundle: boolean
+}
+
+/** `POST …/minutes/item/:recordId/no-bundle { expectedVersion? }` — 「まとまりはない（社内の会議など）」. */
+export interface MinutesNoBundleResult {
+  recordId: string
+  version: number
 }

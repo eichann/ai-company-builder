@@ -12,6 +12,10 @@
  *                                            text, read now from Google with my own permission
  *   POST    /me/minutes/item/:recordId/bundle    the assignee or an admin: { bundleId, expectedVersion? }
  *                                            (which まとまり the meeting belongs to)
+ *   POST    /me/minutes/item/:recordId/no-bundle the assignee or an admin: { expectedVersion? }
+ *                                            (「まとまりはない」: the question closed for good)
+ *   GET     /me/minutes/item/:recordId/bundle-question   a reader of the meeting: may a まとまり be chosen
+ *   GET     /me/minutes/bundle-questions        any member: my 「どのまとまりの会議ですか？」 items
  *
  * The text is never stored, logged or cached: `Cache-Control: no-store`.
  * Non-members get 404 like every company route.
@@ -55,4 +59,19 @@ minutesRoute.get('/me/minutes/item/:recordId/text', companyMember, async (c) => 
 minutesRoute.post('/me/minutes/item/:recordId/bundle', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   return answer(c, minutes.linkBundle(member, { kind: 'human', source: null }, c.req.param('recordId'), c.var.body))
+})
+
+minutesRoute.post('/me/minutes/item/:recordId/no-bundle', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.noBundle(member, { kind: 'human', source: null }, c.req.param('recordId'), c.var.body))
+})
+
+minutesRoute.get('/me/minutes/item/:recordId/bundle-question', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.bundleQuestion(member, c.req.param('recordId')))
+})
+
+minutesRoute.get('/me/minutes/bundle-questions', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.bundleQuestions(member))
 })

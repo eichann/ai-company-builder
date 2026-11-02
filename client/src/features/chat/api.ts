@@ -270,10 +270,15 @@ export function recreatePluginOperation(companyId: string, pluginId: string, ope
 }
 
 /** 「どの案件の議事録ですか？」: the person links the minutes to a deal with their session (nothing goes to HubSpot). */
-export type MinutesBundleWrites = ElectronPort<'linkMinutesBundle'>
+export type MinutesBundleWrites = ElectronPort<'linkMinutesBundle' | 'declineMinutesBundle'>
 
 export function linkMinutesBundle(companyId: string, minutesId: string, bundleId: string, writes: MinutesBundleWrites = window.electronAPI) {
   return writes.linkMinutesBundle(companyId, minutesId, bundleId)
+}
+
+/** 「まとまりはない（社内の会議など）」 from the consultation's card. */
+export function declineMinutesBundle(companyId: string, minutesId: string, writes: MinutesBundleWrites = window.electronAPI) {
+  return writes.declineMinutesBundle(companyId, minutesId)
 }
 
 /**
