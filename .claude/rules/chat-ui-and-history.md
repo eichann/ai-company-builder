@@ -39,7 +39,9 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 
 `src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
-per-agent model pickers, buttons; owns its width observer), `ChatMessageList.tsx`
+per-agent model pickers, buttons; owns its width observer: under 420 px — a pane at its narrowest —
+only the meter, the model picker, ＋, the list and settings stay, and nothing is drawn outside the
+pane: `tests/ui/chat-narrow.spec.ts`), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
 dropped files and images in `ComposerAttachments.tsx`, and the text input
 `CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug

@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
 import { useTranslation } from 'react-i18next'
 import { Sparkle, GearSix, CircleNotch, Plus, SidebarSimple, X, MarkdownLogo, ArrowSquareOut } from '@phosphor-icons/react'
@@ -41,17 +42,21 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
   const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
   // The usage meter shows only its fullest window when the header is narrow.
-  const [headerRef, narrowHeader] = useIsNarrowerThan<HTMLElement>(600)
+  const [narrowRef, narrowHeader] = useIsNarrowerThan<HTMLElement>(600)
+  // A pane at its narrowest (~290 px): the model picker, the list and settings stay; the effort
+  // picker, the Markdown toggle and 「別ウィンドウで開く」 wait for room — nothing is drawn outside the pane.
+  const [tightRef, tight] = useIsNarrowerThan<HTMLElement>(420)
+  const headerRef = useCallback((el: HTMLElement | null) => { narrowRef(el); tightRef(el) }, [narrowRef, tightRef])
 
   return (
-    <header ref={headerRef} className="flex-shrink-0 h-12 flex items-center justify-between gap-2 px-4 border-b border-gray-200 dark:border-zinc-800">
-      <div className="flex items-center gap-3 flex-shrink-0">
-        <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center">
+    <header ref={headerRef} className={`flex-shrink-0 h-12 flex items-center justify-between gap-2 min-w-0 overflow-hidden border-b border-gray-200 dark:border-zinc-800 ${tight ? 'px-2' : 'px-4'}`}>
+      <div className={`flex items-center gap-3 ${tight ? 'min-w-0 shrink overflow-hidden' : 'flex-shrink-0'}`}>
+        {!tight && <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center">
           <Sparkle size={12} weight="fill" className="text-white" />
-        </div>
+        </div>}
         <div className="flex items-center gap-2">
           {/* The model selector already names the agent when space is short. */}
-          {(!narrowHeader || !hasRateLimits(authMode)) && (
+          {!tight && (!narrowHeader || !hasRateLimits(authMode)) && (
             <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
               {agentShortLabel(authMode)}
             </span>
@@ -107,7 +112,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         )}
 
         {/* Effort Level Selector (Claude Code mode only). Options depend on the model. */}
-        {authMode === 'claude-code' && (
+        {authMode === 'claude-code' && !tight && (
           <select
             value={aiEffort}
             onChange={(e) => setAIEffort(e.target.value as AIEffort)}
@@ -134,7 +139,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
         )}
 
         {/* Markdown Render Toggle: ON = decorated rendering, OFF = raw text */}
-        <button
+        {!tight && <button
           onClick={() => setChatMarkdownRender(!chatMarkdownRender)}
           className={`w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-colors ${
             chatMarkdownRender
@@ -144,9 +149,9 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           title={chatMarkdownRender ? '装飾表示中（クリックでプレーン表示に切替）' : 'プレーン表示中（クリックで装飾表示に切替）'}
         >
           <MarkdownLogo size={16} weight={chatMarkdownRender ? 'fill' : 'regular'} />
-        </button>
+        </button>}
 
-        {onOpenInWindow && (
+        {onOpenInWindow && !tight && (
           <button
             onClick={onOpenInWindow}
             disabled={openInWindowBlocked}

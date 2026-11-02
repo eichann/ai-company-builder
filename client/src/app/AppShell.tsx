@@ -83,6 +83,8 @@ import { pluginSlots, type FileActionOpen } from './pluginSlots'
 const PANE_CLASSES: Record<string, string> = {
   side: 'relative flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900',
   fileTree: 'overflow-hidden',
+  // Nothing of the consultation is drawn outside its pane (over the middle's tabs).
+  chat: 'min-w-0 overflow-hidden',
 }
 const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
 const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
