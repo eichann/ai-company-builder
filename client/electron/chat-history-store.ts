@@ -377,7 +377,8 @@ export class ChatHistoryStore {
     return this.list(companyId).filter(session => {
       let text = sessionSearchText.get(session)
       if (text === undefined) {
-        text = normalizeSearchText([session.title, session.draftInput ?? '', ...session.messages.map(m => m.content)].join('\u0000'))
+        // The app's instruction to the AI is not the member's words (app-instruction.ts): not searched.
+        text = normalizeSearchText([session.title, session.draftInput ?? '', ...session.messages.map(m => m.appInstruction ? '' : m.content)].join('\u0000'))
         sessionSearchText.set(session, text)
       }
       return text.includes(needle)

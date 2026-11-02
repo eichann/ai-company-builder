@@ -102,7 +102,11 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
-  useCommandHandler('chat.newConsultation', ({ message, title, minutesId, pluginStep }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId, pluginStep }), { target: paneId })
+  // A person step's procedure is the app's instruction to the AI: sent, shown only as a chip (app-instruction.ts).
+  useCommandHandler('chat.newConsultation', ({ message, title, minutesId, pluginStep }) => setInputRequest({
+    kind: 'newConsultation', message, title, minutesId, pluginStep,
+    ...(pluginStep && message ? { instruction: { kind: 'step', recordId: pluginStep.recordId, title: title ?? '' } } : {}),
+  }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
   useCommandHandler('chat.consultAbout', async ({ recordId, title }) => {
@@ -111,6 +115,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     setInputRequest({
       kind: 'newConsultation', title: taskConsultTitle(title), topicRecordId: recordId,
       message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp')),
+      instruction: { kind: 'task', recordId, title },
     })
   }, { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])

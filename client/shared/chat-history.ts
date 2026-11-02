@@ -7,6 +7,7 @@ import type { ApprovalCardRef } from './approvals'
 import type { MinutesBundleChoiceCard } from './minutes-app'
 import type { MailDraftCard } from './outbound-mail'
 import type { StoredToolLine } from './tool-display'
+import type { AppInstruction } from './app-instruction'
 export interface ChatSession {
   id: string
   companyId: string
@@ -38,6 +39,8 @@ export interface ChatSession {
     mailDrafts?: MailDraftCard[]
     /** Plain-Japanese labels of the app's tools this reply called, by tool name (tool-display.ts; the calls stay `[Tool: name]` markers in `content`). */
     toolLines?: Record<string, StoredToolLine>
+    /** The app composed this message for the AI (app-instruction.ts): sent, never shown or previewed as the member's words. */
+    appInstruction?: AppInstruction
   }>
   createdAt: string
   updatedAt: string

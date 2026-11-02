@@ -37,6 +37,8 @@ import { MessageList } from './ChatMessageList'
 import { ToolApprovalBanner } from './ToolApprovalBanner'
 import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
+import { AppInstructionChip } from './AppInstructionChip'
+import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 
 // One chat tab: a conversation with the agent. A composition of hooks
 // (hooks/, one concern each, in the order useChat needs them) and
@@ -83,7 +85,8 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep }
+  /** `instruction`: `message` is the app's instruction to the AI, sent but shown only as a chip (app-instruction.ts). */
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep; instruction?: AppInstruction }
   | { kind: 'insertText'; text: string }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
@@ -222,7 +225,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // `editedMessageId`: an edited message is resent — the conversation is cut
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string) => {
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -264,6 +267,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
 
     const message: UIMessage = {
       id: crypto.randomUUID(), role: 'user',
+      ...(instruction ? { metadata: { appInstruction: instruction } } : {}),
       parts: [{ type: 'text', text: text || '画像を確認してください' }],
     }
     timestampsRef.current.set(message.id, new Date())
@@ -337,7 +341,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId, topicRecordId, pluginStep } = inputRequest
+    const { message, title, minutesId, topicRecordId, pluginStep, instruction } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -351,7 +355,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       if (minutesId) minutesIdRef.current = minutesId
       if (topicRecordId) topicRecordIdRef.current = topicRecordId
       if (pluginStep) pluginStepRef.current = pluginStep
-      if (message) void handleSend(message)
+      if (message) void sendTurn(message, undefined, undefined, undefined, instruction)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 
@@ -366,6 +370,16 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const handleEditMessage = useCallback((messageId: string, newText: string) => {
     void sendTurnRef.current(newText, undefined, referenceFilesRef.current.get(messageId), messageId)
   }, [])
+
+  // What the consultation is about, when the app started it with an instruction (shown instead of that
+  // message). It is the first message after the greeting: only the head is looked at, per streamed chunk.
+  const instructionShown = useMemo(() => {
+    for (const message of messages.slice(0, 3)) {
+      const found = message.role === 'user' ? appInstructionOf(message) : null
+      if (found) return found
+    }
+    return null
+  }, [messages])
 
   // ============================================================================
   // Render
@@ -390,6 +404,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       />
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
+
+      {instructionShown && <AppInstructionChip instruction={instructionShown} />}
 
       {historyError && (
         <div role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10">

@@ -137,12 +137,23 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
   recent consultation whose main topic is the task (`topicRecordId` in the history and its
   summary: this PC's consultations, the member's own); without one it starts 「<title> の相談」
   with `topicRecordId` set.
-- The AI gets the task through its record tools, not pasted text: the first message (the
-  member's, composed by `taskConsultFirstMessage`, `client/shared/task-consult.ts`) names the task
+- The AI gets the task through its record tools, not pasted text: the first message (the app's
+  instruction, composed by `taskConsultFirstMessage`, `client/shared/task-consult.ts`) names the task
   by id and asks it to read it with `records_get` (state, whose turn, due, links, what the AI
   prepared) and `records_history`, then wait. An agent without the record tools (`recordsMcp`:
   the API key) is only told what the consultation is about. What the AI then does in it is
   recorded by the ledger with the consultation (provenance), as for any consultation.
+- **That first message is never shown as the member's words** (owner staging FB 8, 2026-11-02):
+  it is a user message marked `metadata.appInstruction` `{ kind: 'task', recordId, title }`
+  (`client/shared/app-instruction.ts`; stored as the message's `appInstruction`). The AI receives
+  its full text (live, after a restart, on another agent); the chat draws no bubble for it
+  (`MessageItem`) and shows a chip at the top instead, 「このやることについての相談：<title>」
+  (`AppInstructionChip.tsx`; pressing it runs `record.open` where the screen has it). The list's
+  preview (`sessionPreview`), the title transcript and body search skip it. A business plugin's
+  person step's procedure is the same (`kind: 'step'`, 「この手順についての相談：<title>」,
+  `chat.newConsultation` with `pluginStep`). Tests: `client/tests/app-instruction.test.ts`,
+  `chat-history-store.test.ts` (search), `tests/ui/chat-panel.spec.ts` (「相談する」, 「a person step's
+  consultation …」).
 - Not yet: a change to the task while its consultation exists as one new card in that
   consultation (batched) — the second part of S12.
 - Tests: `client/tests/task-consult.test.ts` (the latest one about that task; found after a
