@@ -12,12 +12,14 @@ import { useBundleChoices } from '../hooks/useBundleChoices'
 
 const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
-export function BundleField({ companyId, bundle, word, canSet, busy, onSet, onRemove }: {
+export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove }: {
   companyId: string
   bundle: RecordViewSummary | null
   /** The kind's name where none is linked yet (「案件」「プロジェクト」). */
   word: string
   canSet: boolean
+  /** ［外す］ (absent when the link is where the record came from or a service's). */
+  canRemove?: boolean
   busy: boolean
   /** null = done; else the reason in words. */
   onSet: (bundle: BundleChoice) => Promise<string | null>
@@ -38,7 +40,7 @@ export function BundleField({ companyId, bundle, word, canSet, busy, onSet, onRe
         {canSet && (
           <span className="ml-auto flex gap-1">
             <button type="button" disabled={busy} onClick={() => setPicking(true)} className={SMALL_BUTTON}>{bundle ? '変える' : `${name}につなぐ`}</button>
-            {bundle && <button type="button" disabled={busy} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
+            {bundle && canRemove && <button type="button" disabled={busy} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
           </span>
         )}
       </div>

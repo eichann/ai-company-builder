@@ -13,7 +13,7 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, historyLines, RECORD_VIEWS_OFFLINE_TEXT, summaryView,
+  cardFields, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
@@ -112,8 +112,9 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
         const label = l.direction === 'out'
           ? def?.links[l.name]?.label ?? l.name
           : (l.record ? defs.get(l.record.type)?.label : undefined) ?? l.name
+        const removable = removableOf(detail.record, l)
         return l.record
-          ? { label, record: summaryView(l.record, defs.get(l.record.type)) }
+          ? { label, record: summaryView(l.record, defs.get(l.record.type)), ...(l.direction === 'out' && l.name === 'bundle' ? { bundle: true as const } : {}), ...(removable ? { removable } : {}) }
           : { label, path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) }
       })
       const isBundle = def?.implements.includes('bundle') ?? false
@@ -127,6 +128,7 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
         success: true,
         card: {
           record: summaryView(detail.record, def),
+          version: detail.record.version,
           ...(view ? { detail: view } : {}),
           fields: cardFields(rest, def, members),
           history: historyLines(entries, def, members),
