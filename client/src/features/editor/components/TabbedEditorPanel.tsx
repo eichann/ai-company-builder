@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type ReactNode } from 'react'
+import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { FileText, Code, Eye } from '@phosphor-icons/react'
 import { CodeEditor } from '../../../shared/ui/CodeEditor'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
@@ -12,6 +12,7 @@ import { useEditorReview } from '../hooks/useEditorReview'
 import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/useMarkdownView'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
+import { fileTabsOf, recordIdOfTab, type RecordTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
 import { MarkdownPreviewPane } from './MarkdownPreviewPane'
@@ -30,8 +31,10 @@ interface TabbedEditorPanelProps {
   paneId?: string
   /** In front of the tabs (← →). */
   navigation?: ReactNode
-  /** Shown instead of the active file (a record's card); the tabs stay, and choosing one leaves it. */
-  overlay?: ReactNode
+  /** Record tabs' titles and kinds, by record id (`editorTabs.ts`). */
+  recordLooks?: Readonly<Record<string, RecordTabLook>>
+  /** The card of the record whose tab is active (drawn by the screen: the task card, a record's card). */
+  renderRecord?: (recordId: string) => ReactNode
   /** Beside the active file (「つながっているもの」, 「前の版」). */
   aside?: ReactNode
 }
@@ -47,9 +50,15 @@ export function TabbedEditorPanel({
   gotoLine,
   paneId = 'editor',
   navigation,
-  overlay,
+  recordLooks,
+  renderRecord,
   aside,
 }: TabbedEditorPanelProps) {
+  // Records share the tabs; only the file tabs load text, save and keep scroll positions.
+  const activeRecordId = recordIdOfTab(activeFilePath)
+  const tabs = openFiles
+  const fileTabs = useMemo(() => fileTabsOf(tabs), [tabs])
+  const shownFile = activeRecordId ? null : activeFilePath
   const { isReadOnly } = useWriteAccess()
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -57,9 +66,9 @@ export function TabbedEditorPanel({
   const [externalDiffPath, setExternalDiffPath] = useState<string | null>(null)
   const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const { mdViewMode, setMdViewModePersisted } = useMarkdownViewMode()
-  const scroll = useScrollMemory(openFiles, activeFilePath, mdViewMode)
+  const scroll = useScrollMemory(fileTabs, shownFile, mdViewMode)
   const { saveCurrentScrollPosition } = scroll
-  const isActivePreviewTab = activeFilePath === previewFilePath
+  const isActivePreviewTab = shownFile === previewFilePath
   const rootRef = useRef<HTMLDivElement>(null)
   // The button just pressed may be gone after the switch: keep the focus (and so ⌘S, ⌘F) in this editor.
   const keepFocusInEditor = () => requestAnimationFrame(() => {
@@ -69,14 +78,14 @@ export function TabbedEditorPanel({
 
   // The review reloads when a sidecar of the active file changes (the watcher in useOpenFiles).
   const reviewReloadRef = useRef<() => void>(() => {})
-  const files = useOpenFiles(openFiles, activeFilePath, reviewReloadRef, setError)
+  const files = useOpenFiles(fileTabs, shownFile, reviewReloadRef, setError)
   const { fileContents, setContent } = files
-  const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
-  const { review, textSelection } = useEditorReview(activeFilePath, activeFile?.content || '')
+  const activeFile = shownFile ? fileContents.get(shownFile) : null
+  const { review, textSelection } = useEditorReview(shownFile, activeFile?.content || '')
   reviewReloadRef.current = review.reload
 
   const saving = useFileSaving({
-    activeFilePath,
+    activeFilePath: shownFile,
     fileContents,
     fileContentsRef: files.fileContentsRef,
     updateFile: files.updateFile,
@@ -103,7 +112,7 @@ export function TabbedEditorPanel({
     setMdViewModePersisted(mode)
     keepFocusInEditor()
   }, [saveCurrentScrollPosition, review.otherInProgressReviews, setMdViewModePersisted])
-  const activeIsMarkdown = !!activeFilePath && isMarkdownFile(activeFilePath)
+  const activeIsMarkdown = !!shownFile && isMarkdownFile(shownFile)
   useCommandHandler('editor.togglePreview', () => {
     if (activeIsMarkdown) handleSetMdViewMode(mdViewMode === 'preview' ? 'editor' : 'preview')
   }, { target: paneId, acceptsKey: () => activeIsMarkdown })
@@ -120,26 +129,20 @@ export function TabbedEditorPanel({
 
   const handleCloseTab = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
-    if (await saving.saveBeforeClose(path)) {
+    if (recordIdOfTab(path) || await saving.saveBeforeClose(path)) {
       onCloseFile(path)
       keepFocusInEditor()
     }
   }
 
-  if (openFiles.length === 0 && overlay) {
+  if (tabs.length === 0) {
     return (
       <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30">
-        <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}</div>
-        <div className="flex-1 overflow-auto min-w-0">{overlay}</div>
-      </div>
-    )
-  }
-
-  if (openFiles.length === 0) {
-    return (
-      <div className="h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-zinc-900/30 text-gray-400 dark:text-zinc-600">
-        <FileText size={48} className="mb-4 opacity-50" />
-        <p className="text-sm">ファイルを選択してください</p>
+        {navigation && <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}</div>}
+        <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-zinc-600">
+          <FileText size={44} className="mb-3 opacity-50" />
+          <p className="text-[12.5px]">左のやることやファイルを押すと、ここにタブで開きます</p>
+        </div>
       </div>
     )
   }
@@ -152,9 +155,10 @@ export function TabbedEditorPanel({
       {navigation}
       <div className="flex-1 min-w-0">
       <EditorTabBar
-        openFiles={openFiles}
+        openFiles={tabs}
         fileContents={fileContents}
-        activeFilePath={overlay ? null : activeFilePath}
+        activeFilePath={activeFilePath}
+        recordLooks={recordLooks}
         previewFilePath={previewFilePath}
         tabLabels={tabLabels}
         onSelect={handleSelectFile}
@@ -176,7 +180,7 @@ export function TabbedEditorPanel({
         onCancel={() => saving.answerConfirm(false)}
       />
 
-      {overlay ? <div className="flex-1 overflow-auto min-w-0">{overlay}</div> : <>
+      {activeRecordId ? <div className="flex-1 overflow-auto min-w-0" data-testid="record-tab">{renderRecord?.(activeRecordId)}</div> : <>
 
       {activeFilePath && isReadOnly(activeFilePath) && <ReadOnlyNotice />}
 

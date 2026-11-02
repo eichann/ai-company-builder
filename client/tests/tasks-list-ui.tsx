@@ -2,6 +2,7 @@
 // Preview page for the task list (features/tasks): the real panel and hooks over a fake main
 // process that keeps the list like the server would (a new task is added, 引き受ける moves it).
 // Dates are relative to now. What was opened shows as the card stub; actions sent in `#acted`.
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -83,12 +84,14 @@ installElectronAPI({
 
 function Preview() {
   const list = useTaskList('co-preview')
+  const [opened, setOpened] = useState<string | null>(null)
   return (
     <main className="flex h-screen flex-col bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
       <div className="flex min-h-0 flex-1">
-        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" list={list} aiTurns={null} renderCard={id => <div data-testid="card">カード：{id}</div>}
+        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" list={list} aiTurns={null} activeRecordId={opened} onOpen={setOpened}
           onConsult={t => { acted.push(`consult ${t.id}`); document.getElementById('acted')!.textContent = acted.join(',') }} />
+        {opened && <div data-testid="card">カード：{opened}</div>}
       </div>
     </main>
   )
