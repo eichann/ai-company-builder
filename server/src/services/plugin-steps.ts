@@ -30,6 +30,7 @@ import {
   PLUGIN_CONTRACT_V2, companySkillOverrideProblem, comparePluginVersions,
   type PluginManifest, type PluginStep, type PluginStepProcedurePin,
 } from '../../shared/core/plugins'
+import { MEETING_BUNDLE_LINKED_ACTION } from '../../shared/core/minutes'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
 import type { Clock } from '../ports/clock'
@@ -71,8 +72,12 @@ export interface PluginStepDeps {
   act?: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<unknown>>
 }
 
-/** The meeting's actions that leave it read (its reading, or its まとまり's part chosen later). */
-const MEETING_READ_ACTIONS: readonly string[] = ['finish_reading', 'finish_bundle_work']
+/**
+ * The meeting's changes after which its まとまり moves: its reading finished, or a まとまり linked to
+ * a meeting already read without one (the minutes service tells only that first link; the meeting
+ * stays read, minutes.md "A まとまり chosen later").
+ */
+const MEETING_READ_ACTIONS: readonly string[] = ['finish_reading', MEETING_BUNDLE_LINKED_ACTION]
 
 interface InstalledStep {
   manifest: PluginManifest
@@ -220,12 +225,13 @@ export function createPluginStepService(deps: PluginStepDeps) {
     stepSkills,
 
     /**
-     * After a meeting became `read` (the record engine's after-act, plan C5): its まとまり moves to
+     * After a meeting became `read`, or its まとまり was chosen after the reading (the record
+     * engine's after-act, plan C5; the minutes service's link): its まとまり moves to
      * a business plugin's `ai_turn` step, so that step (e.g. 「会議を案件に反映する」) becomes the
      * AI's turn. The まとまり's type must be one an enabled contract-2 business plugin has an
      * `ai_turn` step for; exactly one action of that type must lead there (`to` = a step's state,
      * the current state in `from`, `ai` in `who`). It runs as the same AI for the member who read
-     * the meeting (the engine's `who` / `mayAct` apply), its note naming the meeting. Zero or two
+     * the meeting or chose its まとまり (the engine's `who` / `mayAct` apply), its note naming the meeting. Zero or two
      * or more such actions, already at a step's state, no permission or a version conflict →
      * nothing: no guessing. The core never names a business operation (owner rule).
      */
@@ -248,7 +254,9 @@ export function createPluginStepService(deps: PluginStepDeps) {
         a.to !== null && a.to !== undefined && states.has(a.to) && (a.from?.includes(bundle.state) ?? false) && a.who.includes('ai'))
       if (moves.length !== 1) return
       const title = handle.records.byIds([done.recordId])[0]?.title ?? ''
-      await deps.act(member, actor, bundleId, moves[0][0], {
+      // A person's choice moves it as their AI too: the step it leads to is the AI's turn.
+      const ai: ActorInput = actor.kind === 'ai' ? actor : { kind: 'ai', conversationId: null, runId: null }
+      await deps.act(member, ai, bundleId, moves[0][0], {
         expectedVersion: bundle.version, note: `会議「${title.slice(0, 80)}」（${done.recordId}）を読んだあと`.slice(0, 200),
       })
     },

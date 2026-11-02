@@ -415,14 +415,25 @@ describe('a meeting read moves its まとまり to the business plugin\'s step (
     setState(deal, 'talking')
   })
 
-  it("the まとまり chosen later: its part's finish moves the deal the same way", async () => {
+  it('the まとまり chosen later by a person: the meeting stays read, no AI run of its own, and the deal moves the same way', async () => {
     const deal = recordOf('1000000002')
-    const m = meeting(deal, 'bundle_working')
-    expect(await finish(member, m, 'finish_bundle_work')).toMatchObject({ ok: true })
+    const m = meeting(null, 'read')
+    const runs = () => (db.prepare('SELECT COUNT(*) AS n FROM ai_runs WHERE company_id = ? AND record_id = ?').get(CO, m) as Json).n as number
+    const linked = await services.minutes.linkBundle(member, { kind: 'human', source: null }, m, { bundleId: deal })
+    expect(linked, JSON.stringify(linked)).toMatchObject({ ok: true })
+    expect(stateOf(m).state).toBe('read')
+    expect(runs()).toBe(0)
     expect(stateOf(deal).state).toBe('after_meeting')
+    const entries = services.recordEngine.history(member, deal).value.entries as Json[]
+    expect(entries[entries.length - 1]).toMatchObject({ action: 'meeting_held', actorId: member.userId, actorKind: 'ai' })
+    expect((services.pluginSteps.turns(member).value.turns as Json[]).some(t => t.recordId === deal && t.step === 'reflect_meeting')).toBe(true)
     setState(deal, 'talking')
-    // Its part not done (fail_bundle_work, also → read): nothing moves.
-    expect(await finish(member, meeting(deal, 'bundle_working'), 'fail_bundle_work')).toMatchObject({ ok: true })
+    // Chosen again (a まとまり was there): only the link changes, nothing moves a second time.
+    expect(await services.minutes.linkBundle(member, { kind: 'human', source: null }, m, { bundleId: deal })).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('talking')
+    // Linked before the reading: the reading's finish moves it, not the link.
+    const early = meeting(null, 'received')
+    expect(await services.minutes.linkBundle(member, { kind: 'human', source: null }, early, { bundleId: deal })).toMatchObject({ ok: true })
     expect(stateOf(deal).state).toBe('talking')
   })
 

@@ -103,7 +103,7 @@ recordsAiRoute.get('/minutes/:recordId/text', aiReads, async (c) => {
 recordsAiRoute.post('/minutes/:recordId/bundle', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const { kind, source, conversationId, runId } = aiActor(h)
-  return answer(c, minutes.linkBundle(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), c.var.body))
+  return answer(c, await minutes.linkBundle(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), c.var.body))
 })
 
 recordsAiRoute.post('/query', aiReads, serviceBody, async (c) => {

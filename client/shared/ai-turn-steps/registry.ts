@@ -8,7 +8,6 @@ import type { TaskListItem } from '../tasks'
 import { inboxTriage } from './inbox-triage'
 import { followUp } from './follow-up'
 import { minutesReading } from './minutes-reading'
-import { minutesBundle } from './minutes-bundle'
 // lane C ▼
 import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
 import { taskWaitOver } from './task-wait-over'
@@ -17,7 +16,6 @@ import { claimStates, type AiTurnCandidate, type AiTurnStepDefinition } from './
 
 const STEPS = [
   minutesReading,
-  minutesBundle,
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲
@@ -77,8 +75,7 @@ export function aiTurnStepDefinition(step: AiTurnStep): Step {
 
 /**
  * The step that runs this record, or null (a kind the app does not run). With the record's state,
- * the step that starts or works there (a meeting `received` → its reading, `bundle_waiting` → its
- * まとまり's part); without it, or none matching, the kind's first step.
+ * the step that starts or works there; without it, or none matching, the kind's first step.
  */
 export function aiTurnStepForRecord(recordId: string, state?: string | null): Step | null {
   const steps = [...AI_TURN_STEPS.values()].filter(s => s.recordId.test(recordId))

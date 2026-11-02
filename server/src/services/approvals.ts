@@ -86,7 +86,7 @@ export interface ApprovalOperations {
 }
 
 /** Choosing the まとまり of a meeting (services/minutes.ts `linkBundle`: the meeting's assignee or an admin), bound by composition. */
-export type MeetingBundleLink = (member: Member, meetingId: string, bundleId: string) => Outcome<unknown>
+export type MeetingBundleLink = (member: Member, meetingId: string, bundleId: string) => Promise<Outcome<unknown>>
 
 export interface ApprovalDeps {
   companyData: CompanyDataSource
@@ -713,7 +713,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       const { a, recordId, linkMeeting } = outcome.value
       let meeting: SameAsResult['meeting'] = 'not-asked'
       if (linkMeeting && a.meeting) {
-        const linked = meetingLink ? meetingLink(member, a.meeting, recordId) : null
+        const linked = meetingLink ? await meetingLink(member, a.meeting, recordId) : null
         meeting = linked?.ok ? 'linked' : 'not-linked'
       }
       const v = await view(member, load(member, a.row.id) ?? a)

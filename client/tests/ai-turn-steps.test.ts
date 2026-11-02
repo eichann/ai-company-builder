@@ -4,9 +4,7 @@
  *
  * Guards:
  * - a record runs under the one step its id belongs to; a kind without a step is never run; a
- *   meeting's state picks its step (received → reading, bundle_waiting → the まとまり's part);
- * - the まとまり's part (a meeting read without one, chosen later) gets only the deal and meeting-log
- *   tools — nothing that could make the homework, decisions or mail a second time;
+ *   meeting is run only while it waits to be read (a まとまり chosen later starts no run, v4);
  * - the runner's queue holds exactly the waiting records whose kind has a step, each from the list
  *   its step names (minutes only from main's minutes check), once;
  * - least privilege: a step whose tools are not exact (an ending matching every tool, a wildcard)
@@ -19,7 +17,6 @@ import assert from 'node:assert/strict'
 import { z } from 'zod'
 import { aiTurnQueue, aiTurnStepAllowsRecordTool, aiTurnStepForRecord, checkAiTurnSteps } from '../shared/ai-turn-steps/registry'
 import { minutesReading } from '../shared/ai-turn-steps/minutes-reading'
-import { minutesBundle, minutesBundleFirstMessage } from '../shared/ai-turn-steps/minutes-bundle'
 import type { AiTurnStepDefinition } from '../shared/ai-turn-steps/types'
 import type { TaskListItem } from '../shared/tasks'
 import { createRecordTools, type ExtraRecordTools, type RecordToolProvider } from '../electron/records/tools'
@@ -60,20 +57,13 @@ test('the queue: received minutes from main\'s check, other kinds only when thei
   assert.deepEqual(aiTurnQueue({ minutes: [], tasks: [item('meeting-bbbbbbbb', 'ai')] }), [])
 })
 
-test('a meeting read without a まとまり, one chosen later: its まとまり\'s part runs from the task list, confirms and finishes (no business plugin\'s tool)', () => {
+test('a meeting is the AI\'s only while it waits to be read: a まとまり chosen later starts no run (meeting v4)', () => {
   assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'received')?.step, 'minutes-reading')
-  assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'bundle_waiting')?.step, 'minutes-bundle')
-  assert.equal(aiTurnStepForRecord('meeting-abcdef12', 'bundle_working')?.step, 'minutes-bundle')
+  // A meeting in version 3's まとまり's part (an older server's 「AI の番」) is not queued from the task list.
   const queue = aiTurnQueue({ minutes: [], tasks: [item('meeting-dddddddd', 'ai', { state: 'bundle_waiting' }), item('meeting-eeeeeeee', 'mine', { state: 'read' })] })
-  assert.deepEqual(queue.map(c => [c.id, c.state]), [['meeting-dddddddd', 'bundle_waiting']])
-  for (const tool of ['meeting__finish_bundle_work', 'minutes_read']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), true, tool)
-  for (const tool of ['hubspot__update_deal', 'hubspot__log_meeting', 'records_create', 'decisions_record', 'mail_draft_create', 'meeting__finish_reading', 'minutes_link_bundle', 'records_get']) assert.equal(aiTurnStepAllowsRecordTool('minutes-bundle', tool), false, tool)
-  const message = minutesBundleFirstMessage({ id: 'meeting-dddddddd', title: 'A社 商談' }, 6)
-  assert.match(message, /会議：meeting-dddddddd/)
-  assert.match(message, /version は 6/)
-  assert.match(message, /作り直さないでください/)
+  assert.deepEqual(queue, [])
   // Two steps of one kind starting from the same state could not be told apart.
-  assert.match(checkAiTurnSteps([minutesReading, { ...minutesBundle, claim: { ...minutesBundle.claim, from: 'received' } }]) ?? '', /same state/)
+  assert.match(checkAiTurnSteps([minutesReading, { ...minutesReading, step: 'minutes-reading-2' as 'minutes-reading' }]) ?? '', /same state/)
 })
 
 const step = (over: Partial<AiTurnStepDefinition> & { tools?: Partial<AiTurnStepDefinition['tools']> }): AiTurnStepDefinition => ({

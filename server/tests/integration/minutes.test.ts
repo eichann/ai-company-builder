@@ -429,8 +429,8 @@ describe('stuck reading and the switches', () => {
     expect([last.action, last.cause, last.runId]).toEqual(['retry', 'run', run.id])
   })
 
-  it('read without a まとまり, one chosen afterwards: the まとまり\'s part waits for the AI once (its own step), and choosing again moves nothing', async () => {
-    // The reading happened while no まとまり was linked (the AI left the deal's fields and the meeting log).
+  it('read without a まとまり, one chosen afterwards: the meeting stays read and no AI run is made; an older app\'s まとまりの分 is refused', async () => {
+    // The reading happened while no まとまり was linked.
     db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name IN ('bundle', 'counterpart')").run(CO, salesId)
     const versionOf = async () => (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}`)).body.data.record.version as number
     const token = await tokenFor('mn-sato')
@@ -438,23 +438,26 @@ describe('stuck reading and the switches', () => {
     const read = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/finish_reading`, { expectedVersion: await versionOf(), args: { summary_text: '要約' } }, token)
     expect(read.status, read.text).toBe(200)
     expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
-    // Not the AI's turn while read: no run can be claimed.
-    expect((await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-bundle', deviceId: 'app-device-b', conversationId: 'conv-bundle' })).body.code).toBe('NOT_AI_TURN')
+    const runs = () => (db.prepare('SELECT COUNT(*) AS n FROM ai_runs WHERE company_id = ? AND record_id = ?').get(CO, salesId) as Json).n as number
+    const runsBefore = runs()
 
     const deal = dealIdOf('研修導入（株式会社サンプル）')
     const linked = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })
     expect(linked.status, linked.text).toBe(200)
-    expect(minutesRows().find(r => r.id === salesId).state).toBe('bundle_waiting')
-    const claimed = await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-bundle', deviceId: 'app-device-b', conversationId: 'conv-bundle' })
-    expect(claimed.status, claimed.text).toBeLessThan(300)
-    const run = claimed.body.data.run
-    const runToken = (await call('mn-sato', 'POST', `${C()}/me/record-tokens`, { conversationId: 'conv-bundle', agent: 'claude-code', scope: 'act', run: { id: run.id, generation: run.generation } })).body.data.token
-    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_bundle_work`, { expectedVersion: await versionOf() }, runToken)).status).toBe(200)
-    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/finish_bundle_work`, { expectedVersion: await versionOf() }, runToken)).status).toBe(200)
-    expect((await call('mn-sato', 'POST', `${C()}/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'done' })).status).toBe(200)
+    expect(linkOf(salesId, 'bundle')).toBe(deal)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
+    expect(runs()).toBe(runsBefore)
+    // Nothing to claim: the まとまり's part is not an AI turn of the meeting any more.
+    expect((await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-bundle', deviceId: 'app-device-b', conversationId: 'conv-bundle' })).body.code).toBe('NOT_AI_TURN')
+    expect(runs()).toBe(runsBefore)
+    // An older app's AI calling version 3's actions gets a plain refusal, nothing changes.
+    for (const action of ['start_bundle_work', 'finish_bundle_work', 'fail_bundle_work']) {
+      const old = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/${action}`, { expectedVersion: await versionOf() }, token)
+      expect([old.status, old.body.code], action).toEqual([404, 'ACTION_NOT_FOUND'])
+    }
     expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
 
-    // A まとまり was there when it was chosen again: nothing goes back to the AI (no second deal update or log).
+    // Chosen again: only the link changes.
     const other = dealIdOf('生成AI研修 2期（株式会社サンプル）')
     expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: other })).status).toBe(200)
     expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
@@ -633,10 +636,10 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     expect(hidden.text).not.toContain('研修導入（株式会社サンプル）')
     expect((await questions('mn-sato')).questions.find(q => q.recordId === salesId)?.suggested).toBeNull()
     db.prepare('UPDATE records SET personal_owner = NULL WHERE company_id = ? AND id = ?').run(CO, deal)
-    // はい: the same link as choosing by hand, and the まとまり's part goes to the AI.
+    // はい: the same link as choosing by hand; the meeting stays read (no AI run of its own).
     expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(200)
     expect(linkOf(salesId, 'bundle')).toBe(deal)
-    expect(minutesRows().find(r => r.id === salesId).state).toBe('bundle_waiting')
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
     db.prepare("UPDATE record_state SET state = 'open' WHERE company_id = ? AND record_id = ?").run(CO, other)
   })
 })

@@ -57,7 +57,7 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
       assert.match(String(new Headers(init?.headers).get('Authorization')), /^Bearer acb_rec_/)
       run.keys.push(new Headers(init?.headers).get('Idempotency-Key'))
       if (body.expectedVersion !== record.version) return json(409, { error: 'ほかの人が先に変えました', code: 'VERSION_CONFLICT' })
-      const starts: Record<string, [string, string]> = { start_reading: ['received', 'reading'], start_bundle_work: ['bundle_waiting', 'bundle_working'] }
+      const starts: Record<string, [string, string]> = { start_reading: ['received', 'reading'] }
       if (!starts[act[2]] || record.state !== starts[act[2]][0]) return json(409, { error: 'できません', code: 'BAD_STATE' })
       record.state = starts[act[2]][1]
       record.version += 1
@@ -290,18 +290,4 @@ test('a task whose wait is over is claimed from 準備中 as the wait-over step 
   const waiting = fakeServer({ state: 'waiting', version: 4 }, undefined, TASK)
   assert.deepEqual(await claimsFor(waiting).claim(COMPANY, TASK, 4, 'conversation-cccc'), { claimed: false, reason: 'taken' })
   assert.equal(waiting.calls.filter(c => c.endsWith('/ai-run-claims')).length, 0)
-})
-
-test('a meeting whose まとまり was chosen after the reading: the claim takes its まとまり\'s part (that step, that start), and a finished one claims nothing again', async () => {
-  const server = fakeServer({ state: 'bundle_waiting', version: 7 })
-  const pc = claimsFor(server)
-  assert.deepEqual(await pc.claim(COMPANY, RECORD, 7, 'conversation-bund'), { claimed: true, version: 8 })
-  assert.deepEqual(server.run.steps, ['minutes-bundle'])
-  assert.deepEqual(server.record, { state: 'bundle_working', version: 8 })
-  server.record.state = 'read'
-  assert.deepEqual(await pc.settle(COMPANY, RECORD), { outcome: 'done' })
-  // Done: the meeting is read again, so there is no AI turn left to claim (no second deal update or log).
-  const again = await claimsFor(server).claim(COMPANY, RECORD, 9, 'conversation-agan')
-  assert.equal(again.claimed, false)
-  assert.deepEqual(server.run.steps, ['minutes-bundle'])
 })

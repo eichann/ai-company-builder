@@ -53,6 +53,13 @@ export function meetingBundleDaysOf(raw: unknown): number {
 export const MEETING_NO_BUNDLE_ACTION = 'no_bundle'
 
 /**
+ * The meeting's ledger action of choosing its まとまり (the minutes service's link). On a meeting
+ * already read without one it is what moves that まとまり to the business plugin's step for it
+ * (plugin-steps.md "After a meeting is read"); the meeting stays read. Not an action of the type.
+ */
+export const MEETING_BUNDLE_LINKED_ACTION = 'link_bundle'
+
+/**
  * Whether a meeting asks 「どのまとまりの会議ですか？」 at all: only one with someone from outside
  * (an internal meeting has no 案件 to name), never one whose question was closed or that has its まとまり.
  */

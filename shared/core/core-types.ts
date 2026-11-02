@@ -53,6 +53,10 @@
  * compatibility; the intake writes both, older meetings are carried over at
  * startup with a ledger entry, `OUTSIDE_TIME_ACTION`). `outbound_message` is
  * not one (ACB makes it; `sent_at` stays) — the sent mail's `interaction` is.
+ * `meeting` version 4 drops version 3's まとまり's part (bundle_waiting /
+ * bundle_working and their five actions): a まとまり chosen after the reading is
+ * only linked; meetings left there are moved back to `read` at startup
+ * (`BUNDLE_PART_ENDED_ACTION`).
  *
  * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
  * the `minutes` type; the 議事録 is the meeting's content, read where it is),
@@ -174,7 +178,7 @@ actions:
 `,
   meeting: `---
 label: 会議
-version: 3
+version: 4
 implements: [outside_event]
 storage: server
 fields:
@@ -189,7 +193,7 @@ fields:
 links:
   bundle:         { label: まとまり, interface: bundle, cardinality: one, inverse: meetings }
   counterpart:    { label: 相手, interface: counterpart, cardinality: one, inverse: meetings }
-states: [received, reading, read, skipped, failed, bundle_waiting, bundle_working]
+states: [received, reading, read, skipped, failed]
 initial: received
 final: [read, skipped]
 actions:
@@ -198,17 +202,12 @@ actions:
   fail_reading:   { label: 議事録を読めなかった, from: [reading], to: failed, who: [ai], note: optional }
   retry:          { label: もう一度読む, from: [reading, failed], to: received, who: [assignee, admin], note: optional }
   skip:           { label: 読まない, from: [received, failed], to: skipped, who: [assignee, admin], note: optional }
-  start_bundle_work:  { label: まとまりの分を始める, from: [bundle_waiting], to: bundle_working, who: [ai] }
-  finish_bundle_work: { label: まとまりの分を終える, from: [bundle_working], to: read, who: [ai], note: optional }
-  fail_bundle_work:   { label: まとまりの分をできなかった, from: [bundle_working], to: read, who: [ai], note: optional }
-  retry_bundle_work:  { label: まとまりの分をやり直す, from: [bundle_working], to: bundle_waiting, who: [assignee, admin], note: optional }
-  skip_bundle_work:   { label: まとまりの分はしない, from: [bundle_waiting], to: read, who: [assignee, admin], note: optional }
 ---
 # 会議
 
 社内・社外の会議の記録（日時・出席したメンバー・社外の参加者の数）。議事録は会議の中身で、元の文書に置いたまま（本文は持たず、議事録への目印と要約だけを持ちます）。
 「届いた」は AI の番です（AI が議事録を読んで、タスクや決めたことにします）。どの会議を読むかは会社の設定で決まります（最初は社外の人が出た会議だけ）。
-まとまり（案件など）が決まらないまま読んだ会議は、あとで人がまとまりを選ぶと「まとまりの分を待つ」になり、AI がそのまとまりの分（案件の欄の変化・商談の記録）だけを進めます。
+まとまり（案件など）が決まらないまま読んだ会議は、あとで人がまとまりを選ぶと、そのまとまりにつながります（会議は「読んだ」のまま）。まとまりへの反映は、そのまとまりの業務の手順が受け持ちます。
 `,
   approval: `---
 label: 承認のお願い
@@ -387,9 +386,6 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['reading'], to: 'failed' },
     { from: ['reading', 'failed'], to: 'received' },
     { from: ['received', 'failed'], to: 'skipped' },
-    // Read without a まとまり, one chosen afterwards: the AI does just the まとまり's part once.
-    { from: ['read'], to: 'bundle_waiting' },
-    { from: ['bundle_working'], to: 'bundle_waiting' },
   ],
   approval: [
     { from: ['pending'], to: 'approved' },
@@ -554,6 +550,13 @@ export const TASK_WAIT_OVER_STEP = 'task-wait-over'
  * (`meeting_at` → `occurred_at`, meeting version 2): no action of the type.
  */
 export const OUTSIDE_TIME_ACTION = 'carry_outside_time'
+
+/**
+ * The ledger action of the startup move of a meeting left in `bundle_waiting` / `bundle_working`
+ * (meeting version 3's まとまり's part, gone in version 4: choosing a まとまり later only links it,
+ * minutes.md "A まとまり chosen later") back to `read`: no action of the type.
+ */
+export const BUNDLE_PART_ENDED_ACTION = 'end_bundle_part'
 
 /** The server's own migration as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
 export const MIGRATION_ACTOR = Object.freeze({ id: 'acb:migration', kind: 'external' as const, source: 'ACB' })

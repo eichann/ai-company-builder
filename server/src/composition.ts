@@ -418,6 +418,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     tokenDigest: sha256TokenDigest,
     // 名寄せ (identity.md): built below with the inbox lane; called only after construction.
     resolveAddress: (member, address) => inboxLane.identities.resolveAddress(member, address),
+    // A まとまり chosen after the reading moves to the business plugin's step, as after a reading (plugin-steps.md).
+    afterAction: (member, actor, done) => recordEngine.afterAction(member, actor, done),
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
       const accounts = shared.accounts.byIds(rows.map(m => m.user_id))
@@ -475,7 +477,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const aiRuns = createAiRunService({
     ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
     // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
-    afterFailedRun: (member, run) => { if (run.step === 'minutes-reading' || run.step === 'minutes-bundle') minutes.putBackAfterRun(member, run.recordId, run.id) },
+    afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
   })
 
   // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files

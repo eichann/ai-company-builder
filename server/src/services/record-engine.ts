@@ -71,6 +71,8 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     useRoles: ctx.useRoles,
     /** Bound once by the plugins lane (composition/plugins.ts, plan C5): a reaction after an action. */
     useAfterAction: ctx.useAfterAction,
+    /** That reaction, for a core service's own change of the same meaning (minutes.ts: a まとまり chosen after the reading). */
+    afterAction: ctx.afterAction,
   }
 }
 

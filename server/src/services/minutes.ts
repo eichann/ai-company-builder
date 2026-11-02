@@ -27,7 +27,7 @@
  */
 import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import {
-  MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES, MEETING_NO_BUNDLE_ACTION, MEETING_TYPE, meetingAsksBundle,
+  MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES, MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_TYPE, meetingAsksBundle,
   meetingBundleDaysOf, meetingIntakeOf, meetingIsRead, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX,
 } from '../../shared/core/minutes'
 import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
@@ -50,6 +50,7 @@ import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader, type RecordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter } from './record-engine'
+import type { AfterActionListener } from './record-engine/types'
 import { currentTypes, ensureCoreTypes } from './record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
@@ -75,6 +76,12 @@ export interface MinutesServiceDeps {
    * participants' company becomes the meeting's 相手, and its one open まとまり is suggested.
    */
   resolveAddress?: (member: Member, address: string) => Outcome<{ person: string[]; company: string[] }>
+  /**
+   * The record engine's after-action reaction (plugin-steps.md "After a meeting is read"): told
+   * when a まとまり is linked to a meeting already read without one, so the まとまり moves to the
+   * business plugin's step for it as after a reading. Best effort: never changes the answer.
+   */
+  afterAction?: AfterActionListener
 }
 
 /** How far back the calendar is read (design §1-2: the last few days). */
@@ -165,10 +172,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   const { companyData, writer, meetings } = deps
 
   /** A meeting still 「読んでいる」 back to 「届いた」 (the type's `retry`), with the actor that caused it. */
-  /** An AI step that stopped half way goes back to wait for the AI: the reading, or the まとまり's part. */
   const PUT_BACK: Record<string, { action: string; to: string }> = {
     reading: { action: 'retry', to: 'received' },
-    bundle_working: { action: 'retry_bundle_work', to: 'bundle_waiting' },
   }
   function putBack(companyId: string, recordId: string, actor: ServiceActor, note: string): boolean {
     const now = fieldsOf(companyData.forCompany(companyId).records, recordId)
@@ -576,7 +581,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
      * POST …/minutes/item/:recordId/bundle { bundleId, expectedVersion? } — the assignee, an admin,
      * or their AI: which まとまり (any type implementing `bundle`) the meeting belongs to.
      */
-    linkBundle(member: Member, actor: Omit<ServiceActor, 'id'>, recordId: string, body: unknown): Outcome<MinutesLinkBundleResult> {
+    async linkBundle(member: Member, actor: Omit<ServiceActor, 'id'> & { kind: 'human' | 'ai' }, recordId: string, body: unknown): Promise<Outcome<MinutesLinkBundleResult>> {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
@@ -602,11 +607,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (!bundleRow) return refuse('bad-request', 'bundleId: a まとまり (bundle) record you can read', { code: 'BAD_LINK' })
       const counterpart = counterpartOf(handle, bundleRow.id)
       const expected = typeof b.expectedVersion === 'number' ? b.expectedVersion : now.version
-      // Read without a まとまり: its AI left the まとまり's part (the deal's fields, the meeting log).
-      // Choosing one now gives exactly that part back to the AI, once (minutes.md "A まとまり chosen later").
-      const hadBundle = records.linksFrom([row.id]).some(l => l.name === 'bundle' && l.targetId)
+      // Read without a まとまり: the meeting stays read (no AI run of its own); the まとまり moves to the
+      // business plugin's step for it, as after a reading — once (minutes.md "A まとまり chosen later").
+      const firstAfterReading = now.state === 'read' && !records.linksFrom([row.id]).some(l => l.name === 'bundle' && l.targetId)
       const r = writer.transition(member.companyId, {
-        recordId: row.id, action: 'link_bundle', expectedVersion: expected, to: now.state === 'read' && !hadBundle ? 'bundle_waiting' : null,
+        recordId: row.id, action: MEETING_BUNDLE_LINKED_ACTION, expectedVersion: expected, to: null,
         links: { bundle: [bundleRow.id], counterpart: counterpart ? [counterpart] : [] },
         actor: { id: member.userId, ...actor },
       })
@@ -614,6 +619,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         if (r.reason === 'stale') return refuse('conflict', 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', { code: 'VERSION_CONFLICT', version: fieldsOf(records, row.id).version })
         if (r.reason === 'records-off') return disabled()
         return refuse('bad-request', 'まとまりをつなげませんでした', { code: 'MINUTES_LINK_REFUSED' })
+      }
+      if (firstAfterReading && deps.afterAction) {
+        try {
+          await deps.afterAction(member, { kind: actor.kind, source: actor.source ?? undefined, conversationId: actor.conversationId ?? null, runId: actor.runId ?? null },
+            { recordId: row.id, type: MEETING_TYPE, action: MEETING_BUNDLE_LINKED_ACTION, toState: 'read' })
+        } catch { /* the link stands; the まとまり's step is best effort */ }
       }
       return ok({ recordId: row.id, bundleId: bundleRow.id, counterpartId: counterpart, version: r.entry.version })
     },

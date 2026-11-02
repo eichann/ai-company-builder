@@ -79,30 +79,34 @@ access itself: `google-connector.md` (G3).
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote
    check (`quoteAppearsIn`) is not wired (owner §11: optional).
 
-### A まとまり chosen later (meeting version 3, owner 2026-11-02)
+### A まとまり chosen later (meeting version 4, owner FB 20, 2026-11-02)
 
 **What a まとまり gets from a meeting is not the core's** (coordinator decision 2026-11-02; the core
 names no business operation): the reading has no business plugin's tool, and the server refuses a
 core step's run any business plugin operation but a read (`plugin-operation-checks.ts`). When the
-meeting becomes `read` (`finish_reading`, or `finish_bundle_work` below) the server moves its
-まとまり to the business plugin's `ai_turn` step for it (`plugin-steps.md` "After a meeting is
-read", e.g. 「会議を案件に反映する」: the deal's fields and the meeting log), which runs as its own
-AI turn.
+meeting becomes `read` (`finish_reading`) the server moves its まとまり to the business plugin's
+`ai_turn` step for it (`plugin-steps.md` "After a meeting is read", e.g. 「会議を案件に反映する」:
+the deal's fields and the meeting log), which runs as its own AI turn.
 
-Read without a まとまり, the AI leaves the まとまり's part. When a
-person then chooses one (`POST …/minutes/…/bundle` on a `read` meeting that had **no** `bundle`
-link), the same transition moves it `read → bundle_waiting` (`SERVICE_TRANSITIONS.meeting`): 「AI
-の番」 again, for that part only. The app's step `minutes-bundle` (`ai-turns.md` "Steps") claims
-the run (`step: 'minutes-bundle'`, one run per record and step), starts it with
-`start_bundle_work` (→ `bundle_working`) and has only `minutes_read`, the plugin's
-`finish_bundle_work` / `fail_bundle_work` (both → `read`;
-the reason in the ledger's note). `retry_bundle_work` (bundle_working → bundle_waiting) is the
-put-back — after a failed run (`afterFailedRun`) and in the 30-minute rule — and
-`skip_bundle_work` (bundle_waiting → read) a person's 「しない」. **Once**: choosing again when a
-まとまり was already linked changes only the link; a finished part leaves the meeting `read` (not
-an AI turn, so no run can be claimed); the run's operation keys keep a redo within one run from a
-second effect. Test: `server/tests/integration/minutes.test.ts` 「read without a まとまり, one chosen
-afterwards…」, `client/tests/ai-turn-steps.test.ts`, `ai-turn-claims.test.ts`.
+Read without a まとまり, the AI leaves the まとまり's part. When a person (or their AI) then chooses
+one — by hand, the one-click suggestion, or an approval's 「同じ」 — `POST …/minutes/…/bundle` on a
+`read` meeting that had **no** `bundle` link only links it (ledger `link_bundle`,
+`MEETING_BUNDLE_LINKED_ACTION`): **the meeting stays `read` and no AI run is made** (FB 20: version
+3's run for the まとまり's part only confirmed and finished, a wasted run cluttering consultations).
+The minutes service then tells the engine's after-action reaction (`afterAction`, the same seam as
+`finish_reading`), so the まとまり moves to the plugin's step exactly as after a reading. **Once**:
+choosing again when a まとまり was already linked, or linking before the reading (its
+`finish_reading` moves it), changes only the link. A failure of the move never changes the answer.
+
+Version 3's `bundle_waiting` / `bundle_working` and their five actions (`start_` / `finish_` /
+`fail_` / `retry_` / `skip_bundle_work`) are gone: a meeting left there goes back to `read` at
+startup (`migrateBundleParts`, ledger `end_bundle_part` = `BUNDLE_PART_ENDED_ACTION` by the
+server's migration actor, cause `system`). An older app's AI calling one of those actions gets 404
+`ACTION_NOT_FOUND`, and its claim of step `minutes-bundle` 409 `NOT_AI_TURN`; an older app's link
+is the same request and gets the new behaviour. Test: `server/tests/integration/minutes.test.ts`
+「read without a まとまり, one chosen afterwards…」 (read, no run, old actions refused),
+`plugin-steps.test.ts` 「the まとまり chosen later by a person…」 (the deal at after_meeting, its step
+in the turns, once), `server/tests/unit/meeting-bundle-parts.test.ts` (the migration).
 
 ## Outputs made once (owner FB 29, 2026-11-02)
 
@@ -217,15 +221,15 @@ a digest (no calendar id leaves the server).
   actor, note 「まとまりはない（社内の会議など）」, no field, no state, nobody told): never asked
   again (also not by the consultation's card: the text answers `noBundle: true`, `bundleChoiceFor`
   then shows none). A second press writes nothing; a meeting with a まとまり → 409
-  `MINUTES_HAS_BUNDLE`. A まとまり can still be chosen later (same `…/bundle`, the まとまり's part
-  follows as in "A まとまり chosen later").
+  `MINUTES_HAS_BUNDLE`. A まとまり can still be chosen later (same `…/bundle`, the まとまり's
+  step follows as in "A まとまり chosen later").
 - **「『…』の会議ですか？」** (owner 2026-11-02): at intake, a meeting whose まとまり is not linked
   still gets its 相手 when every outside participant who resolves at all resolves (名寄せ,
   `identity.md` `resolveAddress`, with the assignee's reading) to the same company records
   (`participantsCompany`). Each question (and the card's answer) carries `suggested`: that 相手's
   **one** open まとまり of any type implementing `bundle` **the member reads** (0 or ≥ 2, or a 相手
   they do not read → null, the plain question). The app asks 「『<title>』の会議ですか？」 with
-  ［はい］ (the same `…/bundle` as choosing by hand, so the まとまり's part follows),
+  ［はい］ (the same `…/bundle` as choosing by hand, so the まとまり's step follows),
   ［ちがう／選ぶ］ (the chooser) and ［まとまりはない］. **Never linked without the click.**
 - **The card**: `GET …/minutes/item/:recordId/bundle-question` → `{ recordId, title, version,
   canChoose (no まとまり linked and the member is the assignee or an admin), noBundle }` for any
