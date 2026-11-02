@@ -112,7 +112,7 @@ test('the renderer\'s plain-string labels of the core types match their definiti
 test('a record type\'s action reads its Japanese label in the past tense; an unknown one still reads as a sentence', () => {
   const label = (name: string) => toolLineOf(`mcp__acb_records__${name}`, {}).label
   assert.equal(label('meeting__finish_reading'), '議事録を読み終えました')
-  assert.equal(label('task__request_review'), 'レビューを依頼しました')
+  assert.equal(label('task__request_review'), '終わったので見てもらいました')
   assert.equal(label('meeting__fail_reading'), '議事録を読めませんでした')
   assert.equal(label('reply_request__drop'), '返事をしないことにしました')
   for (const name of ['corporate-sales__update_deal', 'someone__does_something', 'deal__frobnicate']) {

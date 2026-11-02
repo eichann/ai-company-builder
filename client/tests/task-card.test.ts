@@ -28,12 +28,12 @@ function card(record: RecordSummary, over: Partial<TaskCardSources> = {}) {
 }
 const offered = (c: ReturnType<typeof card>) => Object.fromEntries(c.actions.map(a => [a.action, { needsOk: a.needsOk, startFirst: a.startFirst }]))
 
-test('the assignee completes by saying whose OK it was (starting first from 未着手); the requester completes plainly', () => {
+test('the assignee completes from 未着手 (知らせるだけ), or says whose OK it was when it is to be checked first; the requester completes plainly', () => {
   const asAssignee = offered(card(task('todo', { assignee: ME, requested_by: BOSS })))
-  assert.deepEqual(asAssignee.complete, { needsOk: true, startFirst: true })
+  assert.deepEqual(asAssignee.complete, { needsOk: false, startFirst: false })
   assert.equal(asAssignee.decline !== undefined, true)
-  const started = offered(card(task('in_progress', { assignee: ME, requested_by: BOSS })))
-  assert.deepEqual(started.complete, { needsOk: true, startFirst: false })
+  const checked = offered(card(task('in_progress', { assignee: ME, requested_by: BOSS, when_done: 'check' })))
+  assert.deepEqual(checked.complete, { needsOk: true, startFirst: false })
   const asRequester = offered(card(task('in_progress', { assignee: 'u-tanaka', requested_by: ME })))
   assert.deepEqual(asRequester.complete, { needsOk: false, startFirst: false })
   assert.equal(asRequester.decline, undefined)

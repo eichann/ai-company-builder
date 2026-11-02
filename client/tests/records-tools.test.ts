@@ -163,7 +163,9 @@ test('screens are offered only the actions that can start from the record\'s sta
   const titles = (state: string) => recordActionChoices(TASK, state).map(c => c.action).sort()
   assert.deepEqual(titles('done'), ['reopen', 'set_bundle', 'set_due', 'set_tags', 'set_wait_until'])
   assert.ok(titles('review').includes('complete'))
-  assert.ok(!titles('todo').includes('complete'))
+  // Task version 9: 完了 from 未着手 too, never from 準備中 (the AI's turn).
+  assert.ok(titles('todo').includes('complete'))
+  assert.ok(!titles('preparing').includes('complete'))
   assert.equal(recordActionChoices(TASK, 'review').find(c => c.action === 'send_back')!.noteRequired, true)
 })
 

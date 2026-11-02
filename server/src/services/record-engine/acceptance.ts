@@ -19,6 +19,8 @@ export interface AcceptanceInput {
   /** Owner-only (「持ち主だけ」): only its owner is ever in it — accepted at once, never waits. */
   personal: boolean
   state: string | null
+  /** The state before the action (null on a create). */
+  fromState?: string | null
   fields: Record<string, LedgerValue>
   /** The action set a different assignee. */
   assigneeChanged: boolean
@@ -47,8 +49,13 @@ export function applyAcceptance(deps: Pick<RecordEngineDeps, 'autoAccepts'>, a: 
     }
     state = t.into
   }
-  if (state !== t.state && !t.working.includes(state)) return state
   const assignee = str(f[t.assignee])
+  // 完了 straight from 引き受け待ち by the assignee (or their delegate): 「引き受けた」 is recorded with it.
+  if (a.fromState === t.state && t.finishes.includes(state)) {
+    if (assignee !== null && a.actorKind === 'human' && (a.memberId === assignee || a.onBehalfOf === assignee)) f[t.acceptedBy] = assignee
+    return state
+  }
+  if (state !== t.state && !t.working.includes(state)) return state
   if (assignee === null) return state === t.state ? t.into : state
   const accepted = () => {
     f[t.acceptedBy] = assignee

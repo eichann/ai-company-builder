@@ -89,12 +89,12 @@ function closeAccounting(userId: string, co = 'a') {
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'user', ?, 0, 0, ?)").run(`${co}-acc-${userId}`, `${co}-acc`, userId, TS)
 }
 
-/** A task alice asked bob for, started (version 2). */
+/** A task alice asked bob for, to be checked first (so bob finishes it on someone's OK), started (version 2). */
 async function startedTask(opts: { folder?: string; co?: string; title?: string; due?: string } = {}) {
   const co = opts.co ?? 'a'
   const t = ok(engine.create(m('u-alice', co), HUMAN, {
     type: 'task', title: opts.title ?? '提案書を作る', ...(opts.folder ? { folder: opts.folder } : {}),
-    fields: { assignee: 'u-bob', ...(opts.due ? { due: opts.due } : {}) },
+    fields: { assignee: 'u-bob', when_done: 'check', ...(opts.due ? { due: opts.due } : {}) },
   })).record
   ok(await engine.act(m('u-bob', co), HUMAN, t.id, 'start', { expectedVersion: 1 }))
   return t

@@ -24,7 +24,8 @@ const shared = params.get('shared') === '1'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
-  assignee: ME, requested_by: 'u-abe', due: '2026-11-07T17:00', tags: '["営業","見積"]',
+  // 終わったら：確かめてから (task version 9): the assignee completes only by naming whose OK.
+  assignee: ME, requested_by: 'u-abe', when_done: 'check', due: '2026-11-07T17:00', tags: '["営業","見積"]',
   prep_summary: '前回の見積と議事録を確かめ、窓口を3つにした下書きを作りました。',
   ...(done ? { ok_by: 'u-abe', ok_note: '電話で' } : {}),
 }, shared ? {} : { personal: true })

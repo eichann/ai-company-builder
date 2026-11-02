@@ -118,11 +118,13 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    Run ids and operation keys that could reshape the URL (`.`/`..`, separators) never reach the
    server.
 4. Actions (`TaskActions.tsx`), offered from the type (`recordActionChoices`) and the member's
-   place: a `who` person field holding the member, or `ok_from` (then the member must say whose OK:
-   a member, or a note for an OK from outside ACB). Never the AI's own steps (`who: [ai]`:
+   place: a `who` person field holding the member (after the action's `who_unless`, `actionWho`),
+   or `ok_from` (then the member must say whose OK: a member, or a note for an OK from outside
+   ACB — since task version 9 only on a task to be checked first, `records.md` "Task version 9"). Never the AI's own steps (`who: [ai]`:
    finish_prep, hand_over) nor actions needing a record chooser (set_bundle) or the list's own
-   editors (tags, wait_until). 完了 from 未着手 / 返事待ち runs 着手 first (complete starts from
-   in_progress / review), each step at the version the previous one moved to. 受けられない needs a
+   editors (tags, wait_until). Since task version 9 完了 starts from every state but 準備中, so the
+   card's 「着手 first」 step (`startFirst`) no longer happens for core tasks (kept for a company's
+   own type that still completes only what was started). 受けられない needs a
    reason (to the requester). 延ばす: 1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜 or a date and time
    (`postponeChoices`); the server tells the requester. The server decides every action.
 5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
@@ -250,7 +252,7 @@ never reaches the server; records off = no list), `src/features/tasks/model.test
 `src/features/tasks/quickAdd.test.ts`, `client/tests/ui/tasks-list.spec.ts`
 (`tests/tasks-list-ui.html`: sections, meetings mixed in, folding, date view, 引き受ける, finishing,
 the one line, the tag filter, a row opening its card), `client/tests/task-card.test.ts` (the
-assignee completes only on a stated OK and starts first; the AI's steps and what the member's
+assignee completes from 未着手, or on a stated OK when the task is to be checked first; the AI's steps and what the member's
 place does not allow never offered; the OK in words; prepared apart from links; an unknown result
 offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts` (also 「＋ファイルをつなぐ」,
 「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
