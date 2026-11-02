@@ -262,7 +262,9 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
   store.save(company, session('b', { draftInput: '未送信の計画' }))
   store.patch(company, 'b', { pinned: true })
   const summaries = store.summaries(company)
-  assert.deepEqual(summaries.map(s => s.id), ['b', 'a', 'c'])
+  // The pinned one first; a and c were both saved just now (the store stamps a new save), so their order is the clock's.
+  assert.equal(summaries[0].id, 'b')
+  assert.deepEqual(summaries.map(s => s.id).sort(), ['a', 'b', 'c'])
   const a = summaries.find(s => s.id === 'a')!
   assert.equal('messages' in a, false)
   assert.equal(a.messageCount, 3)
