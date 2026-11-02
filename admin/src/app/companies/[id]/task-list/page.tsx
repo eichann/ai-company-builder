@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -134,6 +134,7 @@ function SettingsForm({
       <AutoRunCard draft={draft} change={change} />
       <ReadIncomingCard draft={draft} change={change} />
       <AcceptanceCard draft={draft} change={change} />
+      <BundleNameCard draft={draft} change={change} />
       <DepartmentsCard draft={draft} change={change} departments={departments} />
       <HolidaysCard draft={draft} change={change} />
 
@@ -295,6 +296,35 @@ function AutoRunCard({ draft, change }: CardProps) {
           </div>
         </div>
       )}
+    </Card>
+  )
+}
+
+function BundleNameCard({ draft, change }: CardProps) {
+  const tooLong = [...draft.bundleName.trim()].length > TASK_SETTINGS_LIMITS.bundleNameLength
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <Target size={16} />
+          やることを束ねるものの名前
+        </CardTitle>
+        <CardDescription>
+          業務の種類（案件・番組など）がない部署で、やることや会議の記録を束ねるものの名前です。会社で1つ決めます。業務の種類がある部署では、その種類の名前を使います。
+        </CardDescription>
+      </CardHeader>
+      <div className="flex flex-wrap items-center gap-2 border-t px-5 py-4 text-sm">
+        <Label htmlFor="bundle-name">呼び名:</Label>
+        <Input
+          id="bundle-name"
+          className="w-56"
+          maxLength={TASK_SETTINGS_LIMITS.bundleNameLength * 2}
+          aria-invalid={draft.bundleName.trim() === '' || tooLong || undefined}
+          value={draft.bundleName}
+          onChange={(e) => change((d) => { d.bundleName = e.target.value })}
+        />
+        <span className="text-muted-foreground">初めは「プロジェクト」です（{TASK_SETTINGS_LIMITS.bundleNameLength} 文字まで）。</span>
+      </div>
     </Card>
   )
 }

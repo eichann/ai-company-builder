@@ -275,6 +275,7 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/records/meeting-duplicates', w => ({ path: `${C(w)}/records/meeting-duplicates` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/records/meeting-duplicates/merge', w => ({ path: `${C(w)}/records/meeting-duplicates/merge`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/records/types', w => ({ path: `${C(w)}/records/types` }), MEMBERS),
+  r('GET /api/companies/:companyId/records/bundle-kinds', w => ({ path: `${C(w)}/records/bundle-kinds` }), MEMBERS),
   r('POST /api/companies/:companyId/records/query', w => ({ path: `${C(w)}/records/query`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/records/my-turn', w => ({ path: `${C(w)}/records/my-turn` }), MEMBERS),

@@ -67,6 +67,11 @@
  * because approving checks a content hash and runs an operation, and sending
  * reaches outside.
  *
+ * project (束ねる種類, owner decision 2026-11-02): the core's ordinary `bundle` — what a
+ * department with no business plugin's bundle kind makes (records.md "Bundle kinds"). Its name on
+ * screen is the company's (`TaskSettings.bundleName`, default 「プロジェクト」); its `label` is
+ * only the fallback. Anyone may create one (no service owns it).
+ *
  * **The core never names a business plugin's type** (owner decision
  * 2026-11-01 night): what work belongs to links to the `bundle` interface
  * (まとまり: a 案件, a 企画, a 取り組み), whom it is with to the `counterpart`
@@ -348,6 +353,34 @@ actions:
 電話や別の経路で返したときなど、ACB から見えない返事は、担当が「もう返した」で終わりにします。
 期限は、連絡に締切が書いてあればそれ、なければ会社の「返事の目安」です。目安で入れた期限は「目安」と分かるように出します。
 `,
+  project: `---
+label: プロジェクト
+version: 1
+implements: [bundle]
+storage: server
+fields:
+  owner:        { label: 責任者, kind: person, source: server }
+  purpose:      { label: なんのため, kind: text, source: server }
+  due:          { label: 期限, kind: date, source: server }
+links:
+  counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: projects }
+  files:        { label: 関係するファイル, target: file, cardinality: many }
+states: [active, done, cancelled]
+initial: active
+final: [done, cancelled]
+actions:
+  finish:       { label: 終える, from: [active], to: done, who: [owner, admin, dept_manager], note: optional }
+  cancel:       { label: やめる, from: [active], to: cancelled, who: [owner, admin, dept_manager], note: optional }
+  reopen:       { label: もう一度始める, from: [done, cancelled], to: active, who: [owner, admin, dept_manager], note: optional }
+  set_owner:    { label: 責任者を替える, from: [active], who: [owner, admin, dept_manager], args: { owner: person }, note: optional }
+  set_purpose:  { label: なんのためを書く, from: [active], who: [owner, admin, dept_manager], args: { purpose: text }, note: optional }
+  set_due:      { label: 期限を変える, from: [active], who: [owner, admin, dept_manager], args: { due: date }, note: optional }
+---
+# プロジェクト
+
+本体のふつうの「束ねるもの」。業務プラグインの種類（案件・番組など）がない部署で、やること・会議の記録・決めたことなどを束ねます。
+画面での名前は会社の設定で決めます（初めは「プロジェクト」）。
+`,
 }
 
 /**
@@ -566,6 +599,9 @@ export function serviceTransitionAllowed(type: string, from: string | null, to: 
   const table = Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, type) ? SERVICE_TRANSITIONS[type] : undefined
   return !!table && from !== null && table.some(t => t.to === to && t.from.includes(from))
 }
+
+/** The core's ordinary 束ねるもの (records.md "Bundle kinds"): what a department with no business plugin's kind makes. */
+export const CORE_BUNDLE_TYPE = 'project'
 
 /** The core definitions, parsed (throws if one is invalid: a build error, caught by the tests). */
 export function coreTypeDefinitions(): TypeDefinition[] {

@@ -186,6 +186,27 @@ export interface RecordLinkView {
   broken?: boolean
 }
 
+/**
+ * A kind of 束ねるもの as the screen names it (records.md "Bundle kinds"): the type to create
+ * (`POST /records/item { type }`) and its name — a business plugin's kind keeps its own label
+ * (案件・番組), the core's `project` takes the company's name (初期値「プロジェクト」). Never 「まとまり」.
+ */
+export interface BundleKind {
+  type: string
+  name: string
+  source: 'core' | 'plugin'
+}
+
+/** GET /records/bundle-kinds. */
+export interface BundleKindsResult {
+  /** The core's ordinary kind, under the company's name. */
+  core: BundleKind
+  /** What each department makes: its business plugin's kind if one lives there, else `core`. */
+  departments: Array<{ departmentId: string; folder: string; kind: BundleKind }>
+  /** Every kind in use in the company (where kinds mix: 「案件・プロジェクトごと」, searching across departments). */
+  kinds: BundleKind[]
+}
+
 export interface RecordDetail {
   record: RecordSummary
   links: RecordLinkView[]

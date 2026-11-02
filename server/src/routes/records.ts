@@ -7,6 +7,7 @@
  *   GET     /records/problems     owner/admin: what the index could not take
  *   POST    /records/reindex      owner/admin: { full: true } rebuilds the index from the files
  *   GET     /records/types        any member: type definitions in force
+ *   GET     /records/bundle-kinds any member: the 束ねる種類 each department makes, and their names
  *   POST    /records/query        any member: the fixed-shape query
  *   GET     /records/item/:recordId  any member: one record and its links
  *   GET     /records/my-turn      any member: 「あなたの番」 across types implementing request
@@ -47,7 +48,7 @@ export const recordsRoute = new Hono()
 const HUMAN = { kind: 'human' } as const
 /** A person's action, with the provenance their app reports (informational only, never authorizes: record-engine.ts). */
 const humanWith = (body: unknown) => ({ ...HUMAN, ...selfReportedProvenance(body) })
-const { records, recordEngine, recordAiTokens, decisions, meetingOutputs } = services
+const { records, recordEngine, recordAiTokens, decisions, meetingOutputs, bundleKinds } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
@@ -77,6 +78,11 @@ recordsRoute.post('/records/reindex', companyMember, serviceBody, async (c) => {
 recordsRoute.get('/records/types', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, records.types(member))
+})
+
+recordsRoute.get('/records/bundle-kinds', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, bundleKinds.kinds(member))
 })
 
 recordsRoute.post('/records/query', companyMember, serviceBody, async (c) => {
