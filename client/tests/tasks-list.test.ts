@@ -70,6 +70,18 @@ test('☑ (task v9): 完了 from any state but 準備中; asked with 確かめ�
   assert.equal(check('task-done02'), undefined)
 })
 
+// Guards the row's 「人に頼んだもの」 mark (owner 2026-11-02): a task asked of someone else showed the
+// task icon, read as 「もう済んだ」; the member's own, one asked of them, or a finished one never gets it.
+test('「人に頼んだもの」 only on an unfinished task the member asked of someone else', () => {
+  const items = classifyTasks(src({
+    myTurn: [rec('task-own001', 'todo'), rec('task-acc001', 'awaiting_acceptance', { requested_by: 'u-tanaka' })],
+    asked: [rec('task-ask001', 'awaiting_acceptance', { assignee: 'u-tanaka' }), rec('task-ask002', 'in_progress', { assignee: 'u-tanaka' })],
+    doneToday: [rec('task-done01', 'done', { assignee: 'u-tanaka' })],
+  }))
+  const asked = (id: string) => items.find(i => i.id === id)?.askedOfOthers === true
+  assert.deepEqual(['task-own001', 'task-acc001', 'task-ask001', 'task-ask002', 'task-done01'].map(asked), [false, false, true, true, false])
+})
+
 function harness(answers: Record<string, { status: number; body: unknown }>) {
   const requests: Array<{ url: string; method: string; body: unknown }> = []
   const api = createTasksApi({
@@ -173,7 +185,7 @@ test('a meeting the server asks about waits in あなたの番 to be chosen, onc
   const q = { recordId: 'meeting-00aa11', title: 'A社 定例', version: 4, meetingAt: '2026-11-04T05:00:00.000Z', readAt: '2026-11-04T06:00:00.000Z', group: { key: 'g1', label: 'A社' }, suggested: null }
   const items = classifyTasks(src({ bundleQuestions: [q], doneToday: [meeting] }))
   assert.equal(items.length, 1)
-  assert.deepEqual([items[0].turn, items[0].needsBundle, items[0].waitingFor, items[0].version], ['mine', true, 'どのまとまり（案件など）の会議か選んでください', 4])
+  assert.deepEqual([items[0].turn, items[0].needsBundle, items[0].waitingFor, items[0].version], ['mine', true, 'どの案件・プロジェクトの会議か選んでください', 4])
   assert.deepEqual(items[0].bundleGroup, { key: 'g1', label: 'A社' })
 })
 
@@ -185,7 +197,7 @@ test('a suggested まとまり asks 「『…』の会議ですか？」 and is 
   assert.equal(item.bundle, null)
   const [plain] = classifyTasks(src({ bundleQuestions: [{ ...q, suggested: null }] }))
   assert.equal(plain.suggestedBundle, undefined)
-  assert.equal(plain.waitingFor, 'どのまとまり（案件など）の会議か選んでください')
+  assert.equal(plain.waitingFor, 'どの案件・プロジェクトの会議か選んでください')
 })
 
 test('which meetings ask is the server\'s answer: the app adds none and drops none; an older server asks nothing', async () => {

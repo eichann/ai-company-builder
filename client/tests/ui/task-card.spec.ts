@@ -117,25 +117,70 @@ test('「部署に出す」 on an owner-only task sends the chosen department; a
   expectNoPageErrors(sharedState)
 })
 
-test('「相談する」 on the card asks for a consultation about this task', async ({ page }) => {
-  const state = await openPreview(page, 'task-card')
+test('「相談する」 on the card (no consultation yet) asks for a consultation about this task', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { consult: 'none' })
+  await expect(page.getByRole('button', { name: '新しい相談' })).toHaveCount(0)
   await page.getByRole('button', { name: '相談する' }).click()
   await expect(page.locator('#acted')).toHaveText('consult task-0000aa')
   expectNoPageErrors(state)
 })
 
-test('「タグの候補」: asked on the member\'s press, added only when picked, with the tags it already has', async ({ page }) => {
+// Owner 2026-11-02: tags could only be added (quick add, AI suggestions), never removed or added
+// later by hand. Guards: the field opens an editor for who may set tags; × removes one; a tag in
+// use is picked rather than a near spelling; a new word only from 「新しいタグにする」; the AI's
+// suggestions inside it; the server's refusal shown; a 案件's name offers ［案件につなぐ］; a finished
+// task's tags are read only.
+test('「タグ」: removed with ×, picked from the tags in use, a new word only when chosen, AI suggestions inside', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
-  const group = page.getByRole('group', { name: 'タグの候補' })
-  await group.getByRole('button', { name: 'タグの候補を出す' }).click()
-  await group.getByRole('button', { name: '#経理 を付ける' }).click()
-  await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業|見積|経理')
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: /^タグ：営業、見積/ }).click()
+  const editor = card.getByRole('group', { name: 'タグを変える' })
+  await editor.getByRole('button', { name: '#見積 を外す' }).click()
+  await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業')
+
+  // 「けいり」 is not in use; 「経」 matches 経理 — Enter picks the tag in use, never a near spelling.
+  const input = editor.getByRole('textbox', { name: 'タグを足す' })
+  await input.fill('経')
+  await expect(editor.getByRole('option', { name: /#経理/ })).toBeVisible()
+  await input.press('Enter')
+  await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業,set_tags@3:tags=営業|見積|経理')
+
+  // Nothing in use matches: Enter adds the new word.
+  await input.fill('急ぎ')
+  await expect(editor.getByRole('option')).toHaveText(['「急ぎ」を新しいタグにする'])
+  await input.press('Enter')
+  await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|急ぎ')
+
+  // The server's refusal, in its words.
+  await input.fill('禁止')
+  await input.press('Enter')
+  await expect(editor.getByRole('alert')).toHaveText('このタグは付けられません。')
+
+  await editor.getByRole('button', { name: 'AI にタグの候補を出してもらう' }).click()
+  await editor.getByRole('button', { name: '#経理 を付ける' }).click()
+  await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|経理')
   expectNoPageErrors(state)
 
   const done = await openPreview(page, 'task-card', { task: 'done' })
   await expect(page.getByTestId('task-card')).toContainText('了承を得たとして')
-  await expect(page.getByRole('group', { name: 'タグの候補' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /^タグ：/ })).toHaveCount(0)
+  await expect(page.getByTestId('task-card')).toContainText('#営業 #見積')
   expectNoPageErrors(done)
+})
+
+test('「タグ」: a word that is a 案件\'s name offers ［案件につなぐ］ (the same link), adding it as a tag stays possible', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: /^タグ：/ }).click()
+  const editor = card.getByRole('group', { name: 'タグを変える' })
+  await editor.getByRole('textbox', { name: 'タグを足す' }).fill('B社 新人研修')
+  await expect(editor.getByRole('note')).toContainText('『B社 新人研修』は案件の名前です。案件につなぎますか？')
+  await editor.getByRole('note').getByRole('button', { name: '案件につなぐ' }).click()
+  await expect(page.locator('#acted')).toHaveText('link task-0000aa bundle=deal-0002cd@3')
+  await editor.getByRole('textbox', { name: 'タグを足す' }).fill('B社 新人研修')
+  await editor.getByRole('option', { name: /新しいタグにする/ }).click()
+  await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|B社 新人研修')
+  expectNoPageErrors(state)
 })
 
 test('someone changed it first: the card says who and what, and that the press did not happen', async ({ page }) => {
@@ -209,12 +254,13 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   expectNoPageErrors(state)
 })
 
-test('who can see it at the top right; 「AIへの相談」 on the right with ［相談する］［＋新しい相談］', async ({ page }) => {
+test('who can see it at the top right; 「AIへの相談」 on the right with its consultations and only ［＋新しい相談］', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
   await expect(card.locator('[data-seen]')).toHaveText('あなただけ')
   const group = card.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
   await expect(group).toContainText('見積の相談')
+  await expect(group.getByRole('button', { name: '相談する' })).toHaveCount(0)
   await group.getByRole('button', { name: '新しい相談' }).click()
   await expect(page.locator('#acted')).toHaveText('consult task-0000aa fresh')
   expectNoPageErrors(state)

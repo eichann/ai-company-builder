@@ -172,9 +172,26 @@ const ENGINE_ACTIONS: Record<string, string> = {
   retry_bundle_work: 'まとまりの分をやり直しにしました', skip_bundle_work: 'まとまりの分をしないことにしました',
 }
 
-/** One line of 経緯 per ledger entry, newest first. */
+/**
+ * An entry that only set organising labels (an action whose every argument is a `tags` field and
+ * that moves no state and sets no link: the task's `set_tags`). Tags are not work, so 経緯 does not
+ * show them (owner 2026-11-02); the ledger keeps the entry (undo, audit, replay).
+ */
+export function labelOnlyEntry(e: LedgerEntry, def: TypeDefinition | undefined): boolean {
+  const a = def?.actions[e.action]
+  if (!a || a.to !== null || (a.links?.length ?? 0) > 0) return false
+  const kinds = Object.values(a.args)
+  return kinds.length > 0 && kinds.every(k => k === 'tags')
+}
+
+/** The entries 経緯 shows, newest first (`labelOnlyEntry` left out). */
+export function historyEntries(entries: readonly LedgerEntry[], def: TypeDefinition | undefined): LedgerEntry[] {
+  return entries.filter(e => !labelOnlyEntry(e, def)).sort((a, b) => b.version - a.version)
+}
+
+/** One line of 経緯 per ledger entry shown (`historyEntries`), newest first. */
 export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undefined, people: Record<string, string>): RecordCardHistoryLine[] {
-  return [...entries].sort((a, b) => b.version - a.version).map(e => {
+  return historyEntries(entries, def).map(e => {
     const what = def?.actions[e.action]?.label ?? ENGINE_ACTIONS[e.action] ?? e.action
     const who = e.actorKind === 'ai' ? 'AI' : e.actorKind === 'external' ? (e.actorSource ?? '外のサービス') : (people[e.actorId] ?? 'メンバー')
     return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }

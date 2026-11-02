@@ -1,8 +1,8 @@
 // The parts of a task's card under its title (新しい画面のデモ C): where it came from, 「終わったら」,
 // its 案件, the due with 「延ばす」 and the tags, and the notices of the member's last press
 // (「〇〇さんに返しました［取り消す］」, 「〇〇さんが先に変えました…」).
-import { useState } from 'react'
-import { CalendarBlank, Hash, Warning } from '@phosphor-icons/react'
+import { useState, type ReactNode } from 'react'
+import { CalendarBlank, Warning } from '@phosphor-icons/react'
 import type { RecordCardHistoryLine } from '../../../../shared/record-views'
 import type { TaskCardData, TaskCardOrigin } from '../../../../shared/task-card'
 import { CALM } from '../../../../shared/thing-words'
@@ -33,8 +33,8 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
   )
 }
 
-/** 期限 with 「延ばす」, and the tags. */
-export function DueAndTags({ card, now, busy, onPostpone }: { card: TaskCardData; now: CompanyNow; busy: boolean; onPostpone: ((due: string) => void) | null }) {
+/** 期限 with 「延ばす」, and the tags (`tagField`, `TagField.tsx`). */
+export function DueAndTags({ card, now, busy, onPostpone, tagField }: { card: TaskCardData; now: CompanyNow; busy: boolean; onPostpone: ((due: string) => void) | null; tagField: ReactNode }) {
   const [open, setOpen] = useState(false)
   const overdue = card.due ? dueWhen(card.due, now) === 'overdue' : false
   return (
@@ -56,10 +56,7 @@ export function DueAndTags({ card, now, busy, onPostpone }: { card: TaskCardData
           </div>
         )}
       </div>
-      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
-        <div className="flex items-center gap-1 text-[11px] text-gray-500"><Hash size={11} />タグ</div>
-        <div className="text-[13.5px] font-medium">{card.tags.length ? card.tags.map(t => `#${t}`).join(' ') : <span className="font-normal text-gray-400">なし</span>}</div>
-      </div>
+      {tagField}
     </div>
   )
 }

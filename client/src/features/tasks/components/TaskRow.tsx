@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, VideoCamera, Warning } from '@phosphor-icons/react'
+import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning } from '@phosphor-icons/react'
 import { NEXT_STEP, ONLY_YOU, thingKindOf, type ThingKind } from '../../../../shared/thing-words'
 import { SeenBy, ThingIcon } from '../../../shared/ui/ThingIcon'
 import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
@@ -83,6 +83,12 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
             <span className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border border-amber-400 bg-amber-100 dark:bg-amber-500/20" aria-label="確かめてもらっています"><Eye size={9} className="text-amber-700" /></span>
           ) : done && item.type === 'task' && item.state === 'done' ? (
             <span className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] bg-emerald-500 text-white" aria-label="完了"><Check size={10} weight="bold" /></span>
+          ) : item.askedOfOthers ? (
+            // Asked of someone else: nothing to press here, so no box (it read as 「もう済んだ」).
+            <span role="img" aria-label="人に頼んだもの" title="人に頼んだもの" className="relative block h-[15px] w-[15px] text-gray-400 dark:text-zinc-500">
+              <User size={12} weight="duotone" className="absolute right-0 top-0" />
+              <ArrowBendUpRight size={9} weight="bold" className="absolute bottom-0 left-0" />
+            </span>
           ) : <ThingIcon kind={kind} typeLabel={item.typeLabel} size={15} />}
       </span>
       <button type="button" onClick={() => onOpen(item.id)} className="min-w-0 flex-1 text-left">

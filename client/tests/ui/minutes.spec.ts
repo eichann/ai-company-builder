@@ -37,9 +37,10 @@ test('「読み取る」 starts a consultation 「<件名> のあと」 linked t
   await expect.poll(() => chat(page, c => c.open())).toBe(true)
   await chat(page, c => c.send({ type: 'data-minutes-deal-choice', id: 'minutes-deal-card-1', data: {
     id: 'card-1', companyId: 'preview-company', minutesId: 'minutes-0a1b2c3d4e5f60718293a4b5', meetingTitle: 'A社 商談',
-    candidates: [{ id: 'deal-aaaaaa01', title: '研修導入' }, { id: 'deal-bbbbbb02', title: '追加導入' }],
+    candidates: [{ id: 'deal-aaaaaa01', title: '研修導入', typeLabel: '案件' }, { id: 'deal-bbbbbb02', title: '追加導入', typeLabel: '案件' }],
   } }))
-  const card = page.getByRole('group', { name: 'どのまとまりの会議ですか？' })
+  // Asked in the candidates' kind (案件), never 「まとまり」.
+  const card = page.getByRole('group', { name: 'どの案件の会議ですか？' })
   await expect(card).toBeVisible()
   await card.getByRole('radio', { name: '追加導入' }).check()
   await card.getByRole('button', { name: 'これにする' }).click()

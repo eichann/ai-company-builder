@@ -6,7 +6,7 @@
  */
 import type { NotificationItem, NotificationKind, NotificationList } from '../../shared/types/notifications'
 import type { AiTurnItemView } from './ai-turns'
-import { MEETING_NEEDS_BUNDLE_TEXT, meetingSuggestedBundleText, type TaskListItem } from './tasks'
+import { MEETING_NEEDS_BUNDLE_TEXT, meetingBundleWords, meetingSuggestedBundleText, type TaskListItem } from './tasks'
 import { thingKindOf, thingName, TURN_ASKS, turnGroupLine, type ThingKind } from './thing-words'
 
 /** One record waiting for the member (「あなたの番」: `GET /records/my-turn`). */
@@ -115,12 +115,14 @@ const AI_WORDS: Record<AiTurnItemView['state'], string> = {
   handed: 'あなたに渡されました',
 }
 
-export function meetingTurns(items: readonly TaskListItem[], ai: readonly AiTurnItemView[]): MeetingTurn[] {
+/** `word`: the department's kind's name (「案件」), so the question never says 「まとまり」. */
+export function meetingTurns(items: readonly TaskListItem[], ai: readonly AiTurnItemView[], word?: string): MeetingTurn[] {
   const out: MeetingTurn[] = []
+  const ask = word ? meetingBundleWords(word).ask : MEETING_NEEDS_BUNDLE_TEXT
   for (const i of items) {
     if (i.needsBundle) {
       const s = i.suggestedBundle
-      out.push({ id: i.id, title: i.title, kind: 'bundle', text: s ? meetingSuggestedBundleText(s.title) : MEETING_NEEDS_BUNDLE_TEXT, needsPerson: true, ai: null, ...(s ? { suggestedBundle: s } : {}) })
+      out.push({ id: i.id, title: i.title, kind: 'bundle', text: s ? meetingSuggestedBundleText(s.title) : ask, needsPerson: true, ai: null, ...(s ? { suggestedBundle: s } : {}) })
     } else if (i.type === 'meeting' && i.turn === 'ai') {
       const view = ai.find(a => a.recordId === i.id) ?? null
       const words = view ? (view.reason ? `${AI_WORDS[view.state]}：${view.reason}` : AI_WORDS[view.state]) : '議事録が届きました'

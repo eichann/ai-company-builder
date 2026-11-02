@@ -79,14 +79,23 @@ test('a 案件: what for, who and how far, the approval request as its card, eve
   expectNoPageErrors(working)
 })
 
-test('「AIへの相談」 in 「つながっているもの」: the consultations about it, 「相談する」 and 「＋新しい相談」', async ({ page }) => {
+// Owner 2026-11-02: with a consultation already, its row opens it, so 「相談する」 would only repeat
+// it — only 「＋新しい相談」 (fresh); with none, only 「相談する」. Catches both buttons shown again.
+test('「AIへの相談」 in 「つながっているもの」: with consultations only 「＋新しい相談」, with none only 「相談する」', async ({ page }) => {
   const state = await openPreview(page, 'record-card')
   const group = page.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
   await expect(group).toContainText('A社 打ち合わせのあと')
-  await group.getByRole('button', { name: '相談する' }).click()
+  await expect(group.getByRole('button', { name: '相談する' })).toHaveCount(0)
   await group.getByRole('button', { name: '新しい相談' }).click()
-  await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa false\nconsult meeting-0000aa true')
+  await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa true')
   expectNoPageErrors(state)
+
+  const none = await openPreview(page, 'record-card', { consult: 'none' })
+  const empty = page.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
+  await expect(empty.getByRole('button', { name: '新しい相談' })).toHaveCount(0)
+  await empty.getByRole('button', { name: '相談する' }).click()
+  await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa false')
+  expectNoPageErrors(none)
 })
 
 test('a meeting\'s 案件 sits at its head (not on the right); a link is taken off from its 「…」 and put back', async ({ page }) => {

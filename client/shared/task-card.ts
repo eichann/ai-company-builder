@@ -11,7 +11,7 @@ import type { ViewersLabel } from '../../shared/types/viewers'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
 import { recordActionChoices } from './record-actions'
 import {
-  cardFields, historyLines, removableOf, summaryView,
+  cardFields, historyEntries, historyLines, removableOf, summaryView,
   type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
 } from './record-views'
 
@@ -184,7 +184,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     : null
 
   const lines = historyLines(src.entries, def, people)
-  const history = [...src.entries].sort((a, b) => b.version - a.version).map((e, i) => {
+  const history = historyEntries(src.entries, def).map((e, i) => {
     const by = e.changes.find(c => c.field === 'ok_by')?.after
     const note = e.changes.find(c => c.field === 'ok_note')?.after
     if (e.action !== 'complete' || (!str(by) && !str(note))) return lines[i]

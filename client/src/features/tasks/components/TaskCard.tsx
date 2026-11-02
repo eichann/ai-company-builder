@@ -25,7 +25,7 @@ import { TaskActions } from './TaskActions'
 import { BundleField } from './BundleField'
 import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
-import { TagSuggestions } from './TagSuggestions'
+import { TagField } from './TagField'
 
 interface Props {
   companyId: string
@@ -126,16 +126,17 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
   // 「議事録を確認する」: the meeting's summary, the AI's proposals and its decisions, each pressed on its own record.
   const review = card.review && <MinutesReview companyId={companyId} review={card.review} busy={busy}
     onAct={(id, action, at) => change(async () => { const r = await actOnTask(companyId, id, { action, expectedVersion: at }); return r.success ? null : r.error })} />
-  const tagSuggestions = card.canSetTags
-    ? <TagSuggestions companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} busy={busy}
-      onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])} />
-    : null
+  // 「タグ」: who may set tags edits them in place (AI suggestions inside); a typed 案件 name offers ［案件につなぐ］.
+  const tagField = <TagField companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} canEdit={card.canSetTags} busy={busy}
+    onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])}
+    bundleType={bundleFolder ? bundleKind?.type : undefined} linkedBundleId={card.bundle?.id ?? null}
+    {...(card.canSetBundle ? { onLinkBundle: (b: BundleChoice) => recordLink(recordId, { link: 'bundle', target: b.id, expectedVersion: version }, false, `「${b.title}」につなぎました`) } : {})} />
   const top = notice?.kind === 'conflict'
     ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
     onCreateBundle={bundleKind ? (title: string) => change(async () => {
@@ -178,11 +179,11 @@ interface BodyProps {
   onShare: (folder: string) => Promise<string | null>
   onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
   consultations: readonly LinkedConsultation[]
-  tagSuggestions: ReactNode
+  tagField: ReactNode
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagSuggestions, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -281,9 +282,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
 
       <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle}
         {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string) => onCreateBundle(title) } : {})} />
-      <DueAndTags card={card} now={now} busy={busy}
+      <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
-      {tagSuggestions}
       {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       <RecordSourcePanel record={record}>{renderSource(record)}</RecordSourcePanel>

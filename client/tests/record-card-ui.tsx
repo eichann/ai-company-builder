@@ -82,7 +82,7 @@ function Preview() {
       <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={record.id}
         renderSource={r => (r.type === 'interaction' ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
-        consultations={[{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
+        consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         onConsult={(r, fresh) => { opened.push(`consult ${r.id} ${fresh}`); document.getElementById('opened')!.textContent = opened.join('\n') }}
         renderBundleField={f => (realField
           ? renderRecordBundleField('co-preview', f, { type: 'project', name: 'プロジェクト', source: 'core' }, '営業部')

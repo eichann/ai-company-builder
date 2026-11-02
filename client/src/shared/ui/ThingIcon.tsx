@@ -2,14 +2,15 @@
 // icon for a kind of thing (言葉の決まり 2.: the same icon everywhere), so it cannot live in one feature.
 import type { Icon } from '@phosphor-icons/react'
 import {
-  ArrowBendUpLeft, Briefcase, Buildings, CalendarBlank, ChatCircleDots, ChatTeardropText, CheckSquare, ClipboardText,
-  Envelope, Eye, FileText, FilmSlate, GoogleDriveLogo, Lightning, LockSimple, PaperPlaneRight, PaperPlaneTilt, Robot,
+  ArrowBendUpLeft, Briefcase, Buildings, CalendarBlank, ChatCircleDots, ChatTeardropText, ClipboardText,
+  Envelope, Eye, FileText, FilmSlate, GoogleDriveLogo, Lightning, ListChecks, LockSimple, PaperPlaneRight, PaperPlaneTilt, Robot,
   Scales, SealCheck, SlackLogo, Stamp, Target, UserCircle, UsersThree, VideoCamera,
 } from '@phosphor-icons/react'
 import { bundleLook, ONLY_YOU, thingKindOf, thingName, THING_NAMES, type ThingKind } from '../../../shared/thing-words'
 
 const LOOKS: Record<Exclude<ThingKind, 'bundle'>, { icon: Icon; color: string }> = {
-  task: { icon: CheckSquare, color: 'text-accent' },
+  // Not a square box: in the list a box means only ☐ pressable / ✓ done (owner 2026-11-02).
+  task: { icon: ListChecks, color: 'text-accent' },
   minutes_check: { icon: ClipboardText, color: 'text-accent' },
   meeting: { icon: UsersThree, color: 'text-sky-600 dark:text-sky-400' },
   decision: { icon: Scales, color: 'text-amber-600 dark:text-amber-400' },

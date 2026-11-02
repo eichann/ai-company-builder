@@ -435,6 +435,10 @@ Field kind `tags` — the one list-valued kind: short words (タグ) on a record
   records and `total` (also `countOnly`) hold only what the caller reads, and the company handle
   keeps it inside the company.
 - A plugin mapping cannot map a tags field (`plugins.md`).
+- **Not a line of 経緯** (owner 2026-11-02: tags organise, they are not work). The ledger keeps
+  every tag change as an engine entry (undo, replay, audit unchanged; nothing is dropped on the
+  server); the app's 経緯 leaves out entries of an action that only sets `tags` fields
+  (`labelOnlyEntry`, `client/shared/record-views.ts`; `tasks-ui.md` "Tags on the card").
 - Test: `server/tests/unit/record-tags-bundle.test.ts` (bad values refused with nothing written,
   normalization, contains never returns or counts an unreadable record, never another company's,
   never a non-tags field, equality refused), `record-types.test.ts` — mutation-checked.
