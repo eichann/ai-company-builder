@@ -21,6 +21,8 @@ paths:
   - "client/shared/work-switches.ts"
   - "client/electron/features/work-switches/**"
   - "client/tests/work-switches-ipc.test.ts"
+  - "client/src/features/settings/components/MySwitchesSection.tsx"
+  - "client/src/features/settings/hooks/useWorkSwitches.ts"
 ---
 
 # Tasks: company task settings, business days, department membership
@@ -83,7 +85,11 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   `allowed`, `companyDefault`, `chosen` (null = never chose); 受信を読む adds `connected: { mail,
   chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」). App: IPC
   `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
-  `client/shared/work-switches.ts`).
+  `client/shared/work-switches.ts`). The screen: 設定 → 自分の設定 (the settings open on it;
+  `client/src/features/settings/components/MySwitchesSection.tsx`, `hooks/useWorkSwitches.ts`): a switch
+  the company does not allow is greyed out with 「会社の設定で止まっています」 and cannot be turned on;
+  a refused change shows the server's words and reads the switches again
+  (`client/tests/ui/my-switches.spec.ts`).
 - Who follows it: **自動で進める** — the AI's turn runs on the assignee's PC, so the PC asks its
   member's own (`aiTurns:settings`, `ai-turns.md`) and the server clock moves a wait that is over
   to the AI's turn only when the record's **assignee** has it on (`autoRunFor`; no assignee → the

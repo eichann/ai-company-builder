@@ -178,3 +178,16 @@ export function markGoogleSeen(companyId: string, outbound: ConnectToolsOutbound
 export function markSlackSeen(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
   return outbound.markSlackSeen(companyId)
 }
+
+/** 自分の設定: the member's own 受信を読む / AI が自動で進める, as the company server holds them. */
+export type WorkSwitchReads = ElectronPort<'getWorkSwitches'>
+/** Turning one of them on or off (the server refuses turning on what the company does not allow). */
+export type WorkSwitchWrites = ElectronPort<'setWorkSwitch'>
+
+export function getWorkSwitches(companyId: string, reads: WorkSwitchReads = window.electronAPI) {
+  return reads.getWorkSwitches(companyId)
+}
+
+export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRun', on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
+  return writes.setWorkSwitch(companyId, which, on)
+}

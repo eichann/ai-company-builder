@@ -9,10 +9,11 @@ import { GoogleSection } from './GoogleSection'
 import { SlackSection } from './SlackSection'
 import { ConnectToolsScreen } from './ConnectToolsScreen'
 import { AbsenceSection } from '../../absences/components/AbsenceSection'
+import { MySwitchesSection } from './MySwitchesSection'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, PlugsConnected } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, PlugsConnected } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
@@ -31,15 +32,21 @@ const commonKeySet = new Set(COMMON_API_KEYS.map(k => k.key))
 
 interface SettingsPanelProps {
   onClose: () => void
-  /** Section to open first (default: ダウンロードするフォルダ). */
+  /** Section to open first (default: 自分の設定). */
   initialTab?: TabType
   /** 「自分の鍵」: the service to show first (from the chat's "no key" card). */
   focusService?: string
 }
 
-export type TabType = 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
+export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
+  {
+    group: 'あなた',
+    items: [
+      { id: 'mine', label: '自分の設定', icon: <UserCircle size={16} /> },
+    ],
+  },
   {
     group: '同期',
     items: [
@@ -79,7 +86,7 @@ const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] t
 const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
 const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
 
-export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, initialTab = 'mine', focusService }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
@@ -367,6 +374,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
               <GoogleSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'slack' ? (
               <SlackSection key={currentCompany.id} companyId={currentCompany.id} />
+            ) : activeTab === 'mine' ? (
+              <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'absences' ? (
               <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'aienv' ? (
