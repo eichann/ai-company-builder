@@ -48,9 +48,9 @@ export function resolveLeftPanel(id: string | null | undefined, panels: Readonly
 }
 
 /**
- * About how wide the tab strip must be to show every tab's text on one line (13 px a character,
- * the icon, padding): narrower than this, the tabs show their icons only (the name stays as the
- * tooltip and the accessible name) — never text broken one character per line.
+ * About how wide the tab strip must be to show every tab side by side, icon and name on one line
+ * (13 px a character, the icon, padding). Narrower than this, each tab stacks its name (11 px)
+ * under its icon; the name is always shown, never broken across lines.
  */
 export function tabStripWidth(panels: ReadonlyArray<Pick<LeftPanel, 'title' | 'badgeCount' | 'dot'>>): number {
   return panels.reduce((w, p) => w + 20 + 16 + (p.title ? 6 + [...p.title].length * 13 : 0) + (p.badgeCount ? 24 : p.dot ? 12 : 0), 0)

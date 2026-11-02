@@ -77,25 +77,59 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
 })
 
 // Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
-// column. They stay on one line; too narrow for every name, they show icons only, still named.
-for (const width of [1440, 1280]) {
-  test(`at ${width} px the left tabs never break their names; icons only when the names do not fit`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 })
-    const state = await openPreview(page, 'skill-layout', { tasks: '1' })
-    const strip = page.locator('[data-left-tabs]')
-    for (const name of ['スキル', 'ファイル', 'やること', '探す']) {
-      const tab = strip.locator(`button[title="${name}"]`)
-      await expect(tab).toBeVisible()
-      // One line: as tall as an icon row, never a column of characters.
-      expect((await tab.boundingBox())!.height).toBeLessThan(48)
-      // Every tab inside the narrow column.
-      const s = (await strip.boundingBox())!
-      const b = (await tab.boundingBox())!
-      expect(b.x + b.width).toBeLessThanOrEqual(s.x + s.width + 1)
-    }
-    await strip.locator('button[title="探す"]').click()
-    await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeVisible()
-    await page.screenshot({ path: `test-results/left-tabs-${width}.png` })
-    expectNoPageErrors(state)
-  })
+// column; then (#516) showed icons only. Owner 2026-11-02: the names always show. Narrow: the name
+// (11 px, one line) under its icon, every tab inside the column even at its minimum; wide: side by side.
+const NAMES = ['スキル', 'ファイル', 'やること', '探す', '番組']
+
+async function leftTabsLook(page: Page) {
+  const strip = page.locator('[data-left-tabs]')
+  const s = (await strip.boundingBox())!
+  const looks: Array<'stacked' | 'side by side'> = []
+  for (const name of NAMES) {
+    const tab = strip.locator(`button[title="${name}"]`)
+    const label = tab.locator('[data-left-tab-name]')
+    await expect(label).toBeVisible()
+    await expect(label).toHaveText(name)
+    expect(await label.evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(11)
+    const t = (await tab.boundingBox())!
+    const l = (await label.boundingBox())!
+    const icon = (await tab.locator('svg').first().boundingBox())!
+    // One line: never a column of characters.
+    expect(l.height).toBeLessThan(20)
+    // Inside the column, nothing cut off.
+    expect(t.x).toBeGreaterThanOrEqual(s.x - 1)
+    expect(t.x + t.width).toBeLessThanOrEqual(s.x + s.width + 1)
+    looks.push(l.y >= icon.y + icon.height - 1 ? 'stacked' : 'side by side')
+  }
+  return looks
 }
+
+test('at 1440×900 every left tab shows its name on one line: stacked in the narrow column (even at its minimum), side by side when wide', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', plugin: '1' })
+  const strip = page.locator('[data-left-tabs]')
+  await strip.locator('button[title="ファイル"]').click()
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'stacked'))
+  // The new-item dot on やること and the accessible names stay.
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^探す$/ })).toBeVisible()
+
+  // The narrow column at its minimum: still every name, no tab outside the column.
+  const divider = page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' })
+  const d = (await divider.boundingBox())!
+  await page.mouse.move(d.x + d.width / 2, d.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(d.x - 500, d.y + 200, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(async () => Math.round((await strip.boundingBox())!.width)).toBe(200)
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'stacked'))
+  await page.screenshot({ path: 'test-results/left-tabs-narrow.png' })
+  await strip.locator('button[title="探す"]').click()
+  await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeVisible()
+
+  // スキル covers the whole left side: room for icon and name side by side.
+  await strip.locator('button[title="スキル"]').click()
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'side by side'))
+  await page.screenshot({ path: 'test-results/left-tabs-wide.png' })
+  expectNoPageErrors(state)
+})

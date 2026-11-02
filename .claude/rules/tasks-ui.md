@@ -374,3 +374,6 @@ and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list lef
 consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
 the real `AppShell`): the list is the narrow column, a task opens as a tab beside the open files,
 stays when the left tab changes, ← → go between them and a restart brings it back.
+With `&plugin=1` (a fifth tab, 番組) it also holds the left tabs' rule at 1440×900: every name
+shown on one line, under its icon in the narrow column (also at its 200 px minimum), beside it
+when スキル covers the left side (`renderer-structure.md`, panel registry).

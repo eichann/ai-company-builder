@@ -10,6 +10,7 @@
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
+//   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //
 // Departments: 営業部 (downloaded), 開発部 (not downloaded on this computer),
 // 総務 (read-only for this member). window.__acbLayout lets the Playwright UI
@@ -223,6 +224,12 @@ const api: Partial<ElectronAPI> = {
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
     })) } }
     : { success: true, data: { available: false, listDepartmentIds: null, items: [] } },
+  // ?plugin=1: one plugin's left tab (its screen is not loaded here; only the tab strip is looked at).
+  getPluginScreens: async () => ({ success: true, screens: params.get('plugin') === '1' ? [{
+    plugin: { id: 'tv-program', version: '1.0.0' }, label: '番組づくり',
+    tab: { label: '番組', icon: 'FilmSlate', entry: 'index.html' }, peek: null, recordSections: [], fileActions: [],
+  }] : [] }) as never,
+  onPluginsChanged: () => () => {},
   onNotificationsChanged: () => () => {},
   getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
 }

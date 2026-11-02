@@ -41,7 +41,8 @@ export const DEFAULT_LAYOUT: WorkspaceLayout = {
 export const PANE_LIMITS: Readonly<Record<string, PaneLimits>> = {
   side: { min: 300, max: 1200, keepForSiblings: 280 + 10, collapseSiblingAfter: 60 },
   chat: { min: 280 },
-  fileTree: { min: 120, max: 400 },
+  // min: the five standard left tabs fit stacked (icon over an 11 px name) without scrolling.
+  fileTree: { min: 200, max: 400 },
 }
 
 export function paneSize(split: SplitNode, paneId: string): number | null {
