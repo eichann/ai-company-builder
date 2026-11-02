@@ -11,7 +11,7 @@ type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
-const searchBox = (page: Page) => page.getByPlaceholder('文言を検索... (Enter)')
+const searchBox = (page: Page) => page.getByPlaceholder('探す（言葉を入れて Enter）')
 
 const ROOT = '/Users/demo/会社'
 const OTHER_ROOT = '/Users/demo/別会社'
@@ -26,7 +26,7 @@ const restart = (page: Page) => openPreview(page, 'skill-layout', { keep: '1' })
 
 const editorTab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 // Shown only on the 全社 tab while some department is not downloaded (開発部 here).
 const companyWideBanner = (page: Page) => page.getByText('一部の部署がダウンロードされていません。', { exact: false })
 
@@ -68,7 +68,7 @@ test.describe('open files and the left tab', () => {
 
   test('the left tab chosen is the one shown at the next start', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await leftTab(page, '検索').click()
+    await leftTab(page, '探す').click()
     await expect(searchBox(page)).toBeVisible()
     await restart(page)
     await expect(searchBox(page)).toBeVisible()
@@ -92,7 +92,7 @@ test('a left tab remembered for a panel not registered yet (an extension still l
   await restart(page)
   await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
   expect(await savedTab()).toBe('tasks')
-  await leftTab(page, '検索').click()
+  await leftTab(page, '探す').click()
   await expect.poll(savedTab).toBe('search')
 })
 

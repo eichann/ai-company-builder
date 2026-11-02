@@ -1249,7 +1249,9 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   carry these words; machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
   (`GET /companies/:id/members`).
-- **検索**: `POST /records/query { text, limit: 100 }` next to the file search, grouped by kind,
+- **探す** (the left tab; never 「検索」 on screen): `POST /records/query { text, limit: 100 }` next to
+  the file search; a chip per kind found (`src/features/search/model.ts` `findChips`: only kinds
+  with something, bundles of mixed kinds as 「案件・プロジェクト」) narrows the rows,
   `total` as the server counts it (only readable records). Records off for the company: nothing
   shown.
 - **The card** (`src/features/records/components/RecordCard.tsx`): kind, state, title, summary,

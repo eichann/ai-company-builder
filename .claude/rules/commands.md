@@ -71,7 +71,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `records.runAction` `{ recordId, action, expectedVersion, note?, args?, links?, ok? }` | outbound (changes shared state, tells the person it names) | none yet (the task screen, milestone 5); choices from `client/shared/record-actions.ts` | none yet (`records.md`) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button calls the same function directly |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
-| `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 検索 left tab, cursor in its box | the shortcut |
+| `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 探す left tab, cursor in its box | the shortcut |
 | `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |

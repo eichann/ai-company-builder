@@ -4,11 +4,10 @@
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 
 /**
- * Reading on this computer: the file names of a folder, a content search
- * (main runs git grep locally, capped, stopped by the next search) and the
- * text of a hit for its preview.
+ * Reading on this computer: the file names of a folder and a content search
+ * (main runs git grep locally, capped, stopped by the next search).
  */
-export type CompanySearchReads = ElectronPort<'gitListFiles' | 'gitGrep' | 'readFile'>
+export type CompanySearchReads = ElectronPort<'gitListFiles' | 'gitGrep'>
 
 /** Company-relative paths under `departmentFolder` ('' = the whole company), downloaded folders only. */
 export function listCompanyFiles(rootPath: string, departmentFolder: string, reads: CompanySearchReads = window.electronAPI) {
@@ -20,12 +19,7 @@ export function searchFileContents(rootPath: string, query: string, departmentFo
   return reads.gitGrep(rootPath, query, departmentFolder)
 }
 
-/** A hit's file text for the preview, or null. */
-export function readSearchHit(filePath: string, reads: CompanySearchReads = window.electronAPI) {
-  return reads.readFile(filePath)
-}
-
-/** Records (案件・やること・決めたこと・やりとり) whose title or summary holds the words: asked of the company server. */
+/** Records (やること・会議の記録・決めたこと・案件…) whose title or summary holds the words: asked of the company server. */
 export type RecordSearchOutbound = ElectronPort<'searchRecords'>
 
 export function searchRecords(companyId: string, text: string, outbound: RecordSearchOutbound = window.electronAPI) {
