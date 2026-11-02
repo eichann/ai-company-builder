@@ -45,6 +45,9 @@ or who can see it. So:
   schema, unused.
 - Company-files views treat an unreadable private folder exactly as a nonexistent path
   (`company-files.md`).
+- 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
+  (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
+  path inside an unreadable folder is answered as if the folder did not exist.
 
 ## Data and permissions
 

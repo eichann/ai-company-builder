@@ -25,6 +25,14 @@ paths:
   - "client/tests/records-tools.test.ts"
   - "server/tests/integration/record-tokens.test.ts"
   - "server/src/ports/records.ts"
+  - "shared/core/viewers.ts"
+  - "shared/types/viewers.ts"
+  - "server/src/services/viewers.ts"
+  - "server/src/routes/viewers.ts"
+  - "server/tests/unit/viewers.test.ts"
+  - "client/shared/viewers.ts"
+  - "client/electron/features/viewers/**"
+  - "client/tests/viewers-ipc.test.ts"
   - "server/src/ports/record-files.ts"
   - "server/src/adapters/sqlite/records.ts"
   - "server/src/adapters/record-files.ts"
@@ -598,6 +606,28 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   bundle and `link:` / `finishedSince` / `sort` queries for anyone else; cross-company; existing rows
   unchanged and the column migration; share only by the owner, its ledger entry, never undone —
   mutation-checked), permission matrix rows + `CROSS`.
+
+### Who can see it (見られる人, plan「新しい画面のデモ」K サーバー乙 ②, owner decision 2026-11-02)
+
+- `POST /api/companies/:id/viewers { records?: string[], files?: string[] }` (any member, ≤ 200
+  of each, 400 beyond) → `ViewersAnswer` (`shared/types/viewers.ts`): per record id and per company
+  path a `ViewersLabel { kind, text, count }`. The phrase is `shared/core/viewers.ts`
+  `viewersLabel`, first that fits: 「あなただけ」 (owner-only, or nobody else reads it) →
+  「あなたと〇〇さん」 → 「会社のみんな」 → 「『<private folder path>』を見られる人（N人）」 →
+  「〇〇部のみんな」 (exactly the people who belong to the department holding it, owners / admins
+  aside) → 「N人が見られます」. `count` includes owners and admins. Never 「公開」「権限」「スコープ」.
+- Who reads = `recordReader` evaluated for every member (`services/viewers.ts`), once per set of
+  folders above the item (a list costs a few evaluations, not one per row).
+- **No leaks** (owner decision B; asked and confirmed 2026-11-02: the name is shown only on the
+  readers' screens): a record the caller cannot read is **left out** of `records` (an owner-only
+  record too — owners and admins included); files are judged over the folders the caller can
+  see — an unreadable private folder (and every rule inside it) is treated as not there, so a
+  path inside it is answered exactly like a path that does not exist (asking cannot tell it is
+  private or name it). Test: `server/tests/unit/viewers.test.ts` (mutation-checked: dropping the
+  record check or the unreadable-folder filter fails it).
+- App: IPC `viewers:get(companyId, { records?, files? })` → `ViewersResult`
+  (`client/electron/features/viewers/ipc.ts`, `client/shared/viewers.ts`;
+  `client/tests/viewers-ipc.test.ts`).
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 

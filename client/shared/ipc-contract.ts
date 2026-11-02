@@ -38,6 +38,7 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
+import type { ViewersQuery, ViewersResult } from './viewers'
 import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
@@ -496,6 +497,8 @@ export interface IpcInvokeChannels {
   'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
   /** Turn one on / off (a switch the company does not allow cannot be turned on: `WORK_SWITCH_COMPANY_OFF`). */
   'workSwitches:set': { args: [companyId: string, which: WorkSwitch, on: boolean]; result: WorkSwitchesResult }
+  // 見られる人 for the lists: the phrase per record id / company path, with the member's session.
+  'viewers:get': { args: [companyId: string, query: ViewersQuery]; result: ViewersResult }
   /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
   'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
   // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
@@ -898,6 +901,8 @@ export interface ElectronAPI {
   // 自分の設定 → 「受信を読む」「AI が自動で進める」.
   getWorkSwitches: Invoke<'workSwitches:get'>
   setWorkSwitch: Invoke<'workSwitches:set'>
+  // 見られる人 for the lists.
+  getViewers: Invoke<'viewers:get'>
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
   // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
   getCalendarToday: Invoke<'calendar:today'>

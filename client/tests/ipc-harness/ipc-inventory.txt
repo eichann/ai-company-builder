@@ -178,6 +178,7 @@ contract.invoke threads:get
 contract.invoke tool-approval-response
 contract.invoke tools:start
 contract.invoke tools:stop
+contract.invoke viewers:get
 contract.invoke voice:cancel
 contract.invoke voice:capabilities
 contract.invoke voice:devices
@@ -356,6 +357,7 @@ contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
 contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
 contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
+contract.type ElectronAPI.getViewers = getViewers: Invoke<'viewers:get'>
 contract.type ElectronAPI.getWorkSwitches = getWorkSwitches: Invoke<'workSwitches:get'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
@@ -739,6 +741,7 @@ contract.type IpcInvokeChannels.'threads:get' = 'threads:get': { args: [companyI
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
 contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
+contract.type IpcInvokeChannels.'viewers:get' = 'viewers:get': { args: [companyId: string, query: ViewersQuery]; result: ViewersResult }
 contract.type IpcInvokeChannels.'voice:cancel' = 'voice:cancel': { args: [requestId: string]; result: void }
 contract.type IpcInvokeChannels.'voice:capabilities' = 'voice:capabilities': { args: []; result: VoiceCapabilities }
 contract.type IpcInvokeChannels.'voice:devices' = 'voice:devices': { args: []; result: VoiceDeviceList }
@@ -985,6 +988,7 @@ main.handle threads:get @ features/threads/ipc.ts (companyId, recordId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
 main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
+main.handle viewers:get @ features/viewers/ipc.ts (companyId, query)
 main.handle voice:cancel @ voice-input.ts (id: string)
 main.handle voice:capabilities @ voice-input.ts (<capabilities>)
 main.handle voice:devices @ voice-input.ts ()
@@ -1162,6 +1166,8 @@ preload getTaskCard -> invoke tasks:card($0, $1)
 preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
 preload getTaskList -> invoke tasks:list($0)
 preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getViewers -> invoke viewers:get($0, $1)
+preload getViewers : (companyId: string, query: ViewersQuery) => Promise<ViewersResult>
 preload getWorkSwitches -> invoke workSwitches:get($0)
 preload getWorkSwitches : (companyId: string) => Promise<WorkSwitchesResult>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
@@ -1404,5 +1410,6 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
+unmatched.preloadApiUnusedByRenderer getViewers
 unmatched.preloadApiUnusedByRenderer getWorkSwitches
 unmatched.preloadApiUnusedByRenderer setWorkSwitch

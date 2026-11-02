@@ -52,6 +52,7 @@ import { createTaskSettingsService } from './services/task-settings'
 import { createWorkSwitches } from './services/work-switches'
 import { slackFeaturesOf } from './services/slack-client'
 
+import { createViewersService } from './services/viewers'
 import { createAbsenceService } from './services/absences'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
@@ -586,6 +587,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
     taskSettings,
     workSwitches,
+    // 見られる人 for the lists (records.md "Who can see it").
+    viewers: createViewersService({ ...repos, ...shared }),
     // The server clock (notifications.md "The server clock"): started once per process by index.ts.
     serverClock: createServerClock({
       ...shared,

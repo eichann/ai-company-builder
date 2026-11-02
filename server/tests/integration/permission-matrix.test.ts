@@ -244,6 +244,8 @@ const MATRIX: Row[] = [
   // 自分の設定 (受信を読む, AI が自動で進める; tasks.md): any member, their own only.
   r('GET /api/companies/:companyId/me/work-switches', w => ({ path: `${C(w)}/me/work-switches` }), MEMBERS),
   r('PUT /api/companies/:companyId/me/work-switches', w => ({ path: `${C(w)}/me/work-switches`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // 見られる人 (records.md "Who can see it"): any member, only what they read is answered.
+  r('POST /api/companies/:companyId/viewers', w => ({ path: `${C(w)}/viewers`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
   // Absence and the delegate (代わりの人): the member, owner/admin, managers of a department the member belongs to.
   r('GET /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences` }), MEMBERS, 'the caller\'s own'),
   r('GET /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences`, query: `userId=${USER.member}` }), [200, 200, 200, 403, 404, 401],

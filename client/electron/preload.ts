@@ -18,6 +18,7 @@ import type { GoogleFeature } from '../shared/google'
 import type { MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
+import type { ViewersQuery } from '../shared/viewers'
 import type { TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
@@ -153,6 +154,7 @@ const api: ElectronAPI = {
   removeAbsence: (companyId: string, absenceId: string) => invoke('absences:remove', companyId, absenceId),
   getWorkSwitches: (companyId: string) => invoke('workSwitches:get', companyId),
   setWorkSwitch: (companyId: string, which: WorkSwitch, on: boolean) => invoke('workSwitches:set', companyId, which, on),
+  getViewers: (companyId: string, query: ViewersQuery) => invoke('viewers:get', companyId, query),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
   getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
