@@ -294,7 +294,9 @@ incoming link is taken off the other record at its version). The task's 案件�
 head (`BundleField.tsx`), not on the right: linked → ［変える］ (a chooser of the unfinished ones the
 member reads, `tasks:bundles`; a `one` link is replaced) ［外す］; none → ［〇〇につなぐ］, offered while
 the type's `bundle` link is not an origin one and the task is not finished (`canSetBundle`). 〇〇 is
-the kind's own name (`bundleWord`; until the department's kind arrives from `bundle-kinds`, 「プロジェクト」).
+the department's kind's name (`bundleKind` from AppShell, `tasks:bundleKinds`; 「プロジェクト」 until known). While none is linked the
+task also offers ［新しい〇〇にする］ (`NewBundleDialog`, the name from its title, no 宿題): `tasks:createBundle` of that kind in
+the department's folder, then the task's `bundle` link to it.
 `tasks:linkRecord` / `tasks:unlinkRecord` → `POST …/record-links[/remove] { link, target,
 expectedVersion }` (main checks the link name and both ids before any request) and answer the ledger
 entry's version; each change says what it did with ［取り消す］ (`tasks:undo` of that entry, on the

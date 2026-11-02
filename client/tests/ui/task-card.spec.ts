@@ -219,3 +219,16 @@ test('who can see it at the top right; 「AIへの相談」 on the right with �
   await expect(page.locator('#acted')).toHaveText('consult task-0000aa fresh')
   expectNoPageErrors(state)
 })
+
+test('no 案件 yet: 〇〇 is the department\'s kind; ［新しい案件にする］ makes one from the task\'s title and puts the task in', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { bundle: 'none' })
+  const field = page.getByTestId('task-card').getByRole('group', { name: '案件' })
+  await expect(field.getByRole('button', { name: '案件につなぐ' })).toBeVisible()
+  await field.getByRole('button', { name: '新しい案件にする' }).click()
+  const dialog = page.getByRole('dialog', { name: '新しい案件にする' })
+  await expect(dialog.getByLabel('名前')).toHaveValue('A社 見積書を 150万円 で作り直す')
+  await expect(dialog.getByRole('checkbox')).toHaveCount(0)
+  await dialog.getByRole('button', { name: '作る' }).click()
+  await expect(page.locator('#acted')).toHaveText('create deal A社 見積書を 150万円 で作り直す folder=営業部,link task-0000aa bundle=deal-0009zz@3')
+  expectNoPageErrors(state)
+})

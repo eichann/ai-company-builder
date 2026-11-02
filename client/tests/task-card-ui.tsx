@@ -25,6 +25,8 @@ const shared = params.get('shared') === '1'
 const conflict = params.get('conflict') === '1'
 // `?task=review`: 「議事録を確認する」 with its meeting's summary, two proposals (one put away) and decisions.
 const reviewing = params.get('task') === 'review'
+// `?bundle=none`: no 案件 yet, in a department that makes 案件 (［案件につなぐ］［新しい案件にする］).
+const noBundle = params.get('bundle') === 'none'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -51,7 +53,7 @@ const shownCard = reviewing ? reviewCard : taskCardOf({
     record: task,
     links: [
       { name: 'prepared', direction: 'out', record: rec('outbound_message-01', 'outbound_message', 'お礼メール', 'draft') },
-      { name: 'bundle', direction: 'out', record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') },
+      ...(noBundle ? [] : [{ name: 'bundle', direction: 'out' as const, record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') }]),
       { name: 'tasks', direction: 'in', record: rec('decision-0002', 'decision', '今回だけ20%値引き', 'confirmed', { exception: true }, { exceptionNotice: '例外' }) },
       { name: 'files', direction: 'out', path: '営業/見積書_v2.xlsx', broken: false },
       { name: 'related', direction: 'out', record: rec('task-0000bb', 'task', 'スケジュール案を出す', 'todo') },
@@ -65,6 +67,7 @@ const show = (id: string, line: string) => { acted.push(line); document.getEleme
 
 installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
+  createBundle: async (_c, input) => { show('acted', `create ${input.type} ${input.title} folder=${input.folder ?? ''}`); return { success: true, recordId: 'deal-0009zz' } },
   linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
@@ -95,6 +98,7 @@ function Preview() {
         renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null}
         shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
         onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
+        bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         consultations={[{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} />
     </main>

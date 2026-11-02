@@ -5,6 +5,7 @@ import { CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-ico
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
+import type { BundleKind } from '../../../../../shared/types/records'
 import { CALM } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
 import { fileRow, recordRow } from '../../records/components/linkRows'
@@ -12,7 +13,7 @@ import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/c
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
+import { actOnTask, createBundle, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { whenDoneLine } from '../cardActions'
@@ -49,8 +50,10 @@ interface Props {
   team?: boolean
   /** The member changed something (the list reads again). */
   onChanged?: () => void
-  /** The name of the department's kind of 案件・プロジェクト, for ［〇〇につなぐ］ while none is linked. */
-  bundleWord?: string
+  /** What the department on screen makes as its 案件・プロジェクト (`tasks:bundleKinds`): its name for ［〇〇につなぐ］ and the kind ［新しい〇〇にする］ makes; null until known. */
+  bundleKind?: BundleKind | null
+  /** The department's folder a new one is put in (全社: none). */
+  bundleFolder?: string | null
   /** Read: its title and kind, for its tab in the middle. */
   onLoaded?: (look: CardLook) => void
 }
@@ -66,7 +69,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, consultations = [], tagsInUse = [], team, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -134,7 +137,15 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
       : null
   return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
-    companyId={companyId} bundleWord={bundleWord}
+    companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
+    onCreateBundle={bundleKind ? (title: string) => change(async () => {
+      const made = await createBundle(companyId, { type: bundleKind.type, title, folder: bundleFolder })
+      if (!made.success) return made.error
+      const r = await setRecordLink(companyId, recordId, { link: 'bundle', target: made.recordId, expectedVersion: version }, false)
+      if (!r.success) return r.error
+      setNotice({ kind: 'done', text: `「${title}」を作り、このやることを入れました`, undo: null })
+      return null
+    }) : undefined}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
     onSetBundle={b => recordLink(recordId, { link: 'bundle', target: b.id, expectedVersion: version }, false, `「${b.title}」につなぎました`)}
     onRemoveBundle={() => card.bundle ? recordLink(recordId, { link: 'bundle', target: card.bundle.id, expectedVersion: version }, true, `「${card.bundle.title}」から外しました`) : Promise.resolve(null)}
@@ -158,6 +169,7 @@ interface BodyProps {
   onUnlinkFile: (companyPath: string) => Promise<string | null>
   companyId: string
   bundleWord: string
+  onCreateBundle?: (title: string) => Promise<string | null>
   onUnlinkRecord: (link: RemovableLink, label: string) => Promise<string | null>
   onSetBundle: (bundle: BundleChoice) => Promise<string | null>
   onRemoveBundle: () => Promise<string | null>
@@ -170,7 +182,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagSuggestions, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagSuggestions, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -267,7 +279,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         </section>
       )}
 
-      <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle} />
+      <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle}
+        {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string) => onCreateBundle(title) } : {})} />
       <DueAndTags card={card} now={now} busy={busy}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
       {tagSuggestions}
