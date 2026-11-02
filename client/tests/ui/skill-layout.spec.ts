@@ -138,7 +138,7 @@ test('search finds records by kind next to files; a record opens as a card, its 
   // Fields and 経緯 are folded at the bottom until opened.
   await card.getByRole('button', { name: /ほかの項目/ }).click()
   await card.getByRole('button', { name: /経緯/ }).click()
-  await expect(card.getByText('田中 太郎')).toBeVisible()
+  await expect(card.getByText('田中 太郎', { exact: true })).toBeVisible()
   await expect(card.getByText('山田 花子：作りました')).toBeVisible()
 
   // Following the linked file opens it; the file shows what links to it and its earlier versions.

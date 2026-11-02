@@ -521,6 +521,8 @@ export interface IpcInvokeChannels {
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
   /** What the member found in the outside system about an operation whose result was unknown. */
   'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
+  /** 「取り消す」 right after the member's own action: the ledger's undo of that version (the server checks the actor and later changes). */
+  'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
   'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -913,6 +915,7 @@ export interface ElectronAPI {
   shareTask: Invoke<'tasks:share'>
   suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
+  undoTaskAction: Invoke<'tasks:undo'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>

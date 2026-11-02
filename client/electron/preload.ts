@@ -167,6 +167,7 @@ const api: ElectronAPI = {
   suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
   retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),
   reconcileTaskRun: (companyId: string, runId: string, key: string, done: boolean) => invoke('tasks:reconcile', companyId, runId, key, done),
+  undoTaskAction: (companyId: string, recordId: string, version: number, expectedVersion: number) => invoke('tasks:undo', companyId, recordId, version, expectedVersion),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),
   getMinutesNotices: (companyId: string) => invoke('minutes:notices', companyId),

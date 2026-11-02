@@ -173,6 +173,7 @@ contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
 contract.invoke tasks:share
 contract.invoke tasks:suggestTags
+contract.invoke tasks:undo
 contract.invoke tasks:unlinkFile
 contract.invoke threads:get
 contract.invoke tool-approval-response
@@ -457,6 +458,7 @@ contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
 contract.type ElectronAPI.suggestTaskTags = suggestTaskTags: Invoke<'tasks:suggestTags'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
 contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
+contract.type ElectronAPI.undoTaskAction = undoTaskAction: Invoke<'tasks:undo'>
 contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
@@ -734,6 +736,7 @@ contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
+contract.type IpcInvokeChannels.'tasks:undo' = 'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'threads:get' = 'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
@@ -980,6 +983,7 @@ main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
 main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
 main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
+main.handle tasks:undo @ features/tasks/ipc.ts (companyId, recordId, version, expectedVersion)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle threads:get @ features/threads/ipc.ts (companyId, recordId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
@@ -1364,6 +1368,8 @@ preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
 preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
 preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)
 preload undoPluginOperation : (companyId: string, pluginId: string, operationId: string, conversationId?: string | undefined) => Promise<PluginOperationResult>
+preload undoTaskAction -> invoke tasks:undo($0, $1, $2, $3)
+preload undoTaskAction : (companyId: string, recordId: string, version: number, expectedVersion: number) => Promise<TaskWriteResult>
 preload unlinkFileFromTask -> invoke tasks:unlinkFile($0, $1, $2, $3)
 preload unlinkFileFromTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload unwatchCompany -> invoke fs:unwatch($0)

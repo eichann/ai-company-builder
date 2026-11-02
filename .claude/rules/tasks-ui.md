@@ -116,16 +116,33 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    `…/operations/:key/reconcile`), and only with nothing unknown 「もう一度」 (`tasks:retryRun`).
    Run ids and operation keys that could reshape the URL (`.`/`..`, separators) never reach the
    server.
-4. Actions (`TaskActions.tsx`), offered from the type (`recordActionChoices`) and the member's
-   place: a `who` person field holding the member (after the action's `who_unless`, `actionWho`),
-   or `ok_from` (then the member must say whose OK: a member, or a note for an OK from outside
-   ACB — since task version 9 only on a task to be checked first, `records.md` "Task version 9"). Never the AI's own steps (`who: [ai]`:
-   finish_prep, hand_over) nor actions needing a record chooser (set_bundle) or the list's own
-   editors (tags, wait_until). Since task version 9 完了 starts from every state but 準備中, so the
-   card's 「着手 first」 step (`startFirst`) no longer happens for core tasks (kept for a company's
-   own type that still completes only what was started). 受けられない needs a
-   reason (to the requester). 延ばす: 1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜 or a date and time
-   (`postponeChoices`); the server tells the requester. The server decides every action.
+4. Actions (`TaskActions.tsx`, placed by `src/features/tasks/cardActions.ts`), offered from the
+   type (`recordActionChoices`) and the member's place: a `who` person field holding the member (after the action's
+   `who_unless`, `actionWho`), or `ok_from` (then the member must say whose OK: a member, or a note
+   for an OK from outside ACB — since task version 9 only on a task to be checked first, `records.md`
+   "Task version 9").
+   Never the AI's own steps (`who: [ai]`: finish_prep, hand_over) nor actions needing a record
+   chooser (set_bundle) or the list's own editors (tags, wait_until). **One main button** beside
+   the title (新しい画面のデモ C, J; `placeActions`): 自分で進める (AI が用意している) → 引き受ける →
+   終わったので見てもらう (確かめてから, the assignee) → 完了にする; while someone else checks it, a word
+   instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
+   one line on what it does (`actionHint`). **チームの進め方** (`team`, on until its setting exists):
+   off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける, 返事待ち,
+   見てもらう, 受けられない and 差し戻す. Actions that take the task off the member's turn (受けられない,
+   返事待ち, 人に頼む, やめる（しまう）, 見てもらう) open a window that says **何が起きるか** and **知らせる人**
+   first (`leavingWords`); a reason where the type requires one. After a press the card says what
+   happened with **［取り消す］** (`tasks:undo` → `POST …/undo { version, expectedVersion }` of that
+   one entry; the server allows only its actor and refuses when something changed since). Since task
+   version 9 完了 starts from every state but 準備中; a company's own type that still completes only
+   what was started runs 着手 first (`startFirst`), each step at the version the previous one moved
+   to (no 取り消す for such a two-step press). **延ばす** sits on the
+   due (1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜, `postponeChoices`); the server tells the
+   requester. **Someone changed it first** (`VERSION_CONFLICT`, plan H): the card reads the latest
+   and says 「〇〇さんが先に変えました。最新を読み込みました。もう一度押してください」 with each change
+   since the version shown (経緯's lines, `RecordCardHistoryLine.version` / `who`) and that the press
+   did not happen. Under the title: where it came from (`origin`: 「会議『…』（11/5）から AI が作りました」
+   + ［根拠を見る］, the creating entry's note), 「終わったら：…」 (`whenDoneLine`), the 案件 (`bundle`, not
+   repeated on the right), the due and the tags. The server decides every action.
 5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
    reply draft) that stage 3's connectors fill. The card takes `renderSource(record)` from the
    screen: `src/app/recordSource.tsx` `renderRecordSource` returns the connector feature's part

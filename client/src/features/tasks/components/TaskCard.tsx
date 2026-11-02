@@ -1,19 +1,24 @@
+// A task's card in one file: the press's notices (取り消す, 先に変えた) belong to the card that
+// holds its version, so the loader and the body stay together.
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
-import { ChatCircleDots, CheckCircle, CircleNotch, Clock, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { ChatCircleDots, CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { TaskActInput } from '../../../../shared/tasks'
+import { CALM } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
 import { fileRow, recordRow } from '../../records/components/linkRows'
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, shareTaskToFolder, unlinkFileFromTask } from '../api'
+import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
-import { companyNow, companyPathOf, dueText, dueWhen } from '../model'
+import { whenDoneLine } from '../cardActions'
+import { companyNow, companyPathOf } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { TaskActions } from './TaskActions'
+import { BundleLine, ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
 import { TagSuggestions } from './TagSuggestions'
 
@@ -34,23 +39,33 @@ interface Props {
   onConsult?: (record: { id: string; title: string }) => void
   /** Tags in use in the member's list (most used first), for 「タグの候補」. */
   tagsInUse?: string[]
+  /** チームの進め方 (default on until the setting exists): off offers one's own steps only. */
+  team?: boolean
   /** The member changed something (the list reads again). */
   onChanged?: () => void
   /** Read: its title and kind, for its tab in the middle. */
   onLoaded?: (look: CardLook) => void
 }
 
+/** What the member's last press left on the card. */
+type Notice =
+  | { kind: 'done'; text: string; undoVersion: number | null }
+  | { kind: 'conflict'; since: number }
+
 /**
- * A task's card (stage 2 S7c): what the AI prepared on top, then what the member can do, the
- * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
- * server decides every action.
+ * A task's card (stage 2 S7c, 新しい画面のデモ C): one main action beside the title, the rest
+ * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
+ * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], onChanged, onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team = true, onChanged, onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
-  if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込んでいます</div>
+  const [notice, setNotice] = useState<Notice | null>(null)
+  if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   if (!result.success) return <div role="alert" className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400">{result.error}</div>
 
+  const card = result.card
+  const version = card.record.version
   const change = async (fn: () => Promise<string | null>): Promise<string | null> => {
     setBusy(true)
     try {
@@ -61,16 +76,26 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
       onChanged?.()
     }
   }
-  const runSteps = (card: TaskCardData) => (steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => change(async () => {
-    let version = card.record.version
+  const runSteps = (steps: Array<Omit<TaskActInput, 'expectedVersion'>>, done?: string) => change(async () => {
+    let at = version
     for (const step of steps) {
-      const r = await actOnTask(companyId, recordId, { ...step, expectedVersion: version })
-      if (!r.success) return r.error
-      version += 1
+      const r = await actOnTask(companyId, recordId, { ...step, expectedVersion: at })
+      if (!r.success) {
+        // Someone changed it first: the card reads the latest and says what changed (plan H).
+        if (r.code === 'VERSION_CONFLICT') { setNotice({ kind: 'conflict', since: at }); return '' }
+        return r.error
+      }
+      at += 1
     }
+    // Only a one-step press is undone in one step.
+    setNotice(done ? { kind: 'done', text: done, undoVersion: steps.length === 1 ? at : null } : null)
     return null
   })
-  const version = result.card.record.version
+  const undo = (undoVersion: number) => change(async () => {
+    const r = await undoTaskAction(companyId, recordId, undoVersion, version)
+    setNotice(r.success ? { kind: 'done', text: '取り消しました', undoVersion: null } : null)
+    return r.success ? null : r.error
+  })
   const fileLink = (companyPath: string, remove: boolean) => change(async () => {
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
@@ -79,12 +104,16 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
     return r.success ? null : r.error
   })
-  const card = result.card
   const tagSuggestions = card.canSetTags
     ? <TagSuggestions companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} busy={busy}
-      onSet={tags => runSteps(card)([{ action: 'set_tags', args: { tags } }])} />
+      onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])} />
     : null
-  return <CardBody card={result.card} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps(result.card)}
+  const top = notice?.kind === 'conflict'
+    ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
+    : notice?.kind === 'done'
+      ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undoVersion !== null ? () => void undo(notice.undoVersion!) : null} />
+      : null
+  return <CardBody card={card} top={top} team={team} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -92,12 +121,14 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
 
 interface BodyProps {
   card: TaskCardData
+  top: ReactNode
+  team: boolean
   rootPath: string
   busy: boolean
   renderPrepared: (record: RecordViewSummary) => ReactNode
   renderSource: (record: RecordViewSummary) => ReactNode
   renderSections?: (record: RecordViewSummary) => ReactNode
-  onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => Promise<string | null>
+  onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>, done?: string) => Promise<string | null>
   onRetry: (runId: string) => Promise<string | null>
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
   onLinkFile: (companyPath: string) => Promise<string | null>
@@ -109,11 +140,10 @@ interface BodyProps {
   tagSuggestions: ReactNode
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
-  const dueSoon = card.due ? dueWhen(card.due, now) : 'none'
   const [linkError, setLinkError] = useState<string | null>(null)
   const [unlinked, setUnlinked] = useState<string | null>(null)
   const runAction = async (fn: () => Promise<string | null>) => setRunError(await fn())
@@ -132,6 +162,7 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSe
     const path = draggedFilePaths(e.dataTransfer).map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
     if (path) setLinkError(await onLinkFile(path))
   }
+  // The 案件 is at the head of the card, so it is not repeated on the right.
   const rows: LinkedRow[] = [
     ...card.links.flatMap(l => (l.record ? [recordRow(l.record, l.label)] : [])),
     ...card.files.map(f => ({
@@ -139,21 +170,27 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSe
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
     })),
   ]
-  const unlinkedName = unlinked?.split('/').pop()
+  const postpone = card.actions.find(a => a.action === 'set_due')
+  const doneLine = whenDoneLine(card)
+  const turn = record.state === 'preparing' ? 'AI の番' : null
   return (
-    <RecordPage testId="task-card" kind="task" name="やること" title={record.title}
+    <RecordPage testId="task-card" kind="task" name="やること" title={record.title} top={top}
       chips={<>
-        {record.stateLabel && <Chip tone="accent">{record.stateLabel}</Chip>}
+        {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
+        {turn && <Chip>{turn}</Chip>}
         <RecordMarks record={record} />
-        {card.tags.map(t => <span key={t} className="rounded bg-gray-100 px-1 text-[10px] dark:bg-zinc-800">#{t}</span>)}
+        {card.names.assignee && <span className="text-[11.5px] text-gray-500 dark:text-zinc-400">担当 {card.names.assignee}さん{card.names.requester && !(card.roles.assignee && card.roles.requester) && card.names.requester !== card.names.assignee ? `・頼んだ人 ${card.names.requester}さん` : ''}</span>}
       </>}
-      actions={onConsult && (
-        <button type="button" onClick={() => onConsult({ id: record.id, title: record.title })} title="このやることについて AI に相談します（前の相談があれば、それを開きます）"
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-[12px] text-gray-700 hover:border-accent hover:text-accent dark:border-zinc-600 dark:text-zinc-200">
-          <ChatCircleDots size={13} />相談する
-        </button>
-      )}
-      from={card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300">{card.purpose}</p>}
+      actions={<>
+        <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} onRun={onRun} />
+        {onConsult && (
+          <button type="button" onClick={() => onConsult({ id: record.id, title: record.title })} title="このやることについて AI に相談します（前の相談があれば、それを開きます）"
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-[12px] text-gray-700 hover:border-accent hover:text-accent dark:border-zinc-600 dark:text-zinc-200">
+            <ChatCircleDots size={13} />相談する
+          </button>
+        )}
+      </>}
+      from={card.origin && <OriginLine origin={card.origin} />}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows}
         extras={[{ name: 'ファイル', kind: 'file', action: <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />, note: 'つながりは、このやることを見られる人みんなに見えます' }]}
@@ -162,18 +199,12 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSe
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
           {unlinked && (
             <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
-              「{unlinkedName}」とのつながりを外しました
+              「{unlinked.split('/').pop()}」とのつながりを外しました
               <button type="button" disabled={busy} onClick={() => void relink(unlinked)} className="text-accent hover:underline">取り消す</button>
             </p>
           )}
         </>} />}>
-      {card.due && (
-        <p className={`flex items-center gap-1 text-[13px] ${dueSoon === 'overdue' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-zinc-300'}`}>
-          <Clock size={13} />{dueSoon === 'overdue' ? '期限切れ ' : '期限 '}{dueText(card.due, now)}
-        </p>
-      )}
-      {tagSuggestions}
-      <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
+      {doneLine && <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">{doneLine}</p>}
       {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[12.5px] text-emerald-800 dark:text-emerald-300"><CheckCircle size={14} weight="fill" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (
@@ -203,7 +234,12 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, renderSe
         </section>
       )}
 
-      <TaskActions key={`${record.state}@${record.version}`} card={card} now={now} busy={busy} onRun={onRun} />
+      <BundleLine card={card} />
+      <DueAndTags card={card} now={now} busy={busy}
+        onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
+      {tagSuggestions}
+      {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
+      <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
       <RecordSourcePanel record={record}>{renderSource(record)}</RecordSourcePanel>
       {renderSections?.(record)}
     </RecordPage>

@@ -45,7 +45,14 @@ export type RecordListResult =
   | { success: false; offline: boolean; error: string }
 
 export interface RecordCardField { label: string; value: string }
-export interface RecordCardHistoryLine { at: string; text: string; ai: boolean }
+export interface RecordCardHistoryLine {
+  at: string
+  text: string
+  ai: boolean
+  /** The record's version after it, and who did it (「阿部さんが先に変えました」). */
+  version?: number
+  who?: string
+}
 export interface RecordCardLink {
   /** The link's label in the record's type (or the other side's inverse name). */
   label: string
@@ -138,6 +145,6 @@ export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undef
   return [...entries].sort((a, b) => b.version - a.version).map(e => {
     const what = def?.actions[e.action]?.label ?? ENGINE_ACTIONS[e.action] ?? e.action
     const who = e.actorKind === 'ai' ? 'AI' : e.actorKind === 'external' ? (e.actorSource ?? '外のサービス') : (people[e.actorId] ?? 'メンバー')
-    return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai' }
+    return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }
   })
 }
