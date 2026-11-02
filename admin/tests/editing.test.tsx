@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import MembersPage from '@/app/companies/[id]/members/page'
-import PermissionsPage from '@/app/companies/[id]/permissions/page'
+import { PermissionsView as PermissionsPage } from '@/components/folders/permissions-view'
 import SecurityPage from '@/app/companies/[id]/security/page'
 import SettingsPage from '@/app/companies/[id]/settings/page'
 import { toast } from 'sonner'

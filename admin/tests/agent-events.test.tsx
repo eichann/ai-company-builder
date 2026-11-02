@@ -275,7 +275,7 @@ describe('navigation', () => {
   it('hidden from a manager while only admins may read', async () => {
     stubApi({ ...managerCapabilities, canViewAgentEvents: false })
     renderInCompany(<AppShell>page</AppShell>)
-    await screen.findAllByRole('link', { name: '権限' })
+    await screen.findAllByRole('link', { name: 'フォルダ' })
     expect(screen.queryByRole('link', { name: 'AI の操作の記録' })).not.toBeInTheDocument()
   })
 })

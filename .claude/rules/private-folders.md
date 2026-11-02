@@ -14,6 +14,8 @@ paths:
   - "admin/src/lib/private-folders.ts"
   - "admin/src/lib/private-folder-help.ts"
   - "admin/src/app/**/private*/**"
+  - "admin/src/app/**/folders/**"
+  - "admin/src/components/folders/**"
 ---
 
 # Private folders (server, stage 3a)
@@ -34,6 +36,10 @@ database: paths, company-repository lookups, archive files, pushes in flight, th
 Someone who cannot read a private folder must not learn its name, that it exists as private,
 or who can see it. So:
 
+- Admin console: 「フォルダ」 (`/companies/:id/folders`, 管理画面の見直し 2-3) holds what were the
+  pages 「権限」 (tab 「だれが変えられるか」, `components/folders/permissions-view.tsx`) and
+  「非公開フォルダ」 (`?tab=private`, 「見られる人を決めたフォルダ」, `private-folders-view.tsx`);
+  `/permissions` and `/private-folders` redirect there.
 - Departments, stats and folder sizes read the company repository, which never holds private
   content. `/me/write-access` omits unreadable private folders. `/permissions*`, `/overview`,
   `/push-rejections`, `/private-folders*` are owner/admin/manager-only, and managers see only
