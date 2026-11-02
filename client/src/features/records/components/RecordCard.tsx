@@ -103,6 +103,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
   consult: ReturnType<typeof consultationLinks>; field: ReactNode; notes: ReactNode; onUnlink: (link: RemovableLink, label: string) => void
 }) {
   const { record, detail } = card
+  const [historyOpen, setHistoryOpen] = useState(false)
   const linked = card.links.flatMap(l => (l.record ? [l.record] : []))
   const chips = <>
     {record.stateLabel && <Chip tone="accent">{record.stateLabel}</Chip>}
@@ -134,8 +135,8 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
   return (
     <RecordPage testId="record-card" kind={record.thing} name={record.typeLabel} title={record.title} chips={chips} from={from} actions={actions}
       seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
-      top={card.ai && <AiBand ai={card.ai} />}
-      bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
+      top={card.ai && <AiBand ai={card.ai} onShowHistory={() => setHistoryOpen(true)} />}
+      bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows} notice={notes} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
       {field}
       {body}

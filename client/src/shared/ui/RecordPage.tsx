@@ -70,8 +70,14 @@ export const MAIN_BUTTON = 'inline-flex shrink-0 items-center gap-1.5 rounded-md
 export const SMALL_BUTTON = 'inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 bg-white px-2 py-0.5 text-[11.5px] text-gray-700 hover:border-accent hover:text-accent disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200'
 
 /** A section folded until opened (details on demand). */
-export function Fold({ title, icon, count, children }: { title: string; icon?: ReactNode; count?: number; children: ReactNode }) {
-  const [open, setOpen] = useState(false)
+export function Fold({ title, icon, count, children, open: shown, onToggle }: {
+  title: string; icon?: ReactNode; count?: number; children: ReactNode
+  /** Controlled by the screen (「経緯で見る」 opens 経緯); otherwise the fold keeps its own state. */
+  open?: boolean; onToggle?: (open: boolean) => void
+}) {
+  const [own, setOwn] = useState(false)
+  const open = shown ?? own
+  const setOpen = (next: (o: boolean) => boolean) => { const v = next(open); setOwn(v); onToggle?.(v) }
   return (
     <section aria-label={title} className="border-t border-gray-100 pt-3 dark:border-zinc-800">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
@@ -89,10 +95,10 @@ function when(at: string): string {
   return Number.isNaN(d.getTime()) ? at : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-export function HistoryFold({ lines }: { lines: RecordCardHistoryLine[] }) {
+export function HistoryFold({ lines, open, onToggle }: { lines: RecordCardHistoryLine[]; open?: boolean; onToggle?: (open: boolean) => void }) {
   if (lines.length === 0) return null
   return (
-    <Fold title="経緯" icon={<ClockCounterClockwise size={13} className="text-gray-400" />} count={lines.length}>
+    <Fold title="経緯" icon={<ClockCounterClockwise size={13} className="text-gray-400" />} count={lines.length} open={open} onToggle={onToggle}>
       <ol className="ml-1.5 space-y-2 border-l border-gray-200 pl-4 dark:border-zinc-700">
         {lines.map((h, i) => <li key={i} className="text-[12.5px]"><span className="mr-2 text-[11px] tabular-nums text-gray-400">{when(h.at)}</span>{h.text}</li>)}
       </ol>

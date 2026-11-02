@@ -29,6 +29,8 @@ test('only links not marked fixed can be taken off, each from the record that ho
   assert.ok(r.success)
   if (!r.success) return
   assert.equal(r.card.version, 5)
+  // Another record's link to this one says nothing under its row (its type's raw label, 「タスク」, never shows).
+  assert.deepEqual(r.card.links.map(l => l.label), ['bundle', '', ''])
   assert.deepEqual(r.card.links.map(l => [l.record?.id, l.bundle ?? false, l.removable ?? null]), [
     ['deal-0000ee', true, { source: 'meeting-0000aa', sourceVersion: 5, link: 'bundle', target: 'deal-0000ee' }],
     ['decision-000001', false, { source: 'decision-000001', sourceVersion: 3, link: 'meeting', target: 'meeting-0000aa' }],

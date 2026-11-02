@@ -254,6 +254,14 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`tasks-ui.md` "Consulting about a task"). A message the app wrote for the AI keeps
   `appInstruction` (`client/shared/app-instruction.ts`): restored as `metadata.appInstruction`,
   never drawn as a bubble, previewed or searched (`tasks-ui.md`).
+- **`updatedAt` is when the conversation changed** (staging 2026-11-02: every conversation showed the
+  time a new app version first opened, and the list lost its order): `save()` keeps the stored time
+  unless a message (id, role, words) or the draft differs — a save of the same words with other fields
+  (a newer app's, a restore) never moves it (`sameConversation`). Times an earlier version stamped that
+  way are put back once at load: no draft and saved more than 15 minutes after the last message → the
+  last message's time (`repairedUpdateTimes`), written with the next save. Tests:
+  `client/tests/chat-history-store.test.ts` (「a save of the same words in another shape…」, 「times an
+  earlier version stamped…」).
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail

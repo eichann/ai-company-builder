@@ -109,9 +109,8 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const def = defs.get(detail.record.type)
       const entries = history?.status === 200 ? (history.json?.data as { entries?: LedgerEntry[] } | undefined)?.entries ?? [] : []
       const links: RecordCardLink[] = detail.links.map(l => {
-        const label = l.direction === 'out'
-          ? def?.links[l.name]?.label ?? l.name
-          : (l.record ? defs.get(l.record.type)?.label : undefined) ?? l.name
+        // Only this record's own link names say something; another record's link to it says nothing more than its kind.
+        const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : ''
         const removable = removableOf(detail.record, l)
         return l.record
           ? { label, record: summaryView(l.record, defs.get(l.record.type)), ...(l.direction === 'out' && l.name === 'bundle' ? { bundle: true as const } : {}), ...(l.direction === 'out' && l.name === 'counterpart' ? { counterpart: true as const } : {}), recordVersion: l.record.version, ...(removable ? { removable } : {}) }
