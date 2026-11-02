@@ -234,3 +234,19 @@ test('an AI proposal put away (dismissed) is not among today\'s done', () => {
   const items = classifyTasks(src({ doneToday: [rec('task-done01', 'done'), rec('task-prop01', 'dismissed')] }))
   assert.deepEqual(items.map(i => i.id), ['task-done01'])
 })
+
+test('bundle kinds: what the server names each department\'s kind, as it answered; a bad company id never reaches it', async () => {
+  const kinds = {
+    core: { type: 'project', name: '取り組み', source: 'core' },
+    departments: [{ departmentId: 'd1', folder: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' } }],
+    kinds: [{ type: 'deal', name: '案件', source: 'plugin' }, { type: 'project', name: '取り組み', source: 'core' }],
+  }
+  const h = harness({ 'GET /api/companies/co1/records/bundle-kinds': { status: 200, body: { data: kinds } } })
+  assert.deepEqual(await h.api.bundleKinds('co1'), { success: true, kinds })
+  assert.equal((await h.api.bundleKinds('../x')).success, false)
+  assert.equal(h.requests.length, 1)
+  // An older server without the route: a failure the screen can fall back from, not a crash.
+  const old = harness({})
+  const r = await old.api.bundleKinds('co1')
+  assert.equal(r.success, false)
+})

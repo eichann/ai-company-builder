@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
+import type { BundleChoicesResult, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -24,6 +24,8 @@ export type TaskFileWrites = ElectronPort<'linkFileToTask' | 'unlinkFileFromTask
 export type CompanyFileReads = ElectronPort<'gitListFiles'>
 /** 「どのまとまりの会議ですか？」: the まとまり to choose from, and linking the chosen one (nothing goes outside). */
 export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
+/** What each department makes as its 束ねるもの and the names (案件, 番組, the company's 「プロジェクト」). */
+export type BundleKindReads = ElectronPort<'getBundleKinds'>
 export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle' | 'declineMinutesBundle'>
 /** 「部署に出す」: the member's owner-only task shown to a department's readers (the server checks owner and folder). */
 export type TaskShareWrites = ElectronPort<'shareTask'>
@@ -85,6 +87,10 @@ export function unlinkFileFromTask(companyId: string, recordId: string, companyP
 /** Company-relative paths of the files on this computer. */
 export function listCompanyFiles(rootPath: string, reads: CompanyFileReads = window.electronAPI) {
   return reads.gitListFiles(rootPath, '')
+}
+
+export function getBundleKinds(companyId: string, reads: BundleKindReads = window.electronAPI): Promise<BundleKindsAnswer> {
+  return reads.getBundleKinds(companyId)
 }
 
 export function getBundleChoices(companyId: string, reads: MeetingBundleReads = window.electronAPI): Promise<BundleChoicesResult> {

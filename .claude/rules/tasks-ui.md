@@ -53,6 +53,10 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   screen; 全社 = none, the whole company), `when_done` (`notify` = 知らせるだけ by default, `check` =
   確かめてから with the member as `reviewer`). `bundleId` links what it belongs to. Main sends only a
   member id, a `fileLinkPath`-checked folder and a record id.
+- `tasks:bundleKinds(companyId)` → `BundleKindsAnswer`: `GET /records/bundle-kinds` as the server
+  answered it (`records.md` "Bundle kinds": what each department makes and the names — a plugin's
+  案件・番組, the core's 「プロジェクト」 or the company's name). Renderer port `BundleKindReads`
+  (`getBundleKinds`, `src/features/tasks/api.ts`); an older server → a failure to fall back from.
 - `tasks:act(companyId, recordId, { action, expectedVersion, note?, args?, links?, ok? })`: one
   engine action with the session; the engine decides who may (`who`, `ok_from`). An action name
   that is not `[a-z][a-z0-9_]*` or a malformed record id never reaches the server's URL.

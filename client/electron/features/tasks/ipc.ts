@@ -39,7 +39,7 @@ import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
-  type BundleChoicesResult, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
+  type BundleChoicesResult, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
@@ -219,6 +219,16 @@ export function createTasksApi(deps: TasksDeps) {
       }
     },
 
+    /** What each department makes as its 束ねるもの and their names (`GET /records/bundle-kinds`). */
+    async bundleKinds(companyId: string): Promise<BundleKindsAnswer> {
+      if (!COMPANY.test(companyId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      const a = await call(companyId, 'GET', '/records/bundle-kinds')
+      const kinds = a?.status === 200 ? (a.json?.data as BundleKindsResult | undefined) : undefined
+      if (kinds && kinds.core && Array.isArray(kinds.departments) && Array.isArray(kinds.kinds)) return { success: true, kinds }
+      const f = failure('bundle-kinds', a)
+      return { success: false, offline: f.offline, error: f.error }
+    },
+
     async linkFile(companyId: string, recordId: string, companyPath: string, expectedVersion: number, remove: boolean): Promise<TaskWriteResult> {
       const path = typeof companyPath === 'string' ? fileLinkPath(companyPath.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
@@ -383,6 +393,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))
   ipc.handle('tasks:bundles', (_event, companyId) => api.bundles(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:proposals', (_event, companyId, meetingId) => api.proposals(typeof companyId === 'string' ? companyId : '', meetingId))
+  ipc.handle('tasks:bundleKinds', (_event, companyId) => api.bundleKinds(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:linkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
   ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
