@@ -22,7 +22,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createAppPages, createBroadcastPort, createDrivePickerWindow, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createDrivePickerWindow, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
@@ -31,6 +31,8 @@ import { createToolApprovals, registerAgentInteractionsIpc } from './features/ag
 import { requestFromOwner } from './features/agent-interactions/owner'
 import { wireAgentControl } from './features/agent-control/wire'
 import { registerSettingsIpc } from './features/settings/ipc'
+import { registerAppLinkIpc } from './features/app-link/ipc'
+import { APP_LINK_SCHEME, appLinkInArgs } from './features/app-link/link'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
@@ -128,6 +130,18 @@ const appWindow = mainWindowHost.port
 const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) app.quit()
 app.on('second-instance', () => { mainWindowHost.focus() })
+// The server address from an invitation's 「アプリを開く」 (features/app-link): offered only,
+// the member confirms it on the server screen. Focus the window on every link.
+const appLinks = registerAppLinkIpc(ipc, {
+  currentServer: () => config.serverUrl(),
+  saveServer: origin => {
+    const current = config.load()
+    current.serverUrl = origin
+    config.save(current)
+  },
+  log: message => console.warn(message),
+})
+receiveAppLinks(APP_LINK_SCHEME, raw => { appLinks.offer(raw); mainWindowHost.focus() }, appLinkInArgs)
 
 // Chat server info (shared between app.whenReady and IPC handler)
 let chatServerInfo: { port: number; authToken: string } | null = null

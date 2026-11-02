@@ -289,6 +289,9 @@ const api: ElectronAPI = {
   getServerUrl: () => invoke('config:getServerUrl'),
   setServerUrl: (url: string) => invoke('config:setServerUrl', url),
   validateServerUrl: (url: string) => invoke('config:validateServerUrl', url),
+  getAppLinkServerOffer: () => invoke('appLink:serverOffer'),
+  acceptAppLinkServer: () => invoke('appLink:acceptServer'),
+  dismissAppLinkServer: () => invoke('appLink:dismissServer'),
   getAgentEnvPassthrough: () => invoke('config:getAgentEnvPassthrough'),
   setAgentEnvPassthrough: (names: string[]) => invoke('config:setAgentEnvPassthrough', names),
 

@@ -38,7 +38,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   the member's own API keys, and `brokerKeys:moveFromEnv`, which reads a `.env` key in main, sends
   it and removes it locally only after the server kept it: `key-broker.md`), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
-  shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
+  shell:openExternal; running tools stop on quit), `app-link` (appLink:serverOffer / acceptServer /
+  dismissServer: the invitation link's server address, below), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;
   the windows themselves come from `electron-adapter.ts` `createChatWindowHost`),
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
@@ -227,6 +228,16 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   Auth's response body carries the session token; who signed in comes from `auth:getSession`,
   the `/api/me` user fields). Test: `ipc-app.test.ts` ("auth:signIn / auth:signUp never hand the
   session token").
+- **The invitation's 「アプリを開く」** (`ai-company-builder://open?server=<origin>`, 2026-11-02,
+  管理画面の見直し 2-2; `build.protocols` in `client/package.json`; `electron-adapter.ts`
+  `receiveAppLinks`: `open-url`, a second instance's and the first launch's arguments) only
+  *offers* a server: `features/app-link/link.ts` passes an https origin alone (http only on
+  loopback; no credentials, path, query or fragment, one `server`), `features/app-link/ipc.ts`
+  holds it only while the app has no server (a link never switches a configured app), and
+  `appLink:acceptServer` takes no argument — it saves the address main holds, after the member
+  saw it on the server screen (`ServerSetupScreen`, host shown large) and pressed 「つなぐ」 and
+  that server answered `/api/config` as ACB. Tests: `tests/app-link.test.ts` (mutation-checked),
+  `ipc-app.test.ts` 「an invitation link (open-url) never points…」.
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);

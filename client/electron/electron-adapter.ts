@@ -446,6 +446,33 @@ export function registerLocalFileScheme(): void {
   ])
 }
 
+/**
+ * The invitation page's 「アプリを開く」 (`ai-company-builder://open?server=…`): every link the
+ * OS hands the app — macOS `open-url` (also before ready), and the arguments of the first
+ * launch or a second instance (Windows) — goes to `onLink` (features/app-link: it only offers
+ * an https address for the member to confirm). The packaged app registers the scheme through
+ * `build.protocols`; a development run registers its own command.
+ */
+export function receiveAppLinks(scheme: string, onLink: (raw: string) => void, findInArgs: (argv: readonly string[]) => string | null): void {
+  void app.whenReady().then(() => {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, [path.resolve(process.argv[1])])
+    } else {
+      app.setAsDefaultProtocolClient(scheme)
+    }
+  })
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    onLink(url)
+  })
+  app.on('second-instance', (_event, argv) => {
+    const link = findInArgs(argv)
+    if (link) onLink(link)
+  })
+  const atLaunch = findInArgs(process.argv)
+  if (atLaunch) onLink(atLaunch)
+}
+
 /** Serve acb-plugin:// from the verified packages only (`features/plugins/protocol.ts`), once the app is ready. */
 export function servePluginFiles(files: PluginFileServer): void {
   void app.whenReady().then(() => {
