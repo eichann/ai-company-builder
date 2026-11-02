@@ -91,7 +91,7 @@ export function boundaryCrossing(src: string, dest: string, folders: MyPrivateFo
 }
 
 export const TO_PRIVATE_WARNING = 'このファイルの過去の内容は、全員の手元に残っています'
-export const NOT_ALLOWED_REASON = '非公開のフォルダは、管理者か部署の責任者が作れます'
+export const NOT_ALLOWED_REASON = '非公開のフォルダは、管理者か部署の管理役が作れます'
 export const OFFLINE_REASON = 'インターネットにつながっているときに作成できます'
 
 /** The confirmation for a move / copy that crosses the edge (title, message, button). */

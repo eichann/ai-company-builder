@@ -386,7 +386,7 @@ describe('settings', () => {
     expect(draftDays({ choice: 365, customDays: '', viewers: 'admins' })).toBe(365)
     expect(changeLines({ retentionDays: 180, viewers: 'admins' }, { retentionDays: 365, viewers: 'admins-and-managers' })).toEqual([
       '保存期間: 180日 → 1年',
-      '記録を見られる人: オーナーと管理者だけ → オーナーと管理者、各部署の責任者（自分の部署の分だけ）',
+      '記録を見られる人: オーナーと管理者だけ → オーナーと管理者、各部署の管理役（自分の部署の分だけ）',
     ])
   })
 
@@ -417,7 +417,7 @@ describe('settings', () => {
       [`PUT ${ae}/settings`]: (call) => ({ body: ok({ ...settings, ...(call.body as object) }) }),
     }))
     renderInCompany(<AgentEventsPage />)
-    await userEvent.click(await screen.findByRole('radio', { name: /各部署の責任者/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /各部署の管理役/ }))
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ viewers: 'admins-and-managers' }))
     expect(calls.some((c) => c.url.includes('retention-preview'))).toBe(false)
@@ -431,9 +431,9 @@ describe('settings', () => {
     expect(await within(selected).findByText('鈴木 一郎')).toBeInTheDocument()
     expect(within(selected).getAllByText('全部')).toHaveLength(2)
     // The other card shows its list on hover.
-    expect(screen.queryByRole('region', { name: /各部署の責任者.*のときに見られる人/ })).not.toBeInTheDocument()
-    await userEvent.hover(screen.getByRole('radio', { name: /各部署の責任者/ }))
-    const other = await screen.findByRole('region', { name: /各部署の責任者.*のときに見られる人/ })
+    expect(screen.queryByRole('region', { name: /各部署の管理役.*のときに見られる人/ })).not.toBeInTheDocument()
+    await userEvent.hover(screen.getByRole('radio', { name: /各部署の管理役/ }))
+    const other = await screen.findByRole('region', { name: /各部署の管理役.*のときに見られる人/ })
     expect(await within(other).findByText('営業部の分')).toBeInTheDocument()
     expect(within(other).getByText('田中 太郎')).toBeInTheDocument()
   })
@@ -445,7 +445,7 @@ describe('settings', () => {
     await screen.findByText('営業部/提案書.md')
     expect(screen.queryByRole('tab', { name: '設定' })).not.toBeInTheDocument()
     expect(screen.queryByText('保存期間')).not.toBeInTheDocument()
-    expect(screen.getByText(/あなたが責任者の部署で行われた操作だけ/)).toBeInTheDocument()
+    expect(screen.getByText(/あなたが管理役の部署で行われた操作だけ/)).toBeInTheDocument()
   })
 })
 

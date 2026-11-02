@@ -120,7 +120,7 @@ export const SENSITIVE_LABELS: Record<SensitiveLocation, string> = {
 
 export const VIEWER_MODE_LABELS: Record<AgentEventViewerMode, string> = {
   admins: 'オーナーと管理者だけ',
-  'admins-and-managers': 'オーナーと管理者、各部署の責任者（自分の部署の分だけ）',
+  'admins-and-managers': 'オーナーと管理者、各部署の管理役（自分の部署の分だけ）',
 }
 
 export function isDenied(decision: ToolDecision): boolean {

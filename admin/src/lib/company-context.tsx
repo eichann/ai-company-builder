@@ -16,7 +16,7 @@ export interface CompanyContextValue {
   role: Role | null
   /** owner or admin: may change members, departments and settings. */
   isAdmin: boolean
-  /** Departments the signed-in user is a manager (部署の責任者) of. */
+  /** Departments the signed-in user is a manager (部署の管理役) of. */
   managedDepartmentIds: string[]
   /** May open 「AI の操作の記録」: owner/admin, or a department manager while the log's viewer setting allows it. */
   canViewAgentEvents: boolean

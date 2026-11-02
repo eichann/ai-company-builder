@@ -224,7 +224,7 @@ function AbsenceForm({ companyId, member, members }: { companyId: string; member
       const created = await absencesApi.create(companyId, { userId: member.userId, from: from || today, until, delegateId })
       toast.success(`${name}さんの不在を追加しました`)
       if (created.delegateCannotRead > 0) {
-        setNotice(`代わりの人が見られないものが ${created.delegateCannotRead} 件あります。部署の責任者に知らせました。`)
+        setNotice(`代わりの人が見られないものが ${created.delegateCannotRead} 件あります。部署の管理役に知らせました。`)
       }
       setFrom('')
       setUntil('')

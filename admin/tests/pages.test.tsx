@@ -157,7 +157,7 @@ describe('部署', () => {
     mockApi(companyRoutes(managerCapabilities))
     renderInCompany(<DepartmentsPage />)
     await screen.findByRole('list', { name: '部署の一覧' })
-    expect(await screen.findByText('あなたが責任者')).toBeInTheDocument()
+    expect(await screen.findByText('あなたが管理役')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '部署を追加' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /を並べ替え/ })).not.toBeInTheDocument()
   })

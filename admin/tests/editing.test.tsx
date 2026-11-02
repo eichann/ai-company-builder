@@ -110,7 +110,7 @@ describe('権限', () => {
     const picker = await screen.findByRole('dialog')
     expect(within(picker).queryByText('佐藤 花子')).not.toBeInTheDocument()
     expect(within(picker).getByText(/オーナー・管理者（2人）は常に編集できる/)).toBeInTheDocument()
-    expect(within(picker).getByText('責任者')).toBeInTheDocument() // 田中 manages 営業部
+    expect(within(picker).getByText('管理役')).toBeInTheDocument() // 田中 manages 営業部
     await userEvent.type(within(picker).getByRole('combobox'), '田中')
     await userEvent.click(within(picker).getByText('田中 太郎'))
     await userEvent.keyboard('{Escape}')
@@ -237,7 +237,7 @@ describe('権限', () => {
     const subtree = permissionScopes.filter((s) => s.path.startsWith('営業部'))
     mockApi(permissionRoutes(managerCapabilities, subtree))
     renderInCompany(<PermissionsPage />)
-    expect(await screen.findByText(/あなたが責任者を務める部署と、その中のフォルダだけ/)).toBeInTheDocument()
+    expect(await screen.findByText(/あなたが管理役を務める部署と、その中のフォルダだけ/)).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '営業部 の設定' })).toBeInTheDocument()
     expect(screen.queryByText('会社全体の基本ルール')).not.toBeInTheDocument()
     expect(within(screen.getByRole('tree')).getAllByRole('treeitem')).toHaveLength(2)
@@ -250,7 +250,7 @@ describe('権限', () => {
       /閲覧の制限はまだ使えません/
     )
     expect(describeError(new ApiError(403, 'Only owners, admins and the managers of this department can change its permissions'))).toMatch(
-      /その部署の責任者/
+      /その部署の管理役/
     )
     expect(describeError(new ApiError(400, 'The last owner cannot be demoted. Make another member an owner first.'))).toMatch(
       /最後のオーナー/
@@ -264,7 +264,7 @@ describe('権限', () => {
       [`GET ${base}/permissions`]: { status: 403, body: { error: 'Only owners, admins and department managers can view permissions' } },
     })
     renderInCompany(<PermissionsPage />)
-    expect(await screen.findByText('権限を確認できるのは、オーナー・管理者と部署の責任者です')).toBeInTheDocument()
+    expect(await screen.findByText('権限を確認できるのは、オーナー・管理者と部署の管理役です')).toBeInTheDocument()
   })
 })
 

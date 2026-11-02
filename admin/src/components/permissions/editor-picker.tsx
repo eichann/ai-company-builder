@@ -15,7 +15,7 @@ import { isAdminRole } from '@/lib/format'
  * Add (or remove) people who may edit under 指定した人だけ: the メンバー role
  * or individual members, searchable. Picking toggles and keeps the list open
  * so several can be chosen in a row. Owners and admins are not offered — they
- * can always edit. Managers of the department are marked 「責任者」 so they
+ * can always edit. Managers of the department are marked 「管理役」 so they
  * are easy to find (being a manager grants no file access by itself).
  */
 export function EditorPicker({
@@ -90,7 +90,7 @@ export function EditorPicker({
                       <span className="flex items-center gap-1.5">
                         <span className="truncate">{name}</span>
                         {managers.has(m.userId) && (
-                          <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">責任者</span>
+                          <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
                         )}
                       </span>
                       {m.email && <span className="block truncate text-xs text-muted-foreground">{m.email}</span>}

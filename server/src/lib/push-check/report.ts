@@ -140,7 +140,7 @@ export function renderReport(f: Findings): Buffer | null {
     if (f.instructions) {
       o.line()
       o.line('以下は、チャットのAIが毎回読み込む指示のファイル(CLAUDE.md / AGENTS.md)です。')
-      o.line('会社のオーナー・管理者と、その部署の責任者だけが追加・変更・削除できます:')
+      o.line('会社のオーナー・管理者と、その部署の管理役だけが追加・変更・削除できます:')
       o.list(f.instructions)
     }
     if (f.autorun) {

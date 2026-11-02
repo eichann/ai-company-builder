@@ -33,7 +33,7 @@ export const permissionSchema = `
       created_by TEXT
     );
 
-    -- 部署の責任者. Management rights only: grants no file access by itself.
+    -- 部署の管理役. Management rights only: grants no file access by itself.
     CREATE TABLE IF NOT EXISTS department_managers (
       department_id TEXT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,

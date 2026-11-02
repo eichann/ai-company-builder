@@ -117,7 +117,7 @@ describe('やることの一覧の設定', () => {
     await userEvent.selectOptions(within(dialog).getByLabelText('代わりの人'), 'u_owner')
     await userEvent.click(within(dialog).getByRole('button', { name: '追加' }))
 
-    expect(await within(dialog).findByText('代わりの人が見られないものが 2 件あります。部署の責任者に知らせました。')).toBeInTheDocument()
+    expect(await within(dialog).findByText('代わりの人が見られないものが 2 件あります。部署の管理役に知らせました。')).toBeInTheDocument()
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ userId: 'u_member', from: '2026-11-02', until: '2026-11-06', delegateId: 'u_owner' })
   })
 })

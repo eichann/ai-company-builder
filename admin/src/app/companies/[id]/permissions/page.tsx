@@ -183,7 +183,7 @@ export default function PermissionsPage() {
             場所ごとに<strong className="font-medium">「上の階層と同じ」「全員」「指定した人だけ」</strong>から編集できる人を選べます。選ばれなかった人は閲覧のみになります。一部の人にだけ見せたいファイルは、<LockSimple size={14} weight="fill" className="inline align-[-2px] text-brand" aria-hidden="true" />非公開フォルダを作ってそこに置きます。
           </p>
           <p className="text-muted-foreground">オーナーと管理者は、ルールに関係なく常にすべての場所を閲覧・編集できます。</p>
-          {!isAdmin && <p className="text-muted-foreground">あなたが責任者を務める部署と、その中のフォルダだけを表示・変更できます。</p>}
+          {!isAdmin && <p className="text-muted-foreground">あなたが管理役を務める部署と、その中のフォルダだけを表示・変更できます。</p>}
         </div>
       </div>
 
@@ -195,8 +195,8 @@ export default function PermissionsPage() {
       ) : isForbidden(permissions.error) ? (
         <EmptyState
           icon={LockSimple}
-          title="権限を確認できるのは、オーナー・管理者と部署の責任者です"
-          description="変更が必要なときは、管理者か部署の責任者に依頼してください。"
+          title="権限を確認できるのは、オーナー・管理者と部署の管理役です"
+          description="変更が必要なときは、管理者か部署の管理役に依頼してください。"
         />
       ) : permissions.error && !permissions.data ? (
         <ErrorState error={permissions.error} onRetry={permissions.reload} />

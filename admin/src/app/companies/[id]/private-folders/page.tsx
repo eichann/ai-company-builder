@@ -79,7 +79,7 @@ export default function PrivateFoldersPage() {
           <p className="text-muted-foreground">
             見られる人のAIは、中身を読んで公開の場所に書くことができます。アプリでは非公開フォルダに鍵のマークが付きます。
           </p>
-          {!isAdmin && <p className="text-muted-foreground">あなたが責任者を務める部署の中だけで作成・変更できます。</p>}
+          {!isAdmin && <p className="text-muted-foreground">あなたが管理役を務める部署の中だけで作成・変更できます。</p>}
         </div>
       </div>
 
@@ -88,8 +88,8 @@ export default function PrivateFoldersPage() {
       ) : isForbidden(folders.error) ? (
         <EmptyState
           icon={LockSimple}
-          title="非公開フォルダを扱えるのは、オーナー・管理者と部署の責任者です"
-          description="非公開のフォルダが必要なときは、管理者か部署の責任者に依頼してください。"
+          title="非公開フォルダを扱えるのは、オーナー・管理者と部署の管理役です"
+          description="非公開のフォルダが必要なときは、管理者か部署の管理役に依頼してください。"
         />
       ) : folders.error && !folders.data ? (
         <ErrorState error={folders.error} onRetry={folders.reload} />

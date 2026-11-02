@@ -151,7 +151,7 @@ function CreateForm({
       <DialogHeader>
         <DialogTitle>非公開フォルダを作成</DialogTitle>
         <DialogDescription>
-          選んだ人だけに届く、新しいフォルダを作ります。オーナーと管理者は常に見られます。部署の中に作ると、その部署の責任者が見られる人を変更でき、自分を加えることもできます。
+          選んだ人だけに届く、新しいフォルダを作ります。オーナーと管理者は常に見られます。部署の中に作ると、その部署の管理役が見られる人を変更でき、自分を加えることもできます。
         </DialogDescription>
       </DialogHeader>
 

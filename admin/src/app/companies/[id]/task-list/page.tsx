@@ -58,7 +58,7 @@ export default function TaskListSettingsPage() {
     return (
       <>
         <PageHeader title={TITLE} />
-        <EmptyState icon={LockSimple} title="このページはオーナー・管理者と部署の責任者だけが使えます" />
+        <EmptyState icon={LockSimple} title="このページはオーナー・管理者と部署の管理役だけが使えます" />
       </>
     )
   }
@@ -68,7 +68,7 @@ export default function TaskListSettingsPage() {
       <PageHeader title={TITLE} />
       <div className="-mt-2 mb-6 max-w-3xl space-y-2 text-sm text-muted-foreground">
         <p>やることの一覧と、AI に任せる仕事の進め方を決めます。</p>
-        {!isAdmin && <p>会社全体の決めごとはオーナーと管理者が決めます。ここでは、あなたが責任者の部署に所属する人を決められます。</p>}
+        {!isAdmin && <p>会社全体の決めごとはオーナーと管理者が決めます。ここでは、あなたが管理役の部署に所属する人を決められます。</p>}
       </div>
       <div className="space-y-6 pb-4">
         {isAdmin &&
@@ -347,7 +347,7 @@ function ReadIncomingCard({ draft, change }: CardProps) {
 
 const ACCEPTANCE_CASES: Array<{ key: keyof TaskSettings['acceptance']; label: string }> = [
   { key: 'sameDepartment', label: '同じ部署に所属する人に頼んだとき' },
-  { key: 'managerToMember', label: '部署の責任者が、その部署に所属する人に頼んだとき' },
+  { key: 'managerToMember', label: '部署の管理役が、その部署に所属する人に頼んだとき' },
   { key: 'meetingHomework', label: '会議の宿題を AI が作ったとき（担当がその会議に出ていた場合）' },
 ]
 

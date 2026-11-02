@@ -20,7 +20,7 @@ import { describeError } from '@/lib/errors'
 import { roleLabel } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-/** Multi-select of company members as managers (部署の責任者) of one department. */
+/** Multi-select of company members as managers (部署の管理役) of one department. */
 export function ManagersDialog({
   open,
   onOpenChange,
@@ -89,10 +89,10 @@ function ManagersForm({
     setBusy(true)
     try {
       const res = await departmentsApi.setManagers(companyId, department.id, [...selected])
-      toast.success(`「${department.name}」の責任者を更新しました`)
+      toast.success(`「${department.name}」の管理役を更新しました`)
       onSaved(res.managers)
     } catch (err) {
-      toast.error('責任者を更新できませんでした', { description: describeError(err) })
+      toast.error('管理役を更新できませんでした', { description: describeError(err) })
     } finally {
       setBusy(false)
     }
@@ -101,9 +101,9 @@ function ManagersForm({
   return (
     <>
       <DialogHeader className="p-6 pb-4">
-        <DialogTitle>「{department.name}」の責任者</DialogTitle>
+        <DialogTitle>「{department.name}」の管理役</DialogTitle>
         <DialogDescription>
-          責任者は、この部署とその中のフォルダの編集権限を管理画面で設定できます。責任者になるだけでは、本人が編集できる場所は変わりません。複数人を選べます。
+          管理役は、この部署とその中のフォルダの編集権限を管理画面で設定できます。管理役になるだけでは、本人が編集できる場所は変わりません。複数人を選べます。
         </DialogDescription>
       </DialogHeader>
       <Command className="border-y" loop>

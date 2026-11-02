@@ -57,7 +57,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   ai_turn_stuck: '頼んだことの AI の番が 24 時間進んでいない',
   wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
   acceptance_waiting: '頼んだことが 1 営業日たっても引き受けられていない',
-  delegate_stopped: '不在の人の代わりが受け持てないもの（部署の責任者へ）',
+  delegate_stopped: '不在の人の代わりが受け持てないもの（部署の管理役へ）',
   // lane A ▼
   // ── lane A ▲
   // lane B ▼

@@ -259,7 +259,7 @@ function ViewersCard({ value, onChange }: { value: AgentEventViewerMode; onChang
           記録を見られる人
         </CardTitle>
         <CardDescription>
-          選んだ方の下に、実際に見られる人と、その人が見られる範囲を表示しています。部署の責任者は、自分の部署で行われた操作だけを見られ、自分が読めないフォルダの名前は「非公開（表示できません）」になります。
+          選んだ方の下に、実際に見られる人と、その人が見られる範囲を表示しています。部署の管理役は、自分の部署で行われた操作だけを見られ、自分が読めないフォルダの名前は「非公開（表示できません）」になります。
         </CardDescription>
       </CardHeader>
       <div role="radiogroup" aria-label="記録を見られる人" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
@@ -329,7 +329,7 @@ function ViewerList({ mode }: { mode: AgentEventViewerMode }) {
                 <span className="min-w-0 flex-1 truncate">
                   {name}
                   <span className="ml-1.5 text-xs text-muted-foreground">
-                    {v.scope === 'all' ? roleLabel(v.role) : '部署の責任者'}
+                    {v.scope === 'all' ? roleLabel(v.role) : '部署の管理役'}
                   </span>
                 </span>
                 {v.scope === 'all' ? (
@@ -343,7 +343,7 @@ function ViewerList({ mode }: { mode: AgentEventViewerMode }) {
             )
           })}
           {mode === 'admins-and-managers' && (viewers.data?.viewers ?? []).every((v) => v.scope === 'all') && (
-            <li className="py-1.5 text-xs text-muted-foreground">部署の責任者はまだいません（「部署」の画面で設定できます）。</li>
+            <li className="py-1.5 text-xs text-muted-foreground">部署の管理役はまだいません（「部署」の画面で設定できます）。</li>
           )}
         </ul>
       )}

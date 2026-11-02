@@ -259,7 +259,7 @@ departmentsRoute.post('/sync', companyMember, async (c) => {
 })
 
 // ============================================================================
-// Department managers (部署の責任者)
+// Department managers (部署の管理役)
 //
 // Owner/admin assign them per department. Being a manager grants no file
 // access by itself (see shared/core/permissions.ts).

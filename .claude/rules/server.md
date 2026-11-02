@@ -369,6 +369,11 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   rolled back by throwing, 409 `OUTDATED_CLIENTS`). With the default seed (`everyone: read + write` on the company
   scope) nothing is restricted. Managers (`departments/:id/managers`) may manage their
   departments' private folders and instruction files.
+- Words (owner decision 2026-11-02): a department manager (`department_managers`) is
+  **「部署の管理役」** on every screen, message and server sentence (admin console, app, push-check
+  report, errors). 「責任者」 means only the owner of a 案件・プロジェクト (a type's `owner` field), and a
+  business plugin's own role labels (e.g. 営業の責任者) stay as the plugin declares them. Identifiers
+  (`department_managers`, `dept_manager`, `managerIds`) and wire markers do not change.
 
 ## Departments
 
