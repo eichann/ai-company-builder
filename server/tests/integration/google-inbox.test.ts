@@ -4,13 +4,15 @@
  * "Feature toggles"), end to end against the fake Google through the practice redirect.
  *
  * What it protects:
- * - 受信を読む (`gmail.readonly`) is asked for only when the member first asks for it, never with
- *   minutes or mail, and no wider Gmail scope is ever asked for;
+ * - 受信を読む (`gmail.readonly`) is asked for only when the member first asks for it (which turns
+ *   their own 受信を読む on), never with minutes or mail nor in the one consent while their switch
+ *   is off, never when the company does not allow it, and no wider Gmail scope is ever asked for;
  * - the role メールを読む reads only the member's own mailbox, decodes what Japanese mail looks
  *   like (encoded subjects, ISO-2022-JP, HTML only), marks newsletters, and stores and logs
  *   nothing of a message;
- * - the member's own switch: 受信を読む off refuses the next call before anything leaves ACB,
- *   while the other features keep working; on again works; it survives a re-consent;
+ * - the member's own switch (自分の設定 = Google's 受信を読む toggle, one switch): 受信を読む off
+ *   refuses the next call before anything leaves ACB, while the other features keep working; on
+ *   again works; it survives a re-consent; the company not allowing it refuses it too;
  * - 「つないでいるサービス」: owners / admins see Google with the roles it serves, switch it,
  *   and a switched-off Google serves no role from the next call.
  */
@@ -163,11 +165,18 @@ const gmailReads = () => fake.requests.filter(r => r.path.startsWith('/gmail/v1/
 describe('Google as a core connector: 受信を読む', () => {
   it('受信を読む is asked for only when first needed, and nothing wider', async () => {
     expect((await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })).status).toBe(200)
-    // Off for the company until the admin turns it on (owner decision 2026-11-02): not even asked.
+    // The company's 受信を読む off (work-switches.ts): not even asked.
+    expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })).status).toBe(200)
     expect((await call('g-sato', 'POST', `${C()}/me/google/connect`, { features: ['inbox'] })).body.code).toBe('GOOGLE_FEATURE_COMPANY_OFF')
+    expect(services.workSwitches.isOn(CO, 'g-sato', 'readIncoming')).toBe(false)
     expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(200)
+    // Allowed, but each member starts off: the one consent does not ask it.
     const first = await allow('g-sato', ['minutes'], GOOGLE_SEED.member)
     expect(first.url.searchParams.get('scope')).not.toContain('gmail')
+    const all = await call('g-sato', 'POST', `${C()}/me/google/connect`, { all: true })
+    expect(new URL(all.body.data.authorizeUrl).searchParams.get('scope')).not.toContain(READ)
+    // Asking for it by name is the member's own choice: their 受信を読む turns on.
+    expect(services.workSwitches.isOn(CO, 'g-sato', 'readIncoming')).toBe(false)
     const { url, page } = await allow('g-sato', ['inbox'], GOOGLE_SEED.member)
     expect(page.status).toBe(200)
     const scopes = url.searchParams.get('scope')!.split(' ')
@@ -175,6 +184,7 @@ describe('Google as a core connector: 受信を読む', () => {
     expect(scopes).toContain(CAL)
     const mine = (await call('g-sato', 'GET', `${C()}/me/google`)).body.data
     expect(mine).toMatchObject({ connected: true, features: ['minutes', 'inbox'], featuresOff: [] })
+    expect(services.workSwitches.my({ companyId: CO, userId: 'g-sato', role: 'member' }).readIncoming).toMatchObject({ on: true, chosen: true, connected: { mail: true } })
   })
 
   it('the role メールを読む reads the member\'s own mailbox only, in plain text, and keeps nothing', async () => {

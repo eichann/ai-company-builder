@@ -9,9 +9,13 @@
  * - which departments show the task list;
  * - 返事の目安: 翌営業日 (default) or 当日中 with a cutoff (default 17:00; a
  *   message received at or after the cutoff → the next business day);
- * - 自動で進める (the AI's turn runs without a press) on (default) / off, with a daily run
+ * - 自動で進める (the AI's turn runs without a press) allowed (default) / not, with a daily run
  *   limit and "stop after N failures in a row"; sending and approving are
- *   always pressed by a person;
+ *   always pressed by a person; each member turns their own on / off, starting
+ *   from the company's 初めの値 (2026-11-02, `work-switches.ts`);
+ * - 受信を読む: allowed (default) / not, and each member's 初めの値 (off by
+ *   default; `work-switches.ts`). The one company switch for it: Google's
+ *   `inbox` feature follows it (google-connector.md);
  * - business days: weekends and Japanese public holidays are off, plus the
  *   company's own holidays (business-days.ts);
  * - 引き受け (stage 2, owner decision 2026-11-01): when a request is accepted
@@ -24,6 +28,7 @@
  * Pure: imports only shared/core (server/tests/unit/core-purity.test.ts).
  */
 import { isBusinessDay, isCalendarDate, nextBusinessDay } from './business-days'
+import { DEFAULT_WORK_SWITCH_POLICIES, type WorkSwitchPolicies, type WorkSwitchPolicy } from './work-switches'
 
 /** `next-business-day` = 翌営業日; `same-day` = 当日中 (before the cutoff). */
 export type ReplyRule = 'next-business-day' | 'same-day'
@@ -36,8 +41,13 @@ export interface ReplySettings {
 }
 
 export interface AutoRunSettings {
-  /** The AI's turn runs by itself (on the member's open app, S10). */
+  /**
+   * Members may let their AI's turn run by itself (on the member's open app, S10) — 使ってよいか.
+   * Off: no AI turn starts by itself for anyone.
+   */
   enabled: boolean
+  /** A member who never chose starts with it on (各自の初めの値, `work-switches.ts`). */
+  memberDefault: boolean
   /** At most this many automatic runs per member per day. */
   dailyLimit: number
   /** Stop running automatically after this many failures in a row. */
@@ -71,6 +81,8 @@ export interface TaskSettings {
   taskListDepartmentIds: string[] | null
   reply: ReplySettings
   autoRun: AutoRunSettings
+  /** 受信を読む: whether members may use it and what they start with (`work-switches.ts`). */
+  readIncoming: WorkSwitchPolicy
   acceptance: AcceptanceSettings
   /** The company's own days off, by date. */
   companyHolidays: CompanyHoliday[]
@@ -90,7 +102,9 @@ export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   taskListDepartmentIds: null,
   reply: Object.freeze({ rule: 'next-business-day', sameDayCutoff: '17:00' }) as ReplySettings,
   // 自動で進める is on unless the company turns it off (owner decision 2026-11-01).
-  autoRun: Object.freeze({ enabled: true, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
+  autoRun: Object.freeze({ enabled: true, memberDefault: true, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
+  // 受信を読む: allowed, each member starts off (owner decision 2026-11-02).
+  readIncoming: Object.freeze({ ...DEFAULT_WORK_SWITCH_POLICIES.readIncoming }) as WorkSwitchPolicy,
   // Owner decision 2026-11-01: only asking someone in another department waits for 「引き受ける」.
   acceptance: Object.freeze({ sameDepartment: true, managerToMember: true, meetingHomework: true }) as AcceptanceSettings,
   companyHolidays: [],
@@ -102,6 +116,7 @@ export function defaultTaskSettings(): TaskSettings {
     taskListDepartmentIds: null,
     reply: { ...DEFAULT_TASK_SETTINGS.reply },
     autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun },
+    readIncoming: { ...DEFAULT_TASK_SETTINGS.readIncoming },
     acceptance: { ...DEFAULT_TASK_SETTINGS.acceptance },
     companyHolidays: [],
   }
@@ -145,6 +160,14 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
   if (!isInt(auto.stopAfterFailures, L.stopAfterFailures.min, L.stopAfterFailures.max)) {
     return { error: `autoRun.stopAfterFailures must be an integer ${L.stopAfterFailures.min}–${L.stopAfterFailures.max}` }
   }
+  // Added later (per-member switches, 2026-11-02): left out → the default (a stored document or an
+  // older admin console's PUT keeps reading).
+  const autoMemberDefault = auto.memberDefault === undefined ? DEFAULT_TASK_SETTINGS.autoRun.memberDefault : auto.memberDefault
+  if (typeof autoMemberDefault !== 'boolean') return { error: 'autoRun.memberDefault must be true or false' }
+  const read = input.readIncoming === undefined ? { ...DEFAULT_TASK_SETTINGS.readIncoming } : input.readIncoming
+  if (!isObject(read)) return { error: 'readIncoming must be an object' }
+  if (typeof read.allowed !== 'boolean') return { error: 'readIncoming.allowed must be true or false' }
+  if (typeof read.memberDefault !== 'boolean') return { error: 'readIncoming.memberDefault must be true or false' }
 
   // Added after the first release of the page: a document saved before it (or an older admin
   // console's PUT) has none and takes the defaults rather than failing as a whole.
@@ -175,10 +198,19 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
     value: {
       taskListDepartmentIds,
       reply: { rule: reply.rule as ReplyRule, sameDayCutoff: reply.sameDayCutoff },
-      autoRun: { enabled: auto.enabled, dailyLimit: auto.dailyLimit, stopAfterFailures: auto.stopAfterFailures },
+      autoRun: { enabled: auto.enabled, memberDefault: autoMemberDefault, dailyLimit: auto.dailyLimit, stopAfterFailures: auto.stopAfterFailures },
+      readIncoming: { allowed: read.allowed, memberDefault: read.memberDefault },
       acceptance: { sameDepartment: acc.sameDepartment as boolean, managerToMember: acc.managerToMember as boolean, meetingHomework: acc.meetingHomework as boolean },
       companyHolidays,
     },
+  }
+}
+
+/** The company's side of each member's switch (`work-switches.ts`), as these settings hold it. */
+export function workSwitchPoliciesOf(settings: TaskSettings): WorkSwitchPolicies {
+  return {
+    readIncoming: { allowed: settings.readIncoming.allowed, memberDefault: settings.readIncoming.memberDefault },
+    autoRun: { allowed: settings.autoRun.enabled, memberDefault: settings.autoRun.memberDefault },
   }
 }
 

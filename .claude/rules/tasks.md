@@ -14,6 +14,13 @@ paths:
   - "admin/src/lib/task-settings.ts"
   - "admin/src/components/departments/department-members-dialog.tsx"
   - "admin/tests/task-list.test.tsx"
+  - "shared/core/work-switches.ts"
+  - "shared/types/work-switches.ts"
+  - "server/src/services/work-switches.ts"
+  - "server/tests/unit/work-switches.test.ts"
+  - "client/shared/work-switches.ts"
+  - "client/electron/features/work-switches/**"
+  - "client/tests/work-switches-ipc.test.ts"
 ---
 
 # Tasks: company task settings, business days, department membership
@@ -36,10 +43,16 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 - `reply` (返事の目安 of a message that names no deadline): `next-business-day` (翌営業日, the
   default) or `same-day` (当日中) with `sameDayCutoff` (`HH:MM`, default 17:00). Only `same-day`
   uses the cutoff.
-- `autoRun` (自動で進める): `enabled` (default **on**, owner decision 2026-11-01; an admin turns it off), `dailyLimit` per member per day (default 30,
+- `autoRun` (自動で進める): `enabled` = 使ってよいか (default **on**, owner decision 2026-11-01; an
+  admin turns it off for everyone), `memberDefault` = 各自の初めの値 (default **on**, 2026-11-02;
+  missing in an older document → on), `dailyLimit` per member per day (default 30,
   1–500), `stopAfterFailures` in a row (default 3, 1–20). Sending and approving are always pressed
   by a person whatever this says (approvals.md, outbound-mail.md); the runner (S10) enforces the
-  limits.
+  limits. Whether it is on for a member: "Each member's switches" below.
+- `readIncoming` (受信を読む, 2026-11-02): `allowed` (default **on**) and `memberDefault` (default
+  **off**); missing in an older document → those defaults. It is the company's **one** switch for
+  reading members' mail and Slack: Google's company `inbox` feature reads and writes it
+  (`google-connector.md` "One consent"; `setReadIncomingAllowed`).
 - `acceptance` (引き受け, owner decision 2026-11-01; `records.md` "Acceptance"): when a request
   someone else is asked to do counts as accepted by itself — `sameDepartment` (the asker and the
   assignee belong to a common department), `managerToMember` (the asker manages a department the
@@ -51,6 +64,41 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   `acceptance` takes these defaults rather than failing.
 - `companyHolidays`: the company's own days off (`{ date: YYYY-MM-DD, name }`, ≤ 400, years
   2000–2100), stored sorted.
+
+## Each member's switches (自分の設定, owner decision 2026-11-02)
+
+- 受信を読む and AI が自動で進める are each member's own, within the company's (rule:
+  `shared/core/work-switches.ts`; the company's side: `workSwitchPoliciesOf` over `autoRun` and
+  `readIncoming`). On = the company allows it **and** (the member's choice, else the 初めの値). A
+  switch the company does not allow is off for everyone and cannot be turned on (409
+  `WORK_SWITCH_COMPANY_OFF`, nothing stored); turning off is always kept.
+- Stored per member behind the handle (`member_work_switches`, `tasks.workSwitches` /
+  `saveWorkSwitches`; a leaver's row goes with `removeMember`). When the table is first made
+  (`migrateMemberWorkSwitches`, once), a member who read incoming messages — Google's 受信を読む
+  granted and not turned off, or Slack's reading granted and not turned off — gets 受信を読む
+  chosen on (Google's own toggle turned off → chosen off), so the 初めの値 "off" changes nothing
+  for them.
+- `GET|PUT /api/companies/:id/me/work-switches` (`{ switch: 'readIncoming' | 'autoRun', on }`, any
+  member, their own only) → `MyWorkSwitches` (`shared/types/work-switches.ts`: per switch `on`,
+  `allowed`, `companyDefault`, `chosen` (null = never chose); 受信を読む adds `connected: { mail,
+  chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」). App: IPC
+  `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
+  `client/shared/work-switches.ts`).
+- Who follows it: **自動で進める** — the AI's turn runs on the assignee's PC, so the PC asks its
+  member's own (`aiTurns:settings`, `ai-turns.md`) and the server clock moves a wait that is over
+  to the AI's turn only when the record's **assignee** has it on (`autoRunFor`; no assignee → the
+  初めの値; `notifications.md` "The server clock"). Off: work still arrives (a minutes check is
+  still delivered), only the AI's work waits for ［AI に進めてもらう］. **受信を読む** — the Google
+  client refuses `gmail.readonly` calls (`off` when the company does not allow it, `feature-off`
+  when the member's own is off; `google-connector.md`), Slack's signals are dropped
+  (`slack-events.ts` `readsIncoming`), and the one consent does not ask `gmail.readonly` of a member
+  whose own is off. Google's member toggle `PUT /me/google/features { feature: 'inbox' }` writes this
+  switch (one switch, not two).
+- Tests: `server/tests/unit/work-switches.test.ts` (the carry-over once, company off refuses,
+  choices apart), `task-settings-core.test.ts` (the rule, older documents), `server-clock.test.ts`
+  (the assignee's own decides), `slack-connector.test.ts`, `google-inbox.test.ts`,
+  `google-one-consent.test.ts`, `client/tests/ai-turn-claims.test.ts`,
+  `client/tests/work-switches-ipc.test.ts`.
 
 ## Business days and the reply 目安 (`shared/core`)
 

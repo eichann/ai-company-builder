@@ -644,7 +644,7 @@ describe('B5: 追いかけ (following up)', () => {
     return createServerClock({
       companyIds: () => ['a'], companyData: source, clock, writer: serviceWriter,
       notifications: { sweep: () => 0 },
-      taskSettings: () => { const s = defaultTaskSettings(); s.autoRun.enabled = autoRun; return s },
+      autoRunFor: () => autoRun,
       timeZoneOf: () => 'Asia/Tokyo', yieldNow: async () => {}, log: () => {},
     })
   }

@@ -1,0 +1,29 @@
+/**
+ * Wire shapes of each member's own switches (自分の設定: 受信を読む, AI が自動で進める).
+ * The rule is shared/core/work-switches.ts; the company's side (使ってよいか, 各自の
+ * 初めの値) is in the task settings (`readIncoming`, `autoRun.enabled` / `memberDefault`).
+ *
+ *   GET /api/companies/:id/me/work-switches               → MyWorkSwitches
+ *   PUT /api/companies/:id/me/work-switches { switch, on } → MyWorkSwitches
+ *       400 bad body; 409 `WORK_SWITCH_COMPANY_OFF` turning on what the company does not allow
+ */
+import type { WorkSwitch, WorkSwitchState } from '../core/work-switches'
+
+export type { WorkSwitch, WorkSwitchState }
+
+export interface MyWorkSwitches {
+  readIncoming: WorkSwitchState & {
+    /**
+     * What the member has let ACB read (shown only): `mail` = Google's 受信を読む granted,
+     * `chat` = Slack's reading granted. On but neither → offer 「Google で許可」.
+     */
+    connected: { mail: boolean; chat: boolean }
+  }
+  autoRun: WorkSwitchState
+}
+
+/** PUT body. */
+export interface WorkSwitchChange {
+  switch: WorkSwitch
+  on: boolean
+}

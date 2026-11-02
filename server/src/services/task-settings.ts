@@ -113,6 +113,16 @@ export function createTaskSettingsService(deps: TaskSettingsDeps) {
       return ok(view(member))
     },
 
+    /**
+     * The company's 受信を読む 使ってよいか alone (the admin's Google `inbox` switch writes it:
+     * google-connector.md "One consent"); the role check is the caller's.
+     */
+    setReadIncomingAllowed(companyId: string, allowed: boolean, by: string): void {
+      const settings = settingsOf(companyId)
+      settings.readIncoming = { ...settings.readIncoming, allowed }
+      handle(companyId).tasks.save({ settings: JSON.stringify(settings), updatedAt: clock.now(), updatedBy: by })
+    },
+
     /** GET …/departments/:id/members (any member). */
     departmentMembers(member: Member, departmentId: string): Outcome<DepartmentMembersView> {
       if (!handle(member.companyId).departments.exists(departmentId)) return refuse('not-found', 'Department not found')

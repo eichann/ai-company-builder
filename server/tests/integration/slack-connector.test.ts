@@ -7,6 +7,7 @@
  *   works from the next call — calls and events alike;
  * - one company never reaches another's grants, events or Slack accounts;
  * - an event is taken only with the company's own signature (fresh, exact body);
+ * - a member whose own 受信を読む is off gets no signal (work-switches.ts);
  * - no secret and no message text is ever in a table, an answer or a log line.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,6 +45,8 @@ let connector: SlackConnector
 let signals: SlackSignal[]
 let operatorStop: boolean
 let warnings: string[]
+/** `<company>/<user>` whose own 受信を読む is off. */
+let readingOff: Set<string>
 let route: ReturnType<typeof createSlackRoute>
 
 const member = (companyId: string, userId: string) => ({ companyId, userId, role: ROLES[userId] ?? 'member' })
@@ -58,6 +61,7 @@ beforeEach(async () => {
   fake = createFakeSlack()
   signals = []
   warnings = []
+  readingOff = new Set()
   operatorStop = false
   const companyData = sqliteCompanyData(conn)
   const slackData = sqliteSlackData(conn)
@@ -82,7 +86,8 @@ beforeEach(async () => {
   })
   const events = createSlackEvents({
     companyData, slackData, slack: client, clock: systemClock, isMember, operatorStopped,
-    vaultEnabled: () => brokerVault.status().enabled, onSignal: s => signals.push(s), log: { warn: m => warnings.push(m) },
+    vaultEnabled: () => brokerVault.status().enabled, readsIncoming: (co, userId) => !readingOff.has(`${co}/${userId}`),
+    onSignal: s => signals.push(s), log: { warn: m => warnings.push(m) },
   })
   route = createSlackRoute(events)
   await registerApp('c1', 'a1', 0)
@@ -324,6 +329,15 @@ describe('the event receiver: Slack\'s signature', () => {
     const ok = await postEvent('c1', check)
     expect(await ok.json()).toEqual({ challenge: 'fake-challenge-123' })
     expect((await postEvent('c1', check, { secret: 'fake-slack-signing-not-this-one' })).status).toBe(401)
+  })
+
+  it('a member whose own 受信を読む is off gets no signal; on again, it comes', async () => {
+    readingOff.add('c1/u1')
+    expect((await postEvent('c1', message('T0DIV', { channel_type: 'im', channel: 'D0ONE' }))).status).toBe(200)
+    expect(signals).toEqual([])
+    readingOff.clear()
+    await postEvent('c1', message('T0DIV', { channel_type: 'im', channel: 'D0ONE' }))
+    expect(signals.map(s => s.userId)).toEqual(['u1'])
   })
 
   it('drops events while the app is off or the operator stopped Slack (200, nothing handed on)', async () => {

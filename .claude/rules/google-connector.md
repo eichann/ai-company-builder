@@ -82,18 +82,28 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 ## One consent (「仕事の道具をつなぐ」, owner decision 2026-11-02)
 
 - **Company features**: the admin's per-feature switch (`PUT /google/features`, history
-  `features`) over each feature's default: `GOOGLE_COMPANY_DEFAULT_OFF` = **受信を読む (`inbox`) is
-  off for every company, existing and new, until its admin turns it on** (owner decision
-  2026-11-02: the most sensitive scope; the incoming-mail flow ships off); 予定と議事録 and
-  メールを送る are on until turned off. Stored as `google_oauth_clients.features_off` (default-on
-  features turned off) and `features_on` (default-off features turned on), both JSON default `[]`
-  (`migrateGoogleCompanyFeatures`, lane A), so a company that never chose keeps the defaults
-  (`googleCompanyFeatureOn`, `googleCompanySwitched`). What the company offers =
-  `googleCompanyFeatures`: every feature on, Drive only with the Picker registered. The admin
+  `features`) over each feature's default: 予定と議事録 and メールを送る are on until turned off
+  (`GOOGLE_COMPANY_DEFAULT_OFF` is empty). Stored as `google_oauth_clients.features_off`
+  (default-on features turned off) and `features_on` (default-off features turned on), both JSON
+  default `[]` (`migrateGoogleCompanyFeatures`, lane A), so a company that never chose keeps the
+  defaults (`googleCompanyFeatureOn`, `googleCompanySwitched`).
+- **受信を読む (`inbox`) is not a Google switch** (owner decision 2026-11-02, `tasks.md` "Each
+  member's switches"): the company's switch is the task settings' `readIncoming.allowed`
+  (default allowed; `PUT /google/features { feature: 'inbox' }` writes it, history line kept —
+  the same switch also covers Slack's reading), and each member has their own (default off;
+  `PUT /me/google/features { feature: 'inbox' }` writes it). Before 2026-11-02 the company
+  switch was Google's own and off until the admin turned it on; a stored `features_on: ['inbox']`
+  is no longer read.
+- What the company offers = `googleCompanyFeatures` (every feature on, Drive only with the
+  Picker registered); what **a member** is offered = `googleMemberFeatures`: 受信を読む only while
+  their own 受信を読む is on (`MyGoogle.companyFeatures`, `{ all }`, 「あとで」). The admin
   view's `featuresOff` lists every feature off for the company, the defaults included. A feature off is **never asked** (also not one the member
-  allowed before: `googleFeaturesToAsk` = asked ∩ offered ∪ granted ∩ offered) and its calls are
+  allowed before: `googleFeaturesToAsk` = asked ∩ offered ∪ granted ∩ offered — granted ∩ the
+  company's offer, so a member's 受信を読む switched off keeps its scope over a re-consent) and its calls are
   refused from the next one (`google-client.ts` `scopeStop` → `off`, before anything leaves);
-  members' grants keep the scope until they re-consent or stop.
+  members' grants keep the scope until they re-consent or stop. Asking 受信を読む by name
+  (`{ features: ['inbox'] }`, an older app's 「受信を読む許可も足す」) is the member's own choice: their
+  受信を読む turns on.
 - `POST /me/google/connect { all: true }` asks the union of what the company offers in one
   consent (incremental, `include_granted_scopes`) and marks it **seen**; `{ features }` (asked when
   first used: Drive's Picker, a mail card) still works for offered features only (409
@@ -177,7 +187,8 @@ through the key broker's `UpstreamClient` (address checks, no redirects). Before
 in order: operator stop file (`<PLUGINS_DIR>/stopped` with `google` or `*`) → client present →
 on → vault → still a member → grant (`no-grant` / `grant-revoked` / `grant-stopped`) → scope
 granted (`scope-not-granted`) → the scope's feature not turned off by the member
-(`feature-off`, `connector_grants.features_off`; also for the Picker's token) → access token (refresh; `invalid_grant` → the grant becomes
+(`feature-off`, `connector_grants.features_off`; also for the Picker's token; for `gmail.readonly`
+the company's 受信を読む → `off` and the member's own → `feature-off`, `readIncoming` dep) → access token (refresh; `invalid_grant` → the grant becomes
 `revoked` `invalid_grant`, only if it is still that grant). A 401 drops the access token and
 retries once. Reads (GET) retry 429 / 5xx / failures before sending (1 s, 2 s, Retry-After ≤
 10 s; 2 retries); **writes are never retried** — an answer lost after sending is `unknown`
@@ -266,8 +277,9 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
 
 ## Tests
 
-`server/tests/integration/google-one-consent.test.ts` (「仕事の道具をつなぐ」: 受信を読む off until the
-admin turns it on, and off again; `{ all }` asks exactly
+`server/tests/integration/google-one-consent.test.ts` (「仕事の道具をつなぐ」: 受信を読む allowed by
+default and the company's one switch (task settings), off and on again; offered to a member only
+with their own on; `{ all }` asks exactly
 the company's features, Drive only with the Picker; a company-off feature never asked — by name or
 as one granted before — and its calls refused before anything leaves; scopes unticked on Google's
 page kept out, seen, not asked again; 「あとで」; a company without Google records nothing),
@@ -277,8 +289,9 @@ new, never again once shown, only the new ones later, declined text; mutation-ch
 filter), `client/tests/ui/connect-tools.spec.ts` (preview `tests/connect-tools-ui.html?state=
 first|new|seen|noslack|settings`), `client/tests/google-connect.test.ts` (connectAll opens only
 the sign-in page). Also `admin/tests/integrations.test.tsx` 「会社で使うもの」.
-`server/tests/integration/google-inbox.test.ts` (受信を読む asked only when first needed and
-nothing wider; only the member's own mailbox, Japanese mail decoded, nothing stored or logged;
+`server/tests/integration/google-inbox.test.ts` (受信を読む asked only when first needed (turning
+the member's own on), never in the one consent while it is off, never while the company does not
+allow it, and nothing wider; only the member's own mailbox, Japanese mail decoded, nothing stored or logged;
 the member's switch refuses the next call before anything leaves while the rest works, survives
 a re-consent; メールを送る off; 「つないでいるサービス」), mutation-checked: the `feature-off` check.
 `server/tests/integration/google-connector.test.ts` against the fake Google through the practice

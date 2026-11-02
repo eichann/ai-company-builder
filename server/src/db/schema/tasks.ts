@@ -55,6 +55,57 @@ export const taskSchema = `
 `
 
 /**
+ * Each member's own switches (自分の設定: 受信を読む, AI が自動で進める; shared/core/work-switches.ts),
+ * behind the company handle (ports/task-settings.ts): one JSON object per member, a switch left out
+ * = never chosen (the company's 初めの値 applies).
+ *
+ * Made once. When it is first made, a member who reads incoming messages today — Google's 受信を読む
+ * granted and not turned off, or Slack's reading granted and not turned off — gets 受信を読む chosen
+ * on, so turning the company's 初めの値 to "off" changes nothing for them (and Google's per-grant
+ * `inbox` switch, now replaced by this one, is carried over: turned off → chosen off).
+ */
+/** Google's 受信を読む (`shared/core/google.ts` `GOOGLE_SCOPE.gmailReadonly`), Slack's reading (`slack-client.ts`: identity + `read`). */
+const GMAIL_READONLY = 'https://www.googleapis.com/auth/gmail.readonly'
+const SLACK_READ_SCOPES = ['users:read', 'users:read.email', 'im:history', 'mpim:history', 'channels:history', 'groups:history']
+
+export function migrateMemberWorkSwitches(conn: Database.Database): void {
+  const exists = conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'member_work_switches'").get()
+  if (exists) return
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS member_work_switches (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      choices TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id)
+    );
+  `)
+  const hasGrants = conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'connector_grants'").get()
+  if (!hasGrants) return
+  const grants = conn.prepare(`
+    SELECT company_id, user_id, provider, scopes, features_off FROM connector_grants WHERE status = 'active' AND provider IN ('google', 'slack')
+  `).all() as Array<{ company_id: string; user_id: string; provider: string; scopes: string; features_off: string }>
+  const list = (raw: string): string[] => { try { const v = JSON.parse(raw) as unknown; return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [] } catch { return [] } }
+  const choice = new Map<string, { companyId: string; userId: string; on: boolean }>()
+  for (const g of grants) {
+    const scopes = list(g.scopes)
+    const off = list(g.features_off)
+    // Google 受信を読む = gmail.readonly (feature `inbox`); Slack reading = its `read` feature.
+    const reads = g.provider === 'google'
+      ? scopes.includes(GMAIL_READONLY) ? !off.includes('inbox') : null
+      : SLACK_READ_SCOPES.every(x => scopes.includes(x)) ? !off.includes('read') : null
+    if (reads === null) continue
+    const key = `${g.company_id}\u0000${g.user_id}`
+    const before = choice.get(key)
+    // Reading through either one counts as on.
+    choice.set(key, { companyId: g.company_id, userId: g.user_id, on: (before?.on ?? false) || reads })
+  }
+  const insert = conn.prepare('INSERT OR IGNORE INTO member_work_switches (company_id, user_id, choices, updated_at) VALUES (?, ?, ?, ?)')
+  const at = new Date().toISOString()
+  for (const c of choice.values()) insert.run(c.companyId, c.userId, JSON.stringify({ readIncoming: c.on }), at)
+}
+
+/**
  * Absences are history (records.md "Absence and the delegate", "Whose turn it was"): a removed
  * period is marked (`removed_at`, `removed_by`), never deleted, so whose turn a record was at any
  * past moment can be recomputed from the ledger plus the periods known at that moment

@@ -49,6 +49,9 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createTaskSettingsService } from './services/task-settings'
+import { createWorkSwitches } from './services/work-switches'
+import { slackFeaturesOf } from './services/slack-client'
+
 import { createAbsenceService } from './services/absences'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
@@ -90,7 +93,7 @@ import { createGoogleDriveService } from './services/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
-import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, googleFeaturesOf } from '../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
 import { replyAsIncoming, wireConnectorsLane, wireCoreConnectors } from './composition/connectors'
 import { wireInboxLane } from './composition/inbox'
@@ -212,6 +215,24 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // The state engine (4-3): the only writer of record_state / record_ledger.
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
   const taskSettings = createTaskSettingsService({ ...repos, ...shared })
+  // Each member's own 受信を読む / AI が自動で進める within the company's (自分の設定, tasks.md).
+  const workSwitches = createWorkSwitches({
+    ...shared,
+    settingsOf: companyId => taskSettings.settingsOf(companyId),
+    readingConnected: (companyId, userId) => {
+      const connectors = shared.companyData.forCompany(companyId).connectors
+      const google = connectors.grant('google', userId)
+      const slack = connectors.grant('slack', userId)
+      return {
+        mail: google?.status === 'active' && googleFeaturesOf(google.scopes).includes('inbox'),
+        chat: slack?.status === 'active' && slackFeaturesOf(slack.scopes).includes('read') && !slack.featuresOff.includes('read'),
+      }
+    },
+  })
+  const readIncoming = {
+    allowed: (companyId: string) => taskSettings.settingsOf(companyId).readIncoming.allowed,
+    on: (companyId: string, userId: string) => workSwitches.isOn(companyId, userId, 'readIncoming'),
+  }
   // Absence and the delegate (代わりの人, records.md): the ONE resolution of who acts for whom
   // today, handed to my-turn / AI turn, the engine's `who`, approvals and the notices below.
   const absences = createAbsenceService({
@@ -372,6 +393,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
       : `https://${GOOGLE_AUTHORIZE_HOST}`,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    readIncoming,
   })
   // Members' own OAuth permissions, provider-neutral (member-oauth.md); Google registers below.
   const memberOAuth = createMemberOAuth({
@@ -390,6 +412,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     pickerPageUrl: () => `${publicUrl()}${GOOGLE_PICKER_PAGE_PATH}`,
     practiceGoogle: practiceGoogle !== undefined,
     operatorStopped: () => pluginShelf.isStopped('google', ''),
+    readIncoming: {
+      ...readIncoming,
+      setAllowed: (companyId, allowed, by) => taskSettings.setReadIncomingAllowed(companyId, allowed, by),
+      choose: (member, on) => { workSwitches.set(member, { switch: 'readIncoming', on }) },
+    },
   })
 
   // Google Drive (google-drive.md): picked files and folders only (drive.file), through the one Google client.
@@ -488,6 +515,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     conn, core: coreConnectors, ...shared, brokerVault, upstream, practiceList, memberOAuth,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     operatorStopped: connectorId => pluginShelf.isStopped(connectorId, ''),
+    readsIncoming: readIncoming.on,
     recordCall: (companyId, userId, e) => {
       try {
         agentEvents.recordServerEvent(companyId, userId ?? 'acb:slack-bot', {
@@ -557,13 +585,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
     taskSettings,
+    workSwitches,
     // The server clock (notifications.md "The server clock"): started once per process by index.ts.
     serverClock: createServerClock({
       ...shared,
       companyIds: () => repos.companies.allIds(),
       writer: serviceRecords,
       notifications,
-      taskSettings: companyId => taskSettings.settingsOf(companyId),
+      // The AI's turn runs on the assignee's PC: their own 自動で進める (work-switches.ts).
+      autoRunFor: (companyId, assignee) => workSwitches.isOn(companyId, assignee, 'autoRun'),
       timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
       // The content store's retention (records.md "The content store"): reason `retention`, per company.
       expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
