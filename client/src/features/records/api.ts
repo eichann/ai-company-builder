@@ -10,6 +10,13 @@ export function getRecordCard(companyId: string, recordId: string, reads: Record
   return reads.getRecordCard(companyId, recordId)
 }
 
+/** Opening the original in the member's browser (Google, Slack): their own permission decides there. */
+export type OutsideLinks = ElectronPort<'openExternal'>
+
+export function openOutside(url: string, links: OutsideLinks = window.electronAPI) {
+  return links.openExternal(url)
+}
+
 /** `companyPath`: the file's path inside the company folder (`営業部/見積.md`). */
 export function getRecordsForFile(companyId: string, companyPath: string, reads: RecordReads = window.electronAPI) {
   return reads.getRecordsForFile(companyId, companyPath)

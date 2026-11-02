@@ -7,6 +7,7 @@ import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
+import type { RecordDetailView } from './record-details'
 import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
@@ -56,6 +57,8 @@ export interface RecordCardLink {
 }
 export interface RecordCardView {
   record: RecordViewSummary
+  /** A meeting's or a 来た連絡's own parts (`record-details.ts`); absent for other kinds. */
+  detail?: RecordDetailView
   fields: RecordCardField[]
   history: RecordCardHistoryLine[]
   links: RecordCardLink[]

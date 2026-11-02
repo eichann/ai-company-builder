@@ -16,6 +16,7 @@ import {
   cardFields, historyLines, RECORD_VIEWS_OFFLINE_TEXT, summaryView,
   type RecordCardLink, type RecordCardResult, type RecordListResult,
 } from '../../../shared/record-views'
+import { DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface RecordViewsDeps {
@@ -109,11 +110,15 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           ? { label, record: summaryView(l.record, defs.get(l.record.type)) }
           : { label, path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) }
       })
+      const view = recordDetailOf(detail.record, members)
+      const shownElsewhere = DETAIL_FIELDS[detail.record.type]
+      const rest = shownElsewhere ? { ...detail.record, fields: Object.fromEntries(Object.entries(detail.record.fields).filter(([k]) => !shownElsewhere.has(k))) } : detail.record
       return {
         success: true,
         card: {
           record: summaryView(detail.record, def),
-          fields: cardFields(detail.record, def, members),
+          ...(view ? { detail: view } : {}),
+          fields: cardFields(rest, def, members),
           history: historyLines(entries, def, members),
           links,
         },
