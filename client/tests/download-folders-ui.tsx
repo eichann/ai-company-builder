@@ -8,6 +8,9 @@
 //   state  normal (default) | offline | slow (apply takes long) | confirm
 //          (leaving out a folder with local edits) | applyOffline (download fails)
 //   role   owner (default) | admin | member — the member's role in the company
+//   tab    a settings section to open first (default: ダウンロードするフォルダ; mine = 自分の設定)
+//   company  the company's 受信を読む: allowed (default) | off
+//   mail   no = Google has not let ACB read the member's mail yet
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -21,6 +24,13 @@ const view = params.get('view') ?? 'settings'
 const theme = params.get('theme') ?? 'light'
 const state = params.get('state') ?? 'normal'
 const role = params.get('role') ?? 'owner'
+const tab = params.get('tab') ?? 'sync'
+// 自分の設定: the member's two switches as the server would answer them.
+const policy = { readIncoming: params.get('company') !== 'off', autoRun: true }
+const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null }
+const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k], companyDefault: def, chosen: chosen[k] })
+const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true) })
+const switchesSet: string[] = []
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
@@ -101,6 +111,16 @@ const tree = (dir: string, depth: number, max: number): TreeNode[] =>
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
+    // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so.
+    getGoogleStatus: async () => ({ success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
+    getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
+    setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun', on: boolean) => {
+      switchesSet.push(`${which}:${on}`)
+      ;(window as unknown as { __switchesSet: string[] }).__switchesSet = switchesSet
+      if (on && !policy[which]) return { success: false, offline: false, code: 'WORK_SWITCH_COMPANY_OFF', error: '会社の設定で止まっています' }
+      chosen[which] = on
+      return { success: true, switches: mySwitches() }
+    },
     getEnvStatus: async () => ({ success: true, vars: { ...envVars } }),
     listOwnBrokerKeys: async () => ({ success: true, data: ownKeys }),
     // Main reads the value, sends it and removes it from the .env once the server kept it.
@@ -189,7 +209,7 @@ function Preview() {
   }
   return (
     <main className="h-screen bg-zinc-100 dark:bg-zinc-950">
-      <SettingsPanel onClose={() => {}} />
+      <SettingsPanel onClose={() => {}} initialTab={tab as never} />
     </main>
   )
 }

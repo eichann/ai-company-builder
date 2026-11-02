@@ -1417,5 +1417,3 @@ preload withdrawApproval : (companyId: string, approvalId: string) => Promise<Ap
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
 unmatched.preloadApiUnusedByRenderer getViewers
-unmatched.preloadApiUnusedByRenderer getWorkSwitches
-unmatched.preloadApiUnusedByRenderer setWorkSwitch
