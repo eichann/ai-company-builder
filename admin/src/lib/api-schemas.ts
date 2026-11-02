@@ -50,6 +50,7 @@ import type {
   Invitation,
   Member,
   OrphanedScope,
+  AdminHome,
   Overview,
   OverviewMember,
   OrphanedScopeSummary,
@@ -152,6 +153,32 @@ export const overviewSchema: z.ZodMiniType<Overview> = z.looseObject({
     recentRejections: z.array(pushRejectionSchema),
     orphanedScopes: z.optional(z.array(orphanedScopeSummarySchema)),
   }),
+})
+
+export const adminHomeSchema: z.ZodMiniType<AdminHome> = z.looseObject({
+  view: z.enum(['admin', 'manager']),
+  setup: z.nullable(z.looseObject({
+    steps: z.array(z.looseObject({
+      id: z.enum(['departments', 'members', 'department-members', 'google', 'minutes-folder', 'holidays']),
+      done: z.boolean(),
+      byOperator: z.optional(z.boolean()),
+      departmentsWithoutMembers: z.optional(z.number()),
+      departmentsWithoutManager: z.optional(z.number()),
+    })),
+    done: z.number(),
+    total: z.number(),
+  })),
+  departments: z.array(z.looseObject({ id: str, name: str })),
+  attention: z.looseObject({
+    outdatedClients: z.array(overviewMemberSchema),
+    unknownClients: z.array(overviewMemberSchema),
+    notSyncedRecently: z.array(overviewMemberSchema),
+    recentRejections: z.array(pushRejectionSchema),
+    orphanedScopes: z.array(orphanedScopeSummarySchema),
+    meetingDuplicates: z.number(),
+    stoppedPlugins: z.array(z.looseObject({ id: str, label: str, problem: str })),
+  }),
+  counts: z.looseObject({ members: z.number(), departments: z.number() }),
 })
 
 const clientActivitySchema: z.ZodMiniType<ClientActivity> = z.looseObject({

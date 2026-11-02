@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, CheckCircle, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import {
   companiesApi,
   departmentsApi,
+  homeApi,
   taskSettingsApi,
   type Department,
   type DepartmentMember,
@@ -84,16 +85,61 @@ export function TaskSettingsPage({ part }: { part: TaskSettingsPart }) {
         ) : settings.error && !settings.data ? (
           <ErrorState error={settings.error} onRetry={settings.reload} />
         ) : settings.data ? (
-          <SettingsForm
-            key={settings.data.updatedAt ?? 'defaults'}
-            part={part}
-            view={settings.data}
-            departments={departments.data ?? []}
-            onSaved={(next) => settings.setData(() => next)}
-          />
+          <>
+            {part === 'calendar' && <HolidaysCheckedCard />}
+            <SettingsForm
+              key={settings.data.updatedAt ?? 'defaults'}
+              part={part}
+              view={settings.data}
+              departments={departments.data ?? []}
+              onSaved={(next) => settings.setData(() => next)}
+            />
+          </>
         ) : null}
       </div>
     </>
+  )
+}
+
+/**
+ * 「最初にやること」 6 (管理画面の見直し 2-1): the summer holidays and the new year cannot be read
+ * from the settings, so the admin says they checked — after adding days, or with 「足すものはない」.
+ * Saving the holidays here says so too.
+ */
+function HolidaysCheckedCard() {
+  const { companyId } = useCompany()
+  const home = useQuery(`home:${companyId}`, () => homeApi.get(companyId))
+  const [busy, setBusy] = useState(false)
+  const checked = home.data?.setup?.steps.find((s) => s.id === 'holidays')?.done
+  if (checked === undefined) return null
+  const check = async () => {
+    setBusy(true)
+    try {
+      const next = await homeApi.checkHolidays(companyId)
+      home.setData(() => next)
+      toast.success('「会社の休みを確かめた」にしました')
+    } catch (err) {
+      toast.error('保存できませんでした', { description: describeError(err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
+      {checked ? (
+        <span className="flex items-center gap-2 text-success">
+          <CheckCircle size={16} weight="fill" />
+          会社の休みは確かめてあります
+        </span>
+      ) : (
+        <>
+          <span className="flex-1">夏休み・年末年始などを下で足してください。足すものがなければ、こちらを押します。</span>
+          <Button variant="outline" size="sm" onClick={check} disabled={busy}>
+            足すものはない
+          </Button>
+        </>
+      )}
+    </div>
   )
 }
 
@@ -128,6 +174,8 @@ function SettingsForm({
       const next = await taskSettingsApi.update(companyId, draft)
       toast.success('設定を保存しました')
       onSaved(next)
+      // Saving 会社の暦 is checking the holidays (「最初にやること」 6); a failure here changes nothing saved.
+      if (part === 'calendar') void homeApi.checkHolidays(companyId).catch(() => {})
     } catch (err) {
       toast.error('保存できませんでした', { description: describeError(err) })
     } finally {

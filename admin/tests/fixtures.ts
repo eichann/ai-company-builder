@@ -1,6 +1,6 @@
 // Realistic API payloads following the server contract (server/src/routes/*),
 // used by the tests and handy for building screens without a server.
-import type {
+import type { AdminHome,
   Capabilities,
   ClientActivity,
   Company,
@@ -94,6 +94,27 @@ export const quietOverview: Overview = {
   memberCount: 3,
   departmentCount: 3,
   attention: { outdatedClients: [], unknownClients: [], notSyncedRecently: [], recentRejections: [] },
+}
+
+/** GET …/home as an owner / admin gets it: the overview's lists plus the steps (all done unless given). */
+export function homeOf(overview: Overview, over: Partial<AdminHome> = {}): AdminHome {
+  const steps: AdminHome['setup'] = {
+    steps: (['departments', 'members', 'department-members', 'google', 'minutes-folder', 'holidays'] as const).map((id) => ({
+      id,
+      done: true,
+      ...(id === 'google' ? { byOperator: true } : {}),
+    })),
+    done: 6,
+    total: 6,
+  }
+  return {
+    view: 'admin',
+    setup: steps,
+    departments: [],
+    attention: { ...overview.attention, orphanedScopes: overview.attention.orphanedScopes ?? [], meetingDuplicates: 0, stoppedPlugins: [] },
+    counts: { members: overview.memberCount, departments: overview.departmentCount },
+    ...over,
+  }
 }
 
 export const busyOverview: Overview = {

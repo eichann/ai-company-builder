@@ -47,6 +47,7 @@ import {
   meetingDuplicatesSchema,
   meetingDuplicatesMergedSchema,
   overviewSchema,
+  adminHomeSchema,
   permissionsSchema,
   pluginListSchema,
   pluginMappingCheckSchema,
@@ -325,6 +326,39 @@ export interface OrphanedScopeSummary {
 
 export const overviewApi = {
   get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/overview`, overviewSchema),
+}
+
+/** The six 「最初にやること」 (管理画面の見直し 2-1), judged by the server (server.md "Admin home"). */
+export type SetupStepId = 'departments' | 'members' | 'department-members' | 'google' | 'minutes-folder' | 'holidays'
+
+export interface SetupStep {
+  id: SetupStepId
+  done: boolean
+  /** The operator registers it (owner decision 2026-11-02): the home shows 「運用担当者に頼む」. */
+  byOperator?: boolean
+  departmentsWithoutMembers?: number
+  departmentsWithoutManager?: number
+}
+
+/** GET …/home: owner/admin get the steps and the whole company; a department manager their departments' members only. */
+export interface AdminHome {
+  view: 'admin' | 'manager'
+  setup: { steps: SetupStep[]; done: number; total: number } | null
+  /** Manager: the departments they manage. */
+  departments: Array<{ id: string; name: string }>
+  attention: Overview['attention'] & {
+    orphanedScopes: OrphanedScopeSummary[]
+    meetingDuplicates: number
+    stoppedPlugins: Array<{ id: string; label: string; problem: string }>
+  }
+  counts: { members: number; departments: number }
+}
+
+export const homeApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/home`, adminHomeSchema),
+  /** 「会社の休みを確かめた」 (owner/admin). */
+  checkHolidays: (companyId: string) =>
+    getData(`/api/companies/${enc(companyId)}/home/holidays-checked`, adminHomeSchema, { method: 'PUT', body: { checked: true } }),
 }
 
 // ---------------------------------------------------------------------------
