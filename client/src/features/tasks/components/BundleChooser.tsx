@@ -41,7 +41,7 @@ export function BundleChooser({ companyId, meetingTitle, onChoose, onNoBundle, o
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} aria-label="まとまりを探す" placeholder="案件・企画の名前で探す" className="flex-1 bg-transparent text-[12px] outline-none" />
         </div>
         <ul className="max-h-[280px] overflow-y-auto p-1">
-          {choices === null && <li className="px-2 py-2 text-[12px] text-gray-400">読み込み中...</li>}
+          {choices === null && <li className="px-2 py-2 text-[12px] text-gray-400">読み込んでいます</li>}
           {choices && !choices.success && <li role="alert" className="px-2 py-2 text-[12px] text-gray-500">{choices.error}</li>}
           {choices?.success && shown.length === 0 && <li className="px-2 py-2 text-[12px] text-gray-500">見つかりません。</li>}
           {shown.map(b => (

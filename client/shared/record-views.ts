@@ -18,7 +18,7 @@ export const RECORD_KIND_LABELS: Record<RecordKind, string> = {
 }
 export const RECORD_KIND_ORDER: RecordKind[] = ['bundle', 'task', 'decision', 'interaction', 'other']
 
-export const RECORD_VIEWS_OFFLINE_TEXT = 'サーバーにつながらないため、表示できません。'
+export const RECORD_VIEWS_OFFLINE_TEXT = 'サーバーにつながらないため、表示できません。つながってから開き直してください。'
 
 export interface RecordViewSummary {
   id: string
