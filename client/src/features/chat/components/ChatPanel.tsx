@@ -111,8 +111,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
   // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
-  useCommandHandler('chat.consultAbout', async ({ recordId, title }) => {
-    const existing = consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
+  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh }) => {
+    const existing = fresh ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
     if (existing) { openOrFocus(existing); return }
     setInputRequest({
       kind: 'newConsultation', title: taskConsultTitle(title), topicRecordId: recordId,
@@ -120,6 +120,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       instruction: { kind: 'task', recordId, title },
     })
   }, { target: paneId })
+  useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
 
   // 「AI の番」: a hidden consultation (a tab behind the shown one) per record, one at a time.

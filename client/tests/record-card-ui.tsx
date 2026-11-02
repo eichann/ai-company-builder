@@ -53,7 +53,7 @@ const card = kind === 'bundle'
     fields: [], history: [], links: bundleLinks,
     ai: params.get('ai') === 'working' ? { working: true, done: null } : { working: false, done: { at: '2026-11-05T06:38:00.000Z', text: '承認のお願い 1件を作りました' } },
   }
-  : { record: view(record), detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links }
+  : { record: view(record), detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
 
 installElectronAPI({
   getRecordCard: async () => ({ success: true, card }),
@@ -66,7 +66,9 @@ function Preview() {
       <pre id="opened" className="text-[10px]" />
       <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={record.id}
         renderSource={r => (r.type === 'interaction' ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
-        renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>} />
+        renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
+        consultations={[{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}
+        onConsult={(r, fresh) => { opened.push(`consult ${r.id} ${fresh}`); document.getElementById('opened')!.textContent = opened.join('\n') }} />
     </main>
   )
 }

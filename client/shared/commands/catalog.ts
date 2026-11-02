@@ -39,6 +39,16 @@ export const COMMANDS = defineCommands([
     args: z.object({
       recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/).describe('The record the consultation is about'),
       title: z.string().min(1).max(300).describe('The record\'s title, for the new consultation\'s title and first message'),
+      fresh: z.boolean().optional().describe('「＋新しい相談」: start a new one even when one about it exists'),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
+    // A consultation listed in a record's 「つながっているもの」: shows it in the chat pane.
+    id: 'chat.openConsultation', title: '相談を開く', class: 'view',
+    args: z.object({
+      sessionId: z.string().min(1).describe('The consultation (conversation id)'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },

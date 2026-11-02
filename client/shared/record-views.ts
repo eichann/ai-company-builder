@@ -8,6 +8,7 @@ import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from 
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
 import type { RecordDetailView } from './record-details'
+import type { ViewersLabel } from '../../shared/types/viewers'
 import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
@@ -66,6 +67,8 @@ export interface RecordCardView {
   record: RecordViewSummary
   /** A meeting's, a 来た連絡's or a bundle's own parts (`record-details.ts`); absent for other kinds. */
   detail?: RecordDetailView
+  /** 見られる人 (who can see it, `POST …/viewers`); absent when the server did not say. */
+  viewers?: ViewersLabel
   /** The AI on this record (plan I.4): working on it now, or what it last did after the last person's change. */
   ai?: { working: boolean; done: { at: string; text: string } | null }
   fields: RecordCardField[]

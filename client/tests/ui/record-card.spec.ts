@@ -11,6 +11,7 @@ test('a meeting: the summary as its body, 決めたこと and 宿題 apart, the 
   const body = card.getByRole('article')
   await expect(body.getByRole('region', { name: '要約' })).toContainText('窓口を2つから3つに増やす方向で合意')
   await expect(card).toContainText('参加 佐藤・阿部・社外 2人')
+  await expect(card.locator('[data-seen]')).toHaveText('営業部のみんな')
   await expect(body.getByRole('region', { name: '決めたこと' })).toContainText('窓口は3つにする')
   await expect(body.getByRole('region', { name: '宿題' })).toContainText('宿題 4')
 
@@ -41,6 +42,7 @@ test('a 来た連絡 from Slack: its summary (the body stays in Slack), 「Slack
   const card = page.getByTestId('record-card')
   await expect(card).toContainText('来た連絡')
   await expect(card).toContainText('返事が要る')
+  await expect(card.locator('[data-seen]')).toHaveText('あなただけ')
   await expect(card).toContainText('山田 様（C社） から・Slack')
   await expect(card.getByRole('region', { name: '要約' })).toContainText('要約（本文は Slack にあります）先日の打ち合わせ資料')
   await expect(page.getByTestId('thread')).toHaveText('スレッドの前後と返事の下書き：資料送付のお願い')
@@ -71,4 +73,14 @@ test('a 案件: what for, who and how far, the approval request as its card, eve
   const working = await openPreview(page, 'record-card', { record: 'bundle', ai: 'working' })
   await expect(page.getByTestId('record-card').getByRole('status')).toHaveText('AI が反映しています…（あと少し）')
   expectNoPageErrors(working)
+})
+
+test('「AIへの相談」 in 「つながっているもの」: the consultations about it, 「相談する」 and 「＋新しい相談」', async ({ page }) => {
+  const state = await openPreview(page, 'record-card')
+  const group = page.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
+  await expect(group).toContainText('A社 打ち合わせのあと')
+  await group.getByRole('button', { name: '相談する' }).click()
+  await group.getByRole('button', { name: '新しい相談' }).click()
+  await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa false\nconsult meeting-0000aa true')
+  expectNoPageErrors(state)
 })
