@@ -17,7 +17,7 @@ declare global { interface Window { __acbLayout: Layout } }
 const ROOT = '/Users/demo/会社'
 const calls = (page: Page, name: string) => page.evaluate(n => window.__acbLayout.calls.filter(c => c.name === n).map(c => c.args), name)
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 const overlay = (page: Page) => page.getByRole('button', { name: 'ダウンロードして同期を開始' })
 
 test('switching departments keeps the file tree mounted with what was expanded or collapsed, without a cold re-read', async ({ page }) => {
@@ -98,38 +98,49 @@ test('read-only folders carry 閲覧のみ in the tree and above an open file', 
   await expect(page.getByText('このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。')).toBeVisible()
 })
 
-test('search: results grouped by file, the cap note when truncated, cleared by a department switch', async ({ page }) => {
+test('探す: results grouped by file, the cap note when truncated, cleared by a department switch; a hit opens the file in the middle', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await leftTab(page, '検索').click()
+  await leftTab(page, '探す').click()
   const box = page.getByRole('textbox').filter({ visible: true }).first()
   await expect(box).toBeFocused()
   await box.fill('提案')
   await box.press('Enter')
-  await expect(page.getByText('2ファイル / 3件')).toBeVisible()
+  // Two records and two files hold the words.
+  await expect(page.getByText('見つかったもの（4）')).toBeVisible()
   await expect(page.getByText(/結果が多いため/)).toHaveCount(0)
   expect(await calls(page, 'gitGrep')).toEqual([['提案', '営業部']])
+  // A file's hit opens that file in a tab in the middle, 探す staying on the left.
+  await page.getByRole('button', { name: /A社への提案の骨子/ }).click()
+  await expect(page.getByRole('tablist', { name: '開いているもの' }).getByRole('tab', { name: /A社_提案\.md/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(box).toBeVisible()
 
   await box.fill('の')
   await box.press('Enter')
   await expect(page.getByText('結果が多いため最初の500件を表示しています。言葉を増やして絞り込んでください。')).toBeVisible()
 
   await deptTab(page, '総務').click()
-  await expect(page.getByText(/ファイル \/ \d+件/)).toHaveCount(0)
+  await expect(page.getByText(/見つかったもの/)).toHaveCount(0)
   await expect(page.getByText(/結果が多いため/)).toHaveCount(0)
 })
 
-test('search finds records by kind next to files; a record opens as a card, its links are followed, ← → go back and forth', async ({ page }) => {
+test('探す finds records next to files with a chip for each kind found; a record opens as a card, its links are followed, ← → go back and forth', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await leftTab(page, '検索').click()
+  await leftTab(page, '探す').click()
   const box = page.getByRole('textbox').filter({ visible: true }).first()
   await box.fill('提案')
   await box.press('Enter')
-  const hits = page.getByLabel('記録の検索結果')
-  await expect(hits.getByText('やること (1)')).toBeVisible()
-  await expect(hits.getByText('決めたこと (1)')).toBeVisible()
+  const hits = page.getByLabel('見つかった記録')
+  const chips = page.getByRole('group', { name: '種類で絞る' })
+  // Only kinds with something found get a chip.
+  await expect(chips.getByRole('button')).toHaveText(['やること1', '決めたこと1', 'ファイル2'])
   expect(await calls(page, 'searchRecords')).toEqual([['demo', '提案']])
+  await chips.getByRole('button', { name: /決めたこと/ }).click()
+  await expect(hits.getByRole('button')).toHaveCount(1)
+  await expect(page.getByLabel('見つかったファイル')).toHaveCount(0)
+  await chips.getByRole('button', { name: /決めたこと/ }).click()
+  await expect(hits.getByRole('button')).toHaveCount(2)
 
   // A record opens as a card in the editor area of the files tab (a task: the task card).
   await hits.getByRole('button', { name: /A社 提案書を仕上げる/ }).click()
@@ -160,7 +171,7 @@ test('search finds records by kind next to files; a record opens as a card, its 
 test('「前の版」 of an open file replaces the 履歴 tab and refreshes in place after a sync', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await expect(leftTab(page, '検索')).toBeVisible()
+  await expect(leftTab(page, '探す')).toBeVisible()
   await expect(page.getByRole('button', { name: '履歴', exact: true })).toHaveCount(0)
   await leftTab(page, 'ファイル').click()
   await page.getByRole('button', { name: 'A社_提案.md' }).click()
@@ -198,7 +209,7 @@ test('skills: a skill the AI adds appears; a burst of events is one rescan', asy
 })
 
 // The app's shortcuts are commands (.claude/rules/commands.md): app-wide, so they work wherever the focus is.
-test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 検索 tab with the cursor in its box', async ({ page }) => {
+test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 探す tab with the cursor in its box', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   type Keys = { key: string; metaKey?: boolean; shiftKey?: boolean }
   const press = (init: Keys) => page.evaluate((i: Keys) => {
@@ -210,7 +221,7 @@ test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 検索 tab with th
   await page.keyboard.press('Escape')
   await expect(nameSearch).toHaveCount(0)
   await press({ key: 'f', metaKey: true, shiftKey: true })
-  await expect(page.getByPlaceholder('文言を検索... (Enter)')).toBeFocused()
+  await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeFocused()
 })
 
 test('a file link clicked in a consultation\'s own window opens here, in the files tab, as a kept tab (file.open)', async ({ page }) => {

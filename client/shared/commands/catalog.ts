@@ -115,8 +115,8 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
   },
   {
-    // The left panel's 検索 tab, with the cursor in its box.
-    id: 'search.show', title: '検索を開く', class: 'view',
+    // The left panel's 探す tab, with the cursor in its box.
+    id: 'search.show', title: '探すを開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },
   },
   {

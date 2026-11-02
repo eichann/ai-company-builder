@@ -200,7 +200,7 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   preview tabs pinned on double-click / first edit, ⌘⇧V and its remembered mode, ⌘F in a
   preview, the preview's scroll position, image / PDF views).
 - **Files and records share the middle's tabs** (plan A, 新しい画面のデモ 2026-11-02): the left
-  tab (ファイル, やること, 検索…) is the narrow column of the `files` split and the middle
+  tab (ファイル, やること, 探す…) is the narrow column of the `files` split and the middle
   (`TabbedEditorPanel`) is beside it for every left tab, so switching the left tab keeps what is
   open; a `wide` panel (スキル, a plugin's screen; `leftPanels.ts`) covers the middle, which stays
   mounted. A record is a tab under the key `acb-record:<id>` (`editorTabs.ts` `recordTabKey`; no
@@ -299,8 +299,10 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   inside a readable private folder is read from that folder's own clone (the deepest `.git` under
   the company root, validated by the allowed roots), as is `git:commitFileDiff` (`repoHolding`;
   test `ipc-git.test.ts`). `git:showCommit` was removed with the 履歴 tab.
-- The 検索 tab also lists records (`records.md` "The app's views"): `RecordHits`, by kind, above the
-  files; company-wide (the server decides what the member reads), cleared like the file hits.
+- The 探す tab (formerly 検索; the narrow column, `SearchPanel`) also lists records (`records.md`
+  "The app's views"): `RecordHits` above the files, kind chips over both; company-wide (the server
+  decides what the member reads), cleared like the file hits. A file's hit opens the file in a tab
+  in the middle at that line (`gotoLine`); there is no preview pane of its own.
 - The review diff (`src/features/doc-review/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder

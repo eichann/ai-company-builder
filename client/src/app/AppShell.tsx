@@ -273,6 +273,8 @@ export function AppShell() {
     handlePinFile(key)
   }, [showMiddle, visitFile, handleOpenFile, handlePinFile])
   const handleFileSearchSelect = openTab
+  // A file opened from 探す shows the line that was found (its editor tab only).
+  const [gotoLine, setGotoLine] = useState<{ path: string; line: number } | null>(null)
   useCommandHandler('file.open', ({ path }) => openTab(path))
   // A record (search, 「つながっているもの」, a notice) opens in a tab in the middle, next to the files.
   useCommandHandler('record.open', ({ recordId }) => openTab(recordTabKey(recordId)))
@@ -401,9 +403,11 @@ export function AppShell() {
       ) : null,
     },
     {
-      id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened', wide: true,
+      // 探す (never 「検索」): the narrow column; what is found opens in a tab in the middle.
+      id: 'search', title: '探す', icon: MagnifyingGlass, mount: 'once-opened',
       onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
-      render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
+      render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef}
+        onOpenFile={(path, line) => { setGotoLine({ path, line }); openTab(path) }} />,
     },
     // A business plugin's screen takes the whole left side, like スキル.
     ...plugins.tabs.map(tab => ({ ...tab, wide: true })),
@@ -502,6 +506,7 @@ export function AppShell() {
                   onPinFile={handlePinFile}
                   navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
                   renderRecord={recordCard}
+                  gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
                   aside={activeFilePath && !activeRecordId && rootPath
                     ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
                     : undefined}
