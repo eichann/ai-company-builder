@@ -7,8 +7,9 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
-import PermissionsPage from '@/app/companies/[id]/permissions/page'
-import PrivateFoldersPage from '@/app/companies/[id]/private-folders/page'
+import FoldersPage from '@/app/companies/[id]/folders/page'
+import { PermissionsView as PermissionsPage } from '@/components/folders/permissions-view'
+import { PrivateFoldersView as PrivateFoldersPage } from '@/components/folders/private-folders-view'
 import type { PermissionScope, PrivateFolderDetail, PrivateFolderSummary } from '@/lib/api'
 import {
   MANAGERS_MAY_CHANGE_VIEWERS,
@@ -21,10 +22,11 @@ import { base, companyRoutes, renderInCompany } from './company-harness'
 import { COMPANY_ID, departments, effectiveAt, managerCapabilities, members, ok, permissionScopes } from './fixtures'
 import { mockApi, type Call } from './mock-api'
 
+const nav = vi.hoisted(() => ({ search: '' }))
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  usePathname: () => `/companies/${COMPANY_ID}/private-folders`,
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => `/companies/${COMPANY_ID}/folders`,
+  useSearchParams: () => new URLSearchParams(nav.search),
 }))
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
@@ -101,6 +103,22 @@ describe('非公開フォルダ: helpers', () => {
     expect(audienceFromDetail(evaluationDetail)).toEqual({ viewers: ['u_member'], editorsMode: 'all', editors: [] })
     expect(displayPath('人事部/評価', departments)).toBe('人事部 / 評価')
     expect(displayPath('development/設計', departments)).toBe('開発部 / 設計')
+  })
+})
+
+describe('フォルダ: 「権限」 and 「非公開フォルダ」 are one menu item with two tabs', () => {
+  it('opens who may change each place by default, and the folders with chosen viewers with ?tab=private', async () => {
+    mockApi(routes())
+    nav.search = 'tab=private'
+    const { unmount } = renderInCompany(<FoldersPage />)
+    expect(await screen.findByRole('list', { name: '非公開フォルダ' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '見られる人を決めたフォルダ' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: 'だれが変えられるか' })).toHaveAttribute('href', `/companies/${COMPANY_ID}/folders`)
+    unmount()
+    nav.search = ''
+    renderInCompany(<FoldersPage />)
+    expect(await screen.findByRole('link', { name: 'だれが変えられるか' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.queryByRole('list', { name: '非公開フォルダ' })).not.toBeInTheDocument()
   })
 })
 

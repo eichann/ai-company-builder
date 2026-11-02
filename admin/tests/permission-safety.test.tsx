@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 
 import OverviewPage from '@/app/companies/[id]/page'
-import PermissionsPage from '@/app/companies/[id]/permissions/page'
+import { PermissionsView as PermissionsPage } from '@/components/folders/permissions-view'
 import type { OrphanedScope, OutdatedMember, PermissionScope } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import {
@@ -274,7 +274,7 @@ describe('rules whose folder is missing (orphanedScopes)', () => {
     expect(screen.queryByRole('region', { name: title })).not.toBeInTheDocument()
   })
 
-  it('概要: lists them under 要対応 with a link to 権限', async () => {
+  it('概要: lists them under 要対応 with a link to フォルダ', async () => {
     mockApi({
       ...companyRoutes(),
       [`GET ${base}/overview`]: {
@@ -291,6 +291,6 @@ describe('rules whose folder is missing (orphanedScopes)', () => {
     expect(await screen.findByText(title)).toBeInTheDocument()
     expect(screen.getByText(/要対応/)).toHaveTextContent('1件')
     expect(screen.getByText('営業部/旧契約書')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /権限の画面で対応する/ })).toHaveAttribute('href', `/companies/${COMPANY_ID}/permissions`)
+    expect(screen.getByRole('link', { name: /フォルダの画面で対応する/ })).toHaveAttribute('href', `/companies/${COMPANY_ID}/folders`)
   })
 })

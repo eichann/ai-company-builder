@@ -53,7 +53,7 @@ function AdminOverview() {
             <StatCard icon={Users} label="メンバー" value={`${overview.data.memberCount}人`} href={`${base}/members`} />
             <StatCard icon={TreeStructure} label="部署" value={`${overview.data.departmentCount}`} href={`${base}/departments`} />
           </div>
-          <Attention attention={overview.data.attention} membersHref={`${base}/members`} permissionsHref={`${base}/permissions`} />
+          <Attention attention={overview.data.attention} membersHref={`${base}/members`} permissionsHref={`${base}/folders`} />
         </div>
       ) : null}
     </>
@@ -109,7 +109,7 @@ function Attention({
           tone="warning"
           title={ORPHANED_TITLE}
           description={ORPHANED_DESCRIPTION}
-          footer={<FooterLink href={permissionsHref}>権限の画面で対応する</FooterLink>}
+          footer={<FooterLink href={permissionsHref}>フォルダの画面で対応する</FooterLink>}
         >
           {orphanedScopes.map((o) => (
             <li key={o.scopeId} className="flex items-center gap-3 px-5 py-2.5">
