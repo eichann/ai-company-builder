@@ -302,8 +302,28 @@ agent), renderer `SecondOpinionQuote.tsx`. Tests `client/tests/second-opinion.te
   question). The member's stop and an administrator's stop (`chat-turns` abort) kill it. The
   emergency stop's 外部の MCP kind refuses it (category `mcp-external`). Logs carry durations and
   counts only.
-- Not built: a company setting of which AI may be asked (none exists; members choose their AI
-  freely today).
+- **The company allows it or not** (owner decision 2026-11-02: a company contracted with only
+  one AI vendor must not have its content sent to the other). Admin 「詳しい設定 › AI の安全 ›
+  もう一方の AI に聞く」 (`admin/src/app/companies/[id]/advanced/ai-safety/second-opinion/page.tsx`,
+  聞かない / 聞いてよい, saved at once; owner/admin; a company that allows it shows 「変えています」
+  on AI の安全). Server: `GET|PUT /second-opinion` (`routes/second-opinion.ts` →
+  `services/second-opinion-setting.ts` → the handle's `secondOpinion`, table
+  `second_opinion_settings`); **no row = not allowed**. The companies that existed when the
+  setting shipped got `allowed = 1` once, when the table was first made
+  (`db/schema/agents.ts` `migrateSecondOpinionSetting`; a later start never rewrites it), so they
+  kept the feature; companies created afterwards start off. Tests:
+  `server/tests/unit/second-opinion-setting.test.ts`, `admin/tests/second-opinion.test.tsx`.
+- **Enforcement is in the app** — the other AI runs on the member's computer; the server only
+  keeps the setting and hands it out in the member's policy (`GET /me/agent-policy` →
+  `secondOpinion: { allowed }`, a change announced on the push channel like the sandbox,
+  `agent-sandbox.md`). `chat-server.ts` asks `secondOpinionAllowed(companyId)`
+  (`features/chat/server-config.ts`: the policy store, 3 s) only in a turn whose member message
+  names the other agent (`secondOpinionTurn`); anything but an explicit `allowed: true` —
+  forbidden, no policy received in this app run (offline), an older server without the field,
+  a malformed value, a failing check — means **no tool at all**, and the AI gets
+  `secondOpinionForbiddenInstructions` (say it cannot ask; never start the other AI another way).
+  A policy received earlier in the same app run is kept while the server cannot be reached
+  (the policy store's rule). Test: `client/tests/second-opinion-setting.test.ts`.
 
 ## The company map's tools (`acb_records`)
 

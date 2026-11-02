@@ -5,7 +5,7 @@ import { CaretRight, LockSimple } from '@phosphor-icons/react'
 
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
-import { agentEventsApi, agentSandboxApi, inboxSettingsApi, keyBrokerApi, taskSettingsApi } from '@/lib/api'
+import { agentEventsApi, agentSandboxApi, inboxSettingsApi, keyBrokerApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
 import { ADVANCED_SECTIONS, aiSafetyChanged, calendarChanged, inboxChanged, workChanged, type AdvancedSection } from '@/lib/advanced'
 import { useCompany } from '@/lib/company-context'
 import { useQuery } from '@/lib/use-query'
@@ -22,6 +22,7 @@ export default function AdvancedSettingsPage() {
   const sandbox = useQuery(on('agent-sandbox'), () => agentSandboxApi.get(companyId))
   const events = useQuery(on('agent-events-settings'), () => agentEventsApi.settings(companyId))
   const broker = useQuery(on('broker'), () => keyBrokerApi.get(companyId))
+  const secondOpinion = useQuery(on('second-opinion'), () => secondOpinionApi.get(companyId))
 
   if (role !== null && !isAdmin) {
     return (
@@ -38,9 +39,9 @@ export default function AdvancedSettingsPage() {
     calendar: tasks.data ? calendarChanged(tasks.data.settings) : null,
     inbox: inbox.data ? inboxChanged(inbox.data.settings) : null,
     'ai-safety':
-      sandbox.loading || events.loading || broker.loading
+      sandbox.loading || events.loading || broker.loading || secondOpinion.loading
         ? null
-        : aiSafetyChanged({ sandbox: sandbox.data, eventsUpdatedAt: events.data?.updatedAt ?? null, broker: broker.data }),
+        : aiSafetyChanged({ sandbox: sandbox.data, eventsUpdatedAt: events.data?.updatedAt ?? null, broker: broker.data, secondOpinion: secondOpinion.data }),
     info: false,
   }
 

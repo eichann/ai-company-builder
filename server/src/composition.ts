@@ -57,6 +57,7 @@ import { createViewersService } from './services/viewers'
 import { createAbsenceService } from './services/absences'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
+import { createSecondOpinionSettingService } from './services/second-opinion-setting'
 import { createPushChannel } from './services/push-channel'
 import { createBrokerVault } from './services/broker-vault'
 import { createKeyBrokerService } from './services/key-broker'
@@ -204,7 +205,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     brokerEnabled: () => brokerVault.status().enabled,
     onChange: companyId => agentPolicy.announce(companyId),
   })
-  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, digest: sha256TokenDigest, push })
+  // 「もう一方の AI に聞く」: kept here, handed to the apps in their policy (chat-and-agents.md).
+  const secondOpinion = createSecondOpinionSettingService(shared)
+  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, secondOpinion, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
@@ -645,6 +648,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentSandbox,
     agentStops,
     agentPolicy,
+    secondOpinion,
     push,
     brokerVault,
     keyBroker,

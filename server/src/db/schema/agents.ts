@@ -133,3 +133,30 @@ export function migrateAgentEventSandbox(conn: Database.Database): void {
   if (!cols.has('skill')) conn.exec(`ALTER TABLE agent_events ADD COLUMN skill TEXT`)
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_company_sandbox ON agent_events(company_id, at) WHERE sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox')`)
 }
+
+/**
+ * 「もう一方の AI に聞く」 per company (chat-and-agents.md "Asking the other AI", owner decision
+ * 2026-11-02): whether a consultation may ask the other AI vendor at all. No row = not allowed
+ * (a company contracted with one vendor must not send its content to the other).
+ *
+ * Made once. When it is first made, every company that exists then gets a row `allowed = 1`, so
+ * the companies that used the feature before the setting existed keep it; a company created
+ * afterwards has no row until an owner/admin turns it on. Not in `agentSchema` on purpose: the
+ * table's absence is what tells this migration it has not run yet.
+ */
+export function migrateSecondOpinionSetting(conn: Database.Database): void {
+  const exists = conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'second_opinion_settings'").get()
+  if (exists) return
+  conn.transaction(() => {
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS second_opinion_settings (
+        company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+        allowed INTEGER NOT NULL CHECK (allowed IN (0, 1)),
+        updated_at TEXT NOT NULL,
+        updated_by TEXT
+      );
+    `)
+    conn.prepare('INSERT INTO second_opinion_settings (company_id, allowed, updated_at, updated_by) SELECT id, 1, ?, NULL FROM companies')
+      .run(new Date().toISOString())
+  })()
+}

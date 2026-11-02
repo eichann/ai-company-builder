@@ -8,6 +8,7 @@ import { DEFAULT_INTAKE_SETTINGS, type IntakeSettings } from '../../../shared/co
 import { DEFAULT_TASK_SETTINGS, type TaskSettings } from '../../../shared/core/task-settings'
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { BrokerView } from '../../../shared/types/key-broker'
+import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 
 export type AdvancedSection = 'work' | 'calendar' | 'inbox' | 'ai-safety' | 'info'
 
@@ -15,7 +16,7 @@ export const ADVANCED_SECTIONS: Array<{ id: AdvancedSection; title: string; desc
   { id: 'work', title: '仕事の進め方', description: '受信を読む・AI が自動で進める・チームの進め方・会議から AI が作るやること・呼び名・返事の目安', path: 'advanced/work' },
   { id: 'calendar', title: '会社の暦', description: '夏休み・年末年始など、会社の休み（土日・祝日は自動）', path: 'advanced/calendar' },
   { id: 'inbox', title: '来た連絡の決まり', description: '宛先が何人もいるとき・CC だけのとき・メルマガ・共有の受付アドレスなど', path: 'advanced/inbox' },
-  { id: 'ai-safety', title: 'AI の安全', description: 'AI を止める・AI の操作の記録・AI の囲い・API キー', path: 'advanced/ai-safety' },
+  { id: 'ai-safety', title: 'AI の安全', description: 'AI を止める・AI の操作の記録・AI の囲い・API キー・もう一方の AI に聞く', path: 'advanced/ai-safety' },
   { id: 'info', title: '会社の情報', description: '会社名・この会社から退出・組み込みのルールと止められた同期', path: 'advanced/info' },
 ]
 
@@ -48,14 +49,16 @@ export function inboxChanged(s: IntakeSettings): boolean {
 
 /**
  * AI の安全: the sandbox is not as it starts (company or a member), the AI action log's settings
- * were changed, or the company holds keys / turned members' own keys off.
+ * were changed, the company holds keys / turned members' own keys off, or the other AI may be
+ * asked (「もう一方の AI に聞く」 starts as 「聞かない」).
  */
 export function aiSafetyChanged(parts: {
   sandbox?: AgentSandboxView | null
   eventsUpdatedAt?: string | null
   broker?: BrokerView | null
+  secondOpinion?: SecondOpinionView | null
 }): boolean {
-  const { sandbox, eventsUpdatedAt, broker } = parts
+  const { sandbox, eventsUpdatedAt, broker, secondOpinion } = parts
   if (sandbox) {
     const d = DEFAULT_AGENT_SANDBOX_SETTINGS
     const s = sandbox.settings
@@ -64,6 +67,7 @@ export function aiSafetyChanged(parts: {
     if (sandbox.overrides.length > 0) return true
   }
   if (eventsUpdatedAt) return true
+  if (secondOpinion?.allowed) return true
   if (broker && (broker.keys.some((k) => k.scope === 'company') || !broker.settings.memberKeysAllowed)) return true
   return false
 }

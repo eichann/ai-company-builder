@@ -36,6 +36,7 @@ import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
 import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
+import type { SecondOpinionSettingRepository } from './second-opinion'
 import type { SkillUseRepository } from './skill-uses'
 import type { TaskSettingsRepository } from './task-settings'
 
@@ -80,6 +81,8 @@ export interface CompanyData {
   readonly aiRuns: AiRunRepository
   /** Which company Skills members' consultations used (ports/skill-uses.ts, records.md "Which Skill"). */
   readonly skillUses: SkillUseRepository
+  /** 「もう一方の AI に聞く」: allowed for this company or not (ports/second-opinion.ts). */
+  readonly secondOpinion: SecondOpinionSettingRepository
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

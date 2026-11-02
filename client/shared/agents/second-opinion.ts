@@ -217,6 +217,17 @@ export function secondOpinionInstructions(targets: readonly AgentId[]): string {
     'メンバーが頼んでいないのに自分から聞いてはいけません。聞けなかったときは、その理由を一言伝えてください。'
 }
 
+/**
+ * The member named the other AI but the company does not allow asking it (the admin's setting,
+ * or it could not be read): no tool exists; the AI says so instead of finding another way.
+ */
+export function secondOpinionForbiddenInstructions(targets: readonly AgentId[]): string {
+  const names = targets.map(t => AGENTS[t].shortLabel).join('・')
+  return `\n\n【もう一方の AI に聞く】メンバーが今のメッセージで ${names} の意見を求めていますが、この会社では、ほかの AI に聞くことは許されていません（会社の設定）。` +
+    `${names} には聞けないことを一言伝え、自分の考えで答えてください。コマンドなど別の方法で ${names} を動かしたり、内容を渡したりしてはいけません。` +
+    '変えたいときは、会社の管理者が管理画面の「詳しい設定 › AI の安全」で変えられます。'
+}
+
 export const SECOND_OPINION_FAILED = (target: AgentId) => `${AGENTS[target].shortLabel} に聞けませんでした：`
 
 /** Why it could not ask, in words the AI relays (never a stack). */

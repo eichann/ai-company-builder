@@ -36,6 +36,7 @@ import type {
   PluginRolesView,
   PluginStepSkillsView,
 } from '../../../shared/types/plugins'
+import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 import type { SlackAdminView } from '../../../shared/types/slack'
 import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
 import type {
@@ -302,6 +303,9 @@ export const agentSandboxSchema = topLevel<AgentSandboxView>({
   settings: obj, defaultAllowedDomains: list, overrides: list, updatedAt: nullableStr, updatedBy: nullableStr, history: list,
 })
 export const agentStopSchema = topLevel<AgentStopView>({ active: list, history: list, unsupported: list, keys: obj })
+
+// 「もう一方の AI に聞く」 (shared/types/second-opinion.ts)
+export const secondOpinionSchema = topLevel<SecondOpinionView>({ allowed: bool, updatedAt: nullableStr, updatedByName: nullableStr })
 
 // Tasks, inbox and absences
 export const taskSettingsSchema = topLevel<TaskSettingsView>({

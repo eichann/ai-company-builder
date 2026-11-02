@@ -237,6 +237,9 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', w => ({ path: `${C(w)}/agent-sandbox/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  // 「もう一方の AI に聞く」 (chat-and-agents.md "Asking the other AI"): owner/admin, like the other AI settings.
+  r('GET /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/second-opinion', w => ({ path: `${C(w)}/second-opinion`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
 
   // Task settings (tasks.md): every member reads, owner/admin change
   // The admin console's home: owner/admin; a department manager sees their departments' attention only
