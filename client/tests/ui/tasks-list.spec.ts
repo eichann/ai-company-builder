@@ -112,6 +112,21 @@ test('a meeting read without a まとまり asks in あなたの番; choosing li
   expectNoPageErrors(state)
 })
 
+test('「『…』の会議ですか？」: はい links the suggested まとまり; ちがう／選ぶ opens the chooser instead', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const row = page.getByRole('region', { name: 'あなたの番' }).getByTestId('task-row').filter({ hasText: 'E社 打ち合わせ' })
+  await expect(row).toContainText('『E社 研修導入』の会議ですか？')
+  await row.getByRole('button', { name: 'ちがう／選ぶ' }).click()
+  const dialog = page.getByRole('dialog', { name: 'どのまとまりの会議ですか？' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '閉じる' }).click()
+  await expect(page.locator('#acted')).toHaveText('')
+  await row.getByRole('button', { name: 'はい', exact: true }).click()
+  await expect(page.locator('#acted')).toHaveText('meeting-00cc31:bundle deal-e00001')
+  await expect(page.getByRole('region', { name: 'あなたの番' })).not.toContainText('E社 打ち合わせ')
+  expectNoPageErrors(state)
+})
+
 test('meetings of one series are one row that opens; 「まとまりはない」 closes a question without choosing', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const mine = page.getByRole('region', { name: 'あなたの番' })

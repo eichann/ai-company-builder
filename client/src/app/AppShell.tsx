@@ -308,7 +308,9 @@ export function AppShell() {
   const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? []).map(m => {
     const actions: MeetingTurnRow['actions'] = []
     if (m.kind === 'bundle') {
-      actions.push({ label: 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+      const s = m.suggestedBundle
+      if (s) actions.push({ label: 'はい', run: () => void linkMeetingBundle(currentCompany.id, m.id, s.id).then(() => taskList.reload()) })
+      actions.push({ label: s ? 'ちがう／選ぶ' : 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
       actions.push({ label: 'まとまりはない', run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
     }
     if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {

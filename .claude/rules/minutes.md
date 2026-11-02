@@ -180,6 +180,14 @@ a digest (no calendar id leaves the server).
   then shows none). A second press writes nothing; a meeting with a まとまり → 409
   `MINUTES_HAS_BUNDLE`. A まとまり can still be chosen later (same `…/bundle`, the まとまり's part
   follows as in "A まとまり chosen later").
+- **「『…』の会議ですか？」** (owner 2026-11-02): at intake, a meeting whose まとまり is not linked
+  still gets its 相手 when every outside participant who resolves at all resolves (名寄せ,
+  `identity.md` `resolveAddress`, with the assignee's reading) to the same company records
+  (`participantsCompany`). Each question (and the card's answer) carries `suggested`: that 相手's
+  **one** open まとまり of any type implementing `bundle` **the member reads** (0 or ≥ 2, or a 相手
+  they do not read → null, the plain question). The app asks 「『<title>』の会議ですか？」 with
+  ［はい］ (the same `…/bundle` as choosing by hand, so the まとまり's part follows),
+  ［ちがう／選ぶ］ (the chooser) and ［まとまりはない］. **Never linked without the click.**
 - **The card**: `GET …/minutes/item/:recordId/bundle-question` → `{ recordId, title, version,
   canChoose (no まとまり linked and the member is the assignee or an admin), noBundle }` for any
   reader of the meeting (else the same 404).

@@ -413,6 +413,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     writer: serviceRecords,
     meetings: coreConnectors.roleProviders.meetings,
     tokenDigest: sha256TokenDigest,
+    // 名寄せ (identity.md): built below with the inbox lane; called only after construction.
+    resolveAddress: (member, address) => inboxLane.identities.resolveAddress(member, address),
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
       const accounts = shared.accounts.byIds(rows.map(m => m.user_id))

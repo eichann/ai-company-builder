@@ -26,6 +26,8 @@ let data: TaskListData = {
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
     it({ id: 'task-done01', title: '経費の申請', turn: 'done', state: 'done', finishedAt: new Date().toISOString() }),
     it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-c', label: 'C社 打ち合わせ' } }),
+    // The server suggests the 相手's one open まとまり: 「『…』の会議ですか？」.
+    it({ id: 'meeting-00cc31', type: 'meeting', typeLabel: '会議', title: 'E社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: '『E社 研修導入』の会議ですか？', needsBundle: true, bundleGroup: { key: 'g-e', label: 'E社' }, suggestedBundle: { id: 'deal-e00001', title: 'E社 研修導入' } }),
     // Two meetings of one series (the server's group): one row 「まとまりを選ぶ会議 2件」.
     it({ id: 'meeting-00bb21', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第1回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
     it({ id: 'meeting-00bb22', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第2回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),

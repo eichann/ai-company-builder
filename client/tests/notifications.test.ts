@@ -138,6 +138,7 @@ test('a department without the task list still gets its meetings: a まとまり
   })
   const items = [
     item('meeting-read01', { state: 'read', turn: 'mine', needsBundle: true }),
+    item('meeting-read02', { state: 'read', turn: 'mine', needsBundle: true, suggestedBundle: { id: 'deal-abcdef01', title: 'A社 研修導入' } }),
     item('meeting-new001', {}),
     item('meeting-new002', {}),
     item('meeting-new003', {}),
@@ -150,9 +151,12 @@ test('a department without the task list still gets its meetings: a まとまり
   ])
   assert.deepEqual(turns.map(t => [t.id, t.kind, t.needsPerson, t.text]), [
     ['meeting-read01', 'bundle', true, 'どのまとまり（案件など）の会議か選んでください'],
+    // The 相手's one open まとまり, suggested (はい links it; nothing is linked here).
+    ['meeting-read02', 'bundle', true, '『A社 研修導入』の会議ですか？'],
     ['meeting-new001', 'minutes', false, 'AI が読み取っています'],
     ['meeting-new002', 'minutes', true, 'AI が読み取れませんでした：議事録が空でした'],
     // Nothing heard from the runner (another window, the setting off): never silent.
     ['meeting-new003', 'minutes', true, '議事録が届きました'],
   ])
+  assert.deepEqual(turns.find(t => t.id === 'meeting-read02')?.suggestedBundle, { id: 'deal-abcdef01', title: 'A社 研修導入' })
 })

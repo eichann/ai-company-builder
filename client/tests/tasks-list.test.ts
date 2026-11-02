@@ -132,16 +132,27 @@ test('「部署に出す」 sends only a company folder at the version shown; th
 
 test('a meeting the server asks about waits in あなたの番 to be chosen, once, with its group', () => {
   const meeting: RecordSummary = { ...rec('meeting-00aa11', 'read', { assignee: ME }), type: 'meeting' }
-  const q = { recordId: 'meeting-00aa11', title: 'A社 定例', version: 4, meetingAt: '2026-11-04T05:00:00.000Z', readAt: '2026-11-04T06:00:00.000Z', group: { key: 'g1', label: 'A社' } }
+  const q = { recordId: 'meeting-00aa11', title: 'A社 定例', version: 4, meetingAt: '2026-11-04T05:00:00.000Z', readAt: '2026-11-04T06:00:00.000Z', group: { key: 'g1', label: 'A社' }, suggested: null }
   const items = classifyTasks(src({ bundleQuestions: [q], doneToday: [meeting] }))
   assert.equal(items.length, 1)
   assert.deepEqual([items[0].turn, items[0].needsBundle, items[0].waitingFor, items[0].version], ['mine', true, 'どのまとまり（案件など）の会議か選んでください', 4])
   assert.deepEqual(items[0].bundleGroup, { key: 'g1', label: 'A社' })
 })
 
+test('a suggested まとまり asks 「『…』の会議ですか？」 and is only carried, never linked by the list', () => {
+  const q = { recordId: 'meeting-00aa12', title: 'A社 定例', version: 4, meetingAt: null, readAt: '2026-11-04T06:00:00.000Z', group: { key: 'g1', label: 'A社' }, suggested: { id: 'deal-abcdef01', title: 'A社 研修導入', typeLabel: '案件' } }
+  const [item] = classifyTasks(src({ bundleQuestions: [q] }))
+  assert.equal(item.waitingFor, '『A社 研修導入』の会議ですか？')
+  assert.deepEqual(item.suggestedBundle, { id: 'deal-abcdef01', title: 'A社 研修導入' })
+  assert.equal(item.bundle, null)
+  const [plain] = classifyTasks(src({ bundleQuestions: [{ ...q, suggested: null }] }))
+  assert.equal(plain.suggestedBundle, undefined)
+  assert.equal(plain.waitingFor, 'どのまとまり（案件など）の会議か選んでください')
+})
+
 test('which meetings ask is the server\'s answer: the app adds none and drops none; an older server asks nothing', async () => {
   const empty = { status: 200, body: { data: { total: 0, records: [] } } }
-  const question = (id: string) => ({ recordId: id, title: id, version: 2, meetingAt: null, readAt: '2026-11-04T06:00:00.000Z', group: { key: id, label: id } })
+  const question = (id: string) => ({ recordId: id, title: id, version: 2, meetingAt: null, readAt: '2026-11-04T06:00:00.000Z', group: { key: id, label: id }, suggested: null })
   for (const [answer, expected] of [
     [{ status: 200, body: { data: { days: 7, questions: [question('meeting-free01'), question('meeting-free02')] } } }, ['meeting-free01', 'meeting-free02']],
     [{ status: 404, body: { error: 'Not found' } }, []],

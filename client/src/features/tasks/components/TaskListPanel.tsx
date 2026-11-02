@@ -86,6 +86,17 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
       list.reload()
     }
   }
+  const yesBundle = async (item: TaskListItem, bundleId: string) => {
+    setBusy(item.id)
+    setMessage(null)
+    try {
+      const r = await linkMeetingBundle(companyId, item.id, bundleId)
+      if (!r?.success) setMessage(r?.error ?? 'できませんでした。')
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+  }
   // 「まとまりはない（社内の会議など）」: the server closes the question for good; no AI turn follows.
   const noBundle = async (item: TaskListItem) => {
     setBusy(item.id)
@@ -109,7 +120,10 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
     const ai = i.turn === 'ai' ? aiOf(i.id) : null
     const extra: Array<{ label: string; run: () => void }> = []
     if (i.needsBundle) {
-      extra.push({ label: 'まとまりを選ぶ', run: () => setChoosing(i) })
+      // 「『…』の会議ですか？」: はい links the suggested one (the same link as choosing by hand).
+      const s = i.suggestedBundle
+      if (s) extra.push({ label: 'はい', run: () => void yesBundle(i, s.id) })
+      extra.push({ label: s ? 'ちがう／選ぶ' : 'まとまりを選ぶ', run: () => setChoosing(i) })
       extra.push({ label: 'まとまりはない', run: () => void noBundle(i) })
     }
     if (i.type === 'meeting' && i.turn === 'ai' && i.state === 'received' && meetingActions && ai?.state !== 'running') {
