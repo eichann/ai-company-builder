@@ -84,7 +84,7 @@ cd admin && npx vitest run                                # admin tests (seconds
 
 Run the tests for the files you touched, not whole suites. The development machine is shared and
 the full client, sync-harness and UI suites take many minutes; CI runs them on every PR (macOS
-runners for the client). If you start a dev server, Vite preview or watcher, stop it when done.
+runners only where a Mac matters). If you start a dev server, Vite preview or watcher, stop it when done.
 
 Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64 32`) and
 `PUBLIC_URL` are required. `docker compose up -d` runs the full stack (see the deployment rule).
@@ -159,9 +159,11 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - CI (`.github/workflows/ci.yml`): typecheck and changed-file lint always run; on PRs the other
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
-  tests (macOS), Sync harness (macOS); the UI, perf, universal-git and admin jobs should be green
+  tests (macOS) (aggregates a Linux and a macOS half), Sync harness (macOS); the UI, bundle, perf,
+  universal-git and admin jobs should be green
   too. The nightly run (and a manual run) execute everything; a push to main runs the
-  Linux jobs only (typecheck, lint, server, admin) because its PR already ran the macOS ones.
+  Linux jobs only (typecheck, lint, Linux client half, UI, bundle, server, admin) because its PR
+  already ran the macOS ones. macOS jobs can run on a self-hosted Mac (`MAC_RUNNER`; deployment rule).
 - `docs/` holds internal notes and stays uncommitted: this is a public (AGPL) repository, and
   `.git/info/exclude` ignores `/docs/*` except the published `docs/self-hosting/` and
   `docs/images/` (a few older notes are still tracked; leave them, add no new ones). Durable

@@ -120,7 +120,7 @@ test.describe('slash commands', () => {
     for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp']) await page.keyboard.press(key)
     await page.keyboard.press('Tab')
     await typed(page).toBe('/press-release ')
-    await page.keyboard.press('Meta+a')
+    await page.keyboard.press('ControlOrMeta+a') // select all: ⌘A on macOS, Ctrl+A elsewhere
     await page.keyboard.insertText('/')
     await skill(page, '提案書').click()
     await typed(page).toBe('/proposal ')
