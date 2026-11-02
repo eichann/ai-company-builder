@@ -173,7 +173,8 @@ describe('the company assigns a declared role (owner / admin)', () => {
   it('lists the declared role; only this company\'s members; members cannot assign; every change is in the history', async () => {
     const view = await call({ user: 'ro-admin', method: 'GET', path: P })
     expect(view.status).toBe(200)
-    expect(view.body.data.roles).toEqual([{ name: 'sales_manager', label: '営業の責任者', description: null, userIds: [] }])
+    // Starting value (管理画面の見直し 2-4): the 部署の管理役 of the department the first mapping names (営業部: ro-boss).
+    expect(view.body.data.roles).toEqual([{ name: 'sales_manager', label: '営業の責任者', description: null, userIds: ['ro-boss'] }])
     expect((await call({ user: 'ro-member', method: 'PUT', path: `${P}/sales_manager`, body: { userIds: ['ro-member'] } })).status).toBe(403)
     expect((await call({ user: 'ro-admin', method: 'PUT', path: `${P}/sales_manager`, body: { userIds: ['ro-x'] } })).body.code).toBe('ROLE_HOLDERS_INVALID')
     expect((await call({ user: 'ro-admin', method: 'PUT', path: `${P}/no_such_role`, body: { userIds: [] } })).status).toBe(404)

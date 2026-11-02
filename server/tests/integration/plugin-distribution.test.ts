@@ -95,9 +95,8 @@ describe('the agent policy lists the packages the app keeps', () => {
     expect((await services.plugins.setEnabled(otherOwner, 'sample-sales', { enabled: true })).ok).toBe(true)
     expect(await policyOf(otherMember)).toEqual([])
 
-    expect((await services.plugins.install(owner, 'sample-flow', { version: '0.2.0', keyId: null })).ok).toBe(true)
-    expect(await policyOf(member)).toEqual([]) // installed, not on
-    expect((await services.plugins.setEnabled(owner, 'sample-flow', { enabled: true })).ok).toBe(true)
+    // Installing turns a business plugin on at once (「使い始める」 = 「オン」, 管理画面の見直し 2-4).
+    expect((await services.plugins.install(owner, 'sample-flow', { version: '0.2.0', keyId: null })).value.plugin.install.enabled).toBe(true)
     const listed = await policyOf(member)
     expect(listed).toEqual([{ id: 'sample-flow', version: '0.2.0', fingerprint: fingerprintOf('0.2.0'), use: 'current' }])
     expect((await services.agentPolicy.policyFor(member)).version).not.toBe(before)

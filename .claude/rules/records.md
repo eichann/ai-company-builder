@@ -95,8 +95,11 @@ the only writer of a record's server values, with its append-only ledger — and
 
 ## Off per company
 
-Everything is behind a per-company switch (`record_settings.enabled`, default off): owner/admin
-turn it on with `PUT /records/settings { enabled: true }`. While off, nothing is indexed (pushes
+Everything is behind a per-company switch (`record_settings.enabled`): owner/admin
+turn it on with `PUT /records/settings { enabled: true }`. A company created from 2026-11-02 starts
+with it on (`services/companies.ts` `tryCreate`), and turning a business plugin on (its first
+install too) turns it on (`plugins.ts` `recordsOn`) — 管理画面の見直し 2-4: no screen offers the
+switch, and minutes, tasks and business plugins need it. Existing companies keep their value. While off, nothing is indexed (pushes
 schedule nothing) and every route except the settings answers 404 `RECORDS_DISABLED`. The one
 thing that applies to every company is the push checker's rule on `.acb/types/` (below): nobody
 used that folder before, and a type someone added while the switch was off would steer the

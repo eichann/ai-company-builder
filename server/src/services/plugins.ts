@@ -39,6 +39,9 @@
  * and this module installs, turns on / off, sets the read scope and saves mappings.
  */
 import type { PluginPackage } from '../../shared/core/plugins'
+import { MAPPING_SECTIONS } from '../../shared/core/plugin-mapping'
+import { normalizeRepoPath } from '../../shared/core/paths'
+import { isYamlMap, parseYamlLite } from '../../shared/core/yaml-lite'
 import type { PluginDetail, PluginListItem, PluginProblem } from '../../shared/types/plugins'
 import type { PluginInstallRow, PluginHistoryRow } from '../ports/plugins'
 import { requireFullAccess, type Member } from './access'
@@ -123,6 +126,61 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (after.problem && CONNECTOR_PROBLEMS.includes(after.problem)) out.push(i.pluginId)
     }
     return out
+  }
+
+  /**
+   * The departments a business plugin is used in (管理画面の見直し 2-4): the departments whose
+   * folders hold its mapping's `visible_to_folder`s. Empty when the mapping names none.
+   */
+  function businessDepartmentIds(companyId: string, pluginId: string, mappingVersion: number): string[] {
+    const handle = companyData.forCompany(companyId)
+    const text = mappingVersion > 0 ? handle.plugins.mapping(pluginId, mappingVersion)?.text ?? null : null
+    const yaml = text ? parseYamlLite(text) : null
+    if (!yaml?.ok || !isYamlMap(yaml.value)) return []
+    const roots = new Set<string>()
+    for (const [name, o] of Object.entries(yaml.value)) {
+      if (MAPPING_SECTIONS.includes(name) || !isYamlMap(o) || typeof o.visible_to_folder !== 'string') continue
+      const path = normalizeRepoPath(o.visible_to_folder)
+      if (path) roots.add(path.split('/')[0].normalize('NFC'))
+    }
+    return handle.departments.list().filter(d => roots.has(d.folder.normalize('NFC'))).map(d => d.id)
+  }
+
+  /**
+   * Starting values (管理画面の見直し 2-4, set once; an admin changes them on the page afterwards):
+   * a connector's relay read scope, while empty, becomes the departments of the business plugins
+   * using it; each role a business plugin declares, while never assigned, goes to the 部署の管理役
+   * of its departments. Settings a company already has are never changed.
+   */
+  function seedStartingValues(member: Member, connectorId: string, businessIds: string[]): void {
+    const handle = companyData.forCompany(member.companyId)
+    const repo = handle.plugins
+    const at = clock.now()
+    const deptsOf = new Map(businessIds.map(id => [id, businessDepartmentIds(member.companyId, id, repo.install(id)?.mappingVersion ?? 0)]))
+    const connector = repo.install(connectorId)
+    const departmentIds = [...new Set([...deptsOf.values()].flat())]
+    if (connector && !isBusinessInstall(member.companyId, connector) && departmentIds.length > 0
+      && repo.readScope(connectorId, connector.connectionId).length === 0) {
+      repo.setReadScope(connectorId, connector.connectionId, departmentIds.map(id => ({ type: 'department' as const, id })), at, member.userId,
+        history(connectorId, 'read-scope', member.userId, at, { connectionId: connector.connectionId, departmentIds, userIds: [], from: 'starting-values' }))
+    }
+    for (const [businessId, depts] of deptsOf) {
+      const install = repo.install(businessId)
+      const roles = install ? Object.keys(shelf.find(member.companyId, businessId, install.version)?.pkg.manifest.roles ?? {}) : []
+      const managers = [...new Set(depts.flatMap(d => handle.scopes.departmentManagerIds(d)))]
+        .filter(id => deps.isMember(member.companyId, id)).slice(0, 20)
+      if (managers.length === 0) continue
+      for (const role of roles) {
+        if (handle.pluginRoles.assignment(businessId, role) === null) handle.pluginRoles.assign(businessId, role, managers, at, member.userId)
+      }
+    }
+  }
+
+  /** Installed business plugins that use connector `connectorId`. */
+  function businessesUsing(companyId: string, connectorId: string): string[] {
+    return companyData.forCompany(companyId).plugins.installs()
+      .filter(i => shelf.find(companyId, i.pluginId, i.version)?.pkg.manifest.uses?.connector.id === connectorId)
+      .map(i => i.pluginId)
   }
 
   return {
@@ -215,6 +273,20 @@ export function createPluginService(deps: PluginServiceDeps) {
           history(pluginId, 'mapping', member.userId, at, { version: 1, from: 'recommended' }))
       }
       if (row.enabled && manifest.role === 'business') storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
+      if (!before && manifest.role === 'business') {
+        // 「使い始める」 is 「オン」 too (管理画面の見直し 2-4): a first install that can run is turned on
+        // at once, as PUT …/enabled would; one that cannot stays off and says why on the page.
+        // Read back: adding the recommended mapping moved the install's mapping version.
+        const on = { ...(repo.install(pluginId) ?? row), enabled: true }
+        const p = await packageProblem(member.companyId, on, false)
+        if (!p.problem && !typeExtensionConflict(member.companyId, found.pkg)) {
+          repo.saveInstall(on, history(pluginId, 'enable', member.userId, at, { version: on.version, from: 'install' }))
+          storeBusinessTypes(companyData, member.companyId, found.pkg.types, at)
+          deps.recordsOn?.(member)
+        }
+        if (manifest.uses) seedStartingValues(member, manifest.uses.connector.id, [pluginId])
+      }
+      if (!before && manifest.role === 'connector') seedStartingValues(member, pluginId, businessesUsing(member.companyId, pluginId))
       return ok(await detail(member.companyId, pluginId))
     },
 
@@ -247,6 +319,8 @@ export function createPluginService(deps: PluginServiceDeps) {
           repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version }))
           // Its types are the company's from now on (owner decision 2026-11-01), import or not.
           storeBusinessTypes(companyData, member.companyId, p.found.pkg.types, at)
+          // Its types and operations need the records feature (管理画面の見直し 2-4).
+          deps.recordsOn?.(member)
         } else {
           repo.saveInstall(row, history(pluginId, 'disable', member.userId, at, {}))
         }
@@ -416,6 +490,8 @@ export function createPluginService(deps: PluginServiceDeps) {
     }
     repo.addMapping({ pluginId, version, text, createdAt: at, createdBy: member.userId },
       history(pluginId, action, member.userId, at, { version, ...extra }))
+    // The first mapping names the departments the business is used in: the starting values follow it.
+    if (version === 1) seedStartingValues(member, found.pkg.manifest.uses.connector.id, [pluginId])
     return ok(await detail(member.companyId, pluginId))
   }
 }
