@@ -17,7 +17,9 @@ const day = (n: number) => addDays(now.date, n)
 const base = { type: 'task', typeLabel: 'タスク', version: 2, tags: [] as string[], waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, stateLabel: null }
 const it = (over: Partial<TaskListItem> & Pick<TaskListItem, 'id' | 'title' | 'turn'>): TaskListItem => ({ ...base, state: 'todo', due: null, ...over })
 let data: TaskListData = {
-  available: true, listDepartmentIds: null, me: 'u-me', members: [{ id: 'u-me', name: '佐藤' }, { id: 'u-tanaka', name: '田中' }, { id: 'u-abe', name: '阿部' }],
+  available: true, listDepartmentIds: null, me: 'u-me',
+  // 営業部 (the department on screen) makes 案件: the meeting question says 「案件」, never 「まとまり」.
+  bundleKinds: { core: { type: 'project', name: 'プロジェクト', source: 'core' }, departments: [{ departmentId: 'd-sales', folder: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' } }], kinds: [] }, members: [{ id: 'u-me', name: '佐藤' }, { id: 'u-tanaka', name: '田中' }, { id: 'u-abe', name: '阿部' }],
   items: [
     it({ id: 'task-acc001', title: 'セキュリティのチェックシート', turn: 'acceptance', state: 'awaiting_acceptance', due: day(5) }),
     it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応', typeLabel: '案件' } }),
@@ -27,13 +29,15 @@ let data: TaskListData = {
     it({ id: 'task-far001', title: '来期の研修メニューを見直す', turn: 'mine', due: day(40), tags: ['社内'] }),
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
+    // Asked of someone else: no box, the 「人に頼んだもの」 mark.
+    it({ id: 'task-ask001', title: 'セキュリティ資料を送る', turn: 'others', state: 'awaiting_acceptance', waitingFor: '田中さんに頼んだ・引き受け待ち', askedOfOthers: true }),
     it({ id: 'task-done01', title: '経費の申請', turn: 'done', state: 'done', finishedAt: new Date().toISOString() }),
-    it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-c', label: 'C社 打ち合わせ' } }),
+    it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どの案件・プロジェクトの会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-c', label: 'C社 打ち合わせ' } }),
     // The server suggests the 相手's one open まとまり: 「『…』の会議ですか？」.
     it({ id: 'meeting-00cc31', type: 'meeting', typeLabel: '会議', title: 'E社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: '『E社 研修導入』の会議ですか？', needsBundle: true, bundleGroup: { key: 'g-e', label: 'E社' }, suggestedBundle: { id: 'deal-e00001', title: 'E社 研修導入' } }),
     // Two meetings of one series (the server's group): one row 「まとまりを選ぶ会議 2件」.
-    it({ id: 'meeting-00bb21', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第1回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
-    it({ id: 'meeting-00bb22', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第2回', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
+    it({ id: 'meeting-00bb21', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第1回', turn: 'mine', state: 'read', waitingFor: 'どの案件・プロジェクトの会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
+    it({ id: 'meeting-00bb22', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第2回', turn: 'mine', state: 'read', waitingFor: 'どの案件・プロジェクトの会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
   ],
 }
 const changed = emitter<{ companyId: string }>()
@@ -94,7 +98,7 @@ function Preview() {
     <main className="flex h-screen flex-col bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
       <div className="flex min-h-0 flex-1">
-        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" list={list} aiTurns={null} activeRecordId={opened} onOpen={setOpened}
+        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" askFolder="営業部" list={list} aiTurns={null} activeRecordId={opened} onOpen={setOpened}
           onConsult={t => { acted.push(`consult ${t.id}`); document.getElementById('acted')!.textContent = acted.join(',') }} />
         {opened && <div data-testid="card">カード：{opened}</div>}
       </div>

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
-import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '../../../../shared/tasks'
+import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { actOnTask, createTask, declineMeetingBundle, linkFileToTask, linkMeetingBundle } from '../api'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { bundleListWord, companyNow, companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { bundleListWord, companyNow, departmentBundleKind,companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
 import { CALM } from '../../../../shared/thing-words'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { BundleChooser } from './BundleChooser'
@@ -55,7 +55,9 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const events = useMemo(() => (shownTag === null ? listEvents(calendar?.events ?? [], now) : []), [calendar, now, shownTag])
   const kinds = list.data?.bundleKinds
   // The one line's ［〇〇］: what the department on screen makes (全社: the company's own kind).
-  const deptKind = kinds ? (kinds.departments.find(d => d.folder === askFolder)?.kind ?? kinds.core) : null
+  const deptKind = departmentBundleKind(kinds, askFolder)
+  // 「どの〇〇の会議ですか？」 in the department's kind's name (never 「まとまり」).
+  const meetingWords = meetingBundleWords(deptKind?.name ?? 'プロジェクト')
   // 「〇〇ごと」: the kinds in the member's list; with none linked, the department on screen's kind.
   const bundleWord = useMemo(() => bundleListWord(items, deptKind?.name ?? kinds?.core.name), [items, deptKind, kinds])
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now, deptKind?.name ?? kinds?.core.name), [items, events, mode, now, shownTag, deptKind, kinds])
@@ -134,8 +136,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       // 「『…』の会議ですか？」: はい links the suggested one (the same link as choosing by hand).
       const s = i.suggestedBundle
       if (s) extra.push({ label: 'はい', run: () => void yesBundle(i, s.id) })
-      extra.push({ label: s ? 'ちがう／選ぶ' : 'まとまりを選ぶ', run: () => setChoosing(i) })
-      extra.push({ label: 'まとまりはない', run: () => void noBundle(i) })
+      extra.push({ label: s ? 'ちがう／選ぶ' : meetingWords.choose, run: () => setChoosing(i) })
+      extra.push({ label: meetingWords.none, run: () => void noBundle(i) })
     }
     if (i.type === 'meeting' && i.turn === 'ai' && i.state === 'received' && meetingActions && ai?.state !== 'running') {
       extra.push({ label: '自分で読み取る', run: () => meetingActions.read(i.id) })
@@ -143,7 +145,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     }
     return (
       <TaskRow
-        key={i.id} item={i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
+        key={i.id} item={i.needsBundle && !i.suggestedBundle ? { ...i, waitingFor: meetingWords.ask } : i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
         onOpen={onOpen}
         onFinish={i.check ? () => press(i) : null}
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
@@ -165,7 +167,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
           className="flex w-full items-start gap-2 rounded-lg px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-800">
           <Briefcase size={15} className="mt-[2px] shrink-0 text-gray-400" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] text-gray-800 dark:text-zinc-200">まとまりを選ぶ会議 {r.items.length}件</span>
+            <span className="block truncate text-[13px] text-gray-800 dark:text-zinc-200">{meetingWords.group(r.items.length)}</span>
             <span className="block truncate text-[11px] text-gray-500 dark:text-zinc-400">{r.label}</span>
           </span>
           {open ? <CaretDown size={10} className="mt-1.5" /> : <CaretRight size={10} className="mt-1.5" />}
@@ -198,7 +200,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     <>
       {choosing && (
         <BundleChooser
-          companyId={companyId} meetingTitle={choosing.title}
+          companyId={companyId} meetingTitle={choosing.title} word={deptKind?.name ?? 'プロジェクト'}
           onChoose={async b => {
             const r = await linkMeetingBundle(companyId, choosing.id, b.id)
             list.reload()

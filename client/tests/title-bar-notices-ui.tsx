@@ -53,7 +53,7 @@ function Preview() {
   })
   const notices = useNotices('co-preview')
   const meetings: MeetingTurnRow[] = withMeetings ? [
-    { id: 'meeting-read01', title: 'A社 定例', kind: 'bundle', text: 'どのまとまり（案件など）の会議か選んでください', needsPerson: true, ai: null, actions: [{ label: 'まとまりを選ぶ', run: () => setOpened('choose meeting-read01') }] },
+    { id: 'meeting-read01', title: 'A社 定例', kind: 'bundle', text: 'どの案件・プロジェクトの会議か選んでください', needsPerson: true, ai: null, actions: [{ label: '案件を選ぶ', run: () => setOpened('choose meeting-read01') }] },
     { id: 'meeting-new001', title: 'B社 打合せ', kind: 'minutes', text: 'AI が読み取っています', needsPerson: false, ai: null, actions: [] },
     { id: 'meeting-new002', title: 'C社 商談', kind: 'minutes', text: 'AI が読み取れませんでした：議事録が空でした', needsPerson: true, ai: null, actions: [{ label: '自分で読み取る', run: () => setOpened('read meeting-new002') }] },
   ] : []

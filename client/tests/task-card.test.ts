@@ -40,6 +40,22 @@ test('the assignee completes from 未着手 (知らせるだけ), or says whose 
   assert.equal(asRequester.start, undefined)
 })
 
+// Owner 2026-11-02: tags are organising labels, not work — a tag change showed as a 経緯 line.
+// Catches the line coming back, and the OK line shifting onto the wrong entry once one is hidden.
+test('a tag change is not a line of 経緯 (the ledger keeps it); the other lines keep their words', () => {
+  const entries = [
+    { version: 5, action: 'complete', actorId: ME, actorKind: 'human', at: '2026-11-05T02:00:00.000Z', note: '', fromState: 'in_progress', toState: 'done',
+      changes: [{ field: 'ok_by', before: null, after: BOSS }, { field: 'ok_note', before: null, after: '口頭で' }] },
+    { version: 6, action: 'set_tags', actorId: ME, actorKind: 'human', at: '2026-11-05T03:00:00.000Z', note: '', fromState: null, toState: null, changes: [{ field: 'tags', before: null, after: '["営業"]' }] },
+    { version: 4, action: 'set_due', actorId: BOSS, actorKind: 'human', at: '2026-11-05T01:00:00.000Z', note: '', fromState: null, toState: null, changes: [] },
+  ] as unknown as LedgerEntry[]
+  const c = card(task('done', { assignee: ME, requested_by: BOSS, ok_by: BOSS, ok_note: '口頭で' }), { entries })
+  assert.deepEqual(c.history.map(h => h.version), [5, 4])
+  assert.equal(c.history[0].text, '佐藤さんが阿部さんの了承を得たとして完了にしました（口頭で）')
+  assert.equal(c.history[1].text, '阿部：期限を変える')
+  assert.ok(!c.history.some(h => h.text.includes('タグ')))
+})
+
 test('the AI\'s own steps are never offered; 引き受ける only to the assignee', () => {
   const preparing = offered(card(task('preparing', { assignee: ME, requested_by: BOSS })))
   assert.equal(preparing.finish_prep, undefined)

@@ -99,6 +99,13 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   "This week" ends on Sunday; on a Saturday or Sunday it runs to next Sunday, so tomorrow never
   folds. A due with a time today that has passed is 期限切れ. Meetings are read, never made into
   tasks (`calendar.md`); a tag filter hides them.
+- **Icons in the left column** (owner 2026-11-02): a square box only means ☐ = pressable (`check`),
+  green ✓ = done (press: やり直す), and the amber eye box = being checked. A task the member asked of
+  someone else, not finished (`askedOfOthers`, `classifyTasks`: requested_by = them, assignee
+  another) shows the grey 「人に頼んだもの」 mark (User + ArrowBendUpRight) — the task icon there read
+  as 「もう済んだ」. The task kind's icon (`ThingIcon` `task`) is `ListChecks` (the やること tab's
+  icon), not a ticked box, everywhere (card chip, ⌘K, search, links). Tests: `tasks-list.test.ts`,
+  `tasks-list.spec.ts` (「人に頼んだもの」, not a box).
 - Rows (言葉の決まり 3b: what to do next, never a state word): ☑ or the kind's icon (`ThingIcon`), title,
   「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
   whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is
@@ -195,9 +202,11 @@ what is linked **directly**, one group per kind by its plain name (`typeLabel` =
 faint and struck through. A file's own 「つながっているもの」 uses the same column. Its 「AIへの相談」
 group lists this PC's consultations whose main topic is the record (`topicRecordId`;
 `features/chat/recordConsultationsStore.ts`, read when a screen first asks and on every history
-change, given by AppShell) — each opens with `chat.openConsultation` — and offers ［相談する］ (the
-latest, else a new one) and ［＋新しい相談］ (`chat.consultAbout` with `fresh`;
-`src/shared/ui/consultationLinks.tsx`).
+change, given by AppShell) — each opens with `chat.openConsultation` — and offers **one** button
+(owner 2026-11-02): with ≥ 1 consultation listed only ［＋新しい相談］ (`chat.consultAbout` with
+`fresh`; the rows open the existing ones), with none only ［相談する］ (starts one;
+`src/shared/ui/consultationLinks.tsx`). The list row's hover 「相談する」 (latest, else new) is
+unchanged. Tests: `record-card.spec.ts`, `task-card.spec.ts`.
 
 A **meeting** and a **来た連絡** get their own parts in the record card (`RecordDetails.tsx`, built by
 main with `recordDetailOf`, `client/shared/record-details.ts`; the fields they show are not repeated
@@ -224,7 +233,7 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
-- 「相談する」 on the card (its 「AIへの相談」 group on the right, with 「＋新しい相談」 = `fresh`, and the consultations about it listed there; the card also shows 見られる人 top right — `tasks:card` asks `POST …/viewers` for that task and passes only its answer) and on a list row (on hover) run `chat.consultAbout`
+- 「相談する」 on the card (its 「AIへの相談」 group on the right: 「相談する」 while none exists, else only 「＋新しい相談」 = `fresh`, and the consultations about it listed there; the card also shows 見られる人 top right — `tasks:card` asks `POST …/viewers` for that task and passes only its answer) and on a list row (on hover) run `chat.consultAbout`
   (`commands.md`; composed by AppShell, `consultAbout`). The chat pane opens the member's most
   recent consultation whose main topic is the task (`topicRecordId` in the history and its
   summary: this PC's consultations, the member's own); without one it starts 「<title> の相談」
@@ -253,12 +262,35 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
   (「相談する」 starts one with the topic, then opens it instead), `task-card.spec.ts`,
   `tasks-list.spec.ts` (the buttons).
 
+## Tags on the card (owner 2026-11-02: あとから足す・外す)
+
+- The card's 「タグ」 field (`TagField.tsx`, pure rules `tagEditor.ts` + `tagEditor.test.ts`): read
+  only, or — when `canSetTags` (the type's `set_tags` allows the member: requester, assignee; not
+  a finished task) — pressing it opens an inline editor: the tags as chips with × (removes one),
+  an input offering the tags in use that contain what is typed (most used first, loosely spelled:
+  `tagKey`; the task's own left out). **Picking a tag in use is the main path** (no 「営業」 next to
+  「営業部」): Enter takes the highlighted candidate; a new word is offered as 「「〇〇」を新しいタグにする」
+  and Enter adds it only when nothing in use matches. A word spelled like a tag in use is added as
+  that tag. Checked like the server (`normalizeTag`, 40 characters, 20 tags) before sending; the
+  server's refusal shows in its words. Each change is one `set_tags` with the whole list.
+- When the typed word is the whole name of a 案件・プロジェクト the member reads (`tasks:bundles`, of
+  the department's kind; not the one linked), a line says 「『〇〇』は案件の名前です。案件につなぎますか？」 with
+  ［案件につなぐ］ — the same `bundle` link as ［〇〇につなぐ］ (offered only while `canSetBundle`);
+  adding it as a tag stays possible.
+- **Tag changes are not in 経緯** (they organise, they are not work): `labelOnlyEntry` /
+  `historyEntries` (`client/shared/record-views.ts`) leave out an entry of an action that only sets
+  `tags` fields (no state, no link) from the card's and the record card's 経緯 and from 「AI が反映
+  しました」. The ledger keeps the entry (undo, audit, replay; `records.md` "Tags"). Test:
+  `task-card.test.ts`.
+- Tests: `task-card.spec.ts` (「タグ」: ×, picking from tags in use, a new word, the refusal, AI
+  suggestions inside, read only when done; the 案件 hint).
+
 ## Tag suggestions (owner 2026-11-02: 「haikuとか使って」)
 
 - Where: the one line (`QuickAdd`, `useTagSuggestions`: asked 0.7 s after typing pauses, only the
-  newest answer kept, typing never waits) and the card (`TagSuggestions.tsx`: 「タグの候補を出す」 on
-  the member's press, offered when `canSetTags` — the type's `set_tags` allows the member and the
-  task is not finished; a picked tag runs `set_tags` with the task's tags plus it). Tags in use =
+  newest answer kept, typing never waits) and inside the card's tag editor (`TagField.tsx`: 「AI に
+  タグの候補を出してもらう」 on the member's press, while some tag in use is not on the task; a picked
+  tag runs `set_tags` with the task's tags plus it). Tags in use =
   the member's list (`tagCounts`). **Only suggestions**: nothing is added until the member picks.
 - `tasks:suggestTags(companyId, title, tagsInUse)` → `{ source: 'ai' | 'local', tags }` (main,
   `electron/features/tasks/tag-suggest.ts`; pure parts `client/shared/tag-suggest.ts`). Asked
@@ -277,7 +309,7 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 - Tests: `client/tests/tag-suggest.test.ts` (only the title and tags, the company token and
   relay, the registry's model; only tags in use; every fallback; nothing sent without tags),
   `task-card.test.ts` (`canSetTags`), `tasks-list.spec.ts` (a variant suggested, added only when
-  picked), `task-card.spec.ts` (asked on the press, `set_tags` with the existing tags).
+  picked), `task-card.spec.ts` (asked on the press inside the tag editor, `set_tags` with the existing tags).
 
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 
@@ -334,19 +366,28 @@ readable by the member, never a private folder's file for a task outside it (one
   `meetingActions`, composed by `AppShell` from the minutes feature.
 - What the AI made shows where the member works: homework tasks in the list, drafts and approval
   requests in a task's card (「AI が用意したもの」), and the server's notices.
-- 「どのまとまりの会議ですか？」 is an item of あなたの番: `tasks:list` reads the server's
+- **No 「まとまり」 on screen** (owner 2026-11-02, concrete kind names only): every word of this
+  question names the department on screen's kind (`departmentBundleKind` in `model.ts` — the
+  department's kind else the core kind under the company's name, default 「プロジェクト」 — the same
+  as ［〇〇につなぐ］), through `meetingBundleWords(word)` (`client/shared/tasks.ts`): 営業部 →
+  「どの案件の会議ですか？」「案件を選ぶ」「案件はない（社内の会議など）」「案件を選ぶ会議 3件」. The list,
+  `BundleChooser`, `MeetingBundleBar` and the title bar's buttons take it from the screen; main's
+  `MEETING_NEEDS_BUNDLE_TEXT` (it knows no department) is said again by the list. The chat's card
+  (`MinutesBundleChoiceCard`) names its candidates' kinds (`bundleWords`). Below, 〇〇 = that word.
+- 「どの〇〇の会議ですか？」 is an item of あなたの番: `tasks:list` reads the server's
   `GET /me/minutes/bundle-questions` (`minutes.md` "The まとまり question": the server decides — the
-  assignee's meetings with someone from outside, read within the company's days, no まとまり, not
-  closed) and each becomes `needsBundle` (「どのまとまり（案件など）の会議か選んでください」) with its
-  `bundleGroup`, offering 「まとまりを選ぶ」 — `BundleChooser` lists the unfinished まとまり the member
+  assignee's meetings with someone from outside, read within the company's days, no bundle, not
+  closed) and each becomes `needsBundle` (「どの〇〇の会議か選んでください」) with its
+  `bundleGroup`, offering 「〇〇を選ぶ」 — `BundleChooser` lists the unfinished bundles the member
   reads (`tasks:bundles`, final states of each type left out) and links the chosen one
-  (`minutes:linkBundle`; nothing goes outside) — and 「まとまりはない」 (`minutes:noBundle`, also in
-  the chooser). Two or more of one group are one row 「まとまりを選ぶ会議 n件」 that opens (`listRows`,
-  `model.ts`).
+  (`minutes:linkBundle`; nothing goes outside) — and 「〇〇はない」 (`minutes:noBundle`, also in
+  the chooser). Two or more of one group are one row 「〇〇を選ぶ会議 n件」 that opens (`listRows`,
+  `model.ts`). Tests: `tasks-list.spec.ts` (案件 in 営業部, no 「まとまり」), `notifications.test.ts`,
+  `minutes.spec.ts`.
 - **A department without the list** (`tasksShown` false): the same meetings reach the title bar
   instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
   picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already
-  reads, with the runner's state; AppShell gives each its buttons (まとまりを選ぶ → `BundleChooser`,
+  reads, with the runner's state (`meetingTurns(…, word)`); AppShell gives each its buttons (〇〇を選ぶ → `BundleChooser`,
   自分で読み取る / 今は読まない for a received meeting only, もう一度 / 人に渡す). The minutes first message
   tells the AI, when none is linked, to leave the まとまり's fields and the meeting log and finish the
   rest; choosing the まとまり afterwards gives just that part back to the AI once (`minutes.md` "A

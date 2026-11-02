@@ -78,6 +78,8 @@ installElectronAPI({
   ] }),
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
+    // A tag the server refuses: the card shows its words.
+    if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
     return { success: true, recordId }
   },
@@ -99,7 +101,7 @@ function Preview() {
         shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
         onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
-        consultations={[{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
+        consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} />
     </main>
   )

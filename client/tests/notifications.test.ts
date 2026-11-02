@@ -150,7 +150,7 @@ test('a department without the task list still gets its meetings: a まとまり
     { recordId: 'meeting-new002', state: 'failed', reason: '議事録が空でした', canRetry: true, canHand: false },
   ])
   assert.deepEqual(turns.map(t => [t.id, t.kind, t.needsPerson, t.text]), [
-    ['meeting-read01', 'bundle', true, 'どのまとまり（案件など）の会議か選んでください'],
+    ['meeting-read01', 'bundle', true, 'どの案件・プロジェクトの会議か選んでください'],
     // The 相手's one open まとまり, suggested (はい links it; nothing is linked here).
     ['meeting-read02', 'bundle', true, '『A社 研修導入』の会議ですか？'],
     ['meeting-new001', 'minutes', false, 'AI が読み取っています'],
@@ -158,6 +158,8 @@ test('a department without the task list still gets its meetings: a まとまり
     // Nothing heard from the runner (another window, the setting off): never silent.
     ['meeting-new003', 'minutes', true, '議事録が届きました'],
   ])
+  // In the department's kind's name: the umbrella word 「まとまり」 never shows (owner 2026-11-02).
+  assert.equal(meetingTurns(items, [], '案件')[0].text, 'どの案件の会議か選んでください')
   assert.deepEqual(turns.find(t => t.id === 'meeting-read02')?.suggestedBundle, { id: 'deal-abcdef01', title: 'A社 研修導入' })
 })
 

@@ -68,6 +68,11 @@ export interface TaskListItem {
    * The server still decides each press.
    */
   check?: { action: 'complete' } | { action: 'request_review'; reviewer: string } | { action: 'reopen' }
+  /**
+   * A task the member asked of someone else, not finished (requested_by = them, assignee another):
+   * its row shows 「人に頼んだもの」, not the task's icon, which read as a ticked box (owner 2026-11-02).
+   */
+  askedOfOthers?: true
 }
 
 const COMPLETE_FROM = new Set(['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'])
@@ -127,8 +132,27 @@ export type TaskProposalsResult =
   | { success: true; proposals: TaskProposal[] }
   | { success: false; offline: boolean; error: string }
 
-/** The words of the 「あなたの番」 item for a meeting read without a まとまり. */
-export const MEETING_NEEDS_BUNDLE_TEXT = 'どのまとまり（案件など）の会議か選んでください'
+/**
+ * The words of the question 「どの〇〇の会議ですか？」 for a meeting read without a bundle, in the
+ * kind's own name (`word`: the department's kind — 「案件」, 「プロジェクト」); the umbrella word
+ * 「まとまり」 never shows (owner 2026-11-02, records.md "Bundle kinds").
+ */
+export function meetingBundleWords(word: string) {
+  return {
+    question: `どの${word}の会議ですか？`,
+    ask: `どの${word}の会議か選んでください`,
+    choose: `${word}を選ぶ`,
+    none: `${word}はない`,
+    noneLong: `${word}はない（社内の会議など）`,
+    declined: `${word}はない、と決めた会議です。あとからでも選べます。`,
+    group: (n: number) => `${word}を選ぶ会議 ${n}件`,
+  }
+}
+/**
+ * The 「あなたの番」 item's words as main places it (it knows no department); the screens say it
+ * again in the department's kind (`meetingBundleWords(word).ask`).
+ */
+export const MEETING_NEEDS_BUNDLE_TEXT = meetingBundleWords('案件・プロジェクト').ask
 /** The words when the server suggests one まとまり. */
 export const meetingSuggestedBundleText = (title: string) => `『${title}』の会議ですか？`
 
@@ -287,6 +311,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
+      ...(r.type === 'task' && turn !== 'done' && r.fields.requested_by === src.me && typeof r.fields.assignee === 'string' && r.fields.assignee !== src.me ? { askedOfOthers: true as const } : {}),
       // ☑ on the member's own rows (and a check waiting for them), never on what they asked of someone else.
       ...((turn !== 'ai' && (turn !== 'others' || r.fields.assignee === src.me)) && checkOf(r, src.me) ? { check: checkOf(r, src.me) } : {}),
     })

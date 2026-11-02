@@ -61,6 +61,17 @@ test('accepting and finishing from the list; a row opens its card', async ({ pag
   expectNoPageErrors(state)
 })
 
+// Owner 2026-11-02: a task asked of someone else showed the task icon in a box-like shape, read as
+// 「もう済んだ」. It shows 「人に頼んだもの」, and no row has a box it cannot press.
+test('a task asked of someone else shows 「人に頼んだもの」, not a box', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const row = page.getByTestId('task-row').filter({ hasText: 'セキュリティ資料を送る' })
+  await expect(row.getByRole('img', { name: '人に頼んだもの' })).toBeVisible()
+  await expect(row.getByLabel('やること', { exact: true })).toHaveCount(0)
+  await expect(row.getByRole('button', { name: /を完了にする/ })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('the one line adds a task with its due and tags; a tag narrows the list', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const input = page.getByRole('textbox', { name: 'やることを足す' })
@@ -89,7 +100,7 @@ test('担当 another person makes it 「頼む」 with 「終わったら」; th
   await input.fill('見積を直す')
   const chips = page.getByTestId('quick-add-chips')
   await chips.getByRole('button', { name: '担当 自分' }).click()
-  await page.getByRole('button', { name: '田中さん' }).click()
+  await chips.getByRole('button', { name: '田中さん' }).click()
   await expect(chips.getByRole('button', { name: '田中さんに頼む' })).toBeVisible()
   await expect(chips.getByRole('button', { name: '終わったら：知らせるだけ' })).toBeVisible()
   await chips.getByRole('button', { name: '終わったら：知らせるだけ' }).click()
@@ -135,10 +146,12 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
 test('a meeting read without a まとまり asks in あなたの番; choosing links it and the item goes', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const mine = page.getByRole('region', { name: 'あなたの番' })
-  await expect(mine).toContainText('どのまとまり（案件など）の会議か選んでください')
-  await mine.getByTestId('task-row').filter({ hasText: 'C社 打ち合わせ' }).getByRole('button', { name: 'まとまりを選ぶ', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'どのまとまりの会議ですか？' })
-  await dialog.getByLabel('まとまりを探す').fill('研修')
+  // In the department's kind's name (営業部 → 案件), never 「まとまり」 (owner 2026-11-02).
+  await expect(mine).toContainText('どの案件の会議か選んでください')
+  await expect(mine).not.toContainText('まとまり')
+  await mine.getByTestId('task-row').filter({ hasText: 'C社 打ち合わせ' }).getByRole('button', { name: '案件を選ぶ', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'どの案件の会議ですか？' })
+  await dialog.getByLabel('案件を探す').fill('研修')
   await dialog.getByRole('button', { name: /C社 研修導入/ }).click()
   await expect(page.locator('#acted')).toHaveText('meeting-00aa11:bundle deal-c00001')
   await expect(dialog).toHaveCount(0)
@@ -151,7 +164,7 @@ test('「『…』の会議ですか？」: はい links the suggested まとま
   const row = page.getByRole('region', { name: 'あなたの番' }).getByTestId('task-row').filter({ hasText: 'E社 打ち合わせ' })
   await expect(row).toContainText('『E社 研修導入』の会議ですか？')
   await row.getByRole('button', { name: 'ちがう／選ぶ' }).click()
-  const dialog = page.getByRole('dialog', { name: 'どのまとまりの会議ですか？' })
+  const dialog = page.getByRole('dialog', { name: 'どの案件の会議ですか？' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: '閉じる' }).click()
   await expect(page.locator('#acted')).toHaveText('')
@@ -161,24 +174,24 @@ test('「『…』の会議ですか？」: はい links the suggested まとま
   expectNoPageErrors(state)
 })
 
-test('meetings of one series are one row that opens; 「まとまりはない」 closes a question without choosing', async ({ page }) => {
+test('meetings of one series are one row 「案件を選ぶ会議 n件」 that opens; 「案件はない」 closes a question without choosing', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const mine = page.getByRole('region', { name: 'あなたの番' })
   const group = mine.getByTestId('bundle-group')
-  await expect(group).toContainText('まとまりを選ぶ会議 2件')
+  await expect(group).toContainText('案件を選ぶ会議 2件')
   await expect(group).toContainText('D社 定例')
   await expect(mine).not.toContainText('D社 定例 第1回')
-  await group.getByRole('button', { name: /まとまりを選ぶ会議 2件/ }).click()
+  await group.getByRole('button', { name: /案件を選ぶ会議 2件/ }).click()
   await expect(group.getByTestId('task-row')).toHaveCount(2)
-  await group.getByTestId('task-row').filter({ hasText: 'D社 定例 第1回' }).getByRole('button', { name: 'まとまりはない', exact: true }).click()
+  await group.getByTestId('task-row').filter({ hasText: 'D社 定例 第1回' }).getByRole('button', { name: '案件はない', exact: true }).click()
   await expect(page.locator('#acted')).toHaveText('meeting-00bb21:no bundle')
   // One left of the series: an ordinary row again.
   await expect(mine.getByTestId('bundle-group')).toHaveCount(0)
   const second = mine.getByTestId('task-row').filter({ hasText: 'D社 定例 第2回' })
   await expect(second).toHaveCount(1)
   // From the chooser too.
-  await second.getByRole('button', { name: 'まとまりを選ぶ', exact: true }).click()
-  await page.getByRole('dialog', { name: 'どのまとまりの会議ですか？' }).getByRole('button', { name: 'まとまりはない（社内の会議など）' }).click()
+  await second.getByRole('button', { name: '案件を選ぶ', exact: true }).click()
+  await page.getByRole('dialog', { name: 'どの案件の会議ですか？' }).getByRole('button', { name: '案件はない（社内の会議など）' }).click()
   await expect(page.locator('#acted')).toHaveText('meeting-00bb21:no bundle,meeting-00bb22:no bundle')
   await expect(mine).not.toContainText('D社 定例')
   expectNoPageErrors(state)

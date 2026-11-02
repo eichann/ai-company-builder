@@ -66,7 +66,8 @@ import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
-import { companyPathOf, listShownFor, tagCounts } from '../features/tasks/model'
+import { companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
+import { meetingBundleWords } from '../../shared/tasks'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
 import { BundleChooser } from '../features/tasks/components/BundleChooser'
@@ -322,7 +323,9 @@ export function AppShell() {
   const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
   const bundleKinds = taskList.data?.bundleKinds
-  const deptBundleKind = bundleKinds ? (bundleKinds.departments.find(d => d.folder === effectiveDeptFolder)?.kind ?? bundleKinds.core) : null
+  const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
+  const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
+  const meetingWords = meetingBundleWords(bundleWord)
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
@@ -331,7 +334,7 @@ export function AppShell() {
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
     const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
-      ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} onChoose={setChoosingBundle} onChanged={taskList.reload} />
+      ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} word={bundleWord} onChoose={setChoosingBundle} onChanged={taskList.reload} />
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
@@ -343,13 +346,13 @@ export function AppShell() {
     return readOnly
   }
   // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
-  const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? []).map(m => {
+  const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? [], bundleWord).map(m => {
     const actions: MeetingTurnRow['actions'] = []
     if (m.kind === 'bundle') {
       const s = m.suggestedBundle
       if (s) actions.push({ label: 'はい', run: () => void linkMeetingBundle(currentCompany.id, m.id, s.id).then(() => taskList.reload()) })
-      actions.push({ label: s ? 'ちがう／選ぶ' : 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
-      actions.push({ label: 'まとまりはない', run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
+      actions.push({ label: s ? 'ちがう／選ぶ' : meetingWords.choose, run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+      actions.push({ label: meetingWords.none, run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
     }
     if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
       actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
@@ -573,7 +576,7 @@ export function AppShell() {
 
       {choosingBundle && currentCompany && (
         <BundleChooser
-          companyId={currentCompany.id} meetingTitle={choosingBundle.title}
+          companyId={currentCompany.id} meetingTitle={choosingBundle.title} word={bundleWord}
           onChoose={async b => {
             const r = await linkMeetingBundle(currentCompany.id, choosingBundle.id, b.id)
             taskList.reload()

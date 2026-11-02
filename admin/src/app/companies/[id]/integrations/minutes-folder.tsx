@@ -60,7 +60,7 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
     setBusy(true)
     try {
       setView(await minutesApi.setBundleQuestionDays(companyId, days))
-      toast.success(`「どのまとまりの会議ですか？」を${days}日のあいだ出すようにしました。`)
+      toast.success(`「どの案件・プロジェクトの会議ですか？」を${days}日のあいだ出すようにしました。`)
     } catch (err) {
       toast.error(explain(err))
     } finally {
@@ -105,9 +105,9 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
           <p className="text-xs text-muted-foreground">
             「すべて」にすると、人事の面談など社内だけの会議の議事録も読み、出席したメンバーの宿題や決めたことにします。
           </p>
-          <h3 className="pt-2 text-sm font-medium">まとまりを聞く期間</h3>
+          <h3 className="pt-2 text-sm font-medium">どの案件・プロジェクトの会議かを聞く期間</h3>
           <Select value={String(data.bundleQuestionDays)} onValueChange={chooseDays} disabled={busy}>
-            <SelectTrigger className="w-64" aria-label="まとまりを聞く期間">
+            <SelectTrigger className="w-64" aria-label="どの案件・プロジェクトの会議かを聞く期間">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -117,7 +117,7 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            案件などのまとまりが決まらないまま読んだ社外の会議は、この日数のあいだ担当の人の「あなたの番」に「どのまとまりの会議ですか？」として出ます。過ぎたら一覧から消えます（会議のカードからは、あとでも選べます）。
+            案件・プロジェクトが決まらないまま読んだ社外の会議は、この日数のあいだ担当の人の「あなたの番」に「どの案件の会議ですか？」（部署の呼び方で）として出ます。過ぎたら一覧から消えます（会議のカードからは、あとでも選べます）。
           </p>
         </>
       ) : null}

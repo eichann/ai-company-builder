@@ -49,7 +49,7 @@ test('a department without the task list: meetings waiting for the member are in
   await expect(meetings).toContainText('会議：A社 定例')
   await expect(meetings).toContainText('AI が読み取れませんでした：議事録が空でした')
   await expect(meetings).not.toContainText('B社 打合せ')
-  await meetings.getByRole('button', { name: 'まとまりを選ぶ' }).click()
+  await meetings.getByRole('button', { name: '案件を選ぶ' }).click()
   await expect(page.locator('#opened')).toHaveText('choose meeting-read01')
   await turn.click()
   await page.getByRole('menu', { name: 'あなたの番' }).getByRole('button', { name: '自分で読み取る' }).click()

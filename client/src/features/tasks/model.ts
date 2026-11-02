@@ -6,6 +6,7 @@ import type { TaskListItem } from '../../../shared/tasks'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
+import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
 
 /** 番ごと ｜ 〇〇ごと (what the items belong to: 案件, プロジェクト…) ｜ 日付ごと. */
 export type ListMode = 'turn' | 'bundle' | 'date'
@@ -168,6 +169,15 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
  */
 export function bundleListWord(items: readonly TaskListItem[], companyWord = 'プロジェクト'): string {
   return bundleWords(items.map(i => i.bundle?.typeLabel), companyWord)
+}
+
+/**
+ * What the department on screen makes (`folder`; 全社 = none → the company's own kind), null until
+ * the kinds are read. Its name is the word of ［〇〇につなぐ］ and 「〇〇を選ぶ」.
+ */
+export function departmentBundleKind(kinds: BundleKindsResult | null | undefined, folder: string | null | undefined): BundleKind | null {
+  if (!kinds) return null
+  return kinds.departments.find(d => d.folder === folder)?.kind ?? kinds.core
 }
 
 /** Tags in use, most used first, with how many items carry each. */

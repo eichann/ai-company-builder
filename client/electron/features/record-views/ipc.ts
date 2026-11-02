@@ -13,7 +13,7 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
+  cardFields, historyEntries, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
@@ -191,7 +191,8 @@ function viewersOf(a: Answer, recordId: string): { viewers?: ViewersLabel } {
  */
 export function aiOnRecord(recordId: string, runs: AiRunView[], entries: LedgerEntry[], def: TypeDefinition | undefined, people: Record<string, string>): RecordCardView['ai'] {
   const working = runs.some(r => r.recordId === recordId && (r.state === 'running' || r.state === 'open'))
-  const newest = [...entries].sort((a, b) => b.version - a.version)[0]
+  // The newest change 経緯 shows (a tag change is not one).
+  const newest = historyEntries(entries, def)[0]
   const done = !working && newest?.actorKind === 'ai'
     ? { at: newest.at, text: historyLines([newest], def, people)[0].text.replace(/^AI：/, '') }
     : null
