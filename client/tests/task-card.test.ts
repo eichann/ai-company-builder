@@ -131,3 +131,23 @@ test('a record link\'s name and ids are checked before anything reaches the serv
   }
   assert.equal(calls, 0)
 })
+
+test('チームの進め方 on the card is the company\'s setting as the server answers it; unreadable reads as off', async () => {
+  const cardWith = async (switches: { status: number; body: unknown }) => {
+    const api = createTasksApi({
+      baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} },
+      fetch: (async (url: string) => {
+        const path = new URL(url).pathname
+        if (path === '/api/me') return new Response(JSON.stringify({ data: { id: ME } }), { status: 200 })
+        if (path.endsWith('/me/work-switches')) return new Response(JSON.stringify(switches.body), { status: switches.status })
+        if (path.endsWith('/records/item/task-0000aa')) return new Response(JSON.stringify({ data: { record: task('todo', { assignee: ME, requested_by: BOSS }), links: [] } }), { status: 200 })
+        return new Response(JSON.stringify({ data: { entries: [], types: [], runs: [] } }), { status: 200 })
+      }) as unknown as typeof fetch,
+    })
+    const r = await api.card('co1', 'task-0000aa')
+    return r.success ? r.card.teamMode : null
+  }
+  assert.equal(await cardWith({ status: 200, body: { data: { teamMode: { on: true } } } }), true)
+  assert.equal(await cardWith({ status: 200, body: { data: { teamMode: { on: false } } } }), false)
+  assert.equal(await cardWith({ status: 500, body: {} }), false)
+})

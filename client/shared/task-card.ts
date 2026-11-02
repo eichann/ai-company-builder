@@ -75,6 +75,8 @@ export interface TaskCardData {
   whenDone: 'notify' | 'check' | null
   /** The task's 案件 / プロジェクト (its `bundle` link), shown at its head rather than in 「つながっているもの」. */
   bundle: RecordViewSummary | null
+  /** The company's チームの進め方: the team's steps (返事待ち, 進めている印, 見てもらう, 差し戻す) are shown. */
+  teamMode: boolean
   /** The member may change the task's 案件 (its type's `bundle` link can be set by hand, the task not finished). */
   canSetBundle: boolean
   origin: TaskCardOrigin | null
@@ -120,6 +122,8 @@ export interface TaskCardSources {
   entries: LedgerEntry[]
   people: Record<string, string>
   runs: AiRunView[]
+  /** The company's チームの進め方 (`/me/work-switches` `teamMode.on`); absent = off. */
+  teamMode?: boolean
 }
 
 export function taskCardOf(src: TaskCardSources): TaskCardData {
@@ -212,6 +216,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
+    teamMode: src.teamMode === true,
     roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),

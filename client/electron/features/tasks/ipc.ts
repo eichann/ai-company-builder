@@ -33,6 +33,7 @@ import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary,
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
+import type { MyWorkSwitches } from '../../../../shared/types/work-switches'
 import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
@@ -159,9 +160,9 @@ export function createTasksApi(deps: TasksDeps) {
     async card(companyId: string, recordId: string): Promise<TaskCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return { success: false, offline: false, error: '入力が正しくありません。' }
       const id = encodeURIComponent(recordId)
-      const [me, item, history, defs, names, runs] = await Promise.all([
+      const [me, item, history, defs, names, runs, switches] = await Promise.all([
         myId(), call(companyId, 'GET', `/records/item/${id}`), call(companyId, 'GET', `/records/item/${id}/history`),
-        typeDefs(companyId), people(companyId), call(companyId, 'GET', '/ai-runs'),
+        typeDefs(companyId), people(companyId), call(companyId, 'GET', '/ai-runs'), call(companyId, 'GET', '/me/work-switches'),
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200 || !me) {
@@ -173,7 +174,9 @@ export function createTasksApi(deps: TasksDeps) {
       const detail = item.json?.data as RecordDetail
       const entries = history?.status === 200 ? (history.json?.data as { entries?: LedgerEntry[] }).entries ?? [] : []
       const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] }).runs ?? [] : []
-      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList }) }
+      // チームの進め方 is the company's (off by default, also when it cannot be read): how the card looks, not who may.
+      const teamMode = switches?.status === 200 && (switches.json?.data as MyWorkSwitches | undefined)?.teamMode?.on === true
+      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode }) }
     },
 
     async bundles(companyId: string): Promise<BundleChoicesResult> {

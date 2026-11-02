@@ -40,7 +40,7 @@ interface Props {
   onConsult?: (record: { id: string; title: string }) => void
   /** Tags in use in the member's list (most used first), for 「タグの候補」. */
   tagsInUse?: string[]
-  /** チームの進め方 (default on until the setting exists): off offers one's own steps only. */
+  /** チームの進め方, when the screen decides it; else the company's setting the card read. */
   team?: boolean
   /** The member changed something (the list reads again). */
   onChanged?: () => void
@@ -61,7 +61,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team = true, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -124,7 +124,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     companyId={companyId} bundleWord={bundleWord}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
