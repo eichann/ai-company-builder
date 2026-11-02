@@ -43,11 +43,17 @@ the machine is shared — CI runs all of it.
   (a push to main skips the macOS jobs since 2026-10-31; its PR ran them): seeds `1,2,3` / `101,102` / `201,202`, 3 members × 8 rounds. A failing seed prints
   its seed and operation log and reproduces locally with the same variables.
 - PRs run the harness only when sync's inputs change (`.github/scripts/changed-areas.sh`, list
-  `SYNC`): `client/electron/sync/`, `protected-config.ts`, `write-guard.ts`, `client/shared/`,
-  the harness and tests, `server/src/lib/{push-check,git-server}/`, `git-exec.ts`,
-  `server/src/templates/`, `shared/` (permission rules live in `shared/core` since R2; the list
-  still names the removed `server/src/lib/permissions.ts`, harmless), package manifests, the
-  lockfile and the workflow. When sync code starts importing a file outside those lists, add it.
+  `SYNC`): `client/electron/sync/`, `protected-config.ts`, `write-guard.ts`, the `client/shared`
+  and `shared/core` files sync imports (named one by one), the harness and tests,
+  `server/src/lib/{push-check,git-server}/`, `git-exec.ts`, `server/src/templates/`, package
+  manifests, the lockfile and the workflow. Renderer-only PRs never run it.
+  `.github/scripts/check-areas.mjs` (in "Lint (changed files)") follows the tests' imports with
+  esbuild and fails, naming the files, when sync starts importing one the list does not name:
+  add them to `SYNC`. Files read at run time rather than imported (the hook template) are named
+  by hand.
+- The harness stays on macOS: company folders live on APFS (case- and normalization-insensitive,
+  git's `core.ignorecase` / `precomposeunicode`), and the case-variant / NFD / rename scenarios
+  guard that; on Linux they would pass while guarding something else.
 
 ## The world
 

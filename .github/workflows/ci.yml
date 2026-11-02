@@ -5,6 +5,17 @@ name: CI
 # runs only the Linux jobs (the PR already ran the macOS ones; macOS runners are
 # scarce and a full run per merge queued the next PR's checks). The nightly
 # schedule and a manual run run every job with the full soak.
+#
+# macOS runners are the bottleneck, so only what needs a Mac runs on one: the
+# client tests that depend on macOS (client-tests.mjs, list MACOS) and the
+# Swift tests, the sync harness, the performance baselines and the universal
+# git merge. Everything else runs on ubuntu.
+#
+# Where the macOS jobs run (job `changes`, output `mac-runner`): the repository
+# variable MAC_RUNNER names a self-hosted Mac's runner label; unset, they run
+# on GitHub's macos-latest. Pull requests from forks always go to macos-latest,
+# never to the self-hosted Mac (setup and the runner-side guard:
+# .claude/rules/deployment.md "Self-hosted Mac runner").
 on:
   pull_request:
     # next/** are integration branches (e.g. next/sales-meeting): their PRs get the same checks.
@@ -41,11 +52,18 @@ jobs:
     outputs:
       sync: ${{ steps.areas.outputs.sync }}
       client: ${{ steps.areas.outputs.client }}
+      clientmac: ${{ steps.areas.outputs.clientmac }}
       ui: ${{ steps.areas.outputs.ui }}
       perf: ${{ steps.areas.outputs.perf }}
       universal: ${{ steps.areas.outputs.universal }}
       server: ${{ steps.areas.outputs.server }}
       admin: ${{ steps.areas.outputs.admin }}
+      # The runner label for every macOS job. The self-hosted Mac
+      # (vars.MAC_RUNNER) only for code from this repository: a push, the
+      # nightly / manual run, or a pull request whose branch is in this
+      # repository. A fork's pull request is never sent to it. A job reading
+      # this output falls back to macos-latest when it is missing.
+      mac-runner: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.MAC_RUNNER || 'macos-latest' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,36 +84,46 @@ jobs:
       # shared, server, client: tsc --noEmit; admin: next typegen && tsc --noEmit
       - run: pnpm -r typecheck
 
-  test-client:
-    name: Client tests (macOS)
-    # macOS on purpose. The desktop client ships for macOS (and Windows), and
-    # its POSIX spawn wrappers (electron/voice-process.ts,
-    # electron/agents/process.ts) run `exec N>&-` through /bin/sh. On macOS that
-    # is bash, which handles multi-digit fds; on Ubuntu it is dash, which
-    # treats `exec 10>&-` as running a command named "10" and exits. So the
-    # voice-helper / voice-polisher tests fail on ubuntu-latest because of a
-    # real Linux-only bug in application code, which this CI-only change does
-    # not fix. macOS also lets us run the AVFoundation Swift test.
+  test-client-linux:
+    name: Client tests 1/2 (Linux)
+    # Every client node test that does not need a Mac (most of them: pure
+    # logic, the IPC harness, real git in temp folders). node:test via tsx;
+    # .github/scripts/client-tests.mjs lists tests/*.test.ts and the colocated
+    # renderer tests (src/**/*.test.ts) minus its MACOS list. tests/*-ui.tsx +
+    # *-ui.html are preview pages for the Playwright job, not node tests. Part
+    # of the required check "Client tests (macOS)" (job test-client).
     needs: changes
-    # A job skipped by its `if` reports success, so the required check passes
-    # for a PR that does not touch what it tests.
     if: ${{ !cancelled() && needs.changes.outputs.client != 'false' }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      # node:test via tsx. tests/*-ui.tsx + *-ui.html are browser preview
-      # pages, driven by the Playwright job (ui-client), not node tests.
-      # Renderer tests sit next to their code (src/**/*.test.ts,
-      # renderer-structure.md). find lists them: Node 20's test runner does
-      # not expand globs and bash without globstar reads ** as *.
-      - name: Node tests (tests/ and colocated src/)
-        working-directory: client
-        run: |
-          colocated=$(find src -name '*.test.ts' | sort)
-          echo "Colocated renderer tests: ${colocated:-none}"
-          npx tsx --test tests/*.test.ts $colocated
+      - name: Node tests (tests/ and colocated src/, all but the macOS list)
+        run: node .github/scripts/client-tests.mjs linux
+
+  test-client-macos:
+    name: Client tests 2/2 (macOS)
+    # The client tests that guard what only a Mac shows (client-tests.mjs,
+    # list MACOS, with the reason for each file): the POSIX spawn wrappers
+    # (electron/voice-process.ts, electron/agents/process.ts) run `exec N>&-`
+    # through /bin/sh, which is bash on macOS and dash on Ubuntu (dash fails on
+    # multi-digit fds: a known Linux-only bug; Linux is not a shipped
+    # platform); recursive fs.watch is FSEvents; the file-system guards assert
+    # the case- and normalization-insensitive volume. Plus the AVFoundation
+    # Swift tests. Runs when what those files load changes (area clientmac:
+    # client/electron/, client/shared/, shared/, the Swift sources, ...), not
+    # for renderer-only changes. Part of the required check
+    # "Client tests (macOS)".
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.clientmac != 'false' }}
+    runs-on: ${{ needs.changes.outputs.mac-runner || 'macos-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Node tests (the macOS list)
+        run: node .github/scripts/client-tests.mjs macos
       # Built without -O so Swift's assert() stays active.
       - name: Swift audio level test
         working-directory: client
@@ -108,16 +136,42 @@ jobs:
           xcrun swiftc -parse-as-library native/InputRoute.swift tests/input-route.test.swift -o "$RUNNER_TEMP/input-route-test"
           "$RUNNER_TEMP/input-route-test"
 
+  test-client:
+    name: Client tests (macOS)
+    # The required status check (the name branch protection knows): green
+    # when both halves passed, or a half was skipped because the PR does not
+    # touch what it tests; red for a failed or cancelled half. Same meaning as
+    # before the split: every client node test and the Swift tests pass. On
+    # ubuntu so it costs no macOS runner.
+    needs: [changes, test-client-linux, test-client-macos]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          LINUX: ${{ needs.test-client-linux.result }}
+          MACOS: ${{ needs.test-client-macos.result }}
+          WANT_LINUX: ${{ needs.changes.outputs.client }}
+          WANT_MACOS: ${{ needs.changes.outputs.clientmac }}
+        run: |
+          echo "linux: $LINUX (wanted: ${WANT_LINUX:-unknown}), macos: $MACOS (wanted: ${WANT_MACOS:-unknown})"
+          ok() { [ "$1" = success ] || { [ "$1" = skipped ] && [ "$2" = false ]; }; }
+          if ok "$LINUX" "$WANT_LINUX" && ok "$MACOS" "$WANT_MACOS"; then exit 0; fi
+          echo "::error::Client tests did not pass (linux: $LINUX, macos: $MACOS)"
+          exit 1
+
   ui-client:
-    name: Renderer UI tests (macOS)
+    name: Renderer UI tests (Linux)
     # Playwright drives the renderer's preview pages (client/tests/*-ui.html:
     # real components, preload API and chat server faked) in headless
     # Chromium: what the member sees and can do in the chat, the main screen,
-    # the file tree, the editor and settings. macOS like test-client: the
-    # app's platform, and the keyboard hints (⌘) the tests read.
+    # the file tree, the editor and settings. Nothing here depends on macOS:
+    # the pages run in the browser only, shortcuts are matched as ⌘ or Ctrl
+    # (shared/commands), and the specs press ControlOrMeta where the OS
+    # decides. On ubuntu since 2026-11-02 to free macOS runners.
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.ui != 'false' }}
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -128,11 +182,13 @@ jobs:
         run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v4
         with:
-          path: ~/Library/Caches/ms-playwright
+          path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      # --with-deps installs the shell's system libraries and fonts (apt);
+      # the browser itself comes from the cache when it is there.
       - name: Install headless Chromium
         working-directory: client
-        run: npx playwright install --only-shell chromium
+        run: npx playwright install --with-deps --only-shell chromium
       - name: Type-check the UI tests and preview pages
         working-directory: client
         run: npx tsc -p tests/ui
@@ -151,14 +207,39 @@ jobs:
             client/test-results
           retention-days: 7
 
+  bundle-size:
+    name: Renderer bundle size (Linux)
+    # The renderer bundle stays within its budget (check-bundle-size.mjs,
+    # testing.md "Performance baselines"). The JS Vite emits does not depend on
+    # the OS, so this left the macOS perf job on 2026-11-02. Same area as the
+    # UI tests (what the renderer bundle is built from).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.ui != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Renderer bundle size
+        working-directory: client
+        run: |
+          npx vite build
+          node scripts/check-bundle-size.mjs dist
+
   sync-harness-shard:
     name: Sync harness ${{ matrix.shard }}/4 (macOS)
     # git:sync (client/electron/sync/) driven end to end: several members per
     # company against a real bare repository with the production pre-receive
     # hook, scripted dialog answers, the characterization recording, and a
     # seeded randomized soak. Separate from test-client so the two run in
-    # parallel. macOS for the same reasons as test-client (the client's main
-    # platform; /bin/sh is bash).
+    # parallel. Stays on macOS: members' company folders sit on APFS, which is
+    # case- and normalization-insensitive, so git clones there with
+    # core.ignorecase / core.precomposeunicode and every rename, case-variant
+    # and NFD scenario (private-folder names, exclusions, conflicts) behaves as
+    # on a member's Mac; on Linux's case-sensitive file system those scenarios
+    # would pass while guarding something else (folder-exclusions even skips
+    # its case-variant scenario there). Runs only for changes to what sync
+    # loads (area sync), never for renderer-only changes.
     #
     # Split over 4 runners by file groups balanced by duration
     # (.github/scripts/sync-shard.mjs; private-folders.test.ts is split over
@@ -170,7 +251,7 @@ jobs:
     # manual runs the full 3 + 2 + 2 seeds x 8 rounds.
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.sync != 'false' }}
-    runs-on: macos-latest
+    runs-on: ${{ needs.changes.outputs.mac-runner || 'macos-latest' }}
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -217,15 +298,17 @@ jobs:
     # Guards the recent performance wins against order-of-magnitude
     # regressions: one recursive watcher per company and a lazy file tree
     # (#151), the capped company search and git log without --follow (#153),
-    # the history store and windowed chat rendering (#154), and the renderer
-    # bundle size. Budgets are ~10x a developer Mac's numbers (runners vary);
-    # every check prints a `[perf] name=value` line, so the measured values
-    # stay in this job's log. Separate from test-client so a flaky timing is
-    # visible as such. macOS like the other client jobs (recursive fs.watch
-    # is FSEvents there, as on members' Macs).
+    # the history store and windowed chat rendering (#154). Budgets are ~10x
+    # a developer Mac's numbers (runners vary); every check prints a
+    # `[perf] name=value` line, so the measured values stay in this job's log.
+    # Separate from test-client so a flaky timing is visible as such. Stays on
+    # macOS: recursive fs.watch is FSEvents there, as on members' Macs (one
+    # handle for 15k files), and the budgets are Mac numbers. The renderer
+    # bundle size moved to the Linux job bundle-size. Runs only for changes to
+    # what the benchmarks load (area perf).
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.perf != 'false' }}
-    runs-on: macos-latest
+    runs-on: ${{ needs.changes.outputs.mac-runner || 'macos-latest' }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -233,11 +316,6 @@ jobs:
       - name: Benchmarks
         working-directory: client
         run: npx tsx --test --test-concurrency=1 tests/perf/*.perf.test.ts
-      - name: Renderer bundle size
-        working-directory: client
-        run: |
-          npx vite build
-          node scripts/check-bundle-size.mjs dist
 
   universal-git:
     name: Universal bundled git (macOS)
@@ -249,7 +327,7 @@ jobs:
     # or the workflow changes (job `changes`); the merge itself takes seconds.
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.universal != 'false' }}
-    runs-on: macos-latest
+    runs-on: ${{ needs.changes.outputs.mac-runner || 'macos-latest' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -330,3 +408,7 @@ jobs:
           echo "Linting changes since $base"
           echo "sha=$base" >> "$GITHUB_OUTPUT"
       - run: .github/scripts/lint-changed.sh "${{ steps.base.outputs.sha }}"
+      # changed-areas.sh's lists must cover what each area's tests import,
+      # or a PR could skip a test it affects (the files to add are printed).
+      - name: CI area lists cover what the tests load
+        run: node .github/scripts/check-areas.mjs
