@@ -7,6 +7,7 @@
 import type { NotificationItem, NotificationKind, NotificationList } from '../../shared/types/notifications'
 import type { AiTurnItemView } from './ai-turns'
 import { MEETING_NEEDS_BUNDLE_TEXT, meetingSuggestedBundleText, type TaskListItem } from './tasks'
+import { thingKindOf, thingName, TURN_ASKS, turnGroupLine, type ThingKind } from './thing-words'
 
 /** One record waiting for the member (「あなたの番」: `GET /records/my-turn`). */
 export interface TurnItem {
@@ -16,6 +17,26 @@ export interface TurnItem {
   state: string | null
   /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, or null. */
   due: string | null
+}
+
+/** 「あなたの番」 by kind (I.2): 「承認のお願い 3件 — 承認してください」 and its items, in the order first met. */
+export interface TurnGroup {
+  kind: ThingKind
+  /** The kind's plain name and count, with what to do (`turnGroupLine`). */
+  line: string
+  items: TurnItem[]
+}
+
+export function turnGroups(items: readonly TurnItem[]): TurnGroup[] {
+  const groups = new Map<string, { kind: ThingKind; name: string; items: TurnItem[] }>()
+  for (const i of items) {
+    const r = { type: i.type, state: i.state }
+    const name = thingName(r)
+    const g = groups.get(name) ?? { kind: thingKindOf(r), name, items: [] }
+    g.items.push(i)
+    groups.set(name, g)
+  }
+  return [...groups.values()].map(g => ({ kind: g.kind, line: turnGroupLine(g.name, g.items.length, TURN_ASKS[g.kind]), items: g.items }))
 }
 
 /** What main answers the renderer for one company. */

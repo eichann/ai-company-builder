@@ -152,17 +152,20 @@ carry on. The app never acts on the signal itself: it only asks the server again
   main window). The first look at a company notifies nothing; at most 3 per check. Words in
   `client/shared/notifications-app.ts` `desktopNoticeFor` (the record's title as the body).
 - Renderer: `src/features/notifications/` — `TitleBarNotices` in the title bar (`TitleBar`
-  `notices` slot, composed by `AppShell`): 「あなたの番 N」 opens a simple list (an approval is
-  named 「承認のお願い：…」, due shown), the bell shows an unread dot and the list, 「すべて既読にする」,
+  `notices` slot, composed by `AppShell`). **Two roles, never mixed** (新しい画面のデモ I.1 / I.2):
+  「あなたの番 N」 = what the member presses, until it is done — grouped by kind with what to do
+  (`turnGroups`: 「承認のお願い 3件 — 承認してください」, 「送るメールの下書き 1件 — 確かめて送ってください」,
+  `thing-words.ts`), due shown, 「起きたことはベルに出ます。ここは押すものだけです。」; N is the list's
+  count. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
   that notice read.
 - **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
   `TitleBarNotices` takes `meetings` (AppShell, only while the task list is hidden) — a まとまり to
-  choose and received minutes with the automatic runner's state, in a 「会議」 part at the top of
-  「あなたの番」 and of the bell, each with its buttons. Those waiting for the member
-  (`needsPerson`: a まとまり to choose; minutes the AI is not reading or about to read) add to the
-  count and keep the bell's dot. Nothing is stored or sent for them: they come from the list main
-  already read.
+  choose and received minutes with the automatic runner's state, each with its buttons, in a 「会議」
+  part: those waiting for the member (`needsPerson`: a まとまり to choose; minutes the AI is not
+  reading or about to read) at the top of 「あなたの番」 and in its count; the others (the AI reading)
+  in the bell, as news. They never light the bell's dot. Nothing is stored or sent for them: they
+  come from the list main already read.
 - Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
   same as a search hit. The consultation a record belongs to opens from there once S12 links them.
 

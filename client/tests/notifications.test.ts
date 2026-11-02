@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import { createSseParser } from '../shared/agent-stop'
 import { createAgentPushChannel } from '../electron/services/agent-push-channel'
 import { createNotificationsWatcher } from '../electron/features/notifications/watcher'
-import { meetingTurns, NO_NOTICES } from '../shared/notifications-app'
+import { meetingTurns, NO_NOTICES, turnGroups } from '../shared/notifications-app'
 import type { TaskListItem } from '../shared/tasks'
 
 const V1 = 'a'.repeat(32)
@@ -159,4 +159,18 @@ test('a department without the task list still gets its meetings: a まとまり
     ['meeting-new003', 'minutes', true, '議事録が届きました'],
   ])
   assert.deepEqual(turns.find(t => t.id === 'meeting-read02')?.suggestedBundle, { id: 'deal-abcdef01', title: 'A社 研修導入' })
+})
+
+test('「あなたの番」 by kind, each with what to do; the same kind once, in the order first met (I.2)', () => {
+  const groups = turnGroups([
+    { id: 'approval-a', type: 'approval', title: '値引き', state: 'pending', due: null },
+    { id: 'task-a', type: 'task', title: '見積', state: 'todo', due: null },
+    { id: 'approval-b', type: 'approval', title: '発注', state: 'pending', due: null },
+    { id: 'outbound_message-a', type: 'outbound_message', title: 'お礼', state: 'draft', due: null },
+  ])
+  assert.deepEqual(groups.map(g => [g.line, g.items.map(i => i.id)]), [
+    ['承認のお願い 2件 — 承認してください', ['approval-a', 'approval-b']],
+    ['やること 1件', ['task-a']],
+    ['送るメールの下書き 1件 — 確かめて送ってください', ['outbound_message-a']],
+  ])
 })
