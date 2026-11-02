@@ -72,3 +72,13 @@ test('a 案件: what for, who and how far, the approval request as its card, eve
   await expect(page.getByTestId('record-card').getByRole('status')).toHaveText('AI が反映しています…（あと少し）')
   expectNoPageErrors(working)
 })
+
+test('「AIへの相談」 in 「つながっているもの」: the consultations about it, 「相談する」 and 「＋新しい相談」', async ({ page }) => {
+  const state = await openPreview(page, 'record-card')
+  const group = page.getByRole('complementary', { name: 'つながっているもの' }).getByRole('region', { name: 'AIへの相談' })
+  await expect(group).toContainText('A社 打ち合わせのあと')
+  await group.getByRole('button', { name: '相談する' }).click()
+  await group.getByRole('button', { name: '新しい相談' }).click()
+  await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa false\nconsult meeting-0000aa true')
+  expectNoPageErrors(state)
+})

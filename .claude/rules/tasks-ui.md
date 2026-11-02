@@ -160,7 +160,12 @@ what is linked **directly**, one group per kind by its plain name (`typeLabel` =
 案件 and プロジェクト stay two groups and 「まとまり」「やりとり」 never show), in a fixed order (`groupLinks`,
 `src/shared/lib/linkGroups.ts`; a bundle's やること first), three rows per kind and the rest under
 「ほか n 件」 (`foldLinks`). Rows show the name, not the state; a finished request (`finished`) is
-faint and struck through. A file's own 「つながっているもの」 uses the same column.
+faint and struck through. A file's own 「つながっているもの」 uses the same column. Its 「AIへの相談」
+group lists this PC's consultations whose main topic is the record (`topicRecordId`;
+`features/chat/recordConsultationsStore.ts`, read when a screen first asks and on every history
+change, given by AppShell) — each opens with `chat.openConsultation` — and offers ［相談する］ (the
+latest, else a new one) and ［＋新しい相談］ (`chat.consultAbout` with `fresh`;
+`src/shared/ui/consultationLinks.tsx`).
 
 A **meeting** and a **来た連絡** get their own parts in the record card (`RecordDetails.tsx`, built by
 main with `recordDetailOf`, `client/shared/record-details.ts`; the fields they show are not repeated
