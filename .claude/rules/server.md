@@ -235,6 +235,7 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
+                              POST /viewers (見られる人)                      viewers.ts
                                                                 (やることの一覧の設定: tasks.md)
                               GET|POST /agent-stops, DELETE /agent-stops/:stopId,
                               GET /me/events (SSE push channel)               agent-stops.ts

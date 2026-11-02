@@ -51,6 +51,7 @@ import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
 import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
+import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
 import { createAiTurnClaims } from './features/ai-turns/claims'
@@ -292,6 +293,8 @@ registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies }
 registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
 registerWorkSwitchesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// 見られる人 for the lists (features/viewers): with the session.
+registerViewersIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).
 registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays

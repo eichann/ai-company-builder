@@ -23,6 +23,7 @@ import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { taskSettingsRoute } from './routes/task-settings'
 import { absencesRoute } from './routes/absences'
+import { viewersRoute } from './routes/viewers'
 import { recordsRoute } from './routes/records'
 import { aiRunsRoute } from './routes/ai-runs'
 import { skillUsesRoute } from './routes/skill-uses'
@@ -148,6 +149,7 @@ app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', taskSettingsRoute)
 app.route('/api/companies/:companyId', absencesRoute)
+app.route('/api/companies/:companyId', viewersRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
