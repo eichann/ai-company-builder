@@ -8,6 +8,7 @@
  *
  *   GET  /types   GET /my-turn   GET /ai-turn   POST /query   GET /item/:recordId
  *   GET  /item/:recordId/history
+ *   (these look-ups add `people`: id → display name of the company members they name, services/people-names.ts)
  *   POST /item                                  (act)
  *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
@@ -50,16 +51,23 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { services } from '../composition'
 import type { Outcome } from '../services/outcome'
+import type { Member } from '../services/access'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
 import { aiActs, aiReads, serviceBody } from './guards'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, pluginOperations, decisions, approvals, minutes, outboundMail } = services
+const { records, recordEngine, pluginOperations, decisions, approvals, minutes, outboundMail, peopleNames } = services
 
 function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 | 202 = 200) {
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, status)
+}
+
+/** A look-up's answer with `people` (id → name) for the company members it names (services/people-names.ts). */
+function named<T>(c: Context, member: Member, result: Outcome<T>) {
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: peopleNames.withPeople(member, result.value) }, 200)
 }
 
 recordsAiRoute.get('/types', aiReads, (c) => {
@@ -69,12 +77,12 @@ recordsAiRoute.get('/types', aiReads, (c) => {
 
 recordsAiRoute.get('/my-turn', aiReads, (c) => {
   const h = c.var.holder
-  return answer(c, records.myTurn(h.member))
+  return named(c, h.member, records.myTurn(h.member))
 })
 
 recordsAiRoute.get('/ai-turn', aiReads, (c) => {
   const h = c.var.holder
-  return answer(c, records.aiTurn(h.member))
+  return named(c, h.member, records.aiTurn(h.member))
 })
 
 recordsAiRoute.post('/decisions', aiActs, serviceBody, async (c) => {
@@ -100,17 +108,17 @@ recordsAiRoute.post('/minutes/:recordId/bundle', aiActs, serviceBody, async (c) 
 
 recordsAiRoute.post('/query', aiReads, serviceBody, async (c) => {
   const h = c.var.holder
-  return answer(c, records.query(h.member, c.var.body))
+  return named(c, h.member, records.query(h.member, c.var.body))
 })
 
 recordsAiRoute.get('/item/:recordId', aiReads, async (c) => {
   const h = c.var.holder
-  return answer(c, await records.get(h.member, c.req.param('recordId')))
+  return named(c, h.member, await records.get(h.member, c.req.param('recordId')))
 })
 
 recordsAiRoute.get('/item/:recordId/history', aiReads, (c) => {
   const h = c.var.holder
-  return answer(c, recordEngine.history(h.member, c.req.param('recordId')))
+  return named(c, h.member, recordEngine.history(h.member, c.req.param('recordId')))
 })
 
 recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
