@@ -56,6 +56,7 @@ import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
 import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
+import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
@@ -102,6 +103,8 @@ export function AppShell() {
   const notices = useNotices(currentCompany?.id)
   // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
   const taskList = useTaskList(currentCompany?.id)
+  // The やること tab's dot: something of あなたの番 came that the member has not seen in the tab.
+  const seenTasks = useSeenTasks(currentCompany?.id)
   // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
   // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
   const pluginTurns = usePluginStepTurns(currentCompany?.id)
@@ -351,6 +354,12 @@ export function AppShell() {
     const path = rootPath ? companyPathOf(key, rootPath) : null
     return path ? [{ key, path }] : []
   })
+  const myTurnIds = (taskList.data?.items ?? []).filter(i => i.turn === 'mine' || i.turn === 'acceptance').map(i => i.id)
+  // Opening the やること tab, or leaving it, means the member has seen what is in it.
+  const selectLeftTab = (id: string) => {
+    if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
+    setLeftTab(id)
+  }
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
     {
@@ -394,7 +403,8 @@ export function AppShell() {
       // Shown for the departments the company setting names (tasks-ui.md); records off → no tab.
       id: 'tasks', title: 'やること', icon: ListChecks, mount: 'once-opened', className: 'flex',
       visible: tasksShown,
-      badgeCount: taskList.data?.items.filter(i => i.turn === 'mine' || i.turn === 'acceptance').length ?? null,
+      // No count here: the count of あなたの番 is the title bar's alone (owner 2026-11-02); a dot for what is new.
+      dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
       render: () => currentCompany && rootPath ? (
         <TaskListPanel
           companyId={currentCompany.id}
@@ -503,7 +513,7 @@ export function AppShell() {
               collapsed={shownLeft?.wide ? 'editor' : null}
               paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
               renderPane={id => id === 'fileTree' ? (
-                <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={setLeftTab} /></div>
+                <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={selectLeftTab} /></div>
               ) : (
                 <TabbedEditorPanel
                   openFiles={openFiles}

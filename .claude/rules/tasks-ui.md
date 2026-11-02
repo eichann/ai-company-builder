@@ -56,7 +56,10 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
 
 ## Renderer (`client/src/features/tasks/`)
 
-- The left tab 「やること」 (registered in `AppShell.tsx`, between ファイル and 検索; badge = あなたの番
+- The left tab 「やること」 (registered in `AppShell.tsx`, between ファイル and 検索; **no count** — the
+  count of あなたの番 is the title bar's alone (owner 2026-11-02) — but a dot while something of あなたの番
+  or 引き受け待ち came that the member has not seen in the tab: `useSeenTasks`, per company in
+  localStorage `tasks-seen:<company id>`, marked when the tab is opened or left; formerly badge = あなたの番
   + 引き受け待ち). Shown when records are on and the company setting `taskListDepartmentIds` names
   the department on screen (`null` = every department; 全社 = any department shows it:
   `listShownFor`). The list itself is the member's, across the company (records carry no
@@ -74,12 +77,18 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),
   AI の番, ほかの人の番・返事待ち, 先のこと (only the member's own items due after this week — folded
   until opened), 今日終わったこと (today's meetings that are over too; 「あしたの朝に空になります」).
-  **By date**: 期限切れ, 今日まで (meetings to come), 今週, the far future (folded), 期限なし, 今日終わったこと.
+  **By date**: 期限切れ, 今日 (meetings to come), 明日, 今週, あとで (folded), 期限なし, 今日終わったこと.
+  **By bundle** (「〇〇ごと」): each bundle with open items (its name opens it), then 「〇〇なし」, then
+  今日終わったこと; 〇〇 is the kinds actually in the list (`bundleListWord`: 「案件」, 「案件・プロジェクト」),
+  since the list crosses departments; with none, 「プロジェクト」.
   "This week" ends on Sunday; on a Saturday or Sunday it runs to next Sunday, so tomorrow never
   folds. A due with a time today that has passed is 期限切れ. Meetings are read, never made into
   tasks (`calendar.md`); a tag filter hides them.
-- Rows: title, 「自分だけ」 lock, due (期限切れ in red), whose turn / what it waits for, 「〇〇さんの
-  代わり」 for a delegate, the まとまり chip, up to 3 tags. 引き受ける on 引き受け待ち rows; 「終わった」
+- Rows (言葉の決まり 3b: what to do next, never a state word): ☑ or the kind's icon (`ThingIcon`), title,
+  「あなただけ」, the small chip of the 案件 / プロジェクト it belongs to (opens it), due (期限切れ in red),
+  whose turn / what it waits for, 「〇〇さんの代わり」 for a delegate, up to 3 tags; a finished one is
+  struck through. A kind finished elsewhere gets its one button (確かめて送る, 確かめる: opens it).
+  引き受ける on 引き受け待ち rows; ☑ 完了にする
   only on the member's own tasks (`own`: start first when not started, then complete, each at
   the version it moved to — the list never states someone's OK; that is the card's). An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with

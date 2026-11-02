@@ -20,7 +20,7 @@ let data: TaskListData = {
   available: true, listDepartmentIds: null,
   items: [
     it({ id: 'task-acc001', title: 'セキュリティのチェックシート', turn: 'acceptance', state: 'awaiting_acceptance', due: day(5) }),
-    it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応' } }),
+    it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応', typeLabel: '案件' } }),
     it({ id: 'task-mine02', title: '見積書を作り直す', turn: 'mine', due: day(1), tags: ['営業', '見積'], own: true, personal: true }),
     it({ id: 'task-far001', title: '来期の研修メニューを見直す', turn: 'mine', due: day(40), tags: ['社内'] }),
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),

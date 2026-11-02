@@ -5,7 +5,9 @@ import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { actOnTask, createTask, declineMeetingBundle, linkFileToTask, linkMeetingBundle } from '../api'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { companyNow, companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { bundleListWord, companyNow, companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { CALM } from '../../../../shared/thing-words'
+import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
@@ -50,6 +52,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const shownTag = tag !== null && tags.some(t => t.tag === tag) ? tag : null
   const events = useMemo(() => (shownTag === null ? listEvents(calendar?.events ?? [], now) : []), [calendar, now, shownTag])
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now), [items, events, mode, now, shownTag])
+  const bundleWord = useMemo(() => bundleListWord(items), [items])
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
   const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => {
@@ -163,7 +166,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const section = (s: ListSection) => {
     const open = !s.foldable || unfolded[s.key] === true
     const header = <>
-      {s.foldable && (open ? <CaretDown size={10} /> : <CaretRight size={10} />)}{s.title}
+      {s.foldable && (open ? <CaretDown size={10} /> : <CaretRight size={10} />)}{s.bundle && <ThingIcon kind="bundle" typeLabel={s.bundle.typeLabel} size={12} />}{s.title}
       <span className="font-normal">{s.items.length + s.events.length}</span>
       {s.note && <span className="ml-auto truncate text-[10px] font-normal text-gray-400">{s.note}</span>}
     </>
@@ -171,6 +174,9 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       <section key={s.key} aria-label={s.title}>
         {s.foldable ? (
           <button type="button" aria-expanded={open} onClick={() => setUnfolded(u => ({ ...u, [s.key]: !open }))} className={HEADER}>{header}</button>
+        ) : s.bundle ? (
+          // 〇〇ごと: the bundle's name opens it, like its chip on a row.
+          <h3><button type="button" data-bundle-head={s.bundle.id} onClick={() => onOpen(s.bundle!.id)} className={`${HEADER} text-gray-700 hover:text-accent dark:text-zinc-200`}>{header}</button></h3>
         ) : <h3 className={HEADER}>{header}</h3>}
         {open && <div className="space-y-0.5">{s.events.map(e => <EventRow key={e.event.id} e={e} />)}{listRows(s.items).map(listRow)}</div>}
       </section>
@@ -197,12 +203,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       )}
       <section aria-label="やることの一覧" className="flex h-full w-full flex-col bg-white dark:bg-zinc-900">
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
-          <span className="text-[13px] font-semibold text-gray-800 dark:text-zinc-100">やること</span>
           <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
-            {(['turn', 'date'] as const).map(m => (
+            {(['turn', 'bundle', 'date'] as const).map(m => (
               <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
-                className={`px-2 py-0.5 ${mode === m ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}>
-                {m === 'turn' ? '番ごと' : '日付ごと'}
+                className={`px-2 py-0.5 whitespace-nowrap ${mode === m ? 'bg-accent text-white' : 'text-gray-600 hover:bg-gray-100 dark:text-zinc-300 dark:hover:bg-zinc-800'}`}>
+                {m === 'turn' ? '番ごと' : m === 'bundle' ? `${bundleWord}ごと` : '日付ごと'}
               </button>
             ))}
           </span>
@@ -221,10 +226,10 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
         )}
         {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
-          {list.data === null && !list.error && <p className="px-2.5 py-2 text-[12px] text-gray-400">読み込み中...</p>}
+          {list.data === null && !list.error && <p className="px-2.5 py-2 text-[12px] text-gray-400">{CALM.loading}</p>}
           {list.data && sections.length === 0 && (
             <p className="px-2.5 py-4 text-[12px] leading-relaxed text-gray-500 dark:text-zinc-400">
-              {shownTag ? `#${shownTag} のやることはありません。` : 'いま、やることはありません。上の1行で自分のやることを足せます。会議の議事録や、頼まれたことが届くと、ここに並びます。'}
+              {shownTag ? `#${shownTag} のやることはありません。` : `${CALM.emptyTasks}。上の1行で自分のやることを足せます。`}
             </p>
           )}
           {sections.map(section)}

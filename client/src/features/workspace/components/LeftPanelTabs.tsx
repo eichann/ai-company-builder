@@ -43,7 +43,7 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
                 <span className="min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
                   {panel.badgeCount}
                 </span>
-              ) : null}
+              ) : panel.dot ? <span data-new-dot aria-label="新しいものがあります" className="h-2 w-2 rounded-full bg-accent" /> : null}
             </button>
           )
           if (!panel.peek) return tab

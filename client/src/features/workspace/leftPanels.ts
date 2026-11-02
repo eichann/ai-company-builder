@@ -12,6 +12,8 @@ export interface LeftPanel {
   icon: Icon
   /** A count shown on the tab (e.g. items waiting); nothing for 0 or none. */
   badgeCount?: number | null
+  /** A small dot: something new came since the member last looked (the やること tab: no count, owner 2026-11-02). */
+  dot?: boolean
   /** false = no tab; a remembered id of a hidden panel opens the default one. */
   visible?: boolean
   /**

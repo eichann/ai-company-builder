@@ -2,13 +2,13 @@
 // turn with today's meetings mixed in (to come with the member's turn, over with today's done);
 // the far future folded until opened; the date view; 引き受ける from the list; finishing one's own
 // task (start then complete at the versions it moves through); the one line adds a task with its
-// due and tags; a tag narrows the list; a row opens its card beside the list.
+// due and tags; a tag narrows the list; a row opens its card; the 案件ごと view.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
 test('by turn: sections, meetings mixed in, the far future folded, the date view', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
-  const section = (name: string) => page.getByRole('region', { name })
+  const section = (name: string) => page.getByRole('region', { name, exact: true })
   await expect(section('引き受け待ち')).toContainText('セキュリティのチェックシート')
   await expect(section('あなたの番')).toContainText('お礼メールを確かめて送る')
   await expect(section('あなたの番')).toContainText('B社 見積のオンライン確認')
@@ -23,8 +23,13 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   await later.getByRole('button', { name: /先のこと/ }).click()
   await expect(later).toContainText('来期の研修メニュー')
 
+  // 〇〇ごと takes its word from the kinds in the list; each 案件 with its items, then 「案件なし」.
+  await page.getByRole('button', { name: '案件ごと' }).click()
+  await expect(section('A社 問い合わせ対応')).toContainText('お礼メールを確かめて送る')
+  await expect(section('案件なし')).toContainText('見積書を作り直す')
+
   await page.getByRole('button', { name: '日付ごと' }).click()
-  await expect(section('今日まで')).toContainText('お礼メールを確かめて送る')
+  await expect(section('今日')).toContainText('お礼メールを確かめて送る')
   await expect(section('期限なし')).toContainText('日程の候補を探す')
   await expect(page.getByRole('region', { name: 'あなたの番' })).toHaveCount(0)
   expectNoPageErrors(state)
@@ -37,15 +42,16 @@ test('accepting and finishing from the list; a row opens its card', async ({ pag
   await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('セキュリティのチェックシート')
   await expect(page.getByRole('region', { name: '引き受け待ち' })).toHaveCount(0)
 
-  // Only the member's own task offers 「終わった」; it is started first, then completed.
-  await expect(page.getByRole('button', { name: '「お礼メールを確かめて送る」を終わったにする' })).toHaveCount(0)
-  await page.getByRole('button', { name: '「見積書を作り直す」を終わったにする' }).click()
+  // Only the member's own task offers ☑ 完了にする; it is started first, then completed.
+  await expect(page.getByRole('button', { name: '「お礼メールを確かめて送る」を完了にする' })).toHaveCount(0)
+  await page.getByRole('button', { name: '「見積書を作り直す」を完了にする' }).click()
   await expect(page.locator('#acted')).toHaveText('task-acc001:accept@2,task-mine02:start@2,task-mine02:complete@3')
   await expect(page.getByRole('region', { name: '今日終わったこと' })).toContainText('見積書を作り直す')
 
   await page.getByRole('button', { name: /日程の候補を探す/ }).click()
   await expect(page.getByTestId('card')).toHaveText('カード：task-ai0001')
-  await page.getByRole('button', { name: 'A社 問い合わせ対応' }).click()
+  // The small chip of what it belongs to opens that 案件.
+  await page.getByRole('link', { name: /A社 問い合わせ対応/ }).first().click()
   await expect(page.getByTestId('card')).toHaveText('カード：deal-a00001')
   expectNoPageErrors(state)
 })

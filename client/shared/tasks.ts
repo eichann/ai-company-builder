@@ -43,8 +43,8 @@ export interface TaskListItem {
   own: boolean
   /** The absent member it waits for, when it is in this list as their delegate (代わりの人). */
   actingFor: string | null
-  /** The まとまり (取り組み・案件・企画) it belongs to. */
-  bundle: { id: string; title: string } | null
+  /** What it belongs to (a 案件, a 番組, a プロジェクト) and that kind's name, for its small chip. */
+  bundle: { id: string; title: string; typeLabel?: string } | null
   /** `done` only: when it finished (ISO), as far as the list knows (its last change). */
   finishedAt: string | null
   /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
@@ -137,6 +137,14 @@ export type TaskWriteResult =
   | { success: true; recordId: string }
   | { success: false; offline: boolean; code: string | null; error: string }
 
+/** A record's bundle with its kind's name (a record id starts with its type: `deal-…`). */
+function bundleOf(src: TaskSources, recordId: string): TaskListItem['bundle'] {
+  const b = src.bundles[recordId]
+  if (!b) return null
+  const label = src.typeLabels[b.id.slice(0, b.id.indexOf('-'))]
+  return label ? { ...b, typeLabel: label } : b
+}
+
 /** What the server answered, in the shapes the list sorts. */
 export interface TaskSources {
   me: string
@@ -201,7 +209,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       turn, waitingFor, personal: r.personal === true,
       own: r.type === 'task' && r.fields.assignee === src.me && (r.fields.requested_by ?? src.me) === src.me,
       actingFor: r.actingFor ? nameOf(src.people, r.actingFor) : null,
-      bundle: src.bundles[r.id] ?? null,
+      bundle: bundleOf(src, r.id),
       finishedAt,
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
