@@ -163,6 +163,7 @@ const api: ElectronAPI = {
   actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),
   getTaskCard: (companyId: string, recordId: string) => invoke('tasks:card', companyId, recordId),
   getBundleChoices: (companyId: string) => invoke('tasks:bundles', companyId),
+  getTaskProposals: (companyId: string, meetingId: string) => invoke('tasks:proposals', companyId, meetingId),
   linkFileToTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:linkFile', companyId, recordId, companyPath, expectedVersion),
   unlinkFileFromTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:unlinkFile', companyId, recordId, companyPath, expectedVersion),
   shareTask: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:share', companyId, recordId, folder, expectedVersion),

@@ -1,7 +1,7 @@
 /** Creating a record that lives on the server (records.md "The state engine"). */
 import { SERVICE_OWNED_TYPES } from '../../../shared/core/core-types'
 import { findPrivateScope } from '../../../shared/core/permissions'
-import { aiTurnStates } from '../../../shared/core/record-types'
+import { noTurnStates } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
@@ -10,7 +10,7 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
-import { acceptanceOf } from '../../../shared/core/core-types'
+import { acceptanceOf, proposalOf } from '../../../shared/core/core-types'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
@@ -146,6 +146,12 @@ export function creating(ctx: EngineContext) {
           for (const l of links) l.sourceId = keyed
         }
       }
+      // A proposal (案, task version 11): the AI's homework of a meeting, as the company says.
+      const proposal = proposalOf(def.name)
+      if (proposal && actor.kind === 'ai' && deps.proposesFromMeeting && (def.proposalStates ?? []).includes(proposal.state)
+        && links.some(l => l.name === proposal.origin && l.targetId !== null) && (initial === def.initial || initial === proposal.state)) {
+        initial = deps.proposesFromMeeting(member.companyId) ? proposal.state : def.initial
+      }
       // Acceptance (records.md "Acceptance"): asked of someone else → 引き受け待ち unless the setting accepts it.
       const origin = acceptanceOf(def.name)?.origin
       initial = applyAcceptance(deps, {
@@ -173,8 +179,8 @@ export function creating(ctx: EngineContext) {
         if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
         records.appendLedger(entry)
       })
-      // While it is the AI's turn nobody is told: the person hears when the AI hands it over.
-      if (initial === null || !aiTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
+      // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
+      if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       return ok({ record: summaryOf(records, id), entry })
     },
   }

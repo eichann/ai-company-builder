@@ -43,7 +43,7 @@ import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesRe
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
-import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from './tasks'
+import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
@@ -513,6 +513,8 @@ export interface IpcInvokeChannels {
   'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
   /** The unfinished まとまり the member reads (for 「どのまとまりの会議ですか？」). */
   'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
+  /** The AI's proposals (案) from a meeting, proposed and put away (records.md "Task version 11"). */
+  'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
   /** A company file or folder linked to a task (`companyPath`: inside the company folder, e.g. `営業/見積.xlsx`). */
   'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
@@ -916,6 +918,7 @@ export interface ElectronAPI {
   getTaskCard: Invoke<'tasks:card'>
   linkFileToTask: Invoke<'tasks:linkFile'>
   getBundleChoices: Invoke<'tasks:bundles'>
+  getTaskProposals: Invoke<'tasks:proposals'>
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>

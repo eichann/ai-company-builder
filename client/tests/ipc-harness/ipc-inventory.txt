@@ -170,6 +170,7 @@ contract.invoke tasks:card
 contract.invoke tasks:create
 contract.invoke tasks:linkFile
 contract.invoke tasks:list
+contract.invoke tasks:proposals
 contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
 contract.invoke tasks:share
@@ -359,6 +360,7 @@ contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
 contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
 contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
+contract.type ElectronAPI.getTaskProposals = getTaskProposals: Invoke<'tasks:proposals'>
 contract.type ElectronAPI.getViewers = getViewers: Invoke<'viewers:get'>
 contract.type ElectronAPI.getWorkSwitches = getWorkSwitches: Invoke<'workSwitches:get'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
@@ -737,6 +739,7 @@ contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId:
 contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
+contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
 contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
@@ -986,6 +989,7 @@ main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
+main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
 main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
 main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
@@ -1174,6 +1178,8 @@ preload getTaskCard -> invoke tasks:card($0, $1)
 preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
 preload getTaskList -> invoke tasks:list($0)
 preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getTaskProposals -> invoke tasks:proposals($0, $1)
+preload getTaskProposals : (companyId: string, meetingId: string) => Promise<TaskProposalsResult>
 preload getViewers -> invoke viewers:get($0, $1)
 preload getViewers : (companyId: string, query: ViewersQuery) => Promise<ViewersResult>
 preload getWorkSwitches -> invoke workSwitches:get($0)
@@ -1422,4 +1428,5 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
+unmatched.preloadApiUnusedByRenderer getTaskProposals
 unmatched.preloadApiUnusedByRenderer getViewers

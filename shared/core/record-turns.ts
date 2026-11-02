@@ -12,7 +12,7 @@
  * (shared/core/absences.ts `delegationAsOf`).
  */
 import type { LedgerEntry, LedgerValue } from './record-ledger'
-import { aiTurnStates, type TypeDefinition } from './record-types'
+import { noTurnStates, type TypeDefinition } from './record-types'
 
 /** One stretch of the record's life during which the same person (or nobody) held the turn. */
 export interface TurnStretch {
@@ -27,7 +27,8 @@ export interface TurnStretch {
 /** Whose turn a record with these values is: next_actor, else assignee, unless the state waits for nobody. */
 export function turnHolder(def: TypeDefinition, state: string | null, fields: Record<string, LedgerValue | undefined>): string | null {
   if (!def.implements.includes('request')) return null
-  if (state === null || def.final.includes(state) || aiTurnStates(def).has(state)) return null
+  // Final, the AI's turn or a proposal (案): nobody's.
+  if (state === null || noTurnStates(def).has(state)) return null
   const who = typeof fields.next_actor === 'string' ? fields.next_actor : fields.assignee
   return typeof who === 'string' && who.length > 0 ? who : null
 }

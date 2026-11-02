@@ -17,7 +17,7 @@
  * permission's `notices` feature. Nothing is stored; nothing of the text is
  * logged.
  */
-import { aiTurnStates } from '../../shared/core/record-types'
+import { noTurnStates } from '../../shared/core/record-types'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { NotificationRow } from '../ports/notifications'
 import { currentTypes } from './record-index'
@@ -60,7 +60,7 @@ export function createSlackNotices(deps: SlackNoticesDeps) {
       const def = rec ? types.get(rec.type)?.definition : undefined
       const state = states.get(row.recordId)
       if (!rec || rec.removedAt !== null || !def || !def.implements.includes('request') || !state || state.state === null) continue
-      if (def.final.includes(state.state) || aiTurnStates(def).has(state.state)) continue
+      if (noTurnStates(def).has(state.state)) continue
       let fields: Record<string, unknown> = {}
       try { fields = JSON.parse(state.fields) as Record<string, unknown> } catch { continue }
       const who = typeof fields.next_actor === 'string' ? fields.next_actor : fields.assignee

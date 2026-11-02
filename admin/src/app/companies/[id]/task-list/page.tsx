@@ -131,6 +131,7 @@ function SettingsForm({
   return (
     <>
       <ReplyCard draft={draft} change={change} />
+      <MeetingTasksCard draft={draft} change={change} />
       <AutoRunCard draft={draft} change={change} />
       <ReadIncomingCard draft={draft} change={change} />
       <AcceptanceCard draft={draft} change={change} />
@@ -166,6 +167,36 @@ function SettingsForm({
 }
 
 type CardProps = { draft: TaskSettings; change: (fn: (d: TaskSettings) => void) => void }
+
+function MeetingTasksCard({ draft, change }: CardProps) {
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <ListChecks size={16} />
+          会議から AI が作るやること
+        </CardTitle>
+        <CardDescription>
+          AI が議事録を読んで見つけた宿題を、どう届けるかです。「案として出す」なら、会議の担当の「議事録を確認する」に案として並び、人が「足す」まではだれのやることにもなりません。
+        </CardDescription>
+      </CardHeader>
+      <div role="radiogroup" aria-label="会議から AI が作るやること" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
+        <RadioCard
+          checked={draft.meetingTasks === 'propose'}
+          onSelect={() => change((d) => { d.meetingTasks = 'propose' })}
+          label="案として出す"
+          help="人が確かめて「足す」と、やることになります（初めはこれ）。"
+        />
+        <RadioCard
+          checked={draft.meetingTasks === 'create'}
+          onSelect={() => change((d) => { d.meetingTasks = 'create' })}
+          label="自動で作る"
+          help="AI が見つけた宿題を、すぐにやることにします。要らないものは「要らない」でしまえます。"
+        />
+      </div>
+    </Card>
+  )
+}
 
 function ReplyCard({ draft, change }: CardProps) {
   const holidays = draft.companyHolidays.map((h) => h.date)

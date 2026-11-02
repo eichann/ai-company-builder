@@ -276,7 +276,9 @@ export function acting(ctx: EngineContext) {
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
 
       // Duty 4: tell whom the action names (and whose turn it now is).
-      tell(member, [...action.notify.map(n => nextFields[n]), nextFields.next_actor], { type: row.type, entry, fields: nextFields })
+      // Into a proposal (案): nobody's turn, so only whom the action names.
+      const intoProposal = nextState !== null && (def.proposalStates ?? []).includes(nextState)
+      tell(member, [...action.notify.map(n => nextFields[n]), ...(intoProposal ? [] : [nextFields.next_actor])], { type: row.type, entry, fields: nextFields })
       try { deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the follow-up is the service's; the action stands */ }
       // Duty 5: the milestone line.
       if (action.historyLine) historyLine(member, row, action.label, actor, note, at)

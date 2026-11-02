@@ -76,6 +76,10 @@ export interface CompanyHoliday {
   name: string
 }
 
+/** `propose` = 案として出す (default); `create` = 自動で作る. */
+export type MeetingTasksRule = 'propose' | 'create'
+export const MEETING_TASKS_RULES: readonly MeetingTasksRule[] = ['propose', 'create']
+
 export interface TaskSettings {
   /** Departments that show the task list; null = every department. */
   taskListDepartmentIds: string[] | null
@@ -84,6 +88,12 @@ export interface TaskSettings {
   /** 受信を読む: whether members may use it and what they start with (`work-switches.ts`). */
   readIncoming: WorkSwitchPolicy
   acceptance: AcceptanceSettings
+  /**
+   * 会議から AI が作るやること (owner decision 2026-11-02, plan F): `propose` — the AI's homework
+   * of a meeting starts as a proposal (案) a person adds or puts away (default); `create` — it is a
+   * task at once, as before (`PROPOSALS`, shared/core/core-types.ts).
+   */
+  meetingTasks: MeetingTasksRule
   /** The company's own days off, by date. */
   companyHolidays: CompanyHoliday[]
   /**
@@ -115,6 +125,8 @@ export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   readIncoming: Object.freeze({ ...DEFAULT_WORK_SWITCH_POLICIES.readIncoming }) as WorkSwitchPolicy,
   // Owner decision 2026-11-01: only asking someone in another department waits for 「引き受ける」.
   acceptance: Object.freeze({ sameDepartment: true, managerToMember: true, meetingHomework: true }) as AcceptanceSettings,
+  // Owner decision 2026-11-02: the AI's homework of a meeting is a proposal until a person adds it.
+  meetingTasks: 'propose',
   companyHolidays: [],
   bundleName: 'プロジェクト',
 }) as TaskSettings
@@ -127,6 +139,7 @@ export function defaultTaskSettings(): TaskSettings {
     autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun },
     readIncoming: { ...DEFAULT_TASK_SETTINGS.readIncoming },
     acceptance: { ...DEFAULT_TASK_SETTINGS.acceptance },
+    meetingTasks: DEFAULT_TASK_SETTINGS.meetingTasks,
     companyHolidays: [],
     bundleName: DEFAULT_TASK_SETTINGS.bundleName,
   }
@@ -197,6 +210,10 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
     if (typeof acc[k] !== 'boolean') return { error: `acceptance.${k} must be true or false` }
   }
 
+  // Added later (plan F, 2026-11-02): left out → 案として出す.
+  const meetingTasks = input.meetingTasks === undefined ? DEFAULT_TASK_SETTINGS.meetingTasks : input.meetingTasks
+  if (!(MEETING_TASKS_RULES as readonly unknown[]).includes(meetingTasks)) return { error: 'meetingTasks must be propose or create' }
+
   const holidays = input.companyHolidays
   if (!Array.isArray(holidays)) return { error: 'companyHolidays must be an array' }
   if (holidays.length > L.holidays) return { error: `At most ${L.holidays} company holidays` }
@@ -225,6 +242,7 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
       autoRun: { enabled: auto.enabled, memberDefault: autoMemberDefault, dailyLimit: auto.dailyLimit, stopAfterFailures: auto.stopAfterFailures },
       readIncoming: { allowed: read.allowed, memberDefault: read.memberDefault },
       acceptance: { sameDepartment: acc.sameDepartment as boolean, managerToMember: acc.managerToMember as boolean, meetingHomework: acc.meetingHomework as boolean },
+      meetingTasks: meetingTasks as MeetingTasksRule,
       companyHolidays,
       bundleName,
     },

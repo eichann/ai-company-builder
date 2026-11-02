@@ -10,7 +10,7 @@
  * (`member.companyId`): another company's record id is a record that does not exist.
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
-import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
+import { aiTurnStates, noTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import { turnsOf } from '../../shared/core/record-turns'
 import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP } from '../../shared/core/core-types'
@@ -269,8 +269,8 @@ export function waitingFor(records: RecordRepository, userIds: string[], old: Re
   const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
   if (types.length === 0 || userIds.length === 0) return []
   const names = types.map(([n]) => n)
-  // Not final, and not the AI's turn (a task being prepared reaches the person when the AI hands it over).
-  const finalOf = new Map(types.map(([n, t]) => [n, new Set([...t.definition.final, ...aiTurnStates(t.definition)])]))
+  // Not final, not the AI's turn (a task being prepared reaches the person when the AI hands it over), not a proposal (案).
+  const finalOf = new Map(types.map(([n, t]) => [n, noTurnStates(t.definition)]))
   const next = records.candidates({ types: names, fields: [{ name: 'next_actor', values: userIds }] }, MAX_CANDIDATES)
   const assigned = records.candidates({
     types: names, fields: [{ name: 'assignee', values: userIds }, { name: 'next_actor', values: [null] }],

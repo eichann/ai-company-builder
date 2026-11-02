@@ -60,8 +60,8 @@ export function findMeetingOutput(
 
 /** The output types merged by an action of their own (a mail draft is the author's to discard). */
 const MERGE_ACTION: Record<string, string> = { task: 'cancel', decision: 'retract' }
-/** States a duplicate no longer counts in (already cancelled, retracted, discarded). */
-const GONE_STATES = new Set(['cancelled', 'retracted', 'discarded'])
+/** States a duplicate no longer counts in (already cancelled, retracted, discarded, a proposal put away). */
+const GONE_STATES = new Set(['cancelled', 'retracted', 'discarded', 'dismissed'])
 const OUTPUT_TYPES = ['task', 'decision', 'outbound_message']
 const MAX_GROUPS = 200
 

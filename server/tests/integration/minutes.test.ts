@@ -651,7 +651,9 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
   const task = (token: string, meetingId: string, title: string, key?: string) => call(null, 'POST', '/api/records-ai/item', {
     type: 'task', title, fields: { assignee: 'mn-sato' }, links: { meeting: meetingId }, ...(key ? { key } : {}),
   }, token)
-  const tasksOf = (meetingId: string) => (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'meeting' AND target_id = ?").all(CO, meetingId) as Json[])
+  // What the reading made (the server's own 「議事録を確認する」 of a read meeting is not one of them).
+  const tasksOf = (meetingId: string) => (db.prepare(`SELECT l.source_id FROM record_links l JOIN record_state s ON s.company_id = l.company_id AND s.record_id = l.source_id
+    WHERE l.company_id = ? AND l.name = 'meeting' AND l.target_id = ? AND json_extract(s.fields, '$.task_kind') IS NULL`).all(CO, meetingId) as Json[])
     .map(r => r.source_id as string).filter(id => id.startsWith('task-'))
 
   it('a second reading reuses the task (same key, or the same title written differently); a different item is still made', async () => {
