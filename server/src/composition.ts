@@ -77,6 +77,7 @@ import { createPluginImportService } from './services/plugin-import'
 import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
+import { createMeetingOutputService } from './services/meeting-outputs'
 import { createDecisionService } from './services/decisions'
 import { createCalendarService } from './services/calendar'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
@@ -250,6 +251,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     notify: notifyRecords,
     actsFor,
     autoAccepts: taskAcceptance.autoAccepts,
+    // A meeting output's item key → its id: what one reading made is made once (minutes.md).
+    tokenDigest: sha256TokenDigest,
     // 「もう返した」 drops the prepared reply drafts (inbox.md; lane B, built below; called after construction only).
     afterAct: (companyId, change) => inboxLane.inbox.afterAct(companyId, change),
   })
@@ -608,6 +611,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     skillUses: createSkillUseService(shared),
     notifications,
     decisions,
+    // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
+    meetingOutputs: createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) }),
     recordAiTokens: createRecordAiTokenService({
       ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped, runs: aiRuns,
     }),

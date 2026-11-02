@@ -34,6 +34,7 @@ import type { MinutesText } from '../../../shared/types/minutes'
 import { MINUTES_SUMMARY_MAX } from '../../../shared/core/minutes'
 import { bundleChoiceFor, type MinutesBundleChoiceCard } from '../../shared/minutes-app'
 import { aiMailSummary, readMailDraft, type MailDraftCard } from '../../shared/outbound-mail'
+import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
@@ -349,6 +350,7 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         fields: z.record(z.string(), z.union([scalar, z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT)])).optional()
           .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
         personal: z.boolean().optional().describe('true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ） / owner-only: only the member sees it, admins included; no other assignee'),
+        key: z.string().min(1).max(MEETING_OUTPUT_KEY_MAX).optional().describe('会議から作るときの項目の目印（例「task:3」。links.meeting と一緒に）。同じ会議・同じ目印・同じ件名なら2回目は作られず、前のものが返る / an item key for an output of a meeting (with links.meeting): the same meeting and key or title returns the earlier record'),
         state: z.string().max(40).optional().describe('始める状態（型の create_states のどれか。例 task の preparing＝AI が下ごしらえしてから担当に渡す）。ふつうは省く / the state to start in (one of the type\'s create_states, e.g. task preparing: the AI prepares first, then hands it over); normally leave out'),
       }).strict(),
       description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。` +
@@ -672,7 +674,9 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
           const draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
           if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
           if (options.companyId) options.onMailDraft?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, draft, byAi: true, at: now().toISOString() })
-          return JSON.stringify(aiMailSummary(draft, spec.mailCard === 'shown'))
+          // The same mail of the same meeting was made before (minutes.md "Outputs made once"): say so.
+          const reused = (answer as { reused?: unknown }).reused === true ? { reused: true, note: MEETING_OUTPUT_REUSED_NOTE } : {}
+          return JSON.stringify({ ...aiMailSummary(draft, spec.mailCard === 'shown'), ...reused })
         }
         const choice = spec.bundleChoice && options.companyId && answer && typeof answer === 'object'
           ? bundleChoiceFor(answer as Parameters<typeof bundleChoiceFor>[0], { id: newId(), companyId: options.companyId }) : null

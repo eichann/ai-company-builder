@@ -3,6 +3,10 @@ paths:
   - "server/src/services/minutes.ts"
   - "server/src/services/google-meetings.ts"
   - "server/src/routes/minutes.ts"
+  - "server/src/services/meeting-outputs.ts"
+  - "shared/core/meeting-outputs.ts"
+  - "shared/types/meeting-outputs.ts"
+  - "admin/src/app/companies/[[]id]/task-list/meeting-duplicates.tsx"
   - "server/tests/integration/minutes.test.ts"
   - "shared/types/minutes.ts"
   - "shared/core/minutes.ts"
@@ -99,6 +103,41 @@ put-back — after a failed run (`afterFailedRun`) and in the 30-minute rule —
 an AI turn, so no run can be claimed); the run's operation keys keep a redo within one run from a
 second effect. Test: `server/tests/integration/minutes.test.ts` 「read without a まとまり, one chosen
 afterwards…」, `client/tests/ai-turn-steps.test.ts`, `ai-turn-claims.test.ts`.
+
+## Outputs made once (owner FB 29, 2026-11-02)
+
+Reading a meeting again (「もう一度読む」, a retry, a rerun) made the same task five times. **What a
+meeting's reading makes is made once per meeting and item, decided by the server**
+(`services/meeting-outputs.ts`, `shared/core/meeting-outputs.ts`):
+
+- **Task** (`POST /records/item`, `records_create`, any type with a `meeting` link to a meeting):
+  optional `key` (≤ 200, one line, the AI's item mark `task:1`; only with `links.meeting`, else 400
+  `KEY_NEEDS_MEETING`). With a key the id is derived from meeting + type + key (`meetingOutputId`), so
+  the same key never makes a second record (one the member cannot read → 409 `KEY_TAKEN`, never
+  named). Without a key, or a different one, a record of the same type linked to the same meeting
+  whose title is the same after `outputTitleKey` (NFKC, A–Z folded, no spaces / brackets /
+  punctuation) is the same item. Found → 200 `{ record, entry: null, reused: true, note }`, nothing
+  written; otherwise 201 as before.
+- **Decision** (`decisions_record`): with a meeting link the key is the meeting's
+  (`<meeting id>:<key>` unless it starts with it), so another meeting's `1` is never this one; the
+  same title of the same meeting is the same item too (200 `created: false, reused: true, note`).
+- **Mail draft** (`mail_draft_create` / `POST /outbound` with `meetingId`, not a reply): the member's
+  own draft of that meeting with the same subject (title key), not discarded (sent included), is
+  the answer (200 `reused`); the tool tells the AI (`MEETING_OUTPUT_REUSED_NOTE`).
+- Only records the member reads count; other meetings never match. Look-up and write are one
+  synchronous stretch (the mail's after its awaits), so two calls at once make one. The minutes
+  first message asks for `links.meeting` + `key` on each output and says what `reused` means.
+- **Made twice before** (maintenance, owner/admin): `GET /records/meeting-duplicates` → groups of
+  the same meeting, type and title key with two or more live records (`keep` = the oldest; cancelled
+  / retracted / discarded left out); `POST /records/meeting-duplicates/merge { keepId, duplicateIds }`
+  (one listed group only, else 400 `NOT_DUPLICATES`) cancels each task / retracts each decision
+  through the engine as that admin, note 「同じ会議から重複して作られたため、こちらは使いません。残したもの：…（id）」
+  — nothing is deleted; a mail draft is listed only (`mergeable: false`, its author discards it).
+  Admin console: 「やることの一覧」→「同じ会議から重複して作られたもの」 (`meeting-duplicates.tsx`).
+- Test: `server/tests/integration/minutes.test.ts` 「made once (FB 29)」 (a second reading reuses by key
+  and by reworded title; a different item is made; another meeting is unaffected; decisions; the
+  duplicates list and merge), `outbound-mail.test.ts` 「the meeting's mail is made once」,
+  `client/tests/outbound-mail-tools.test.ts` (the AI told), `minutes-app.test.ts` (the first message).
 
 ## The text
 

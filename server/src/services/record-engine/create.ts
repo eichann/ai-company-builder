@@ -17,6 +17,8 @@ import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
 import { ASSIGNEE_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
+import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
+import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
 
 export function creating(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, placeFolder, tell, summaryOf } = ctx
@@ -25,7 +27,7 @@ export function creating(ctx: EngineContext) {
      * A record that lives on the server (types with storage `server` or
      * `either`; a company's own file-backed type is created by writing its file).
      */
-    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -38,6 +40,11 @@ export function creating(ctx: EngineContext) {
       if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
       if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
       if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')
+      // The item key of a meeting's output (minutes.md "Outputs made once"): one line, with a meeting link.
+      if (b.key !== undefined && b.key !== null && (typeof b.key !== 'string' || b.key.trim() === '' || b.key.length > MEETING_OUTPUT_KEY_MAX || /[\r\n]/.test(b.key))) {
+        return bad(`key: 1–${MEETING_OUTPUT_KEY_MAX} characters on one line`)
+      }
+      const itemKey = typeof b.key === 'string' ? b.key.normalize('NFC').trim() : null
       // `personal: true` = owner-only (「持ち主だけ」): the creator alone sees it, never with a folder.
       if (b.personal !== undefined && typeof b.personal !== 'boolean') return bad('personal must be true or false')
       const personalOwner = b.personal === true ? member.userId : null
@@ -88,7 +95,7 @@ export function creating(ctx: EngineContext) {
       const links: RecordLinkRow[] = []
       const rawLinks = (b.links ?? {}) as Record<string, unknown>
       if (typeof rawLinks !== 'object' || rawLinks === null || Array.isArray(rawLinks)) return bad('links must be an object')
-      const id = newRecordId(def.name, deps.ids.newToken().slice(0, 16))
+      let id = newRecordId(def.name, deps.ids.newToken().slice(0, 16))
       for (const [name, value] of Object.entries(rawLinks)) {
         const l = def.links[name]
         if (!l) return bad(`${name} is not a link of ${def.name}`)
@@ -118,6 +125,21 @@ export function creating(ctx: EngineContext) {
         if (interfaceLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
           const r = interfaceLinkRefusal(name, l)
           return refuse('bad-request', r.error, { code: r.code })
+        }
+      }
+      // What a meeting's reading makes, made once: the same item of the same meeting is the answer.
+      const meetingId = def.links.meeting?.target === 'meeting' ? links.find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
+      if (itemKey !== null && !meetingId) return bad('key: only for a record linked to its meeting (links.meeting)', 'KEY_NEEDS_MEETING')
+      if (meetingId) {
+        const keyed = itemKey !== null && deps.tokenDigest ? meetingOutputId(deps.tokenDigest, def.name, meetingId, itemKey) : null
+        const keyTaken = keyed !== null && records.byIds([keyed]).some(r => r.removedAt === null)
+        const same = findMeetingOutput(records, r => reader.record(r), { type: def.name, meetingId, title: b.title as string, byId: keyed })
+        if (same) return ok({ record: summaryOf(records, same.id), entry: null, reused: true as const, note: MEETING_OUTPUT_REUSED_NOTE })
+        // The key's record exists but the member does not read it: never a second one, never named.
+        if (keyTaken) return refuse('conflict', 'この目印の記録は、すでにほかの場所にあります', { code: 'KEY_TAKEN' })
+        if (keyed) {
+          id = keyed
+          for (const l of links) l.sourceId = keyed
         }
       }
       // Acceptance (records.md "Acceptance"): asked of someone else → 引き受け待ち unless the setting accepts it.

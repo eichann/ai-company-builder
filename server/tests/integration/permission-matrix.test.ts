@@ -268,6 +268,9 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/records/settings', w => ({ path: `${C(w)}/records/settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/records/problems', w => ({ path: `${C(w)}/records/problems` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/records/reindex', w => ({ path: `${C(w)}/records/reindex`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  // What one meeting made twice (minutes.md "Outputs made once"): owner/admin list and merge.
+  r('GET /api/companies/:companyId/records/meeting-duplicates', w => ({ path: `${C(w)}/records/meeting-duplicates` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/records/meeting-duplicates/merge', w => ({ path: `${C(w)}/records/meeting-duplicates/merge`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/records/types', w => ({ path: `${C(w)}/records/types` }), MEMBERS),
   r('POST /api/companies/:companyId/records/query', w => ({ path: `${C(w)}/records/query`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),

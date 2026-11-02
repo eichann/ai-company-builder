@@ -126,6 +126,8 @@ test('the first message names the minutes by id and carries no minutes text; the
   const message = minutesFirstMessage(held)
   assert.ok(message.includes(MINUTES_ID))
   assert.ok(message.includes('minutes_read'))
+  // Each output names its meeting and item, and a reading run again is told to reuse what it finds (FB 29).
+  assert.ok(message.includes('task:1') && message.includes('decision:1') && message.includes('reused'))
   assert.ok(!message.includes(held.text))
   const day = `${new Date(held.meetingAt).getMonth() + 1}/${new Date(held.meetingAt).getDate()}`
   assert.equal(minutesConsultationTitle(held), `A社 商談 のあと（${day}）`)

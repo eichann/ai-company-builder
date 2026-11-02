@@ -27,6 +27,7 @@ import type { GoogleAdminView } from '../../../shared/types/google'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
+import type { MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
 import type {
   ImportReport,
   PluginDetail,
@@ -307,3 +308,5 @@ export const slackSchema = topLevel<SlackAdminView>({
 })
 export const coreConnectorsSchema = topLevel<CoreConnectorsView>({ connectors: list, roles: list })
 export const minutesFolderSchema = topLevel<MinutesFolderSetting>({ folder: nullableStr, choices: list, meetings: str, bundleQuestionDays: num })
+export const meetingDuplicatesSchema = topLevel<MeetingDuplicates>({ groups: list })
+export const meetingDuplicatesMergedSchema = topLevel<MeetingDuplicatesMerged>({ keptId: str, merged: list, failed: list })

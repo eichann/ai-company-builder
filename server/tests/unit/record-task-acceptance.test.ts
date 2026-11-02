@@ -90,9 +90,11 @@ function setAcceptance(co: string, acceptance: Partial<AcceptanceSettings>) {
   source.forCompany(co).tasks.save({ settings: JSON.stringify({ ...s, acceptance: { ...s.acceptance, ...acceptance } }), updatedAt: TS, updatedBy: 'u-owner' })
 }
 
+// Each ask is its own item: one meeting's tasks of the same title are one (minutes.md "Outputs made once").
+let asked = 0
 function ask(by: string, assignee: string, opts: { co?: string; actor?: typeof HUMAN | typeof AI; links?: Record<string, string>; personal?: boolean } = {}) {
   return ok(engine.create(m(by, opts.co ?? 'a'), opts.actor ?? HUMAN, {
-    type: 'task', title: '請求書を確かめる', fields: { assignee }, ...(opts.links ? { links: opts.links } : {}), ...(opts.personal ? { personal: true } : {}),
+    type: 'task', title: `請求書を確かめる ${++asked}`, fields: { assignee }, ...(opts.links ? { links: opts.links } : {}), ...(opts.personal ? { personal: true } : {}),
   })).record
 }
 

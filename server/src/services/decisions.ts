@@ -16,6 +16,10 @@
  *   a precedent; set here or later by the `set_exception` action (who may confirm);
  * - an optional idempotency `key` (`meeting-…:decision:2`) records the same
  *   item once: the id is derived from it and it is kept in the `source_key` field.
+ *   With a meeting link the key is the meeting's (`<meeting id>:<key>`, unless it starts
+ *   with the meeting's id already), so another meeting's `1` is never this one; and a
+ *   decision of the same meeting with the same title is the same item too
+ *   (minutes.md "Outputs made once").
  */
 import { nameKey, normalizeRepoPath, isSameOrAncestorPath } from '../../shared/core/paths'
 import { findPrivateScope, resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
@@ -29,6 +33,8 @@ import type { TokenDigest } from '../ports/key-broker'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
+import { findMeetingOutput } from './meeting-outputs'
+import { MEETING_OUTPUT_REUSED_NOTE } from '../../shared/core/meeting-outputs'
 import { recordReader } from './record-access'
 import { ASSIGNEE_CANNOT_READ, type ActorInput, type ServiceRecordWriter } from './record-engine'
 import { currentTypes } from './record-index'
@@ -74,7 +80,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
      * Record a decision: `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
      * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
      */
-    async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean }>> {
+    async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean; reused?: true; note?: string }>> {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
@@ -91,8 +97,8 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (!source) return bad(`source: 1–${SOURCE_MAX} characters`)
       if (b.important !== undefined && typeof b.important !== 'boolean') return bad('important: true or false')
       if (b.exception !== undefined && typeof b.exception !== 'boolean') return bad('exception: true or false')
-      const key = line(b.key, KEY_MAX, false)
-      if (key === null) return bad(`key: up to ${KEY_MAX} characters`)
+      const givenKey = line(b.key, KEY_MAX, false)
+      if (givenKey === null) return bad(`key: up to ${KEY_MAX} characters`)
       if (typeof b.folder !== 'string') return bad('folder: a department folder')
 
       // Links: readable records of the type the link names (`bundle`: of any type implementing it).
@@ -122,6 +128,8 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       const wanted = normalizeRepoPath(b.folder)
       const department = wanted ? handle.departments.folders().find(d => nameKey(d.folder) === nameKey(wanted)) : undefined
       const perms: PermissionRepository = { getMemberRole: () => member.role, listScopes: () => scopes }
+      // A meeting's item key is that meeting's: another meeting's `1` is never this one.
+      const key = givenKey !== undefined && links.meeting && !givenKey.startsWith(`${links.meeting}:`) ? `${links.meeting}:${givenKey}` : givenKey
       // With a key, the id is the key's: two calls at once still make one record.
       const id = key !== undefined
         ? newRecordId('decision', deps.tokenDigest.digest(`decision-key:${key}`).slice(0, 24))
@@ -140,8 +148,13 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         if (earlier) {
           const row = records.byIds([earlier.id]).find(r => reader.record(r))
           if (!row) return refuse('conflict', 'この目印の決めたことは、すでにほかの場所にあります', { code: 'KEY_TAKEN' })
-          return ok({ record: recordSummaries(records, [row]).get(row.id) as RecordSummary, created: false })
+          return ok({ record: recordSummaries(records, [row]).get(row.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
         }
+      }
+      // The same title from the same meeting is the same item (a reading run again, without a key).
+      if (links.meeting) {
+        const same = findMeetingOutput(records, r => reader.record(r), { type: 'decision', meetingId: links.meeting, title })
+        if (same) return ok({ record: recordSummaries(records, [same]).get(same.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
       }
 
       const meeting = links.meeting ? linked.find(r => r.id === links.meeting) : undefined

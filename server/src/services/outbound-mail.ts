@@ -53,6 +53,8 @@ import { recordReader } from './record-access'
 import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
+import { findMeetingOutput } from './meeting-outputs'
+import { MEETING_OUTPUT_REUSED_NOTE } from '../../shared/core/meeting-outputs'
 import { fieldsOf, mailThreadIdOf, threadPointerOf, type ThreadPointer } from './threads'
 
 /** How long a sent / discarded mail's body stays on the server (§9 q9). */
@@ -709,7 +711,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     },
 
     /** A new draft (person or their AI): POST /outbound. */
-    async create(member: Member, actor: ActorInput, rawBody: unknown): Promise<Outcome<{ draft: OutboundMailView }>> {
+    async create(member: Member, actor: ActorInput, rawBody: unknown): Promise<Outcome<{ draft: OutboundMailView; reused?: true; note?: string }>> {
       const off = enabled(member.companyId)
       if (off) return off
       const body = isObj(rawBody) ? rawBody : {}
@@ -735,9 +737,20 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       }
       const checked = contentCheck(from, resolved.to, resolved.cc, body.subject, body.body, reply)
       if ('ok' in checked) return checked
+      const handle = companyData.forCompany(member.companyId)
+      // A meeting's mail made once (minutes.md "Outputs made once"): the member's own draft of this meeting with
+      // the same subject, not discarded, is the answer. Checked here, in the stretch that writes, so two calls make one.
+      if (ctx.meetingId && !ctx.interactionId) {
+        const mine = (r: RecordRow) => handle.outbound.mail(r.id)?.authorId === member.userId && handle.records.states([r.id])[0]?.state !== 'discarded'
+        const same = findMeetingOutput(handle.records, mine, { type: 'outbound_message', meetingId: ctx.meetingId, title: titleOf(checked.subject) })
+        const sameMail = same ? handle.outbound.mail(same.id) : null
+        if (sameMail) {
+          const answer = draftAnswer(member, sameMail)
+          return answer.ok ? ok({ ...answer.value, reused: true as const, note: MEETING_OUTPUT_REUSED_NOTE }) : answer
+        }
+      }
       const messageId = `outbound_message-${deps.ids.newToken().slice(0, 16)}`
       const at = deps.clock.now()
-      const handle = companyData.forCompany(member.companyId)
       // The content (its hash goes into the record), the record and the rows: all or nothing.
       const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, meetingId: ctx.meetingId, bundleId: ctx.bundleId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
       const made = tryWrite(() => {
