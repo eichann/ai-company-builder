@@ -153,7 +153,9 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    Never the AI's own steps (`who: [ai]`: finish_prep, hand_over) nor actions needing a record
    chooser (set_bundle) or the list's own editors (tags, wait_until). **One main button** beside
    the title (新しい画面のデモ C, J; `placeActions`): 自分で進める (AI が用意している) → 引き受ける →
-   終わったので見てもらう (確かめてから, the assignee) → 完了にする; while someone else checks it, a word
+   終わったので見てもらう (確かめてから, the assignee) → 完了にする — but on a task returned to its requester
+   (受けられないと返した) the requester's main action is 担当を替える, with 「やり直す（同じ人にもう一度）」 and
+   「中止する」 in 「…」; while someone else checks it, a word
    instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
    one line on what it does (`actionHint`). **チームの進め方** (the company's `teamMode`, off by default: `tasks:card` reads `GET /me/work-switches` `teamMode.on`, unreadable = off; `card.teamMode`):
    off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける, 返事待ち,
@@ -212,7 +214,8 @@ the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんな
 whose turn and the due and opening the task; the right column starts with its やること, each with
 whose turn. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
-「AI が反映しました：<what>」 with its time. **見られる人** at the top right of a record's card
+「AI が反映しました（11/2 09:56）」 — one line in fixed words, never the AI's step names; what it did is in
+経緯, opened by the band's ［経緯で見る］. **見られる人** at the top right of a record's card
 (`SeenBy`, the lock only for 「あなただけ」): main asks `POST …/viewers { records: [id] }` with the card
 and passes only what the server answered for that record (`viewers`); a record left out shows
 nothing (`client/tests/record-card-viewers.test.ts`).

@@ -68,3 +68,12 @@ test('an AI proposal opened on its own: 「足す」 is the main action, 「要�
   const review = card(task('todo', { assignee: ME, requested_by: ME, task_kind: 'minutes_review' }))
   assert.equal(actionText(placeActions(review, false).main!, { review: { meetingId: 'm', meetingTitle: 'm', summary: null, decisions: [] } }), '確認を終える')
 })
+
+test('受けられないと返した: the requester main action is 担当を替える; やり直す（同じ人にもう一度）and 中止する are in 「…」, 完了 never first', () => {
+  const returned = card(task('declined', { assignee: 'u-tanaka', requested_by: ME }))
+  const p = placeActions(returned, false)
+  assert.equal(p.main?.action, 'assign')
+  const more = Object.fromEntries(p.more.map(a => [a.action, actionText(a, returned)]))
+  assert.equal(more.reopen, 'やり直す（同じ人にもう一度）')
+  assert.equal(more.cancel, '中止する')
+})

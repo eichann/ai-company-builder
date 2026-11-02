@@ -63,7 +63,11 @@ test('a 案件: what for, who and how far, the approval request as its card, eve
   await expect(everyone.getByRole('region', { name: 'あなたの番' })).toContainText('見積書を作り直すあなたの番・11/7 17:00')
   await expect(everyone.getByRole('region', { name: 'ほかの人の番・返事待ち' })).toContainText('スケジュール案を出す阿部さんの番')
   await expect(everyone.getByRole('region', { name: '終わったこと' })).toContainText('お礼メールを送る')
-  await expect(card.getByRole('status')).toContainText('AI が反映しました：承認のお願い 1件を作りました')
+  // One line in fixed words; what it did (and the AI's step names) only in 経緯, opened from the band.
+  const band = card.getByRole('status')
+  await expect(band).toHaveText(/^AI が反映しました（11\/5 15:38）経緯で見る$/)
+  await band.getByRole('button', { name: '経緯で見る' }).click()
+  await expect(card.getByRole('region', { name: '経緯' })).toContainText('承認のお願い 1件を作りました')
   // The right column starts with the 案件's own やること, each saying whose turn it is.
   const side = card.getByRole('complementary', { name: 'つながっているもの' })
   await expect(side.getByRole('region').first()).toHaveAccessibleName('やること')
@@ -116,5 +120,11 @@ test('「新しいプロジェクトにする」: the name from the meeting, its
     'link task-000001 bundle=project-0000nn@2', 'link task-000002 bundle=project-0000nn@2', 'link task-000003 bundle=project-0000nn@2',
   ].join('\n'))
   await expect(page.getByRole('status')).toContainText('「A社 研修導入のお打ち合わせ」を作り、つなぎました（宿題 3件も入れました）')
+  expectNoPageErrors(state)
+})
+
+test('a row of 「つながっているもの」 says no raw type name under it (never 「タスク」)', async ({ page }) => {
+  const state = await openPreview(page, 'record-card')
+  await expect(page.getByRole('complementary', { name: 'つながっているもの' })).not.toContainText('タスク')
   expectNoPageErrors(state)
 })

@@ -206,7 +206,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     if (l.direction === 'out' && l.name === 'prepared') { prepared.push(view); continue }
     if (l.direction === 'out' && l.name === 'bundle') { bundle = view; continue }
     if (l.direction === 'out' && (l.name === 'meeting' || l.name === 'interaction')) originLink ??= { kind: l.name, record: l.record }
-    const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : src.defs.get(l.record.type)?.label ?? l.name
+    // Only this record's own link names say something (「もとの会議」); another record's link to it says nothing more than its kind.
+    const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : ''
     const removable = removableOf(r, l)
     links.push({ label, record: view, ...(removable ? { removable } : {}) })
   }

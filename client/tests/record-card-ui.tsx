@@ -58,7 +58,7 @@ const card = kind === 'bundle'
   ? {
     record: { ...view(deal), typeLabel: '案件', thing: 'bundle' as const },
     detail: bundleDetailOf(deal, [...tasks, approval], 'u-sato', people),
-    fields: [], history: [], links: bundleLinks,
+    fields: [], history: [{ at: '2026-11-05T06:38:00.000Z', text: 'AI：まとまりの分を終える（承認のお願い 1件を作りました）', ai: true }], links: bundleLinks,
     ai: params.get('ai') === 'working' ? { working: true, done: null } : { working: false, done: { at: '2026-11-05T06:38:00.000Z', text: '承認のお願い 1件を作りました' } },
   }
   : { record: view(record), version: 3, detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }

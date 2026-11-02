@@ -40,7 +40,11 @@ export function placeActions(card: TaskCardData, team: boolean): ActionPlacement
   else if (state === 'dismissed') status = 'しまった'
   else if (state === 'review' && !card.roles.reviewer && !card.roles.requester) status = `${card.names.reviewer ?? '確かめる人'}さんが確かめています`
   // While someone else checks it (or it is done) the word stands alone; 完了 stays in 「…」.
-  if (!status) {
+  if (!status && state === 'declined' && card.roles.requester) {
+    // Returned to the requester: who does it next is the question, not finishing it.
+    main = find('assign')
+  }
+  if (!status && !main) {
     main = find('adopt')
       ?? find('take_over')
       ?? find('accept')
@@ -58,8 +62,10 @@ function isHandToChecker(card: TaskCardData, a: TaskCardAction): boolean {
 }
 
 /** The words on a button or a menu row. */
-export function actionText(a: TaskCardAction, card?: Pick<TaskCardData, 'review'>): string {
+export function actionText(a: TaskCardAction, card?: Partial<Pick<TaskCardData, 'review' | 'record'>>): string {
+  const declined = card?.record?.state === 'declined'
   switch (a.action) {
+    case 'reopen': return declined ? 'やり直す（同じ人にもう一度）' : a.title
     case 'complete': return a.needsOk ? '完了にする（OK をもらった）' : card?.review ? '確認を終える' : '完了にする'
     case 'adopt': return '足す'
     case 'dismiss': return '要らない（AI の案を外す）'
@@ -68,7 +74,7 @@ export function actionText(a: TaskCardAction, card?: Pick<TaskCardData, 'review'
     case 'start': return '進めている印をつける'
     case 'assign': return '人に頼む（担当を替える）'
     case 'decline': return '受けられない（頼んだ人に返す）'
-    case 'cancel': return 'やめる（しまう）'
+    case 'cancel': return declined ? '中止する' : 'やめる（しまう）'
     default: return a.title
   }
 }
@@ -79,7 +85,7 @@ export function actionHint(a: TaskCardAction, card: TaskCardData): string | unde
   switch (a.action) {
     case 'complete': return a.needsOk ? '確かめる人が ACB の外で OK をくれたとき。誰の OK かを書きます' : undefined
     case 'start': return '手を付けたことを見せます（付けなくても完了にできます）'
-    case 'reopen': return '完了を取り消して、担当の番に戻します'
+    case 'reopen': return card.record.state === 'declined' ? '同じ人に、もう一度頼みます' : '完了を取り消して、担当の番に戻します'
     case 'request_review': return '確かめる人の番になります。その人の OK で完了です'
     case 'wait': return '相手の返事を待つ間、あなたの番から外れます'
     case 'assign': return '頼んだ相手の番になります。あなたの一覧では「ほかの人の番」に残ります'

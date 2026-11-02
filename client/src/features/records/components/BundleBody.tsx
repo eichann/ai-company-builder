@@ -63,13 +63,21 @@ export function BundleBody({ b, renderApproval }: { b: BundleDetailView; renderA
   )
 }
 
-/** 「AI が反映しています…（あと少し）」 while it works, 「AI が反映しました：…」 after (plan I.4). */
-export function AiBand({ ai }: { ai: NonNullable<RecordCardView['ai']> }) {
+/**
+ * 「AI が反映しています…（あと少し）」 while it works, 「AI が反映しました（11/2 09:56）」 after (plan I.4): one
+ * line in fixed words — what it did is in 経緯 (［経緯で見る］), never the AI's own step names here.
+ */
+export function AiBand({ ai, onShowHistory }: { ai: NonNullable<RecordCardView['ai']>; onShowHistory?: () => void }) {
   if (ai.working) {
     return <p role="status" className="flex items-center gap-2 rounded-xl border border-accent/30 bg-accent/[0.04] px-3 py-2 text-[12.5px]"><CircleNotch size={14} className="animate-spin text-accent" />{CALM.aiWorking}</p>
   }
   if (!ai.done) return null
   const at = new Date(ai.done.at)
   const time = Number.isNaN(at.getTime()) ? '' : `（${at.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}）`
-  return <p role="status" className="flex items-center gap-2 rounded-lg bg-emerald-500/[0.07] px-3 py-2 text-[12.5px]"><Sparkle size={14} weight="fill" className="text-emerald-600" />{CALM.aiDone(ai.done.text)}{time}</p>
+  return (
+    <p role="status" className="flex items-center gap-2 truncate rounded-lg bg-emerald-500/[0.07] px-3 py-2 text-[12.5px]">
+      <Sparkle size={14} weight="fill" className="shrink-0 text-emerald-600" /><span className="min-w-0 flex-1 truncate">AI が反映しました{time}</span>
+      {onShowHistory && <button type="button" onClick={onShowHistory} className="shrink-0 text-[11.5px] text-accent hover:underline">経緯で見る</button>}
+    </p>
+  )
 }
