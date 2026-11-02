@@ -15,7 +15,7 @@ const INTERACTION = 'interaction-0a1b2c3d4e5f6071'
 const REPLY_REQUEST = 'reply_request-0a1b2c3d4e5f6071'
 const TASK = 'task-0a1b2c3d4e5f6071'
 
-function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES) {
+function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES, ownAutoRun?: boolean | 'broken') {
   const record = { ...initial }
   const calls: string[] = []
   const tokens: Array<{ conversationId: string; agent: string; scope: string; run?: { id: string; generation: number } }> = []
@@ -65,6 +65,10 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
     }
     if (url.pathname === `/api/companies/${COMPANY}/task-settings` && method === 'GET' && autoRun) {
       return json(200, { success: true, data: { settings: { autoRun }, canEdit: false, updatedAt: null, updatedBy: null, updatedByName: null } })
+    }
+    if (url.pathname === `/api/companies/${COMPANY}/me/work-switches` && method === 'GET' && ownAutoRun !== undefined) {
+      if (ownAutoRun === 'broken') return json(500, { error: 'x' })
+      return json(200, { success: true, data: { autoRun: { on: ownAutoRun, allowed: true, companyDefault: true, chosen: ownAutoRun } } })
     }
     if (url.pathname === `/api/companies/${COMPANY}/records/item/${RECORD}` && method === 'GET') return json(200, { data: { record } })
     if (url.pathname === `/api/companies/${COMPANY}/records/item/${RECORD}/actions/retry` && method === 'POST') {
@@ -203,8 +207,18 @@ test("「自動で進める」 comes from the company's task settings (S6); not 
   assert.deepEqual(await claimsFor(on).settings(COMPANY), { enabled: true, dailyLimit: 12, stopAfterFailures: 2 })
   const off = fakeServer(undefined, { enabled: false, dailyLimit: 30, stopAfterFailures: 3 })
   assert.equal((await claimsFor(off).settings(COMPANY)).enabled, false)
+  // (An older server without the member's own switch: the company's switch as before.)
   // An older server without the settings (404), or offline: nothing runs by itself.
   assert.equal((await claimsFor(fakeServer()).settings(COMPANY)).enabled, false)
+})
+
+test('「自動で進める」 is the member\'s own switch on their PC (work-switches.ts), within the company\'s; unreadable means off', async () => {
+  const company = { enabled: true, dailyLimit: 12, stopAfterFailures: 2 }
+  assert.deepEqual(await claimsFor(fakeServer(undefined, company, MINUTES, false)).settings(COMPANY), { ...company, enabled: false })
+  assert.deepEqual(await claimsFor(fakeServer(undefined, company, MINUTES, true)).settings(COMPANY), company)
+  assert.equal((await claimsFor(fakeServer(undefined, company, MINUTES, 'broken')).settings(COMPANY)).enabled, false)
+  // The company not allowing it wins over the member's own (stored) choice.
+  assert.equal((await claimsFor(fakeServer(undefined, { ...company, enabled: false }, MINUTES, true)).settings(COMPANY)).enabled, false)
 })
 
 test('a notice older than the record (an earlier run was put back): the claim starts it at the version now and says which', async () => {

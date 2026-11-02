@@ -57,10 +57,22 @@ export function sqliteTaskSettingsRepository(conn: Database.Database, companyId:
     },
     removeMember(userId, by, at) {
       conn.prepare('DELETE FROM department_members WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM member_work_switches WHERE company_id = ? AND user_id = ?').run(companyId, userId)
       // History (records.md "Whose turn it was"): marked, never deleted.
       conn.prepare(`
         UPDATE member_absences SET removed_at = ?, removed_by = ? WHERE company_id = ? AND (user_id = ? OR delegate_id = ?) AND removed_at IS NULL
       `).run(at, by, companyId, userId, userId)
+    },
+    workSwitches(userId) {
+      const r = conn.prepare('SELECT choices FROM member_work_switches WHERE company_id = ? AND user_id = ?')
+        .get(companyId, userId) as { choices: string } | undefined
+      return r?.choices ?? null
+    },
+    saveWorkSwitches(userId, choices, at) {
+      conn.prepare(`
+        INSERT INTO member_work_switches (company_id, user_id, choices, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(company_id, user_id) DO UPDATE SET choices = excluded.choices, updated_at = excluded.updated_at
+      `).run(companyId, userId, choices, at)
     },
     absencesFrom(day) {
       return (conn.prepare(`

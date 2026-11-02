@@ -47,7 +47,8 @@ API calls (Google: `google-connector.md`, `services/google-connector.ts` registe
   `addSetupSeen`): which features the screen already showed the member, so it opens by itself only
   for new ones (google-connector.md "One consent"). Kept across 「許可をやめる」.
 - **Feature toggles inside a grant** (owner decision 2026-11-01, e.g. Google 予定と議事録を読む /
-  メールを送る / 受信を読む): `connector_grants.features_off` (JSON list, default `[]`, kept across a
+  メールを送る; not 受信を読む since 2026-11-02 — that is the member's own switch in 自分の設定,
+  `tasks.md` "Each member's switches", which Google's toggle writes): `connector_grants.features_off` (JSON list, default `[]`, kept across a
   re-consent, gone with 「許可をやめる」). The member sets it (`memberOAuth.setFeatureOff(provider,
   member, feature, off)`: only the descriptor's features, only their own grant; history
   `grant-features`; Google's route `PUT /me/google/features`), and the provider's client refuses

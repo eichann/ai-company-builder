@@ -91,7 +91,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_operations: ['adapters/sqlite/plugins.ts'],
   // The Google connection (google-connector.md).
   google_oauth_clients: ['adapters/sqlite/connectors.ts'],
-  connector_grants: ['adapters/sqlite/connectors.ts'],
+  // db/schema/tasks.ts: read once when member_work_switches is made (MIGRATION below).
+  connector_grants: ['adapters/sqlite/connectors.ts', 'db/schema/tasks.ts'],
   oauth_pending: ['adapters/sqlite/connectors.ts'],
   connector_history: ['adapters/sqlite/connectors.ts'],
   // Google Drive (google-drive.md).
@@ -108,6 +109,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   task_settings: ['adapters/sqlite/task-settings.ts'],
   department_members: ['adapters/sqlite/task-settings.ts'],
   member_absences: ['adapters/sqlite/task-settings.ts'],
+  // Each member's own switches (tasks.md); db/schema/tasks.ts: the one-time carry-over when the table is made.
+  member_work_switches: ['adapters/sqlite/task-settings.ts', 'db/schema/tasks.ts'],
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // 「仕事の道具をつなぐ」: features already shown to a member (google-connector.md).
@@ -181,6 +184,9 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['UPDATE scope_rules SET company_id = (SELECT s.company_id FROM scopes s WHERE s.id = scope_rules.scope_id) WHERE company_id IS NULL', MIGRATION],
     ['DELETE FROM department_managers WHERE company_id IS NULL AND department_id NOT IN (SELECT id FROM departments)', MIGRATION],
     ['UPDATE department_managers SET company_id = (SELECT d.company_id FROM departments d WHERE d.id = department_managers.department_id) WHERE company_id IS NULL', MIGRATION],
+  ],
+  'db/schema/tasks.ts': [
+    ["SELECT company_id, user_id, provider, scopes, features_off FROM connector_grants WHERE status = 'active' AND provider IN ('google', 'slack')", MIGRATION],
   ],
   'adapters/sqlite/push-rejections.ts': [
     ["SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}", BUILT_WHERE],

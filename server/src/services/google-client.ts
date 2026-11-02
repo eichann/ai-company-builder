@@ -10,7 +10,8 @@
  * the company's client present and on, the vault on, the caller still a
  * member, the member's grant active (an admin's stop, 「すべての鍵を止める」
  * and the member's own 「許可をやめる」 all end it), the scope granted, and the
- * scope's feature not turned off by the member (`features_off`).
+ * scope's feature not turned off by the member (`features_off`; for 受信を読む, the member's
+ * own switch within the company's: shared/core/work-switches.ts).
  *
  * Secrets: the client secret and the refresh token come out of the vault
  * just before they are sent; the access token lives only in this module's
@@ -51,7 +52,7 @@ const BEFORE_SENDING: readonly UpstreamFailure[] = ['private-address', 'dns', 't
 export type GoogleStopReason =
   | 'operator-stopped' | 'not-configured' | 'off' | 'vault-off' | 'not-member'
   | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted'
-  /** The member turned this feature off inside their grant (`features_off`, e.g. 受信を読む). */
+  /** The member turned this feature off (`features_off`; 受信を読む: their own switch is off). */
   | 'feature-off'
   | 'practice-real-secret' | 'bad-path' | 'token-refused' | 'token-unavailable'
   /** Google answered the Picker's token with more than `drive.file`: it is not handed out. */
@@ -129,6 +130,11 @@ export interface GoogleClientDeps {
   /** Where the browser signs in (https://accounts.google.com, or the fake Google's origin). */
   authorizeOrigin: string
   sleep(ms: number): Promise<void>
+  /**
+   * 受信を読む (the `inbox` feature): the company's 使ってよいか and the member's own switch
+   * (services/work-switches.ts), read on every call.
+   */
+  readIncoming: { allowed(companyId: string): boolean; on(companyId: string, userId: string): boolean }
 }
 
 async function readBody(body: AsyncIterable<Uint8Array>): Promise<Uint8Array | null> {
@@ -233,11 +239,16 @@ export function createGoogleClient(deps: GoogleClientDeps) {
    * by the admin (answered like the company switch, `off`), nor by the member
    * (member-oauth.md "Feature toggles": refused like a scope not granted).
    */
-  function scopeStop(connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
+  function scopeStop(companyId: string, connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
     if (!grant.scopes.includes(scope)) return 'scope-not-granted'
     const feature = googleFeatureOfScope(scope)
+    if (feature === 'inbox') {
+      // 受信を読む: the company's and the member's own switch (work-switches.ts), not Google's.
+      if (!deps.readIncoming.allowed(companyId)) return 'off'
+      return deps.readIncoming.on(companyId, grant.userId) ? null : 'feature-off'
+    }
     const client = connectors.client()
-    if (feature !== null && client && !googleCompanyFeatureOn(feature, client)) return 'off'
+    if (feature !== null && client && !googleCompanyFeatureOn(feature, { ...client, readIncomingAllowed: false })) return 'off'
     if (feature !== null && grant.featuresOff.includes(feature)) return 'feature-off'
     return null
   }
@@ -370,7 +381,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       const grant = connectors.grant('google', userId)
       const stop = grantStop(grant)
       if (stop) return { ok: false, reason: stop }
-      const scoped = scopeStop(connectors, grant!, GOOGLE_SCOPE.driveFile)
+      const scoped = scopeStop(companyId, connectors, grant!, GOOGLE_SCOPE.driveFile)
       if (scoped) return { ok: false, reason: scoped }
       const stored = connectors.refreshToken('google', userId)
       if (!stored || stored.grantId !== grant!.grantId) return { ok: false, reason: 'grant-revoked' }
@@ -420,7 +431,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const grant = connectors.grant('google', userId)
         const stop = grantStop(grant)
         if (stop) return notSent(stop)
-        const scoped = scopeStop(connectors, grant!, req.scope)
+        const scoped = scopeStop(companyId, connectors, grant!, req.scope)
         if (scoped) return notSent(scoped)
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)

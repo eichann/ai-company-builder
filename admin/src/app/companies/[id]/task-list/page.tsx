@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, ChatCircleText, Handshake, ListChecks, LockSimple, Robot, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Trash, UsersThree } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -132,6 +132,7 @@ function SettingsForm({
     <>
       <ReplyCard draft={draft} change={change} />
       <AutoRunCard draft={draft} change={change} />
+      <ReadIncomingCard draft={draft} change={change} />
       <AcceptanceCard draft={draft} change={change} />
       <DepartmentsCard draft={draft} change={change} departments={departments} />
       <HolidaysCard draft={draft} change={change} />
@@ -243,9 +244,25 @@ function AutoRunCard({ draft, change }: CardProps) {
           checked={draft.autoRun.enabled}
           onSelect={() => change((d) => { d.autoRun.enabled = true })}
           label="進めさせる"
-          help="AI の番になった仕事を、AI が自分で進めます（下書きまで）。"
+          help="AI の番になった仕事を、AI が自分で進めます（下書きまで）。各自が自分の設定でオン・オフできます。"
         />
       </div>
+      {draft.autoRun.enabled && (
+        <div role="radiogroup" aria-label="AI が自動で進める 各自の初めの値" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
+          <RadioCard
+            checked={draft.autoRun.memberDefault}
+            onSelect={() => change((d) => { d.autoRun.memberDefault = true })}
+            label="各自オンで始める"
+            help="まだ自分で決めていない人は、AI が自動で進めます。"
+          />
+          <RadioCard
+            checked={!draft.autoRun.memberDefault}
+            onSelect={() => change((d) => { d.autoRun.memberDefault = false })}
+            label="各自オフで始める"
+            help="自分の設定でオンにした人だけ、AI が自動で進めます。"
+          />
+        </div>
+      )}
       {draft.autoRun.enabled && (
         <div className="grid gap-4 border-t px-5 py-4 text-sm sm:grid-cols-2">
           <div className="space-y-1.5">
@@ -276,6 +293,52 @@ function AutoRunCard({ draft, change }: CardProps) {
             />
             <p className="text-xs text-muted-foreground">止まったら、本人に知らせます（{L.stopAfterFailures.min}〜{L.stopAfterFailures.max} 回）</p>
           </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+function ReadIncomingCard({ draft, change }: CardProps) {
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <EnvelopeSimple size={16} />
+          受信を読む
+        </CardTitle>
+        <CardDescription>
+          本人のメール・Slack に来た連絡を AI が読み、返事が要るものを「返事のお願い」にします。本文は ACB に残しません。使ってよいときは、各自が自分の設定でオン・オフできます。
+        </CardDescription>
+      </CardHeader>
+      <div role="radiogroup" aria-label="受信を読む 使ってよいか" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
+        <RadioCard
+          checked={draft.readIncoming.allowed}
+          onSelect={() => change((d) => { d.readIncoming.allowed = true })}
+          label="使ってよい"
+          help="各自が自分の設定でオンにできます。"
+        />
+        <RadioCard
+          checked={!draft.readIncoming.allowed}
+          onSelect={() => change((d) => { d.readIncoming.allowed = false })}
+          label="使わない"
+          help="だれのメール・Slack も読みません。"
+        />
+      </div>
+      {draft.readIncoming.allowed && (
+        <div role="radiogroup" aria-label="受信を読む 各自の初めの値" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
+          <RadioCard
+            checked={!draft.readIncoming.memberDefault}
+            onSelect={() => change((d) => { d.readIncoming.memberDefault = false })}
+            label="各自オフで始める"
+            help="自分の設定でオンにした人のものだけ読みます。"
+          />
+          <RadioCard
+            checked={draft.readIncoming.memberDefault}
+            onSelect={() => change((d) => { d.readIncoming.memberDefault = true })}
+            label="各自オンで始める"
+            help="まだ自分で決めていない人のものも読みます（Google・Slack で許可した人だけ）。"
+          />
         </div>
       )}
     </Card>

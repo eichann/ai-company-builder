@@ -139,8 +139,9 @@ mentioned users. The member's **own** message in a DM or a thread reply is a sig
 (their reply: the inbox ends what it answered, B4). Signals go to the listeners registered with
 `services.onSlackSignal` (lane B's 来た連絡). Left out: bots (`bot_id`), edits and other subtypes,
 the sender themselves (except `own` above),
-members without an active grant that reads (`read` granted and not in `features_off`) or no
-longer members. Slack lists only one authorization per event; reaching every member of a
+members without an active grant that reads (`read` granted and not in `features_off`), members
+whose own 受信を読む is off (`readsIncoming`: within the company's; `tasks.md` "Each member's
+switches"), or no longer members. Slack lists only one authorization per event; reaching every member of a
 broadcast needs `apps.event.authorizations.list`, which takes an **app-level token** (`xapp-`,
 `authorizations:read`) — a third secret the admin would register — and one call per broadcast
 (paged). Not done in A3 (not cheap): an @channel reaches only the one authorized member today.

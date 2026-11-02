@@ -115,6 +115,8 @@ export interface ConnectorRepository {
   prunePending(now: string, userId?: string): void
 
   history(provider: ConnectorProvider, limit: number): ConnectorChangeRow[]
+  /** One history line for a change stored elsewhere (Google's `inbox` switch = the company's 受信を読む). */
+  addHistory(change: ConnectorChangeRow): void
 
   // 「仕事の道具をつなぐ」: the provider's features the app already showed the member.
   setupSeen(provider: ConnectorProvider, userId: string): string[]

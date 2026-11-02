@@ -10,7 +10,8 @@
  * `gmail.metadata`, `gmail.modify` or domain-wide delegation
  * (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox`
  * feature (owner decision 2026-11-01, spec §7-1: the member can turn it off).
- * The Google account must be the member's own ACB email.
+ * The Google account must be the member's own ACB email. 受信を読む's switches are the
+ * member's own 受信を読む within the company's (`work-switches.ts`), not a Google switch.
  *
  * Pure: imports nothing outside shared/core.
  */
@@ -119,25 +120,32 @@ export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
 // What the company offers its members (owner decision 2026-11-02, 「仕事の道具をつなぐ」).
 
 /**
- * Off for a company until its admin turns them on (owner decision 2026-11-02:
- * 受信を読む is the most sensitive scope, and the incoming-mail flow ships off).
- * The others are on until the admin turns them off.
+ * Off for a company until its admin turns them on; the others are on until the admin turns them
+ * off. Empty since 2026-11-02: 受信を読む (`inbox`) is no longer Google's own company switch — it is
+ * the company's 受信を読む (`work-switches.ts`, the task settings' `readIncoming.allowed`, allowed
+ * by default, each member starting off), which covers Slack's reading too. `featuresOn` is kept
+ * for a feature that needs it again.
  */
-export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['inbox']
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = []
 
-/** The admin's switches as stored: default-on features turned off, default-off features turned on. */
+/**
+ * The admin's switches as stored (default-on features turned off, default-off features turned on)
+ * and the company's 受信を読む (`readIncomingAllowed`), which decides the `inbox` feature.
+ */
 export interface GoogleCompanySwitches {
   featuresOff: readonly string[]
   featuresOn: readonly string[]
+  readIncomingAllowed: boolean
 }
 
-/** Whether the company has a feature on (the admin's switch over the feature's default). */
+/** Whether the company has a feature on (the admin's switch over the feature's default; `inbox` = the company's 受信を読む). */
 export function googleCompanyFeatureOn(feature: GoogleFeature, company: GoogleCompanySwitches): boolean {
+  if (feature === 'inbox') return company.readIncomingAllowed
   return GOOGLE_COMPANY_DEFAULT_OFF.includes(feature) ? company.featuresOn.includes(feature) : !company.featuresOff.includes(feature)
 }
 
-/** The switches after the admin turns one feature on or off (only the list of its default changes). */
-export function googleCompanySwitched(company: GoogleCompanySwitches, feature: GoogleFeature, on: boolean): { featuresOff: GoogleFeature[]; featuresOn: GoogleFeature[] } {
+/** The stored switches after the admin turns one feature on or off (only the list of its default changes; never `inbox`). */
+export function googleCompanySwitched(company: Omit<GoogleCompanySwitches, 'readIncomingAllowed'>, feature: Exclude<GoogleFeature, 'inbox'>, on: boolean): { featuresOff: GoogleFeature[]; featuresOn: GoogleFeature[] } {
   const defaultOff = GOOGLE_COMPANY_DEFAULT_OFF.includes(feature)
   return {
     featuresOff: GOOGLE_FEATURES.filter(f => (f === feature && !defaultOff ? !on : company.featuresOff.includes(f) && !GOOGLE_COMPANY_DEFAULT_OFF.includes(f))),
@@ -152,6 +160,16 @@ export function googleCompanySwitched(company: GoogleCompanySwitches, feature: G
  */
 export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerConfigured: boolean }): GoogleFeature[] {
   return GOOGLE_FEATURES.filter(f => googleCompanyFeatureOn(f, company) && (f !== 'drive' || company.pickerConfigured))
+}
+
+/**
+ * What one member is offered (「仕事の道具をつなぐ」's one consent, the screen's 「まだ許可していないもの」):
+ * the company's features, but 受信を読む only while the member's own 受信を読む is on — the
+ * most sensitive scope is never asked of someone who did not turn it on (owner decisions
+ * 2026-11-02).
+ */
+export function googleMemberFeatures(companyFeatures: readonly GoogleFeature[], readIncomingOn: boolean): GoogleFeature[] {
+  return companyFeatures.filter(f => f !== 'inbox' || readIncomingOn)
 }
 
 /**

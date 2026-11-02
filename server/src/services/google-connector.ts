@@ -13,7 +13,7 @@
  * company's Workspace domain is accepted — anything else stores nothing.
  */
 import {
-  googleCompanyFeatureOn, googleCompanyFeatures, googleCompanySwitched, googleFeaturesOf, GOOGLE_COMPANY_DEFAULT_OFF, googleFeaturesOff, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
+  googleCompanyFeatureOn, googleCompanyFeatures, googleCompanySwitched, googleFeaturesOf, googleFeaturesOff, googleMemberFeatures, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
   checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
 import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
@@ -48,6 +48,19 @@ export interface GoogleConnectorDeps {
   pickerPageUrl(): string
   practiceGoogle: boolean
   operatorStopped(): Promise<boolean>
+  /**
+   * 受信を読む (the `inbox` feature) is the company's and each member's own switch
+   * (services/work-switches.ts), not a Google switch: the admin's Google `inbox` switch and the
+   * member's Google 受信を読む toggle read and write it.
+   */
+  readIncoming: {
+    allowed(companyId: string): boolean
+    on(companyId: string, userId: string): boolean
+    /** The company's 使ってよいか (the task settings' `readIncoming.allowed`). */
+    setAllowed(companyId: string, allowed: boolean, by: string): void
+    /** The member's own choice. */
+    choose(member: Member, on: boolean): void
+  }
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -82,10 +95,22 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
   }
 
   /** What the company offers its members now (google-connector.md "One consent"). */
-  function companyFeaturesOf(connectors: ConnectorRepository): GoogleFeature[] {
+  function companyFeaturesOf(companyId: string): GoogleFeature[] {
+    const connectors = connectorsOf(companyId)
     const client = connectors.client()
     if (!client) return []
-    return googleCompanyFeatures({ ...client, pickerConfigured: connectors.picker() !== null })
+    return googleCompanyFeatures({ ...client, readIncomingAllowed: deps.readIncoming.allowed(companyId), pickerConfigured: connectors.picker() !== null })
+  }
+
+  /** What one member is offered: 受信を読む only while their own 受信を読む is on. */
+  function memberFeaturesOf(member: Member): GoogleFeature[] {
+    return googleMemberFeatures(companyFeaturesOf(member.companyId), deps.readIncoming.on(member.companyId, member.userId))
+  }
+
+  /** The features a member has turned off: their `features_off`, and 受信を読む while their own switch is off. */
+  function memberFeaturesOff(member: Member, granted: readonly GoogleFeature[], featuresOff: readonly string[]): GoogleFeature[] {
+    const readOn = deps.readIncoming.on(member.companyId, member.userId)
+    return granted.filter(f => (f === 'inbox' ? !readOn : googleFeaturesOff(featuresOff).includes(f)))
   }
 
   async function view(companyId: string): Promise<GoogleAdminView> {
@@ -116,7 +141,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         memberName: people.get(g.userId)?.name ?? null,
         googleEmail: g.accountEmail,
         features: googleFeaturesOf(g.scopes),
-        featuresOff: googleFeaturesOff(g.featuresOff),
+        featuresOff: memberFeaturesOff({ companyId, userId: g.userId, role: 'member' }, googleFeaturesOf(g.scopes), g.featuresOff),
         scopes: g.scopes,
         status: g.status,
         createdAt: g.createdAt,
@@ -128,8 +153,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         try { detail = JSON.parse(h.change) as Record<string, unknown> } catch { /* unreadable: shown empty */ }
         return { id: h.id, action: h.action as GoogleChangeAction, at: h.at, by: h.by, byName: people.get(h.by)?.name ?? null, userId: h.userId, detail }
       }),
-      featuresOff: client ? GOOGLE_FEATURES.filter(f => !googleCompanyFeatureOn(f, client)) : [...GOOGLE_COMPANY_DEFAULT_OFF],
-      companyFeatures: companyFeaturesOf(connectors),
+      featuresOff: GOOGLE_FEATURES.filter(f => !googleCompanyFeatureOn(f, { featuresOff: client?.featuresOff ?? [], featuresOn: client?.featuresOn ?? [], readIncomingAllowed: deps.readIncoming.allowed(companyId) })),
+      companyFeatures: companyFeaturesOf(companyId),
     }
   }
 
@@ -145,10 +170,10 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       status: grant?.status ?? null,
       googleEmail: grant?.accountEmail ?? null,
       features: grant?.status === 'active' ? googleFeaturesOf(grant.scopes) : [],
-      featuresOff: grant?.status === 'active' ? googleFeaturesOff(grant.featuresOff).filter(f => googleFeaturesOf(grant.scopes).includes(f)) : [],
+      featuresOff: grant?.status === 'active' ? memberFeaturesOff(member, googleFeaturesOf(grant.scopes), grant.featuresOff) : [],
       domain: client?.domain ?? null,
       practice: deps.practiceGoogle,
-      companyFeatures: reason === null ? companyFeaturesOf(connectors) : [],
+      companyFeatures: reason === null ? memberFeaturesOf(member) : [],
       seen: googleFeaturesOff(connectors.setupSeen('google', member.userId)),
     }
   }
@@ -276,7 +301,13 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       const client = connectors.client()
       if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
       const feature = body.feature
-      if (googleCompanyFeatureOn(feature, client) !== body.on) {
+      if (feature === 'inbox') {
+        // 受信を読む is the company's own switch (task settings `readIncoming.allowed`), Slack's reading too.
+        if (deps.readIncoming.allowed(member.companyId) !== body.on) {
+          deps.readIncoming.setAllowed(member.companyId, body.on, member.userId)
+          connectors.addHistory(change('features', member.userId, null, { feature, on: body.on }))
+        }
+      } else if (googleCompanyFeatureOn(feature, { ...client, readIncomingAllowed: false }) !== body.on) {
         connectors.setClientFeatures(googleCompanySwitched(client, feature, body.on), clock.now(), member.userId, change('features', member.userId, null, { feature, on: body.on }))
       }
       google.forgetCompany(member.companyId)
@@ -349,14 +380,24 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       const account = accounts.byIds([member.userId]).get(member.userId)
       const grant = connectors.grant('google', member.userId)
       const active = grant?.status === 'active'
-      const offered = companyFeaturesOf(connectors)
-      const requested = all ? offered : (body as { features: GoogleFeature[] }).features
-      if (requested.length === 0 || requested.some(f => !offered.includes(f))) {
+      const companyOffers = companyFeaturesOf(member.companyId)
+      const named = all ? [] : (body as { features: GoogleFeature[] }).features
+      if (!all && named.some(f => !companyOffers.includes(f))) {
+        return refuse('conflict', 'この機能は会社で使っていません。管理者に確かめてください。', { code: 'GOOGLE_FEATURE_COMPANY_OFF' })
+      }
+      // Asking for 受信を読む by name is the member choosing it (an older app's 「受信を読む許可も足す」):
+      // their own 受信を読む turns on. `{ all }` never asks it unless it is on already.
+      if (named.includes('inbox') && !deps.readIncoming.on(member.companyId, member.userId)) deps.readIncoming.choose(member, true)
+      const offered = memberFeaturesOf(member)
+      const requested = all ? offered : named
+      if (requested.length === 0) {
         return refuse('conflict', 'この機能は会社で使っていません。管理者に確かめてください。', { code: 'GOOGLE_FEATURE_COMPANY_OFF' })
       }
       // Ask for what the member already allowed too (incremental: Google merges them), but
       // nothing the company turned off.
-      const features = googleFeaturesToAsk(requested, offered, active ? googleFeaturesOf(grant!.scopes) : [])
+      // A scope already granted stays asked while the company offers it (受信を読む switched off by
+      // the member keeps its scope: their switch, not Google's, decides).
+      const features = googleFeaturesToAsk(requested, companyOffers, active ? googleFeaturesOf(grant!.scopes) : [])
       const scopes = googleScopesFor(features)
       // Shown once: whatever the member allows or declines on Google's page, the screen
       // does not come back for these (never a loop).
@@ -392,6 +433,14 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       if (!googleFeaturesOf(grant.scopes).includes(body.feature)) {
         return refuse('conflict', 'この機能はまだ許可していません。先に「Google で許可」で足してください。', { code: 'GOOGLE_FEATURE_NOT_GRANTED' })
       }
+      if (body.feature === 'inbox') {
+        // 受信を読む is the member's own switch (自分の設定), which covers Slack's reading too.
+        if (body.on && !deps.readIncoming.allowed(member.companyId)) {
+          return refuse('conflict', '会社の設定で止まっています。管理者に確かめてください。', { code: 'WORK_SWITCH_COMPANY_OFF' })
+        }
+        deps.readIncoming.choose(member, body.on)
+        return ok(await myView(member))
+      }
       const r = memberOAuth.setFeatureOff('google', member, body.feature, !body.on)
       if (!r.ok) return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
       return ok(await myView(member))
@@ -403,7 +452,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
      */
     async markSeen(member: Member): Promise<Outcome<MyGoogle>> {
       const connectors = connectorsOf(member.companyId)
-      if (await unavailableReason(member.companyId) === null) connectors.addSetupSeen('google', member.userId, companyFeaturesOf(connectors), clock.now())
+      if (await unavailableReason(member.companyId) === null) connectors.addSetupSeen('google', member.userId, memberFeaturesOf(member), clock.now())
       return ok(await myView(member))
     },
 

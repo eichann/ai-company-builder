@@ -139,7 +139,7 @@ side's text not quoted), `reply_request__finish_prep` (`links.prepared` = the dr
 
 - **The clock**: `WAIT_OVER.reply_request` (`core-types.ts`): a 返事待ち whose `wait_until` (返事の
   見込み: the AI reads a promise, the person sets it, or the 目安) has passed goes to `preparing` (the
-  AI drafts the nudge) when 自動で進める is on, else to `open` (the assignee). **Never before**: the
+  AI drafts the nudge) when the assignee's 自動で進める is on, else to `open` (the assignee). **Never before**: the
   only way out of `waiting_reply` into 準備中 is the clock's `wait_over` after the time (no action of
   the type does it). The person still presses 送る.
 - **Their reply ends it** (the reply's content decides): a reply that is not automatic moves a

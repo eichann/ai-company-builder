@@ -62,6 +62,11 @@ export interface SlackEventsDeps {
   isMember(companyId: string, userId: string): boolean
   operatorStopped(): Promise<boolean>
   vaultEnabled(): boolean
+  /**
+   * The member's own 受信を読む is on (within the company's 使ってよいか; services/work-switches.ts):
+   * off, ACB takes nothing of their Slack — as if they had not allowed reading.
+   */
+  readsIncoming(companyId: string, userId: string): boolean
   /** Where signals go (B2's 来た連絡). Must return quickly: Slack waits at most 3 s. */
   onSignal(signal: SlackSignal): void
   /** Warnings (reason codes and ids only); default console. */
@@ -83,6 +88,7 @@ export function createSlackEvents(deps: SlackEventsDeps) {
       .find(g => g.status === 'active' && g.accountEmail === email)
     if (!grant) return null
     if (!slackFeaturesOf(grant.scopes).includes('read') || grant.featuresOff.includes('read')) return null
+    if (!deps.readsIncoming(companyId, grant.userId)) return null
     return deps.isMember(companyId, grant.userId) ? grant.userId : null
   }
 

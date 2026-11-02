@@ -16,7 +16,7 @@ import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
-import { migrateMemberAbsenceHistory, taskSchema } from './schema/tasks'
+import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
@@ -41,7 +41,7 @@ export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecor
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
-export { migrateMemberAbsenceHistory } from './schema/tasks'
+export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 
 // Ensure data directory exists
@@ -142,6 +142,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane B ▲
   // lane C ▼
   // lane C ▲
+  // Each member's own switches (自分の設定); after the connector migrations (it reads their grants).
+  migrateMemberWorkSwitches(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.

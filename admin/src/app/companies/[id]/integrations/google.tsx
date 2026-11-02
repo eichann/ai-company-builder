@@ -270,6 +270,11 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
                   <span className="min-w-56">{GOOGLE_FEATURE_TEXT[f]}</span>
                   <span className="text-muted-foreground">{on ? (needsPicker ? 'オン（下の「ファイル選び」を設定すると使えます）' : 'オン') : 'オフ'}</span>
                   <Button variant="outline" size="sm" disabled={busy} onClick={() => setFeature(f, !on)}>{on ? 'オフにする' : 'オンにする'}</Button>
+                  {f === 'inbox' && (
+                    <span className="w-full text-xs text-muted-foreground">
+                      「やることの一覧」の設定の「受信を読む」と同じ切り替えです（Slack も同じ）。オンのときは、各自が自分の設定でオンにした人にだけ許可を求めます。
+                    </span>
+                  )}
                 </li>
               )
             })}

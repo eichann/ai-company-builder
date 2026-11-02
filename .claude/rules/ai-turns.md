@@ -128,11 +128,15 @@ turns").
   finishes the run (below).
 - `aiTurns:retry(companyId, recordId)` — 「もう一度」 also gives the server's run back
   (`POST /ai-runs/:runId/retry`); the runner forgets that it saw the record taken.
-- `aiTurns:settings(companyId)` — the company's 「自動で進める」: `autoRun` of S6's task settings
-  (`GET /task-settings` with the session; `shared/core/task-settings.ts`: enabled, daily limit,
-  stop after N failures in a row). `readAutoTurnSettings` checks each value against S6's limits;
-  not readable (offline, an older server) or missing → **off**: nothing starts on a guess. The
-  company default is on (owner decision); an admin turns it off in the admin console 「やることの一覧」.
+- `aiTurns:settings(companyId)` — 「自動で進める」 for **this member** (the AI's turn runs on the
+  assignee's PC, owner decision 2026-11-02): their own switch (`GET /me/work-switches`,
+  `readOwnAutoRun`; `tasks.md` "Each member's switches") within the company's `autoRun` of S6's
+  task settings (`GET /task-settings` with the session: enabled = 使ってよいか, daily limit, stop
+  after N failures in a row). `readAutoTurnSettings` checks each value against S6's limits;
+  not readable (offline) or missing → **off**: nothing starts on a guess; a server without the
+  member's switch (404) → the company's as before. The company default is allowed and each
+  member starts on; an admin changes both in the admin console 「やることの一覧」, the member in
+  自分の設定.
 
 ## Execution runs on the server (S10b, records.md "Execution runs")
 
@@ -266,7 +270,7 @@ ceiling, the first message).
 ## A task's wait that is over (`task-wait-over`, lane C)
 
 - **The clock** (S14, `notifications.md` "The server clock"): a `waiting` task past its
-  `wait_until` goes to `preparing` when 自動で進める is on, else straight to `todo` (the assignee's
+  `wait_until` goes to `preparing` when the assignee's 自動で進める is on, else straight to `todo` (the assignee's
   turn; nothing runs on the PC). Only the first case runs here.
 - **Only a task the clock put there**: `enteredByWaitOver` (`shared/core/core-types.ts`: the
   newest state change is the clock's `wait_over`; later field-only entries keep it). The server
