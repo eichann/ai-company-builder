@@ -11,6 +11,7 @@ import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
 import { toolRowOf } from './toolRows'
 import { appInstructionOf, readAppInstruction } from '../../../shared/app-instruction'
+import { SECOND_OPINION_PART_TYPE, readSecondOpinionRecord, type SecondOpinionRecord } from '../../../shared/agents/second-opinion'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
 // stored history (shared/chat-history.ts ChatSession). Pure; the history
@@ -34,6 +35,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
+  const secondOpinions: SecondOpinionRecord[] = []
   const toolLines: Record<string, StoredToolLine> = {}
   const appInstruction = appInstructionOf(msg)
   for (const part of msg.parts) {
@@ -55,6 +57,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === MAIL_DRAFT_PART_TYPE) {
       const card = readMailDraftCard((part as { data?: unknown }).data)
       if (card && !mailDrafts.some(c => c.id === card.id)) { mailDrafts.push(card); cardOrder.push(`mail-draft-${card.id}`) }
+      continue
+    }
+    if (part.type === SECOND_OPINION_PART_TYPE) {
+      const record = readSecondOpinionRecord((part as { data?: unknown }).data)
+      if (record && !secondOpinions.some(r => r.id === record.id)) secondOpinions.push(record)
       continue
     }
     if (part.type === REVIEW_PART_TYPE) {
@@ -96,6 +103,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
+    ...(secondOpinions.length ? { secondOpinions } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
     ...(appInstruction ? { appInstruction } : {}),
   }
@@ -153,6 +161,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     if (card) cards.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card })
   }
   parts.push(...inCardOrder(cards, msg.cardOrder))
+  for (const stored of msg.secondOpinions || []) {
+    const record = readSecondOpinionRecord(stored)
+    if (record) parts.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record })
+  }
   for (const review of msg.reviewRequests || []) {
     const record = readReviewRecord(review)
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })

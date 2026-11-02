@@ -1,5 +1,7 @@
 import type { UIMessage } from 'ai'
 import { RESTORED_TOOL_PART_TYPE, failureOf, readToolLine, toolLineOf, type ToolLine } from '../../../shared/tool-display'
+import { secondOpinionTargetOf } from '../../../shared/agents/second-opinion'
+import { agentShortLabel } from '../../../shared/agents/registry'
 
 /**
  * Render plan for an assistant message's parts (pure, no React).
@@ -44,6 +46,9 @@ export function getToolDisplayName(toolName: string): string {
     readSkillFile: 'スキルファイル読取',
   }
   if (names[toolName]) return names[toolName]
+  // 「もう一方の AI に聞く」: the approval asks before the call, in the present (「Codex に聞く」).
+  const otherAi = secondOpinionTargetOf(toolName)
+  if (otherAi) return `${agentShortLabel(otherAi)} に聞く`
   // A tool the app has no name for (a member's own MCP server): never the raw `mcp__…` id.
   const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName)
   return mcp ? `道具（${mcp[1]}・${mcp[2]}）` : toolName

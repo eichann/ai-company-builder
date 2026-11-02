@@ -3,6 +3,7 @@ import type { CompanyFileTools } from '../company-files/tools'
 import type { ReviewTools } from '../review/tools'
 import type { RecordTools } from '../records/tools'
 import type { WebResearchTools } from '../web-research/tools'
+import type { SecondOpinionTools } from './second-opinion'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
@@ -70,6 +71,11 @@ export interface AgentConnection {
      * `acb_web` / `web_research` and its own built-in web tools are off.
      */
     webResearch?: WebResearchTools
+    /**
+     * 「もう一方の AI に聞く」 (second-opinion.ts): only in a turn whose member message names the
+     * other agent. Given → the agent offers its tools on `acb_second_opinion`.
+     */
+    secondOpinion?: SecondOpinionTools
     resumeId?: string
     /** Refuse edits to read-only folders before they happen (write-guard.ts). */
     writeGuard?: WriteGuard

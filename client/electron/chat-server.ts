@@ -9,6 +9,9 @@ import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import type { WebResearchTools } from './web-research/tools'
+import { createSecondOpinionBudget, createSecondOpinionTools } from './agents/second-opinion'
+import type { SecondOpinionRequest, SecondOpinionResult } from './agents/second-opinion-runner'
+import { SECOND_OPINION_PART_TYPE, askedTargets, secondOpinionInstructions } from '../shared/agents/second-opinion'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -73,6 +76,11 @@ export interface ChatServerConfig extends AgentHost {
    * turns its own web tools off.
    */
   createWebResearch?: (request: { agent: AgentId; conversationId: string; signal: AbortSignal }) => { tools: WebResearchTools; instructions: string } | undefined
+  /**
+   * 「もう一方の AI に聞く」 (agents/second-opinion.ts): ask another agent of the registry (its own
+   * CLI, no tools). Offered only in a turn whose member message names that agent.
+   */
+  runSecondOpinion?: (target: AgentId, request: Omit<SecondOpinionRequest, 'host'>) => Promise<SecondOpinionResult>
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -223,6 +231,8 @@ export async function startChatServer(config: ChatServerConfig) {
   const agentSessionMap = new Map<string, AgentSession>()
   // Running turns: steering (extra instructions), next-prompt suggestions, abort handles.
   const chatTurns = createChatTurns(undefined, { cancelInteractions: config.cancelInteractions })
+  // 「もう一方の AI に聞く」: calls per conversation, for the app's lifetime.
+  const secondOpinionBudget = createSecondOpinionBudget()
 
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
@@ -358,6 +368,26 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
+    // 「もう一方の AI に聞く」 (agents/second-opinion.ts): only the agents the member's own latest
+    // message names; the tool does not exist in any other turn. It stops with the turn
+    // (the member's stop here, an administrator's once the turn is tracked below).
+    const secondOpinionAbort = new AbortController()
+    const stopSecondOpinion = () => secondOpinionAbort.abort()
+    if (c.req.raw.signal.aborted) stopSecondOpinion(); else c.req.raw.signal.addEventListener('abort', stopSecondOpinion, { once: true })
+    const runSecondOpinion = config.runSecondOpinion
+    const secondOpinion = !aiTurnStep && connection.ownsConversation && runSecondOpinion && appSessionId && companyRootPath
+      ? createSecondOpinionTools({
+        asker: authMode, targets: askedTargets(authMode, messages), conversationId: appSessionId, messages, root: companyRootPath,
+        notDownloaded: writeGuard?.getNotDownloaded, privateReads: privateContext ? { context: privateContext, state: privateState } : undefined,
+        requestApproval: config.requestToolApproval
+          ? (toolId, reason) => config.requestToolApproval!(toolId, {}, crypto.randomUUID(), appSessionId, reason).then(answer => answer.approved)
+          : undefined,
+        run: (target, request) => runSecondOpinion(target, request),
+        budget: secondOpinionBudget, signal: secondOpinionAbort.signal,
+        onAnswer: record => injector.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record }),
+      })
+      : undefined
+    if (secondOpinion) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionInstructions(secondOpinion.tools.map(t => t.target))
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
     // A person step's consultation is bound before its first tools exist; never run it unbound.
@@ -426,7 +456,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -522,6 +552,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const activityToken = crypto.randomUUID()
     // The renderer's stop (the request's signal) or the main process's (chat-turns abort).
     const running = chatTurns.track({ appSessionId, companyId }, c.req.raw.signal, injector)
+    if (running.signal.aborted) stopSecondOpinion(); else running.signal.addEventListener('abort', stopSecondOpinion, { once: true })
     let released = false
     const release = (outcome: 'finished' | 'failed' = 'failed') => {
       if (released) return
