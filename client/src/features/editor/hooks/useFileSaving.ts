@@ -95,7 +95,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
       setError('保存に失敗しました')
       return false
     } catch {
-      setError('保存中にエラーが発生しました')
+      setError('保存できませんでした。少し待ってから、もう一度保存してください')
       return false
     } finally {
       setIsSaving(false)

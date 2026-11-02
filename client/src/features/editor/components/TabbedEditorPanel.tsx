@@ -221,7 +221,7 @@ export function TabbedEditorPanel({
           </div>
         ) : activeFile?.isLoading ? (
           <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500">
-            読み込み中...
+            読み込んでいます
           </div>
         ) : activeFile && activeFilePath && isImageFile(activeFilePath) ? (
           <div className="h-full flex items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(#e5e5e5_0%_25%,#fff_0%_50%)] dark:bg-[repeating-conic-gradient(#333_0%_25%,#222_0%_50%)] bg-[length:16px_16px]">

@@ -64,7 +64,7 @@ export function PdfPreview({ filePath }: { filePath: string }) {
   if (!url) {
     return (
       <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500 text-sm">
-        読み込み中...
+        読み込んでいます
       </div>
     )
   }
