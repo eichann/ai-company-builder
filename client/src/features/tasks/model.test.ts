@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { companyNow, companyPathOf, dueText, dueWhen, listEvents, listSections, listShownFor, filterByTag } from './model'
+import { companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag } from './model'
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
@@ -82,4 +82,15 @@ test('a dragged path is named inside the company folder; one outside it (or the 
   assert.equal(companyPathOf('/Users/me/会社/営業/見積.xlsx', '/Users/me/会社/'), '営業/見積.xlsx')
   assert.equal(companyPathOf('/Users/me/会社2/x.md', '/Users/me/会社'), null)
   assert.equal(companyPathOf('/Users/me/会社', '/Users/me/会社'), null)
+})
+
+test('meetings asking for their まとまり in one group become one row where the first stands; a lone one stays a row', () => {
+  const base = { type: 'meeting', typeLabel: '会議', state: 'read', stateLabel: null, version: 1, due: null, tags: [], turn: 'mine' as const, waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null }
+  const q = (id: string, key: string): TaskListItem => ({ ...base, id, title: id, needsBundle: true, bundleGroup: { key, label: `相手${key}` } })
+  const task: TaskListItem = { ...base, id: 't1', type: 'task', title: 't1' }
+  const rows = listRows([q('m1', 'a'), task, q('m2', 'b'), q('m3', 'a'), q('m4', 'a')])
+  assert.deepEqual(rows.map(r => r.kind === 'item' ? r.item.id : `${r.label}:${r.items.map(i => i.id).join(',')}`), ['相手a:m1,m3,m4', 't1', 'm2'])
+  // An item with a group key but no question (never happens from the server) is not swallowed.
+  const odd: TaskListItem = { ...task, id: 't2', bundleGroup: { key: 'a', label: 'x' } }
+  assert.equal(listRows([odd, q('m5', 'a')]).length, 2)
 })

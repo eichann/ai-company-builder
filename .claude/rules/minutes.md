@@ -158,6 +158,36 @@ too). PUT takes `{ folder?, meetings? }` (at least one; another value → 400); 
 (`record_settings.meeting_intake`, additive column; `shared/core/minutes.ts` `meetingIsRead`). Admin
 console: 「議事録の置き場所」 → 「読む会議」.
 
+## The まとまり question (owner FB 28, 2026-11-02)
+
+**The server decides** which meetings ask 「どのまとまりの会議ですか？」:
+`GET /api/companies/:id/me/minutes/bundle-questions` → `MeetingBundleQuestions { days, questions:
+[{ recordId, title, version, meetingAt, readAt, group: { key, label } }] }` — meetings the member is
+the **assignee** of, in `read`, entered `read` within the company's days, with someone from outside
+(`external_count` > 0: an internal meeting never asks, `meetingAsksBundle`), no `bundle` link, the
+question not closed, in a company where the member reads some まとまり. The app shows exactly these
+(`tasks:list`; an older server without the route asks nothing). `group`: same 相手 (counterpart
+link), else the same calendar series (a recurring event's base id), else the same title; the key is
+a digest (no calendar id leaves the server).
+
+- **Days**: `record_settings.meeting_bundle_days` (additive), carried by `GET|PUT
+  /google/minutes-folder` as `bundleQuestionDays` (1–30, default 7, `meetingBundleDaysOf`);
+  owner/admin; admin console 「まとまりを聞く期間」. Past them the item leaves あなたの番.
+- **「まとまりはない（社内の会議など）」**: `POST …/minutes/item/:recordId/no-bundle { expectedVersion? }`
+  (assignee or owner/admin) — a ledger entry `no_bundle` (`MEETING_NO_BUNDLE_ACTION`, the person as
+  actor, note 「まとまりはない（社内の会議など）」, no field, no state, nobody told): never asked
+  again (also not by the consultation's card: the text answers `noBundle: true`, `bundleChoiceFor`
+  then shows none). A second press writes nothing; a meeting with a まとまり → 409
+  `MINUTES_HAS_BUNDLE`. A まとまり can still be chosen later (same `…/bundle`, the まとまり's part
+  follows as in "A まとまり chosen later").
+- **The card**: `GET …/minutes/item/:recordId/bundle-question` → `{ recordId, title, version,
+  canChoose (no まとまり linked and the member is the assignee or an admin), noBundle }` for any
+  reader of the meeting (else the same 404).
+- Test: `server/tests/integration/minutes.test.ts` 「どのまとまりの会議ですか？」 (assignee only,
+  internal never, same 相手 one group, days and the setting, 「まとまりはない」 for good and still
+  choosable), `client/tests/tasks-list.test.ts` (the server's answer as is, an older server asks
+  nothing), `src/features/tasks/model.test.ts` (`listRows`), `tests/ui/tasks-list.spec.ts`.
+
 ## Switches
 
 Google (operator stop, the company's switch, vault, grant, scope — `google-connector.md`): both
@@ -204,10 +234,13 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the record's id and title only — **the app never has the minutes text**. An agent without
   record actions (registry `recordActions` false: Codex) gets 「議事録の読み取りは Claude Code の相談で
   できます」 and nothing starts.
-- **「どのまとまりの会議ですか？」 in 「あなたの番」** (S11): a meeting of the member read in the last
-  14 days with no `bundle` link — only where the company has some まとまり — is an item of the task
-  list's あなたの番 with 「まとまりを選ぶ」 (the unfinished まとまり the member reads, `tasks:bundles`;
-  choosing calls `minutes:linkBundle`). The first message tells the AI to leave the まとまり's fields
+- **「どのまとまりの会議ですか？」 in 「あなたの番」** (S11; FB 28, "The まとまり question" below):
+  the server's `bundle-questions` are items of the task list's あなたの番 with 「まとまりを選ぶ」 (the
+  unfinished まとまり the member reads, `tasks:bundles`; choosing calls `minutes:linkBundle`) and
+  「まとまりはない」 (`minutes:noBundle`); two or more of one group are one row 「まとまりを選ぶ会議 n件」
+  that opens. The meeting's card (`MeetingBundleBar`, `minutes:bundleQuestion`) offers both while
+  no まとまり is linked, also after the item left あなたの番; the consultation's card offers
+  「まとまりはない」 too. The first message tells the AI to leave the まとまり's fields
   and the meeting log alone and finish the rest when none is linked, so an automatic run never waits
   for a card nobody sees.
 - **The card in a consultation** (`MinutesBundleChoiceCard.tsx`): when `minutes_read` answers no

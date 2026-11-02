@@ -1173,4 +1173,7 @@ export const minutesApi = {
   /** Which meetings are read: `external` (only with someone from outside; the default) or `all`. */
   setMeetings: (companyId: string, meetings: MeetingIntake) =>
     getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { meetings } }),
+  /** Days 「どのまとまりの会議ですか？」 stays in a member's あなたの番 after a meeting is read (1–30). */
+  setBundleQuestionDays: (companyId: string, bundleQuestionDays: number) =>
+    getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { bundleQuestionDays } }),
 }

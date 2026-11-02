@@ -9,7 +9,7 @@
 // The push channel's `records` signal carries no content: it only makes this
 // module ask the server again for the member's received minutes.
 
-import type { MinutesActionResult, MinutesNotice, MinutesNoticesResult } from '../../../shared/minutes-app'
+import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNotice, MinutesNoticesResult } from '../../../shared/minutes-app'
 import { MINUTES_OFFLINE_TEXT } from '../../../shared/minutes-app'
 
 export interface MinutesCheckerDeps {
@@ -219,6 +219,28 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
         return { success: false, error: memberText(r.body, `つなげませんでした（サーバーの応答 ${r.status}）。`) }
       }
       return { success: true }
+    },
+
+    /** 「まとまりはない（社内の会議など）」: the server records the person's choice; nothing is asked again. */
+    async noBundle(companyId: string, minutesId: string): Promise<MinutesActionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/no-bundle`, {})
+      if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      if (r.status >= 300) {
+        log.warn(`[minutes] no bundle: answered ${r.status}`)
+        return { success: false, error: memberText(r.body, `できませんでした（サーバーの応答 ${r.status}）。`) }
+      }
+      return { success: true }
+    },
+
+    /** The meeting card's question (the server decides whether a まとまり may be chosen). */
+    async bundleQuestion(companyId: string, minutesId: string): Promise<MeetingBundleQuestionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'GET', `/me/minutes/item/${encodeURIComponent(minutesId)}/bundle-question`)
+      if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      const d = r.body?.data as { title?: unknown; canChoose?: unknown; noBundle?: unknown } | undefined
+      if (r.status !== 200 || typeof d?.canChoose !== 'boolean') return { success: false, error: memberText(r.body, `読めませんでした（サーバーの応答 ${r.status}）。`) }
+      return { success: true, title: typeof d.title === 'string' && d.title ? d.title.slice(0, 200) : '会議', canChoose: d.canChoose, noBundle: d.noBundle === true }
     },
 
     /** Sign-out / quit: forget everything and stop the loop. */

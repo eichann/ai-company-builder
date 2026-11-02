@@ -26,7 +26,10 @@
  *   owner §11) and makes outputs with the typed tools; the server's gates decide.
  */
 import { CLOCK_ACTOR } from '../../shared/core/core-types'
-import { MEETING_INTAKE_CHOICES, MEETING_TYPE, meetingIntakeOf, meetingIsRead, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
+import {
+  MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES, MEETING_NO_BUNDLE_ACTION, MEETING_TYPE, meetingAsksBundle,
+  meetingBundleDaysOf, meetingIntakeOf, meetingIsRead, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX,
+} from '../../shared/core/minutes'
 import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { isExternalAddress, emailDomain, normalizeEmail } from '../../shared/core/mail'
 import { foldAsciiCase, nameKey, normalizeRepoPath } from '../../shared/core/paths'
@@ -34,7 +37,10 @@ import { findPrivateScope, FULL_ACCESS_ROLES } from '../../shared/core/permissio
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
-import type { MinutesBundleSummary, MinutesCheckResult, MinutesFolderSetting, MinutesLinkBundleResult, MinutesText } from '../../shared/types/minutes'
+import type {
+  MeetingBundleQuestion, MeetingBundleQuestions, MeetingBundleQuestionState, MinutesBundleSummary, MinutesCheckResult, MinutesFolderSetting,
+  MinutesLinkBundleResult, MinutesNoBundleResult, MinutesText,
+} from '../../shared/types/minutes'
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
@@ -72,6 +78,9 @@ export const MINUTES_READING_STALE_MS = 30 * 60 * 1000
 const STALE_PUT_BACK_NOTE = '読み始めてから30分たっても終わらなかったため、AI の番に戻しました'
 const RUN_PUT_BACK_NOTE = 'AI の自動実行が読み終えずに止まったため、AI の番に戻しました'
 const MAX_MEETINGS_PER_CHECK = 50
+/** At most this many of a member's read meetings are looked at for 「どのまとまりの会議ですか？」. */
+const MAX_BUNDLE_QUESTIONS = 100
+const NO_BUNDLE_NOTE = 'まとまりはない（社内の会議など）'
 
 export const MINUTES_FOLDER_REFUSED = {
   error: 'この場所は議事録の置き場所に選べません。部署のフォルダを選んでください。',
@@ -245,6 +254,34 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return { id: row.id, type: row.type, typeLabel: label, title: row.title, state: s.state, fields: s.fields, version: s.version }
   }
 
+  function folderView(handle: CompanyData, folder: string | null): MinutesFolderSetting {
+    return {
+      folder, choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()),
+      bundleQuestionDays: meetingBundleDaysOf(handle.records.meetingBundleDays()),
+    }
+  }
+
+  /** A person closed 「どのまとまりの会議ですか？」 for this meeting (its ledger keeps the choice). */
+  const noBundleChosen = (handle: CompanyData, id: string) => handle.records.ledger(id).some(e => e.action === MEETING_NO_BUNDLE_ACTION)
+  const hasBundleLink = (handle: CompanyData, id: string) => handle.records.linksFrom([id]).some(l => l.name === 'bundle' && l.targetId)
+  const mayChooseBundle = (member: Member, fields: Record<string, LedgerValue>) => fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role)
+
+  /**
+   * Which meetings ask together (one row 「まとまりを選ぶ会議 n件」): the same 相手, else the same
+   * calendar series (a recurring event's instances share its base id), else the same title. The key
+   * is a digest: no calendar id leaves the server.
+   */
+  function bundleGroup(handle: CompanyData, reader: RecordReader, row: RecordRow, fields: Record<string, LedgerValue>): MeetingBundleQuestion['group'] {
+    const key = (raw: string) => deps.tokenDigest.digest(`meeting-bundle-group:${raw}`).slice(0, 16)
+    const cp = handle.records.linksFrom([row.id]).find(l => l.name === 'counterpart' && l.targetId)
+    const cpRow = cp ? handle.records.byIds([cp.targetId as string]).find(r => r.removedAt === null && reader.record(r)) : undefined
+    if (cpRow) return { key: key(`c:${cpRow.id}`), label: cpRow.title || row.title }
+    const event = parseRef(fields.source_ref)?.event ?? ''
+    const cut = event.indexOf('_')
+    if (cut > 0) return { key: key(`s:${event.slice(0, cut)}`), label: row.title }
+    return { key: key(`t:${squash(row.title)}`), label: row.title }
+  }
+
   /** Is the member the minutes' assignee or an attendee? */
   function isYours(fields: Record<string, LedgerValue>, userId: string): boolean {
     return fields.assignee === userId || attendeeIds(fields.attendees).includes(userId)
@@ -255,22 +292,26 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     folderSetting(member: Member): Outcome<MinutesFolderSetting> {
       if (!FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', 'この設定は管理者だけが見られます', { code: 'FORBIDDEN' })
       const handle = companyData.forCompany(member.companyId)
-      return ok({ folder: handle.records.minutesFolder(), choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()) })
+      return ok(folderView(handle, handle.records.minutesFolder()))
     },
 
     /**
-     * PUT /google/minutes-folder { folder?: string | null, meetings?: 'external' | 'all' } —
-     * owner/admin; at least one. The folder is a department folder, never private.
+     * PUT /google/minutes-folder { folder?: string | null, meetings?: 'external' | 'all',
+     * bundleQuestionDays?: 1–30 } — owner/admin; at least one. The folder is a department folder, never private.
      */
     setFolder(member: Member, body: unknown): Outcome<MinutesFolderSetting> {
       if (!FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', 'この設定は管理者だけが変えられます', { code: 'FORBIDDEN' })
       const b = body as Record<string, unknown> | null
-      if (typeof b !== 'object' || b === null || Array.isArray(b) || !('folder' in b || 'meetings' in b)) {
-        return refuse('bad-request', 'folder: a department folder or null; meetings: external or all', { code: 'BAD_REQUEST' })
+      if (typeof b !== 'object' || b === null || Array.isArray(b) || !('folder' in b || 'meetings' in b || 'bundleQuestionDays' in b)) {
+        return refuse('bad-request', 'folder: a department folder or null; meetings: external or all; bundleQuestionDays: 1–30', { code: 'BAD_REQUEST' })
       }
-      for (const k of Object.keys(b)) if (k !== 'folder' && k !== 'meetings') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
+      for (const k of Object.keys(b)) if (k !== 'folder' && k !== 'meetings' && k !== 'bundleQuestionDays') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
       if ('meetings' in b && !(MEETING_INTAKE_CHOICES as readonly unknown[]).includes(b.meetings)) {
         return refuse('bad-request', `meetings: ${MEETING_INTAKE_CHOICES.join(' or ')}`, { code: 'BAD_REQUEST' })
+      }
+      const days = b.bundleQuestionDays
+      if ('bundleQuestionDays' in b && !(typeof days === 'number' && Number.isInteger(days) && days >= MEETING_BUNDLE_DAYS_MIN && days <= MEETING_BUNDLE_DAYS_MAX)) {
+        return refuse('bad-request', `bundleQuestionDays: a whole number ${MEETING_BUNDLE_DAYS_MIN}–${MEETING_BUNDLE_DAYS_MAX}`, { code: 'BAD_REQUEST' })
       }
       const handle = companyData.forCompany(member.companyId)
       let folder: string | null = handle.records.minutesFolder()
@@ -286,7 +327,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const at = deps.clock.now()
       if ('folder' in b) handle.records.setMinutesFolder(folder, member.userId, at)
       if ('meetings' in b) handle.records.setMeetingIntake(b.meetings as string, member.userId, at)
-      return ok({ folder, choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()) })
+      if ('bundleQuestionDays' in b) handle.records.setMeetingBundleDays(days as number, member.userId, at)
+      return ok(folderView(handle, folder))
     },
 
     /**
@@ -477,6 +519,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
         bundle,
         candidates,
+        noBundle: noBundleChosen(handle, row.id),
         instructionLike: findInstructionLikeText(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
@@ -493,7 +536,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
-      if (now.fields.assignee !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) {
+      if (!mayChooseBundle(member, now.fields)) {
         return refuse('forbidden', 'どのまとまりの会議かを選べるのは、会議の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
       }
       const b = body as Record<string, unknown> | null
@@ -525,6 +568,99 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         return refuse('bad-request', 'まとまりをつなげませんでした', { code: 'MINUTES_LINK_REFUSED' })
       }
       return ok({ recordId: row.id, bundleId: bundleRow.id, counterpartId: counterpart, version: r.entry.version })
+    },
+
+    /**
+     * GET /me/minutes/bundle-questions — the member's 「どのまとまりの会議ですか？」 items of あなたの番
+     * (minutes.md "The まとまり question"): meetings they are the assignee of, read within the
+     * company's days, with someone from outside, no まとまり linked, the question not closed — only
+     * in a company with some まとまり the member reads. The app shows exactly these.
+     */
+    bundleQuestions(member: Member): Outcome<MeetingBundleQuestions> {
+      const handle = companyData.forCompany(member.companyId)
+      const records = handle.records
+      if (!records.settings().enabled) return disabled()
+      const days = meetingBundleDaysOf(records.meetingBundleDays())
+      const reader = recordReader(member, handle.scopes.listWithRules())
+      const bundleTypes = [...typesImplementing(handle, 'bundle').keys()]
+      if (bundleTypes.length === 0 || !records.candidates({ types: bundleTypes }, 200).some(r => reader.record(r))) return ok({ days, questions: [] })
+      const since = new Date(deps.clock.nowMs() - days * 86_400_000).toISOString()
+      const rows = records.candidates({
+        types: [MEETING_TYPE], states: ['read'], fields: [{ name: 'assignee', values: [member.userId] }],
+        finishedSince: { since, finals: [{ type: MEETING_TYPE, state: 'read' }] },
+      }, MAX_BUNDLE_QUESTIONS).filter(r => reader.record(r))
+      const questions: MeetingBundleQuestion[] = []
+      for (const row of records.byIds(rows.map(r => r.id))) {
+        const now = fieldsOf(records, row.id)
+        const ledger = records.ledger(row.id)
+        const asks = meetingAsksBundle({
+          externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
+          hasBundle: hasBundleLink(handle, row.id),
+          noBundleChosen: ledger.some(e => e.action === MEETING_NO_BUNDLE_ACTION),
+        })
+        if (!asks) continue
+        const readAt = [...ledger].reverse().find(e => e.toState === 'read' && e.fromState !== 'read')?.at
+        if (!readAt || readAt < since) continue
+        questions.push({
+          recordId: row.id, title: row.title, version: now.version,
+          meetingAt: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null,
+          readAt, group: bundleGroup(handle, reader, row, now.fields),
+        })
+      }
+      questions.sort((a, b) => (b.readAt < a.readAt ? -1 : b.readAt > a.readAt ? 1 : 0))
+      return ok({ days, questions })
+    },
+
+    /** GET /me/minutes/item/:recordId/bundle-question — the meeting card's 「まとまりを選ぶ」 / 「まとまりはない」. */
+    bundleQuestion(member: Member, recordId: string): Outcome<MeetingBundleQuestionState> {
+      const handle = companyData.forCompany(member.companyId)
+      if (!handle.records.settings().enabled) return disabled()
+      const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
+      if (!row) return notFound()
+      const now = fieldsOf(handle.records, row.id)
+      return ok({
+        recordId: row.id, title: row.title, version: now.version,
+        canChoose: mayChooseBundle(member, now.fields) && !hasBundleLink(handle, row.id),
+        noBundle: noBundleChosen(handle, row.id),
+      })
+    },
+
+    /**
+     * POST /me/minutes/item/:recordId/no-bundle { expectedVersion? } — the assignee or an admin:
+     * 「まとまりはない（社内の会議など）」. Closes the question for good: a ledger entry that is the
+     * person's choice, no field, no state, no AI turn, nobody told. A まとまり can still be chosen later.
+     */
+    noBundle(member: Member, actor: Omit<ServiceActor, 'id'>, recordId: string, body: unknown): Outcome<MinutesNoBundleResult> {
+      const handle = companyData.forCompany(member.companyId)
+      const records = handle.records
+      if (!records.settings().enabled) return disabled()
+      const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
+      if (!row) return notFound()
+      const now = fieldsOf(records, row.id)
+      if (!mayChooseBundle(member, now.fields)) {
+        return refuse('forbidden', 'まとまりがないと決められるのは、会議の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
+      }
+      const b = body as Record<string, unknown> | null
+      if (typeof b !== 'object' || b === null || Array.isArray(b)) return refuse('bad-request', 'The body must be an object', { code: 'BAD_REQUEST' })
+      for (const k of Object.keys(b)) if (k !== 'expectedVersion') return refuse('bad-request', `Unknown key: ${k}`, { code: 'BAD_REQUEST' })
+      if (b.expectedVersion !== undefined && (typeof b.expectedVersion !== 'number' || !Number.isInteger(b.expectedVersion))) {
+        return refuse('bad-request', 'expectedVersion: a whole number', { code: 'BAD_REQUEST' })
+      }
+      if (hasBundleLink(handle, row.id)) {
+        return refuse('conflict', 'この会議には、もうまとまりがつながっています。', { code: 'MINUTES_HAS_BUNDLE', version: now.version })
+      }
+      // Asked twice (two windows, a retry): the first answer stands, nothing more is written.
+      if (noBundleChosen(handle, row.id)) return ok({ recordId: row.id, version: now.version })
+      const r = writer.transition(member.companyId, {
+        recordId: row.id, action: MEETING_NO_BUNDLE_ACTION, expectedVersion: typeof b.expectedVersion === 'number' ? b.expectedVersion : now.version,
+        to: null, note: NO_BUNDLE_NOTE, quiet: true, actor: { id: member.userId, ...actor },
+      })
+      if (!r.ok) {
+        if (r.reason === 'stale') return refuse('conflict', 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', { code: 'VERSION_CONFLICT', version: fieldsOf(records, row.id).version })
+        if (r.reason === 'records-off') return disabled()
+        return refuse('bad-request', 'できませんでした', { code: 'MINUTES_NO_BUNDLE_REFUSED' })
+      }
+      return ok({ recordId: row.id, version: r.entry.version })
     },
 
     /**

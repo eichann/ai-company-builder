@@ -209,13 +209,15 @@ readable by the member, never a private folder's file for a task outside it (one
   `meetingActions`, composed by `AppShell` from the minutes feature.
 - What the AI made shows where the member works: homework tasks in the list, drafts and approval
   requests in a task's card (「AI が用意したもの」), and the server's notices.
-- 「どのまとまりの会議ですか？」 is an item of あなたの番: `tasks:list` also reads the member's meetings
-  read in the last 14 days (`finishedSince`), and one whose detail shows no `bundle` link — only when
-  the company has any まとまり (`implements: bundle`, `countOnly`) and only for a meeting whose
-  detail was read — becomes `needsBundle` (「どのまとまり（案件など）の会議か選んでください」) with
-  「まとまりを選ぶ」: `BundleChooser` lists the unfinished まとまり the member reads (`tasks:bundles`,
-  final states of each type left out) and links the chosen one (`minutes:linkBundle`; nothing goes
-  outside).
+- 「どのまとまりの会議ですか？」 is an item of あなたの番: `tasks:list` reads the server's
+  `GET /me/minutes/bundle-questions` (`minutes.md` "The まとまり question": the server decides — the
+  assignee's meetings with someone from outside, read within the company's days, no まとまり, not
+  closed) and each becomes `needsBundle` (「どのまとまり（案件など）の会議か選んでください」) with its
+  `bundleGroup`, offering 「まとまりを選ぶ」 — `BundleChooser` lists the unfinished まとまり the member
+  reads (`tasks:bundles`, final states of each type left out) and links the chosen one
+  (`minutes:linkBundle`; nothing goes outside) — and 「まとまりはない」 (`minutes:noBundle`, also in
+  the chooser). Two or more of one group are one row 「まとまりを選ぶ会議 n件」 that opens (`listRows`,
+  `model.ts`).
 - **A department without the list** (`tasksShown` false): the same meetings reach the title bar
   instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
   picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already

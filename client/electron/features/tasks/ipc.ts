@@ -26,6 +26,7 @@ import type { RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } f
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
+import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
@@ -55,8 +56,6 @@ const opKey = (key: unknown): key is string => typeof key === 'string' && OPERAT
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
-/** Meetings read this far back still ask for their まとまり when none was chosen. */
-const MEETING_BUNDLE_DAYS = 14
 
 type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: unknown } | null } | null
 
@@ -217,8 +216,7 @@ export function createTasksApi(deps: TasksDeps) {
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
       const since = new Date(dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).from).toISOString()
-      const meetingsSince = new Date(now() - MEETING_BUNDLE_DAYS * 86_400_000).toISOString()
-      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, meetings, anyBundle] = await Promise.all([
+      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions] = await Promise.all([
         call(companyId, 'GET', '/records/my-turn'),
         call(companyId, 'GET', '/records/ai-turn'),
         call(companyId, 'POST', '/records/query', { type: 'task', state: [...OPEN_TASK_STATES], fields: { requested_by: id }, limit: 200 }),
@@ -227,8 +225,8 @@ export function createTasksApi(deps: TasksDeps) {
         call(companyId, 'GET', '/records/types'),
         people(companyId),
         call(companyId, 'GET', '/task-settings'),
-        call(companyId, 'POST', '/records/query', { type: 'meeting', state: ['read'], finishedSince: meetingsSince, fields: { assignee: id }, limit: 50 }),
-        call(companyId, 'POST', '/records/query', { implements: 'bundle', countOnly: true }),
+        // 「どのまとまりの会議ですか？」: the server decides which meetings ask (minutes.md).
+        call(companyId, 'GET', '/me/minutes/bundle-questions'),
       ])
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
@@ -248,11 +246,9 @@ export function createTasksApi(deps: TasksDeps) {
       }
       const ids = (settings?.status === 200 ? (settings.json?.data as { settings?: { taskListDepartmentIds?: unknown } }).settings?.taskListDepartmentIds : null)
       const doneToday = [...done1, ...done2]
-      // A meeting asks for its まとまり only where the company has some to choose from.
-      const hasBundles = anyBundle?.status === 200 && ((anyBundle.json?.data as { total?: number }).total ?? 0) > 0
-      const readMeetings = hasBundles ? records(meetings) ?? [] : []
-      const all = [...mine, ...ai, ...askedList, ...doneToday, ...readMeetings]
-      const linked = await bundles(companyId, all)
+      // An older server without the route, or no answer: nothing asks (the list itself still shows).
+      const bundleQuestions = questions?.status === 200 ? (questions.json?.data as MeetingBundleQuestions | undefined)?.questions ?? [] : []
+      const linked = await bundles(companyId, [...mine, ...ai, ...askedList, ...doneToday])
       return {
         success: true,
         data: {
@@ -260,8 +256,7 @@ export function createTasksApi(deps: TasksDeps) {
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
           items: classifyTasks({
             me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
-            // Only meetings whose link could be read: one not looked up never asks.
-            meetingsWithoutBundle: readMeetings.filter(m => bundleCache.get(`${companyId}:${m.id}@${m.version}`) === null),
+            bundleQuestions,
           }),
         },
       }

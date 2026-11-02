@@ -37,7 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
-import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
@@ -525,6 +525,10 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
+  /** 「まとまりはない（社内の会議など）」: the question closed for good (the person's choice, no AI turn). */
+  'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+  /** The meeting card's question: may a まとまり be chosen, was 「まとまりはない」 chosen. */
+  'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
@@ -906,6 +910,8 @@ export interface ElectronAPI {
   getMinutesNotices: Invoke<'minutes:notices'>
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesBundle: Invoke<'minutes:linkBundle'>
+  declineMinutesBundle: Invoke<'minutes:noBundle'>
+  getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「AI の番」 run automatically (the main window only).
   getAutoTurnSettings: Invoke<'aiTurns:settings'>

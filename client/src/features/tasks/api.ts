@@ -22,7 +22,7 @@ export type TaskFileWrites = ElectronPort<'linkFileToTask' | 'unlinkFileFromTask
 export type CompanyFileReads = ElectronPort<'gitListFiles'>
 /** 「どのまとまりの会議ですか？」: the まとまり to choose from, and linking the chosen one (nothing goes outside). */
 export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
-export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle'>
+export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle' | 'declineMinutesBundle'>
 /** 「部署に出す」: the member's owner-only task shown to a department's readers (the server checks owner and folder). */
 export type TaskShareWrites = ElectronPort<'shareTask'>
 /** Tags in use that fit a title: main asks a Haiku model through the company's key (only the title and the tags), else matches locally. */
@@ -91,6 +91,11 @@ export function getBundleChoices(companyId: string, reads: MeetingBundleReads = 
 
 export function linkMeetingBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleWrites = window.electronAPI) {
   return writes.linkMinutesBundle(companyId, meetingId, bundleId)
+}
+
+/** 「まとまりはない（社内の会議など）」: the server closes the question for good (no AI turn). */
+export function declineMeetingBundle(companyId: string, meetingId: string, writes: MeetingBundleWrites = window.electronAPI) {
+  return writes.declineMinutesBundle(companyId, meetingId)
 }
 
 /** `folder`: a department folder as the company names it (`営業`). Never undone. */

@@ -6,6 +6,7 @@
  */
 import { parseTagsValue } from '../../shared/core/record-types'
 import type { RecordSummary } from '../../shared/types/records'
+import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { stateLabel } from './record-views'
 
 /**
@@ -47,6 +48,11 @@ export interface TaskListItem {
   finishedAt: string | null
   /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
   needsBundle?: true
+  /**
+   * With `needsBundle`: meetings of the same 相手 or series share the key, and the list shows two
+   * or more of them as one row 「まとまりを選ぶ会議 n件」 (the server groups them).
+   */
+  bundleGroup?: { key: string; label: string }
   /** 「AI の番」 only: the server clock put it there because its wait is over (the PC's wait-over step runs it). */
   waitOver?: true
 }
@@ -111,8 +117,12 @@ export interface TaskSources {
   asked: RecordSummary[]
   /** Records that reached a final state today, the member's or asked by them. */
   doneToday: RecordSummary[]
-  /** Meetings of the member read lately whose まとまり nobody chose (none when the company has none). */
-  meetingsWithoutBundle?: RecordSummary[]
+  /**
+   * 「どのまとまりの会議ですか？」 as the server decides them (`GET /me/minutes/bundle-questions`:
+   * the member's meetings with someone from outside, read within the company's days, no まとまり,
+   * the question not closed). The app adds none and leaves none out.
+   */
+  bundleQuestions?: MeetingBundleQuestion[]
   typeLabels: Record<string, string>
   /** Type name → the interfaces it implements, for the types that do. */
   typeImplements?: Record<string, string[]>
@@ -150,7 +160,7 @@ function waitingWords(r: RecordSummary, me: string, people: Record<string, strin
 export function classifyTasks(src: TaskSources): TaskListItem[] {
   const seen = new Set<string>()
   const out: TaskListItem[] = []
-  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null, needsBundle = false) => {
+  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null, bundleGroup: TaskListItem['bundleGroup'] | null = null) => {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({
@@ -164,7 +174,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       actingFor: r.actingFor ? nameOf(src.people, r.actingFor) : null,
       bundle: src.bundles[r.id] ?? null,
       finishedAt,
-      ...(needsBundle ? { needsBundle: true as const } : {}),
+      ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
     })
   }
@@ -174,7 +184,13 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
     else if (r.state === 'declined') add(r, 'mine', `${nameOf(src.people, r.fields.assignee)}さんが受けられないと返しました`)
     else add(r, 'mine', null)
   }
-  for (const r of src.meetingsWithoutBundle ?? []) add(r, 'mine', MEETING_NEEDS_BUNDLE_TEXT, null, true)
+  for (const q of src.bundleQuestions ?? []) {
+    const r: RecordSummary = {
+      id: q.recordId, type: 'meeting', typeVersion: null, title: q.title, summary: '', path: null, state: 'read', version: q.version,
+      fields: q.meetingAt ? { meeting_at: q.meetingAt } : {}, updatedAt: q.readAt,
+    }
+    add(r, 'mine', MEETING_NEEDS_BUNDLE_TEXT, null, q.group)
+  }
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))
   for (const r of src.doneToday) add(r, 'done', null, r.updatedAt)

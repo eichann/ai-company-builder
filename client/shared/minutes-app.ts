@@ -32,6 +32,11 @@ export type MinutesActionResult =
   | { success: true; message?: string }
   | { success: false; error: string }
 
+/** A meeting's 「どのまとまりの会議ですか？」 for its card (the server decides; see minutes.md). */
+export type MeetingBundleQuestionResult =
+  | { success: true; title: string; canChoose: boolean; noBundle: boolean }
+  | { success: false; error: string }
+
 export const MINUTES_OFFLINE_TEXT = 'サーバーに接続できないため、いまは議事録を確かめられません（オフラインの可能性があります）。'
 /** The consultation's agent cannot run the minutes' actions (registry `recordActions` false: Codex). */
 export const MINUTES_NEEDS_CLAUDE_TEXT = '議事録の読み取りは Claude Code の相談でできます。'
@@ -125,10 +130,11 @@ export function readMinutesBundleChoiceCard(data: unknown): MinutesBundleChoiceC
  * is linked, or exactly one candidate — the server links that one itself).
  */
 export function bundleChoiceFor(
-  answer: { recordId?: unknown; bundle?: unknown; candidates?: unknown; meeting?: { title?: unknown } },
+  answer: { recordId?: unknown; bundle?: unknown; candidates?: unknown; noBundle?: unknown; meeting?: { title?: unknown } },
   ctx: { id: string; companyId: string },
 ): MinutesBundleChoiceCard | null {
-  if (answer.bundle) return null
+  // A person said 「まとまりはない（社内の会議など）」: never asked again.
+  if (answer.bundle || answer.noBundle === true) return null
   const candidates = Array.isArray(answer.candidates) ? answer.candidates : []
   if (candidates.length === 1) return null
   return readMinutesBundleChoiceCard({

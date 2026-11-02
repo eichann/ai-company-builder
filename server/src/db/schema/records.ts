@@ -184,6 +184,8 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   if (!settings.has('content_store')) conn.exec(`ALTER TABLE record_settings ADD COLUMN content_store INTEGER`)
   // Which meetings the intake reads (minutes.md "Which meetings"): null = the default, 'external'.
   if (!settings.has('meeting_intake')) conn.exec(`ALTER TABLE record_settings ADD COLUMN meeting_intake TEXT`)
+  // How long 「どのまとまりの会議ですか？」 stays in あなたの番 (minutes.md): null = the default.
+  if (!settings.has('meeting_bundle_days')) conn.exec(`ALTER TABLE record_settings ADD COLUMN meeting_bundle_days INTEGER`)
 }
 
 /**

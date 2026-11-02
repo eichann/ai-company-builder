@@ -184,3 +184,31 @@ export function companyPathOf(path: string, rootPath: string): string | null {
 export function linkableTasks(items: readonly TaskListItem[]): TaskListItem[] {
   return items.filter(i => i.type === 'task' && i.turn !== 'done')
 }
+
+/** A row of a section: one item, or 「まとまりを選ぶ会議 n件」 holding the meetings of one 相手 or series. */
+export type ListRow =
+  | { kind: 'item'; item: TaskListItem }
+  | { kind: 'bundle-group'; key: string; label: string; items: TaskListItem[] }
+
+/**
+ * Meetings asking 「どのまとまりの会議ですか？」 that the server put in one group (same 相手 or
+ * series) become one row where the first of them stands, when there are two or more; everything
+ * else stays one row per item, in order.
+ */
+export function listRows(items: readonly TaskListItem[]): ListRow[] {
+  const groups = new Map<string, TaskListItem[]>()
+  for (const i of items) {
+    if (!i.needsBundle || !i.bundleGroup) continue
+    groups.set(i.bundleGroup.key, [...(groups.get(i.bundleGroup.key) ?? []), i])
+  }
+  const out: ListRow[] = []
+  const placed = new Set<string>()
+  for (const i of items) {
+    const g = i.needsBundle && i.bundleGroup ? groups.get(i.bundleGroup.key) : undefined
+    if (!g || g.length < 2 || !i.bundleGroup) { out.push({ kind: 'item', item: i }); continue }
+    if (placed.has(i.bundleGroup.key)) continue
+    placed.add(i.bundleGroup.key)
+    out.push({ kind: 'bundle-group', key: i.bundleGroup.key, label: i.bundleGroup.label, items: g })
+  }
+  return out
+}

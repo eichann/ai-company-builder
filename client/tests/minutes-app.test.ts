@@ -108,10 +108,12 @@ test('「今は読まない」 runs skip at the notice\'s version, and the ま�
   const before = seen.length
   assert.deepEqual(await checker.skip('co', MINUTES_ID), { success: true })
   assert.deepEqual(await checker.linkBundle('co', MINUTES_ID, 'deal-8f3a2c01'), { success: true })
+  assert.equal((await checker.noBundle('co', MINUTES_ID)).success, true)
   const sent = seen.slice(before).filter(s => s.method === 'POST')
   assert.deepEqual(sent.map(s => [s.url.replace('https://acb.example.jp/api/companies/co', ''), JSON.parse(s.body!)]), [
     [`/records/item/${MINUTES_ID}/actions/skip`, { expectedVersion: 1 }],
     [`/me/minutes/item/${MINUTES_ID}/bundle`, { bundleId: 'deal-8f3a2c01' }],
+    [`/me/minutes/item/${MINUTES_ID}/no-bundle`, {}],
   ])
   assert.ok(sent.every(s => s.headers.Cookie === SESSION && !('Authorization' in s.headers)))
   // An id the server could take as a path is refused before sending.
@@ -140,6 +142,8 @@ test('the まとまり choice card: only with no linked まとまり and not exa
   assert.deepEqual(bundleChoiceFor({ ...base, candidates: [] }, ctx)?.candidates, [])
   assert.equal(bundleChoiceFor({ ...base, candidates: [two[0]] }, ctx), null)
   assert.equal(bundleChoiceFor({ ...base, bundle: { id: 'deal-aaaaaa01' }, candidates: two }, ctx), null)
+  // 「まとまりはない」 was chosen for this meeting: never asked again.
+  assert.equal(bundleChoiceFor({ ...base, candidates: two, noBundle: true }, ctx), null)
 })
 
 test('reading minutes with two candidates puts the card in the reply (the app\'s, not the AI\'s) and tells the AI to wait', async () => {
