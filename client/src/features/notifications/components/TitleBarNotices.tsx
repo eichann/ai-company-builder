@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { Bell, GearSix } from '@phosphor-icons/react'
 import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS } from '../../../../../shared/types/notifications'
-import { shortDue, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
+import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
+import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { getNoticeSettings, markNoticesRead, setNoticeSetting } from '../api'
 
@@ -26,8 +27,9 @@ interface Props {
 type Open = 'turn' | 'bell' | 'settings' | null
 
 /**
- * The title bar's 「あなたの番 N」 (what waits for the member, until it is done)
- * and the bell (what happened, gone once read) — drawn by the core app only.
+ * The title bar's 「あなたの番 N」 (what the member presses, until it is done — by kind with one line
+ * on what to do; the count is the list's) and the bell (what happened, read only, gone once read;
+ * I.1) — drawn by the core app only.
  * Each list item opens its record; reading the bell's list marks nothing until
  * an item is opened or 「すべて既読」 is pressed, so the other PC's dot stays honest.
  */
@@ -43,9 +45,10 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen }: Pro
   const { myTurn, notices } = state
   const waitingMeetings = meetings.filter(m => m.needsPerson).length
   const turnTotal = myTurn.total + waitingMeetings
-  const meetingList = meetings.length > 0 && (
+  // A meeting waiting for the member is theirs to press (あなたの番); one the AI is reading is only news (the bell).
+  const meetingList = (list: MeetingTurnRow[]) => list.length > 0 && (
     <section aria-label="会議" className="border-b border-gray-100 dark:border-zinc-800">
-      {meetings.map(m => (
+      {list.map(m => (
         <div key={`${m.kind}:${m.id}`} className="px-3 py-2">
           <span className="block truncate text-gray-800 dark:text-zinc-100">{m.kind === 'bundle' ? '会議：' : '議事録：'}{m.title}</span>
           <span className={`block text-xs ${m.needsPerson ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-zinc-400'}`}>{m.text}</span>
@@ -86,40 +89,45 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen }: Pro
       >
         あなたの番 <b className="tabular-nums">{turnTotal}</b>
       </button>
-      <button type="button" onClick={() => toggle('bell')} className={ICON_BUTTON} title="知らせ" aria-label={notices.unread > 0 ? `知らせ（未読 ${notices.unread} 件）` : waitingMeetings > 0 ? '知らせ（会議が待っています）' : '知らせ'} aria-expanded={open === 'bell'}>
+      <button type="button" onClick={() => toggle('bell')} className={ICON_BUTTON} title="起きたこと（読むだけ）" aria-label={notices.unread > 0 ? `起きたこと（未読 ${notices.unread} 件）` : '起きたこと'} aria-expanded={open === 'bell'}>
         <Bell size={18} />
-        {(notices.unread > 0 || waitingMeetings > 0) && <span data-testid="notices-unread-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />}
+        {notices.unread > 0 && <span data-testid="notices-unread-dot" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />}
       </button>
 
       {open === 'turn' && (
         <div className={PANEL} role="menu" aria-label="あなたの番">
-          {meetingList}
-          {myTurn.items.length === 0 && meetings.length === 0 && <p className="px-3 py-3 text-gray-500 dark:text-zinc-400">いま、あなたの番のものはありません。</p>}
-          {myTurn.items.map(item => (
-            <button key={item.id} type="button" role="menuitem" className={ROW} onClick={() => { setOpen(null); onOpen({ recordId: item.id, title: item.title }) }}>
-              <span className="block truncate text-gray-800 dark:text-zinc-100">{item.type === 'approval' ? '承認のお願い：' : ''}{item.title}</span>
-              {item.due && <span className="text-xs text-gray-500 dark:text-zinc-400">期限 {shortDue(item.due)}</span>}
-            </button>
+          <p className="px-3 pt-2 pb-1 text-[12px] font-semibold text-gray-700 dark:text-zinc-200">あなたの番<span className="ml-1.5 font-normal text-gray-400">あなたが押すもの</span></p>
+          {meetingList(meetings.filter(m => m.needsPerson))}
+          {myTurn.items.length === 0 && waitingMeetings === 0 && <p className="px-3 py-3 text-gray-500 dark:text-zinc-400">いま、あなたの番のものはありません。</p>}
+          {turnGroups(myTurn.items).map(g => (
+            <section key={g.line} aria-label={g.line} className="pb-1">
+              <p className="flex items-center gap-1.5 px-3 pt-1.5 text-[11px] font-semibold text-gray-500 dark:text-zinc-400"><ThingIcon kind={g.kind} size={12} />{g.line}</p>
+              {g.items.map(item => (
+                <button key={item.id} type="button" role="menuitem" className={`${ROW} pl-8`} onClick={() => { setOpen(null); onOpen({ recordId: item.id, title: item.title }) }}>
+                  <span className="block truncate text-gray-800 dark:text-zinc-100">{item.title}</span>
+                  {item.due && <span className="text-xs text-gray-500 dark:text-zinc-400">期限 {shortDue(item.due)}</span>}
+                </button>
+              ))}
+            </section>
           ))}
           {myTurn.total > myTurn.items.length && <p className="px-3 py-2 text-xs text-gray-500">ほかに {myTurn.total - myTurn.items.length} 件</p>}
+          <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-800 dark:text-zinc-400">起きたことはベルに出ます。ここは押すものだけです。</p>
         </div>
       )}
 
       {open === 'bell' && (
-        <div className={PANEL} role="menu" aria-label="知らせ">
+        <div className={PANEL} role="menu" aria-label="起きたこと">
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-1.5 text-xs dark:border-zinc-800">
+            <span className="font-semibold text-gray-700 dark:text-zinc-200">起きたこと<span className="ml-1 font-normal text-gray-400">読むだけ</span></span>
             <button type="button" className="text-blue-600 disabled:text-gray-400 dark:text-blue-400" disabled={notices.unread === 0}
               onClick={() => { void markNoticesRead(companyId, 'all').then(r => { if (r && !r.success) setError(r.error) }) }}>
-              すべて既読にする
-            </button>
-            <button type="button" className="flex items-center gap-1 text-gray-500 hover:text-gray-700 dark:text-zinc-400" onClick={() => void openSettings()}>
-              <GearSix size={12} /> 知らせの設定
+              すべて読んだ
             </button>
           </div>
           {error && <p role="alert" className="px-3 py-2 text-xs text-red-600">{error}</p>}
-          {meetingList}
+          {meetingList(meetings.filter(m => !m.needsPerson))}
           {notices.items.length === 0
-            ? <p className="px-3 py-3 text-gray-500 dark:text-zinc-400">知らせはありません。</p>
+            ? <p className="px-3 py-3 text-gray-500 dark:text-zinc-400">起きたことはまだありません。</p>
             : notices.items.map(item => (
               <button key={item.id} type="button" role="menuitem" className={ROW}
                 onClick={() => {
@@ -134,6 +142,9 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen }: Pro
                 <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </button>
             ))}
+          <button type="button" className="flex w-full items-center gap-1 border-t border-gray-100 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:border-zinc-800 dark:text-zinc-400" onClick={() => void openSettings()}>
+            <GearSix size={12} /> 知らせの設定
+          </button>
         </div>
       )}
 
