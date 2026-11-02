@@ -14,7 +14,7 @@ test('the approver sees the change, basis, precedents and materials; 「承認�
   await expect(card).toContainText('チャット窓口も最初から入れたい')
   await expect(card.getByRole('list', { name: '前例' })).toContainText('対象部署が増えたため')
   await expect(card.getByRole('list', { name: '材料' })).toContainText('11/5 商談')
-  await expect(card).toContainText('承認待ち：阿部さんにお願いしました')
+  await expect(card).toContainText('阿部さんの承認待ち')
   await expect(card).toContainText('中身が変わっていないことを確かめて承認します')
   const reason = card.getByRole('textbox')
   await expect(reason).toHaveValue('先方が対象を広げたいと言ったため')
@@ -30,7 +30,7 @@ test('the approver sees the change, basis, precedents and materials; 「承認�
 test('the requester (not the approver) has no approve or send-back button, only 取り下げる', async ({ page }) => {
   const state = await openPreview(page, 'approval-card', { viewer: 'requester' })
   const card = page.getByRole('group', { name: '承認のお願い' })
-  await expect(card).toContainText('承認待ち：阿部さんにお願いしました')
+  await expect(card).toContainText('阿部さんの承認待ち')
   await expect(card.getByRole('button', { name: '承認' })).toHaveCount(0)
   await expect(card.getByRole('button', { name: '差し戻す' })).toHaveCount(0)
   await expect(card.getByRole('button', { name: '取り下げる' })).toBeVisible()

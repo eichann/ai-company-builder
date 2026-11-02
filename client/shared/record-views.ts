@@ -57,8 +57,10 @@ export interface RecordCardLink {
 }
 export interface RecordCardView {
   record: RecordViewSummary
-  /** A meeting's or a 来た連絡's own parts (`record-details.ts`); absent for other kinds. */
+  /** A meeting's, a 来た連絡's or a bundle's own parts (`record-details.ts`); absent for other kinds. */
   detail?: RecordDetailView
+  /** The AI on this record (plan I.4): working on it now, or what it last did after the last person's change. */
+  ai?: { working: boolean; done: { at: string; text: string } | null }
   fields: RecordCardField[]
   history: RecordCardHistoryLine[]
   links: RecordCardLink[]

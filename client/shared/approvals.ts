@@ -57,7 +57,7 @@ export function percentText(p: number | null): string | null {
 export function stateLine(v: ApprovalView, names: Record<string, string>): string {
   const first = v.changes[0]
   switch (v.state as ApprovalState) {
-    case 'pending': return `承認待ち：${nameOf(names, v.approver)}さんにお願いしました`
+    case 'pending': return `${nameOf(names, v.approver)}さんの承認待ち`
     case 'approved': return first
       ? `承認されました。${v.systemLabel} の${first.label}も ${first.afterShown} になりました`
       : `承認されました。${v.systemLabel} に反映しました`
