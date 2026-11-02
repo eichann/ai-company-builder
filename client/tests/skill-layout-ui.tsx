@@ -210,7 +210,10 @@ const api: Partial<ElectronAPI> = {
   getChatServerInfo: async () => null,
   getClaudeCodeStatus: async () => ({ available: true, authenticated: true, cliPath: null, version: null, error: null, checkedAt: 0 }),
   getAuthMode: async () => 'claude-code',
-  getChatSessionSummaries: async () => [],
+  // ?consultations=1: one stored consultation in 「AIへの相談」 (探す ⌘K finds it by its title).
+  getChatSessionSummaries: async () => params.get('consultations') === '1'
+    ? [{ id: 's_estimate', companyId: COMPANY, title: '見積の相談', createdAt: '2026-11-01T09:00:00Z', updatedAt: '2026-11-01T09:30:00Z', messageCount: 2, sent: true, preview: '' }]
+    : [],
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
   // ?tasks=1: the やること tab (features/tasks) with a few rows; otherwise records give no list.

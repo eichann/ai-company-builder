@@ -3,7 +3,7 @@ import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
 import { FindPalette } from '../features/search/components/FindPalette'
-import type { PaletteRecent } from '../features/search/model'
+import type { PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
 import { BackupHistorySlideOver } from '../features/sync/components/BackupHistorySlideOver'
 import { SettingsPanel } from '../features/settings/components/SettingsPanel'
 import { ConnectToolsScreen } from '../features/settings/components/ConnectToolsScreen'
@@ -30,6 +30,11 @@ interface Props {
   /** 探す ⌘K: the tabs open in the middle (newest first), and opening a record found. */
   recentTabs: PaletteRecent[]
   onOpenRecord: (recordId: string) => void
+  /** 探す ⌘K's skills (already loaded) and 「AIへの相談」 (read when it opens), each opened in its usual place. */
+  paletteSkills: PaletteSkill[]
+  onOpenSkill: (skillId: string) => void
+  loadConsultations?: () => Promise<PaletteConsultation[]>
+  onOpenConsultation: (sessionId: string) => void
   showSettings: boolean
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; at: number } | null
@@ -77,6 +82,10 @@ export function AppDialogs(props: Props) {
             recent={props.recentTabs}
             onSelectFile={onFileSearchSelect}
             onOpenRecord={props.onOpenRecord}
+            skills={props.paletteSkills}
+            onOpenSkill={props.onOpenSkill}
+            loadConsultations={props.loadConsultations}
+            onOpenConsultation={props.onOpenConsultation}
           />
         )}
 
