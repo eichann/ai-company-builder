@@ -589,6 +589,9 @@ export interface IpcInvokeChannels {
   'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult }
   'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
   'git:inspectCompanyFolder': { args: [folder: string, companyId: string]; result: InspectCompanyFolderResult }
+  // A member's first time without choices (features/company-setup): 所属 and the default folder
+  'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
+  'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
   'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
   'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
   'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
@@ -983,6 +986,8 @@ export interface ElectronAPI {
   gitLog: Invoke<'git:log'>
   gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
   gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'>
+  getMyDepartments: Invoke<'companySetup:myDepartments'>
+  getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
   onSetupProgress: Subscribe<'setup:progress'>
 
   // Sparse checkout

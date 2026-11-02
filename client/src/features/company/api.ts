@@ -26,6 +26,22 @@ export type CompanyFolderReads = ElectronPort<'gitInspectCompanyFolder' | 'readD
  */
 export type CompanySetupWrites = ElectronPort<'createDirectory' | 'gitSetupCompanyRemote'>
 
+/** Which departments the member belongs to (所属): asks the company server, sends only who the member is. */
+export type MembershipReads = ElectronPort<'getMyDepartments'>
+/**
+ * The folder company folders go in when the member is not asked (`~/AI Company Builder`):
+ * main creates it if missing and lets the app's file operations reach it.
+ */
+export type DefaultFolderWrites = ElectronPort<'getDefaultParentFolder'>
+
+export function getMyDepartments(companyId: string, reads: MembershipReads = window.electronAPI) {
+  return reads.getMyDepartments(companyId)
+}
+
+export function getDefaultParentFolder(writes: DefaultFolderWrites = window.electronAPI) {
+  return writes.getDefaultParentFolder()
+}
+
 export function getCompanies(reads: CompanyListReads = window.electronAPI) {
   return reads.getCompanies()
 }

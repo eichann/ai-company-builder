@@ -64,6 +64,8 @@ contract.invoke chatWindow:open
 contract.invoke chatWindow:openFile
 contract.invoke chatWindow:reportStatus
 contract.invoke codex:status
+contract.invoke companySetup:defaultParentFolder
+contract.invoke companySetup:myDepartments
 contract.invoke config:getAgentEnvPassthrough
 contract.invoke config:getApiKeyStatus
 contract.invoke config:getAuthMode
@@ -348,12 +350,14 @@ contract.type ElectronAPI.getChatWindowContext = getChatWindowContext: Invoke<'c
 contract.type ElectronAPI.getClaudeCodeStatus = getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'>
 contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'>
 contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
+contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
+contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
 contract.type ElectronAPI.getNotificationsState = getNotificationsState: Invoke<'notifications:state'>
@@ -647,6 +651,8 @@ contract.type IpcInvokeChannels.'chatWindow:open' = 'chatWindow:open': { args: [
 contract.type IpcInvokeChannels.'chatWindow:openFile' = 'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
 contract.type IpcInvokeChannels.'chatWindow:reportStatus' = 'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
 contract.type IpcInvokeChannels.'codex:status' = 'codex:status': { args: []; result: CodexStatus }
+contract.type IpcInvokeChannels.'companySetup:defaultParentFolder' = 'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
+contract.type IpcInvokeChannels.'companySetup:myDepartments' = 'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
 contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
 contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
 contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
@@ -904,6 +910,8 @@ main.handle chatWindow:open @ features/chat-windows/ipc.ts (sessionId: string, r
 main.handle chatWindow:openFile @ features/chat-windows/ipc.ts (filePath: string)
 main.handle chatWindow:reportStatus @ features/chat-windows/ipc.ts (status: unknown)
 main.handle codex:status @ features/settings/ipc.ts ()
+main.handle companySetup:defaultParentFolder @ features/company-setup/ipc.ts ()
+main.handle companySetup:myDepartments @ features/company-setup/ipc.ts (companyId: string)
 main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
 main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
 main.handle config:getAuthMode @ features/settings/ipc.ts ()
@@ -1168,6 +1176,8 @@ preload getCodexStatus -> invoke codex:status()
 preload getCodexStatus : () => Promise<CodexStatus>
 preload getCompanies -> invoke api:getCompanies()
 preload getCompanies : () => Promise<CompaniesResult>
+preload getDefaultParentFolder -> invoke companySetup:defaultParentFolder()
+preload getDefaultParentFolder : () => Promise<{ success: boolean; folder?: string | undefined; }>
 preload getDepartments -> invoke api:getDepartments($0)
 preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
 preload getEnvStatus -> invoke env:status($0)
@@ -1180,6 +1190,8 @@ preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
 preload getMeetingBundleQuestion : (companyId: string, minutesId: string) => Promise<MeetingBundleQuestionResult>
 preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
+preload getMyDepartments -> invoke companySetup:myDepartments($0)
+preload getMyDepartments : (companyId: string) => Promise<{ success: boolean; departmentIds?: string[] | undefined; }>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
 preload getNotificationSettings -> invoke notifications:settings($0)

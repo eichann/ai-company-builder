@@ -7,12 +7,11 @@ import { CompanySelector } from './features/company/components/CompanySelector'
 import { ServerSetupScreen } from './features/auth/components/ServerSetupScreen'
 import { SpinnerGap } from '@phosphor-icons/react'
 import type { CompanyView } from './types'
-import { checkRememberedCompany } from './features/company/restore-company'
+import { checkRememberedCompany, LAST_COMPANY_KEY_PREFIX } from './features/company/restore-company'
 import { getServerUrl } from './features/auth/api'
 import { companyPathExists, getCompanies } from './features/company/api'
 import { registerCompanyFolder } from './shared/ipc/allowed-folders'
 
-const LAST_COMPANY_KEY_PREFIX = 'lastCompany:'
 
 function safeReadLastCompany(userId: string): CompanyView | null {
   try {

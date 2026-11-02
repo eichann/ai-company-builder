@@ -37,3 +37,23 @@ export function departmentIdFor(folderName: string): string {
 export function isDepartmentEntry(entry: DirectoryEntry): boolean {
   return entry.isDirectory && !entry.name.startsWith('_') && !entry.name.startsWith('.')
 }
+
+/**
+ * The folders a first setup downloads without asking (管理画面の見直し 2-2): the departments
+ * the member belongs to (所属), in the list's order. Empty = nothing known → ask as before.
+ * Only for a first setup (a folder with nothing downloaded): an existing clone's choices are
+ * never changed (download-choices.md "First setup").
+ */
+export function membershipFolders(departments: PickableDepartment[], myDepartmentIds: readonly string[] | null | undefined): string[] {
+  const mine = new Set(myDepartmentIds ?? [])
+  return departments.filter(d => mine.has(d.id)).map(d => d.folder)
+}
+
+/**
+ * The company opened without choosing (2-2 「会社が1つなら選ばせない」): the only one, unless
+ * a company is remembered for this member (App.tsx restores that one; starting another setup
+ * beside it would race it).
+ */
+export function companyToOpenWithoutChoosing<T>(companies: readonly T[], remembered: boolean): T | null {
+  return !remembered && companies.length === 1 ? companies[0] : null
+}

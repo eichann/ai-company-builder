@@ -4,6 +4,9 @@
 // (join with all or the picked departments as a partial clone, or the
 // owner's first push). Reports download progress as setup:progress.
 //   git:inspectCompanyFolder, git:setupCompanyRemote
+// A member's first time without choices (管理画面の見直し 2-2): the departments they belong
+// to (所属, set by the invitation or the admin) and the folder the company goes in by default.
+//   companySetup:myDepartments, companySetup:defaultParentFolder
 
 import fs from 'fs'
 import path from 'path'
@@ -24,11 +27,57 @@ export interface CompanySetupDeps {
   serverUrl: () => string
   /** The app's own folder (ls-remote by URL needs no repository; it runs there). */
   userDataDir: () => string
+  /** The member's home folder (the default company folder goes under it). */
+  home: () => string
 }
+
+/** Where company folders go when the member is not asked (`~/AI Company Builder/<会社名>`). */
+export const DEFAULT_PARENT_FOLDER_NAME = 'AI Company Builder'
 
 const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。'
 
-export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir }: CompanySetupDeps): void {
+export function registerCompanySetupIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, userDataDir, home }: CompanySetupDeps): void {
+
+  // The folder company folders are made in when nobody picks one: created if missing and
+  // registered like a folder picked in the dialog. The company folder inside it still goes
+  // through git:inspectCompanyFolder (a folder of the member's own is refused, never used).
+  ipc.handle('companySetup:defaultParentFolder', async () => {
+    const parent = path.join(home(), DEFAULT_PARENT_FOLDER_NAME)
+    try {
+      await fs.promises.mkdir(parent, { recursive: true })
+      paths.add(parent)
+      return { success: true, folder: parent }
+    } catch (error) {
+      console.warn('Git setup: Could not prepare the default folder:', error instanceof Error ? error.message : 'unknown')
+      return { success: false }
+    }
+  })
+
+  // The departments the signed-in member belongs to (所属), read from the company server:
+  // each department's members (any member may read them). Anything unreadable → not
+  // success, and the selector asks the member as before.
+  ipc.handle('companySetup:myDepartments', async (_, companyId: string) => {
+    const userId = session.userId()
+    if (!userId || typeof companyId !== 'string' || !companyId) return { success: false }
+    const headers: Record<string, string> = session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {}
+    const base = `${serverUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`
+    try {
+      const listed = await fetch(base, { headers })
+      const list = listed.ok ? await listed.json() as { success?: unknown; data?: unknown } : null
+      if (list?.success !== true || !Array.isArray(list.data)) return { success: false }
+      const departmentIds: string[] = []
+      for (const department of list.data as Array<{ id?: unknown }>) {
+        if (typeof department.id !== 'string') continue
+        const answer = await fetch(`${base}/${encodeURIComponent(department.id)}/members`, { headers })
+        if (!answer.ok) return { success: false }
+        const view = await answer.json() as { data?: { members?: Array<{ userId?: unknown }> } } | null
+        if (view?.data?.members?.some(m => m.userId === userId)) departmentIds.push(department.id)
+      }
+      return { success: true, departmentIds }
+    } catch {
+      return { success: false }
+    }
+  })
 
   // The company's repository URL on the server (null when the server cannot say).
   async function companyRemoteUrl(companyId: string): Promise<string | null> {
