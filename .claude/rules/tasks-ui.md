@@ -220,7 +220,7 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
-- 「相談する」 on the card (next to the title) and on a list row (on hover) run `chat.consultAbout`
+- 「相談する」 on the card (its 「AIへの相談」 group on the right, with 「＋新しい相談」 = `fresh`, and the consultations about it listed there; the card also shows 見られる人 top right — `tasks:card` asks `POST …/viewers` for that task and passes only its answer) and on a list row (on hover) run `chat.consultAbout`
   (`commands.md`; composed by AppShell, `consultAbout`). The chat pane opens the member's most
   recent consultation whose main topic is the task (`topicRecordId` in the history and its
   summary: this PC's consultations, the member's own); without one it starts 「<title> の相談」

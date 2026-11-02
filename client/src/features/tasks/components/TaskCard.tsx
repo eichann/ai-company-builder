@@ -1,14 +1,16 @@
 // A task's card in one file: the press's notices (取り消す, 先に変えた) belong to the card that
 // holds its version, so the loader and the body stay together.
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
-import { ChatCircleDots, CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
 import { CALM } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
 import { fileRow, recordRow } from '../../records/components/linkRows'
+import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
+import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
@@ -38,7 +40,9 @@ interface Props {
   /** The departments the member can write to, offered by 「部署に出す」 on an owner-only task. */
   shareFolders?: ShareFolder[]
   /** 「相談する」: the member's latest consultation about this task, else a new one (AppShell: `chat.consultAbout`). */
-  onConsult?: (record: { id: string; title: string }) => void
+  onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
+  /** Consultations whose main topic is this task (this PC's), listed in 「つながっているもの」. */
+  consultations?: readonly LinkedConsultation[]
   /** Tags in use in the member's list (most used first), for 「タグの候補」. */
   tagsInUse?: string[]
   /** チームの進め方, when the screen decides it; else the company's setting the card read. */
@@ -62,7 +66,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, tagsInUse = [], team, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, consultations = [], tagsInUse = [], team, onChanged, bundleWord = 'プロジェクト', onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -128,7 +132,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     companyId={companyId} bundleWord={bundleWord}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
@@ -160,12 +164,13 @@ interface BodyProps {
   /** Offered only for an owner-only task (empty otherwise). */
   shareFolders: ShareFolder[]
   onShare: (folder: string) => Promise<string | null>
-  onConsult?: (record: { id: string; title: string }) => void
+  onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
+  consultations: readonly LinkedConsultation[]
   tagSuggestions: ReactNode
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, tagSuggestions, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagSuggestions, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -199,6 +204,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
     })),
   ]
+  // 「AIへの相談」 on the right: the consultations about this task, ［相談する］［＋新しい相談］.
+  const consult = consultationLinks(consultations, onConsult && (fresh => onConsult({ id: record.id, title: record.title }, fresh)))
   const postpone = card.actions.find(a => a.action === 'set_due')
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null
@@ -212,17 +219,12 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       </>}
       actions={<>
         <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} onRun={onRun} />
-        {onConsult && (
-          <button type="button" onClick={() => onConsult({ id: record.id, title: record.title })} title="このやることについて AI に相談します（前の相談があれば、それを開きます）"
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 px-2 py-1 text-[12px] text-gray-700 hover:border-accent hover:text-accent dark:border-zinc-600 dark:text-zinc-200">
-            <ChatCircleDots size={13} />相談する
-          </button>
-        )}
       </>}
       from={card.origin && <OriginLine origin={card.origin} />}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
-      links={<LinkedColumn rows={rows}
-        extras={[{ name: 'ファイル', kind: 'file', action: <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />, note: 'つながりは、このやることを見られる人みんなに見えます' }]}
+      seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
+      links={<LinkedColumn rows={[...rows, ...consult.rows]}
+        extras={[{ name: 'ファイル', kind: 'file', action: <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
         drop={{ label: 'ここにファイルをドロップしてつなぐ', accepts: e => isFileTreeDrag(e.dataTransfer), onDrop: e => void drop(e) }}
         notice={<>
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
