@@ -134,6 +134,7 @@ function SettingsForm({
       <MeetingTasksCard draft={draft} change={change} />
       <AutoRunCard draft={draft} change={change} />
       <ReadIncomingCard draft={draft} change={change} />
+      <TeamModeCard draft={draft} change={change} />
       <AcceptanceCard draft={draft} change={change} />
       <BundleNameCard draft={draft} change={change} />
       <DepartmentsCard draft={draft} change={change} departments={departments} />
@@ -355,6 +356,36 @@ function BundleNameCard({ draft, change }: CardProps) {
           onChange={(e) => change((d) => { d.bundleName = e.target.value })}
         />
         <span className="text-muted-foreground">初めは「プロジェクト」です（{TASK_SETTINGS_LIMITS.bundleNameLength} 文字まで）。</span>
+      </div>
+    </Card>
+  )
+}
+
+function TeamModeCard({ draft, change }: CardProps) {
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <UsersThree size={16} />
+          チームの進め方
+        </CardTitle>
+        <CardDescription>
+          使うと、やることに「引き受け待ち」「確かめる人（見てもらって完了・差し戻し）」「受けられない」「返事待ち」「代わりの人」が出ます。使わないときは、自分のやることを進めて完了にする形と、人に頼むことだけです。
+        </CardDescription>
+      </CardHeader>
+      <div role="radiogroup" aria-label="チームの進め方" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
+        <RadioCard
+          checked={!draft.teamMode}
+          onSelect={() => change((d) => { d.teamMode = false })}
+          label="使わない"
+          help="はじめはこちらです。"
+        />
+        <RadioCard
+          checked={draft.teamMode}
+          onSelect={() => change((d) => { d.teamMode = true })}
+          label="使う"
+          help="相手がいるやることにだけ、チームの操作が出ます。"
+        />
       </div>
     </Card>
   )

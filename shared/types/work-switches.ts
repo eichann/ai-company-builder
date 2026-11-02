@@ -20,6 +20,12 @@ export interface MyWorkSwitches {
     connected: { mail: boolean; chat: boolean }
   }
   autoRun: WorkSwitchState
+  /**
+   * The company's チームの進め方 (task settings `teamMode`, default off): the team's steps on a task
+   * (引き受け待ち, 確かめる人・レビューと差し戻し, 受けられない, 返事待ち, 代わりの人) are offered.
+   * The company's alone: no member choice, not changed through this route.
+   */
+  teamMode: { on: boolean }
 }
 
 /** PUT body. */

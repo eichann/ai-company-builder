@@ -76,6 +76,13 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 - `companyHolidays`: the company's own days off (`{ date: YYYY-MM-DD, name }`, ≤ 400, years
   2000–2100), stored sorted.
 
+- `teamMode` (チームの進め方, owner decision 2026-11-02): default **off**; missing in an older
+  document → off. On: the team's steps on a task are offered (引き受け待ち, 確かめる人・レビューと
+  差し戻し, 受けられない, 返事待ち, 代わりの人; only on tasks with someone else involved). Off: one's
+  own task (未着手 → 進めている → 完了 / やめる) and 人に頼む. The company's alone (no member choice);
+  the app reads it as `teamMode.on` of `GET /me/work-switches` (`workSwitches:get`). The task card
+  reading it is the screen's (画面乙); the server does not refuse team actions by it yet.
+
 ## Each member's switches (自分の設定, owner decision 2026-11-02)
 
 - 受信を読む and AI が自動で進める are each member's own, within the company's (rule:
@@ -92,7 +99,8 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 - `GET|PUT /api/companies/:id/me/work-switches` (`{ switch: 'readIncoming' | 'autoRun', on }`, any
   member, their own only) → `MyWorkSwitches` (`shared/types/work-switches.ts`: per switch `on`,
   `allowed`, `companyDefault`, `chosen` (null = never chose); 受信を読む adds `connected: { mail,
-  chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」). App: IPC
+  chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」), plus the
+  company's `teamMode: { on }` (read only here; `PUT` takes only the two switches). App: IPC
   `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
   `client/shared/work-switches.ts`). The screen: 設定 → 自分の設定 (the settings open on it;
   `client/src/features/settings/components/MySwitchesSection.tsx`, `hooks/useWorkSwitches.ts`): a switch

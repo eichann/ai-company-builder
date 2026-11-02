@@ -44,7 +44,8 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
   }
 
   function view(companyId: string, userId: string): MyWorkSwitches {
-    const policies = workSwitchPoliciesOf(deps.settingsOf(companyId))
+    const settings = deps.settingsOf(companyId)
+    const policies = workSwitchPoliciesOf(settings)
     const choices = choicesOf(companyId, userId)
     return {
       readIncoming: {
@@ -52,6 +53,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
         connected: deps.readingConnected?.(companyId, userId) ?? { mail: false, chat: false },
       },
       autoRun: workSwitchState(policies.autoRun, choices.autoRun),
+      teamMode: { on: settings.teamMode },
     }
   }
 
