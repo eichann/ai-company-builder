@@ -74,6 +74,11 @@ export interface AuthUser {
   name: string | null
   image: string | null
   emailVerified: boolean
+  /**
+   * May this account create a company (GET /api/me; the check POST /api/companies makes)?
+   * Absent from an older server: offered, and the server still refuses.
+   */
+  canCreateCompany?: boolean
 }
 
 /** Sign-in / sign-up: whether it worked. The server's answer (it holds the session token) stays in main. */

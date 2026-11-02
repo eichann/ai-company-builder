@@ -214,6 +214,7 @@ contract.type AuthResult = export interface AuthResult { }
 contract.type AuthResult.error = error?: string
 contract.type AuthResult.success = success: boolean
 contract.type AuthUser = export interface AuthUser { }
+contract.type AuthUser.canCreateCompany = canCreateCompany?: boolean
 contract.type AuthUser.email = email: string
 contract.type AuthUser.emailVerified = emailVerified: boolean
 contract.type AuthUser.id = id: string

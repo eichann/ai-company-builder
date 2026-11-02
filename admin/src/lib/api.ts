@@ -176,6 +176,12 @@ export interface User {
   email: string
   name: string | null
   createdAt?: string
+  /**
+   * May this account create a company (GET /api/me; the same check POST
+   * /api/companies makes)? Absent from an older server: offer it, the server
+   * still refuses. Read through lib/company-creation.ts.
+   */
+  canCreateCompany?: boolean
 }
 
 export const authApi = {

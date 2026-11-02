@@ -337,6 +337,11 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   address), plus the first account of a fresh server while no company exists; anyone else 403
   `COMPANY_CREATION_RESTRICTED` (Japanese `error`: released apps show it as is). Checked before
   the body. `tests/integration/company-creation.test.ts`, `tests/unit/company-creation-policy.test.ts`.
+  `GET /api/me` answers the same check as `canCreateCompany` (`mayCreate(user.id).ok`, this
+  account only; nothing about who the operators are), and the admin console and desktop app show
+  「会社を作成」 only when it is not `false` (absent from an older server: shown, still refused;
+  owner decision 2026-11-02). A non-operator with no company is told to open their invitation
+  link. Same test file; `admin/tests/company-creation.test.tsx`, `client/tests/ui/company-selector.spec.ts`.
 - Company slugs are unique across the server, so a new one never depends on whether another
   company has a slug (2026-10-31; before, `abe` taken → `abe-2` told the creator so): always the
   sanitized requested slug or name (or `company`) + `-` + the first 8 characters of the new

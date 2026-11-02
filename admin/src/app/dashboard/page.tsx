@@ -12,10 +12,12 @@ import { Button } from '@/components/ui/button'
 import { companiesApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { LAST_COMPANY_KEY } from '@/lib/company-context'
+import { NOT_A_MEMBER_YET, offersCompanyCreation } from '@/lib/company-creation'
 import { useQuery } from '@/lib/use-query'
 
 // Entry point after sign-in: opens the company used last (or the first one),
-// or offers to create one.
+// or offers to create one — only to those the server lets create a company
+// (its operators, or the first account of a fresh server).
 export default function DashboardPage() {
   return (
     <RequireAuth>
@@ -26,7 +28,7 @@ export default function DashboardPage() {
 
 function CompanyRedirect() {
   const router = useRouter()
-  const { signOut } = useAuth()
+  const { user, signOut } = useAuth()
   const companies = useQuery('companies', () => companiesApi.list())
 
   useEffect(() => {
@@ -68,20 +70,30 @@ function CompanyRedirect() {
         </button>
       }
     >
-      <EmptyState
-        icon={Buildings}
-        title="まだ会社がありません"
-        description="会社を作成すると、メンバーを招待して部署ごとにファイルやAIスキルを共有できます。招待を受けた場合は、届いた招待リンクを開いてください。"
-        action={
-          <Button asChild>
-            <Link href="/companies/new">
-              <Plus />
-              会社を作成
-            </Link>
-          </Button>
-        }
-        className="bg-card"
-      />
+      {offersCompanyCreation(user) ? (
+        <EmptyState
+          icon={Buildings}
+          title="まだ会社がありません"
+          description="会社を作成すると、メンバーを招待して部署ごとにファイルやAIスキルを共有できます。招待を受けた場合は、届いた招待リンクを開いてください。"
+          action={
+            <Button asChild>
+              <Link href="/companies/new">
+                <Plus />
+                会社を作成
+              </Link>
+            </Button>
+          }
+          className="bg-card"
+        />
+      ) : (
+        <EmptyState
+          icon={Buildings}
+          title="まだ会社に参加していません"
+          description={NOT_A_MEMBER_YET}
+          className="bg-card"
+        />
+      )}
     </AuthLayout>
   )
 }
+

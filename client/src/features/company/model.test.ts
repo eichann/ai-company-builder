@@ -2,7 +2,7 @@
 // which departments download without asking.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { companyToOpenWithoutChoosing, membershipFolders, type PickableDepartment } from './model.ts'
+import { companyToOpenWithoutChoosing, membershipFolders, offersCompanyCreation, type PickableDepartment } from './model.ts'
 
 const departments: PickableDepartment[] = [
   { id: 'd-sales', name: '営業部', folder: '営業部' },
@@ -27,4 +27,11 @@ test('only a single company opens by itself, and never beside a remembered one',
   assert.equal(companyToOpenWithoutChoosing(['A'], true), null)
   assert.equal(companyToOpenWithoutChoosing(['A', 'B'], false), null)
   assert.equal(companyToOpenWithoutChoosing([], false), null)
+})
+
+test('「新しい会社を作成」 is hidden only when the server says the account may not create a company', () => {
+  assert.equal(offersCompanyCreation({ canCreateCompany: false }), false)
+  assert.equal(offersCompanyCreation({ canCreateCompany: true }), true)
+  // An older server sends no answer: offered as before (the server still refuses).
+  assert.equal(offersCompanyCreation({}), true)
 })

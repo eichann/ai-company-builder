@@ -9,7 +9,7 @@ import { useAuthStore } from '../../../stores/authStore'
 import type { CompanyInfo } from '../../../../shared/ipc-contract'
 import { chooseFolder, getDefaultParentFolder } from '../api'
 import { prepareCompanyFolder } from '../folderSetup'
-import { companyToOpenWithoutChoosing, type PickableDepartment, type SelectorView, type SetupKind } from '../model'
+import { companyToOpenWithoutChoosing, offersCompanyCreation, type PickableDepartment, type SelectorView, type SetupKind } from '../model'
 import { hasRememberedCompany } from '../restore-company'
 import { useCompanies } from '../hooks/useCompanies'
 import { useFolderSetup } from '../hooks/useFolderSetup'
@@ -28,7 +28,8 @@ interface PickerState {
 
 export function CompanySelector() {
   const addCompany = useAppStore(s => s.addCompany)
-  const { user, signOut } = useAuthStore()
+  const { user, signOut, refreshUser } = useAuthStore()
+  const canCreate = offersCompanyCreation(user)
   const list = useCompanies(companies => {
     const only = user ? companyToOpenWithoutChoosing(companies, hasRememberedCompany(user.id)) : null
     if (only) void openWithoutChoosing(only)
@@ -143,14 +144,16 @@ export function CompanySelector() {
           <CompanyList
             companies={list.companies}
             error={error ?? list.loadError}
+            canCreate={canCreate}
             onSelect={select}
             onCreate={() => setView('create')}
           />
         )}
 
-        {view === 'create' && (
+        {view === 'create' && canCreate && (
           <CreateCompanyForm
-            onCreated={company => { list.add(company); select(company) }}
+            // The first company of a fresh server: its creator may not make another.
+            onCreated={company => { list.add(company); select(company); void refreshUser() }}
             onBack={() => setView('list')}
           />
         )}

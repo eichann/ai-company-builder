@@ -8,6 +8,7 @@
 //   ?setup=fail|manual       the download fails / waits for window.__acbCompany.finishSetup()
 //   ?companies=one           the member belongs to one company (it opens by itself)
 //   ?mine=d1,d2              the departments the member belongs to (所属); none by default
+//   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
 import { createRoot } from 'react-dom/client'
@@ -50,7 +51,10 @@ const decisions = {
 const folder = params.get('folder') ?? 'empty'
 
 useAuthStore.setState({
-  user: { id: 'u1', email: 'demo@example.com', name: '阿部', image: null, emailVerified: true },
+  user: {
+    id: 'u1', email: 'demo@example.com', name: '阿部', image: null, emailVerified: true,
+    ...(params.has('create') ? { canCreateCompany: params.get('create') === 'yes' } : {}),
+  },
   signOut: async () => { calls.push(['signOut']) },
 })
 

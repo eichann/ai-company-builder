@@ -1,6 +1,15 @@
 // The company selector's screens and the departments it offers or finds, without React.
-import type { DepartmentInfo, DirectoryEntry } from '../../../shared/ipc-contract'
+import type { AuthUser, DepartmentInfo, DirectoryEntry } from '../../../shared/ipc-contract'
 import type { FolderSetupPlan } from './folderPlan'
+
+/**
+ * Whether 「新しい会社を作成」 is offered: creating a company is the server operators' work
+ * (the first company of a fresh server excepted), and the server answers it per account.
+ * Hidden only when it says no; an older server's answer lacks the field.
+ */
+export function offersCompanyCreation(user: Pick<AuthUser, 'canCreateCompany'> | null): boolean {
+  return user?.canCreateCompany !== false
+}
 
 /** list → (create →) folder choice (clone: 既存 / 新しく; openExisting: 新しく作成) → departments → setup. */
 export type SelectorView = 'list' | 'create' | 'clone' | 'openExisting' | 'departments' | 'setup'
