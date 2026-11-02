@@ -95,5 +95,13 @@ export function sqliteTaskSettingsRepository(conn: Database.Database, companyId:
       return conn.prepare('UPDATE member_absences SET removed_at = ?, removed_by = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL')
         .run(at, by, companyId, id).changes > 0
     },
+    setupMark(mark) {
+      const r = conn.prepare('SELECT done_at, done_by FROM admin_setup_marks WHERE company_id = ? AND mark = ?')
+        .get(companyId, mark) as { done_at: string; done_by: string } | undefined
+      return r ? { at: r.done_at, by: r.done_by } : null
+    },
+    saveSetupMark(mark, by, at) {
+      conn.prepare('INSERT OR IGNORE INTO admin_setup_marks (company_id, mark, done_at, done_by) VALUES (?, ?, ?, ?)').run(companyId, mark, at, by)
+    },
   }
 }
