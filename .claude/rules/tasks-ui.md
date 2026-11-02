@@ -166,8 +166,10 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    「中止する」 in 「…」; while someone else checks it, a word
    instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
    one line on what it does (`actionHint`). **チームの進め方** (the company's `teamMode`, off by default: `tasks:card` reads `GET /me/work-switches` `teamMode.on`, unreadable = off; `card.teamMode`):
-   off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける, 返事待ち,
+   off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける,
    見てもらう and 差し戻す — how the card looks, not a permission (the server allows them either way);
+   **返事待ちにする is always in 「…」** (owner decision 2026-11-03), never the main button, for whom
+   the type's `wait` allows (assignee, AI) in its states;
    引き受ける and 受けられない stay on any task someone asked of the member. Actions that take the task off the member's turn (受けられない,
    返事待ち, 人に頼む, やめる（しまう）, 見てもらう) open a window that says **何が起きるか** and **知らせる人**
    first (`leavingWords`); a reason where the type requires one. After a press the card says what
@@ -184,10 +186,12 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    + ［根拠を見る］, the creating entry's note), 「終わったら：…」 (`whenDoneLine`), the 案件 (`bundle`, not
    repeated on the right), the due and the tags. The server decides every action.
 5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
-   reply draft) that stage 3's connectors fill. The card takes `renderSource(record)` from the
+   reply draft) that stage 3's connectors fill — asked only for a task that links the 来た連絡 it
+   came from (`card.fromIncoming`, an out `interaction` link): a task made by hand shows no もとの連絡
+   block and makes no read (owner decision 2026-11-03: no mail / chat parts where there is none). The card takes `renderSource(record)` from the
    screen: `src/app/recordSource.tsx` `renderRecordSource` returns the connector feature's part
    (under its lane marker, `ipc-and-main-process.md` "Lane markers"), so `tasks` imports no other
-   feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …").
+   feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …": shown only with the 来た連絡 linked).
 6. Fields and 経緯 folded at the bottom (`FieldsFold`, `HistoryFold`), and 「つながっているもの」 on
    the right with the record card's rows (`records/components/linkRows.tsx`, registered import):
    decisions marked 例外（この件だけ） and owner-only records marked 自分だけ (`RecordMarks`).
@@ -233,8 +237,8 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
 ## 返事待ち and its 見込み (task version 12, owner decision 2026-11-03 「②」; server `records.md` "Task version 12")
 
-- **Making it wait** (the card's 返事待ちにする, still offered as before — チームの進め方 on, a task someone
-  else is in — and 「もう少し待つ」): `WaitDialog` (`components/WaitParts.tsx`): 何が起きるか / 知らせる人,
+- **Making it wait** (the card's 返事待ちにする in 「…」 — always, チームの進め方 or not, one's own task
+  too: owner decision 2026-11-03 — and 「もう少し待つ」): `WaitDialog` (`components/WaitParts.tsx`): 何が起きるか / 知らせる人,
   「何を待っていますか」 (`waiting_on`, prefilled) and 「いつごろ来そうか」 (`WaitChooser`): ［明日］ (the next
   business day; 「次の営業日」 when that is not tomorrow) ［3日後］ (3 business days) ［来週］ (same weekday,
   or the next business day) ［日を選ぶ］ — each chip with its date (`waitChoices`, `client/shared/tasks.ts`,
@@ -254,10 +258,28 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
   ［もう少し待つ］ (the same window, a new 見込み) ［完了にする］. 経緯 shows the clock's note as one line
   (「ACB の時計：返事の見込み（11/6）を過ぎました」, `historyLines`).
 - Tests: `client/tests/tasks-list.test.ts` (the row words, business days, the chips' dates),
-  `task-card.test.ts` (`card.wait`), `tests/ui/task-card.spec.ts` (`?task=todo-team|waiting|back`: chips
+  `task-card.test.ts` (`card.wait`), `src/features/tasks/cardActions.test.ts` (返事待ちにする in 「…」
+  without チームの進め方, never main, not for the requester), `tests/ui/task-card.spec.ts`
+  (`?task=todo-own`: in 「…」 with team mode off; `SCREENSHOTS` writes the menu; `?task=todo-team|waiting|back`: chips
   set the date, nothing chosen sends none, ［見込みを変える］, the came-back band and its three buttons;
   `SCREENSHOTS=<dir>` writes the chooser and the came-back card), `task-consult.test.ts` (the nudge
   message never lets the AI send).
+
+## Without mail or chat (owner decision 2026-11-03)
+
+The list and the card are complete without Gmail / Slack; following mail and chat up (来た連絡,
+返事のお願い, 返事を待つ) is a bonus when the company has them, never something to log by hand.
+- **Company level** — `GET /me/work-switches` `channels` (`tasks.md`; a usable connector for the
+  `mail` / `chat` role): neither → 設定 → 自分の設定 shows no 受信を読む switch, only
+  「Gmail・Slack をつなぐと、返事の追いかけを AI がします」 (the one entry; the Google / Slack sections
+  stay). The task screens carry no mail / chat parts of their own to hide: the card's もとの連絡 shows
+  only on a task linking a 来た連絡 (above), 「返事を待つ」 only on a mail draft being sent
+  (`outbound-mail.md`), and 探す's kind chips only for kinds found (`search/model.ts`).
+- **Records are never hidden**: a 返事のお願い or a 来た連絡 to confirm in someone's turn stays in the
+  list (and the title bar) after a disconnect until it is finished — the list never asks about
+  connections (`tasks-list.test.ts` "a 返事のお願い or a 来た連絡 to confirm …").
+- **Member level** (company connected, this member not, or 受信を読む off): nothing is hidden —
+  自分の設定 is where they turn it on / 「Google で許可する」, and what others asked of them stays.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 

@@ -184,7 +184,7 @@ describe('Google as a core connector: 受信を読む', () => {
     expect(scopes).toContain(CAL)
     const mine = (await call('g-sato', 'GET', `${C()}/me/google`)).body.data
     expect(mine).toMatchObject({ connected: true, features: ['minutes', 'inbox'], featuresOff: [] })
-    expect(services.workSwitches.my({ companyId: CO, userId: 'g-sato', role: 'member' }).readIncoming).toMatchObject({ on: true, chosen: true, connected: { mail: true } })
+    expect((await services.workSwitches.my({ companyId: CO, userId: 'g-sato', role: 'member' })).readIncoming).toMatchObject({ on: true, chosen: true, connected: { mail: true } })
   })
 
   it('the role メールを読む reads the member\'s own mailbox only, in plain text, and keeps nothing', async () => {
@@ -288,12 +288,16 @@ describe('Google as a core connector: 受信を読む', () => {
     expect(offView.status).toBe(200)
     expect(offView.body.data.connectors[0].status).toBe('off')
     expect(offView.body.data.roles.every((r: Json) => r.servedBy === null)).toBe(true)
+    // The app learns it with the member's switches (owner decision 2026-11-03: no mail UI without mail).
+    const sato = { companyId: CO, userId: 'g-sato', role: 'member' as const }
+    expect((await services.workSwitches.my(sato)).channels).toEqual({ mail: false, chat: false })
     const before = gmailReads()
     expect(await services.mailReader.listMessages(CO, 'g-sato', { afterMs: AFTER })).toEqual({ ok: false, reason: 'stopped' })
     expect(gmailReads()).toBe(before)
     expect((await call('g-sato', 'PUT', `${C()}/connectors/google/enabled`, { enabled: true })).status).toBe(403)
     expect((await call('g-owner', 'PUT', `${C()}/connectors/google/enabled`, { enabled: true })).status).toBe(200)
     expect((await services.mailReader.listMessages(CO, 'g-sato', { afterMs: AFTER })).ok).toBe(true)
+    expect((await services.workSwitches.my(sato)).channels).toEqual({ mail: true, chat: false })
     // A connector cannot be chosen for a role it does not serve; an unknown connector is not found.
     expect((await call('g-owner', 'PUT', `${C()}/connector-roles/chat`, { connectorId: 'google' })).status).toBe(400)
     expect((await call('g-owner', 'PUT', `${C()}/connectors/no-such/enabled`, { enabled: true })).status).toBe(404)
@@ -303,5 +307,6 @@ describe('Google as a core connector: 受信を読む', () => {
     const before = gmailReads()
     expect(await services.mailReader.listMessages(OTHER, 'g-other-member', { afterMs: AFTER })).toEqual({ ok: false, reason: 'stopped' })
     expect(gmailReads()).toBe(before)
+    expect((await services.workSwitches.my({ companyId: OTHER, userId: 'g-other-member', role: 'member' })).channels).toEqual({ mail: false, chat: false })
   })
 })

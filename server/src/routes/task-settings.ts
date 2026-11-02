@@ -31,12 +31,12 @@ taskSettingsRoute.put('/task-settings', companyMember, serviceBody, (c) => {
 // Each member's own switches (自分の設定: 受信を読む, AI が自動で進める; shared/types/work-switches.ts).
 //   GET  /me/work-switches                  any member: their own, with the company's 使ってよいか / 初めの値
 //   PUT  /me/work-switches { switch, on }   any member, their own only (409 WORK_SWITCH_COMPANY_OFF)
-taskSettingsRoute.get('/me/work-switches', companyMember, (c) => {
-  return c.json({ success: true, data: services.workSwitches.my(c.var.member) })
+taskSettingsRoute.get('/me/work-switches', companyMember, async (c) => {
+  return c.json({ success: true, data: await services.workSwitches.my(c.var.member) })
 })
 
-taskSettingsRoute.put('/me/work-switches', companyMember, serviceBody, (c) => {
-  const result = services.workSwitches.set(c.var.member, c.var.body)
+taskSettingsRoute.put('/me/work-switches', companyMember, serviceBody, async (c) => {
+  const result = await services.workSwitches.set(c.var.member, c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

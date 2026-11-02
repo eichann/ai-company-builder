@@ -4,7 +4,7 @@
 // run with an unknown outside result is settled by the member; the completed card states the OK
 // in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
 // owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
-// and stays hidden without it.
+// only on a task linking the 来た連絡 it came from; 返事待ちにする is in 「…」 without チームの進め方.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -87,7 +87,7 @@ test('「＋ファイルをつなぐ」 links a company file; a linked file is t
   expectNoPageErrors(state)
 })
 
-test('the source slot shows what the screen gives for the task, and nothing without it', async ({ page }) => {
+test('the source slot shows what the screen gives only for a task that came from a 来た連絡 (no もとの連絡 block on a task made by hand)', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { source: '1' })
   const card = page.getByTestId('task-card')
   await expect(card.getByRole('region', { name: '元のやりとり' })).toContainText('元のメール：A社 見積書を 150万円 で作り直す')
@@ -309,6 +309,27 @@ test('返事待ちにする asks what and until when: chips set the date; nothin
   await page.getByLabel('待っているもの').fill('見積の回答')
   await page.getByRole('dialog', { name: '返事待ちにしますか？' }).getByRole('button', { name: '返事待ちにする' }).click()
   await expect(page.locator('#acted')).toHaveText('wait@3:on=先方からの返事:until=2026-11-09,wait@3:on=見積の回答')
+  expectNoPageErrors(state)
+})
+
+test('返事待ちにする is in 「…」 without チームの進め方, on the member\'s own task too, with the same window (owner decision 2026-11-03)', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-02T01:00:00Z') })
+  const state = await openPreview(page, 'task-card', { task: 'todo-own' })
+  const card = page.getByTestId('task-card')
+  // Nothing added to the main view: the main button is still 完了にする.
+  await expect(card.getByRole('button', { name: '返事待ちにする' })).toHaveCount(0)
+  if (shots) await page.screenshot({ path: `${shots}/task-card-own.png`, fullPage: true })
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  const item = page.getByRole('menuitem', { name: /返事待ちにする/ })
+  await expect(item).toBeVisible()
+  if (shots) await page.screenshot({ path: `${shots}/more-menu-wait.png` })
+  await item.click()
+  const dialog = page.getByRole('dialog', { name: '返事待ちにしますか？' })
+  await dialog.getByRole('group', { name: 'いつごろ来そうか' }).getByRole('button', { name: /3日後/ }).click()
+  await dialog.getByRole('button', { name: '返事待ちにする' }).click()
+  await expect(page.locator('#acted')).toHaveText('wait@3:on=相手からの返事:until=2026-11-06')
+  // A task made by hand links no 来た連絡: no もとの連絡 block.
+  await expect(card.getByRole('region', { name: '元のやりとり' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
 

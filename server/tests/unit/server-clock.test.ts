@@ -167,14 +167,14 @@ describe('the server clock: a wait that is over', () => {
 
   it('the assignee’s own 自動で進める decides: off → their turn; the company not allowing it → nobody’s AI', async () => {
     autoRun.a = true
-    ok(switches.set(m('u-bob'), { switch: 'autoRun', on: false }))
+    ok(await switches.set(m('u-bob'), { switch: 'autoRun', on: false }))
     // alice's own switch (on) does not matter: bob is the assignee, his PC would run it.
-    ok(switches.set(m('u-alice'), { switch: 'autoRun', on: true }))
+    ok(await switches.set(m('u-alice'), { switch: 'autoRun', on: true }))
     const id = await waitingTask('2026-11-04')
     await clock.runOnce()
     expect(stateOf(id).state).toBe('todo')
 
-    ok(switches.set(m('u-bob'), { switch: 'autoRun', on: true }))
+    ok(await switches.set(m('u-bob'), { switch: 'autoRun', on: true }))
     autoRun.a = false
     const second = await waitingTask('2026-11-04')
     await clock.runOnce()

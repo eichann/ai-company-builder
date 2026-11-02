@@ -3,7 +3,7 @@
 // with 「会社の設定で止まっています」. The server decides; this only shows and asks.
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
-import { WORK_SWITCH_COMPANY_OFF_TEXT, type WorkSwitch } from '../../../../shared/work-switches'
+import { companyHasMailOrChat, CONNECT_MAIL_CHAT_TEXT, WORK_SWITCH_COMPANY_OFF_TEXT, type WorkSwitch } from '../../../../shared/work-switches'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
 
@@ -42,6 +42,15 @@ export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: stri
           <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
             {SWITCHES.map(w => {
               const s = switches[w.key]
+              // No mail or chat in the company (owner decision 2026-11-03): one line on what connecting does, no switch.
+              if (w.key === 'readIncoming' && !companyHasMailOrChat(switches)) {
+                return (
+                  <div key={w.key} data-connect-mail-chat className="p-5">
+                    <p className="text-[13.5px] font-medium">{CONNECT_MAIL_CHAT_TEXT.title}</p>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">{CONNECT_MAIL_CHAT_TEXT.body}</p>
+                  </div>
+                )
+              }
               return (
                 <div key={w.key} data-my-switch={w.key} className={`flex items-start gap-4 p-5 ${s.allowed ? '' : 'opacity-60'}`}>
                   <div className="min-w-0 flex-1">

@@ -235,6 +235,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
         chat: slack?.status === 'active' && slackFeaturesOf(slack.scopes).includes('read') && !slack.featuresOff.includes('read'),
       }
     },
+    // The roles are wired below (Google block, Slack in the connectors lane); asked per request only.
+    channelsOf: async companyId => {
+      const [mail, chat] = await Promise.all([
+        coreConnectors.connectorRoles.resolve(companyId, 'mail'),
+        coreConnectors.connectorRoles.resolve(companyId, 'chat'),
+      ])
+      return { mail: mail.ok || mail.reason === 'choice-needed', chat: chat.ok || chat.reason === 'choice-needed' }
+    },
   })
   const readIncoming = {
     allowed: (companyId: string) => taskSettings.settingsOf(companyId).readIncoming.allowed,
@@ -439,7 +447,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     readIncoming: {
       ...readIncoming,
       setAllowed: (companyId, allowed, by) => taskSettings.setReadIncomingAllowed(companyId, allowed, by),
-      choose: (member, on) => { workSwitches.set(member, { switch: 'readIncoming', on }) },
+      choose: (member, on) => { void workSwitches.set(member, { switch: 'readIncoming', on }) },
     },
   })
 

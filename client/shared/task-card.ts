@@ -82,6 +82,12 @@ export interface TaskCardData {
   /** The member may change the task's 案件 (its type's `bundle` link can be set by hand, the task not finished). */
   canSetBundle: boolean
   origin: TaskCardOrigin | null
+  /**
+   * The task links the 来た連絡 it came from (`interaction`, out): only then does the card ask for
+   * the original thread (もとの連絡). A task made by hand has none, so a company without mail or
+   * chat never sees that block (owner decision 2026-11-03).
+   */
+  fromIncoming: boolean
   /** 見られる人 (`POST …/viewers`), only when the server answered it for this task. */
   viewers?: ViewersLabel
   /** Set on 「議事録を確認する」 (`task_kind: minutes_review`), else null. */
@@ -217,6 +223,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   const prepared: RecordViewSummary[] = []
   let bundle: RecordViewSummary | null = null
   let originLink: { kind: 'meeting' | 'interaction'; record: RecordSummary } | null = null
+  let fromIncoming = false
   const files: Array<{ path: string; broken?: boolean }> = []
   for (const l of src.detail.links) {
     if (l.path !== undefined) {
@@ -228,6 +235,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     if (l.direction === 'out' && l.name === 'prepared') { prepared.push(view); continue }
     if (l.direction === 'out' && l.name === 'bundle') { bundle = view; continue }
     if (l.direction === 'out' && (l.name === 'meeting' || l.name === 'interaction')) originLink ??= { kind: l.name, record: l.record }
+    if (l.direction === 'out' && l.name === 'interaction') fromIncoming = true
     // Only this record's own link names say something (「もとの会議」); another record's link to it says nothing more than its kind.
     const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : ''
     const removable = removableOf(r, l)
@@ -266,7 +274,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
     review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me) : null,
     teamMode: src.teamMode === true,
-    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin,
+    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin, fromIncoming,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,

@@ -115,7 +115,28 @@ test('「人に頼んだもの」 only on an unfinished task the member asked of
   assert.deepEqual(['task-own001', 'task-acc001', 'task-ask001', 'task-ask002', 'task-done01'].map(asked), [false, false, true, true, false])
 })
 
-function harness(answers: Record<string, { status: number; body: unknown }>) {
+// Owner decision 2026-11-03: a company without mail or chat sees no mail / chat parts, but never
+// loses work — a 返事のお願い or 確認待ち left from before a disconnect is listed until it is finished.
+test('a 返事のお願い or a 来た連絡 to confirm in the member\'s turn is listed as theirs, with nothing about connections asked', async () => {
+  const reply = rec('reply_request-0001', 'open', { requested_by: null }, { type: 'reply_request', title: 'Re: 見積のご相談' })
+  const unsure = rec('interaction-0001', 'unsure', { requested_by: null }, { type: 'interaction', title: '日程のご相談' })
+  const items = classifyTasks(src({ myTurn: [reply, unsure], typeLabels: { task: 'タスク', reply_request: '返事のお願い', interaction: '来た連絡' } }))
+  assert.deepEqual(items.map(i => [i.id, i.turn]), [['reply_request-0001', 'mine'], ['interaction-0001', 'mine']])
+
+  // Main reads the list with the company's switches saying neither mail nor chat is connected.
+  const h = harness({
+    '/api/me': { status: 200, body: { data: { id: ME } } },
+    '/api/companies/co1/records/my-turn': { status: 200, body: { data: { records: [reply, unsure] } } },
+    '/api/companies/co1/records/ai-turn': { status: 200, body: { data: { records: [] } } },
+    'POST /api/companies/co1/records/query': { status: 200, body: { data: { records: [] } } },
+    '/api/companies/co1/me/work-switches': { status: 200, body: { data: { channels: { mail: false, chat: false } } } },
+  })
+  const listed = await h.api.list('co1')
+  assert.ok(listed.success && listed.data.available)
+  assert.deepEqual(listed.data.items.filter(i => i.turn === 'mine').map(i => i.id).sort(), ['interaction-0001', 'reply_request-0001'])
+})
+
+function harness(answers:Record<string, { status: number; body: unknown }>) {
   const requests: Array<{ url: string; method: string; body: unknown }> = []
   const api = createTasksApi({
     baseUrl: () => 'https://acb.test',
