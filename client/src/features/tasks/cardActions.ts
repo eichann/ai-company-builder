@@ -5,9 +5,11 @@ import type { TaskCardAction, TaskCardData } from '../../../shared/task-card'
 
 /**
  * Actions of チームの進め方: offered only with it on, and only on a task someone else is in. It is
- * how the card looks, not a permission (the server allows them either way).
+ * how the card looks, not a permission (the server allows them either way). 返事待ちにする (`wait`)
+ * is not one (owner decision 2026-11-03): waiting on someone outside happens on one's own task too,
+ * so it is always in 「…」 for whom the type allows it.
  */
-const TEAM_ACTIONS = new Set(['start', 'wait', 'request_review', 'send_back'])
+const TEAM_ACTIONS = new Set(['start', 'request_review', 'send_back'])
 /** Needed whenever someone asked it of the member, whatever チームの進め方 says (引き受ける needs no list: it is never hidden). */
 const ASKED_ACTIONS = new Set(['decline'])
 /** Actions that take the task out of the member's turn: confirmed first, then 「取り消す」. */

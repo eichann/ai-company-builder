@@ -28,16 +28,30 @@ test('確かめてから: the assignee\'s main action is 「終わったので�
   assert.equal(whenDoneLine(c), '終わったら：阿部さんに確かめてもらう（阿部さんの OK で完了）')
 })
 
-test('チームの進め方 off, or a task nobody else is in: no team actions (返事待ち・進めている印); 受けられない and 引き受ける stay on what someone asked', () => {
+test('チームの進め方 off, or a task nobody else is in: no team actions (進めている印); 受けられない and 引き受ける stay on what someone asked', () => {
   const asked = card(task('todo', { assignee: ME, requested_by: BOSS }))
   const on = names(placeActions(asked, true)).more
-  assert.ok(on.includes('wait') && on.includes('decline') && on.includes('start'))
+  assert.ok(on.includes('decline') && on.includes('start'))
   const off = names(placeActions(asked, false)).more
-  assert.ok(!off.includes('wait') && !off.includes('start'))
+  assert.ok(!off.includes('start'))
   assert.ok(off.includes('decline'))
   assert.equal(placeActions(card(task('awaiting_acceptance', { assignee: ME, requested_by: BOSS })), false).main?.action, 'accept')
   const own = names(placeActions(card(task('todo', { assignee: ME, requested_by: ME })), true)).more
-  assert.ok(!own.includes('wait') && !own.includes('start'))
+  assert.ok(!own.includes('start'))
+})
+
+test('返事待ちにする is always in 「…」 for the assignee (owner decision 2026-11-03): team mode off, one\'s own task too; never the main button', () => {
+  for (const team of [false, true]) {
+    for (const fields of [{ assignee: ME, requested_by: ME }, { assignee: ME, requested_by: BOSS }, { assignee: ME }] as Array<Record<string, string>>) {
+      const p = placeActions(card(task('todo', fields)), team)
+      assert.notEqual(p.main?.action, 'wait')
+      assert.ok(p.more.some(a => a.action === 'wait'), `wait offered (team ${team}, ${JSON.stringify(fields)})`)
+    }
+  }
+  // Only whom the type allows: the requester of a task someone else holds is not offered it.
+  assert.ok(!placeActions(card(task('todo', { assignee: 'u-tanaka', requested_by: ME })), false).more.some(a => a.action === 'wait'))
+  // Not where it cannot move: done, or already waiting (「もう少し待つ」 is the band's).
+  assert.ok(!placeActions(card(task('done', { assignee: ME, requested_by: ME })), false).more.some(a => a.action === 'wait'))
 })
 
 test('while someone else checks it, the card says so instead of a button; 延ばす is never in 「…」', () => {

@@ -91,6 +91,12 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   one there), the sender's, until the picked morning. Their reply / silence then work as above and
   in "Following up", unchanged.
 
+## In the app without mail or chat (owner decision 2026-11-03)
+
+A company with no usable connector for the `mail` and `chat` roles sees no mail / chat parts
+(`GET /me/work-switches` `channels`; `tasks-ui.md` "Without mail or chat"); records already made
+stay listed until finished.
+
 ## Connections (reconnecting, spec §7-5)
 
 `inbox.connect(companyId, userId, channel)` (the connector, when the member grants): a first

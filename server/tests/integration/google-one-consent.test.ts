@@ -235,7 +235,7 @@ describe('「仕事の道具をつなぐ」: one consent for what the company of
     expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).body.data.companyFeatures).toEqual(['minutes', 'mail', 'drive', 'inbox'])
     // Allowed, but the admin's own 受信を読む is off: not offered to them.
     expect((await call('g-admin', 'GET', `${C()}/me/google`)).body.data.companyFeatures).toEqual(['minutes', 'mail', 'drive'])
-    expect(services.workSwitches.set({ companyId: CO, userId: 'g-admin', role: 'admin' }, { switch: 'readIncoming', on: true }).ok).toBe(true)
+    expect((await services.workSwitches.set({ companyId: CO, userId: 'g-admin', role: 'admin' }, { switch: 'readIncoming', on: true })).ok).toBe(true)
     const mine = (await call('g-admin', 'GET', `${C()}/me/google`)).body.data
     expect(mine.companyFeatures.filter((f: string) => !mine.seen.includes(f))).toEqual(['inbox'])
     // 「許可をやめる」 does not bring the screen back.

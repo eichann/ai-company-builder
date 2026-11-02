@@ -291,7 +291,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
       {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}
       <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
-      <RecordSourcePanel record={record}>{renderSource(record)}</RecordSourcePanel>
+      {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
+      <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>
       {renderSections?.(record)}
     </RecordPage>
   )

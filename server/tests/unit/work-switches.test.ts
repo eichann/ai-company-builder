@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 describe('the carry-over when the table is first made', () => {
-  it('who reads today keeps reading; Google\'s 受信を読む turned off stays off; nobody else gets a choice; once only', () => {
+  it('who reads today keeps reading; Google\'s 受信を読む turned off stays off; nobody else gets a choice; once only', async () => {
     conn.exec('DROP TABLE member_work_switches')
     grant('a', 'u-gmail', 'google', [GMAIL_READONLY])
     grant('a', 'u-gmail-off', 'google', [GMAIL_READONLY], ['inbox'])
@@ -63,34 +63,56 @@ describe('the carry-over when the table is first made', () => {
     expect([on('a', 'u-gmail-off'), on('a', 'u-slack-off'), on('a', 'u-minutes'), on('a', 'u-revoked')]).toEqual([false, false, false, false])
     // Companies apart: the same user id in another company has its own row.
     expect(on('b', 'u-gmail')).toBe(false)
-    expect(switches.my(m('u-minutes')).readIncoming.chosen).toBeNull()
-    expect(switches.my(m('u-gmail-off')).readIncoming.chosen).toBe(false)
+    expect((await switches.my(m('u-minutes'))).readIncoming.chosen).toBeNull()
+    expect((await switches.my(m('u-gmail-off'))).readIncoming.chosen).toBe(false)
 
     // Never again: a later choice is not overwritten by a second run.
-    expect(switches.set(m('u-gmail'), { switch: 'readIncoming', on: false }).ok).toBe(true)
+    expect((await switches.set(m('u-gmail'), { switch: 'readIncoming', on: false })).ok).toBe(true)
     migrateMemberWorkSwitches(conn)
     expect(on('a', 'u-gmail')).toBe(false)
   })
 })
 
 describe('a member\'s own switch', () => {
-  it('cannot be turned on while the company does not allow it (nothing stored); off stands when allowed again', () => {
+  it('cannot be turned on while the company does not allow it (nothing stored); off stands when allowed again', async () => {
     settings.a.autoRun.enabled = false
-    const refused = switches.set(m('u-sato'), { switch: 'autoRun', on: true })
+    const refused = (await switches.set(m('u-sato'), { switch: 'autoRun', on: true }))
     expect(refused).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'WORK_SWITCH_COMPANY_OFF' } })
-    expect(switches.my(m('u-sato')).autoRun).toEqual({ on: false, allowed: false, companyDefault: true, chosen: null })
-    expect(switches.set(m('u-sato'), { switch: 'autoRun', on: false }).ok).toBe(true)
+    expect((await switches.my(m('u-sato'))).autoRun).toEqual({ on: false, allowed: false, companyDefault: true, chosen: null })
+    expect((await switches.set(m('u-sato'), { switch: 'autoRun', on: false })).ok).toBe(true)
     settings.a.autoRun.enabled = true
     expect(switches.isOn('a', 'u-sato', 'autoRun')).toBe(false)
     // Someone who never chose follows the 初めの値; another member is untouched by Sato's choice.
     expect(switches.isOn('a', 'u-tanaka', 'autoRun')).toBe(true)
-    expect(switches.set(m('u-sato'), { switch: 'nothing', on: true })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect((await switches.set(m('u-sato'), { switch: 'nothing', on: true }))).toMatchObject({ ok: false, kind: 'bad-request' })
   })
 
-  it('チームの進め方 is the company\'s alone: shown with the switches, off until the company turns it on, never a member\'s choice', () => {
-    expect(switches.my(m('u-sato')).teamMode).toEqual({ on: false })
+  it('チームの進め方 is the company\'s alone: shown with the switches, off until the company turns it on, never a member\'s choice', async () => {
+    expect((await switches.my(m('u-sato'))).teamMode).toEqual({ on: false })
     settings.a.teamMode = true
-    expect(switches.my(m('u-sato')).teamMode).toEqual({ on: true })
-    expect(switches.set(m('u-sato'), { switch: 'teamMode', on: false })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect((await switches.my(m('u-sato'))).teamMode).toEqual({ on: true })
+    expect((await switches.set(m('u-sato'), { switch: 'teamMode', on: false }))).toMatchObject({ ok: false, kind: 'bad-request' })
+  })
+})
+
+describe('whether the company has mail / chat connected (owner decision 2026-11-03: no mail / chat UI without them)', () => {
+  const build = (channelsOf?: (co: string) => Promise<{ mail: boolean; chat: boolean }>) => createWorkSwitches({
+    companyData: sqliteCompanyData(conn),
+    clock: { now: () => TS, nowMs: () => Date.parse(TS) },
+    settingsOf: co => settings[co],
+    ...(channelsOf ? { channelsOf } : {}),
+  })
+
+  it('says per company what the roles answer, for the GET and the PUT alike', async () => {
+    const s = build(async co => co === 'a' ? { mail: false, chat: false } : { mail: true, chat: false })
+    expect((await s.my(m('u-sato'))).channels).toEqual({ mail: false, chat: false })
+    expect((await s.my(m('u-sato', 'b'))).channels).toEqual({ mail: true, chat: false })
+    const put = await s.set(m('u-sato'), { switch: 'autoRun', on: false })
+    expect(put.ok && put.value.channels).toEqual({ mail: false, chat: false })
+  })
+
+  it('leaves the field out when the roles cannot be asked, so the app shows its parts as before (never hides on a failure)', async () => {
+    expect('channels' in (await build(async () => { throw new Error('down') }).my(m('u-sato')))).toBe(false)
+    expect('channels' in (await build().my(m('u-sato')))).toBe(false)
   })
 })

@@ -80,8 +80,9 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 
 - `teamMode` (チームの進め方, owner decision 2026-11-02): default **off**; missing in an older
   document → off. On: the team's steps on a task are offered (引き受け待ち, 確かめる人・レビューと
-  差し戻し, 受けられない, 返事待ち, 代わりの人; only on tasks with someone else involved). Off: one's
-  own task (未着手 → 進めている → 完了 / やめる) and 人に頼む. The company's alone (no member choice);
+  差し戻し, 受けられない, 代わりの人; only on tasks with someone else involved). Off: one's
+  own task (未着手 → 進めている → 完了 / やめる) and 人に頼む. 返事待ちにする is in the card's 「…」
+  either way (owner decision 2026-11-03, `tasks-ui.md`). The company's alone (no member choice);
   the app reads it as `teamMode.on` of `GET /me/work-switches` (`workSwitches:get`). The task card
   reading it is the screen's (画面乙); the server does not refuse team actions by it yet.
 
@@ -102,11 +103,20 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   member, their own only) → `MyWorkSwitches` (`shared/types/work-switches.ts`: per switch `on`,
   `allowed`, `companyDefault`, `chosen` (null = never chose); 受信を読む adds `connected: { mail,
   chat }` — what Google / Slack let ACB read, so the app can offer 「Google で許可」), plus the
-  company's `teamMode: { on }` (read only here; `PUT` takes only the two switches). App: IPC
+  company's `teamMode: { on }` (read only here; `PUT` takes only the two switches) and
+  `channels: { mail, chat }` — whether a usable connector serves the company's `mail` / `chat`
+  role now (`connector-roles.md`; `choice-needed` counts as connected; asked per request through
+  `channelsOf`, late-bound in `composition.ts`; a failure leaves the field out). App: IPC
   `workSwitches:get` / `workSwitches:set` (`client/electron/features/work-switches/ipc.ts`,
   `client/shared/work-switches.ts`). The screen: 設定 → 自分の設定 (the settings open on it;
   `client/src/features/settings/components/MySwitchesSection.tsx`, `hooks/useWorkSwitches.ts`): a switch
   the company does not allow is greyed out with 「会社の設定で止まっています」 and cannot be turned on;
+  **a company with neither mail nor chat** (`companyHasMailOrChat`, `client/shared/work-switches.ts`:
+  `channels` both false; absent = connected, as before) shows no 受信を読む switch, only the line
+  「Gmail・Slack をつなぐと、返事の追いかけを AI がします」 (`CONNECT_MAIL_CHAT_TEXT`; owner decision
+  2026-11-03: tasks are complete without Gmail / Slack, the follow-up is a bonus when connected,
+  and this is the one place that says so — nothing on the task screens; the Google / Slack sections
+  where one connects stay);
   a refused change shows the server's words and reads the switches again
   (`client/tests/ui/my-switches.spec.ts`).
 - Who follows it: **自動で進める** — the AI's turn runs on the assignee's PC, so the PC asks its
@@ -120,7 +130,9 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   whose own is off. Google's member toggle `PUT /me/google/features { feature: 'inbox' }` writes this
   switch (one switch, not two).
 - Tests: `server/tests/unit/work-switches.test.ts` (the carry-over once, company off refuses,
-  choices apart), `task-settings-core.test.ts` (the rule, older documents), `server-clock.test.ts`
+  choices apart, `channels` per company and left out on a failure), `google-inbox.test.ts`
+  (`channels` follows Google switched off / on, another company without Google),
+  `client/tests/ui/my-switches.spec.ts` (no 受信を読む switch without mail / chat), `task-settings-core.test.ts` (the rule, older documents), `server-clock.test.ts`
   (the assignee's own decides), `slack-connector.test.ts`, `google-inbox.test.ts`,
   `google-one-consent.test.ts`, `client/tests/ai-turn-claims.test.ts`,
   `client/tests/work-switches-ipc.test.ts`.

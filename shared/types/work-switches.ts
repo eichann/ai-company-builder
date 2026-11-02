@@ -26,6 +26,13 @@ export interface MyWorkSwitches {
    * The company's alone: no member choice, not changed through this route.
    */
   teamMode: { on: boolean }
+  /**
+   * Whether the company has mail / chat connected now: a usable connector serves the `mail` /
+   * `chat` role (connector-roles.md). Neither → the app hides its 受信を読む switch and offers one
+   * line on what connecting does (owner decision 2026-11-03). Absent (an older server, or the
+   * roles could not be asked) → shown as before.
+   */
+  channels?: { mail: boolean; chat: boolean }
 }
 
 /** PUT body. */

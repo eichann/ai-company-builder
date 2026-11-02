@@ -30,6 +30,12 @@ export interface WorkSwitchesDeps {
    * only shown, so the app can offer 「Google で許可」 after the member turns 受信を読む on.
    */
   readingConnected?(companyId: string, userId: string): { mail: boolean; chat: boolean }
+  /**
+   * Whether the company has a usable connector for the `mail` / `chat` role now
+   * (connector-roles.md; `choice-needed` counts as connected). Absent or failing:
+   * the field is left out and the app shows its mail / chat parts as before.
+   */
+  channelsOf?(companyId: string): Promise<{ mail: boolean; chat: boolean }>
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -43,7 +49,18 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
     try { return parseWorkSwitchChoices(JSON.parse(raw)) } catch { return {} }
   }
 
-  function view(companyId: string, userId: string): MyWorkSwitches {
+  async function channelsOf(companyId: string): Promise<MyWorkSwitches['channels']> {
+    if (!deps.channelsOf) return undefined
+    try {
+      const c = await deps.channelsOf(companyId)
+      return { mail: c.mail === true, chat: c.chat === true }
+    } catch {
+      return undefined
+    }
+  }
+
+  async function view(companyId: string, userId: string): Promise<MyWorkSwitches> {
+    const channels = await channelsOf(companyId)
     const settings = deps.settingsOf(companyId)
     const policies = workSwitchPoliciesOf(settings)
     const choices = choicesOf(companyId, userId)
@@ -54,6 +71,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
       },
       autoRun: workSwitchState(policies.autoRun, choices.autoRun),
       teamMode: { on: settings.teamMode },
+      ...(channels ? { channels } : {}),
     }
   }
 
@@ -68,7 +86,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
     },
 
     /** GET …/me/work-switches (any member): their own. */
-    my(member: Member): MyWorkSwitches {
+    my(member: Member): Promise<MyWorkSwitches> {
       return view(member.companyId, member.userId)
     },
 
@@ -76,7 +94,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
      * PUT …/me/work-switches { switch, on } (any member, their own only). Turning on a switch
      * the company does not allow → 409 `WORK_SWITCH_COMPANY_OFF`; off is always kept.
      */
-    set(member: Member, body: unknown): Outcome<MyWorkSwitches> {
+    async set(member: Member, body: unknown): Promise<Outcome<MyWorkSwitches>> {
       if (!isObject(body) || !isWorkSwitch(body.switch) || typeof body.on !== 'boolean') {
         return refuse('bad-request', 'switch must be readIncoming or autoRun; on must be true or false')
       }
@@ -84,7 +102,7 @@ export function createWorkSwitches(deps: WorkSwitchesDeps) {
       const next = chooseWorkSwitch(policies, choicesOf(member.companyId, member.userId), body.switch, body.on)
       if ('refused' in next) return refuse('conflict', WORK_SWITCH_COMPANY_OFF, { code: 'WORK_SWITCH_COMPANY_OFF' })
       repo(member.companyId).saveWorkSwitches(member.userId, JSON.stringify(next.value), deps.clock.now())
-      return ok(view(member.companyId, member.userId))
+      return ok(await view(member.companyId, member.userId))
     },
   }
 }
