@@ -80,6 +80,8 @@ export interface TaskCardData {
   /** The member may change the task's 案件 (its type's `bundle` link can be set by hand, the task not finished). */
   canSetBundle: boolean
   origin: TaskCardOrigin | null
+  /** Set on 「議事録を確認する」 (`task_kind: minutes_review`), else null. */
+  review: MinutesReviewView | null
   actions: TaskCardAction[]
   /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
   canSetTags: boolean
@@ -114,9 +116,20 @@ export function okWords(actor: string, okBy: string | null, okNote: string | nul
   return `${actor}さんが${whose}完了にしました${okNote ? `（${okNote}）` : ''}`
 }
 
+/** 「議事録を確認する」's own parts (task version 11): the meeting, its summary and the decisions the AI left. */
+export interface MinutesReviewView {
+  meetingId: string
+  meetingTitle: string
+  summary: string | null
+  /** `mine`: the member is its 確かめる人 (the decision's `owner`), so ［確かめる］ is theirs to press. */
+  decisions: Array<{ id: string; title: string; state: string | null; version: number; mine: boolean }>
+}
+
 export interface TaskCardSources {
   me: string
   detail: RecordDetail
+  /** For 「議事録を確認する」: its meeting as the server answers it (decisions linked to it). */
+  meeting?: RecordDetail
   def: TypeDefinition | undefined
   defs: Map<string, TypeDefinition>
   entries: LedgerEntry[]
@@ -216,11 +229,22 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
+    review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me) : null,
     teamMode: src.teamMode === true,
     roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+  }
+}
+
+function reviewOf(meeting: RecordDetail, me: string): MinutesReviewView {
+  const m = meeting.record
+  return {
+    meetingId: m.id, meetingTitle: m.title || '（名前なし）', summary: str(m.fields.summary_text),
+    decisions: meeting.links.flatMap(l => (l.record?.type === 'decision' && l.record.state !== 'retracted'
+      ? [{ id: l.record.id, title: l.record.title || '（名前なし）', state: l.record.state, version: l.record.version, mine: l.record.fields.owner === me }]
+      : [])),
   }
 }

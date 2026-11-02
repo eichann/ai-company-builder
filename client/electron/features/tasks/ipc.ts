@@ -176,7 +176,12 @@ export function createTasksApi(deps: TasksDeps) {
       const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] }).runs ?? [] : []
       // チームの進め方 is the company's (off by default, also when it cannot be read): how the card looks, not who may.
       const teamMode = switches?.status === 200 && (switches.json?.data as MyWorkSwitches | undefined)?.teamMode?.on === true
-      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode }) }
+      // 「議事録を確認する」 shows its meeting's summary and decisions: the meeting as the member reads it.
+      const meetingId = detail.record.fields.task_kind === 'minutes_review'
+        ? detail.links.find(l => l.direction === 'out' && l.name === 'meeting' && l.record)?.record?.id : undefined
+      const meetingAnswer = meetingId ? await call(companyId, 'GET', `/records/item/${encodeURIComponent(meetingId)}`) : null
+      const meeting = meetingAnswer?.status === 200 ? meetingAnswer.json?.data as RecordDetail : undefined
+      return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, ...(meeting ? { meeting } : {}) }) }
     },
 
     async bundles(companyId: string): Promise<BundleChoicesResult> {

@@ -17,6 +17,7 @@ import { whenDoneLine } from '../cardActions'
 import { companyNow, companyPathOf } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
+import { MinutesReview } from './MinutesReview'
 import { TaskActions } from './TaskActions'
 import { BundleField } from './BundleField'
 import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
@@ -115,6 +116,9 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
     return r.success ? null : r.error
   })
+  // 「議事録を確認する」: the meeting's summary, the AI's proposals and its decisions, each pressed on its own record.
+  const review = card.review && <MinutesReview companyId={companyId} review={card.review} busy={busy}
+    onAct={(id, action, at) => change(async () => { const r = await actOnTask(companyId, id, { action, expectedVersion: at }); return r.success ? null : r.error })} />
   const tagSuggestions = card.canSetTags
     ? <TagSuggestions companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} busy={busy}
       onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])} />
@@ -124,7 +128,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     companyId={companyId} bundleWord={bundleWord}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
@@ -158,9 +162,10 @@ interface BodyProps {
   onShare: (folder: string) => Promise<string | null>
   onConsult?: (record: { id: string; title: string }) => void
   tagSuggestions: ReactNode
+  review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, tagSuggestions, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -238,6 +243,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           {card.prepared.map(p => <div key={p.id}>{renderPrepared(p)}</div>)}
         </section>
       )}
+
+      {review}
 
       {card.runs.length > 0 && (
         <section aria-label="AI が止まっています" className="space-y-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-[12.5px]">

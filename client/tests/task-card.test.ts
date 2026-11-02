@@ -151,3 +151,17 @@ test('チームの進め方 on the card is the company\'s setting as the server 
   assert.equal(await cardWith({ status: 200, body: { data: { teamMode: { on: false } } } }), false)
   assert.equal(await cardWith({ status: 500, body: {} }), false)
 })
+
+test('「議事録を確認する」 carries its meeting\'s summary and decisions (［確かめる］ only for the member\'s own); any other task carries none', () => {
+  const meeting: RecordSummary = { ...task('read', { summary_text: '合意しました' }), id: 'meeting-0000mm', type: 'meeting', title: 'A社' }
+  const decision = (id: string, state: string, owner: string): RecordSummary => ({ ...task(state, { owner }), id, type: 'decision', title: id, version: 2 })
+  const meetingDetail: RecordDetail = { record: meeting, links: [
+    { name: 'meeting', direction: 'in', record: decision('decision-000001', 'unconfirmed', ME) },
+    { name: 'meeting', direction: 'in', record: decision('decision-000002', 'unconfirmed', BOSS) },
+    { name: 'meeting', direction: 'in', record: decision('decision-000003', 'retracted', ME) },
+  ] }
+  const review = taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME, task_kind: 'minutes_review' }), links: [] }, meeting: meetingDetail, def: defs.get('task'), defs, entries: [], people, runs: [] }).review
+  assert.deepEqual(review && { summary: review.summary, decisions: review.decisions.map(d => `${d.id}:${d.mine}`) },
+    { summary: '合意しました', decisions: ['decision-000001:true', 'decision-000002:false'] })
+  assert.equal(taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME }), links: [] }, meeting: meetingDetail, def: defs.get('task'), defs, entries: [], people, runs: [] }).review, null)
+})

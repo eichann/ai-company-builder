@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
+import type { BundleChoicesResult, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -16,8 +16,8 @@ export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** Setting or taking off a link between two records (the server decides which links may change). */
 export type RecordLinkWrites = ElectronPort<'linkRecordToRecord' | 'unlinkRecordFromRecord'>
-/** One task's card. */
-export type TaskCardReads = ElectronPort<'getTaskCard'>
+/** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
+export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */
 export type TaskFileWrites = ElectronPort<'linkFileToTask' | 'unlinkFileFromTask'>
 /** The company's file names on this computer (downloaded folders only), for 「＋ファイルをつなぐ」. */
@@ -124,4 +124,9 @@ export function undoTaskAction(companyId: string, recordId: string, version: num
 /** Links `recordId` to another record (`link` names it there; a `one` link is replaced), or takes that link off. */
 export function setRecordLink(companyId: string, recordId: string, input: RecordLinkInput, remove: boolean, writes: RecordLinkWrites = window.electronAPI): Promise<TaskWriteResult> {
   return remove ? writes.unlinkRecordFromRecord(companyId, recordId, input) : writes.linkRecordToRecord(companyId, recordId, input)
+}
+
+/** The AI's proposals (案) from one meeting, proposed and put away. */
+export function getTaskProposals(companyId: string, meetingId: string, reads: TaskCardReads = window.electronAPI): Promise<TaskProposalsResult> {
+  return reads.getTaskProposals(companyId, meetingId)
 }

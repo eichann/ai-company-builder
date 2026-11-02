@@ -1446,5 +1446,4 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
-unmatched.preloadApiUnusedByRenderer getTaskProposals
 unmatched.preloadApiUnusedByRenderer getViewers

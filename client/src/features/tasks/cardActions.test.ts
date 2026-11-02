@@ -4,7 +4,7 @@ import { coreTypeDefinitions } from '../../../../shared/core/core-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { RecordDetail, RecordSummary } from '../../../../shared/types/records'
 import { taskCardOf } from '../../../shared/task-card'
-import { placeActions, whenDoneLine } from './cardActions'
+import { actionText, placeActions, whenDoneLine } from './cardActions'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
@@ -56,4 +56,15 @@ test('where it came from: the meeting, made by the AI, with the words it rests o
     { kind: 'meeting', title: 'A社 打ち合わせ', byAi: true, basis: '「見積は来週までに」（鈴木様）', at: '2026-11-05T14:30' })
   assert.equal(c.bundle?.id, 'deal-01')
   assert.ok(!c.links.some(l => l.record?.id === 'deal-01'))
+})
+
+test('an AI proposal opened on its own: 「足す」 is the main action, 「要らない（AI の案を外す）」 in 「…」; 「議事録を確認する」 finishes with 確認を終える', () => {
+  const proposal = card(task('proposed', { assignee: ME, requested_by: ME }))
+  const p = placeActions(proposal, false)
+  assert.equal(p.main?.action, 'adopt')
+  assert.ok(p.more.some(a => a.action === 'dismiss'))
+  const aiMade = placeActions(card(task('todo', { assignee: 'u-tanaka', requested_by: ME })), false)
+  assert.equal(actionText(aiMade.more.find(a => a.action === 'dismiss')!), '要らない（AI の案を外す）')
+  const review = card(task('todo', { assignee: ME, requested_by: ME, task_kind: 'minutes_review' }))
+  assert.equal(actionText(placeActions(review, false).main!, { review: { meetingId: 'm', meetingTitle: 'm', summary: null, decisions: [] } }), '確認を終える')
 })
