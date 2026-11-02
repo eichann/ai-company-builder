@@ -430,7 +430,13 @@ line and `X-Request-Id`, carried by `AsyncLocalStorage` in `lib/request-log.ts`)
 code locations — not the message. git-http drains `git http-backend`'s stderr without logging
 it, and no longer logs the member's email or `PATH_INFO`. Services may import `lib/error-log`
 (listed in `layering.test.ts` with that reason). Tests: `tests/unit/error-log.test.ts`, and
-`tests/integration/request-log.test.ts` (a git failure naming a private folder in three routes). Test: `tests/integration/request-log.test.ts` (captures
+`tests/integration/request-log.test.ts` (a git failure naming a private folder in three routes).
+An error no route handled reaches `app.onError` (`app.ts`): it is logged the same way
+(`[http] Unhandled error in a request: <kind> request=<id>`) and answered with the fixed
+500 `{ error: 'サーバーでエラーが起きました', code: 'INTERNAL' }` (no message, no stack; an
+`HTTPException` keeps its own answer); an unknown path answers 404
+`{ error: 'Not found', code: 'NOT_FOUND' }`. Routes still answer their own errors first. Test:
+`tests/integration/unhandled-errors.test.ts`. Test: `tests/integration/request-log.test.ts` (captures
 every console output while sending paths, search terms, a relay `?key=` token and an invitation
 token).
 
