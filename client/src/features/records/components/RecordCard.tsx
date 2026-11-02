@@ -41,6 +41,10 @@ export interface BundleFieldContext {
   bundle: RecordViewSummary | null
   /** Taking the current one off (absent when its link cannot be removed by hand). */
   removable: RemovableLink | null
+  /** The record's 相手 (its `counterpart` link), for a new one's 相手. */
+  counterpart: { id: string; title: string } | null
+  /** A meeting's 宿題: the tasks made from it, at their versions (to put into a new one). */
+  homework: Array<{ id: string; version: number }>
   /** After a change: the card reads again and says `text`, with 取り消す of `undo` when given. */
   onChanged: (text: string, undo: { recordId: string; version: number } | null) => void
 }
@@ -74,7 +78,11 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const card = result.card
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
-    ? renderBundleField({ record: card.record, version: card.version, bundle: bundleLink?.record ?? null, removable: bundleLink?.removable ?? null, onChanged: changed })
+    ? renderBundleField({
+      record: card.record, version: card.version, bundle: bundleLink?.record ?? null, removable: bundleLink?.removable ?? null, onChanged: changed,
+      counterpart: card.links.flatMap(l => (l.counterpart && l.record ? [{ id: l.record.id, title: l.record.title }] : []))[0] ?? null,
+      homework: card.detail?.kind === 'meeting' ? card.links.flatMap(l => (l.record?.thing === 'task' && l.recordVersion !== undefined && !l.record.finished ? [{ id: l.record.id, version: l.recordVersion }] : [])) : [],
+    })
     : null
   const notes = <>
     {error && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}

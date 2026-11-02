@@ -114,7 +114,7 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           : (l.record ? defs.get(l.record.type)?.label : undefined) ?? l.name
         const removable = removableOf(detail.record, l)
         return l.record
-          ? { label, record: summaryView(l.record, defs.get(l.record.type)), ...(l.direction === 'out' && l.name === 'bundle' ? { bundle: true as const } : {}), ...(removable ? { removable } : {}) }
+          ? { label, record: summaryView(l.record, defs.get(l.record.type)), ...(l.direction === 'out' && l.name === 'bundle' ? { bundle: true as const } : {}), ...(l.direction === 'out' && l.name === 'counterpart' ? { counterpart: true as const } : {}), recordVersion: l.record.version, ...(removable ? { removable } : {}) }
           : { label, path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) }
       })
       const isBundle = def?.implements.includes('bundle') ?? false

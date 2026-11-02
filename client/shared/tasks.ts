@@ -185,6 +185,17 @@ export interface TaskActInput {
 }
 
 /** A record link set or taken off later (`tasks:linkRecord` / `tasks:unlinkRecord`): the link's name on the record and the other record. */
+/**
+ * 「新しい〇〇にする」: a new 案件・プロジェクト of the department's kind (`type` from `tasks:bundleKinds`),
+ * the member as its 責任者, in `folder` (the department's readers see it), with the 相手 when known.
+ */
+export interface BundleCreateInput {
+  type: string
+  title: string
+  folder?: string | null
+  counterpart?: string | null
+}
+
 export interface RecordLinkInput {
   link: string
   target: string
