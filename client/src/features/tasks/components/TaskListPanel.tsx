@@ -53,12 +53,12 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const tags = useMemo(() => tagCounts(items), [items])
   const shownTag = tag !== null && tags.some(t => t.tag === tag) ? tag : null
   const events = useMemo(() => (shownTag === null ? listEvents(calendar?.events ?? [], now) : []), [calendar, now, shownTag])
-  const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now), [items, events, mode, now, shownTag])
-  // 「〇〇ごと」: the kinds in the member's list; with none, the company's own kind (records.md "Bundle kinds").
   const kinds = list.data?.bundleKinds
-  const bundleWord = useMemo(() => bundleListWord(items, kinds?.core.name), [items, kinds])
   // The one line's ［〇〇］: what the department on screen makes (全社: the company's own kind).
   const deptKind = kinds ? (kinds.departments.find(d => d.folder === askFolder)?.kind ?? kinds.core) : null
+  // 「〇〇ごと」: the kinds in the member's list; with none linked, the department on screen's kind.
+  const bundleWord = useMemo(() => bundleListWord(items, deptKind?.name ?? kinds?.core.name), [items, deptKind, kinds])
+  const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now, deptKind?.name ?? kinds?.core.name), [items, events, mode, now, shownTag, deptKind, kinds])
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
   const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => {

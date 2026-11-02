@@ -79,6 +79,9 @@ test('by bundle: each one with its open items, then the ones in none; the word i
   assert.equal(sections[0].bundle?.id, 'deal-a00001')
   assert.equal(bundleListWord([{ ...item('x', 'mine', null), bundle: deal }]), '案件')
   assert.equal(bundleListWord([item('x', 'mine', null)]), 'プロジェクト')
+  // Nothing in the list belongs to one: the department on screen's kind names it (営業部 → 案件).
+  assert.equal(bundleListWord([item('x', 'mine', null)], '案件'), '案件')
+  assert.equal(listSections([item('loose', 'mine', null)], [], 'bundle', NOW, '案件')[0].title, '案件なし')
 })
 
 test('a tag keeps only items carrying it', () => {

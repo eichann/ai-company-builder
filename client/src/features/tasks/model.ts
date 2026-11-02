@@ -117,7 +117,8 @@ export interface ListSection {
  * 明日, 今週, あとで (folded), 期限なし, 今日終わったこと. By bundle: each one with its open items,
  * then 「〇〇なし」. Empty sections are left out.
  */
-export function listSections(items: readonly TaskListItem[], events: readonly ListEvent[], mode: ListMode, now: CompanyNow): ListSection[] {
+/** `bundleWord`: the name of 「〇〇なし」 when nothing in the list belongs to one (the department's kind). */
+export function listSections(items: readonly TaskListItem[], events: readonly ListEvent[], mode: ListMode, now: CompanyNow, bundleWord?: string): ListSection[] {
   const open = items.filter(i => i.turn !== 'done')
   const done = items.filter(i => i.turn === 'done').sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))
   const coming = events.filter(e => !e.past)
@@ -142,7 +143,7 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
       const b = list[0].bundle!
       sections.push({ key: `bundle:${id}`, title: b.title, items: list, events: [], foldable: false, note: b.typeLabel, bundle: b })
     }
-    sections.push({ key: 'no-bundle', title: `${bundleListWord(items)}なし`, items: sorted(open.filter(i => !i.bundle)), events: [], foldable: false })
+    sections.push({ key: 'no-bundle', title: `${bundleListWord(items, bundleWord)}なし`, items: sorted(open.filter(i => !i.bundle)), events: [], foldable: false })
   } else {
     // 期限切れ・今日・明日・今週・あとで (folded)・期限なし (言葉の決まり 5.).
     const tomorrow = addDays(now.date, 1)

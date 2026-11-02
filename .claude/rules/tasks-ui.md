@@ -89,7 +89,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   **By date**: 期限切れ, 今日 (meetings to come), 明日, 今週, あとで (folded), 期限なし, 今日終わったこと.
   **By bundle** (「〇〇ごと」): each bundle with open items (its name opens it), then 「〇〇なし」, then
   今日終わったこと; 〇〇 is the kinds actually in the list (`bundleListWord`: 「案件」, 「案件・プロジェクト」),
-  since the list crosses departments; with none, the company's own kind's name. The names come
+  since the list crosses departments; with none linked, the department on screen's kind (営業部 →
+  案件ごと; 全社 → the company's own kind). The names come
   from `GET /records/bundle-kinds` (read with the list: `TaskListData.bundleKinds`, and
   `bundleKindNames` for each row's chip — the core's kind under the company's name); an older
   server → the types' own labels. The one line's ［〇〇］ is the department on screen's kind and
