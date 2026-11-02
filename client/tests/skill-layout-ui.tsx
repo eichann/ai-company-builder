@@ -189,7 +189,7 @@ const api: Partial<ElectronAPI> = {
     ? { success: true, card: {
       record: { ...RECORD_TASK, state: 'in_progress', version: 2 }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
-      roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, whenDone: null, bundle: null, origin: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
+      roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, whenDone: null, bundle: null, canSetBundle: false, origin: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
       files: [{ path: '営業部/提案書/A社_提案.md' }],
       links: [{ label: '決めたこと', record: RECORD_DECISION }],
       history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],

@@ -280,7 +280,21 @@ chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file 
 onto a task row or onto the card's 「つながっているもの」 (its drop zone 「ここにファイルをドロップしてつなぐ」;
 `src/shared/lib/dragTypes.ts`; the first dragged path inside the company folder), and the card's
 「＋ファイルをつなぐ」 (the company's file names on this computer, `git:listFiles`). Each linked file's
-「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again). Main sends only a path inside the
+「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
+
+**Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row
+of 「つながっているもの」 whose link the server did not mark `fixed` (where the task came from — もとの
+会議・もとの連絡・AI が用意したもの — or a service's) has 「…」→「つながりを外す」 (`removable`:
+`removableOf`, `client/shared/record-views.ts`; the record holding the link is the one changed — an
+incoming link is taken off the other record at its version). The task's 案件・プロジェクト sits at its
+head (`BundleField.tsx`), not on the right: linked → ［変える］ (a chooser of the unfinished ones the
+member reads, `tasks:bundles`; a `one` link is replaced) ［外す］; none → ［〇〇につなぐ］, offered while
+the type's `bundle` link is not an origin one and the task is not finished (`canSetBundle`). 〇〇 is
+the kind's own name (`bundleWord`; until the department's kind arrives from `bundle-kinds`, 「プロジェクト」).
+`tasks:linkRecord` / `tasks:unlinkRecord` → `POST …/record-links[/remove] { link, target,
+expectedVersion }` (main checks the link name and both ids before any request) and answer the ledger
+entry's version; each change says what it did with ［取り消す］ (`tasks:undo` of that entry, on the
+record that holds the link). Tests: `client/tests/task-card.test.ts`, `tests/ui/task-card.spec.ts`. Main sends only a path inside the
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.

@@ -62,6 +62,22 @@ export interface RecordCardLink {
   /** A file of the company folder (company path). */
   path?: string
   broken?: boolean
+  /**
+   * A link between records that can be taken off by hand (not where it came from, not a service's):
+   * the record holding it (`id`, its `version` now) and the link's name there. Absent = no 「…」.
+   */
+  removable?: RemovableLink
+}
+
+/** What `recordLinks:remove` needs to take one link off (and `tasks:undo` to put it back). */
+export interface RemovableLink { source: string; sourceVersion: number; link: string; target: string }
+
+/** The record-to-record link of `l` that may be removed, seen from record `self`. */
+export function removableOf(self: Pick<RecordSummary, 'id' | 'version'>, l: { name: string; direction: 'in' | 'out'; record?: Pick<RecordSummary, 'id' | 'version'>; fixed?: true }): RemovableLink | undefined {
+  if (!l.record || l.fixed) return undefined
+  return l.direction === 'out'
+    ? { source: self.id, sourceVersion: self.version, link: l.name, target: l.record.id }
+    : { source: l.record.id, sourceVersion: l.record.version, link: l.name, target: self.id }
 }
 export interface RecordCardView {
   record: RecordViewSummary

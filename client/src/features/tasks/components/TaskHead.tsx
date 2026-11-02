@@ -33,19 +33,6 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
   )
 }
 
-/** The task's 案件・プロジェクト at its head (one click away). */
-export function BundleLine({ card }: { card: TaskCardData }) {
-  if (!card.bundle) return null
-  const b = card.bundle
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
-      <ThingIcon kind={b.thing} typeLabel={b.typeLabel} size={14} label="" />
-      <span className="text-gray-500">{b.typeLabel}</span>
-      <button type="button" onClick={() => runCommand('record.open', { recordId: b.id })} className="min-w-0 truncate font-medium text-accent hover:underline">{b.title}</button>
-    </div>
-  )
-}
-
 /** 期限 with 「延ばす」, and the tags. */
 export function DueAndTags({ card, now, busy, onPostpone }: { card: TaskCardData; now: CompanyNow; busy: boolean; onPostpone: ((due: string) => void) | null }) {
   const [open, setOpen] = useState(false)

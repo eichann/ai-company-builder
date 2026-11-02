@@ -10,7 +10,7 @@ import type { AiRunView } from '../../shared/types/ai-runs'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
 import { recordActionChoices } from './record-actions'
 import {
-  cardFields, historyLines, summaryView,
+  cardFields, historyLines, removableOf, summaryView,
   type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
 } from './record-views'
 
@@ -75,6 +75,8 @@ export interface TaskCardData {
   whenDone: 'notify' | 'check' | null
   /** The task's 案件 / プロジェクト (its `bundle` link), shown at its head rather than in 「つながっているもの」. */
   bundle: RecordViewSummary | null
+  /** The member may change the task's 案件 (its type's `bundle` link can be set by hand, the task not finished). */
+  canSetBundle: boolean
   origin: TaskCardOrigin | null
   actions: TaskCardAction[]
   /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
@@ -185,7 +187,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     if (l.direction === 'out' && l.name === 'bundle') { bundle = view; continue }
     if (l.direction === 'out' && (l.name === 'meeting' || l.name === 'interaction')) originLink ??= { kind: l.name, record: l.record }
     const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : src.defs.get(l.record.type)?.label ?? l.name
-    links.push({ label, record: view })
+    const removable = removableOf(r, l)
+    links.push({ label, record: view, ...(removable ? { removable } : {}) })
   }
   prepared.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 
@@ -209,7 +212,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
-    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin, actions, canSetTags, okLine,
+    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin,
+    canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),

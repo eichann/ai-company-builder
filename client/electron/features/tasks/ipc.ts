@@ -19,6 +19,9 @@
 //                 the app's own matching (tag-suggest.ts; only the title and the tags are sent)
 //   tasks:undo    「取り消す」 right after the member's own action (POST …/undo; the server allows
 //                 only the entry's actor and refuses when something changed since)
+//   tasks:linkRecord / tasks:unlinkRecord   a link between two records set or taken off later
+//                 (POST …/record-links[/remove]; a `one` link such as bundle is replaced; the server
+//                 refuses an origin link, a record the member cannot read, or one of another type)
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
@@ -234,6 +237,16 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 || a?.status === 201 ? { success: true, recordId } : failure('undo', a)
     },
 
+    async linkRecord(companyId: string, recordId: string, input: { link: string; target: string; expectedVersion: number }, remove: boolean): Promise<TaskWriteResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
+      if (!input || typeof input.link !== 'string' || !ACTION.test(input.link) || typeof input.target !== 'string' || !RECORD_ID_RE.test(input.target) || !Number.isInteger(input.expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/record-links${remove ? '/remove' : ''}`,
+        { link: input.link, target: input.target, expectedVersion: input.expectedVersion })
+      if (a?.status !== 200 && a?.status !== 201) return failure(remove ? 'unlink record' : 'link record', a)
+      const entry = (a.json?.data as { entry?: { version?: unknown } | null } | undefined)?.entry
+      return { success: true, recordId, ...(typeof entry?.version === 'number' ? { entryVersion: entry.version } : {}) }
+    },
+
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/retry`, {})
@@ -374,6 +387,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
+  ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))
+  ipc.handle('tasks:unlinkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, true))
   ipc.handle('tasks:undo', (_event, companyId, recordId, version, expectedVersion) => api.undo(typeof companyId === 'string' ? companyId : '', recordId, version, expectedVersion))
   ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

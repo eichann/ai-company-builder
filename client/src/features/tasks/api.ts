@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
+import type { BundleChoicesResult, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -14,6 +14,8 @@ export type CalendarReads = ElectronPort<'getCalendarToday'>
 export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
+/** Setting or taking off a link between two records (the server decides which links may change). */
+export type RecordLinkWrites = ElectronPort<'linkRecordToRecord' | 'unlinkRecordFromRecord'>
 /** One task's card. */
 export type TaskCardReads = ElectronPort<'getTaskCard'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */
@@ -111,4 +113,9 @@ export function suggestTaskTags(companyId: string, title: string, tagsInUse: str
 /** 「取り消す」 right after the member's own action: undoes ledger `version` (the server decides). */
 export function undoTaskAction(companyId: string, recordId: string, version: number, expectedVersion: number, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.undoTaskAction(companyId, recordId, version, expectedVersion)
+}
+
+/** Links `recordId` to another record (`link` names it there; a `one` link is replaced), or takes that link off. */
+export function setRecordLink(companyId: string, recordId: string, input: RecordLinkInput, remove: boolean, writes: RecordLinkWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return remove ? writes.unlinkRecordFromRecord(companyId, recordId, input) : writes.linkRecordToRecord(companyId, recordId, input)
 }

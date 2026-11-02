@@ -42,6 +42,8 @@ const card = taskCardOf({
       { name: 'bundle', direction: 'out', record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') },
       { name: 'tasks', direction: 'in', record: rec('decision-0002', 'decision', '今回だけ20%値引き', 'confirmed', { exception: true }, { exceptionNotice: '例外' }) },
       { name: 'files', direction: 'out', path: '営業/見積書_v2.xlsx', broken: false },
+      { name: 'related', direction: 'out', record: rec('task-0000bb', 'task', 'スケジュール案を出す', 'todo') },
+      { name: 'meeting', direction: 'out', fixed: true, record: rec('meeting-0000cc', 'meeting', 'A社 打ち合わせ', 'read') },
     ],
   },
 })
@@ -50,6 +52,9 @@ const show = (id: string, line: string) => { acted.push(line); document.getEleme
 
 installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
+  linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
+  unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
+  getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
