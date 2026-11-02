@@ -6,7 +6,8 @@
 import { coreTypeDefinitions } from './core-types'
 import {
   PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, comparePluginVersions, priorFieldWriters, roleOfWho,
-  type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
+  type OperationUse, type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
+  type SimilarRule,
 } from './plugin-declaration'
 import { parsePluginManifest } from './plugin-manifest'
 import { isMoneyField, parseTypeFile, type TypeDefinition } from './record-types'
@@ -162,6 +163,7 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
   for (const [opname, use] of Object.entries(uses.operations)) {
     const where = `操作「${opname}」`
     const op = connector.operations[opname]
+    if (!op && connector.searches?.[opname]) { errors.push(`${where}は探す操作です。operations ではなく、記録を作る操作の similar の search に書きます`); continue }
     if (!op) { errors.push(`${where}は「${connector.label}」${connector.version} にありません`); continue }
     const obj = useObject(op.object)!
     const target = op.attachTo ? useObject(op.attachTo) : null
@@ -183,7 +185,11 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
     if (use.movesMoney && op.kind === 'read') errors.push(`${where}: 読む操作はお金を動かしません（moves_money は書く操作だけです）`)
     if (use.movesMoney && policy === 'auto') errors.push(`${where}: お金が動く操作は「自動」にできません`)
     if (op.createsRecord && policy === 'auto') errors.push(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
-    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy, movesMoney: use.movesMoney, ...(use.via ? { via: [...use.via] } : {}) }
+    const similar = use.similar ? similarRule(where, use.similar, op, recordObject.recordType, connector, uses, types, useObject, errors) : null
+    operations[opname] = {
+      ...op, who: [...use.who], decision: use.decision, note: use.note, policy, movesMoney: use.movesMoney,
+      ...(use.via ? { via: [...use.via] } : {}), ...(similar ? { similar } : {}),
+    }
   }
   if (errors.length === 0) {
     for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {
@@ -208,4 +214,35 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
       },
     },
   }
+}
+
+/**
+ * A create of a record's `similar`, checked against the connector and the
+ * types and resolved (plugins.md "Similar records"): only on a create of a
+ * record; `status` a choice field of its type; `search` a search of the
+ * connector on the same object — asked by 相手 only when the search says how
+ * (`counterpart`) and that object is one of the business plugin's types.
+ */
+function similarRule(
+  where: string, use: NonNullable<OperationUse['similar']>, op: PluginOperation, recordType: string, connector: PluginManifest,
+  uses: NonNullable<PluginManifest['uses']>, types: PluginPackage['types'], useObject: (name: string) => PluginObject | null, errors: string[],
+): SimilarRule | null {
+  if (!op.createsRecord) { errors.push(`${where}: similar は記録を新しく作る操作だけに書けます`); return null }
+  if (use.status !== null) {
+    const f = types[recordType]?.fields[use.status]
+    if (!f || f.kind !== 'choice') { errors.push(`${where}の similar の status「${use.status}」は型「${recordType}」の選ぶ欄（choice）ではありません`); return null }
+  }
+  let search: SimilarRule['search'] = null
+  if (use.search !== null) {
+    const s = Object.prototype.hasOwnProperty.call(connector.searches ?? {}, use.search) ? connector.searches![use.search] : undefined
+    if (!s) { errors.push(`${where}の similar の search「${use.search}」は「${connector.label}」${connector.version} の探す操作（kind: search）にありません`); return null }
+    if (s.object !== op.object) { errors.push(`${where}の similar の search「${use.search}」は対象「${op.object}」を探すものではありません`); return null }
+    if (use.by.includes('counterpart') && s.counterpart) {
+      if (!uses.objects[s.counterpart.object]?.recordType) { errors.push(`${where}の similar: 相手で探すには、対象「${s.counterpart.object}」を objects でこの業務の型（record_type）にしてください`); return null }
+      useObject(s.counterpart.object)
+    }
+    if (!use.by.includes('name') && !(use.by.includes('counterpart') && s.counterpart)) { errors.push(`${where}の similar の search「${use.search}」は by のどれでも探せません（相手で探すには、探す操作に counterpart が要ります）`); return null }
+    search = { operation: use.search, ...s }
+  }
+  return { by: [...use.by], status: use.status, search }
 }

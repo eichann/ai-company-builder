@@ -110,7 +110,7 @@ The dependency points one way: **business → connector**. (#372's first cut had
   operation): the mapping, acknowledgements, import, links (`plugin_external_links.plugin_id`),
   operation records, the ledger's `source` / `action`, routes `/plugins/<business>/…` and the AI's
   tools (`corporate-sales__update_deal`). The import skips an outside object another business plugin
-  brought in (problem 「ほかの業務の記録」), and refresh / operations / similar deals only use the
+  brought in (problem 「ほかの業務の記録」), and refresh / operations / similar records only use the
   plugin's own links (`NOT_LINKED`, nothing asked outside).
 - **Turning a business plugin on stores its types at once** (`storeBusinessTypes`, source
   `plugin`), connector or not. Without its connector (not installed, off, stopped, too old, no
@@ -732,10 +732,10 @@ plugin's switch:
 
 ## Typed operations (P6, `services/plugin-operations.ts`)
 
-Code: `services/plugin-operations.ts` composes the service (run, create, similar deals, reconcile,
+Code: `services/plugin-operations.ts` composes the service (run, create, similar records, reconcile,
 recreate) from `plugin-operation-checks.ts` (the checks and the precheck before every send),
 `-inputs.ts` (bodies), `-records.ts` (the operation record and its view), `-sending.ts` (send,
-settle, reconcile — never re-sent), `-undo.ts`, `-approvals.ts` (the approval seam) and
+settle, reconcile — never re-sent), `-undo.ts`, `-approvals.ts` (the approval seam), `-similar.ts` and
 `-common.ts` (words, refusals, the one per-object serialiser every part shares).
 
 ```
@@ -856,11 +856,64 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   connection and account, as a new operation (`undo`, `undoOf`); the record's ledger notes it.
   `CREATE_UNDO_NOTICE`: what HubSpot did after the create is not undone. An archive whose answer
   was lost: reconcile reads the object (`observed` when gone, who removed it not known).
-- **Similar deals** (`similarDeals(member, pluginId, title)`, design §6-3; for the approval card,
-  no route yet): the declared `search` on the create-of-a-record's object, the title's words as
-  `CONTAINS_TOKEN` filters (OR, ≤ 3 words) on the title property; only records already imported
-  through the current connection **that the member may read** come back (an outside hit without
-  such a record is dropped); someone who cannot read the folder gets 403 with nothing asked.
+- **Similar records** ("Similar records" below; `similarRecords(member, pluginId, operation, {
+  title, meetingId })`, for the approval card, no route of its own).
+
+## Similar records (owner decision 2026-11-02; `services/plugin-operation-similar.ts`)
+
+Before a create of a record (`create_deal`) is approved, the approval card shows existing records
+that may be the same, so duplicates are not made (div's anken-sync rule). Generic: the core names no
+business type.
+
+```yaml
+# connector (hubspot): a read-only search — not an operation, never run directly
+operations:
+  search_deals:
+    label: 似ている取引を探す
+    kind: search
+    object: deal                                                   # needs the object's `search` call
+    counterpart: { object: company, property: associations.company } # optional: filter by the 相手's outside id
+# business plugin (corporate-sales): on its create of a record
+operations:
+  create_deal:
+    who: [viewer, ai]
+    similar: { by: [counterpart, name], search: search_deals, status: stage }
+```
+
+- Declaration (any contract; contract 1 and 2 packages without it read as before):
+  `similar.by` ⊆ `counterpart` / `name` (one or more, no repeats); `search` names a connector
+  search (`kind: search`) on the **same object**; `status` a `choice` field of the record's type
+  (its `option_labels` shown; absent → the record's state). Refused (`combineUse`): `similar` on
+  anything but a create of a record, an unknown search, a search of another object, `by:
+  [counterpart]` with a search that has no `counterpart`, a `counterpart.object` the business
+  plugin did not make one of its types, a search listed in the business plugin's `operations`.
+  A connector search takes only `label` / `kind` / `object` / `counterpart` (`object` / `property`;
+  the property is an outside name — HubSpot's `associations.company`). Parsed into the connector's
+  `searches` (not `operations`), resolved into the combined operation's `similar`.
+- Without `similar`: `by: [name]` through the object's `search` call when it has one (milestone 4's
+  behaviour) plus the title's words in ACB.
+- Found, in this order, at most `SIMILAR_MAX` (5), each a live record of the create's type the
+  member may read (an unreadable one does not exist — no count), not from an old connection:
+  1. `counterpart`: records of that type linking to the request's 相手 — the 相手 of its meeting
+     (`basis.meetingId`), every record of that 相手's 名寄せ identity (`identity.md`) and the 相手
+     records with the same company domain (`identityKeysOf`, never a free-mail domain) — only 相手
+     the member may read;
+  2. the connector's search (read only, the member's key and checks as any read; nothing written):
+     `counterpart.property EQ <outside id>` for up to 2 of those 相手 that this plugin imported
+     through the current connection, and `CONTAINS_TOKEN` on the mapping's title property for up to
+     3 words of the title (≤ 5 filter groups); only hits already imported as this plugin's records
+     come back (`matchedBy: outside`). The account is checked first; a search that cannot be asked
+     leaves ACB's own records (`outside: unavailable`), never a refusal;
+  3. `name`: records of that type whose title holds one of those words.
+  Each: title, status, `assignee` (when the type has that person field), last update, `matchedBy`.
+- Someone who cannot run the create (cannot read its folder, `who`) gets its refusal with nothing
+  asked outside. The card and 「同じ」: `approvals.md` (`same-as`).
+- Tests: `tests/unit/plugins.test.ts` 「similar records before a create of a record」 (the syntax and
+  each refusal), `tests/integration/approvals.test.ts` 「similar records before a new deal」 (the
+  meeting's 相手, the same domain, HubSpot's search by the company, an unreadable deal left out,
+  「同じ」 by requester and approver, meeting linked, nothing created — mutation-checked),
+  `tests/integration/plugin-operations.test.ts` (title search, a reader of no folder asks nothing),
+  `client/tests/ui/approval-card.spec.ts` (approve disabled until chosen; 「同じ」 sends the record).
 
 ## The approval seam (milestone 4 G5; the approvals service builds on it)
 
@@ -890,8 +943,8 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   A remapping after approval makes the request stale (the mapping version is part of the fixed
   content), so "raw, not re-translated" is tested by the payload's own raw value.
 - Approving itself (who may, the hash, once only) is the approvals service's (G6, `approvals.md`).
-- `similarDeals(member, pluginId, title)`: shown on a create-of-a-record approval card (only
-  records the viewer may read).
+- `similarRecords(member, pluginId, operation, { title, meetingId })`: shown on a
+  create-of-a-record approval card (only records the viewer may read).
 
 ## The gate of a step's run (plan C4 「業務×操作の関所」)
 
@@ -1050,7 +1103,7 @@ The server gate is the pair business plugin × operation, and inside a step's ru
 
 P9
 staging (compose wiring of `PLUGINS_DIR`). Milestone 4: approval requests and their card (G6, on
-the seam above), the 「もう一度作る」 button and similar deals on a screen. `add_note` runs like
+the seam above), the 「もう一度作る」 button and similar records on a screen. `add_note` runs like
 `log_meeting` (an attached create) but div does not use it. The real packages live in
 private repositories ("Where packages come from"): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
 (「法人営業」: deal / customer, `connector: hubspot >= 0.3.0`, its recommended mapping). Its flows
@@ -1083,7 +1136,7 @@ undone through; milestone 4: log_meeting `prior` by default, `auto` only acknowl
 meeting on the deal with the correlation value and its archive, a lost create never re-sent and not
 searched before 60 s then found by its value, not found stays unknown also while off, 「もう一度作る」
 only after that and confirmed, create_deal never without approval (route, AI, read token, forged
-policy), similar deals only readable, prepareApproval / executeApproved for create_deal and stage
+policy), similar records only readable, prepareApproval / executeApproved for create_deal and stage
 (changed outside, mapping version, connection, field off, raw values sent, requester as actor), no
 key in operation records or ledger), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
@@ -1096,7 +1149,7 @@ own, old shapes refused, `available_to` each on its own), `tests/integration/plu
 stopped / too old → `connector-*` while the business stays on, `PLUGIN_WOULD_STOP` dependents,
 `TYPE_OWNED_ELSEWHERE`, `NOT_A_CONNECTOR` / `NOT_A_BUSINESS`, `CONNECTOR_REQUIRED`, the old version's
 way out), `tests/integration/plugin-import.test.ts` 「two business plugins on one connector…」 (import,
-refresh, operations, undeclared operation, similar deals) — mutation-checked; integration tests key
+refresh, operations, undeclared operation, similar records) — mutation-checked; integration tests key
 the mapping / import / operations by `sample-sales` and the key / read scope / switch by `sample-hub`
 (`tests/helpers/plugin-packages.ts`).
 Contract 2: `server/tests/unit/plugin-contract-v2.test.ts` with `fixtures/plugins/sample-flow`

@@ -7,8 +7,8 @@
  */
 import { CORE_TYPE_FILES } from './core-types'
 import {
-  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
-  type CommonPart, type ConnectorUse, type FieldPolicy, type PluginManifest,
+  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS, SIMILAR_BY,
+  type CommonPart, type ConnectorUse, type FieldPolicy, type OperationUse, type PluginManifest, type SimilarBy,
 } from './plugin-declaration'
 import { strList, typeNameLayerProblem, unknownKeys } from './plugin-declaration-rules'
 import { ONTOLOGY_NAME_RE, parseVia, type ActionVia, type NoteRule } from './record-types'
@@ -70,7 +70,7 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
       const where = `操作「${opname}」`
       if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(op)) { err(`${where}は { who, … } の形で書いてください`); continue }
-      unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy', 'moves_money', 'via'], err)
+      unknownKeys(`${where}: `, op, ['who', 'decision', 'note', 'policy', 'moves_money', 'via', 'similar'], err)
       const who = strList(op.who)
       // `role:<name>` (a declared role) only from contract 2 on; parseFlow checks the name is declared.
       const whoNameOk = (w: string) => ONTOLOGY_NAME_RE.test(w) || (common.contract >= PLUGIN_CONTRACT_V2 && w.startsWith(ROLE_WHO_PREFIX) && ONTOLOGY_NAME_RE.test(w.slice(ROLE_WHO_PREFIX.length)))
@@ -97,7 +97,8 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
         else if (common.contract < PLUGIN_CONTRACT_V2) err(`${where}の via は contract: ${PLUGIN_CONTRACT_V2} の包みだけに書けます`)
         else via = v
       }
-      operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy, movesMoney: movesMoney === true, ...(via ? { via } : {}) }
+      const similar = op.similar === undefined ? undefined : parseSimilar(where, op.similar, err)
+      operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy, movesMoney: movesMoney === true, ...(via ? { via } : {}), ...(similar ? { similar } : {}) }
     }
     if (Object.keys(operations).length === 0 && Object.keys(objects).length === 0) err('connector を書いたら、使う objects か operations を書いてください')
     if (connector) uses = { connector, objects, operations }
@@ -116,4 +117,32 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
     ...common, role: 'business', service: '', baseUrl: { host: '', basePath: '' }, scopes: [], operationScopes: {},
     types: types ?? [], objects: {}, operations: {}, fieldPolicyDefaults, uses, accountInfo: null, ...noFlow(),
   }
+}
+
+/**
+ * `similar: { by: [counterpart, name], search?: <connector search>, status?: <choice field> }`
+ * on a create of a record (owner decision 2026-11-02, plugins.md "Similar records"):
+ * what the approval card shows before a new record is made. Whether the operation
+ * creates a record, the search and the field are checked against the connector and
+ * the types by `combineUse`.
+ */
+function parseSimilar(where: string, v: YamlValue, err: (m: string) => void): NonNullable<OperationUse['similar']> | undefined {
+  if (!isYamlMap(v)) { err(`${where}の similar は { by: [${SIMILAR_BY.join(', ')}], search?, status? } の形で書いてください`); return undefined }
+  unknownKeys(`${where}の similar: `, v, ['by', 'search', 'status'], err)
+  const by = strList(v.by)
+  if (!by || by.length === 0 || !by.every(b => (SIMILAR_BY as readonly string[]).includes(b)) || new Set(by).size !== by.length) {
+    err(`${where}の similar の by は ${SIMILAR_BY.join(' / ')} の並びです（重ねずに 1 つ以上）`)
+    return undefined
+  }
+  let search: string | null = null
+  if (v.search !== undefined && v.search !== null) {
+    if (typeof v.search !== 'string' || !ONTOLOGY_NAME_RE.test(v.search)) { err(`${where}の similar の search は、つなぎ先の探す操作（kind: search）の名前です`); return undefined }
+    search = v.search
+  }
+  let status: string | null = null
+  if (v.status !== undefined && v.status !== null) {
+    if (typeof v.status !== 'string' || !ONTOLOGY_NAME_RE.test(v.status)) { err(`${where}の similar の status は型の選ぶ欄の名前です`); return undefined }
+    status = v.status
+  }
+  return { by: by as SimilarBy[], search, status }
 }

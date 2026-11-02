@@ -1,4 +1,4 @@
-import type { ApprovalState, ApprovalView } from '../../shared/types/approvals'
+import type { ApprovalState, ApprovalView, SameAsResult } from '../../shared/types/approvals'
 
 /**
  * The chat's approval card (承認のお願い, milestone 4 G6, `.claude/rules/approvals.md`).
@@ -40,7 +40,7 @@ export const APPROVALS_OFFLINE_TEXT = 'サーバーに接続できないため�
 
 /** The answer of the card's IPC calls (`approvals:*`), made with the member's session in main. */
 export type ApprovalResult =
-  | { success: true; approval: ApprovalView; names: Record<string, string> }
+  | { success: true; approval: ApprovalView; names: Record<string, string>; meeting?: SameAsResult['meeting'] }
   | { success: false; offline: boolean; code: string | null; error: string; approval?: ApprovalView; names?: Record<string, string> }
 
 /** A member by name (from the app's member list), else a neutral word — never an id on screen. */
@@ -76,7 +76,8 @@ export function outcomeByText(outcome: Pick<NonNullable<ApprovalView['outcome']>
 
 /** The ids a view names (for the names lookup). */
 export function namedMembers(v: ApprovalView): string[] {
-  return [...new Set([v.requestedBy, v.approver, v.outcome?.by, v.outcome?.onBehalfOf].filter((x): x is string => typeof x === 'string' && x.length > 0))]
+  return [...new Set([v.requestedBy, v.approver, v.outcome?.by, v.outcome?.onBehalfOf, ...(v.similar?.items.map(x => x.assignee) ?? [])]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0))]
 }
 
 /** What the AI is told when its request became an approval request (it must not claim the change happened). */

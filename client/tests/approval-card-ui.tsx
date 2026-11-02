@@ -2,7 +2,8 @@
 // Preview page for the chat's approval card (承認のお願い, client/shared/approvals.ts): a reply
 // holding a `data-approval` reference; the card reads the request through the fake preload API.
 // `?viewer=approver` (default) may approve; `?viewer=requester` asked for it and may not.
-// What 「承認」 sent is shown in `#sent` for the spec.
+// `?kind=create`: a new deal with similar existing ones (plugins.md "Similar records").
+// What 「承認」 / 「同じ」 sent is shown in `#sent` for the spec.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { UIMessage } from 'ai'
@@ -17,7 +18,7 @@ const params = new URLSearchParams(location.search)
 const approver = params.get('viewer') !== 'requester'
 const HASH = `sha256:${'9c1e'.repeat(16)}`
 
-const view: ApprovalView = {
+const updateView: ApprovalView = {
   id: 'approval-preview0001', state: 'pending', recordVersion: 1, pluginId: 'hubspot', operation: 'update_deal',
   operationLabel: '案件の欄を HubSpot に書き戻す', systemLabel: 'HubSpot', recordId: 'deal-preview01', recordTitle: '研修導入（プレビュー株式会社）',
   changes: [{ field: 'amount', label: '金額', before: 1200000, after: 1500000, beforeShown: '1,200,000', afterShown: '1,500,000', changePercent: 25 }],
@@ -28,6 +29,19 @@ const view: ApprovalView = {
   proposedReason: '先方が対象を広げたいと言ったため', requestedBy: 'u-sato', requestedByAi: true, approver: 'u-abe', approverRule: 'dept_manager', approverRuleLabel: '部署の責任者',
   hash: HASH, version: 1, createdAt: '2026-11-05T06:41:00.000Z', viewerMayApprove: approver, viewerIsRequester: !approver, outcome: null,
 }
+const createView: ApprovalView = {
+  ...updateView, operation: 'create_deal', operationLabel: '取引を新しく作る', recordId: null, recordTitle: null, changes: [],
+  create: { title: '生成AI研修（プレビュー株式会社）', fields: [{ label: '次のアクション', shown: '提案書を送る' }] },
+  similar: {
+    typeLabel: '案件', outside: 'checked',
+    items: [
+      { recordId: 'deal-preview02', title: '研修導入（プレビュー株式会社）', status: '提案', assignee: 'u-sato', updatedAt: '2026-10-30T01:00:00.000Z', matchedBy: 'counterpart' },
+      { recordId: 'deal-preview03', title: '生成AI研修 2期（見本商事）', status: '初回面談', assignee: null, updatedAt: '2026-10-01T01:00:00.000Z', matchedBy: 'name' },
+    ],
+  },
+  precedents: { total: 0, items: [] }, materials: [],
+}
+const view = params.get('kind') === 'create' ? createView : updateView
 const names = { 'u-sato': '佐藤', 'u-abe': '阿部' }
 
 function Preview() {
@@ -37,6 +51,10 @@ function Preview() {
     approveApproval: async (_companyId, _id, hash, reason) => {
       setSent(JSON.stringify({ hash, reason }))
       return { success: true, approval: { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: reason, resultOperationId: 'op-1' } }, names }
+    },
+    sameAsApproval: async (_companyId, _id, recordId, linkMeeting) => {
+      setSent(JSON.stringify({ recordId, linkMeeting }))
+      return { success: true, approval: { ...view, state: 'withdrawn', similar: null, viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: 'すでにある記録と同じため、作りませんでした', resultOperationId: null } }, names, meeting: 'linked' }
     },
   })
   const ref: ApprovalCardRef = { id: 'card-1', companyId: 'co-preview', conversationId: 'conv-1', approvalId: view.id, origin: approver ? 'shown' : 'requested', at: '2026-11-05T06:41:00.000Z' }

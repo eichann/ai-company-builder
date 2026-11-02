@@ -35,6 +35,8 @@ operations:
     policy: prior
   create_deal:
     who: [viewer, ai]
+    # Before a new deal, the approval card shows the deals of the same 相手 and with similar names.
+    similar: { by: [counterpart, name], search: search_deals, status: stage }
 
 field_policy_defaults:
   next_step: auto

@@ -483,6 +483,8 @@ export interface IpcInvokeChannels {
   'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
   'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
   'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「これと同じ…です（作らない）」: a create is the same as this existing record (and, when asked, the meeting belongs to it). */
+  'approvals:sameAs': { args: [companyId: string, approvalId: string, recordId: string, linkMeeting: boolean]; result: ApprovalResult }
   // Settings → 「不在と代わりの人」: the member's own absences, read and changed with their session.
   /** The member's view (absences, whom they cover today) and the company's members for the picker. */
   'absences:get': { args: [companyId: string]; result: AbsencesResult }
@@ -878,6 +880,7 @@ export interface ElectronAPI {
   approveApproval: Invoke<'approvals:approve'>
   sendBackApproval: Invoke<'approvals:sendBack'>
   withdrawApproval: Invoke<'approvals:withdraw'>
+  sameAsApproval: Invoke<'approvals:sameAs'>
   // Settings → 「不在と代わりの人」.
   getAbsences: Invoke<'absences:get'>
   addAbsence: Invoke<'absences:add'>

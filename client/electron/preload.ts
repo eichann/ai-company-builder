@@ -146,6 +146,7 @@ const api: ElectronAPI = {
   approveApproval: (companyId: string, approvalId: string, hash: string, reason: string) => invoke('approvals:approve', companyId, approvalId, hash, reason),
   sendBackApproval: (companyId: string, approvalId: string, reason: string) => invoke('approvals:sendBack', companyId, approvalId, reason),
   withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
+  sameAsApproval: (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => invoke('approvals:sameAs', companyId, approvalId, recordId, linkMeeting),
   getAbsences: (companyId: string) => invoke('absences:get', companyId),
   addAbsence: (companyId: string, input: AbsenceAddInput) => invoke('absences:add', companyId, input),
   removeAbsence: (companyId: string, absenceId: string) => invoke('absences:remove', companyId, absenceId),

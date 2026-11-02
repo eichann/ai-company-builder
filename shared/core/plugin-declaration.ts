@@ -147,6 +147,43 @@ export interface PluginOperation {
   movesMoney: boolean
   /** The business plugin's `via` for its use of the operation (absent: `[screen, run]`; never on a connector's own). */
   via?: ActionVia[]
+  /**
+   * A create of a record: how similar existing records are found before it is
+   * approved (the business plugin's `similar`, with the connector's search
+   * resolved). Absent: by name through the object's `search` call (as before).
+   */
+  similar?: SimilarRule
+}
+
+/**
+ * What "similar" means before a create of a record (owner decision 2026-11-02,
+ * plugins.md "Similar records"): `counterpart` = records of the same type
+ * linked to the same 相手 (its 名寄せ identity, the same company domain);
+ * `name` = the title's words.
+ */
+export const SIMILAR_BY = ['counterpart', 'name'] as const
+export type SimilarBy = typeof SIMILAR_BY[number]
+
+/**
+ * A connector's search (`kind: search`): read only, on an object with a
+ * `search` call. `counterpart`: which connector object the 相手 is and the
+ * outside filter property that matches an item to it (HubSpot:
+ * `associations.company`). Not an operation: nobody runs it directly — a
+ * business plugin's `similar` names it.
+ */
+export interface PluginSearch {
+  label: string
+  object: string
+  counterpart: { object: string; property: string } | null
+}
+
+/** A business plugin's `similar` on a create of a record, as combined with its connector. */
+export interface SimilarRule {
+  by: SimilarBy[]
+  /** A choice field of the record's type shown as each candidate's status (null: the record's state). */
+  status: string | null
+  /** The connector's search to ask as well (null: only records already in ACB). */
+  search: (PluginSearch & { operation: string }) | null
 }
 
 /** Never runs without a person's approval: it reaches people outside, moves money, or creates a record (統合版: never `ok_from`, never direct). */
@@ -209,6 +246,8 @@ export interface OperationUse {
    * becomes an approval request (the bridge has no direct run).
    */
   via?: ActionVia[]
+  /** `similar: { by, search?, status? }` on a create of a record (any contract; checked against the connector by `combineUse`). */
+  similar?: { by: SimilarBy[]; search: string | null; status: string | null }
 }
 
 /**
@@ -358,6 +397,8 @@ export interface PluginManifest {
   objects: Record<string, PluginObject>
   /** Likewise: a connector's operations (who / decision empty), or the combined use's. */
   operations: Record<string, PluginOperation>
+  /** A connector's searches (`kind: search`; absent: none). Never an operation: a business plugin's `similar` names one. */
+  searches?: Record<string, PluginSearch>
   /** A business plugin's recommended field policies (a connector has none). */
   fieldPolicyDefaults: Record<string, FieldPolicy>
   /** A business plugin: how it uses its connector; null = it works inside ACB only. */

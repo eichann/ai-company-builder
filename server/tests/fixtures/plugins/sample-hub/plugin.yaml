@@ -87,3 +87,10 @@ operations:
     reaches: internal
     undo: archive
     correlation_property: acb_operation_id
+  # Read only, before a new deal (plugins.md "Similar records"): deals of the same company
+  # (HubSpot's search filter on the association) or with a word of the title.
+  search_deals:
+    label: 似ている取引を探す
+    kind: search
+    object: deal
+    counterpart: { object: company, property: associations.company }

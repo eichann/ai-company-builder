@@ -86,8 +86,9 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
   `option_labels`, numbers with their % change), the basis (minutes quote; the minutes' title only
   when the viewer may read it), **precedents**, **materials**, the proposed reason, approver and
   rule, `hash` + `version`, `viewerMayApprove`, `viewerIsRequester`, the outcome (who, when, the
-  note, the operation id). A create of a record also shows `similar` (`similarDeals`, readable
-  records only; design §6-3).
+  note, the operation id). A create of a record, while pending, also shows `similar`
+  (`similarRecords`, plugins.md "Similar records": up to 5 readable records — title, status, assignee,
+  last update, why — the type's label and whether the outside system was asked).
 - **Precedents** (design N8, §3-8): earlier approved / sent-back requests of the same company and
   operation sharing a field, whose folder is in the same department; each must be readable by the
   viewer, and so must the record it was about (its fixed payload's `record`, whatever its type) —
@@ -104,11 +105,23 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
 POST /api/companies/:id/approvals/:approvalId/approve     { hash, reason }
 POST /api/companies/:id/approvals/:approvalId/send-back   { reason }
 POST /api/companies/:id/approvals/:approvalId/withdraw
+POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeeting? }
 ```
 
 - **No other credential reaches them**: no record-token route (the AI lists and reads only), no
   admin-API or rule route. Tests: `approvals.test.ts` (an AI token on both route sets), the
   permission matrix rows.
+- **「これと同じ…です（作らない）」** (`same-as`, owner decision 2026-11-02, plugins.md "Similar
+  records"): only a create of a record (else 400 `NOT_A_CREATE`); readable (else 404) → the
+  requester (pending or sent back) or whoever qualifies to approve (pending; else 403
+  `NOT_APPROVER`) → still open (409 `NOT_PENDING`) → `recordId` a live record of the create's type
+  the person may read (else 400 `BAD_LINK`, also for one that does not exist). The request becomes
+  `withdrawn` (action `same_as_existing`, note `SAME_AS_NOTE` — never the record's name), the record
+  kept as its `bundle` link when it is a まとまり; nothing is sent. `linkMeeting: true` also makes the
+  request's meeting belong to it through `minutes.linkBundle` (the meeting's assignee or an admin;
+  answer `meeting: linked | not-linked | not-asked`). Serialised with approving like the others.
+  The card (`ApprovalCard.tsx`) shows 「これと同じ<型の名前>です（作らない）」 on each similar record
+  and 「別の<型の名前>として作る」; the approve button stays disabled until one is chosen.
 - Approve, in order: readable (else 404) → **qualifies** (`mayApprove` with requester / manager of
   the department holding the request's folder / owner-admin, from the server's data — or, as the
   delegate of an absent member they cover today (`actsFor`, `records.md` "Absence and the

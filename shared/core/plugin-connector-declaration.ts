@@ -8,7 +8,7 @@ import { builtinBrokerService, isValidBrokerServiceName, parseRelayBaseUrl } fro
 import {
   CREATE_CONTENT_SLOTS, PLUGIN_ENDPOINTS, noFlow,
   type CommonPart, type CreateContentSlot, type OperationReach, type PluginEndpoint, type PluginEndpointName, type PluginManifest,
-  type PluginObject, type PluginOperation, type UndoKind,
+  type PluginObject, type PluginOperation, type PluginSearch, type UndoKind,
 } from './plugin-declaration'
 import { checkPluginPathTemplate, EXTERNAL_NAME_RE, isStr, SCOPE_RE, strList, unknownKeys } from './plugin-declaration-rules'
 import { ONTOLOGY_NAME_RE } from './record-types'
@@ -72,16 +72,22 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
   }
 
   const operations: Record<string, PluginOperation> = {}
+  const searches: Record<string, PluginSearch> = {}
   const rawOps = raw.operations ?? {}
   if (!isYamlMap(rawOps)) err('operations は「名前: { … }」の形で書いてください')
   else for (const [opname, op] of Object.entries(rawOps)) {
     if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
     if (!isYamlMap(op)) { err(`操作「${opname}」は { … } の形で書いてください`); continue }
+    if (op.kind === 'search') {
+      const s = parseSearch(`操作「${opname}」`, op, objects, err)
+      if (s) searches[opname] = s
+      continue
+    }
     unknownKeys(`操作「${opname}」: `, op, ['label', 'kind', 'object', 'attach_to', 'reaches', 'undo', 'content', 'association_type', 'correlation_property'], err, NOT_IN_CONNECTOR_OPERATION)
     const where = `操作「${opname}」`
     if (!isStr(op.label)) err(`${where}に label を書いてください`)
     const opKind = op.kind
-    if (opKind !== 'read' && opKind !== 'update' && opKind !== 'create') { err(`${where}の kind は read / update / create です`); continue }
+    if (opKind !== 'read' && opKind !== 'update' && opKind !== 'create') { err(`${where}の kind は read / update / create / search です`); continue }
     const obj = typeof op.object === 'string' ? objects[op.object] : undefined
     if (!obj) { err(`${where}の object は objects にある名前です`); continue }
     const reaches = op.reaches ?? 'internal'
@@ -178,6 +184,31 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
 
   return {
     ...common, role: 'connector', service: raw.service as string, baseUrl, scopes: scopes ?? [], operationScopes,
-    types: [], objects, operations, fieldPolicyDefaults: {}, uses: null, accountInfo, ...noFlow(),
+    types: [], objects, operations, ...(Object.keys(searches).length > 0 ? { searches } : {}), fieldPolicyDefaults: {}, uses: null, accountInfo, ...noFlow(),
   }
+}
+
+/**
+ * `kind: search` (owner decision 2026-11-02, plugins.md "Similar records"): a
+ * read-only search on an object with a `search` call, used only through a
+ * business plugin's `similar` before a create of a record. `counterpart: {
+ * object, property }`: the connector object that is the 相手 and the outside
+ * filter property matching an item to it (HubSpot: `associations.company`).
+ */
+function parseSearch(where: string, op: { [k: string]: YamlValue }, objects: Record<string, PluginObject>, err: (m: string) => void): PluginSearch | null {
+  unknownKeys(`${where}: `, op, ['label', 'kind', 'object', 'counterpart'], err, NOT_IN_CONNECTOR_OPERATION)
+  if (!isStr(op.label)) err(`${where}に label を書いてください`)
+  const obj = typeof op.object === 'string' ? objects[op.object] : undefined
+  if (!obj) { err(`${where}の object は objects にある名前です`); return null }
+  if (!obj.endpoints.search) { err(`${where}: 探す操作の対象には search が要ります`); return null }
+  let counterpart: PluginSearch['counterpart'] = null
+  if (op.counterpart !== undefined) {
+    const c = op.counterpart
+    if (!isYamlMap(c)) { err(`${where}の counterpart は { object: 相手の対象, property: 外の絞り込みの項目名 } の形で書いてください`); return null }
+    unknownKeys(`${where}の counterpart: `, c, ['object', 'property'], err)
+    if (typeof c.object !== 'string' || !objects[c.object]) { err(`${where}の counterpart の object は objects にある名前です`); return null }
+    if (typeof c.property !== 'string' || !EXTERNAL_NAME_RE.test(c.property)) { err(`${where}の counterpart の property は外の項目名です（例：associations.company）`); return null }
+    counterpart = { object: c.object, property: c.property }
+  }
+  return { label: isStr(op.label) ? op.label : '', object: op.object as string, counterpart }
 }
