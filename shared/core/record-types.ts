@@ -167,6 +167,14 @@ export interface LinkDef {
   cardinality: 'one' | 'many'
   /** The name the other side shows the link under (a label only; nothing is stored twice). */
   inverse?: string
+  /**
+   * YAML `origin: true` (出どころ, owner decision 2026-11-02): where the record came from — the
+   * meeting a task is homework of, the message it answers, what the AI made for it. History, not
+   * filing: set when the record is made (or by the action that makes it), never linked or
+   * removed afterwards by hand (records.md "Linking records later"). Absent otherwise (so
+   * stored definitions compare equal); adding or dropping it is not breaking.
+   */
+  origin?: true
 }
 
 export interface ActionDef {
@@ -456,7 +464,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [lname, l] of Object.entries(rawLinks)) {
       if (!ONTOLOGY_NAME_RE.test(lname)) { err(`つながりの名前「${lname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(l)) { err(`つながり「${lname}」は { label, target, cardinality } の形で書いてください`); continue }
-      for (const k of Object.keys(l)) if (!['label', 'target', 'interface', 'cardinality', 'inverse'].includes(k)) err(`つながり「${lname}」に知らない項目「${k}」があります`)
+      for (const k of Object.keys(l)) if (!['label', 'target', 'interface', 'cardinality', 'inverse', 'origin'].includes(k)) err(`つながり「${lname}」に知らない項目「${k}」があります`)
       if (!isStr(l.label)) err(`つながり「${lname}」に label を書いてください`)
       let target: string
       let toInterface = false
@@ -473,7 +481,11 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       const cardinality = l.cardinality ?? 'many'
       if (cardinality !== 'one' && cardinality !== 'many') { err(`つながり「${lname}」の cardinality は one か many です`); continue }
       if (l.inverse !== undefined && (!isStr(l.inverse) || !ONTOLOGY_NAME_RE.test(l.inverse))) err(`つながり「${lname}」の inverse は英小文字の名前で書いてください`)
-      links[lname] = { label: isStr(l.label) ? l.label : lname, target, cardinality, ...(toInterface ? { targetIsInterface: true as const } : {}), ...(isStr(l.inverse) ? { inverse: l.inverse } : {}) }
+      if (l.origin !== undefined && typeof l.origin !== 'boolean') err(`つながり「${lname}」の origin は true か false です`)
+      links[lname] = {
+        label: isStr(l.label) ? l.label : lname, target, cardinality, ...(toInterface ? { targetIsInterface: true as const } : {}), ...(isStr(l.inverse) ? { inverse: l.inverse } : {}),
+        ...(l.origin === true ? { origin: true as const } : {}),
+      }
     }
   }
 

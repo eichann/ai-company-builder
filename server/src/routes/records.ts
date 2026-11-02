@@ -22,6 +22,8 @@
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
  *   POST    /records/item/:recordId/file-links        { path, link?, expectedVersion, note? } link a file later
  *   POST    /records/item/:recordId/file-links/remove { path, link?, expectedVersion, note? } remove that link
+ *   POST    /records/item/:recordId/record-links        { link, target, expectedVersion, note? } link a record later
+ *   POST    /records/item/:recordId/record-links/remove { link, target, expectedVersion, note? } remove that link
  *   POST    /records/item/:recordId/share             { folder, expectedVersion, note? } the owner shows their
  *                                                     owner-only record to a folder's readers (session only)
  *   POST    /records/item/:recordId/opened            the app opened the record: the first opening of the
@@ -149,6 +151,18 @@ recordsRoute.post('/records/item/:recordId/file-links/remove', companyMember, se
   const member = c.var.member
   const body = c.var.body
   return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'unlink', body))
+})
+
+recordsRoute.post('/records/item/:recordId/record-links', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
+  return answer(c, recordEngine.recordLink(member, humanWith(body), c.req.param('recordId'), 'link', body))
+})
+
+recordsRoute.post('/records/item/:recordId/record-links/remove', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
+  return answer(c, recordEngine.recordLink(member, humanWith(body), c.req.param('recordId'), 'unlink', body))
 })
 
 // Owner-only → a folder's readers (records.md "Owner-only records"): the person's own step, so no AI route.

@@ -13,7 +13,7 @@ import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permiss
 import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import { turnsOf } from '../../shared/core/record-turns'
-import { enteredByWaitOver, TASK_WAIT_OVER_STEP } from '../../shared/core/core-types'
+import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP } from '../../shared/core/core-types'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -579,15 +579,20 @@ export function createRecordService(deps: RecordServiceDeps) {
       const otherIds = [...new Set([...out.flatMap(l => (l.targetId ? [l.targetId] : [])), ...inn.map(l => l.sourceId)])].slice(0, MAX_NEIGHBOURS)
       const others = new Map(records.byIds(otherIds).map(r => [r.id, r]))
       const shown = new Map<string, RecordRow>()
-      const links: Array<{ name: string; direction: 'out' | 'in'; id?: string; path?: string }> = []
+      const links: Array<{ name: string; direction: 'out' | 'in'; id?: string; path?: string; fixed: boolean }> = []
+      // Whether a link of `source` cannot be removed by hand (records.md "Linking records later"):
+      // an origin link (出どころ), a record whose links only its service changes, a file record's text.
+      const types = currentTypes(records)
+      const fixed = (source: RecordRow, name: string) =>
+        types.get(source.type)?.definition.links[name]?.origin === true || SERVICE_STATE_TYPES.includes(source.type) || source.path !== null
       for (const l of out) {
-        if (l.targetPath !== null) { if (reader.file(l.targetPath)) links.push({ name: l.name, direction: 'out', path: l.targetPath }); continue }
+        if (l.targetPath !== null) { if (reader.file(l.targetPath)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
         const t = others.get(l.targetId as string)
-        if (t && linkAllowed(row, t) && reader.record(t)) { shown.set(t.id, t); links.push({ name: l.name, direction: 'out', id: t.id }) }
+        if (t && linkAllowed(row, t) && reader.record(t)) { shown.set(t.id, t); links.push({ name: l.name, direction: 'out', id: t.id, fixed: fixed(row, l.name) }) }
       }
       for (const l of inn) {
         const s = others.get(l.sourceId)
-        if (s && linkAllowed(s, row) && reader.record(s)) { shown.set(s.id, s); links.push({ name: l.name, direction: 'in', id: s.id }) }
+        if (s && linkAllowed(s, row) && reader.record(s)) { shown.set(s.id, s); links.push({ name: l.name, direction: 'in', id: s.id, fixed: fixed(s, l.name) }) }
       }
       const sums = recordSummaries(records, [row, ...shown.values()], oldConnectionIds(member))
       // Only paths already shown to this reader are looked up.
@@ -597,9 +602,12 @@ export function createRecordService(deps: RecordServiceDeps) {
         : null
       return ok({
         record: sums.get(row.id)!,
-        links: links.map((l): RecordLinkView => (l.id
-          ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
-          : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}) })),
+        links: links.map((l): RecordLinkView => ({
+          ...(l.id
+            ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
+            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}) }),
+          ...(l.fixed ? { fixed: true as const } : {}),
+        })),
       })
     },
   }

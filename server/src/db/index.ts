@@ -3,6 +3,7 @@ import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
 import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
+import { TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -121,7 +122,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateOutsideTimes(conn)
   // Meeting version 4: no AI run for a まとまり chosen later (minutes.md "A まとまり chosen later").
   migrateBundleParts(conn)
-  // Task version 9: 完了 from any state, 「終わったら」 (records.md "Task version 9").
+  // Tasks to the core version (9: 完了 from any state, 「終わったら」; 10: origin links) — records.md "Task version 9".
   migrateTaskVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
@@ -210,12 +211,12 @@ export function migrateBundleParts(conn: Database.Database): void {
   }
 }
 
-/** Every company's tasks move to task version 9 (adapters/sqlite/records.ts `migrateCompanyTaskVersion`), idempotent. */
+/** Every company's tasks move to the core task version (`TASK_VERSION`) (adapters/sqlite/records.ts `migrateCompanyTaskVersion`), idempotent. */
 export function migrateTaskVersion(conn: Database.Database): void {
   const at = new Date().toISOString()
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyTaskVersion(conn, id, at)
-    if (moved > 0 && conn === sqlite) console.log(`[records] task version 9: ${moved} task(s) moved in company ${id}`)
+    if (moved > 0 && conn === sqlite) console.log(`[records] task version ${TASK_VERSION}: ${moved} task(s) moved in company ${id}`)
   }
 }
 

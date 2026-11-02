@@ -72,7 +72,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   interaction not judged yet (`received`, or `unsure`) becomes `handled` (`needs_reply: false`).
   A judgement `reply` on a thread whose newest message is ours makes no reply request
   (`alreadyReplied: true`, handled). A reply ACB cannot see (the phone, another channel): the
-  assignee's 「もう返した」 (`replied_elsewhere`, reply_request v2), which discards the same drafts
+  assignee's 「もう返した」 (`replied_elsewhere`, reply_request v2; v3 marks `interaction` /
+  `prepared` as origin links, `records.md` "Linking records later"), which discards the same drafts
   (the engine's `afterAct` hook → `inbox.afterAct`, note 「ほかの経路で返信済み（もう返した）」), so
   the card offers no second reply.
 - **The thread went on**: their reply (not `automated` / `bulk`: an automatic reply is no reply)
