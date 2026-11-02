@@ -114,17 +114,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  useEffect(() => {
-    if (!currentCompany?.id) return
-    let live = true
-    setGitignoreEditable(false)
-    void canEditCompanyGitignore(currentCompany.id).then(editable => { if (live) setGitignoreEditable(editable) })
-    return () => { live = false }
-  }, [currentCompany?.id])
-
-  // Load .env and .gitignore files on mount
+  // Load .env and .gitignore files (and whether this member may edit the latter) on mount
   useEffect(() => {
     if (!currentCompany?.rootPath) return
+    const companyId = currentCompany.id
+
+    setGitignoreEditable(false)
+    let live = true
+    void canEditCompanyGitignore(companyId).then(editable => { if (live) setGitignoreEditable(editable) })
 
     const loadFiles = async () => {
       setLoading(true)
@@ -152,7 +149,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     }
 
     loadFiles()
-  }, [currentCompany?.rootPath])
+    return () => { live = false }
+  }, [currentCompany?.rootPath, currentCompany?.id])
 
   // After a key moved to the server: the .env changed in main, read its state again.
   const reloadEnvStatus = useCallback(() => {
