@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { resolveLeftPanel, shownPanels, type LeftPanel } from '../leftPanels'
+import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
+import { resolveLeftPanel, shownPanels, tabStripWidth, type LeftPanel } from '../leftPanels'
 
 interface Props {
   panels: ReadonlyArray<LeftPanel>
@@ -17,19 +18,25 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
   if (activeId && !visited.has(activeId)) setVisited(new Set([...visited, activeId]))
   // The tab whose peek is open (pointer on the tab or its peek, or focus on the tab).
   const [peeking, setPeeking] = useState<string | null>(null)
+  // Too narrow for every name on one line: icons only (the name stays as the tooltip).
+  const [stripRef, iconsOnly] = useIsNarrowerThan<HTMLDivElement>(tabStripWidth(shown))
 
   return (
     <>
-      <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
+      <div ref={stripRef} data-left-tabs className="flex-shrink-0 flex min-w-0 overflow-x-auto border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
         {shown.map(panel => {
           const active = panel.id === activeId
           const Icon = panel.icon
           const tab = (
             <button
               key={panel.id}
+              type="button"
+              title={panel.title}
+              aria-label={iconsOnly ? panel.title : undefined}
+              data-left-tab={panel.id}
               onClick={() => { setPeeking(null); onSelect(panel.id); panel.onOpen?.() }}
               className={`
-                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                flex flex-shrink-0 items-center gap-1.5 px-2.5 py-2.5 text-[13px] font-medium whitespace-nowrap
                 border-b-2 transition-colors
                 ${active
                   ? 'border-accent text-gray-900 dark:text-zinc-100'
@@ -37,8 +44,8 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
                 }
               `}
             >
-              <Icon size={16} weight={active ? 'fill' : 'regular'} />
-              {panel.title}
+              <Icon size={16} weight={active ? 'fill' : 'regular'} className="flex-shrink-0" />
+              {!iconsOnly && panel.title}
               {panel.badgeCount ? (
                 <span className="min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
                   {panel.badgeCount}

@@ -46,3 +46,12 @@ export function resolveLeftPanel(id: string | null | undefined, panels: Readonly
   const shown = shownPanels(panels)
   return shown.find(panel => panel.id === id)?.id ?? shown[0]?.id ?? null
 }
+
+/**
+ * About how wide the tab strip must be to show every tab's text on one line (13 px a character,
+ * the icon, padding): narrower than this, the tabs show their icons only (the name stays as the
+ * tooltip and the accessible name) — never text broken one character per line.
+ */
+export function tabStripWidth(panels: ReadonlyArray<Pick<LeftPanel, 'title' | 'badgeCount' | 'dot'>>): number {
+  return panels.reduce((w, p) => w + 20 + 16 + (p.title ? 6 + [...p.title].length * 13 : 0) + (p.badgeCount ? 24 : p.dot ? 12 : 0), 0)
+}

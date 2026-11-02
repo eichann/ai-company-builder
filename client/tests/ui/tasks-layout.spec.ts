@@ -75,3 +75,27 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
   await expect(middleTabs(page).getByRole('tab', { name: /A社 提案書を仕上げる/ })).toBeVisible()
   expectNoPageErrors(state)
 })
+
+// Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
+// column. They stay on one line; too narrow for every name, they show icons only, still named.
+for (const width of [1440, 1280]) {
+  test(`at ${width} px the left tabs never break their names; icons only when the names do not fit`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const state = await openPreview(page, 'skill-layout', { tasks: '1' })
+    const strip = page.locator('[data-left-tabs]')
+    for (const name of ['スキル', 'ファイル', 'やること', '探す']) {
+      const tab = strip.locator(`button[title="${name}"]`)
+      await expect(tab).toBeVisible()
+      // One line: as tall as an icon row, never a column of characters.
+      expect((await tab.boundingBox())!.height).toBeLessThan(48)
+      // Every tab inside the narrow column.
+      const s = (await strip.boundingBox())!
+      const b = (await tab.boundingBox())!
+      expect(b.x + b.width).toBeLessThanOrEqual(s.x + s.width + 1)
+    }
+    await strip.locator('button[title="探す"]').click()
+    await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeVisible()
+    await page.screenshot({ path: `test-results/left-tabs-${width}.png` })
+    expectNoPageErrors(state)
+  })
+}
