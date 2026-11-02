@@ -93,7 +93,21 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
   once opened.
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
+- **Too large to share** (owner decision 2026-11-02, 案A): a file sync keeps on this computer
+  because it is over 100 MB (`sync.md` step 4) carries 「共有されていません」 in its row
+  (`TreeRow` `tooLarge`, aria-label 「<name>は大きすぎて共有されていません」). Pressing it opens
+  `components/TooLargeFileHelp.tsx`: why (over 100 MB never reaches anyone else; the file is still
+  here) and what to do — 小さくする (and save it under a new name: the old name stays ignored),
+  分ける, 共有のリンクで渡す. The list comes from main's `git:unsharedLargeFiles`
+  (`findUnsharedLargeFiles` in `electron/sync/large-files.ts`: untracked files over the limit,
+  ignored or not yet; tracked ones are shared and not marked; ignored folders — `.backups/`, private
+  clones, nested repositories kept local — are not entered, so a private folder's own large files
+  are not marked), held per company folder by `hooks/useUnsharedLargeFiles.ts`
+  (`useSyncExternalStore`, reloaded 1.5 s after file events). The sync message's count stays.
+  Tests: `tests/unshared-large-files.test.ts`, `file-tree.spec.ts` 「a file sync keeps on this
+  computer for its size is marked…」.
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
+  `UnsharedLargeFileReads` (the too-large files, read-only git),
   `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
   drop: takes a file from anywhere on the computer; where the dropped file lies comes from
   `getPathForFile`, preload's `webUtils.getPathForFile`, no IPC — `File.path` is gone since

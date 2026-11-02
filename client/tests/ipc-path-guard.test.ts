@@ -62,6 +62,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'git:fileDiff': { args: [IN, 'a.txt', 'modified'], paths: [0] },
   'git:commitFileDiff': { args: [IN, 'abcdef0', 'a.txt'], paths: [0] },
   'git:listFiles': { args: [IN, ''], paths: [0] },
+  'git:unsharedLargeFiles': { args: [IN], paths: [0] },
   'git:grep': { args: [IN, 'q', ''], paths: [0] },
   'git:log': { args: [IN, '', 5], paths: [0] },
   'git:setupCompanyRemote': { args: [IN, 'co', []], paths: [0] },

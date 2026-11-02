@@ -112,6 +112,7 @@ contract.invoke git:sparseGetExclusions
 contract.invoke git:sparseSetExclusions
 contract.invoke git:sparseUncommittedChanges
 contract.invoke git:sync
+contract.invoke git:unsharedLargeFiles
 contract.invoke google:connect
 contract.invoke google:connectAll
 contract.invoke google:disconnect
@@ -373,6 +374,7 @@ contract.type ElectronAPI.gitPreview = gitPreview: Invoke<'git:preview'>
 contract.type ElectronAPI.gitRevertFile = gitRevertFile: Invoke<'git:revertFile'>
 contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
+contract.type ElectronAPI.gitUnsharedLargeFiles = gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
 contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFile'>
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
@@ -675,6 +677,7 @@ contract.type IpcInvokeChannels.'git:sparseGetExclusions' = 'git:sparseGetExclus
 contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
 contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
+contract.type IpcInvokeChannels.'git:unsharedLargeFiles' = 'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
 contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
@@ -922,6 +925,7 @@ main.handle git:sparseGetExclusions @ features/download-choices/ipc.ts (repoPath
 main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath: string, excluded: string[])
 main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
 main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string, commitMessage: string)
+main.handle git:unsharedLargeFiles @ features/git-history/ipc.ts (repoPath: string)
 main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
 main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
@@ -1198,6 +1202,8 @@ preload gitSetupCompanyRemote -> invoke git:setupCompanyRemote($0, $1, $2)
 preload gitSetupCompanyRemote : (repoPath: string, companyId: string, selectedPaths?: string[] | undefined) => Promise<GitResult & { refused?: boolean | undefined; }>
 preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
+preload gitUnsharedLargeFiles -> invoke git:unsharedLargeFiles($0)
+preload gitUnsharedLargeFiles : (repoPath: string) => Promise<{ success: boolean; files: string[]; }>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
 preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)

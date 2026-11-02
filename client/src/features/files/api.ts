@@ -106,3 +106,16 @@ export function reservedPathRefusal(targetPath: string, outbound: ReservedNameOu
 export function startDrag(filePath: string, outbound: FileDragOutbound = window.electronAPI) {
   outbound.startDrag(filePath)
 }
+
+/** Reading on this computer which files are too large for sync to share (git, read-only). */
+export type UnsharedLargeFileReads = ElectronPort<'gitUnsharedLargeFiles'>
+
+/** Company-relative paths of the files over 100 MB that sync keeps on this computer; [] when unknown. */
+export async function getUnsharedLargeFiles(rootPath: string, reads: Partial<UnsharedLargeFileReads> | undefined = window.electronAPI): Promise<string[]> {
+  try {
+    const result = await reads?.gitUnsharedLargeFiles?.(rootPath)
+    return result?.success && Array.isArray(result.files) ? result.files : []
+  } catch {
+    return []
+  }
+}

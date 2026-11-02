@@ -209,6 +209,8 @@ const api: ElectronAPI = {
     invoke('git:commitFileDiff', repoPath, commitHash, filePath),
   gitListFiles: (repoPath: string, folderPath: string) =>
     invoke('git:listFiles', repoPath, folderPath),
+  gitUnsharedLargeFiles: (repoPath: string) =>
+    invoke('git:unsharedLargeFiles', repoPath),
   gitGrep: (repoPath: string, query: string, folderPath: string) =>
     invoke('git:grep', repoPath, query, folderPath),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>

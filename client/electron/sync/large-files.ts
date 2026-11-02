@@ -153,3 +153,27 @@ export function largeFilePattern(rel: string): string {
   p = p.replace(/ +$/, spaces => spaces.replace(/ /g, '\\ '))
   return rel.includes('/') ? p : `/${p}`
 }
+
+/**
+ * The files the file tree marks 「大きすぎて共有されていません」: untracked
+ * files over the threshold — ignored already (sync's step 4 did it) or not yet
+ * (the next sync will) — repository-relative, sorted. Tracked large files are
+ * shared and not listed. Ignored folders count as one entry and are not entered
+ * (`--directory`: .backups/, .workspace/, node_modules/, private folders'
+ * clones, nested repositories kept on this computer), so a private folder's
+ * own large files are not listed here. Never downloads a blob.
+ */
+export async function findUnsharedLargeFiles(git: SimpleGit, repoPath: string, threshold = LARGE_FILE_THRESHOLD): Promise<string[]> {
+  const list = (args: string[]) => git.raw(['ls-files', '-z', '--others', '--exclude-standard', ...args])
+    .then(out => out.split('\0').filter(e => e !== '' && !e.endsWith('/')))
+  const [plain, ignored] = await Promise.all([list([]), list(['--ignored', '--directory'])])
+  const out: string[] = []
+  for (const rel of [...new Set([...plain, ...ignored])]) {
+    if (skippedBySegment(rel)) continue
+    try {
+      const st = await fs.promises.lstat(path.join(repoPath, rel))
+      if (st.isFile() && st.size > threshold) out.push(rel)
+    } catch { /* gone meanwhile */ }
+  }
+  return out.sort()
+}

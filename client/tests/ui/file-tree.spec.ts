@@ -220,3 +220,22 @@ test('「やることにつなぐ…」 hands the file to the task chooser; no i
   await expect(page.getByRole('button', { name: 'やることにつなぐ…' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+test('a file sync keeps on this computer for its size is marked; the mark explains why and what to do, without opening the file', async ({ page }) => {
+  const state = await open(page)
+  const mark = page.getByRole('button', { name: '会議の録画.mp4は大きすぎて共有されていません', exact: true })
+  await expect(mark).toBeVisible()
+  await expect(mark).toHaveText('共有されていません')
+  await expect(page.locator('[data-too-large]')).toHaveCount(1) // 10月.md and the rest: no mark
+
+  await mark.click()
+  const help = page.getByRole('dialog', { name: '大きすぎて共有されていません' })
+  await expect(help).toContainText('会議の録画.mp4')
+  await expect(help).toContainText('100MB をこえるファイルは、同期してもほかの人には届きません。')
+  await expect(help.getByRole('list', { name: 'ほかの人にも見てもらうには' }).getByRole('listitem')).toHaveCount(3)
+  for (const step of ['小さくする', '分ける', '共有のリンクで渡す']) await expect(help).toContainText(step)
+  await expect(page.getByRole('status', { name: '開いているファイル' })).toHaveText('')
+  await page.keyboard.press('Escape')
+  await expect(help).toHaveCount(0)
+  expectNoPageErrors(state)
+})
