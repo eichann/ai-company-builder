@@ -322,6 +322,10 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
     as "Completing on someone's OK". On a 知らせるだけ task an OK statement is `OK_NOT_EXPECTED`.
   - `set_when_done` (args `when_done`) and `set_reviewer` (args `reviewer`): the requester or an
     admin, never the assignee or the AI, from every non-final state but review.
+  - **確かめる人 must be able to open the task**: a `reviewer` set on create, by `set_reviewer` or
+    by `request_review` who cannot read the record → 400 `REVIEWER_CANNOT_READ` (as the assignee's
+    `ASSIGNEE_CANNOT_READ`; never names the place, nothing written), so the checker's turn is
+    never a record they cannot open.
 - **完了 from 引き受け待ち** by the assignee (or their delegate) also records 「引き受けた」: the same
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
@@ -331,7 +335,7 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   version 9 (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
-  checker completes; only the requester decides 終わったら; 引き受けた recorded with the 完了 by the
+  checker completes; only the requester decides 終わったら; a checker who cannot read it refused; 引き受けた recorded with the 完了 by the
   assignee only; `who_unless` parsing; the migration once, no entry, a company without tasks
   untouched) — mutation-checked. `record-task-ok.test.ts` runs the OK path on a `check` task.
 

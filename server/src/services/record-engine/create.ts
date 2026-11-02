@@ -14,7 +14,7 @@ import { acceptanceOf } from '../../../shared/core/core-types'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
@@ -77,8 +77,12 @@ export function creating(ctx: EngineContext) {
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v
       }
-      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner })) {
+      const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner }
+      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, place)) {
         return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
+      }
+      if (typeof fields.reviewer === 'string' && !canRead(member.companyId, fields.reviewer, place)) {
+        return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
       }
       // The state it starts in: `initial`, or one the type lists in `create_states` (task: `preparing`, the AI's turn).
       let initial = def.initial
