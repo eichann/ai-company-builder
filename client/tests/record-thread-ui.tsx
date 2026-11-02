@@ -44,7 +44,7 @@ installElectronAPI({
   },
 })
 
-const summary = (id: string, type: string) => ({ id, type, typeLabel: type, kind: 'other' as const, title: 't', summary: '', stateLabel: null, updatedAt: '2026-11-02T03:00:00Z' })
+const summary = (id: string, type: string) => ({ id, type, typeLabel: type, kind: 'other' as const, thing: 'other' as const, title: 't', summary: '', stateLabel: null, updatedAt: '2026-11-02T03:00:00Z' })
 
 function Preview() {
   const [lines, setLines] = useState<string[]>([])

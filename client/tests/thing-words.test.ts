@@ -42,7 +42,7 @@ test('a message to send reads by its channel and state: a mail draft, a Slack re
 
 test('the same state word reads per type: a task in review is not an approval waiting', () => {
   assert.equal(stateWord('review', 'task'), '確かめてもらっている')
-  assert.equal(stateWord('pending', 'approval'), '確かめ待ち')
+  assert.equal(stateWord('pending', 'approval'), '承認待ち')
   assert.equal(stateWord('cancelled', 'task'), 'やめた（しまった）')
   assert.equal(stateWord('read', 'meeting'), 'AI が読み終えた')
   assert.equal(stateWord('custom_state', 'deal'), 'custom_state')

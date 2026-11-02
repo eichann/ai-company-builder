@@ -1105,7 +1105,8 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   a company's type by its own label, never its id; `stateWord` per type; `CALM` for waiting, empty and
   failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,
   `RecordIcon`, `SourceIcon`, `SeenBy`). No 「型」, category word (やりとり, まとまり) or machine name on a
-  member's screen (`tests/thing-words.test.ts`). `typeLabel` / `stateLabel` in the views and the task list
+  member's screen (`tests/thing-words.test.ts`). 「確かめる」 is only a task's checker's word: a
+  承認のお願い says 承認待ち・承認する・断る (owner 2026-11-02; 「阿部さんの承認待ち」). `typeLabel` / `stateLabel` in the views and the task list
   carry these words; machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
   (`GET /companies/:id/members`).

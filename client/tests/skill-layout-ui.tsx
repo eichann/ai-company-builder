@@ -105,8 +105,8 @@ const COMMITS = [
   { hash: 'c1'.padEnd(40, '0'), hashShort: 'c1000000', message: '顧客一覧を追加', author: '山田 花子', date: '2026-10-21T09:00:00+09:00' },
 ]
 
-const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', kind: 'task' as const, title: 'A社 提案書を仕上げる', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
-const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめ済み', updatedAt: '2026-10-30T10:00:00Z' }
+const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', kind: 'task' as const, thing: 'task' as const, title: 'A社 提案書を仕上げる', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
+const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, thing: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめた', updatedAt: '2026-10-30T10:00:00Z' }
 
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
 // A file link clicked in a consultation's own window, after main checked it.
