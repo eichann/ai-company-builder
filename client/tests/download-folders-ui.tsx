@@ -7,6 +7,7 @@
 //   theme  light (default) | dark
 //   state  normal (default) | offline | slow (apply takes long) | confirm
 //          (leaving out a folder with local edits) | applyOffline (download fails)
+//   role   owner (default) | admin | member — the member's role in the company
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -19,6 +20,7 @@ const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
 const theme = params.get('theme') ?? 'light'
 const state = params.get('state') ?? 'normal'
+const role = params.get('role') ?? 'owner'
 if (theme === 'dark') document.documentElement.classList.add('dark')
 
 const ROOT = '/Users/demo/会社'
@@ -107,8 +109,16 @@ Object.assign(window, {
       delete envVars[name]
       return { success: true, removed: true, data: { ...ownKeys, check: { service: 'anthropic', result: 'valid' } } }
     },
+    // The member's role in the company (the settings page asks it before offering the .gitignore editor).
+    getCompanies: async () => {
+      ;(window as unknown as { __acbRoleAnswered: boolean }).__acbRoleAnswered = true
+      return { success: true, data: [{ id: 'demo', name: '株式会社デモ', slug: 'demo', ownerId: 'u1', repoPath: null, role, createdAt: '', updatedAt: '' }] }
+    },
     readFile: async () => '.backups/\n.env*\nnode_modules/\n',
-    writeFile: async () => true,
+    writeFile: async (p: string, content: string) => {
+      ;((window as unknown as { __acbWrites: unknown[] }).__acbWrites ??= []).push([p, content])
+      return true
+    },
     updateEnv: async (_root: string, changes: Record<string, string | null>) => {
       ;((window as unknown as { __acbEnvUpdates: unknown[] }).__acbEnvUpdates ??= []).push(changes)
       return { success: true }

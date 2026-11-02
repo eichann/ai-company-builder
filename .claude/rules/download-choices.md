@@ -131,7 +131,12 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   one indigo accent, light and dark). The panel reaches the main process only through
   `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
   (uncommitted changes, progress), and separate ports for the company `.env` (status only),
-  `.gitignore`, the AI's environment-variable list and the git binary status. The 同期 group
+  `.gitignore`, the AI's environment-variable list and the git binary status. 「同期しないファイル」
+  (the company's root `.gitignore`) is editable only for owners / admins (`canEditCompanyGitignore`,
+  role from `getCompanies`; unknown role → read-only); everyone else reads it with
+  「会社全体に効くので、変えられるのは管理者だけです。」 and no 保存 — the server does not check this
+  yet (`sync-guards.md` "Shared files"). Test: `tests/ui/download-folders.spec.ts`
+  「同期しないファイル: …」. The 同期 group
   also holds 「自動同期」 (`src/features/settings/components/AutoSyncSettings.tsx`; behaviour in
   `sync.md` "Automatic sync").
 - File tree: a not-downloaded folder stays visible as a muted placeholder (dashed icon,
