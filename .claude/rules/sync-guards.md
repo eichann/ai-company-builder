@@ -117,6 +117,19 @@ what git actually sees through the app's `createGit`.
   the shared `.gitignore`; one that still reached the index (a shared `!.*` outranks
   `info/exclude`) is unstaged after the `git add`, like `.backups/`. The file stays on disk
   untouched. Tests: `client/tests/sync/temp-save-files.test.ts`, `client/tests/temp-save-file.test.ts`.
+- Who may change the shared root `.gitignore` — **open hole, client-side only so far**. The
+  settings page's editor (「同期しないファイル」) is offered to owners / admins only
+  (`download-choices.md`); the push checker does **not** restrict the file, so any member (a
+  hand edit, the AI, an older app) can still push a line such as `*.xlsx` that stops new files
+  syncing for everyone. It cannot simply be made owner/admin-only on the server, because the app
+  itself writes that file for every member: sync's essentials (step 3), large files (step 4),
+  the `.env` lines (`electron/features/env/ipc.ts`), a new skill kept private / published
+  (`skills:makePrivate` / `skills:publish`) and the union-merge tidy (11.5). A
+  `[PROTECTED_CONFIG]` rejection there would restore the server's version — a private skill
+  would be shared on the next sync, a large-file line re-added and refused every sync. The real
+  fix (owner's plan 2026-11-02): move those automatic lines to `.git/info/exclude` (as nested
+  repositories were), and once no released app writes the shared `.gitignore` any more, make it
+  owner/admin-only in the push checker.
 - `.gitignore` merges with the `union` driver, declared in the repository-local
   `.git/info/attributes` (never committed, outranks `.gitattributes`, any depth;
   `sync/gitignore-merge.ts`). After replayed commits, duplicate lines the merge added are removed

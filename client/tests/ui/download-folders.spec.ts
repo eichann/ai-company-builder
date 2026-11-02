@@ -125,6 +125,27 @@ test.describe('settings', () => {
     await expect(page.getByRole('switch', { name: '自動で送る' })).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByRole('group', { name: '送る時刻' })).toContainText('09:30')
   })
+
+  // The company .gitignore applies to everyone once synced: only owners and admins get the
+  // editor. The server does not check who changes it yet (sync-guards.md "Shared files").
+  test('同期しないファイル: a member reads the list but cannot change it; an admin can', async ({ page }) => {
+    const textarea = () => page.getByRole('textbox', { name: '.gitignore の内容' })
+    await openPreview(page, 'download-folders', { role: 'member' })
+    await page.getByRole('button', { name: '同期しないファイル' }).click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __acbRoleAnswered?: boolean }).__acbRoleAnswered)).toBe(true)
+    await expect(textarea()).toHaveValue(/node_modules\//)
+    await expect(page.getByText('会社全体に効くので、変えられるのは管理者だけです。')).toBeVisible()
+    await expect(textarea()).not.toBeEditable()
+    await expect(page.getByRole('button', { name: '保存', exact: true })).toHaveCount(0)
+
+    await openPreview(page, 'download-folders', { role: 'admin' })
+    await page.getByRole('button', { name: '同期しないファイル' }).click()
+    await expect(textarea()).toBeEditable()
+    await expect(page.getByText('会社全体に効くので、変えられるのは管理者だけです。')).toHaveCount(0)
+    await textarea().fill('node_modules/\n*.tmp\n')
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __acbWrites?: unknown[] }).__acbWrites)).toEqual([['/Users/demo/会社/.gitignore', 'node_modules/\n*.tmp\n']])
+  })
 })
 
 test.describe('file tree', () => {

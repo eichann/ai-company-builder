@@ -6,6 +6,7 @@
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
+import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
@@ -17,6 +18,8 @@ export type CompanyEnvWrites = ElectronPort<'updateEnv'>
 export type GitignoreReads = ElectronPort<'readFile'>
 /** Writing the company folder's .gitignore. */
 export type GitignoreWrites = ElectronPort<'writeFile'>
+/** Asking the company server which companies the member belongs to, with their role in each. */
+export type GitignoreEditorReads = ElectronPort<'getCompanies'>
 /** Reading this computer's list of extra environment variable names the AI may see. */
 export type AgentEnvReads = ElectronPort<'getAgentEnvPassthrough'>
 /** Changing that list: widens or narrows what the AI's processes see on this computer. */
@@ -58,6 +61,23 @@ export function readGitignore(rootPath: string, reads: GitignoreReads = window.e
 
 export function writeGitignore(rootPath: string, content: string, writes: GitignoreWrites = window.electronAPI) {
   return writes.writeFile(gitignorePath(rootPath), content)
+}
+
+/**
+ * May this member edit the company .gitignore on the settings page? It applies to everyone
+ * once synced, so only owners and admins get the editor; anyone else (or an unknown role:
+ * offline, company not listed) sees it read-only. Only the page: sync's own lines (essentials,
+ * large files, a new skill kept private) are still written for every member, and the server
+ * does not check who changes the file yet (.claude/rules/sync-guards.md "Shared files").
+ */
+export async function canEditCompanyGitignore(companyId: string, reads: GitignoreEditorReads = window.electronAPI): Promise<boolean> {
+  try {
+    const result = await reads.getCompanies()
+    const role = result.success ? result.data?.find(c => c.id === companyId)?.role : undefined
+    return role !== undefined && FULL_ACCESS_ROLES.has(role)
+  } catch {
+    return false
+  }
 }
 
 export function getAgentEnvPassthrough(reads: AgentEnvReads = window.electronAPI) {
