@@ -36,6 +36,11 @@ export interface TaskSettingsRepository {
   departmentMemberIds(departmentId: string): string[]
   /** Replace who belongs to the department (kept rows keep created_at/by); a department of another company is left alone. */
   replaceDepartmentMembers(departmentId: string, userIds: string[], createdBy: string, at: string): void
+  /**
+   * Add the user to these departments (an accepted invitation's 所属), keeping everyone else;
+   * an id that is not a department of this company is skipped.
+   */
+  addDepartmentMember(userId: string, departmentIds: string[], createdBy: string, at: string): void
   /** The departments the user belongs to (the member left the company → removeMember). */
   departmentIdsOf(userId: string): string[]
   /**

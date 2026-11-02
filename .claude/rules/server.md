@@ -362,6 +362,16 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   records the account (`signup_user_id`); a second sign-up with the link is refused; accepting is
   a compare-and-set on `used_by` and, for a claimed link, only by that account.
   `expiresInDays`: integer 1–30 (default 7).
+- An invitation may carry 所属 (`departmentIds`, 2026-11-02, 管理画面の見直し 2-2): unique ids of
+  the inviting company's departments (owner / admin, as for invitations; another company's id
+  answers 400 like an unknown one, nothing created; `invitations.department_ids`, JSON). Accepting
+  adds those `department_members` rows (created by the inviter) in the accept transaction,
+  skipping a department deleted since; the app's first setup downloads exactly them
+  (`download-choices.md`). The public `GET /invitations/:token` answers `inviterName` and
+  `departmentNames` for the page (「〇〇さんが、（会社名）に招待しています」); `/api/config` answers
+  `appDownloadUrl` (`APP_DOWNLOAD_URL`, https only, `lib/config.ts`). The page's 「アプリを開く」
+  is `ai-company-builder://open?server=<origin>` (`admin/src/lib/app-link.ts`): the origin only,
+  never the token. `account-security.test.ts` 「所属 on the link」, `admin/tests/invite.test.tsx`.
 - Permission model: `resolveAccess` / `writeAccessSummary` / `canReadPrivateScope` live in
   `shared/core/permissions.ts` (moved from `server/src/lib/permissions.ts` in R2); storage in
   `adapters/sqlite/permission-store.ts` behind `ScopeRepository`. Reads: `services/permission-views.ts`

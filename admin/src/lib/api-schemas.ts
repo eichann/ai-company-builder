@@ -48,6 +48,7 @@ import type {
   DepartmentManager,
   EffectiveAccess,
   Invitation,
+  InvitationPreview,
   Member,
   OrphanedScope,
   AdminHome,
@@ -77,10 +78,12 @@ export const userSchema: z.ZodMiniType<User> = z.looseObject({
   createdAt: z.optional(str),
 })
 
-export const configSchema: z.ZodMiniType<{ name: string; version: string; setupComplete: boolean }> = z.looseObject({
+export const configSchema: z.ZodMiniType<{ name: string; version: string; setupComplete: boolean; appDownloadUrl?: string | null }> = z.looseObject({
   name: str,
   version: str,
   setupComplete: z.boolean(),
+  // Older servers do not send it (the invitation page then says to get the app from the admin).
+  appDownloadUrl: z.optional(nullableStr),
 })
 
 export const companySchema: z.ZodMiniType<Company> = z.looseObject({
@@ -248,16 +251,16 @@ const optionalList = z.optional(list)
 
 // Members, roles and invitations
 export const memberRoleSchema = topLevel<{ userId: string; companyId: string; role: Role }>({ userId: str, companyId: str, role })
-export const invitationValidateSchema = topLevel<{ companyName: string; role: Role; expiresAt: string }>({ companyName: str, role, expiresAt: str })
+export const invitationValidateSchema = topLevel<InvitationPreview>({ companyName: str, role, expiresAt: str, inviterName: nullableStr, departmentNames: z.array(str) })
 export const invitationAcceptSchema = topLevel<{ companyId: string; companyName: string; role: Role }>({ companyId: str, companyName: str, role })
 export const invitationsSchema = z.array(topLevel<Invitation>({
   id: str, companyId: str, companyName: str, token: str, role, createdBy: str,
   createdByName: nullableStr, createdByEmail: nullableStr,
   usedBy: nullableStr, usedByName: nullableStr, usedByEmail: nullableStr, usedAt: nullableStr,
-  expiresAt: str, createdAt: str, isExpired: bool, isUsed: bool,
+  expiresAt: str, createdAt: str, isExpired: bool, isUsed: bool, departmentIds: z.array(str),
 }))
 export const createdInvitationSchema = topLevel<CreatedInvitation>({
-  id: str, token: str, companyId: str, companyName: str, role, expiresAt: str, createdAt: str,
+  id: str, token: str, companyId: str, companyName: str, role, expiresAt: str, createdAt: str, departmentIds: z.array(str),
 })
 
 // Permissions

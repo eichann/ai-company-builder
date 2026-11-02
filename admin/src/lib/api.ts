@@ -805,18 +805,31 @@ export interface Invitation {
   createdAt: string
   isExpired: boolean
   isUsed: boolean
+  /** The departments the invitee will belong to (所属) once they accept; [] = none chosen. */
+  departmentIds: string[]
 }
 
 /** POST /companies/:id/invitations (201): the new link only — no creator/use details yet. */
-export type CreatedInvitation = Pick<Invitation, 'id' | 'token' | 'companyId' | 'companyName' | 'role' | 'expiresAt' | 'createdAt'>
+export type CreatedInvitation = Pick<Invitation, 'id' | 'token' | 'companyId' | 'companyName' | 'role' | 'expiresAt' | 'createdAt' | 'departmentIds'>
+
+/** GET /invitations/:token (public): what the invitation page shows before an account exists. */
+export interface InvitationPreview {
+  companyName: string
+  role: Role
+  expiresAt: string
+  /** Who created the link (name, else email); null when that account is gone. */
+  inviterName: string | null
+  /** The 所属 departments' names. */
+  departmentNames: string[]
+}
 
 export const invitationsApi = {
   list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/invitations`, invitationsSchema),
 
-  create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7) =>
+  create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7, departmentIds: string[] = []) =>
     getData(`/api/companies/${enc(companyId)}/invitations`, createdInvitationSchema, {
       method: 'POST',
-      body: { role, expiresInDays },
+      body: { role, expiresInDays, departmentIds },
     }),
 
   delete: (companyId: string, invitationId: string) =>

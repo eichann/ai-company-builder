@@ -18,6 +18,7 @@ invitationsRoute.get('/companies/:companyId/invitations', companyAdmin('Only own
     success: true,
     data: invitations.list(actor).map(item => ({
       ...toCamelCase(item.invitation),
+      departmentIds: item.departmentIds,
       isExpired: item.isExpired,
       isUsed: item.isUsed,
       createdByName: item.createdBy?.name ?? null,
@@ -36,7 +37,7 @@ invitationsRoute.post('/companies/:companyId/invitations', companyAdmin('Only ow
   if (!company.ok) return refusal(c, company)
 
   const body = c.var.body
-  const { role = 'member', expiresInDays = 7 } = (body ?? {}) as { role?: unknown; expiresInDays?: unknown }
+  const { role = 'member', expiresInDays = 7, departmentIds } = (body ?? {}) as { role?: unknown; expiresInDays?: unknown; departmentIds?: unknown }
 
   if (role !== 'admin' && role !== 'member') {
     return c.json({ error: 'Invalid role. Must be "admin" or "member"' }, 400)
@@ -47,8 +48,10 @@ invitationsRoute.post('/companies/:companyId/invitations', companyAdmin('Only ow
     || expiresInDays < MIN_INVITATION_DAYS || expiresInDays > MAX_INVITATION_DAYS) {
     return c.json({ error: `expiresInDays must be an integer from ${MIN_INVITATION_DAYS} to ${MAX_INVITATION_DAYS}` }, 400)
   }
+  const departments = invitations.departmentsFor(actor, departmentIds)
+  if (!departments.ok) return refusal(c, departments)
 
-  const created = invitations.create(actor, role, expiresInDays)
+  const created = invitations.create(actor, role, expiresInDays, departments.value)
 
   return c.json({
     success: true,
@@ -60,6 +63,7 @@ invitationsRoute.post('/companies/:companyId/invitations', companyAdmin('Only ow
       role: created.role,
       expiresAt: created.expiresAt,
       createdAt: created.createdAt,
+      departmentIds: created.departmentIds,
     },
   }, 201)
 })
@@ -82,12 +86,16 @@ invitationsRoute.get('/invitations/:token', publicRoute('the sign-up page checks
   const found = invitations.check(c.req.param('token'))
   if (!found.ok) return refusal(c, found)
 
+  const { invitation, inviterName, departmentNames } = found.value
   return c.json({
     success: true,
     data: {
-      companyName: found.value.company_name,
-      role: found.value.role,
-      expiresAt: found.value.expires_at,
+      companyName: invitation.company_name,
+      role: invitation.role,
+      expiresAt: invitation.expires_at,
+      // The page's 「〇〇さんが、（会社名）に招待しています」 and 「（部署）のメンバーとして参加します」.
+      inviterName,
+      departmentNames,
     },
   })
 })

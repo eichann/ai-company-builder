@@ -177,3 +177,20 @@ export const PRACTICE_UPSTREAMS = practiceUpstreamsFrom(process.env)
 export function publicUrl(): string {
   return (process.env.PUBLIC_URL?.trim() || 'http://localhost:3001').replace(/\/+$/, '')
 }
+
+/**
+ * Where members download the desktop app (Mac), shown on the invitation page after joining
+ * (`APP_DOWNLOAD_URL`, e.g. a release's .dmg). Only an https URL without credentials is used;
+ * anything else is null (the page then says to get the app from the admin). Read per call.
+ */
+export function appDownloadUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = env.APP_DOWNLOAD_URL?.trim()
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || url.username || url.password) return null
+    return url.toString()
+  } catch {
+    return null
+  }
+}

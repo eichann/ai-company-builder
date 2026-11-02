@@ -50,6 +50,13 @@ export function sqliteTaskSettingsRepository(conn: Database.Database, companyId:
         for (const userId of userIds) insert.run(companyId, departmentId, userId, at, createdBy)
       })()
     },
+    addDepartmentMember(userId, departmentIds, createdBy, at) {
+      const insert = conn.prepare(`
+        INSERT OR IGNORE INTO department_members (company_id, department_id, user_id, created_at, created_by)
+        SELECT company_id, id, ?, ?, ? FROM departments WHERE company_id = ? AND id = ?
+      `)
+      for (const departmentId of departmentIds) insert.run(userId, at, createdBy, companyId, departmentId)
+    },
     departmentIdsOf(userId) {
       return (conn.prepare(`
         SELECT department_id FROM department_members WHERE company_id = ? AND user_id = ? ORDER BY created_at, department_id

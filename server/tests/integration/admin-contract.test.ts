@@ -88,7 +88,7 @@ const TYPES: Record<string, string> = {
   PluginRoles: 'PluginRolesView',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
-  InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
+  InvitationValidate: 'InvitationPreview',
   InvitationAccept: '{ companyId: string; companyName: string; role: Role }',
   Departments: 'Department[]',
   Department: 'Department',

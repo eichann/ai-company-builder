@@ -100,9 +100,12 @@ export const companySchema = `
     CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_company_folder ON departments(company_id, folder);
 `
 
-/** Add the invitation claim columns to an existing invitations table (idempotent). */
+/** Add the invitation claim and 所属 columns to an existing invitations table (idempotent). */
 export function migrateInvitationClaims(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(invitations)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('signup_claimed_at')) conn.exec(`ALTER TABLE invitations ADD COLUMN signup_claimed_at TEXT`)
   if (!cols.has('signup_user_id')) conn.exec(`ALTER TABLE invitations ADD COLUMN signup_user_id TEXT`)
+  // The departments the invitee will belong to (所属), chosen by who invited them: JSON list of
+  // department ids of this company, added to department_members when the link is accepted.
+  if (!cols.has('department_ids')) conn.exec(`ALTER TABLE invitations ADD COLUMN department_ids TEXT NOT NULL DEFAULT '[]'`)
 }
