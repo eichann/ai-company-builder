@@ -5,6 +5,7 @@
  */
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { HTTPException } from 'hono/http-exception'
 import { auth, authDb } from './lib/auth'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
@@ -55,6 +56,7 @@ import { pluginBridgeRoute } from './routes/plugin-bridge'
 import { pluginStepsRoute } from './routes/plugin-steps'
 // lane C ▲
 import { requestLog } from './lib/request-log'
+import { logError } from './lib/error-log'
 import { services } from './composition'
 
 export const app = new Hono()
@@ -76,6 +78,22 @@ app.use('*', cors({
 
 // Record the desktop-app build (X-ACB-Client-Version) per member and company.
 app.use('/api/*', clientActivityMiddleware)
+
+// What no route handled. A handler that throws gets one fixed answer: an error's message can hold
+// a git command line, a path, a private folder's name or what the member sent, so neither the
+// answer nor the log line carries it (logError prints the kind, the request id — which ties it to
+// the request line — and code locations). Routes keep answering their own errors as before; this
+// replaces Hono's default (plain "Internal Server Error" and console.error of the whole error).
+// An HTTPException keeps the answer it carries, as with the default handler.
+export const INTERNAL_ERROR = { error: 'サーバーでエラーが起きました', code: 'INTERNAL' } as const
+export const NOT_FOUND = { error: 'Not found', code: 'NOT_FOUND' } as const
+
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse()
+  logError('http', 'Unhandled error in a request', err)
+  return c.json(INTERNAL_ERROR, 500)
+})
+app.notFound((c) => c.json(NOT_FOUND, 404))
 
 // Health check
 app.get('/', (c) => {
