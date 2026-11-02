@@ -246,7 +246,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
-  `data-plugin-operation` parts; `plugins.md` "The app"), `minutesDealChoices`
+  `data-plugin-operation` parts; `plugins.md` "The app"), `secondOpinions` (the other AI's answer,
+「Codex の答えを全部見る」, `chat-and-agents.md`), `minutesDealChoices`
   (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
   `outbound-mail.md`). The app's cards come back after the text in
   the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or

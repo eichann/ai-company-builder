@@ -8,6 +8,7 @@ import type { MinutesBundleChoiceCard } from './minutes-app'
 import type { MailDraftCard } from './outbound-mail'
 import type { StoredToolLine } from './tool-display'
 import type { AppInstruction } from './app-instruction'
+import type { SecondOpinionRecord } from './agents/second-opinion'
 export interface ChatSession {
   id: string
   companyId: string
@@ -37,6 +38,8 @@ export interface ChatSession {
     cardOrder?: string[]
     /** Mail drafts the AI made in this reply, drawn by the app with 「確かめて送る」 (outbound-mail.ts); shown after its text. */
     mailDrafts?: MailDraftCard[]
+    /** 「もう一方の AI に聞く」: the other AI's answers in this reply, shown as folded quotes after its text (agents/second-opinion.ts). */
+    secondOpinions?: SecondOpinionRecord[]
     /** Plain-Japanese labels of the app's tools this reply called, by tool name (tool-display.ts; the calls stay `[Tool: name]` markers in `content`). */
     toolLines?: Record<string, StoredToolLine>
     /** The app composed this message for the AI (app-instruction.ts): sent, never shown or previewed as the member's words. */

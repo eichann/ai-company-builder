@@ -17,6 +17,8 @@
  */
 import { companyPath, countOf, shortText } from './tool-display-text'
 import type { ToolDisplay } from './tool-display'
+import { AGENTS, AGENT_IDS } from './agents/registry'
+import { secondOpinionToolId } from './agents/second-opinion'
 
 // --- Past tense and progressive of an action label (dictionary form) -----------------------
 const E_OR_I_ROW = 'えけげせぜてでねへべぺめれいきぎしじちぢにひびぴみり'
@@ -98,6 +100,20 @@ export const CORE_ACTION_LABELS: Readonly<Record<string, string>> = {
 const say = (label: string, running: string, many: string, describe?: ToolDisplay['describe']): ToolDisplay => ({ label, running, many, ...(describe ? { describe } : {}) })
 const records = (name: string) => `mcp__acb_records__${name}`
 
+/** What the other AI was shown: 「この相談とファイル 2 件を見せました」 (never a path or the question). */
+function shownDetail(input: Record<string, unknown>): string | undefined {
+  const files = countOf(input.files)
+  return files > 0 ? `この相談とファイル ${files} 件を見せました` : 'この相談を見せました'
+}
+
+/** 「Codex に聞きました」: one tool per agent that can be asked (shared/agents/second-opinion.ts). */
+const SECOND_OPINION_DISPLAYS: Record<string, ToolDisplay> = Object.fromEntries(AGENT_IDS
+  .filter(id => AGENTS[id].capabilities.secondOpinion)
+  .map(id => {
+    const name = AGENTS[id].shortLabel
+    return [secondOpinionToolId(id), say(`${name} に聞きました`, `${name} に聞いています`, `${name} に {n} 回聞きました`, shownDetail)]
+  }))
+
 /** Every fixed ACB tool. A tool made from a type or a plugin is not listed (see `acbToolDisplay`). */
 export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   // The company map (records/tools.ts).
@@ -142,6 +158,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   // The question is the member's topic, never a URL path.
   mcp__acb_web__web_research: say('Webで調べました', 'Webで調べています', 'Webで {n} 回調べました', input => shortText(input.question)),
   mcp__acb_ask__ask_user: say('質問しました', '質問しています', '{n} 回質問しました'),
+  ...SECOND_OPINION_DISPLAYS,
 }
 
 /** A fixed tool's display, for its definition; throws at load if it is missing here. */

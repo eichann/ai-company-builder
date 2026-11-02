@@ -36,6 +36,9 @@ paths:
   - "client/shared/review-request.ts"
   - "client/src/features/chat/components/ReviewRequestCard.tsx"
   - "client/tests/review-request.test.ts"
+  - "client/shared/agents/second-opinion.ts"
+  - "client/src/features/chat/components/SecondOpinionQuote.tsx"
+  - "client/tests/second-opinion.test.ts"
 ---
 
 # Chat agents (Claude Code, Codex)
@@ -51,10 +54,11 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
   (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
   (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
-  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader) and `capabilities`
+  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader / secondOpinion), `askNames` (how a
+  member names the agent in a message: 「Codex」「コーデックス」, 「Claude」「クロード」) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
-  webReader, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
+  webReader, secondOpinion, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
   `minCliVersion` (Codex: the oldest CLI the app starts, checked with `--version` before a chat
   turn and in the settings check — `agent-sandbox.md`).
 - **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and
@@ -254,6 +258,52 @@ tool), renderer `ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`.
   sends `REVIEW_CONFIRM_MESSAGE`, 「直してほしい」 focuses the composer, a file opens in the
   editor (the `file.open` command, registered by the main screen; `commands.md`). Tests: `client/tests/review-request.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
+
+## 「もう一方の AI に聞く」 (asking the other AI, owner 2026-11-02)
+
+`client/shared/agents/second-opinion.ts` (pure: ids, limits, input check, who may be asked, the
+material, the answer's header, the record), `electron/agents/second-opinion.ts` (the tool),
+`second-opinion-runner.ts` + `claude-second-opinion.ts` / `codex-second-opinion.ts` (the asked
+agent), renderer `SecondOpinionQuote.tsx`. Tests `client/tests/second-opinion.test.ts`
+(each guard mutation-checked).
+
+- A conversation, not a feature screen: no window, card or 「〇〇の案を採る」 button. The member
+  writes 「Codex はどう言ってる？」; the AI says 「Codex に聞いてみます」, calls the tool (row
+  「Codex に聞きました」 + 「この相談とファイル n 件を見せました」), and sums the answer up in the
+  conversation (①… → 直しました / そのままにしました, 「どうしますか？」). The other AI's own words are
+  a folded quote 「Codex の答えを全部見る」 after the reply's text: a `data-second-opinion` part,
+  stored with the reply as `secondOpinions`, drawn as plain text (no links, no images).
+- **Only when the member asked.** `askedTargets(asker, messages)`: the request's last message
+  must be the member's own (not one the app composed, `appInstruction`) and name the agent
+  (registry `askNames`, case-insensitive). Only then does the turn get the tool (`ask_codex`,
+  `ask_claude_code` on MCP server `acb_second_opinion`, one per named agent); in any other turn
+  it does not exist. The description and the system-prompt paragraph also say never on the AI's
+  own initiative. ≤ 2 calls per turn, ≤ 10 per conversation (in memory).
+- **Read-only, narrower than the sandbox.** Registry `capabilities.secondOpinion` (Claude Code,
+  Codex) + factory `runSecondOpinion`: the other agent's own CLI with no tools at all, in a new
+  empty temp folder, the material as JSON data. Claude: `claude -p --safe-mode --tools ""
+  --permission-mode dontAsk --strict-mcp-config --setting-sources "" --disable-slash-commands
+  --no-session-persistence --max-turns 1` (verified on CLI 2.1.316: init `tools: []`,
+  `mcp_servers: []`); an init listing any tool or MCP server, or any `tool_use`, kills it. Codex:
+  the `codex-text.ts` one-shot (shell, apply_patch, web search, plugins… off, MCP servers disabled,
+  read-only, approvals never), only user / agent message and reasoning items. Model:
+  `tasks.secondOpinion` (Claude: the chat Opus; Codex: catalog default).
+- **What it sees** is what the member can see in this consultation: the AI's summary; the
+  conversation's latest 8 messages' text as shown (no tool output, no app-composed message);
+  files the app reads itself — inside the company folder after resolving symlinks, not in a
+  not-downloaded folder, not `.git/`, not secret-looking names (`.env*`, keys, `id_*`, …), text
+  only, ≤ 5 × 40 KB (120 KB in all). Private folders: the private-read guard treats the tool as a
+  send-out (`otherAiMessage`, kind `send`, #465's per-conversation consent); the tool itself also
+  asks (so Codex, without the guard's hooks, is covered too) when the conversation read a
+  private folder or a shown file is in one; no one to ask → refused.
+- **Availability, time, stop.** Claude must be installed and signed in (`claudeReady`), Codex
+  answers `account/read` with ChatGPT; otherwise the AI relays 「Codex がこの PC で使えないので聞け
+  ませんでした」. 180 s per call (Codex's `tool_timeout_sec` leaves room for the private-read
+  question). The member's stop and an administrator's stop (`chat-turns` abort) kill it. The
+  emergency stop's 外部の MCP kind refuses it (category `mcp-external`). Logs carry durations and
+  counts only.
+- Not built: a company setting of which AI may be asked (none exists; members choose their AI
+  freely today).
 
 ## The company map's tools (`acb_records`)
 

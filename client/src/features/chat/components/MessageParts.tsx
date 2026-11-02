@@ -19,6 +19,8 @@ import { ApprovalCard } from './ApprovalCard'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard } from '../../../../shared/minutes-app'
 import { MinutesBundleChoiceCard } from './MinutesBundleChoiceCard'
 import { SteerInstructionView } from './SteerInstruction'
+import { SecondOpinionQuote } from './SecondOpinionQuote'
+import { SECOND_OPINION_PART_TYPE, readSecondOpinionRecord, type SecondOpinionRecord } from '../../../../shared/agents/second-opinion'
 import { BrokerKeyNeededCard } from './BrokerKeyNeededCard'
 import { brokerKeyNeedsOf } from '../brokerKeyNeeds'
 import { planParts } from '../toolRows'
@@ -94,6 +96,12 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
   const lastIndex = parts.length - 1
   // Searched once the reply has ended (not per streamed chunk): a "no key" answer → a 「自分の鍵」 card.
   const keyNeeds = useMemo(() => (isStreaming ? [] : brokerKeyNeedsOf(parts)), [parts, isStreaming])
+  // 「Codex の答えを全部見る」: after the reply's text, where the AI has summed the answer up.
+  const secondOpinions = useMemo(() => parts.flatMap(part => {
+    if (part.type !== SECOND_OPINION_PART_TYPE) return []
+    const record = readSecondOpinionRecord((part as { data?: unknown }).data)
+    return record ? [record] : []
+  }).filter((record, i, all) => all.findIndex(r => r.id === record.id) === i), [parts])
 
   return (
     <>
@@ -143,6 +151,7 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         return null
       })}
+      {secondOpinions.map((record: SecondOpinionRecord) => <SecondOpinionQuote key={`second-opinion:${record.id}`} record={record} />)}
       {keyNeeds.map(service => <BrokerKeyNeededCard key={`key-needed:${service}`} service={service} />)}
     </>
   )

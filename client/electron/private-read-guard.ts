@@ -22,6 +22,8 @@ import { foldAsciiCase, repoRelativePath } from '../shared/write-access'
 import { excludedFolderOf } from '../shared/sparse-paths'
 import { bashWriteTargets } from './write-guard'
 import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
+import { secondOpinionTargetOf } from '../shared/agents/second-opinion'
+import { agentShortLabel } from '../shared/agents/registry'
 
 export interface PrivateReadContext {
   /** The company's checkout root (absolute). */
@@ -260,6 +262,11 @@ export function webResearchMessage(): string {
   return `${PREFIX}Webで調べるために、AIが書いた質問を外部（検索やWebサイト）に送ろうとしています。質問に非公開の内容が含まれていないか確認してください。`
 }
 
+/** 「もう一方の AI に聞く」: the material goes to another company's AI (second-opinion.ts). */
+export function otherAiMessage(name: string): string {
+  return `${PREFIX}${name}（別の会社の AI）に意見を聞くために、この相談の内容を送ろうとしています。非公開の内容が含まれていないか確認してください。`
+}
+
 export function shellWriteMessage(command: string): string {
   return `${PREFIX}このコマンド（${command}）は、会社フォルダの公開の場所に書き込む可能性があります。全員に共有されてもよい内容か確認してください。`
 }
@@ -362,6 +369,8 @@ function askFor(ctx: PrivateReadContext, toolName: string, toolInput: Record<str
     return askSend(sendOutMessage(what))
   }
   if (toolName === WEB_RESEARCH_TOOL_ID) return askSend(webResearchMessage())
+  const otherAi = secondOpinionTargetOf(toolName)
+  if (otherAi) return askSend(otherAiMessage(agentShortLabel(otherAi)))
   const mcp = /^mcp__(.+?)__/.exec(toolName)
   if (mcp && !APP_MCP_SERVERS.includes(mcp[1])) return askSend(sendOutMessage(toolName))
   return { ask: false }

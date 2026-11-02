@@ -23,6 +23,8 @@ import { referenceSchemas } from '../electron/consultations/tools'
 import { COMPANY_FILE_TOOL_NAMES, companyFileToolId } from '../electron/company-files/tools'
 import { REVIEW_TOOL_ID } from '../shared/review-request'
 import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
+import { secondOpinionToolId } from '../shared/agents/second-opinion'
+import { AGENT_IDS, agentCan } from '../shared/agents/registry'
 import { CHOICE_TOOL_NAMES } from '../shared/choice-prompt'
 import { builtinToolDisplay, readToolLine, toolLineOf, type ToolDisplay } from '../shared/tool-display'
 import { ACB_TOOL_DISPLAYS, CORE_ACTION_LABELS, CORE_TYPE_LABELS, actionToolDisplay, pluginOperationDisplay } from '../shared/acb-tool-displays'
@@ -89,7 +91,7 @@ test('every ACB tool a turn can get has a plain-Japanese label (records, plugins
   const appTools = [
     ...Object.keys(referenceSchemas).map(n => `mcp__acb_consultations__${n}`),
     ...COMPANY_FILE_TOOL_NAMES.map(companyFileToolId),
-    REVIEW_TOOL_ID, WEB_RESEARCH_TOOL_ID, ...[...CHOICE_TOOL_NAMES].filter(n => n.startsWith('mcp__')),
+    REVIEW_TOOL_ID, WEB_RESEARCH_TOOL_ID, ...AGENT_IDS.filter(id => agentCan(id, 'secondOpinion')).map(secondOpinionToolId), ...[...CHOICE_TOOL_NAMES].filter(n => n.startsWith('mcp__')),
     ...specs.map(s => `mcp__acb_records__${s.name}`),
   ]
   for (const name of appTools) assertPlain(name, displays.get(name))
