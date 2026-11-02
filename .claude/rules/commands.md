@@ -70,7 +70,8 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `settings.openOwnKey` `{ service? }` | view | `AppShell.tsx`: Settings → 「自分の鍵」, that service shown first (highlighted, its form open when the member may register; a new request remounts the panel) | the chat's 「<サービス> の鍵がありません」 card (`features/chat/components/BrokerKeyNeededCard.tsx`; a button only while a handler exists, `useCommandAvailable` — none in a consultation's own window) |
 | `records.runAction` `{ recordId, action, expectedVersion, note?, args?, links?, ok? }` | outbound (changes shared state, tells the person it names) | none yet (the task screen, milestone 5); choices from `client/shared/record-actions.ts` | none yet (`records.md`) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button calls the same function directly |
-| `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
+| `find.byName` ⌘K (app) | view | `AppShell.tsx`: 探す ⌘K, `FindPalette` — open anything by name (records the server finds, files, the open tabs as 「最近開いたもの」) | the shortcut |
+| `file.search` ⌘P (app) | view | `AppShell.tsx`: the same 探す window (kept for members used to ⌘P) | the shortcut |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 探す left tab, cursor in its box | the shortcut |
 | `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
