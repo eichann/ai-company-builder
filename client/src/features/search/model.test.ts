@@ -32,3 +32,20 @@ test('⌘K: nothing typed lists the open tabs; typed, the records found first, t
   assert.ok(!items.some(i => i.path === '営業/memo.md'))
   assert.equal(items.filter(i => i.path).length, 30)
 })
+
+test('⌘K: skills match by name or slash command and consultations by title, after the records and before the files', () => {
+  const skills = [
+    { id: 'company-weekly', name: '週報をまとめる', command: 'weekly-report', group: '全社' },
+    { id: 'sales-proposal', name: '提案書のたたき台', command: 'proposal', group: '営業部' },
+    { id: 'company-weekly', name: '週報をまとめる', command: 'weekly-report', group: '全社' },
+  ]
+  const consultations = [{ id: 's1', title: '週報の書き方' }, { id: 's2', title: '見積の相談' }]
+  const items = paletteItems('週報', ['営業/週報.md'], [rec('task-a', 'task', 'やること')], [], { skills, consultations })
+  assert.deepEqual(items.map(i => [i.title, i.kindName]), [['task-a', 'やること'], ['週報をまとめる', 'スキル'], ['週報の書き方', 'AIへの相談'], ['週報.md', 'ファイル']])
+  assert.equal(items[1].skillId, 'company-weekly')
+  assert.equal(items[1].detail, '全社')
+  assert.equal(items[2].consultationId, 's1')
+  assert.deepEqual(paletteItems('WEEKLY', [], [], [], { skills }).map(i => i.skillId), ['company-weekly'])
+  // Nothing typed: still only what is open.
+  assert.deepEqual(paletteItems('', [], [], [], { skills, consultations }), [])
+})

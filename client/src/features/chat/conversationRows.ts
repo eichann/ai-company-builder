@@ -32,6 +32,16 @@ export function buildConversationRows(sessions: ChatSessionSummary[], tabs: Conv
         (b.session?.updatedAt ?? '\uffff').localeCompare(a.session?.updatedAt ?? '\uffff'))
 }
 
+/**
+ * 「AIへの相談」 for 探す ⌘K: the stored conversations under the titles the list shows, pinned first,
+ * then newest; blank leftovers (never listed) are left out.
+ */
+export function paletteConsultations(sessions: readonly ChatSessionSummary[]): { id: string; title: string }[] {
+  return sessions.filter(s => !isEmptyConversation(s) && s.title.trim())
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt.localeCompare(a.updatedAt))
+    .map(s => ({ id: s.id, title: s.title }))
+}
+
 // Search runs over all sessions before pagination. Open and pinned chats always
 // remain visible; the limit only controls ordinary history rows in the sidebar.
 export function paginateConversationRows(rows: ReturnType<typeof buildConversationRows>, historyLimit: number) {

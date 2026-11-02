@@ -239,6 +239,31 @@ test('shortcuts: ⌘P and ⌘K open 探す by name, ⌘⇧F the 探す tab with 
   await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeFocused()
 })
 
+test('⌘K finds skills (the shown department\'s and the company-wide ones) and consultations by name; a skill opens in the スキル tab', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { consultations: '1' })
+  await deptTab(page, '営業部').click()
+  const press = () => page.evaluate(() => {
+    (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
+  })
+  const nameSearch = page.getByPlaceholder('やること・案件・ファイルなどを名前で探す')
+  const options = page.getByRole('listbox', { name: '開くもの' }).getByRole('option')
+  // A consultation by its title, labelled as the list names it.
+  await press()
+  await nameSearch.fill('見積')
+  await expect(options.filter({ hasText: '見積の相談' })).toContainText('AIへの相談')
+  await page.keyboard.press('Escape')
+  // A company-wide skill while 営業部 is shown: chosen, it opens under 全社 in the スキル tab.
+  await press()
+  await nameSearch.fill('WEEKLY')
+  await expect(options.first()).toContainText('weekly-report')
+  await expect(options.first()).toContainText('スキル')
+  await nameSearch.press('Enter')
+  await expect(nameSearch).toHaveCount(0)
+  // Its card under 全社 (営業部's skills gone) and, chosen, its detail beside it: the heading twice.
+  await expect(page.getByRole('heading', { name: 'weekly-report' })).toHaveCount(2)
+  await expect(page.getByRole('heading', { name: 'proposal' })).toHaveCount(0)
+})
+
 test('a file link clicked in a consultation\'s own window opens here, in the files tab, as a kept tab (file.open)', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await leftTab(page, 'スキル').click()

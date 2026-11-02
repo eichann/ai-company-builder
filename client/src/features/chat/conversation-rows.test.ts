@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, focusConversationRows, paginateConversationRows } from './conversationRows'
+import { buildConversationRows, focusConversationRows, paginateConversationRows, paletteConsultations } from './conversationRows'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -45,4 +45,12 @@ test('narrowed to the record open in the middle: only consultations whose topic 
   const rows = buildConversationRows(sessions, [{ id: 'tab-shown', title: 'shown', sessionId: 'shown' }], '')
   assert.deepEqual(focusConversationRows(rows, 'deal-01', 'tab-shown').map(r => r.session?.id).sort(), ['deal', 'shown'])
   assert.deepEqual(focusConversationRows(rows, 'deal-01', 'other-tab').map(r => r.session?.id), ['deal'])
+})
+test('探す ⌘K lists the consultations the list keeps (blank leftovers never), pinned first, then newest', () => {
+  const sessions = [
+    session('old', { sent: true, updatedAt: '2026-01-01' }), session('new', { sent: true, updatedAt: '2026-01-03' }),
+    session('pin', { sent: true, pinned: true, updatedAt: '2025-12-01' }), session('blank', { sent: false, updatedAt: '2026-01-04' }),
+    session('draft', { sent: false, draftInput: '下書き', updatedAt: '2026-01-02' }),
+  ]
+  assert.deepEqual(paletteConsultations(sessions).map(c => c.id), ['pin', 'new', 'draft', 'old'])
 })

@@ -57,17 +57,33 @@ export interface PaletteItem {
   path?: string
   recordId?: string
   record?: ThingRecord
+  /** A skill (its id in the スキル tab's list) or an AI consultation (its conversation id). */
+  skillId?: string
+  consultationId?: string
+  /** The line under the name: a skill's place (全社, 営業部…). */
+  detail?: string
   /** The kind's plain name shown at the right (やること, 案件…). */
   kindName: string
 }
 
+/** A skill the member has (the スキル tab's list and the company-wide ones behind slash commands). */
+export interface PaletteSkill { id: string; name: string; /** Its folder name, the slash command. */ command: string; group?: string }
+/** A consultation in 「AIへの相談」 (this computer's history), titled as the list shows it. */
+export interface PaletteConsultation { id: string; title: string }
+
 const MAX_FILES = 30
+const MAX_SKILLS = 20
+const MAX_CONSULTATIONS = 20
 
 /**
  * What ⌘K lists: with nothing typed, the open tabs (newest first); typed, the records the server
- * found by those words, then the files whose path holds them (A–Z folded), records first.
+ * found by those words, then the skills (by name or slash command), the consultations (by title)
+ * and the files (by path) that hold them, A–Z folded, each kind in its given order and capped.
  */
-export function paletteItems(query: string, files: readonly string[], records: readonly RecordViewSummary[], recent: readonly PaletteRecent[]): PaletteItem[] {
+export function paletteItems(
+  query: string, files: readonly string[], records: readonly RecordViewSummary[], recent: readonly PaletteRecent[],
+  more: { skills?: readonly PaletteSkill[]; consultations?: readonly PaletteConsultation[] } = {},
+): PaletteItem[] {
   const q = query.trim()
   if (!q) {
     return recent.map(r => 'path' in r
@@ -80,6 +96,18 @@ export function paletteItems(query: string, files: readonly string[], records: r
     key: `record:${r.id}`, title: r.title, recordId: r.id, kindName: r.typeLabel,
     record: { type: r.type, typeLabel: r.typeLabel, implements: r.thing === 'bundle' ? ['bundle'] : undefined },
   }))
+  const seen = new Set<string>()
+  for (const s of more.skills ?? []) {
+    if (seen.size >= MAX_SKILLS) break
+    if (seen.has(s.id) || !(fold(s.name).includes(fq) || fold(s.command).includes(fq))) continue
+    seen.add(s.id)
+    out.push({ key: `skill:${s.id}`, title: s.name, skillId: s.id, detail: s.group, kindName: THING_NAMES.skill })
+  }
+  let c = 0
+  for (const s of more.consultations ?? []) {
+    if (c >= MAX_CONSULTATIONS) break
+    if (fold(s.title).includes(fq)) { out.push({ key: `consultation:${s.id}`, title: s.title, consultationId: s.id, kindName: THING_NAMES.consultation }); c++ }
+  }
   let n = 0
   for (const f of files) {
     if (n >= MAX_FILES) break

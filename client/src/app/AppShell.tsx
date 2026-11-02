@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
+import { getChatSessionSummaries } from '../features/chat/api'
+import { paletteConsultations } from '../features/chat/conversationRows'
 import { refreshFileVersions } from '../features/history/refresh'
 import { RecordCard } from '../features/records/components/RecordCard'
 import { usePlaceHistory } from '../features/editor/hooks/usePlaceHistory'
@@ -364,11 +366,22 @@ export function AppShell() {
     const path = rootPath ? companyPathOf(key, rootPath) : null
     return path ? [{ key, path }] : []
   })
+  // 探す ⌘K's skills: the ones the スキル tab shows, then the company-wide ones (both already loaded).
+  const paletteSkills = useMemo(() => [...skills, ...(isCompanyWide ? [] : companySkills)]
+    .map(s => ({ id: s.id, name: s.name, command: s.skillPath?.split('/').pop() ?? '', group: s.group })), [skills, companySkills, isCompanyWide])
+  const companyId = currentCompany?.id
+  const loadPaletteConsultations = useMemo(() => companyId ? () => getChatSessionSummaries(companyId).then(paletteConsultations) : undefined, [companyId])
   const myTurnIds = (taskList.data?.items ?? []).filter(i => i.turn === 'mine' || i.turn === 'acceptance').map(i => i.id)
   // Opening the やること tab, or leaving it, means the member has seen what is in it.
   const selectLeftTab = (id: string) => {
     if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
     setLeftTab(id)
+  }
+  // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
+  const openSkillFromPalette = (id: string) => {
+    if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
+    skillsTab.selectSkill(id)
+    selectLeftTab('skills')
   }
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
@@ -617,6 +630,13 @@ export function AppShell() {
         onFileSearchSelect={handleFileSearchSelect}
         recentTabs={recentTabs}
         onOpenRecord={id => openTab(recordTabKey(id))}
+        paletteSkills={paletteSkills}
+        onOpenSkill={openSkillFromPalette}
+        loadConsultations={loadPaletteConsultations}
+        onOpenConsultation={sessionId => {
+          if (collapsedPane === 'chat') toggleChat()
+          void runCommand('chat.openConsultation', { sessionId }).catch(() => {})
+        }}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}
