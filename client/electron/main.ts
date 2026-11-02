@@ -436,7 +436,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).
-registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir })
+registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home') })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath) })

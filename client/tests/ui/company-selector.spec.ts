@@ -188,3 +188,33 @@ test('the owner\'s first upload continues when the setup call fails (the next sy
   await button(page, /既存のフォルダを開く/).click()
   await expect(opened(page)).toBeVisible()
 })
+
+test('one company and 所属: it opens by itself in the default folder and downloads only the member\'s departments', async ({ page }) => {
+  const state = await openPreview(page, 'company-selector', { companies: 'one', mine: 'd2' })
+  await expect(opened(page)).toContainText('"rootPath":"/Users/demo/AI Company Builder/阿部商店"')
+  await expect(page.getByRole('heading', { name: '会社を選択' })).toHaveCount(0)
+  expect(await callsOf(page, 'selectDirectory')).toEqual([])
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/AI Company Builder/阿部商店', 'c1', ['development']]])
+  expectNoPageErrors(state)
+})
+
+test('one company without 所属: the member is asked which departments (never everything by default)', async ({ page }) => {
+  await openPreview(page, 'company-selector', { companies: 'one' })
+  await expect(page.getByRole('heading', { name: '所属する部署を選択' })).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+})
+
+test('one company whose default folder is refused: the folder choice says why, nothing is set up', async ({ page }) => {
+  await openPreview(page, 'company-selector', { companies: 'one', folder: 'refuse', mine: 'd1' })
+  await expect(page.getByText('別の会社のフォルダです。')).toBeVisible()
+  await expect(button(page, /既存のフォルダを開く/)).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([])
+})
+
+test('several companies: the list is shown, and a first setup still uses 所属 when there is one', async ({ page }) => {
+  await open(page, { mine: 'd1' })
+  await chooseCompany(page)
+  await button(page, /既存のフォルダを開く/).click()
+  await expect(opened(page)).toBeVisible()
+  expect(await callsOf(page, 'gitSetupCompanyRemote')).toEqual([['gitSetupCompanyRemote', '/Users/demo/作業', 'c1', ['営業部']]])
+})

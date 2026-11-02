@@ -225,6 +225,8 @@ const api: ElectronAPI = {
     invoke('git:setupCompanyRemote', repoPath, companyId, selectedPaths),
   gitInspectCompanyFolder: (folder: string, companyId: string) =>
     invoke('git:inspectCompanyFolder', folder, companyId),
+  getMyDepartments: (companyId: string) => invoke('companySetup:myDepartments', companyId),
+  getDefaultParentFolder: () => invoke('companySetup:defaultParentFolder'),
   onSetupProgress: callback => subscribe('setup:progress', callback),
 
   // Sparse checkout

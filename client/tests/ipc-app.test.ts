@@ -483,3 +483,41 @@ test('an invitation link (open-url) never points an app that has a server at ano
   assert.equal((await h.invoke<{ success: boolean }>('appLink:acceptServer')).success, false)
   assert.equal(await h.invoke('config:getServerUrl'), SERVER_URL)
 })
+
+test('first setup without choices: 所属 is the signed-in member\'s own, and anything unreadable means "ask"', async () => {
+  // Signed out: nothing is asked, nothing is chosen for anyone.
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+
+  const user = { id: 'u-me', email: 'me@example.com', name: 'Me' }
+  h.server.on('POST', '/api/auth/sign-in/email', { json: { user }, headers: { 'Set-Cookie': 'better-auth.session_token=tok.me; Path=/; HttpOnly' } })
+  h.server.on('GET', '/api/me', { json: { success: true, data: user } })
+  await h.invoke('auth:signIn', 'me@example.com', 'pw')
+  await h.invoke('auth:getSession')
+
+  const members = (ids: string[]) => ({ json: { success: true, data: { canEdit: false, members: ids.map(userId => ({ userId, name: null, email: null })) } } })
+  h.server.on('GET', '/api/companies/co-m/departments', { json: { success: true, data: [{ id: 'd-sales' }, { id: 'd-dev' }, { id: 'd-support' }] } })
+  h.server.on('GET', '/api/companies/co-m/departments/d-sales/members', members(['u-other', 'u-me']))
+  h.server.on('GET', '/api/companies/co-m/departments/d-dev/members', members(['u-other']))
+  h.server.on('GET', '/api/companies/co-m/departments/d-support/members', members(['u-me']))
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: true, departmentIds: ['d-sales', 'd-support'] })
+
+  // One department unreadable: not a partial answer (which would leave a department out silently).
+  h.server.on('GET', '/api/companies/co-m/departments/d-dev/members', { status: 500, json: {} })
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+  h.server.offline = true
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+  h.server.offline = false
+  await h.invoke('auth:signOut')
+})
+
+test('the default company folder goes under the home folder\'s 「AI Company Builder」 and becomes reachable', async () => {
+  const home = path.join(h.base, 'home')
+  fs.mkdirSync(home, { recursive: true })
+  h.fake.paths.home = home
+  const parent = path.join(home, 'AI Company Builder')
+  assert.deepEqual(await h.invoke('companySetup:defaultParentFolder'), { success: true, folder: parent })
+  assert.ok(fs.statSync(parent).isDirectory())
+  // reachable like a folder picked in the dialog: a company folder inside it can be inspected
+  const inspected = await h.invoke<{ success: boolean; error?: string }>('git:inspectCompanyFolder', path.join(parent, 'サンプル商事'), 'co-x')
+  assert.doesNotMatch(inspected.error ?? '', /outside allowed directories/)
+})

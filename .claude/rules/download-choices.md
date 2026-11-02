@@ -38,6 +38,19 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 
 ## First setup (`sync/first-setup.ts`, `features/company-setup/ipc.ts`)
 
+- **A member's first time asks nothing when it can** (2026-11-02, 管理画面の見直し 2-2):
+  the departments they belong to (所属: `department_members`, set by the invitation or the
+  admin; `companySetup:myDepartments` reads each department's members with the session, any
+  unreadable one → "unknown") are downloaded without the picker (`membershipFolders`,
+  `folderSetup.ts` `kind: 'mine'`); unknown or none → the picker as below, never "everything".
+  Only on this first-setup path: an existing clone's exclusions are never changed, so no sync
+  behaviour changes. A member with exactly one company and no remembered company
+  (`companyToOpenWithoutChoosing`, `hasRememberedCompany`) gets it opened by itself in
+  `~/AI Company Builder/<会社名>` (`companySetup:defaultParentFolder`: created, registered like
+  a picked folder); that folder still goes through `git:inspectCompanyFolder`, and a refusal
+  (the member's own files there) lands on the folder choice with the reason. Tests:
+  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「one company…」,
+  `tests/ipc-app.test.ts` 「first setup without choices…」.
 - In a **fresh folder** the member picks departments first (`CompanySelector`:
   「所属する部署を選んでください。他の部署はあとから設定でダウンロードできます」). Then
   `git:setupCompanyRemote` → `checkoutSelectedDepartments`: `fetch --filter=blob:none` → persist
