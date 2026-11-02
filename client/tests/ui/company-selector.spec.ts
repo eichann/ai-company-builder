@@ -39,6 +39,18 @@ test('no companies says so; a failed list load shows why', async ({ page }) => {
   await expect(page.getByText('会社の一覧を読めませんでした')).toBeVisible()
 })
 
+test('someone the server does not let create a company is not offered it, and is told to open their invitation link', async ({ page }) => {
+  await open(page, { create: 'no' })
+  await expect(button(page, /阿部商店/)).toBeVisible()
+  await expect(button(page, /新しい会社を作成/)).toHaveCount(0)
+  await open(page, { create: 'no', companies: 'empty' })
+  await expect(page.getByText(/まだ会社に参加していません。会社に参加するには、届いた招待リンクを開いてください。/)).toBeVisible()
+  await expect(button(page, /新しい会社を作成/)).toHaveCount(0)
+  // An operator (or the first account of a fresh server) is.
+  await open(page, { create: 'yes' })
+  await expect(button(page, /新しい会社を作成/)).toBeVisible()
+})
+
 test('creating a company sends the trimmed name and goes on to its folder choice; a failure stays on the form', async ({ page }) => {
   await open(page)
   await button(page, /新しい会社を作成/).click()

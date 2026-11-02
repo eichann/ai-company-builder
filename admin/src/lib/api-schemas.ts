@@ -76,6 +76,7 @@ export const userSchema: z.ZodMiniType<User> = z.looseObject({
   email: str,
   name: nullableStr,
   createdAt: z.optional(str),
+  canCreateCompany: z.optional(z.boolean()),
 })
 
 export const configSchema: z.ZodMiniType<{ name: string; version: string; setupComplete: boolean; appDownloadUrl?: string | null }> = z.looseObject({

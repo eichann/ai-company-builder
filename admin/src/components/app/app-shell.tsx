@@ -42,6 +42,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
+import { offersCompanyCreation } from '@/lib/company-creation'
 import { roleLabel } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -171,6 +172,7 @@ function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter()
   const pathname = usePathname()
   const { companyId, company, companies, role } = useCompany()
+  const { user } = useAuth()
 
   if (!company.data) {
     return (
@@ -221,16 +223,21 @@ function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            onNavigate?.()
-            router.push('/companies/new')
-          }}
-        >
-          <Plus />
-          新しい会社を作成
-        </DropdownMenuItem>
+        {/* Only for those the server lets create a company (its operators). */}
+        {offersCompanyCreation(user) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.()
+                router.push('/companies/new')
+              }}
+            >
+              <Plus />
+              新しい会社を作成
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )
