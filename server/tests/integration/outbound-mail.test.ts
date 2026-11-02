@@ -29,6 +29,7 @@ import { GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
+import { awaitReplyDefault } from '../../../shared/core/mail'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -500,5 +501,115 @@ describe('retention (fake clock)', () => {
     expect(sentOne.providerMessageId).toBe(google.sent[0].id)
     // A draft that is still a draft keeps its body.
     expect(db.prepare("SELECT COUNT(*) AS n FROM fixed_payloads WHERE company_id = ? AND canonical IS NULL AND owner_id NOT IN (?, ?)").get(CO, sent[0].message_id, sent[1].message_id).n).toBe(0)
+  })
+})
+
+describe('返事を待つ: a new mail we send first waits for their answer (outbound-mail.md "Waiting for their answer")', () => {
+  let token: string
+  let hubRef: string
+  const day = (offset: number) => new Date(Date.now() + offset * 24 * 3600_000 + 9 * 3600_000).toISOString().slice(0, 10)
+  /** The 返事のお願い made for the interaction of a sent mail, if any. */
+  const waitingFor = (interactionId: string) => db.prepare(`
+    SELECT r.id, s.state, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
+    JOIN record_links l ON l.company_id = r.company_id AND l.source_id = r.id AND l.name = 'interaction' AND l.target_id = ?
+    WHERE r.company_id = ? AND r.type = 'reply_request'`).all(interactionId, CO) as Json[]
+  const requestCount = () => (db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND type = 'reply_request'").get(CO) as Json).n
+  /** The interaction of the mail Gmail sent last (found by the Message-ID ACB gave it). */
+  function interactionOfLastSent(): { id: string; messageId: string; fields: Json } {
+    const messageId = google.sent[google.sent.length - 1].headers['message-id']
+    const rows = db.prepare("SELECT r.id, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'interaction'").all(CO) as Json[]
+    const row = rows.find(r => JSON.parse(r.fields).message_id === messageId)
+    return { id: row?.id, messageId, fields: row ? JSON.parse(row.fields) : null }
+  }
+  async function draft(extra: Record<string, unknown> = {}) {
+    const made = await ai(token, 'POST', '/outbound', { bundleId, toRefs: [hubRef], subject: `お見積りのご送付 ${Math.random()}`, body: '見積書をお送りします。ご確認ください。', ...extra })
+    expect(made.status, made.text).toBe(201)
+    return made.body.data.draft as Json
+  }
+
+  beforeAll(async () => {
+    token = await tokenFor('m-sato')
+    hubRef = (await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot' && x.email === GOOGLE_SEED.customerSuzuki).ref
+  })
+
+  it('the card is offered the box: pre-ticked when the AI marked the draft, unticked for a draft without the mark (an older app)', async () => {
+    const marked = await draft({ expectsReply: true })
+    expect(marked.awaitReply).toEqual({ expected: true, defaultUntil: awaitReplyDefault(new Date(), []), chosenUntil: null })
+    const plain = await draft()
+    expect(plain.awaitReply).toMatchObject({ expected: false, chosenUntil: null })
+    // The AI may change its mark; a value that is not a yes / no is refused.
+    const unmarked = await ai(token, 'PUT', `/outbound/${marked.id}`, { expectedVersion: 1, expectsReply: false })
+    expect(unmarked.body.data.draft.awaitReply.expected).toBe(false)
+    expect((await ai(token, 'POST', '/outbound', { bundleId, toRefs: [hubRef], subject: 's', body: 'b', expectsReply: 'yes' })).status).toBe(400)
+  })
+
+  it('a day in the past or too far ahead is refused before anything is sent', async () => {
+    const d = await draft({ expectsReply: true })
+    const sentBefore = sentCount()
+    for (const until of [day(-2), day(400), 'tomorrow']) {
+      const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until } })
+      expect([r.status, r.body.code], until).toEqual([400, 'AWAIT_REPLY_DATE'])
+    }
+    expect(sentCount()).toBe(sentBefore)
+    expect(stateOf(d.id).state).toBe('draft')
+  })
+
+  it('nothing waits when the send fails', async () => {
+    const d = await draft({ expectsReply: true })
+    const before = requestCount()
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: false })).ok).toBe(true)
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until: day(5) } })
+    expect([r.status, r.body.code]).toEqual([409, 'RECIPIENTS_UNVERIFIABLE'])
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
+    expect(requestCount()).toBe(before)
+    expect(JSON.parse(stateOf(d.id).fields).reply_wait_until).toBeUndefined()
+  })
+
+  it('unticked: sent as before, nothing waits', async () => {
+    const d = await draft({ expectsReply: true })
+    const before = requestCount()
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash })
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(requestCount()).toBe(before)
+    expect(r.body.data.draft.awaitReply.chosenUntil).toBeNull()
+  })
+
+  it('ticked: a 返事のお願い in 返事待ち until that morning, the sender\'s, linked to the mail\'s やりとり and the task; their reply moves it to the AI\'s check', async () => {
+    const task = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '見積を送って返事をもらう', fields: { assignee: 'm-sato' } })
+    expect(task.status, task.text).toBe(201)
+    const taskId = task.body.data.record.id as string
+    const d = await draft({ expectsReply: true, taskId })
+    const until = day(5)
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until } })
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(r.body.data.draft.awaitReply.chosenUntil).toBe(until)
+    const interaction = interactionOfLastSent()
+    expect(interaction.fields).toMatchObject({ message_id: interaction.messageId, assignee: 'm-sato', thread_ref: `gmail:${google.sent[google.sent.length - 1].threadId}` })
+    const [rr] = waitingFor(interaction.id)
+    expect(rr.state).toBe('waiting_reply')
+    expect(JSON.parse(rr.fields)).toMatchObject({ assignee: 'm-sato', wait_until: `${until}T09:00`, waiting_on: expect.stringContaining('からの返事') })
+    const task2 = db.prepare("SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'task'").get(CO, rr.id) as Json
+    expect(task2.target_id).toBe(taskId)
+    // Their reply in the same thread (their mail references ours): the AI's turn to check it.
+    const answered = services.inbox.receive(CO, 'm-sato', {
+      channel: 'email', messageId: '<answer-1@a-corp.example>', references: [interaction.messageId], sourceRef: 'gmail:answer1',
+      occurredAt: new Date().toISOString(), subject: 'Re: お見積り', from: { address: GOOGLE_SEED.customerSuzuki }, to: [{ address: GOOGLE_SEED.member }],
+    })
+    expect(answered).toBe('continued')
+    expect(waitingFor(interaction.id)[0].state).toBe('checking')
+  })
+
+  it('a lost answer, then 「送られていた」: the waiting chosen at the send starts then', async () => {
+    const d = await draft({ expectsReply: true })
+    const until = day(3)
+    google.faults.dropAnswerAfterSend(1)
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until } })
+    expect(r.body.data?.outcome, r.text).toBe('unknown')
+    const before = requestCount()
+    const resolved = await person('m-sato', 'POST', `/outbound/${d.id}/resolve`, { sent: true })
+    expect(resolved.status, resolved.text).toBe(200)
+    expect(requestCount()).toBe(before + 1)
+    const interaction = interactionOfLastSent()
+    expect(JSON.parse(waitingFor(interaction.id)[0].fields).wait_until).toBe(`${until}T09:00`)
   })
 })

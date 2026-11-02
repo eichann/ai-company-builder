@@ -64,11 +64,13 @@ of the company went to (`outbound.sentDomains()`).
 
 ## Drafts and versions
 
-- Record `outbound_message` (「送るもの」, version 4; server only, `records.md`), created / changed
-  only through the service writer; folder = the まとまり's (else the meeting's) folder;
+- Record `outbound_message` (「送るもの」, version 5; server only, `records.md`), created / changed
+  only through the service writer; folder = the まとまり's (else the meeting's, the 連絡's, the
+  task's) folder (an owner-only task without まとまり / meeting: its owner's);
   `requested_by` / `assignee` = the author; fields `subject`, `payload_hash`, `payload_version`,
   `channel: email` | `slack` (one type for every channel; Slack replies: "Replies" below),
-  `slack_thread`; links `bundle`, `meeting`, `interaction` (the 連絡 it answers). The outbound
+  `slack_thread`, `expects_reply`, `reply_wait_until` ("Waiting for their answer"); links
+  `bundle`, `meeting`, `interaction` (the 連絡 it answers), `task`. The outbound
   tables keep their column names `minutes_id` / `deal_id` (the port calls them `meetingId` /
   `bundleId`).
 - Every change is a new version: the canonical content (`mailContentCanonical` — From = the
@@ -180,6 +182,59 @@ v4 additive), permission matrix + `CROSS`; `client/tests/threads-ipc.test.ts` (i
 nothing), `client/tests/ui/record-thread.spec.ts` (the thread, a Slack reply body-only, confirm
 then the hash shown, an unseen 連絡 shows nothing).
 
+## Waiting for their answer (「返事を待つ」, owner decision 2026-11-03 「①」)
+
+A new mail **we send first** (not a reply to a 連絡, not Slack: `offersAwait`) may wait for the
+other side's answer; from then on the inbox's usual machinery (`inbox.md` "The thread went on",
+"Following up") catches their reply or their silence. Nothing is sent by itself; the server runs
+no AI.
+
+- **The AI's mark**: `mail_draft_create` / `mail_draft_update` take `expectsReply` (field
+  `expects_reply`, outbound_message v5; a non-boolean → 400; ignored for a reply). Absent = no:
+  drafts of older apps / from before are unticked. `taskId` (a やること the member reads; its まとまり
+  is taken along, link `task`) names the task the mail is for (the consultation's task); a task
+  whose `prepared` links the draft counts too (`taskOf`).
+- **The view** (`awaitReply`, only where offered): `expected` (the mark), `defaultUntil` = the
+  3rd business day after now (`shared/core/mail.ts` `awaitReplyDefault`: weekends, Japanese
+  holidays, the company's own `companyHolidays`), `chosenUntil` (the day chosen at the send, else
+  null). An older server sends no `awaitReply`: the card offers nothing.
+- **The card** (`MailDraftCard`, confirm step only): 「返事を待つ（来なければ 〇月〇日（〇）の朝に知らせる）」,
+  pre-ticked from `expected`, and 「知らせる日」 (a date input, today at the earliest; a stored card's
+  default already past → the member picks). After the send: 「相手の返事を待っています（…）」.
+- **The send**: `POST …/send { hash, awaitReply?: { until } }` (IPC `outboundMail:send`'s 4th
+  argument; main lets only `{ until: YYYY-MM-DD }` leave). Checked with the body, before
+  anything leaves: not offered → 400 `AWAIT_REPLY_NOT_OFFERED`; not a day, before today, more than
+  180 days ahead → 400 `AWAIT_REPLY_DATE`. A send that fails waits for nothing. `{ hash }` alone
+  (released apps) waits for nothing, as before.
+- **After a confirmed send** (or `unknown` → 「送られていた」: the day is kept on the record as
+  `reply_wait_until` at `send_unknown`, cleared by 「送られていなかった」): the sent mail's
+  `interaction` additionally keeps our Message-ID (`message_id`, `<acb.<send id>@<domain>>`) and
+  the Gmail thread (`thread_ref`), is placed like the mail record (not only the まとまり's folder),
+  is the sender's (`assignee`) and starts `handled` (nobody's turn). Then
+  `outboundMail.onAwaitingReply` → `inbox.awaitOwnMessage` (`composition.ts`): our message is
+  registered in that interaction's thread (`inbox_messages`, direction out) and a 返事のお願い is made
+  straight in 返事待ち: assignee / requester = the sender, `wait_until` = the picked day
+  `T09:00` (`awaitReplyWaitUntil`), `waiting_on` 「〇〇さんからの返事」 (the first To's name, else
+  「<domain> の方からの返事」: no address on a shared record), a fixed `end_condition`, placed
+  like the interaction, links `interaction`, `bundle`, `counterpart` (the まとまり's, else 名寄せ of
+  the first To), `task` (reply_request v4, origin; only a task the sender reads).
+- **The task** (choice for 「③」): the task is **not** put into 返事待ち (a task's own wait has its
+  own clock and follow-up step — two clocks would nudge twice — and the task may be someone
+  else's or in a state without `wait`). The 返事のお願い links it: the task card's
+  「つながっているもの」 shows it (the inverse link), and when their reply moves it to `checking` the
+  task's assignee is told too (`reply_arrived`, only when they can read the 返事のお願い).
+- Slack: there is no way to start a Slack message (only replies in a thread), so nothing here.
+
+Tests: `server/tests/integration/outbound-mail.test.ts` 「返事を待つ」 (pre-ticked / unticked
+offer, a bad day refused with nothing sent, a failed send waits for nothing, unticked → nothing,
+ticked → the 返事のお願い with the day and the task, their reply → checking, `unknown` → 送られていた
+starts it), `server/tests/unit/inbox.test.ts` 「we sent first」 (placement, task link only when
+readable, the task's assignee told only when a reader, automatic reply ignored, the clock never
+before the morning, then follow_up), `server/tests/unit/mail-message.test.ts` (the default day,
+the day's range, v5 / v4 additive), `client/tests/outbound-mail-tools.test.ts` (only a day leaves
+main, a stored card keeps the offer), `client/tests/ui/mail-draft-card.spec.ts` (unticked old
+draft sends nothing to wait for; pre-ticked, the day changed, the send carries it).
+
 ## Retention (§9 q9)
 
 `cleanupBodies` at startup + every 24 h (`lib/mail-body-retention.ts`, one run per server, each
@@ -195,7 +250,7 @@ POST /outbound-recipients                  POST /outbound-recipients   (read; ma
 POST /outbound                             POST /outbound              (act; mail_draft_create)
 GET|PUT /outbound/:messageId               GET /outbound/:messageId (read; mail_draft_show), PUT (act; mail_draft_update)
 GET|POST /outbound/:messageId/recipients   —
-POST /outbound/:messageId/send             —   (no route: the AI cannot send)
+POST /outbound/:messageId/send             —   (no route: the AI cannot send; { hash, awaitReply? })
 POST /outbound/:messageId/resolve          —
 POST /outbound/:messageId/discard          —
 ```

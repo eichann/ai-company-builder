@@ -73,6 +73,11 @@
  * today (`ARG_DEFAULTS`). When it passes the server clock gives the task back (`WAIT_OVER`), and
  * `waitCameBack` tells a task given back so from any other 未着手.
  *
+ * We send first (owner decision 2026-11-03 「①」, outbound-mail.md "Waiting for their answer"):
+ * `outbound_message` v5 adds `expects_reply` (the drafting AI's mark: pre-ticks 「返事を待つ」),
+ * `reply_wait_until` (the day the member picked at 確かめて送る) and the link `task` (the やること the
+ * mail was drafted for); `reply_request` v4 adds the origin link `task`, and the service writer
+ * may create a 返事のお願い straight in 返事待ち (`SERVICE_TRANSITIONS`). Both additive. *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
@@ -289,7 +294,7 @@ final: [approved, stale, withdrawn, failed]
 `,
   outbound_message: `---
 label: 送るもの
-version: 4
+version: 5
 implements: [prepared]
 storage: server
 fields:
@@ -302,10 +307,13 @@ fields:
   provider_message_id: { label: 送った先での番号, kind: text, source: server }
   channel:             { label: 経路, kind: choice, options: [email, slack], option_labels: { email: メール, slack: Slack }, source: server }
   slack_thread:        { label: Slack のスレッド, kind: text, source: server }
+  expects_reply:       { label: 返事が来るはず, kind: boolean, source: server }
+  reply_wait_until:    { label: 返事を待つ日, kind: date, source: server }
 links:
   bundle:              { label: まとまり, interface: bundle, cardinality: one, inverse: messages }
   meeting:             { label: 会議, target: meeting, cardinality: one, inverse: messages }
   interaction:         { label: 返事をする連絡, target: interaction, cardinality: one, inverse: replies }
+  task:                { label: もとのタスク, target: task, cardinality: one, inverse: messages }
 states: [draft, sent, unknown, discarded]
 initial: draft
 final: [sent, discarded]
@@ -348,7 +356,7 @@ actions:
 `,
   reply_request: `---
 label: 返事のお願い
-version: 3
+version: 4
 implements: [request, prepared, outside_event]
 storage: server
 fields:
@@ -372,6 +380,7 @@ links:
   bundle:        { label: まとまり, interface: bundle, cardinality: one, inverse: reply_requests }
   counterpart:   { label: 相手, interface: counterpart, cardinality: one, inverse: reply_requests }
   prepared:      { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: reply_requests, origin: true }
+  task:          { label: もとのタスク, target: task, cardinality: one, inverse: reply_requests, origin: true }
 states: [preparing, open, waiting_reply, checking, closed, dropped]
 initial: preparing
 final: [closed, dropped]
@@ -513,6 +522,9 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     // The server clock's 「見込みの日時が過ぎた」 (WAIT_OVER, B5): the AI's nudge draft, or the assignee.
     { from: ['waiting_reply'], to: 'preparing' },
     { from: ['waiting_reply'], to: 'open' },
+    // We sent first and wait for their answer (outbound-mail.md "Waiting for their answer"): the inbox
+    // creates the 返事のお願い straight in 返事待ち (a create's `state`; no service moves one there).
+    { from: ['preparing'], to: 'waiting_reply' },
   ],
   // Not service-owned: only the server clock's 「見込みの日時が過ぎた」 (WAIT_OVER below), a state
   // change only — the writer refuses a field-only change of a type that is not service-owned.

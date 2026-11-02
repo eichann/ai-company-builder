@@ -30,6 +30,7 @@
  */
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
 import {
+  awaitReplyDefault, awaitReplyUntilProblem, awaitReplyWaitUntil,
   chatReplyCanonical, chatReplyProblems, countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS,
   MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX, type MailReplyHeaders, type RecipientSource,
 } from '../../shared/core/mail'
@@ -97,6 +98,26 @@ export interface OutboundMailDeps {
   chat?: ChatSender
   /** Every company (the retention run opens each one's handle). */
   companyIds: () => string[]
+  /** The company's own holidays (`YYYY-MM-DD`): 「返事を待つ」's default day counts business days. */
+  holidaysOf?: (companyId: string) => string[]
+}
+
+/** A new mail sent with 「返事を待つ」 ticked: the inbox starts waiting for their answer (outbound-mail.md "Waiting for their answer"). */
+export interface SentAwaitingReply {
+  companyId: string
+  userId: string
+  /** The interaction recorded for the sent mail. */
+  interactionId: string
+  /** Our Message-ID (what their reply references). */
+  messageId: string
+  sourceRef: string
+  occurredAt: string
+  /** `wait_until`: the picked day's morning. */
+  waitUntil: string
+  title: string
+  waitingOn: string
+  to: string | null
+  taskId: string | null
 }
 
 /** A reply that left (a person's confirmed send, or 「送られていた」): the inbox hears it as the company's own message in the thread. */
@@ -156,6 +177,20 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   const contextScope = (userId: string, meetingId: string | null, bundleId: string | null, interactionId: string | null = null) =>
     `${userId}|${meetingId ?? ''}|${bundleId ?? ''}${interactionId ? `|${interactionId}` : ''}`
   const replyListeners: Array<(r: ReplySent) => void> = []
+  const awaitListeners: Array<(a: SentAwaitingReply) => void> = []
+
+  /** The やること a draft was made for: its own `task` link, else a task that links it as what its AI prepared. */
+  function taskOf(companyId: string, messageId: string): string | null {
+    const records = companyData.forCompany(companyId).records
+    const own = records.linksFrom([messageId]).find(l => l.name === 'task' && l.targetId)?.targetId
+    if (own) return own
+    const preparedBy = records.linksTo([messageId]).filter(l => l.name === 'prepared').map(l => l.sourceId)
+    return records.byIds(preparedBy).find(r => r.type === 'task' && r.removedAt === null)?.id ?? null
+  }
+
+  /** 「返事を待つ」 is offered for a new mail (not a reply in a thread, not Slack). */
+  const offersAwait = (companyId: string, messageId: string, fields: Record<string, LedgerValue>) =>
+    fields.channel !== 'slack' && interactionOf(companyId, messageId) === null
 
   /** The 連絡 a draft answers (its `interaction` link), or null. */
   const interactionOf = (companyId: string, messageId: string): string | null =>
@@ -199,15 +234,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * A record the member may read, of `kind`: a meeting (type `meeting`) or a まとまり
    * (any type implementing `bundle`), or null.
    */
-  function readable(member: Member, id: unknown, kind: 'meeting' | 'bundle' | 'interaction'): RecordRow | null {
+  function readable(member: Member, id: unknown, kind: 'meeting' | 'bundle' | 'interaction' | 'task'): RecordRow | null {
     if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) return null
     const handle = companyData.forCompany(member.companyId)
     const row = handle.records.byIds([id])[0]
     if (!row || row.removedAt !== null) return null
     const fits = kind === 'meeting'
       ? row.type === MEETING_TYPE
-      : kind === 'interaction'
-        ? row.type === 'interaction'
+      : kind === 'interaction' || kind === 'task'
+        ? row.type === kind
         : currentTypes(handle.records).get(row.type)?.definition.implements.includes('bundle') === true
     if (!fits) return null
     return recordReader(member, handle.scopes.listWithRules()).record(row) ? row : null
@@ -322,6 +357,13 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       providerMessageId: typeof fields.provider_message_id === 'string' ? fields.provider_message_id : null,
       lastChangedBy: v.actorKind,
       updatedAt: s.updatedAt,
+      ...(offersAwait(companyId, mail.messageId, fields) ? {
+        awaitReply: {
+          expected: fields.expects_reply === true,
+          defaultUntil: awaitReplyDefault(new Date(deps.clock.nowMs()), deps.holidaysOf?.(companyId) ?? []),
+          chosenUntil: typeof fields.reply_wait_until === 'string' ? fields.reply_wait_until : null,
+        },
+      } : {}),
     }
   }
 
@@ -353,21 +395,30 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * The draft context from a request: a meeting, a まとまり and/or the 来た連絡 it answers, each one the
    * member may read (a meeting's or 連絡's まとまり is taken along; an owner-only 連絡 is its owner's only).
    */
-  function contextOf(member: Member, body: Record<string, unknown>): { meetingId: string | null; bundleId: string | null; interactionId: string | null; meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null } | Refusal {
+  function contextOf(member: Member, body: Record<string, unknown>): { meetingId: string | null; bundleId: string | null; interactionId: string | null; taskId: string | null; meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task: RecordRow | null } | Refusal {
     const given = (v: unknown) => v !== undefined && v !== null
     const meeting = given(body.meetingId) ? readable(member, body.meetingId, 'meeting') : null
     if (given(body.meetingId) && !meeting) return refuse('not-found', '会議が見つかりません', { code: 'RECORD_NOT_FOUND' })
     const interaction = given(body.interactionId) ? readable(member, body.interactionId, 'interaction') : null
     if (given(body.interactionId) && !interaction) return refuse('not-found', '返事をする連絡が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    // The やること the mail is for (the consultation's task): its まとまり is taken along; a reply waits there too.
+    const task = given(body.taskId) ? readable(member, body.taskId, 'task') : null
+    if (given(body.taskId) && !task) return refuse('not-found', 'やることが見つかりません', { code: 'RECORD_NOT_FOUND' })
     let bundle = given(body.bundleId) ? readable(member, body.bundleId, 'bundle') : null
     if (given(body.bundleId) && !bundle) return refuse('not-found', 'まとまり（案件など）が見つかりません', { code: 'RECORD_NOT_FOUND' })
-    for (const from of [meeting, interaction]) {
+    for (const from of [meeting, interaction, task]) {
       if (bundle || !from) continue
       const linked = companyData.forCompany(member.companyId).records.linksFrom([from.id]).find(l => l.name === 'bundle')
       bundle = linked?.targetId ? readable(member, linked.targetId, 'bundle') : null
     }
-    if (!meeting && !bundle && !interaction) return bad('meetingId, bundleId or interactionId: the meeting, まとまり or 連絡 the mail is about', 'MAIL_CONTEXT_REQUIRED')
-    return { meetingId: meeting?.id ?? null, bundleId: bundle?.id ?? null, interactionId: interaction?.id ?? null, meeting, bundle, interaction }
+    if (!meeting && !bundle && !interaction && !task) return bad('meetingId, bundleId, interactionId or taskId: the meeting, まとまり, 連絡 or やること the mail is about', 'MAIL_CONTEXT_REQUIRED')
+    return { meetingId: meeting?.id ?? null, bundleId: bundle?.id ?? null, interactionId: interaction?.id ?? null, taskId: task?.id ?? null, meeting, bundle, interaction, task }
+  }
+
+  /** The drafting AI's mark 「返事が来るはず」 (absent = no; an older app never sends it). */
+  function expectsReplyOf(body: Record<string, unknown>): boolean | Refusal | undefined {
+    if (body.expectsReply === undefined) return undefined
+    return typeof body.expectsReply === 'boolean' ? body.expectsReply : bad('expectsReply: true when the mail asks something the other side should answer')
   }
 
   /** Resolve refs: from `known` first (kept from the current version), else from fresh sources (read once, lazily). */
@@ -411,6 +462,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (!d) return notFound()
     const body = isObj(rawBody) ? rawBody : {}
     if (typeof body.hash !== 'string' || !CONTENT_HASH_RE.test(body.hash)) return bad('hash: the content hash shown on the screen')
+    // 「返事を待つ」 (a new mail only): the day the member picked, checked before anything leaves.
+    let waitDay: string | null = null
+    if (body.awaitReply !== undefined && body.awaitReply !== null && body.awaitReply !== false) {
+      if (!offersAwait(member.companyId, d.mail.messageId, d.fields)) return bad('返事を待つのは、新しく送るメールだけです（返事は元の連絡の「返事のお願い」が待ちます）。', 'AWAIT_REPLY_NOT_OFFERED')
+      const until = isObj(body.awaitReply) ? body.awaitReply.until : undefined
+      const problem = awaitReplyUntilProblem(until, new Date(deps.clock.nowMs()))
+      if (problem) return bad(problem, 'AWAIT_REPLY_DATE')
+      waitDay = until as string
+    }
     if (d.state !== 'draft') return refuse('conflict', 'この下書きはもう送ったか、捨てたか、結果を確かめている途中です。', { code: 'NOT_DRAFT', state: d.state })
     const handle = companyData.forCompany(member.companyId)
     const version = typeof d.fields.payload_version === 'number' ? d.fields.payload_version : 0
@@ -471,7 +531,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (result.ok) {
       const gmailId = isObj(result.json) && typeof result.json.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.id) ? result.json.id : null
       handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)
-      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId)
+      const threadId = isObj(result.json) && typeof result.json.threadId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.threadId) ? result.json.threadId : null
+      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId, { threadId, waitDay })
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
       handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)
@@ -484,25 +545,36 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
     // A lost answer or a 5xx: it may have been sent. Never re-sent; the person checks Gmail.
     handle.outbound.finishSend(sendId, 'unknown', result.googleReason ?? result.reason, null, at)
-    const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor })
+    // The choice is kept: 「送られていた」 later starts the waiting as a confirmed send would.
+    const moved = writer.transition(member.companyId, {
+      recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(waitDay ? { fields: { reply_wait_until: waitDay } } : {}),
+    })
     if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
     const view = viewOf(member.companyId, d.mail, d.mail.messageId)
     return view ? ok({ outcome: 'unknown', draft: view, message: MAIL_UNKNOWN_TEXT }) : notFound()
   }
 
   /** The record → sent, the retention clock, and the 「やりとり」 on its まとまり (design §1-6 step 19). */
-  function finishSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }, sendId: string | null): Outcome<MailSendAnswer> {
+  function finishSent(
+    member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }, sendId: string | null,
+    awaiting: { threadId: string | null; waitDay: string | null },
+  ): Outcome<MailSendAnswer> {
     const handle = companyData.forCompany(member.companyId)
     const moved = writer.transition(member.companyId, {
       recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor,
-      fields: { sent_at: at, ...(gmailId ? { provider_message_id: gmailId } : {}) },
+      fields: { sent_at: at, ...(gmailId ? { provider_message_id: gmailId } : {}), ...(awaiting.waitDay ? { reply_wait_until: awaiting.waitDay } : {}) },
     })
     if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
     handle.outbound.setFinished(mail.messageId, at)
     const interactionId = interactionOf(member.companyId, mail.messageId)
+    const ownId = sendId ? ourMessageId(sendId, mail.fromEmail) : null
     // A reply belongs to its 連絡's thread (one interaction per thread, inbox.md): the inbox hears it; no new receipt.
-    if (interactionId) tellReplySent(member, interactionId, 'email', sendId ? ourMessageId(sendId, mail.fromEmail) : null, gmailId ? `gmail:${gmailId}` : null, at, mail.fromEmail)
-    else recordInteraction(member, mail, at, gmailId, recipients)
+    if (interactionId) tellReplySent(member, interactionId, 'email', ownId, gmailId ? `gmail:${gmailId}` : null, at, mail.fromEmail)
+    else {
+      const waiting = awaiting.waitDay && ownId ? { messageId: ownId, threadId: awaiting.threadId } : null
+      const receipt = recordInteraction(member, mail, at, gmailId, recipients, waiting)
+      if (receipt && ownId && awaiting.waitDay) tellAwaiting(member, mail, receipt, ownId, gmailId, at, awaiting.waitDay)
+    }
     const view = viewOf(member.companyId, mail, mail.messageId)
     return view ? ok({ outcome: 'sent', draft: view }) : notFound()
   }
@@ -591,32 +663,72 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return found ? { counterpart: [found.id] } : {}
   }
 
-  function recordInteraction(member: Member, mail: OutboundMailRow, at: string, gmailId: string | null, recipients: string[]) {
+  /** The subject a draft's record holds now. */
+  function subjectOf(companyId: string, messageId: string): string {
+    const s = companyData.forCompany(companyId).records.states([messageId])[0]
+    try { return String((JSON.parse(s?.fields ?? '{}') as { subject?: unknown }).subject ?? '') } catch { return '' }
+  }
+
+  /**
+   * The 「やりとり」 of a sent new mail. With `waiting` (「返事を待つ」 ticked) it also keeps our
+   * Message-ID and the Gmail thread (their reply finds it), is placed like the mail itself and is
+   * the sender's, already handled (nobody's turn; a reply after the waiting ended is judged again by
+   * their AI, inbox.md). Without it: as before.
+   */
+  function recordInteraction(member: Member, mail: OutboundMailRow, at: string, gmailId: string | null, recipients: string[], waiting: { messageId: string; threadId: string | null } | null = null): string | null {
     const handle = companyData.forCompany(member.companyId)
     const bundle = mail.bundleId ? handle.records.byIds([mail.bundleId])[0] : undefined
-    const subjectField = handle.records.states([mail.messageId])[0]
-    let subject = ''
-    try { subject = String((JSON.parse(subjectField?.fields ?? '{}') as { subject?: unknown }).subject ?? '') } catch { subject = '' }
+    const subject = subjectOf(member.companyId, mail.messageId)
     const domains = [...new Set(recipients.map(emailDomain))].join(', ').slice(0, 500)
+    const own = handle.records.byIds([mail.messageId])[0]
+    const place = waiting && own
+      ? (own.personalOwner ? { personalOwner: own.personalOwner } : { folder: own.folder })
+      : { folder: bundle?.folder ?? null }
     const made = writer.create(member.companyId, {
-      type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), folder: bundle?.folder ?? null,
-      fields: { occurred_at: at, channel: 'email', counterpart_text: domains, source_ref: gmailId ? `gmail:${gmailId}` : null, needs_reply: false },
+      type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), ...place,
+      fields: {
+        occurred_at: at, channel: 'email', counterpart_text: domains, source_ref: gmailId ? `gmail:${gmailId}` : null, needs_reply: false,
+        ...(waiting ? { message_id: waiting.messageId, thread_ref: waiting.threadId ? `gmail:${waiting.threadId}` : null, assignee: member.userId } : {}),
+      },
       links: bundle ? { bundle: [bundle.id], ...counterpartLink(member.companyId, bundle.id) } : {},
       actor: { id: member.userId, kind: 'human', source: null },
+      ...(waiting ? { state: 'handled', quiet: true } : {}),
     })
-    if (!made.ok) logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: made.reason })
+    if (!made.ok) { logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: made.reason }); return null }
+    return made.record.id
+  }
+
+  /** 「返事を待つ」: the inbox starts waiting for their answer in that thread (never throws). */
+  function tellAwaiting(member: Member, mail: OutboundMailRow, interactionId: string, messageId: string, gmailId: string | null, at: string, waitDay: string) {
+    const handle = companyData.forCompany(member.companyId)
+    const payload = deps.payloads.current(member.companyId, KIND, mail.messageId)
+    const v = payload ? handle.outbound.version(mail.messageId, payload.version) : null
+    const first = v?.to[0] ?? null
+    // 「〇〇さんからの返事」: a name when the source gave one, else the domain (no address on a shared record).
+    const waitingOn = first ? (first.name ? `${first.name}さんからの返事` : `${emailDomain(first.email)} の方からの返事`) : '相手からの返事'
+    const event: SentAwaitingReply = {
+      companyId: member.companyId, userId: member.userId, interactionId, messageId, sourceRef: gmailId ? `gmail:${gmailId}` : `acb:${messageId}`,
+      occurredAt: at, waitUntil: awaitReplyWaitUntil(waitDay), title: titleOf(subjectOf(member.companyId, mail.messageId)), waitingOn, to: first?.email ?? null,
+      taskId: taskOf(member.companyId, mail.messageId),
+    }
+    for (const listen of awaitListeners) {
+      try { listen(event) } catch (err) { logError('outbound-mail', 'await listener failed', err) }
+    }
   }
 
   /** Who may see the draft's record: an owner-only 連絡's reply stays its owner's; else the まとまり's / meeting's / 連絡's folder. */
-  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null }): { folder: string | null } | { personalOwner: string } {
+  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): { folder: string | null } | { personalOwner: string } {
     if (ctx.interaction?.personalOwner) return { personalOwner: ctx.interaction.personalOwner }
-    return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? null }
+    // A mail for someone's own task (持ち主だけ) is theirs alone too.
+    if (!ctx.bundle && !ctx.meeting && ctx.task?.personalOwner) return { personalOwner: ctx.task.personalOwner }
+    return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? ctx.task?.folder ?? null }
   }
 
-  const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null }) => ({
+  const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null; taskId?: string | null }) => ({
     ...(ctx.bundleId ? { bundle: [ctx.bundleId] } : {}),
     ...(ctx.meetingId ? { meeting: [ctx.meetingId] } : {}),
     ...(ctx.interactionId ? { interaction: [ctx.interactionId] } : {}),
+    ...(ctx.taskId ? { task: [ctx.taskId] } : {}),
   })
 
   function chatCheck(from: string, ref: { channelId: string; threadTs: string }, body: unknown): { canonical: string } | Refusal {
@@ -658,7 +770,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   /** A new version of a draft: the content, the record's fields and the recipients, all or nothing. */
-  function newVersion(member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, canonical: string, subject: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[]): Outcome<{ draft: OutboundMailView }> {
+  function newVersion(member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, canonical: string, subject: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], extra: Record<string, LedgerValue> = {}): Outcome<{ draft: OutboundMailView }> {
     const handle = companyData.forCompany(member.companyId)
     const next = version + 1
     const at = deps.clock.now()
@@ -667,7 +779,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (!fixed || fixed.version !== next) throw new WriteFailed({ ok: false, reason: 'stale' })
       const r = writer.transition(member.companyId, {
         recordId: d.mail.messageId, action: 'edit', expectedVersion: d.recordVersion, to: null,
-        fields: { subject, payload_hash: fixed.hash, payload_version: next }, actor: { id: member.userId, ...actor, source: actor.source ?? null },
+        fields: { subject, payload_hash: fixed.hash, payload_version: next, ...extra }, actor: { id: member.userId, ...actor, source: actor.source ?? null },
       })
       if (!r.ok) throw new WriteFailed(r)
       handle.outbound.insertVersion({ messageId: d.mail.messageId, version: next, to, cc, actorKind: actor.kind, createdAt: at })
@@ -721,6 +833,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const pointer = ctx.interactionId ? pointerOf(member.companyId, ctx.interactionId).pointer : null
       if (ctx.interactionId && !pointer) return refuse('conflict', 'この連絡には、返事をするスレッドがありません。', { code: 'THREAD_UNKNOWN' })
       if (pointer?.kind === 'chat') return createChatReply(member, actor, body, ctx, pointer)
+      const expects = expectsReplyOf(body)
+      if (expects !== undefined && typeof expects !== 'boolean') return expects
       const to = refList(body.toRefs, MAIL_LIMITS.to, 'toRefs')
       if (!Array.isArray(to)) return to
       const cc = refList(body.ccRefs, MAIL_LIMITS.cc, 'ccRefs')
@@ -760,7 +874,11 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         const r = writer.create(member.companyId, {
         type: 'outbound_message', id: messageId, title: titleOf(checked.subject),
         ...placeOf(ctx),
-        fields: { requested_by: member.userId, assignee: member.userId, subject: checked.subject, payload_hash: hash, payload_version: 1, channel: 'email' },
+        fields: {
+          requested_by: member.userId, assignee: member.userId, subject: checked.subject, payload_hash: hash, payload_version: 1, channel: 'email',
+          // The AI's mark only for a new mail (a reply's waiting is its 返事のお願い's).
+          ...(expects === true && !ctx.interactionId ? { expects_reply: true } : {}),
+        },
         links: linksOf(ctx),
         actor: { id: member.userId, ...actor, source: actor.source ?? null },
         })
@@ -793,6 +911,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (toRefs !== null && !Array.isArray(toRefs)) return toRefs
       const ccRefs = body.ccRefs === undefined ? null : refList(body.ccRefs, MAIL_LIMITS.cc, 'ccRefs')
       if (ccRefs !== null && !Array.isArray(ccRefs)) return ccRefs
+      const expects = expectsReplyOf(body)
+      if (expects !== undefined && typeof expects !== 'boolean') return expects
       if (d.state !== 'draft') return refuse('conflict', 'この下書きはもう直せません。', { code: 'NOT_DRAFT', state: d.state })
       const handle = companyData.forCompany(member.companyId)
       if (handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending') return refuse('conflict', 'このメールはいま送っている途中です。', { code: 'SEND_IN_PROGRESS' })
@@ -817,7 +937,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       // A reply keeps the thread it was drafted for (the hash covers it).
       const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body, old.reply)
       if ('ok' in checked) return checked
-      return newVersion(member, actor, d, version, checked.canonical, checked.subject, resolved.to, resolved.cc)
+      const mark: Record<string, LedgerValue> = expects !== undefined && offersAwait(member.companyId, d.mail.messageId, d.fields) ? { expects_reply: expects } : {}
+      return newVersion(member, actor, d, version, checked.canonical, checked.subject, resolved.to, resolved.cc, mark)
     },
 
     /** A person types an address (「あなたが入力」): POST /outbound/:id/recipients { email, name? }. Session only. */
@@ -848,6 +969,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     /** Who hears a reply that left (the inbox: the company's own message in the thread). Bound once at wiring. */
     onReplySent(listen: (reply: ReplySent) => void): void { replyListeners.push(listen) },
 
+    /** Who starts waiting for their answer to a new mail sent with 「返事を待つ」 (the inbox). Bound once at wiring. */
+    onAwaitingReply(listen: (a: SentAwaitingReply) => void): void { awaitListeners.push(listen) },
+
     /** After an unknown send: POST /outbound/:id/resolve { sent }. sent → `sent`; not sent → back to `draft` (sending again needs 確かめて送る again). */
     resolve(member: Member, messageId: unknown, rawBody: unknown): Outcome<{ draft: OutboundMailView }> {
       const off = enabled(member.companyId)
@@ -868,10 +992,16 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         if (v) to = [...v.to, ...v.cc].map(r => r.email)
         const r = d.fields.channel === 'slack'
           ? finishChatSent(member, d.mail, d.recordVersion, at, null, { channelId: '', threadTs: '' }, actor)
-          : finishSent(member, d.mail, d.recordVersion, at, null, to, actor, last?.id ?? null)
+          : finishSent(member, d.mail, d.recordVersion, at, null, to, actor, last?.id ?? null, {
+            threadId: null, waitDay: typeof d.fields.reply_wait_until === 'string' ? d.fields.reply_wait_until : null,
+          })
         return r.ok ? ok({ draft: r.value.draft }) : r
       }
-      const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'not_sent', expectedVersion: d.recordVersion, to: 'draft', actor })
+      // Not sent: the 「返事を待つ」 of that try is chosen again at the next 確かめて送る.
+      const moved = writer.transition(member.companyId, {
+        recordId: d.mail.messageId, action: 'not_sent', expectedVersion: d.recordVersion, to: 'draft', actor,
+        ...(typeof d.fields.reply_wait_until === 'string' ? { fields: { reply_wait_until: null } } : {}),
+      })
       if (!moved.ok) return writeFailed(moved)
       if (last?.outcome === 'unknown') handle.outbound.resolveSend(last.id, 'not-sent', at)
       return draftAnswer(member, d.mail)

@@ -15,7 +15,7 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
-import type { MailDraftEdit } from '../shared/outbound-mail'
+import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
@@ -200,7 +200,7 @@ const api: ElectronAPI = {
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),
   updateOutboundMail: (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string) => invoke('outboundMail:update', companyId, messageId, edit, conversationId),
   addOutboundMailRecipient: (companyId: string, messageId: string, email: string, name?: string) => invoke('outboundMail:addRecipient', companyId, messageId, email, name),
-  sendOutboundMail: (companyId: string, messageId: string, hash: string) => invoke('outboundMail:send', companyId, messageId, hash),
+  sendOutboundMail: (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null) => invoke('outboundMail:send', companyId, messageId, hash, awaitReply),
   resolveOutboundMail: (companyId: string, messageId: string, sent: boolean) => invoke('outboundMail:resolve', companyId, messageId, sent),
   discardOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:discard', companyId, messageId),
   gitPreview: (repoPath: string) =>

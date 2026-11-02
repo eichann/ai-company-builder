@@ -16,7 +16,9 @@
  * - A person presses send; the hash of the version on screen must equal the
  *   server's. Nothing here sends.
  */
+import { addBusinessDays, addDays, isCalendarDate } from './business-days'
 import { canonicalJson } from './fixed-content'
+import { japanDateTime } from './task-settings'
 
 export const RECIPIENT_SOURCES = ['calendar', 'hubspot', 'member', 'typed', 'thread'] as const
 export type RecipientSource = typeof RECIPIENT_SOURCES[number]
@@ -171,3 +173,31 @@ export function chatReplyCanonical(c: ChatReplyContent): string {
 export function countLinks(body: string): number {
   return (body.match(/\bhttps?:\/\/[^\s<>"'）)]+/gi) ?? []).length
 }
+
+/**
+ * 「返事を待つ」 at 確かめて送る (outbound-mail.md "Waiting for their answer"): a new mail we send
+ * first may wait for the other side's answer. Their silence is noticed on the morning of the day
+ * the member picked — by default the third business day after sending (weekends, Japanese public
+ * holidays and the company's own holidays are off) — at `AWAIT_REPLY_TIME` (company clock).
+ */
+export const AWAIT_REPLY_BUSINESS_DAYS = 3
+export const AWAIT_REPLY_TIME = '09:00'
+/** The furthest day the member may pick (days after today). */
+export const AWAIT_REPLY_MAX_DAYS = 180
+
+/** The default day to notice silence: the `AWAIT_REPLY_BUSINESS_DAYS`-th business day after `sentAt` (Japan date). */
+export function awaitReplyDefault(sentAt: Date, companyHolidays: Iterable<string> = []): string {
+  return addBusinessDays(japanDateTime(sentAt).date, AWAIT_REPLY_BUSINESS_DAYS, companyHolidays)
+}
+
+/** Why `until` (a picked day, `YYYY-MM-DD`) cannot be the day to wait until at `now`, or null. */
+export function awaitReplyUntilProblem(until: unknown, now: Date): string | null {
+  if (!isCalendarDate(until)) return '返事を待つ日は、日付（YYYY-MM-DD）で選んでください。'
+  const today = japanDateTime(now).date
+  if (until < today) return '返事を待つ日には、今日かそれよりあとの日を選んでください。'
+  if (until > addDays(today, AWAIT_REPLY_MAX_DAYS)) return `返事を待つ日は、${AWAIT_REPLY_MAX_DAYS} 日先までで選んでください。`
+  return null
+}
+
+/** The stored 返事の見込み of a picked day (`wait_until`, the company's clock): that day's morning. */
+export const awaitReplyWaitUntil = (until: string) => `${until}T${AWAIT_REPLY_TIME}`
