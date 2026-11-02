@@ -80,6 +80,27 @@ test('the one-line add makes a task only the member sees, assigned to them, with
   assert.equal((await h.api.create('co1', { title: 'x', due: '明日' })).success, false)
 })
 
+test('「頼む」 from the one line: shared with the department\'s readers (never owner-only), 終わったら, and the checker when 確かめてから', async () => {
+  const h = harness({ '/api/me': { status: 200, body: { data: { id: ME } } }, 'POST /api/companies/co1/records/item': { status: 201, body: { data: { record: { id: 'task-new002' } } } } })
+  const sent = () => h.requests.filter(q => q.url.endsWith('/records/item')).at(-1)?.body
+  await h.api.create('co1', { title: '見積を直す', assignee: 'u-tanaka', whenDone: 'check', folder: '営業部', bundleId: 'deal-a00001' })
+  assert.deepEqual(sent(), {
+    type: 'task', title: '見積を直す', folder: '営業部', links: { bundle: 'deal-a00001' },
+    fields: { assignee: 'u-tanaka', when_done: 'check', reviewer: ME },
+  })
+  // 知らせるだけ is the default; 全社 (no folder) is the whole company, as records made before.
+  await h.api.create('co1', { title: '資料を送る', assignee: 'u-tanaka' })
+  assert.deepEqual(sent(), { type: 'task', title: '資料を送る', fields: { assignee: 'u-tanaka', when_done: 'notify' } })
+  // The member themselves as 担当 is their own task: owner-only, no 終わったら.
+  await h.api.create('co1', { title: '自分の', assignee: ME, whenDone: 'check' })
+  assert.deepEqual(sent(), { type: 'task', title: '自分の', personal: true, fields: { assignee: ME } })
+  const before = h.requests.length
+  for (const bad of [{ assignee: '../x' }, { whenDone: 'later' }, { folder: '../営業部' }, { folder: '/Users/me/会社' }, { bundleId: 'deal/../x' }]) {
+    assert.equal((await h.api.create('co1', { title: 'x', assignee: 'u-tanaka', ...bad } as never)).success, false, JSON.stringify(bad))
+  }
+  assert.equal(h.requests.length, before)
+})
+
 test('an action name or record id that is not one never reaches the server', async () => {
   const h = harness({})
   for (const action of ['../share', 'complete/../../x', 'Complete']) {

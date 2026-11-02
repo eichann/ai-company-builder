@@ -289,6 +289,8 @@ export function createTasksApi(deps: TasksDeps) {
         data: {
           available: true,
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
+          me: id,
+          members: Object.entries(names).map(([memberId, name]) => ({ id: memberId, name })),
           items: classifyTasks({
             me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
             bundleQuestions,
@@ -303,12 +305,28 @@ export function createTasksApi(deps: TasksDeps) {
       if (input.due != null && (typeof input.due !== 'string' || !isDateValue(input.due))) return BAD_INPUT
       const tags = input.tags && input.tags.length > 0 ? normalizeTagsValue(input.tags) : null
       if (tags !== null && typeof tags !== 'string') return BAD_INPUT
+      if (input.assignee != null && (typeof input.assignee !== 'string' || !MEMBER.test(input.assignee))) return BAD_INPUT
+      if (input.whenDone != null && input.whenDone !== 'notify' && input.whenDone !== 'check') return BAD_INPUT
+      if (input.bundleId != null && (typeof input.bundleId !== 'string' || !RECORD_ID_RE.test(input.bundleId))) return BAD_INPUT
+      const folder = input.folder == null || input.folder === '' ? null : typeof input.folder === 'string' ? fileLinkPath(input.folder) : null
+      if (input.folder != null && input.folder !== '' && !folder) return BAD_INPUT
       const id = await myId()
       if (!id) return { success: false, offline: true, code: null, error: TASKS_OFFLINE_TEXT }
-      const fields: Record<string, unknown> = { assignee: id }
+      // Asked of someone else: shared with the folder's readers, never owner-only (they could not read it).
+      const asking = !!input.assignee && input.assignee !== id
+      const fields: Record<string, unknown> = { assignee: asking ? input.assignee : id }
       if (input.due) fields.due = input.due
       if (tags) fields.tags = JSON.parse(tags) as string[]
-      const a = await call(companyId, 'POST', '/records/item', { type: 'task', title, personal: true, fields })
+      if (asking) {
+        fields.when_done = input.whenDone ?? 'notify'
+        if (input.whenDone === 'check') fields.reviewer = id
+      }
+      const body = {
+        type: 'task', title, fields,
+        ...(asking ? (folder ? { folder } : {}) : { personal: true }),
+        ...(input.bundleId ? { links: { bundle: input.bundleId } } : {}),
+      }
+      const a = await call(companyId, 'POST', '/records/item', body)
       const record = (a?.json?.data as { record?: { id?: unknown } } | undefined)?.record
       if (a?.status === 201 && typeof record?.id === 'string') return { success: true, recordId: record.id }
       return failure('create', a)

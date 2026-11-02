@@ -30,12 +30,14 @@ interface Props {
    * consultation themselves, or puts it aside. Absent where the company reads no minutes.
    */
   meetingActions?: { read: (recordId: string) => void; skip: (recordId: string) => Promise<string | null> }
+  /** The department folder on screen: a task asked of someone from the one line is shown to its readers. */
+  askFolder?: string | null
   /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
   onConsult?: (task: { id: string; title: string }) => void
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -109,7 +111,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     }
   }
   const add = async (input: TaskCreateInput): Promise<string | null> => {
-    const r = await createTask(companyId, input)
+    const r = await createTask(companyId, input.assignee ? { ...input, folder: askFolder } : input)
     if (!r.success) return r.error
     list.reload()
     return null
@@ -212,7 +214,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             ))}
           </span>
         </div>
-        <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} onAdd={add} />
+        <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} me={list.data?.me} members={list.data?.members} bundleWord={bundleWord} onAdd={add} />
         {tags.length > 0 && (
           <div role="group" aria-label="タグで絞る" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 text-[11px]">
             <button type="button" aria-pressed={shownTag === null} onClick={() => setTag(null)} className={`rounded-full px-2 py-px ${shownTag === null ? 'bg-gray-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>すべて</button>

@@ -414,6 +414,7 @@ export function AppShell() {
           activeRecordId={activeRecordId}
           onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
           onConsult={consultAbout}
+          askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
           meetingActions={minutes.available ? {
             read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },

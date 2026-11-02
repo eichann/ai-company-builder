@@ -107,6 +107,9 @@ export interface TaskListData {
   /** The company setting 「一覧を出す部署」: department ids, or null = every department. */
   listDepartmentIds: string[] | null
   items: TaskListItem[]
+  /** The member's own id and the company's members (the one line's 「担当」 picker); absent from an older main. */
+  me?: string
+  members?: Array<{ id: string; name: string }>
 }
 
 export type TaskListResult =
@@ -115,11 +118,23 @@ export type TaskListResult =
 
 export const TASKS_OFFLINE_TEXT = 'サーバーにつながらないため、やることを表示できません。'
 
-/** A new task from the list's one line: the member's own (owner-only), assigned to them. */
+/**
+ * A new task from the list's one line: the member's own (owner-only), assigned to them — or, with
+ * an `assignee` other than the member, asked of that person (「頼む」, task v9): shown to the readers
+ * of `folder` (the department on screen; none = the whole company), with 「終わったら」.
+ */
 export interface TaskCreateInput {
   title: string
   due?: string | null
   tags?: string[]
+  /** A member id; the member themselves or absent = their own task. */
+  assignee?: string | null
+  /** 「終わったら」 when asking: 知らせるだけ (default) or 確かめてから (the member checks). */
+  whenDone?: 'notify' | 'check'
+  /** The department folder whose readers see an asked task (a company path). */
+  folder?: string | null
+  /** What it belongs to (a 案件, a プロジェクト): a record id. */
+  bundleId?: string | null
 }
 
 /** An action the list or the card runs on a record (the server decides who may). */

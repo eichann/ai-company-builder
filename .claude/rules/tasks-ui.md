@@ -46,8 +46,13 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   done. `own` = the member asked it of themselves (requester and assignee).
   Each item also carries the interfaces its type implements (`implements`, from `/records/types`):
   a plugin's peek lists by them (`plugin-frame.md` "The four slots").
-- `tasks:create(companyId, { title, due?, tags? })`: the list's one line makes a task **only the
-  member sees** (`personal: true`, assignee = the member; `records.md` "Owner-only records").
+- `tasks:create(companyId, { title, due?, tags?, assignee?, whenDone?, folder?, bundleId? })`: the
+  list's one line makes a task **only the member sees** (`personal: true`, assignee = the member;
+  `records.md` "Owner-only records"). With another member as `assignee` it is **「頼む」** (task v9):
+  never owner-only (they could not read it), shown to the readers of `folder` (the department on
+  screen; 全社 = none, the whole company), `when_done` (`notify` = 知らせるだけ by default, `check` =
+  確かめてから with the member as `reviewer`). `bundleId` links what it belongs to. Main sends only a
+  member id, a `fileLinkPath`-checked folder and a record id.
 - `tasks:act(companyId, recordId, { action, expectedVersion, note?, args?, links?, ok? })`: one
   engine action with the session; the engine decides who may (`who`, `ok_from`). An action name
   that is not `[a-z][a-z0-9_]*` or a malformed record id never reaches the server's URL.
@@ -93,8 +98,12 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   the version it moved to — the list never states someone's OK; that is the card's). An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with
   「もう一度」 / 「人に渡す」 when stopped.
-- `QuickAdd` + `quickAdd.ts`: 「見積を直す 明日15時まで #営業」 → title, due (今日・明日・あさって・来週
-  [曜日]・曜日・M/D, a time N時[半] / H:MM) and tags; words not understood stay in the title.
+- `QuickAdd` + `quickAdd.ts` (no window, owner 2026-11-02): while the line has the focus, chips show
+  under it — ［期限］ (today / tomorrow / a date, a time) ［担当 自分］ (the company's members:
+  `TaskListData.members`) ［〇〇］ (the bundles the member reads, `tasks:bundles`) and, once someone
+  else is 担当, ［終わったら：知らせるだけ／確かめてから］; 「Enter で足す／頼む」. 「見積を直す 明日15時まで #営業」
+  → title, due (今日・明日・あさって・来週[曜日]・曜日・M/D, a time N時[半] / H:MM) and tags, shown in the
+  chips; words not understood stay in the title.
   Tags in use are offered while typing after 「#」, and a tag spelled differently from one in use
   (width, case, katakana / hiragana) is offered as that one (`similarTag`); once typing pauses
   the title's 「タグの候補」 are offered too ("Tag suggestions" below).

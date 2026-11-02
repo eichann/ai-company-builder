@@ -17,7 +17,7 @@ const day = (n: number) => addDays(now.date, n)
 const base = { type: 'task', typeLabel: 'タスク', version: 2, tags: [] as string[], waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, stateLabel: null }
 const it = (over: Partial<TaskListItem> & Pick<TaskListItem, 'id' | 'title' | 'turn'>): TaskListItem => ({ ...base, state: 'todo', due: null, ...over })
 let data: TaskListData = {
-  available: true, listDepartmentIds: null,
+  available: true, listDepartmentIds: null, me: 'u-me', members: [{ id: 'u-me', name: '佐藤' }, { id: 'u-tanaka', name: '田中' }, { id: 'u-abe', name: '阿部' }],
   items: [
     it({ id: 'task-acc001', title: 'セキュリティのチェックシート', turn: 'acceptance', state: 'awaiting_acceptance', due: day(5) }),
     it({ id: 'task-mine01', title: 'お礼メールを確かめて送る', turn: 'mine', due: `${day(0)}T23:59`, tags: ['営業'], bundle: { id: 'deal-a00001', title: 'A社 問い合わせ対応', typeLabel: '案件' } }),
@@ -50,6 +50,8 @@ installElectronAPI({
     },
   }),
   createTask: async (_companyId, input) => {
+    acted.push(`create ${JSON.stringify(input)}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
     data = { ...data, items: [it({ id: 'task-new001', title: input.title, turn: 'mine', due: input.due ?? null, tags: input.tags ?? [], own: true, personal: true }), ...data.items] }
     return { success: true, recordId: 'task-new001' }
   },
