@@ -4,7 +4,7 @@
  * is offered from the type definition and the member's place in the record (assignee, requester,
  * OK-giver); the server's engine still decides every action. Pure.
  */
-import { parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
+import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { RecordDetail } from '../../shared/types/records'
@@ -107,7 +107,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     .flatMap(c => {
       const a = def!.actions[c.action]
       if (a.who.length === 1 && a.who[0] === 'ai') return []
-      const direct = personMay(a.who)
+      // `who_unless`: a task to be checked first (終わったら：確かめてから) is not the assignee's to complete.
+      const direct = personMay(actionWho(a, r.fields))
       const viaOk = !direct && c.okFrom.some(f => holds(f))
       if (!direct && !viaOk) return []
       return [{

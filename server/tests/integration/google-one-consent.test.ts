@@ -4,10 +4,12 @@
  * end to end against the fake Google through the practice redirect.
  *
  * What it protects:
- * - 受信を読む is off for a company until its admin turns it on (owner decision 2026-11-02);
- * - `{ all: true }` asks exactly the union of the company's features (the admin's switches,
- *   Drive only with the Picker registered) — a feature the company turned off is never asked,
- *   not even one the member had allowed before;
+ * - 受信を読む is the company's switch (allowed by default) and each member's own (off until they
+ *   turn it on, owner decision 2026-11-02, work-switches.ts): never offered to a member whose own
+ *   switch is off;
+ * - `{ all: true }` asks exactly the union of what the member is offered (the admin's switches,
+ *   Drive only with the Picker registered, 受信を読む only when their own is on) — a feature the
+ *   company turned off is never asked, not even one the member had allowed before;
  * - a feature the company turned off is refused at the next call before anything leaves ACB;
  * - a member who unticks some scopes on Google's page keeps what they allowed, sees what is
  *   missing, and the screen does not offer them again (no loop);
@@ -162,20 +164,23 @@ const sendAs = (user: string) =>
   services.googleClient.request(CO, user, { api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw: Buffer.from('To: tanaka@div.example\r\nSubject: t\r\n\r\nhi').toString('base64url') }, scope: SEND, operation: 'gmail.send' })
 
 describe('「仕事の道具をつなぐ」: one consent for what the company offers', () => {
-  it('受信を読む is off for a company until its admin turns it on; only owners and admins switch', async () => {
+  it('受信を読む is allowed for a company by default and is the company\'s one switch; only owners and admins switch', async () => {
     expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(404)
     const saved = await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })
     expect(saved.status).toBe(200)
-    // The defaults (owner decision 2026-11-02): 受信を読む off; no Picker yet, so Drive is not offered either.
-    expect(saved.body.data).toMatchObject({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })
-    expect((await call('g-sato', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(403)
+    // The defaults (owner decision 2026-11-02): 受信を読む allowed (each member starts off); no Picker yet, so no Drive.
+    expect(saved.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
+    expect((await call('g-sato', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })).status).toBe(403)
     expect((await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'everything', on: false })).status).toBe(400)
-    // On and off again: the history says so, and off is the stored state again.
-    const on = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })
-    expect(on.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
+    // Off, on and off again: the history says so, and it is the company's 受信を読む (task settings) itself.
     const off = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })
     expect(off.body.data).toMatchObject({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })
-    expect(off.body.data.history[0]).toMatchObject({ action: 'features', detail: { feature: 'inbox', on: false } })
+    expect(services.taskSettings.settingsOf(CO).readIncoming.allowed).toBe(false)
+    const on = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })
+    expect(on.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
+    expect(services.taskSettings.settingsOf(CO).readIncoming.allowed).toBe(true)
+    const offAgain = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })
+    expect(offAgain.body.data.history[0]).toMatchObject({ action: 'features', detail: { feature: 'inbox', on: false } })
   })
 
   it('{ all } asks exactly the company\'s features in one consent, and marks them seen', async () => {
@@ -225,9 +230,12 @@ describe('「仕事の道具をつなぐ」: one consent for what the company of
     expect((await call('g-tanaka', 'GET', `${C()}/me/google`)).body.data.features).toEqual(['minutes', 'mail'])
   })
 
-  it('「あとで」 marks what is offered now; a feature the company adds later is new', async () => {
+  it('「あとで」 marks what is offered now; a feature the company adds later, or 受信を読む the member turns on, is new', async () => {
     expect((await call('g-admin', 'PUT', `${C()}/me/google/seen`)).body.data.seen).toEqual(['minutes', 'mail', 'drive'])
     expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).body.data.companyFeatures).toEqual(['minutes', 'mail', 'drive', 'inbox'])
+    // Allowed, but the admin's own 受信を読む is off: not offered to them.
+    expect((await call('g-admin', 'GET', `${C()}/me/google`)).body.data.companyFeatures).toEqual(['minutes', 'mail', 'drive'])
+    expect(services.workSwitches.set({ companyId: CO, userId: 'g-admin', role: 'admin' }, { switch: 'readIncoming', on: true }).ok).toBe(true)
     const mine = (await call('g-admin', 'GET', `${C()}/me/google`)).body.data
     expect(mine.companyFeatures.filter((f: string) => !mine.seen.includes(f))).toEqual(['inbox'])
     // 「許可をやめる」 does not bring the screen back.

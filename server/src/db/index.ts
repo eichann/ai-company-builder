@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes } from '../adapters/sqlite/records'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -16,7 +16,7 @@ import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
-import { migrateMemberAbsenceHistory, taskSchema } from './schema/tasks'
+import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
@@ -41,7 +41,7 @@ export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecor
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
-export { migrateMemberAbsenceHistory } from './schema/tasks'
+export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
 
 // Ensure data directory exists
@@ -121,6 +121,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateOutsideTimes(conn)
   // Meeting version 4: no AI run for a まとまり chosen later (minutes.md "A まとまり chosen later").
   migrateBundleParts(conn)
+  // Task version 9: 完了 from any state, 「終わったら」 (records.md "Task version 9").
+  migrateTaskVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -142,6 +144,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane B ▲
   // lane C ▼
   // lane C ▲
+  // Each member's own switches (自分の設定); after the connector migrations (it reads their grants).
+  migrateMemberWorkSwitches(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
@@ -203,6 +207,15 @@ export function migrateBundleParts(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyBundleParts(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] meeting version 4: ${moved} meeting(s) back to read in company ${id}`)
+  }
+}
+
+/** Every company's tasks move to task version 9 (adapters/sqlite/records.ts `migrateCompanyTaskVersion`), idempotent. */
+export function migrateTaskVersion(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyTaskVersion(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] task version 9: ${moved} task(s) moved in company ${id}`)
   }
 }
 

@@ -37,6 +37,15 @@ export function readAutoTurnSettings(value: unknown): AutoTurnSettings {
 }
 
 /**
+ * The member's own 「AI が自動で進める」 from `GET /me/work-switches` (shared/types/work-switches.ts):
+ * on only when the answer says so; unreadable → off (an AI turn never starts on a guess).
+ */
+export function readOwnAutoRun(value: unknown): boolean {
+  const autoRun = value && typeof value === 'object' ? (value as { autoRun?: unknown }).autoRun : undefined
+  return !!autoRun && typeof autoRun === 'object' && (autoRun as { on?: unknown }).on === true
+}
+
+/**
  * Taking a record's AI turn (`aiTurns:claim`): the type's first AI action at
  * the record's version read just before — a compare-and-set on the server, so
  * of two PCs only one wins. `version`: the record's version after that action,

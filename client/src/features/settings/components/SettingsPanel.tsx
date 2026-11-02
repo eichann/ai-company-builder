@@ -16,7 +16,7 @@ import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check,
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
-import { getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../api'
+import { canEditCompanyGitignore, getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../api'
 import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from '../model'
 import type { EnvVarStatus } from '../../../../shared/env-file'
 
@@ -93,6 +93,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
   const [newKeyName, setNewKeyName] = useState('')
   const [pastedEnv, setPastedEnv] = useState('')
   const [gitignoreContent, setGitignoreContent] = useState('')
+  // Read-only until the server says this member is an owner or admin (canEditCompanyGitignore).
+  const [gitignoreEditable, setGitignoreEditable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -112,9 +114,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Load .env and .gitignore files on mount
+  // Load .env and .gitignore files (and whether this member may edit the latter) on mount
   useEffect(() => {
     if (!currentCompany?.rootPath) return
+    const companyId = currentCompany.id
+
+    setGitignoreEditable(false)
+    let live = true
+    void canEditCompanyGitignore(companyId).then(editable => { if (live) setGitignoreEditable(editable) })
 
     const loadFiles = async () => {
       setLoading(true)
@@ -142,7 +149,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     }
 
     loadFiles()
-  }, [currentCompany?.rootPath])
+    return () => { live = false }
+  }, [currentCompany?.rootPath, currentCompany?.id])
 
   // After a key moved to the server: the .env changed in main, read its state again.
   const reloadEnvStatus = useCallback(() => {
@@ -216,6 +224,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     setError(null)
     try {
       if (activeTab === 'gitignore') {
+        if (!gitignoreEditable) return
         // Save .gitignore
         const result = await writeGitignore(currentCompany.rootPath, gitignoreContent)
         if (result) {
@@ -247,7 +256,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     } finally {
       setSaving(false)
     }
-  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent])
+  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent, gitignoreEditable])
 
   // Handle backdrop click
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -260,7 +269,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     return null
   }
 
-  const hasSaveFooter = activeTab === 'apikeys' || activeTab === 'gitignore' || activeTab === 'advanced'
+  const hasSaveFooter = activeTab === 'apikeys' || (activeTab === 'gitignore' && gitignoreEditable) || activeTab === 'advanced'
 
   const loadingState = (
     <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-zinc-500 dark:text-zinc-400">
@@ -449,9 +458,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
             ) : activeTab === 'gitignore' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="同期しないファイル" description={<>ここに書いたファイルやフォルダは、チームと共有されません（<code className={CODE}>.gitignore</code>）。</>} />
+                {!gitignoreEditable && (
+                  <Callout tone="info"><p>会社全体に効くので、変えられるのは管理者だけです。</p></Callout>
+                )}
                 <textarea
                   value={gitignoreContent}
+                  readOnly={!gitignoreEditable}
                   onChange={(e) => {
+                    if (!gitignoreEditable) return
                     setGitignoreContent(e.target.value)
                     setSaved(false)
                   }}

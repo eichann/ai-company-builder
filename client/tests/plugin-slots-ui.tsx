@@ -45,7 +45,7 @@ installElectronAPI({
   getRecordCard: async (_companyId, recordId) => ({
     success: true,
     card: {
-      record: { id: recordId, type: 'program_plan', typeLabel: '企画', kind: 'bundle', title: '春の特番', summary: '', stateLabel: '作成中', updatedAt: '2026-11-02T00:00:00.000Z' },
+      record: { id: recordId, type: 'program_plan', typeLabel: '企画', kind: 'bundle', thing: 'bundle', title: '春の特番', summary: '', stateLabel: '作成中', updatedAt: '2026-11-02T00:00:00.000Z' },
       fields: [{ label: '放送日', value: '4月1日' }], history: [], links: [],
     },
   }),

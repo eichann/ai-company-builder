@@ -142,7 +142,7 @@ describe('duties 1 and 2: from where, and who', () => {
 
   it('an action outside its from states is refused and changes nothing', async () => {
     const t = newTask()
-    const r = await act(m('u-bob'), t.id, 'complete', { expectedVersion: 1 })
+    const r = await act(m('u-bob'), t.id, 'send_back', { expectedVersion: 1, note: 'x' })
     expect(r).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'ACTION_NOT_ALLOWED_IN_STATE' } })
     expect(source.forCompany('a').records.ledger(t.id)).toHaveLength(1)
   })

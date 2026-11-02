@@ -6,11 +6,11 @@ interface Options {
   companyId: string | undefined
   /** The file tab shown when nothing was visited yet (restored tabs): ← returns to it. */
   activeFilePath: string | null
-  /** ← / → reached a file: show its tab (open it again when it was closed). */
+  /** ← / → reached a tab: show it (open it again when it was closed). */
   showFile: (path: string) => void
 }
 
-/** ← → over the files and record cards the editor area showed, like a browser (design §7-4). */
+/** ← → over the tabs (files and records) the middle showed, like a browser (design §7-4). */
 export function usePlaceHistory({ companyId, activeFilePath, showFile }: Options) {
   const [state, setState] = useState<{ companyId: string | undefined; history: PlaceHistory }>({ companyId, history: EMPTY_PLACES })
   let history = state.history
@@ -33,12 +33,9 @@ export function usePlaceHistory({ companyId, activeFilePath, showFile }: Options
     if (place.kind === 'file') showFile(place.path)
   }, [history, showFile])
 
-  const current = history.entries[history.index]
   return {
-    /** The record whose card the editor area shows now, else null (a file tab is shown). */
-    recordId: current?.kind === 'record' ? current.id : null,
+    /** A tab was shown: a file's path or a record's tab key (`editorTabs.ts`). */
     visitFile: useCallback((path: string) => visit({ kind: 'file', path }), [visit]),
-    visitRecord: useCallback((id: string) => visit({ kind: 'record', id }), [visit]),
     back: useCallback(() => step(-1), [step]),
     forward: useCallback(() => step(1), [step]),
     canBack: canGoBack(history),

@@ -12,6 +12,10 @@ paths:
   - "client/src/features/minutes/startReading.ts"
   - "client/electron/features/tasks/**"
   - "client/src/features/tasks/**"
+  - "client/src/features/records/**"
+  - "client/src/shared/ui/RecordPage.tsx"
+  - "client/src/shared/ui/LinkedColumn.tsx"
+  - "client/src/shared/lib/linkGroups*"
   - "client/tests/tasks-*.test.ts"
   - "client/tests/tasks-*-ui.*"
   - "client/tests/ui/tasks-*.spec.ts"
@@ -57,13 +61,12 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   the department on screen (`null` = every department; 全社 = any department shows it:
   `listShownFor`). The list itself is the member's, across the company (records carry no
   department the app could filter by).
-- `TaskListPanel`: the list on the left, the opened item's card on the right (`renderCard`,
-  composed by AppShell: the records feature's card). A まとまり chip opens that まとまり there too.
-  On the main screen the card opens **where a file opens**: AppShell's `frame` puts the list and
-  the card in the ファイル tab's split (`layout.files`: the list takes the file tree's width, the
-  card the editor area's, one divider for both), so with the consultation open the card is never
-  a strip between the list and the chat. Test: `tests/ui/tasks-layout.spec.ts` (the card area at
-  least the editor area's width, 「＋ファイルをつなぐ」 left of the consultation).
+- `TaskListPanel`: the list, in the narrow column where the file tree sits. A row opens its item
+  in a tab in the middle, next to the open files (`onOpen`; `files-and-editor.md` "Files and
+  records share the middle's tabs"), and switching the left tab keeps it; the row of the active
+  tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
+  the card by the version the list knows, so a change made from the list shows on the card.
+  Test: `tests/ui/tasks-layout.spec.ts`.
 - `useTaskList` (in AppShell): read at mount, on `notifications:changed` for the company (the title
   bar keeps main watching), every 2 minutes and after the member's own change. `useCalendarToday`:
   at mount and every 10 minutes.
@@ -114,11 +117,13 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    Run ids and operation keys that could reshape the URL (`.`/`..`, separators) never reach the
    server.
 4. Actions (`TaskActions.tsx`), offered from the type (`recordActionChoices`) and the member's
-   place: a `who` person field holding the member, or `ok_from` (then the member must say whose OK:
-   a member, or a note for an OK from outside ACB). Never the AI's own steps (`who: [ai]`:
+   place: a `who` person field holding the member (after the action's `who_unless`, `actionWho`),
+   or `ok_from` (then the member must say whose OK: a member, or a note for an OK from outside
+   ACB — since task version 9 only on a task to be checked first, `records.md` "Task version 9"). Never the AI's own steps (`who: [ai]`:
    finish_prep, hand_over) nor actions needing a record chooser (set_bundle) or the list's own
-   editors (tags, wait_until). 完了 from 未着手 / 返事待ち runs 着手 first (complete starts from
-   in_progress / review), each step at the version the previous one moved to. 受けられない needs a
+   editors (tags, wait_until). Since task version 9 完了 starts from every state but 準備中, so the
+   card's 「着手 first」 step (`startFirst`) no longer happens for core tasks (kept for a company's
+   own type that still completes only what was started). 受けられない needs a
    reason (to the requester). 延ばす: 1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜 or a date and time
    (`postponeChoices`); the server tells the requester. The server decides every action.
 5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
@@ -126,9 +131,18 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    screen: `src/app/recordSource.tsx` `renderRecordSource` returns the connector feature's part
    (under its lane marker, `ipc-and-main-process.md` "Lane markers"), so `tasks` imports no other
    feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …").
-6. Fields, 経緯, and 「つながっているもの」 with the record card's rows (`RecordRows.tsx`, registered
-   import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
-   (`RecordMarks`, also on the generic card and every record row).
+6. Fields and 経緯 folded at the bottom (`FieldsFold`, `HistoryFold`), and 「つながっているもの」 on
+   the right with the record card's rows (`records/components/linkRows.tsx`, registered import):
+   decisions marked 例外（この件だけ） and owner-only records marked 自分だけ (`RecordMarks`).
+
+Every record opens in one layout (`src/shared/ui/RecordPage.tsx`: the kind's icon and name, short
+chips, the big title with the actions beside it, where it came from, the body, folded fields and
+経緯) with 「つながっているもの」 as a table of contents on the right (`src/shared/ui/LinkedColumn.tsx`):
+what is linked **directly**, one group per kind by its plain name (`typeLabel` = `thingName`, so
+案件 and プロジェクト stay two groups and 「まとまり」「やりとり」 never show), in a fixed order (`groupLinks`,
+`src/shared/lib/linkGroups.ts`; a bundle's やること first), three rows per kind and the rest under
+「ほか n 件」 (`foldLinks`). Rows show the name, not the state; a finished request (`finished`) is
+faint and struck through. A file's own 「つながっているもの」 uses the same column.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
@@ -193,9 +207,10 @@ Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST 
 `…/file-links/remove`, the version the screen shows): the file tree's right-click
 「やることにつなぐ…」 (shown only while the task list shows for the department on screen; the
 chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file dragged from the tree
-onto a task row or onto the task card (`src/shared/lib/dragTypes.ts`; the first dragged path inside
-the company folder), and the card's 「＋ファイルをつなぐ」 (the company's file names on this
-computer, `git:listFiles`) with 「外す」 on each linked file. Main sends only a path inside the
+onto a task row or onto the card's 「つながっているもの」 (its drop zone 「ここにファイルをドロップしてつなぐ」;
+`src/shared/lib/dragTypes.ts`; the first dragged path inside the company folder), and the card's
+「＋ファイルをつなぐ」 (the company's file names on this computer, `git:listFiles`). Each linked file's
+「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again). Main sends only a path inside the
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
@@ -236,7 +251,7 @@ never reaches the server; records off = no list), `src/features/tasks/model.test
 `src/features/tasks/quickAdd.test.ts`, `client/tests/ui/tasks-list.spec.ts`
 (`tests/tasks-list-ui.html`: sections, meetings mixed in, folding, date view, 引き受ける, finishing,
 the one line, the tag filter, a row opening its card), `client/tests/task-card.test.ts` (the
-assignee completes only on a stated OK and starts first; the AI's steps and what the member's
+assignee completes from 未着手, or on a stated OK when the task is to be checked first; the AI's steps and what the member's
 place does not allow never offered; the OK in words; prepared apart from links; an unknown result
 offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts` (also 「＋ファイルをつなぐ」,
 「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
@@ -247,6 +262,5 @@ a department without the list gets its meetings in the title bar (`notifications
 `title-bar-notices.spec.ts`). `tests/ui/ai-turns.spec.ts`
 and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list left of the
 consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
-the real `AppShell`): with the consultation open the やること tab fills the left side from the tab
-strip to the bottom, the consultation stays where it is for ファイル and 検索, and a card opens
-beside the list.
+the real `AppShell`): the list is the narrow column, a task opens as a tab beside the open files,
+stays when the left tab changes, ← → go between them and a restart brings it back.

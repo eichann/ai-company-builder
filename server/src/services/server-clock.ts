@@ -5,8 +5,9 @@
  *
  * 1. moves a waiting task whose 「返事・届く見込み」 (`wait_until`) has passed to
  *    the right turn so 追いかけ can happen (core-types.ts `WAIT_OVER`): the
- *    AI's turn when the company's 自動で進める is on and the type has an AI
- *    step there, else the assignee's — through the service writer (its value
+ *    AI's turn when the assignee's own 自動で進める is on (their PC runs it:
+ *    shared/core/work-switches.ts) and the type has an AI step there, else
+ *    the assignee's — through the service writer (its value
  *    and reader checks, compare-and-set, one ledger entry with the clock as
  *    actor, `CLOCK_ACTOR`), which tells the assignee (a notice, S5);
  * 2. writes the overdue (A-2) and stuck-AI-turn (C-18) notices
@@ -24,7 +25,6 @@
 import { CLOCK_ACTOR, WAIT_OVER, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import { aiTurnStates } from '../../shared/core/record-types'
 import type { LedgerValue } from '../../shared/core/record-ledger'
-import type { TaskSettings } from '../../shared/core/task-settings'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ServiceRecordWriter } from './record-engine'
@@ -42,7 +42,11 @@ export interface ServerClockDeps {
   clock: Clock
   writer: Pick<ServiceRecordWriter, 'transition'>
   notifications: { sweep(companyId: string, limit: number): number }
-  taskSettings: (companyId: string) => TaskSettings
+  /**
+   * Whether 自動で進める is on for the record's assignee (their own switch within the company's
+   * 使ってよいか; services/work-switches.ts `isOn`). No assignee: the company's 初めの値.
+   */
+  autoRunFor: (companyId: string, assignee: string | null) => boolean
   timeZoneOf: (companyId: string) => string
   /**
    * The content store's retention (records.md "The content store"): erase
@@ -75,7 +79,6 @@ export function createServerClock(deps: ServerClockDeps) {
     const types = currentTypes(records)
     const now = companyNow(deps.clock.nowMs(), deps.timeZoneOf(companyId))
     const today = now.slice(0, 10)
-    let autoRun: boolean | null = null
     let moved = 0
     for (const [type, rule] of Object.entries(WAIT_OVER)) {
       const def = types.get(type)?.definition
@@ -89,14 +92,15 @@ export function createServerClock(deps: ServerClockDeps) {
         ...records.candidates({ types: [type], states: [rule.from], ranges: [{ name: rule.field, gte: `${today}T`, lt: now }], sort }, left),
       ].slice(0, left)
       if (passed.length === 0) continue
-      autoRun ??= deps.taskSettings(companyId).autoRun.enabled
-      const to = autoRun && aiTurnStates(def).has(rule.aiTurn) ? rule.aiTurn : rule.personTurn
-      if (!def.states.includes(to)) continue
+      const hasAiStep = aiTurnStates(def).has(rule.aiTurn)
       for (const s of records.states(passed.map(r => r.id))) {
         if (s.state !== rule.from) continue
         let fields: Record<string, LedgerValue> = {}
         try { fields = JSON.parse(s.fields) as Record<string, LedgerValue> } catch { continue }
         const assignee = typeof fields.assignee === 'string' && fields.assignee !== '' ? fields.assignee : null
+        // The AI's turn runs on the assignee's PC: their own 自動で進める decides.
+        const to = hasAiStep && deps.autoRunFor(companyId, assignee) ? rule.aiTurn : rule.personTurn
+        if (!def.states.includes(to)) continue
         const r = deps.writer.transition(companyId, {
           recordId: s.recordId, action: WAIT_OVER_ACTION, expectedVersion: s.version, to,
           // The assignee's turn (also while the AI prepares: 「AI の番」 shows whose).

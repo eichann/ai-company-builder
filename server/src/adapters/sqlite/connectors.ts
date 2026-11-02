@@ -186,6 +186,9 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       if (userId !== undefined) conn.prepare('DELETE FROM oauth_pending WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
 
+    addHistory(change) {
+      addHistory(change)
+    },
     history(provider, limit) {
       return (conn.prepare('SELECT id, provider, action, user_id, at, by_user, change FROM connector_history WHERE company_id = ? AND provider = ? ORDER BY at DESC, rowid DESC LIMIT ?')
         .all(companyId, provider, limit) as HistoryRow[])

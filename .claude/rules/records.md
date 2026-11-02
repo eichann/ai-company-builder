@@ -111,8 +111,8 @@ engine the day it is turned on.
   cardinality, inverse label),
   `states`, `initial`, `create_states` (states a create may start in instead — "Task version
   5"), `actions` (from / to / who / notify / attach / note / history_line /
-  decision / approval / args / ok_from — "Completing on someone's OK" — / links — record links
-  the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
+  decision / approval / args / ok_from — "Completing on someone's OK" — / who_unless — "Task
+  version 9" — / links — record links the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
   below: `request` needs `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the
   server; `bundle` (まとまり) needs `owner` (person) and `purpose` (text) on the server and final
   states; `counterpart` (相手) needs `counterpart_kind` (choice offering company and person),
@@ -292,6 +292,48 @@ Task: `complete` has `ok_from: [assignee]`, `notify: [requested_by, ok_by]`; `re
   version 3 stay valid. Test: `server/tests/unit/record-task-ok.test.ts` (each refusal, AI
   refused, requester unchanged, OK-giver told and reopening, cleared on reopen, cross-company,
   v4 additive — mutation-checked).
+
+### Task version 9 (owner decision 2026-11-02 「着手しないで完了にできる」)
+
+完了 no longer waits for 着手, and who confirms the end is said by the task (「終わったら」).
+Additive over version 8 (who / from / notify / labels widened, one field, two actions):
+
+- **完了 from any state but 準備中** (`complete` from todo / in_progress / review / waiting /
+  awaiting_acceptance / declined). 準備中 is the AI's turn: 「自分で進める」 (`take_over`) first.
+  `start` stays, labelled 「進めている印をつける」 — optional. **No start is ever made up**: the
+  ledger of a task completed from 未着手 is create → complete; a measurement of such a task takes
+  creation → completion.
+- **`when_done` (終わったら)**, choice `notify` (知らせるだけ) / `check` (確かめてから); empty reads as
+  `notify` (the default when asking). `reviewer` is 確かめる人 (label only changed).
+  - `notify`: the assignee completes (`who: [assignee, requested_by, reviewer]`); the requester
+    (and a reviewer) are told and the requester may `reopen` (やり直す) — `reopen`'s `who` now
+    also has `reviewer`.
+  - `check`: generic action key **`who_unless`** — `complete: { who_unless: { assignee: {
+    when_done: check } } }` drops the assignee from `who` while the field holds that option
+    (parser: an entry of `who`, a server choice field, one of its options; `actionWho` in
+    `shared/core/record-types.ts` is the one evaluation, used by the engine — also for a delegate —
+    and by the app's card). The assignee's main action is then `request_review`
+    (「終わったので見てもらう」, now from todo / in_progress / waiting / awaiting_acceptance, `hand_to`
+    the checker) and the checker's (or the requester's) `complete` is the OK.
+  - **One line with version 4's OK**: `ok_from: [assignee]` stays on `complete`, and since the
+    assignee is in `who` it only matters when `who_unless` took them out — i.e. only on a task to
+    be checked first, when the checker said OK elsewhere (口頭・Slack・先方のメール): the assignee
+    completes stating whose OK (`ok_by` / `ok_note`), the OK-giver is told and may reopen, exactly
+    as "Completing on someone's OK". On a 知らせるだけ task an OK statement is `OK_NOT_EXPECTED`.
+  - `set_when_done` (args `when_done`) and `set_reviewer` (args `reviewer`): the requester or an
+    admin, never the assignee or the AI, from every non-final state but review.
+- **完了 from 引き受け待ち** by the assignee (or their delegate) also records 「引き受けた」: the same
+  entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
+  the action's `fromState`). The requester completing it does not.
+- **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
+  `migrateCompanyTaskVersion`, `TASK_VERSION`): at startup, every company whose map has the task
+  type stores the core version 9 when nothing as new is stored, then every task's index row says
+  version 9 (`type_version`). No value changes, so no ledger entry. Idempotent.
+- Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
+  told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
+  checker completes; only the requester decides 終わったら; 引き受けた recorded with the 完了 by the
+  assignee only; `who_unless` parsing; the migration once, no entry, a company without tasks
+  untouched) — mutation-checked. `record-task-ok.test.ts` runs the OK path on a `check` task.
 
 ### Tags (stage 2 S1, owner decision 2026-11-01: 「何個も値を持てる項目」を1つ足す)
 
@@ -1098,8 +1140,16 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
 
 - **Kinds** people see (`recordKindOf`): まとまり (any type implementing `bundle`: a 案件, a 企画),
   やること (`task`, `approval`), 決めたこと (`decision`), やりとり (`interaction`, `meeting`,
-  `outbound_message`), そのほか; the type's own label is shown small. Core states have member words
-  (`stateLabel`; definitions carry no state labels); machinery fields (hashes, outside ids,
+  `outbound_message`), そのほか (search's grouping, to be replaced by kind chips).
+- **Words and icons** (言葉の決まり, owner 2026-11-02): one plain name and one icon per kind of
+  thing, the same on every screen — `client/shared/thing-words.ts` (`thingName`: やること, 議事録を確認する,
+  会議の記録, 来た連絡, 送るメールの下書き / 送る Slack の返事 / 送ったもの, 承認のお願い, 返事のお願い; a bundle or
+  a company's type by its own label, never its id; `stateWord` per type; `CALM` for waiting, empty and
+  failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,
+  `RecordIcon`, `SourceIcon`, `SeenBy`). No 「型」, category word (やりとり, まとまり) or machine name on a
+  member's screen (`tests/thing-words.test.ts`). 「確かめる」 is only a task's checker's word: a
+  承認のお願い says 承認待ち・承認する・断る (owner 2026-11-02; 「阿部さんの承認待ち」). `typeLabel` / `stateLabel` in the views and the task list
+  carry these words; machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
   (`GET /companies/:id/members`).
 - **検索**: `POST /records/query { text, limit: 100 }` next to the file search, grouped by kind,
@@ -1261,6 +1311,7 @@ folder, key, links — each mutation-checked),
 where the type lets it, unreadable and private-folder files refused alike without a place,
 cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
+`server/tests/unit/record-task-v9.test.ts` (task version 9, above),
 `server/tests/unit/absences.test.ts` (the delegate only during the absence, the ledger's
 `onBehalfOf`, the delegate's own reader incl. owner-only records, the manager told, no chains,
 cross-company, who sets — each mutation-checked),

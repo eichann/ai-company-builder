@@ -19,6 +19,11 @@ export interface LeftPanel {
    * is shown. Either way it then stays mounted, hidden, to keep its state.
    */
   mount: 'always' | 'once-opened'
+  /**
+   * Takes the whole left side, covering the middle (open files and records), which stays mounted:
+   * スキル and a plugin's screen. Otherwise the panel is the narrow column beside the middle (plan A).
+   */
+  wide?: boolean
   /** Extra classes on the panel's container. */
   className?: string
   /** Its tab was clicked (the search panel focuses its box). */

@@ -111,8 +111,9 @@ compare-and-set and ledger), and writes notices.
 - **A wait that is over** (`WAIT_OVER` in `shared/core/core-types.ts`; today `task`): a record
   still in `waiting` whose `wait_until` has passed (a day: once it is over; a time: that minute,
   company time) moves — to `preparing` (the AI's turn: the AI drafts the follow-up, then
-  「用意ができた」/「先に渡す」 as for any preparation) when the company's 自動で進める
-  (`autoRun.enabled`, `tasks.md`) is on and `preparing` is an AI turn of the type, else to `todo`
+  「用意ができた」/「先に渡す」 as for any preparation) when the record's
+  **assignee**'s own 自動で進める is on (their PC runs it: `autoRunFor`, within the company's
+  `autoRun.enabled`; no assignee → the company's 初めの値; `tasks.md` "Each member's switches") and `preparing` is an AI turn of the type, else to `todo`
   (the assignee's turn); `next_actor` = the assignee; the assignee is told (`wait_over`). Ledger
   action `wait_over`, actor `CLOCK_ACTOR` (kind `external`, id `acb:clock`, source 「ACB の時計」
   — the history shows the source). No new action or state in the task type: the moves are listed
@@ -176,7 +177,7 @@ a business day later → told once, not before, nobody else),
 `server/tests/unit/absences.test.ts` (the delegate's copy only when they can read; the stops to
 the manager; no chains),
 `server/tests/unit/server-clock.test.ts` (nothing moves before its time; a second run does
-nothing more; the AI's turn only with 自動で進める; an owner-only record's notices only to its
+nothing more; the AI's turn only with the assignee's 自動で進める; an owner-only record's notices only to its
 owner; another company untouched and still run when one fails; one company's backlog capped per
 run; no overlapping runs), permission-matrix rows,
 owner-only record's notices only to its owner (not other members, not owners/admins; no row, no

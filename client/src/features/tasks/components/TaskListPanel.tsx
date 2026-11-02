@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '../../../../shared/tasks'
@@ -19,28 +19,24 @@ interface Props {
   list: { data: TaskListData | null; error: string | null; reload: () => void }
   /** The automatic 「AI の番」's view of each record it holds (the chat's runner), when known. */
   aiTurns: AiTurnItemsView | null
-  /** The opened record's card, drawn by the screen (the records feature). */
-  renderCard: (recordId: string) => ReactNode
+  /** The record whose tab the middle shows (its row is marked). */
+  activeRecordId?: string | null
+  /** A row opens its record in a tab in the middle, where files open too (AppShell: `record.open`). */
+  onOpen: (recordId: string) => void
   /**
    * A received meeting the AI has not started (stopped, or no Claude Code): the member reads it in a
    * consultation themselves, or puts it aside. Absent where the company reads no minutes.
    */
   meetingActions?: { read: (recordId: string) => void; skip: (recordId: string) => Promise<string | null> }
-  /**
-   * Places the list and the opened card on the screen (AppShell: the ファイル tab's split, so the
-   * card gets the editor area a file opens in). Absent: the list at a fixed width, the card beside it.
-   */
-  frame?: (panes: { list: ReactNode; card: ReactNode }) => ReactNode
   /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
   onConsult?: (task: { id: string; title: string }) => void
 }
 
-/** The task list tab (やること): the list on the left, the opened item's card on the right. */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions, frame, onConsult }: Props) {
+/** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
-  const [opened, setOpened] = useState<string | null>(null)
   const [unfolded, setUnfolded] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -133,8 +129,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
     const canFinish = i.own && i.turn === 'mine' && ['todo', 'in_progress', 'review', 'waiting'].includes(i.state ?? '')
     return (
       <TaskRow
-        key={i.id} item={i} now={now} active={opened === i.id} ai={ai} busy={busy === i.id}
-        onOpen={setOpened}
+        key={i.id} item={i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
+        onOpen={onOpen}
         onFinish={canFinish ? () => void finish(i) : null}
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
@@ -199,7 +195,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
           onClose={() => setChoosing(null)}
         />
       )}
-      <section aria-label="やることの一覧" className={`flex ${frame ? 'h-full w-full' : 'w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0'} flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900`}>
+      <section aria-label="やることの一覧" className="flex h-full w-full flex-col bg-white dark:bg-zinc-900">
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
           <span className="text-[13px] font-semibold text-gray-800 dark:text-zinc-100">やること</span>
           <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
@@ -239,18 +235,5 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
       </section>
     </>
   )
-  const cardPane = (
-    <div className="h-full min-w-0 flex-1 overflow-y-auto bg-white dark:bg-zinc-900" data-testid="task-card-area">
-      {/* Keyed by the version the list knows: a change made from the list shows on the card too. */}
-      {opened ? <div key={`${opened}@${items.find(i => i.id === opened)?.version ?? 0}`} className="h-full">{renderCard(opened)}</div>
-        : <div className="flex h-full items-center justify-center text-sm text-gray-400">左の一覧から開きます</div>}
-    </div>
-  )
-  if (frame) return <>{frame({ list: listPane, card: cardPane })}</>
-  return (
-    <div className="flex h-full min-h-0 w-full">
-      {listPane}
-      {cardPane}
-    </div>
-  )
+  return listPane
 }

@@ -39,10 +39,15 @@ export interface TaskSettingsRepository {
   /** The departments the user belongs to (the member left the company → removeMember). */
   departmentIdsOf(userId: string): string[]
   /**
-   * The user left the company: they belong to no department of it any more, and their absences
-   * (and those they cover) stop — marked removed at `at` by `by`, kept as history.
+   * The user left the company: they belong to no department of it any more, their own switches
+   * are forgotten, and their absences (and those they cover) stop — marked removed at `at` by `by`, kept as history.
    */
   removeMember(userId: string, by: string, at: string): void
+
+  /** A member's own switches as stored (JSON, shared/core/work-switches.ts), null when they never chose. */
+  workSwitches(userId: string): string | null
+  /** Keep a member's own switches (the whole object). */
+  saveWorkSwitches(userId: string, choices: string, at: string): void
 
   /** Every standing (not removed) absence of the company that has not ended before `day` (`until >= day`), soonest first. */
   absencesFrom(day: string): StoredAbsence[]

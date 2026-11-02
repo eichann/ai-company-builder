@@ -203,8 +203,19 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   for the panel itself (`editor-panel.spec.ts`: autosave after 1 s, ⌘S, closing saves first,
   preview tabs pinned on double-click / first edit, ⌘⇧V and its remembered mode, ⌘F in a
   preview, the preview's scroll position, image / PDF views).
-- Open tabs, the active tab and the left panel tab are saved per company in localStorage
-  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`
+- **Files and records share the middle's tabs** (plan A, 新しい画面のデモ 2026-11-02): the left
+  tab (ファイル, やること, 検索…) is the narrow column of the `files` split and the middle
+  (`TabbedEditorPanel`) is beside it for every left tab, so switching the left tab keeps what is
+  open; a `wide` panel (スキル, a plugin's screen; `leftPanels.ts`) covers the middle, which stays
+  mounted. A record is a tab under the key `acb-record:<id>` (`editorTabs.ts` `recordTabKey`; no
+  path can have it), drawn with its kind's icon and title (`RecordTabLook`, told by the card once
+  read: `onLoaded`), and its card is drawn by the screen (`renderRecord`); only file tabs load
+  text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
+  preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
+- Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
+  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records }` (`records`: the open
+  record tabs' titles, so they show at once after a restart; a record tab is not checked against
+  the disk)
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
   (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
   background; any `leftTab` string is kept and one no registered panel has opens the default tab

@@ -1,6 +1,6 @@
 // The task card (tests/task-card-ui.tsx, features/tasks, tasks-ui.md "The card"). Guards: what the
-// AI prepared is on top; the assignee completes only by naming whose OK (start first, then
-// complete with it, each at its version); 受けられない needs a reason; 延ばす sends a new due; a
+// AI prepared is on top; on a task to be checked first the assignee completes only by naming whose
+// OK (from 未着手 too since task version 9, at the version shown); 受けられない needs a reason; 延ばす sends a new due; a
 // run with an unknown outside result is settled by the member; the completed card states the OK
 // in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
 // owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
@@ -22,7 +22,7 @@ test('prepared things on top; completing on whose OK; 受けられない needs a
   await expect(submit).toBeDisabled()
   await form.getByLabel('OK をくれた人').selectOption({ label: '阿部さん' })
   await submit.click()
-  await expect(page.locator('#acted')).toHaveText('start@3,complete@4:ok=u-abe/')
+  await expect(page.locator('#acted')).toHaveText('complete@3:ok=u-abe/')
 
   await page.getByRole('button', { name: '受けられない' }).click()
   const decline = page.getByRole('group', { name: '受けられない' })
@@ -44,11 +44,12 @@ test('a task completed on someone\'s OK says so in words, never as an approval',
   const state = await openPreview(page, 'task-card', { task: 'done' })
   const card = page.getByTestId('task-card')
   await expect(card).toContainText('佐藤さんが阿部さんの了承を得たとして完了にしました（電話で）')
+  await card.getByRole('button', { name: /経緯/ }).click()
   await expect(card.getByRole('region', { name: '経緯' })).toContainText('佐藤さんが阿部さんの了承を得たとして完了にしました')
   expectNoPageErrors(state)
 })
 
-test('「＋ファイルをつなぐ」 links a company file; a linked file can be taken away; a dropped file is linked', async ({ page }) => {
+test('「＋ファイルをつなぐ」 links a company file; a linked file is taken away from its 「…」 and put back; a dropped file is linked', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   await page.getByRole('button', { name: 'ファイルをつなぐ' }).click()
   const picker = page.getByRole('group', { name: 'つなぐファイル' })
@@ -57,10 +58,14 @@ test('「＋ファイルをつなぐ」 links a company file; a linked file can 
   await picker.getByRole('button', { name: /提案書\.md/ }).click()
   await expect(page.locator('#acted')).toHaveText('link 営業/提案書.md@3')
 
-  await page.getByRole('button', { name: '「見積書_v2.xlsx」を外す' }).click()
+  await page.getByRole('button', { name: '「見積書_v2.xlsx」の操作' }).click()
+  await page.getByRole('menuitem', { name: /つながりを外す/ }).click()
   await expect(page.locator('#acted')).toContainText('unlink 営業/見積書_v2.xlsx@3')
+  const undone = page.getByRole('status').filter({ hasText: '「見積書_v2.xlsx」とのつながりを外しました' })
+  await undone.getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toContainText('unlink 営業/見積書_v2.xlsx@3,link 営業/見積書_v2.xlsx@3')
 
-  const card = page.getByTestId('task-card')
+  const card = page.getByRole('complementary', { name: 'つながっているもの' })
   const data = await page.evaluateHandle(() => {
     const dt = new DataTransfer()
     dt.setData('application/x-file-paths', JSON.stringify(['/Users/elsewhere/x.md', '/Users/me/company/経理/請求書.xlsx']))

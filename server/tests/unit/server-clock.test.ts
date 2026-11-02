@@ -7,7 +7,8 @@
  * Guards (each fails when its check is removed — mutation-checked):
  * - nothing moves before its time (a time today, a day not over yet);
  * - running twice does nothing more (no second move, entry or notice);
- * - the AI's turn only with 自動で進める on; else the assignee's;
+ * - the AI's turn only with 自動で進める on — the assignee's own switch (their PC
+ *   runs it), within the company's 使ってよいか; else the assignee's;
  * - an owner-only record's notices reach its owner only, never another
  *   member named in it, nor an owner/admin;
  * - another company is untouched, and one company's failure does not stop it;
@@ -24,6 +25,7 @@ import { ensureCoreTypes } from '../../src/services/record-index'
 import { createRecordEngine, createServiceRecordWriter, type RecordChange, type RecordEngine } from '../../src/services/record-engine'
 import { createNotificationService, type NotificationService } from '../../src/services/notifications'
 import { createServerClock, type ServerClock } from '../../src/services/server-clock'
+import { createWorkSwitches, type WorkSwitches } from '../../src/services/work-switches'
 import type { Member } from '../../src/services/access'
 import { CLOCK_ACTOR } from '../../../shared/core/core-types'
 import { defaultTaskSettings } from '../../../shared/core/task-settings'
@@ -41,6 +43,7 @@ let source: CompanyDataSource
 let engine: RecordEngine
 let notices: NotificationService
 let clock: ServerClock
+let switches: WorkSwitches
 let nowMs: number
 let autoRun: Record<string, boolean>
 let failing: Set<string>
@@ -80,17 +83,22 @@ function wire(limits?: { moves: number; notices: number }) {
   const notify = (co: string, userIds: string[], change?: RecordChange) => { if (change) notices.recordChange(co, userIds, change) }
   engine = createRecordEngine({ ...shared, files: { appendHistoryLine: async () => true, fileAtCommit: async () => true }, managedFolders: () => [], isMember, roleOf, notify })
   const writer = createServiceRecordWriter({ ...shared, isMember, roleOf, notify })
-  clock = createServerClock({
+  // As composition.ts: the assignee's own switch, within the company's settings.
+  switches = createWorkSwitches({
     ...shared,
-    companyIds: () => ['a', 'b'],
-    writer,
-    notifications: notices,
-    taskSettings: co => {
+    settingsOf: co => {
       if (failing.has(co)) throw new Error('broken')
       const s = defaultTaskSettings()
       s.autoRun.enabled = autoRun[co] ?? false
       return s
     },
+  })
+  clock = createServerClock({
+    ...shared,
+    companyIds: () => ['a', 'b'],
+    writer,
+    notifications: notices,
+    autoRunFor: (co, assignee) => switches.isOn(co, assignee, 'autoRun'),
     timeZoneOf: () => 'Asia/Tokyo',
     yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     log: () => {},
@@ -155,6 +163,22 @@ describe('the server clock: a wait that is over', () => {
     await clock.runOnce()
     expect(stateOf(id).state).toBe('preparing')
     expect(ok(notices.list(m('u-bob'))).items.map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。AI が追いかけを用意します'])
+  })
+
+  it('the assignee’s own 自動で進める decides: off → their turn; the company not allowing it → nobody’s AI', async () => {
+    autoRun.a = true
+    ok(switches.set(m('u-bob'), { switch: 'autoRun', on: false }))
+    // alice's own switch (on) does not matter: bob is the assignee, his PC would run it.
+    ok(switches.set(m('u-alice'), { switch: 'autoRun', on: true }))
+    const id = await waitingTask('2026-11-04')
+    await clock.runOnce()
+    expect(stateOf(id).state).toBe('todo')
+
+    ok(switches.set(m('u-bob'), { switch: 'autoRun', on: true }))
+    autoRun.a = false
+    const second = await waitingTask('2026-11-04')
+    await clock.runOnce()
+    expect(stateOf(second).state).toBe('todo')
   })
 
   it('another company is untouched, and keeps running when one company fails', async () => {

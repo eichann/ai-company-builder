@@ -3,11 +3,13 @@
  * (weekends, Japanese public holidays calculated without a network call,
  * company holidays) and the reply 目安 (`replyTarget`) a message without a
  * deadline gets. A wrong holiday or cutoff here moves every member's due
- * dates.
+ * dates. Also each member's own switches (shared/core/work-switches.ts): the
+ * company's 使ってよいか always wins, and an older settings document keeps reading.
  */
 import { describe, expect, it } from 'vitest'
 import { isBusinessDay, isCalendarDate, japaneseHolidays, nextBusinessDay } from '../../shared/core/business-days'
-import { DEFAULT_TASK_SETTINGS, defaultTaskSettings, parseTaskSettings, replyTarget, type ReplySettings } from '../../shared/core/task-settings'
+import { DEFAULT_TASK_SETTINGS, defaultTaskSettings, parseTaskSettings, replyTarget, workSwitchPoliciesOf, type ReplySettings } from '../../shared/core/task-settings'
+import { chooseWorkSwitch, parseWorkSwitchChoices, workSwitchOn } from '../../shared/core/work-switches'
 
 /**
  * The Cabinet Office's published lists (内閣府「国民の祝日について」) for 2026
@@ -21,6 +23,25 @@ const PUBLISHED: Record<number, string[]> = {
   2029: ['01-01', '01-08', '02-11', '02-12', '02-23', '03-20', '04-29', '04-30', '05-03', '05-04', '05-05', '07-16', '08-11', '09-17', '09-23', '09-24', '10-08', '11-03', '11-23'],
   2030: ['01-01', '01-14', '02-11', '02-23', '03-20', '04-29', '05-03', '05-04', '05-05', '05-06', '07-15', '08-11', '08-12', '09-16', '09-23', '10-14', '11-03', '11-04', '11-23'],
 }
+
+describe('each member\'s own switches (work-switches.ts)', () => {
+  it('the company not allowing a switch: off for everyone, nobody can turn it on; turning off is always kept', () => {
+    const settings = defaultTaskSettings()
+    settings.autoRun.enabled = false
+    const policies = workSwitchPoliciesOf(settings)
+    expect(workSwitchOn(policies.autoRun, true)).toBe(false)
+    expect(chooseWorkSwitch(policies, {}, 'autoRun', true)).toEqual({ refused: 'company-off' })
+    expect(chooseWorkSwitch(policies, { readIncoming: true }, 'autoRun', false)).toEqual({ value: { readIncoming: true, autoRun: false } })
+  })
+
+  it('a member who never chose has the company\'s 初めの値; their own choice wins over it', () => {
+    const policies = workSwitchPoliciesOf(defaultTaskSettings())
+    expect([workSwitchOn(policies.readIncoming, undefined), workSwitchOn(policies.autoRun, undefined)]).toEqual([false, true])
+    expect([workSwitchOn(policies.readIncoming, true), workSwitchOn(policies.autoRun, false)]).toEqual([true, false])
+    // A stored document with anything but a boolean is "never chose".
+    expect(parseWorkSwitchChoices({ readIncoming: 'on', autoRun: false, other: true })).toEqual({ autoRun: false })
+  })
+})
 
 describe('Japanese public holidays (calculated, no network)', () => {
   for (const [year, days] of Object.entries(PUBLISHED)) {
@@ -114,7 +135,9 @@ describe('parseTaskSettings', () => {
     expect(DEFAULT_TASK_SETTINGS).toEqual({
       taskListDepartmentIds: null,
       reply: { rule: 'next-business-day', sameDayCutoff: '17:00' },
-      autoRun: { enabled: true, dailyLimit: 30, stopAfterFailures: 3 },
+      autoRun: { enabled: true, memberDefault: true, dailyLimit: 30, stopAfterFailures: 3 },
+      // Owner decision 2026-11-02: 受信を読む allowed, each member starts off.
+      readIncoming: { allowed: true, memberDefault: false },
       acceptance: { sameDepartment: true, managerToMember: true, meetingHomework: true },
       companyHolidays: [],
     })
@@ -124,7 +147,15 @@ describe('parseTaskSettings', () => {
   it('a document saved before 引き受け keeps its other answers (the acceptance defaults are added); a bad switch is refused', () => {
     const before: Record<string, unknown> = { ...defaultTaskSettings(), autoRun: { enabled: false, dailyLimit: 9, stopAfterFailures: 2 } }
     delete before.acceptance
-    expect(parseTaskSettings(before)).toEqual({ value: { ...before, acceptance: DEFAULT_TASK_SETTINGS.acceptance } })
+    delete before.readIncoming
+    expect(parseTaskSettings(before)).toEqual({
+      value: {
+        ...before, autoRun: { enabled: false, memberDefault: true, dailyLimit: 9, stopAfterFailures: 2 },
+        readIncoming: DEFAULT_TASK_SETTINGS.readIncoming, acceptance: DEFAULT_TASK_SETTINGS.acceptance,
+      },
+    })
+    expect(parseTaskSettings({ ...defaultTaskSettings(), readIncoming: { allowed: 'yes', memberDefault: false } })).toHaveProperty('error')
+    expect(parseTaskSettings({ ...defaultTaskSettings(), autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun, memberDefault: 1 } })).toHaveProperty('error')
     expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: 'yes', managerToMember: true, meetingHomework: true } })).toHaveProperty('error')
     expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: true, managerToMember: true } })).toHaveProperty('error')
   })

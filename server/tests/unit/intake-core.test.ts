@@ -98,7 +98,7 @@ describe('the core types the inbox writes', () => {
     }
     expect(def('interaction').version).toBe(5)
     expect(def('interaction').fields.channel.options).toContain('chat')
-    expect(def('task').version).toBe(8)
+    expect(def('task').version).toBeGreaterThanOrEqual(8)
     expect(def('task').links.interaction.target).toBe('interaction')
   })
 

@@ -186,6 +186,8 @@ contract.invoke voice:resetPrompt
 contract.invoke voice:setPrompt
 contract.invoke voice:start
 contract.invoke voice:stop
+contract.invoke workSwitches:get
+contract.invoke workSwitches:set
 contract.invoke writeAccess:get
 contract.send fs:startDrag
 contract.sync chatHistory:flushSession
@@ -354,6 +356,7 @@ contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
 contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
 contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
+contract.type ElectronAPI.getWorkSwitches = getWorkSwitches: Invoke<'workSwitches:get'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
 contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
@@ -437,6 +440,7 @@ contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invok
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
 contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFeature'>
+contract.type ElectronAPI.setWorkSwitch = setWorkSwitch: Invoke<'workSwitches:set'>
 contract.type ElectronAPI.settleAiTurn = settleAiTurn: Invoke<'aiTurns:settle'>
 contract.type ElectronAPI.shareTask = shareTask: Invoke<'tasks:share'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
@@ -743,6 +747,8 @@ contract.type IpcInvokeChannels.'voice:resetPrompt' = 'voice:resetPrompt': { arg
 contract.type IpcInvokeChannels.'voice:setPrompt' = 'voice:setPrompt': { args: [instructions: string]; result: VoicePromptSettings }
 contract.type IpcInvokeChannels.'voice:start' = 'voice:start': { args: [requestId: string, deviceId?: string]; result: void }
 contract.type IpcInvokeChannels.'voice:stop' = 'voice:stop': { args: [requestId: string]; result: void }
+contract.type IpcInvokeChannels.'workSwitches:get' = 'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
+contract.type IpcInvokeChannels.'workSwitches:set' = 'workSwitches:set': { args: [companyId: string, which: WorkSwitch, on: boolean]; result: WorkSwitchesResult }
 contract.type IpcInvokeChannels.'writeAccess:get' = 'writeAccess:get': { args: [companyId: string, refresh?: boolean]; result: WriteAccess | null }
 contract.type IpcSendChannels = export interface IpcSendChannels { }
 contract.type IpcSendChannels.'fs:startDrag' = 'fs:startDrag': { args: [filePath: string] }
@@ -987,6 +993,8 @@ main.handle voice:resetPrompt @ voice-input.ts ()
 main.handle voice:setPrompt @ voice-input.ts (instructions: unknown)
 main.handle voice:start @ voice-input.ts (id: unknown, deviceId?: unknown)
 main.handle voice:stop @ voice-input.ts (id: string)
+main.handle workSwitches:get @ features/work-switches/ipc.ts (companyId)
+main.handle workSwitches:set @ features/work-switches/ipc.ts (companyId, which, on)
 main.handle writeAccess:get @ features/sync/ipc.ts (companyId: string, refresh?: boolean)
 main.on chatHistory:flushSession @ features/chat-history/ipc.ts (companyId: string, session: ChatSession)
 main.on fs:startDrag @ features/fs/ipc.ts (filePath: string)
@@ -1154,6 +1162,8 @@ preload getTaskCard -> invoke tasks:card($0, $1)
 preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
 preload getTaskList -> invoke tasks:list($0)
 preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getWorkSwitches -> invoke workSwitches:get($0)
+preload getWorkSwitches : (companyId: string) => Promise<WorkSwitchesResult>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
 preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
 preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)
@@ -1320,6 +1330,8 @@ preload setServerUrl -> invoke config:setServerUrl($0)
 preload setServerUrl : (url: string) => Promise<boolean>
 preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)
 preload setSlackFeature : (companyId: string, feature: "read" | "reply" | "notices", on: boolean) => Promise<SlackStatusResult>
+preload setWorkSwitch -> invoke workSwitches:set($0, $1, $2)
+preload setWorkSwitch : (companyId: string, which: "readIncoming" | "autoRun", on: boolean) => Promise<WorkSwitchesResult>
 preload settleAiTurn -> invoke aiTurns:settle($0, $1)
 preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
 preload shareTask -> invoke tasks:share($0, $1, $2, $3)
@@ -1392,3 +1404,5 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
+unmatched.preloadApiUnusedByRenderer getWorkSwitches
+unmatched.preloadApiUnusedByRenderer setWorkSwitch

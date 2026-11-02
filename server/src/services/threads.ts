@@ -72,7 +72,7 @@ export function fieldsOf(handle: ReturnType<CompanyDataSource['forCompany']>, id
 const TEXTS: Record<ThreadChannel, Record<ThreadUnavailableReason, string>> = {
   email: {
     'not-connected': 'Google で「受信を読む」を許可すると、ここに元のメールが出ます（設定 → Google）。',
-    'turned-off': '「受信を読む」をオフにしているため、元のメールを出せません（設定 → Google でオンにできます）。',
+    'turned-off': '「受信を読む」をオフにしているため、元のメールを出せません（自分の設定でオンにできます。会社の設定で止まっているときは管理者に確かめてください）。',
     stopped: 'いまはメールを読めません（つなぎ先が止まっています）。',
     'choice-needed': 'どのサービスでメールを読むかを管理者が選ぶまで、元のメールを読めません。',
     'not-found': '元のメールが見つかりません（あなたのメールボックスにないか、消されています）。',

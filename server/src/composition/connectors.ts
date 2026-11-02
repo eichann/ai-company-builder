@@ -117,6 +117,8 @@ export interface ConnectorsLaneDeps {
   /** One AI-action-log line per Slack call (no content). */
   recordCall(companyId: string, userId: string | null, e: { operation: string; host: string; status: number | null; ok: boolean }): void
   publicUrl(): string
+  /** The member's own 受信を読む (services/work-switches.ts): Slack's signals only while it is on. */
+  readsIncoming(companyId: string, userId: string): boolean
 }
 
 export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
@@ -155,6 +157,7 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
   const slackEvents = createSlackEvents({
     companyData, slackData, slack: slackClient, clock, isMember, operatorStopped,
     vaultEnabled: () => brokerVault.status().enabled,
+    readsIncoming: deps.readsIncoming,
     onSignal: signal => { for (const listen of signalListeners) listen(signal) },
   })
 

@@ -15,13 +15,14 @@ import { useDepartments } from '../shared/hooks/useDepartments'
 import { useWriteAccess } from '../shared/hooks/useWriteAccess'
 import { usePrivateFolderStore } from '../features/files/hooks/usePrivateFolders'
 import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
-import { tabDepartmentLabels } from '../features/editor/editorTabs'
+import { recordIdOfTab, recordTabKey, tabDepartmentLabels, type RecordTabLook } from '../features/editor/editorTabs'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
-import { FilesPanel } from './FilesPanel'
+import { FileTreePanel } from '../features/files/components/FileTreePanel'
+import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { AppDialogs } from './AppDialogs'
 import { LeftPanelTabs } from '../features/workspace/components/LeftPanelTabs'
-import type { LeftPanel } from '../features/workspace/leftPanels'
+import { resolveLeftPanel, type LeftPanel } from '../features/workspace/leftPanels'
 import { SkillsPanel } from '../features/skills/components/SkillsPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
 import { DepartmentBar } from '../features/workspace/components/DepartmentBar'
@@ -126,9 +127,17 @@ export function AppShell() {
   const { unsyncedFolders, isSelectedDeptUnsynced, markDownloaded } =
     useDepartmentAvailability(rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
 
-  // Open file tabs, the active one and the left tab, saved per company.
-  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab } =
+  // Open tabs (files and records side by side), the active one and the left tab, saved per company.
+  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks } =
     useEditorPersistence(currentCompany?.id, DEFAULT_LEFT_PANEL)
+  // A record's card tells its title and kind once read: its tab shows them (and after a restart).
+  const noteRecordLook = useCallback((id: string, look: RecordTabLook) => {
+    setRecordLooks(prev => {
+      const old = prev[id]
+      if (old && old.title === look.title && old.state === look.state && old.typeLabel === look.typeLabel) return prev
+      return { ...prev, [id]: look }
+    })
+  }, [setRecordLooks])
   const { previewFilePath, openFile: handleOpenFile, pinFile: handlePinFile, selectFile: handleSelectOpenFile, closeFile: handleCloseFile } =
     useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActiveFilePath })
   const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
@@ -148,13 +157,14 @@ export function AppShell() {
   const [settingsFocus, setSettingsFocus] = useState<{ service?: string; at: number } | null>(null)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
-  // ← → over the files and record cards the editor area showed (design §7-4).
+  // ← → over the files and records the middle showed (design §7-4): both are tabs.
   const showFileAgain = useCallback((path: string) => {
     if (openFiles.includes(path)) handleSelectOpenFile(path)
     else { handleOpenFile(path); handlePinFile(path) }
   }, [openFiles, handleSelectOpenFile, handleOpenFile, handlePinFile])
   const places = usePlaceHistory({ companyId: currentCompany?.id, activeFilePath, showFile: showFileAgain })
   const { visitFile } = places
+  const activeRecordId = recordIdOfTab(activeFilePath)
   const openFileFromTree = useCallback((path: string) => { visitFile(path); handleOpenFile(path) }, [visitFile, handleOpenFile])
   const selectOpenFile = useCallback((path: string) => { visitFile(path); handleSelectOpenFile(path) }, [visitFile, handleSelectOpenFile])
 
@@ -248,22 +258,31 @@ export function AppShell() {
     // Open file tabs stay: one strip for the whole company, labelled with their department.
   }
 
+  // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
+  const middleHidden = useRef(false)
+  const showMiddle = useCallback(() => { if (middleHidden.current) setLeftTab('files') }, [setLeftTab])
   const handleEditFile = (filePath: string) => {
     setLeftTab('files')
     openFileFromTree(filePath)
   }
-  const handleFileSearchSelect = useCallback((filePath: string) => {
-    setLeftTab('files')
-    visitFile(filePath)
-    handleOpenFile(filePath)
-    handlePinFile(filePath)
-  }, [visitFile, handleOpenFile, handlePinFile, setLeftTab])
-  useCommandHandler('file.open', ({ path }) => handleFileSearchSelect(path))
-  // A record's card (search, 「つながっているもの」) opens in the editor area of the files tab.
-  useCommandHandler('record.open', ({ recordId }) => {
-    setLeftTab('files')
-    places.visitRecord(recordId)
-  })
+  // Opens a tab for good (not the preview tab the next single click replaces).
+  const openTab = useCallback((key: string) => {
+    showMiddle()
+    visitFile(key)
+    handleOpenFile(key)
+    handlePinFile(key)
+  }, [showMiddle, visitFile, handleOpenFile, handlePinFile])
+  const handleFileSearchSelect = openTab
+  useCommandHandler('file.open', ({ path }) => openTab(path))
+  // A record (search, 「つながっているもの」, a notice) opens in a tab in the middle, next to the files.
+  useCommandHandler('record.open', ({ recordId }) => openTab(recordTabKey(recordId)))
+  // A task list row opens its item as the preview tab, like a single click in the file tree.
+  const openListItem = useCallback((item: { id: string; title: string; type: string; typeLabel: string; state: string | null; implements?: string[] }) => {
+    noteRecordLook(item.id, { title: item.title, type: item.type, typeLabel: item.typeLabel, state: item.state, ...(item.implements ? { implements: item.implements } : {}) })
+    const key = recordTabKey(item.id)
+    visitFile(key)
+    handleOpenFile(key)
+  }, [noteRecordLook, visitFile, handleOpenFile])
   // A file link in a consultation's own window opens here (that window has no editor).
   useFilesFromChatWindows()
 
@@ -290,14 +309,14 @@ export function AppShell() {
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
     const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
       ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} onChoose={setChoosingBundle} onChanged={taskList.reload} />
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} /></div>
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
@@ -324,7 +343,7 @@ export function AppShell() {
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
     {
-      id: 'skills', title: t('tabs.skills'), icon: Lightning, mount: 'once-opened', className: 'flex',
+      id: 'skills', title: t('tabs.skills'), icon: Lightning, mount: 'once-opened', className: 'flex', wide: true,
       render: () => (
         <SkillsPanel
           skills={skills}
@@ -348,32 +367,15 @@ export function AppShell() {
       // Always mounted: the file tree and the open files keep their state.
       id: 'files', title: t('tabs.files'), icon: FolderSimple, mount: 'always',
       render: () => (
-        <FilesPanel
-          split={layout.files}
-          paneClassName={paneClassName}
-          dividerLabel={dividerLabel}
-          onResizeStart={startResize}
-          onResize={resize}
+        <FileTreePanel
           rootPath={rootPath || ''}
           departmentFolder={effectiveDeptFolder}
-          openFiles={openFiles}
-          activeFilePath={activeFilePath}
-          previewFilePath={previewFilePath}
-          tabLabels={tabLabels}
-          onOpenFile={openFileFromTree}
-          onPinFile={handlePinFile}
-          onSelectOpenFile={selectOpenFile}
-          onCloseFile={handleCloseFile}
+          selectedFilePath={activeFilePath}
+          onSelectFile={openFileFromTree}
+          onDoubleClickFile={handlePinFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
           onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
           extraMenuItems={plugins.fileMenuItems}
-          navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
-          overlay={places.recordId && currentCompany && rootPath
-            ? recordCard(places.recordId)
-            : undefined}
-          aside={activeFilePath && rootPath
-            ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
-            : undefined}
         />
       ),
     },
@@ -388,30 +390,26 @@ export function AppShell() {
           rootPath={rootPath}
           list={taskList}
           aiTurns={aiTurnItems}
-          renderCard={recordCard}
+          activeRecordId={activeRecordId}
+          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
           onConsult={consultAbout}
           meetingActions={minutes.available ? {
             read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
           } : undefined}
-          // The card opens where a file opens: the ファイル tab's split (list = the tree's width, card = the editor's).
-          frame={({ list, card }) => (
-            <SplitView
-              split={layout.files} limits={PANE_LIMITS} className="h-full w-full min-w-0"
-              paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
-              renderPane={paneId => (paneId === 'fileTree' ? list : card)}
-            />
-          )}
         />
       ) : null,
     },
     {
-      id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened',
+      id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened', wide: true,
       onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
       render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
     },
-    ...plugins.tabs,
+    // A business plugin's screen takes the whole left side, like スキル.
+    ...plugins.tabs.map(tab => ({ ...tab, wide: true })),
   ]
+  const shownLeft = leftPanels.find(p => p.id === resolveLeftPanel(leftTab, leftPanels))
+  middleHidden.current = !!shownLeft?.wide
 
   return (
     <div className="h-screen flex flex-col bg-gray-100 dark:bg-zinc-950">
@@ -485,7 +483,31 @@ export function AppShell() {
             className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
             aria-hidden={isSelectedDeptUnsynced || undefined}
           >
-            <LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={setLeftTab} />
+            {/* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */}
+            <SplitView
+              split={layout.files} limits={PANE_LIMITS} className="h-full min-w-0"
+              collapsed={shownLeft?.wide ? 'editor' : null}
+              paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
+              renderPane={id => id === 'fileTree' ? (
+                <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={setLeftTab} /></div>
+              ) : (
+                <TabbedEditorPanel
+                  openFiles={openFiles}
+                  activeFilePath={activeFilePath}
+                  previewFilePath={previewFilePath}
+                  tabLabels={tabLabels}
+                  recordLooks={recordLooks}
+                  onSelectFile={selectOpenFile}
+                  onCloseFile={handleCloseFile}
+                  onPinFile={handlePinFile}
+                  navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
+                  renderRecord={recordCard}
+                  aside={activeFilePath && !activeRecordId && rootPath
+                    ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
+                    : undefined}
+                />
+              )}
+            />
           </div>
           {isSelectedDeptUnsynced && (
             <DepartmentDownloadPrompt

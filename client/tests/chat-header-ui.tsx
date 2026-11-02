@@ -334,7 +334,7 @@ export function AutoTurnList() {
   return (
     <div className="h-full min-w-0 flex-1 flex">
       <TaskListPanel
-        companyId="preview-company" rootPath="/tmp/acb-preview" list={list} aiTurns={view} renderCard={() => null}
+        companyId="preview-company" rootPath="/tmp/acb-preview" list={list} aiTurns={view} onOpen={() => {}}
         meetingActions={{ read: () => startMinutesReading(MINUTES_NOTICE), skip: async () => null }}
       />
     </div>

@@ -142,7 +142,7 @@ describe('notice DMs (あなたの番)', () => {
     ok(await engine.act(m('u-bob'), HUMAN, t.id, 'start', { expectedVersion: 1 }))
     // A due changed (still bob's turn) and the completion are told to alice: neither waits for her.
     ok(await engine.act(m('u-bob'), HUMAN, t.id, 'set_due', { expectedVersion: 2, args: { due: '2026-11-20' } }))
-    ok(await engine.act(m('u-bob'), HUMAN, t.id, 'complete', { expectedVersion: 3, ok: { by: 'u-alice' } }))
+    ok(await engine.act(m('u-bob'), HUMAN, t.id, 'complete', { expectedVersion: 3 }))
     expect(await dms()).toEqual([])
   })
 

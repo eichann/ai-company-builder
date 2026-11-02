@@ -20,7 +20,7 @@ import type { AgentId } from '../../../shared/agents/registry'
 import { agentCan } from '../../../shared/agents/registry'
 import { aiTurnStepForRecord } from '../../../shared/ai-turn-steps/registry'
 import { claimStates } from '../../../shared/ai-turn-steps/types'
-import { readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
+import { readAutoTurnSettings, readOwnAutoRun, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
 // lane C ▼
@@ -200,12 +200,19 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     },
     // lane C ▲
 
-    /** The company's 「自動で進める」 (`autoRun` of S6's task settings); not readable → off. */
+    /**
+     * 「自動で進める」 for this member: their own switch within the company's (`GET
+     * /me/work-switches`, shared/core/work-switches.ts — the AI's turn runs on the assignee's PC),
+     * with the company's limits (`autoRun` of S6's task settings). Not readable → off; a server
+     * without the member's switch (404, older) → the company's switch as before.
+     */
     async settings(companyId: string): Promise<AutoTurnSettings> {
       if (!COMPANY.test(companyId)) return readAutoTurnSettings(undefined)
-      const r = await session(companyId, 'GET', '/task-settings')
+      const [r, mine] = await Promise.all([session(companyId, 'GET', '/task-settings'), session(companyId, 'GET', '/me/work-switches')])
       const view = r?.status === 200 ? r.data as { settings?: { autoRun?: unknown } } | undefined : undefined
-      return readAutoTurnSettings(view?.settings?.autoRun)
+      const company = readAutoTurnSettings(view?.settings?.autoRun)
+      if (mine?.status === 404) return company
+      return { ...company, enabled: company.enabled && readOwnAutoRun(mine?.status === 200 ? mine.data : undefined) }
     },
 
     /**
