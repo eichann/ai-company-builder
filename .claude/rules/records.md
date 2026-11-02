@@ -1035,6 +1035,16 @@ complete and idempotent; the immutability trigger — mutation-checked).
   person fields take member ids, while replies to the member call a record by its title and
   distinguishing details (担当, 金額, dates) and show internal ids (record ids, outside ids,
   operation ids) only when asked — the tools keep the ids (`RECORDS_INSTRUCTIONS`).
+- **Names next to person ids** (staging FB 9, 2026-11-02): the AI's look-ups (`GET /my-turn`,
+  `/ai-turn`, `POST /query`, `GET /item/:id`, `/item/:id/history` on `/api/records-ai`, and the
+  inbox's `GET /items/:id`) add `people` (id → display name, first key so the app's output cut
+  keeps it) for every string in the answer that is a member id of the **caller's company**
+  (`services/people-names.ts`, `withPeople`). Anyone else — another company's account, a removed
+  member, an account without a name — gets no entry; no email or other account field is added.
+  The ids stay where they were and the tools still take ids; `RECORDS_INSTRUCTIONS` and the
+  `records_get` / `records_history` descriptions tell the AI to call people by name and never guess
+  a missing one. Test: `server/tests/integration/record-ai-people.test.ts` (membership check
+  mutation-checked).
   Category `app-tool` in the action log. Not in the
   private-read guard's app list: after the conversation read a private folder, a record tool call
   asks the member first (a note could carry private content to a shared record).

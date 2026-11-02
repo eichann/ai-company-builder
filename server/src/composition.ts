@@ -61,6 +61,7 @@ import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
+import { createPeopleNames } from './services/people-names'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
@@ -595,6 +596,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
     records,
+    // The names behind person ids in the AI's record answers (records.md "Typed tools in the app").
+    peopleNames: createPeopleNames({ memberships: repos.memberships, accounts: shared.accounts }),
     absences,
     aiRuns,
     recordEngine,

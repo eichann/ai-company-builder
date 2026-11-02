@@ -142,13 +142,13 @@ const LOOKUPS: RecordToolSpec[] = [
   {
     name: 'records_get', readOnly: true, schema: z.object({ id }).strict(),
     display: recordToolDisplay('records_get'),
-    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。links のうち path を持つものはつながったファイル（会社のフォルダの中のパス。名前だけで中身は入っていない）：中身が要るときは、ふだんの道具でそのファイルを読む（メンバーが見られるものだけ）。broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. Links with a `path` are linked files (company paths — names only, never contents): when you need what is in one, read it with your normal file tools (only what the member can read). A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow).',
+    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。links のうち path を持つものはつながったファイル（会社のフォルダの中のパス。名前だけで中身は入っていない）：中身が要るときは、ふだんの道具でそのファイルを読む（メンバーが見られるものだけ）。broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。people は答えに出てくる人（担当・依頼した人など）の id → 名前：メンバーには名前で、道具には id で。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. Links with a `path` are linked files (company paths — names only, never contents): when you need what is in one, read it with your normal file tools (only what the member can read). A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow). `people` maps the person ids in the answer (assignee, requester…) to names: use the name when talking to the member, the id in tool calls.',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
   },
   {
     name: 'records_history', readOnly: true, schema: z.object({ id }).strict(),
     display: recordToolDisplay('records_history'),
-    description: '記録の台帳（誰が・いつ・何を・なぜ変えたか）。\nThe record\'s ledger: who changed what, when, and why.',
+    description: '記録の台帳（誰が・いつ・何を・なぜ変えたか）。people は出てくる人の id → 名前。\nThe record\'s ledger: who changed what, when, and why. `people` maps the person ids in it to names.',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}/history` }),
   },
   {
@@ -580,6 +580,7 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
 ]
 
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
+  `記録の答えの people は、答えに出てくる人の id と名前の対応です（会社のメンバーだけ）。メンバーへの返事では人を名前で呼び（「佐藤さんの番です」）、id は見せないでください。people に無い id は、名前の分からない人です（会社のメンバーではないなど）。名前を推測せず、そう伝えてください。道具に人を渡すときは id を使います。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。` +

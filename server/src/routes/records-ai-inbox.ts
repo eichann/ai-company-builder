@@ -16,13 +16,13 @@ import { refusal } from './respond'
 import { aiActs, aiReads, serviceBody } from './guards'
 
 export const recordsAiInboxRoute = new Hono()
-const { inbox } = services
+const { inbox, peopleNames } = services
 
 recordsAiInboxRoute.get('/items/:recordId', aiReads, (c) => {
   const h = c.var.holder
   const r = inbox.item(h.member, c.req.param('recordId'))
   if (!r.ok) return refusal(c, r)
-  return c.json({ success: true, data: r.value }, 200)
+  return c.json({ success: true, data: peopleNames.withPeople(h.member, r.value) }, 200)
 })
 
 recordsAiInboxRoute.post('/items/:recordId/judgement', aiActs, serviceBody, async (c) => {
