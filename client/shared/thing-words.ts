@@ -103,7 +103,7 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
   decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },
   outbound_message: { draft: '下書き', sent: '送った', unknown: '届いたか分からない', discarded: 'やめた（しまった）' },
   approval: {
-    pending: '確かめ待ち', approved: '承認した', sent_back: '差し戻した', stale: '中身が変わったので使えない',
+    pending: '承認待ち', approved: '承認した', sent_back: '差し戻した', stale: '中身が変わったので使えない',
     withdrawn: '取り下げた', failed: 'うまくいかなかった',
   },
   reply_request: {

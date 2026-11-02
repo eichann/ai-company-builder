@@ -135,6 +135,9 @@ test('search finds records by kind next to files; a record opens as a card, its 
   await hits.getByRole('button', { name: /A社 提案書を仕上げる/ }).click()
   const card = page.getByTestId('task-card')
   await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
+  // Fields and 経緯 are folded at the bottom until opened.
+  await card.getByRole('button', { name: /ほかの項目/ }).click()
+  await card.getByRole('button', { name: /経緯/ }).click()
   await expect(card.getByText('田中 太郎')).toBeVisible()
   await expect(card.getByText('山田 花子：作りました')).toBeVisible()
 

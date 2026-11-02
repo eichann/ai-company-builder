@@ -7,7 +7,7 @@ import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
-import { stateWord, thingName } from './thing-words'
+import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
 export type RecordKind = 'bundle' | 'task' | 'decision' | 'interaction' | 'other'
@@ -33,6 +33,10 @@ export interface RecordViewSummary {
   personal?: true
   /** A decision marked 例外（この件だけ）: never a precedent for another case. */
   exception?: true
+  /** How it is shown (its icon, `ThingIcon`); `typeLabel` is its name. */
+  thing: ThingKind
+  /** A request (やること, 承認のお願い…) that is over: its row is drawn faint. */
+  finished?: true
 }
 
 /** `available: false`: records are off for this company (nothing to show, no error). */
@@ -84,6 +88,8 @@ export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): 
     title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state, r.type), updatedAt: r.updatedAt,
     ...(r.personal ? { personal: true as const } : {}),
     ...(r.exceptionNotice ? { exception: true as const } : {}),
+    thing: thingKindOf({ type: r.type, implements: def?.implements, state: r.state }),
+    ...(def?.implements.includes('request') && r.state !== null && def.final.includes(r.state) ? { finished: true as const } : {}),
   }
 }
 

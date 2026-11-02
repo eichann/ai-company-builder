@@ -12,6 +12,10 @@ paths:
   - "client/src/features/minutes/startReading.ts"
   - "client/electron/features/tasks/**"
   - "client/src/features/tasks/**"
+  - "client/src/features/records/**"
+  - "client/src/shared/ui/RecordPage.tsx"
+  - "client/src/shared/ui/LinkedColumn.tsx"
+  - "client/src/shared/lib/linkGroups*"
   - "client/tests/tasks-*.test.ts"
   - "client/tests/tasks-*-ui.*"
   - "client/tests/ui/tasks-*.spec.ts"
@@ -126,9 +130,18 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    screen: `src/app/recordSource.tsx` `renderRecordSource` returns the connector feature's part
    (under its lane marker, `ipc-and-main-process.md` "Lane markers"), so `tasks` imports no other
    feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …").
-6. Fields, 経緯, and 「つながっているもの」 with the record card's rows (`RecordRows.tsx`, registered
-   import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
-   (`RecordMarks`, also on the generic card and every record row).
+6. Fields and 経緯 folded at the bottom (`FieldsFold`, `HistoryFold`), and 「つながっているもの」 on
+   the right with the record card's rows (`records/components/linkRows.tsx`, registered import):
+   decisions marked 例外（この件だけ） and owner-only records marked 自分だけ (`RecordMarks`).
+
+Every record opens in one layout (`src/shared/ui/RecordPage.tsx`: the kind's icon and name, short
+chips, the big title with the actions beside it, where it came from, the body, folded fields and
+経緯) with 「つながっているもの」 as a table of contents on the right (`src/shared/ui/LinkedColumn.tsx`):
+what is linked **directly**, one group per kind by its plain name (`typeLabel` = `thingName`, so
+案件 and プロジェクト stay two groups and 「まとまり」「やりとり」 never show), in a fixed order (`groupLinks`,
+`src/shared/lib/linkGroups.ts`; a bundle's やること first), three rows per kind and the rest under
+「ほか n 件」 (`foldLinks`). Rows show the name, not the state; a finished request (`finished`) is
+faint and struck through. A file's own 「つながっているもの」 uses the same column.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
@@ -193,9 +206,10 @@ Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST 
 `…/file-links/remove`, the version the screen shows): the file tree's right-click
 「やることにつなぐ…」 (shown only while the task list shows for the department on screen; the
 chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file dragged from the tree
-onto a task row or onto the task card (`src/shared/lib/dragTypes.ts`; the first dragged path inside
-the company folder), and the card's 「＋ファイルをつなぐ」 (the company's file names on this
-computer, `git:listFiles`) with 「外す」 on each linked file. Main sends only a path inside the
+onto a task row or onto the card's 「つながっているもの」 (its drop zone 「ここにファイルをドロップしてつなぐ」;
+`src/shared/lib/dragTypes.ts`; the first dragged path inside the company folder), and the card's
+「＋ファイルをつなぐ」 (the company's file names on this computer, `git:listFiles`). Each linked file's
+「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again). Main sends only a path inside the
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.

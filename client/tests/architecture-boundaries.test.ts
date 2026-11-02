@@ -245,7 +245,7 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
   'settings -> voice/components/VoicePromptSettings.tsx': 'the settings panel shows the voice input\'s prompt settings, owned by the voice feature',
   'settings -> voice/components/VoiceShortcutSettings.tsx': 'the settings panel shows the voice input\'s key, owned by the voice feature',
   'tasks -> records/components/RecordRows.tsx': 'the task card\'s 「つながっているもの」 follows records and files with the record card\'s own rows (one look, record.open / file.open)',
-  'tasks -> records/model.ts': 'the task card groups its linked records by kind like the record card (groupByKind, kindTitle: pure)',
+  'tasks -> records/components/linkRows.tsx': 'the task card\'s 「つながっているもの」 rows are the record card\'s own (a record opens with record.open, a file with file.open; one look)',
   'settings -> absences/components/AbsenceSection.tsx': 'the settings panel shows 「不在と代わりの人」, owned by the absences feature (like the voice settings)',
   'chat -> voice/components/VoiceShortcutSettings.tsx': 'the chat\'s agent settings show the voice key with the other input settings',
   'chat -> voice/api.ts': 'the composer\'s microphone button (VoiceInputControl) records and transcribes through the voice ports',
