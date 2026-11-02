@@ -58,6 +58,7 @@ import { pluginBridgeRoute } from './routes/plugin-bridge'
 import { pluginStepsRoute } from './routes/plugin-steps'
 // lane C ▲
 import { requestLog } from './lib/request-log'
+import { appDownloadUrl } from './lib/config'
 import { logError } from './lib/error-log'
 import { services } from './composition'
 
@@ -112,6 +113,8 @@ app.get('/api/config', (c) => {
       name: 'AI Company Builder',
       version: '1.0.0',
       setupComplete: result.count > 0,
+      // The invitation page's 「アプリをダウンロード（Mac）」 (null: the page says to get the app from the admin).
+      appDownloadUrl: appDownloadUrl(),
     },
   })
 })

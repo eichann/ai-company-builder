@@ -232,6 +232,61 @@ describe('invitations', () => {
     expect((await as('u-other-account', 'POST', `/api/invitations/${token}/accept`)).status).toBe(410)
   })
 
+  describe('所属 on the link (departmentIds)', () => {
+    const addDept = (id: string, companyId: string, name: string) =>
+      db.prepare('INSERT OR IGNORE INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, companyId, name, name, ts(), ts())
+    const belongsTo = (userId: string) =>
+      (db.prepare('SELECT department_id, created_by FROM department_members WHERE company_id = ? AND user_id = ? ORDER BY department_id').all(CO, userId) as Array<{ department_id: string; created_by: string }>)
+    beforeAll(() => {
+      addDept('d-sales', CO, '営業部')
+      addDept('d-support', CO, 'サポート部')
+      addDept('d-gone', CO, '消える部')
+      addDept('d-other-co', 'acct-other', 'よその部署')
+    })
+
+    it('only this company\'s departments: another company\'s id answers like an unknown one, and nothing is created', async () => {
+      const count = () => (db.prepare('SELECT COUNT(*) AS n FROM invitations WHERE company_id = ?').get(CO) as { n: number }).n
+      const before = count()
+      const other = await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member', departmentIds: ['d-sales', 'd-other-co'] })
+      const unknown = await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member', departmentIds: ['d-sales', 'd-nowhere'] })
+      expect(other.status).toBe(400)
+      expect(other.body).toEqual(unknown.body)
+      for (const bad of ['d-sales', [1], [''], { a: 1 }]) {
+        expect((await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member', departmentIds: bad })).status, JSON.stringify(bad)).toBe(400)
+      }
+      expect(count()).toBe(before)
+      // a member still gets 403 first, whatever the body
+      expect((await as('u-member', 'POST', `/api/companies/${CO}/invitations`, { departmentIds: 'x' })).status).toBe(403)
+    })
+
+    it('the page shows who invited and the departments; accepting adds 所属 (a department deleted meanwhile is skipped)', async () => {
+      const created = await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member', departmentIds: ['d-sales', 'd-gone', 'd-sales'] })
+      expect(created.status).toBe(201)
+      expect(created.body.data.departmentIds).toEqual(['d-sales', 'd-gone'])
+      const token: string = created.body.data.token
+
+      const page = await as(null, 'GET', `/api/invitations/${token}`)
+      expect(page.status).toBe(200)
+      expect(page.body.data).toMatchObject({ companyName: 'Acct', inviterName: 'u-owner', departmentNames: ['営業部', '消える部'] })
+
+      db.prepare('DELETE FROM departments WHERE id = ?').run('d-gone')
+      addUser('u-joiner')
+      expect((await as('u-joiner', 'POST', `/api/invitations/${token}/accept`)).status).toBe(200)
+      expect(belongsTo('u-joiner')).toEqual([{ department_id: 'd-sales', created_by: 'u-owner' }])
+
+      const listed = await as('u-owner', 'GET', `/api/companies/${CO}/invitations`)
+      expect(listed.body.data.find((i: { token: string }) => i.token === token).departmentIds).toEqual(['d-sales', 'd-gone'])
+    })
+
+    it('a link without 所属 adds none', async () => {
+      const created = await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member' })
+      addUser('u-plain')
+      expect((await as('u-plain', 'POST', `/api/invitations/${created.body.data.token}/accept`)).status).toBe(200)
+      expect(belongsTo('u-plain')).toEqual([])
+      expect((await as(null, 'GET', `/api/invitations/${created.body.data.token}`)).status).toBe(410)
+    })
+  })
+
   it('an existing account accepts an unclaimed link once', async () => {
     const created = await as('u-owner', 'POST', `/api/companies/${CO}/invitations`, { role: 'member' })
     const token: string = created.body.data.token

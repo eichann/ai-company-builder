@@ -217,6 +217,7 @@ export const invitations: Invitation[] = [
     createdAt: '2026-10-21T00:00:00.000Z',
     isExpired: false,
     isUsed: false,
+    departmentIds: [],
   },
 ]
 

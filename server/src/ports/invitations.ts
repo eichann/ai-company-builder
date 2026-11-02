@@ -15,6 +15,8 @@ export type InvitationWithCompany = {
   created_at: string
   signup_claimed_at: string | null
   signup_user_id: string | null
+  /** JSON list of this company's department ids the invitee will belong to (所属); '[]' = none chosen. */
+  department_ids: string
   company_name: string
 }
 
@@ -26,6 +28,8 @@ export interface NewInvitation {
   createdBy: string
   expiresAt: string
   createdAt: string
+  /** Departments of this company the invitee will belong to (所属) once they accept. */
+  departmentIds: string[]
 }
 
 /**

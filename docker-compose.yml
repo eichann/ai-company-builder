@@ -44,6 +44,8 @@ services:
       # (comma-separated). Policy: operator (default; the only one so far).
       - OPERATOR_USER_IDS=${OPERATOR_USER_IDS:-}
       - COMPANY_CREATION_POLICY=${COMPANY_CREATION_POLICY:-operator}
+      # Where members download the desktop app (https only; shown on the invitation page).
+      - APP_DOWNLOAD_URL=${APP_DOWNLOAD_URL:-}
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").
