@@ -59,6 +59,7 @@ const TYPES: Record<string, string> = {
   MemberRole: '{ userId: string; companyId: string; role: Role }',
   Capabilities: 'Capabilities',
   Overview: 'Overview',
+  AdminHome: 'AdminHome',
   ClientActivity: 'ClientActivity[]',
   Permissions: '{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }',
   ScopeRulesResult: 'ScopeRulesResult',
@@ -250,6 +251,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
   app.route('/api/companies/:companyId', inboxRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/absences')).absencesRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
@@ -284,6 +286,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   it('capabilities / overview / push rejections', async () => {
     await expectShape('Capabilities', USERS.member, 'GET', `${base}/me/capabilities`)
     await expectShape('Overview', USERS.owner, 'GET', `${base}/overview`)
+    await expectShape('AdminHome', USERS.owner, 'GET', `${base}/home`)
+    await expectShape('AdminHome', USERS.owner, 'PUT', `${base}/home/holidays-checked`, { checked: true })
     await expectShape('PushRejections', USERS.owner, 'GET', `${base}/push-rejections?limit=10`)
   })
 
