@@ -18,6 +18,8 @@ interface Props {
   members?: Array<{ id: string; name: string }>
   /** The name of what a task belongs to when nothing is chosen yet (the department's kind: 案件, プロジェクト). */
   bundleWord?: string
+  /** Only bundles of this type are offered (the department's kind); none = every kind (全社, where kinds mix). */
+  bundleType?: string
   /** null = added; else the reason in words. */
   onAdd: (input: TaskCreateInput) => Promise<string | null>
 }
@@ -33,7 +35,7 @@ const POP_ROW = 'block w-full rounded px-2 py-1 text-left hover:bg-gray-100 dark
  * ［期限］［担当］［〇〇］, plus ［終わったら］ once someone else is chosen (it is then 「頼む」). What
  * the line already says (「明日15時」, 「#営業」) is in the chips. Enter adds.
  */
-export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWord = 'プロジェクト', onAdd }: Props) {
+export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWord = 'プロジェクト', bundleType, onAdd }: Props) {
   const [line, setLine] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -148,7 +150,7 @@ export function QuickAdd({ companyId, now, tagsInUse, me, members = [], bundleWo
               <div className={`${POP} max-h-[240px] w-[220px] overflow-y-auto`} data-quick-pop="bundle">
                 <button type="button" className={POP_ROW} onClick={() => { setBundle(null); setOpen(null) }}>{bundleWord}なし</button>
                 {bundles === null && <p className="px-2 py-1 text-gray-400">読み込んでいます</p>}
-                {bundles?.map(b => (
+                {bundles?.filter(b => !bundleType || b.id.startsWith(`${bundleType}-`)).map(b => (
                   <button key={b.id} type="button" className={`${POP_ROW} flex items-center gap-1.5`} onClick={() => { setBundle(b); setOpen(null) }}>
                     <ThingIcon kind="bundle" typeLabel={b.typeLabel} size={12} /><span className="truncate">{b.title}</span>
                   </button>

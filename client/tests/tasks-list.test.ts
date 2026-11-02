@@ -218,3 +218,19 @@ test('which meetings ask is the server\'s answer: the app adds none and drops no
     assert.equal(asked.some(a => a.includes('/records/item/meeting-')), false)
   }
 })
+
+test('a row\'s 案件・プロジェクト chip names the kind as the company calls it (bundle kinds), else the type\'s label', () => {
+  const items = classifyTasks(src({
+    myTurn: [rec('task-a00001', 'todo'), rec('task-b00001', 'todo')],
+    typeLabels: { task: 'タスク', project: 'プロジェクト', deal: '案件' },
+    bundles: { 'task-a00001': { id: 'project-abc123', title: '新サービス' }, 'task-b00001': { id: 'deal-abc123', title: 'A社' } },
+    bundleKindNames: { project: '取り組み' },
+  }))
+  assert.equal(items.find(i => i.id === 'task-a00001')?.bundle?.typeLabel, '取り組み')
+  assert.equal(items.find(i => i.id === 'task-b00001')?.bundle?.typeLabel, '案件')
+})
+
+test('an AI proposal put away (dismissed) is not among today\'s done', () => {
+  const items = classifyTasks(src({ doneToday: [rec('task-done01', 'done'), rec('task-prop01', 'dismissed')] }))
+  assert.deepEqual(items.map(i => i.id), ['task-done01'])
+})

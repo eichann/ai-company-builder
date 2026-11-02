@@ -85,7 +85,12 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   **By date**: 期限切れ, 今日 (meetings to come), 明日, 今週, あとで (folded), 期限なし, 今日終わったこと.
   **By bundle** (「〇〇ごと」): each bundle with open items (its name opens it), then 「〇〇なし」, then
   今日終わったこと; 〇〇 is the kinds actually in the list (`bundleListWord`: 「案件」, 「案件・プロジェクト」),
-  since the list crosses departments; with none, 「プロジェクト」.
+  since the list crosses departments; with none, the company's own kind's name. The names come
+  from `GET /records/bundle-kinds` (read with the list: `TaskListData.bundleKinds`, and
+  `bundleKindNames` for each row's chip — the core's kind under the company's name); an older
+  server → the types' own labels. The one line's ［〇〇］ is the department on screen's kind and
+  offers only bundles of that type (全社: every kind). An AI proposal put away (`dismissed`) is
+  never in 今日終わったこと.
   "This week" ends on Sunday; on a Saturday or Sunday it runs to next Sunday, so tomorrow never
   folds. A due with a time today that has passed is 期限切れ. Meetings are read, never made into
   tasks (`calendar.md`); a tag filter hides them.

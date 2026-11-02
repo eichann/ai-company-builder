@@ -5,7 +5,7 @@
  * not read); this only sorts and words it. Pure: main, the renderer and tests import it.
  */
 import { parseTagsValue } from '../../shared/core/record-types'
-import type { RecordSummary } from '../../shared/types/records'
+import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { stateLabel } from './record-views'
 import { thingName } from './thing-words'
@@ -133,6 +133,11 @@ export interface TaskListData {
   /** The company setting 「一覧を出す部署」: department ids, or null = every department. */
   listDepartmentIds: string[] | null
   items: TaskListItem[]
+  /**
+   * What each department makes as its 束ねるもの and the names (`GET /records/bundle-kinds`): the one
+   * line's ［〇〇］ for the department on screen, 「〇〇ごと」 with none in the list. Absent: an older server.
+   */
+  bundleKinds?: BundleKindsResult
   /** The member's own id and the company's members (the one line's 「担当」 picker); absent from an older main. */
   me?: string
   members?: Array<{ id: string; name: string }>
@@ -182,7 +187,8 @@ export type TaskWriteResult =
 function bundleOf(src: TaskSources, recordId: string): TaskListItem['bundle'] {
   const b = src.bundles[recordId]
   if (!b) return null
-  const label = src.typeLabels[b.id.slice(0, b.id.indexOf('-'))]
+  const type = b.id.slice(0, b.id.indexOf('-'))
+  const label = src.bundleKindNames?.[type] ?? src.typeLabels[type]
   return label ? { ...b, typeLabel: label } : b
 }
 
@@ -206,6 +212,8 @@ export interface TaskSources {
   typeImplements?: Record<string, string[]>
   /** Member id → display name. */
   people: Record<string, string>
+  /** A bundle type → its name as the company calls it (a plugin's own label, the core's 「プロジェクト」 or the company's name). */
+  bundleKindNames?: Record<string, string>
   /** Record id → its まとまり, when it has one. */
   bundles: Record<string, { id: string; title: string }>
 }
@@ -275,7 +283,8 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
   }
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))
-  for (const r of src.doneToday) add(r, 'done', null, r.updatedAt)
+  // An AI proposal put away (「要らない」, `dismissed`) was never done: it stays out of 今日終わったこと.
+  for (const r of src.doneToday) if (r.state !== 'dismissed') add(r, 'done', null, r.updatedAt)
   return out
 }
 

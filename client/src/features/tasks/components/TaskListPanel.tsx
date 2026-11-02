@@ -54,7 +54,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const shownTag = tag !== null && tags.some(t => t.tag === tag) ? tag : null
   const events = useMemo(() => (shownTag === null ? listEvents(calendar?.events ?? [], now) : []), [calendar, now, shownTag])
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now), [items, events, mode, now, shownTag])
-  const bundleWord = useMemo(() => bundleListWord(items), [items])
+  // 「〇〇ごと」: the kinds in the member's list; with none, the company's own kind (records.md "Bundle kinds").
+  const kinds = list.data?.bundleKinds
+  const bundleWord = useMemo(() => bundleListWord(items, kinds?.core.name), [items, kinds])
+  // The one line's ［〇〇］: what the department on screen makes (全社: the company's own kind).
+  const deptKind = kinds ? (kinds.departments.find(d => d.folder === askFolder)?.kind ?? kinds.core) : null
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
   const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => {
@@ -219,7 +223,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             ))}
           </span>
         </div>
-        <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} me={list.data?.me} members={list.data?.members} bundleWord={bundleWord} onAdd={add} />
+        <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} me={list.data?.me} members={list.data?.members} bundleWord={deptKind?.name ?? bundleWord} bundleType={askFolder ? deptKind?.type : undefined} onAdd={add} />
         {tags.length > 0 && (
           <div role="group" aria-label="タグで絞る" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 text-[11px]">
             <button type="button" aria-pressed={shownTag === null} onClick={() => setTag(null)} className={`rounded-full px-2 py-px ${shownTag === null ? 'bg-gray-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>すべて</button>
