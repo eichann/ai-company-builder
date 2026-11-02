@@ -83,11 +83,7 @@ turns").
   title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
   `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`), `follow-up.ts` (lane B,
   B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
-  start mark, `claimStates`), `minutes-bundle.ts` (the まとまり's part of a meeting read without one,
-  `minutes.md` "A まとまり chosen later": only `minutes_read`, `meeting__finish_bundle_work` /
-  `fail_bundle_work` — it confirms the まとまり and finishes; the まとまり's own step follows,
-  `plugin-steps.md` "After a meeting is read"; nothing that makes homework, decisions or mail),
-`task-wait-over.ts` (lane C: a task the clock's 「見込みの日時が過ぎた」 put in 準備中, below). A type with no start mark
+  start mark, `claimStates`), `task-wait-over.ts` (lane C: a task the clock's 「見込みの日時が過ぎた」 put in 準備中, below). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).

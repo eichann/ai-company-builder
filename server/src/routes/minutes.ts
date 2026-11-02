@@ -58,7 +58,7 @@ minutesRoute.get('/me/minutes/item/:recordId/text', companyMember, async (c) => 
 
 minutesRoute.post('/me/minutes/item/:recordId/bundle', companyMember, serviceBody, async (c) => {
   const member = c.var.member
-  return answer(c, minutes.linkBundle(member, { kind: 'human', source: null }, c.req.param('recordId'), c.var.body))
+  return answer(c, await minutes.linkBundle(member, { kind: 'human', source: null }, c.req.param('recordId'), c.var.body))
 })
 
 minutesRoute.post('/me/minutes/item/:recordId/no-bundle', companyMember, serviceBody, async (c) => {

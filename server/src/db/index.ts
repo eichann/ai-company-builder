@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes } from '../adapters/sqlite/records'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes } from '../adapters/sqlite/records'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -119,6 +119,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateCoreInterfaceLinks(conn)
   // Meeting version 2: the common outside time (records.md "Outside time").
   migrateOutsideTimes(conn)
+  // Meeting version 4: no AI run for a まとまり chosen later (minutes.md "A まとまり chosen later").
+  migrateBundleParts(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -192,6 +194,18 @@ export function migrateCoreInterfaceLinks(conn: Database.Database): void {
  * Every company's meetings get `occurred_at` from `meeting_at` (adapters/sqlite/records.ts
  * `migrateCompanyOutsideTimes`): one ledger entry each, idempotent.
  */
+/**
+ * Every company's meetings left in version 3's まとまり's part go back to `read`
+ * (adapters/sqlite/records.ts `migrateCompanyBundleParts`): one ledger entry each, idempotent.
+ */
+export function migrateBundleParts(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyBundleParts(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] meeting version 4: ${moved} meeting(s) back to read in company ${id}`)
+  }
+}
+
 export function migrateOutsideTimes(conn: Database.Database): void {
   const at = new Date().toISOString()
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {

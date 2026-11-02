@@ -58,7 +58,7 @@ describe('the outside time is one field, through the interface', () => {
     const before: Record<string, string> = {
       // Version 4 as it was (interaction 5 is the inbox's: tests/unit/intake-core.test.ts).
       interaction: INTERACTION_V4_TEXT.replace('version: 4\nimplements: [outside_event]\n', 'version: 3\n'),
-      meeting: CORE_TYPE_FILES.meeting.replace('version: 3\nimplements: [outside_event]\n', 'version: 1\n')
+      meeting: CORE_TYPE_FILES.meeting.replace('version: 4\nimplements: [outside_event]\n', 'version: 1\n')
         .replace(/ {2}occurred_at: .*\n/, ''),
     }
     for (const [name, text] of Object.entries(before)) {

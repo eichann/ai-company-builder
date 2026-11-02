@@ -82,7 +82,9 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   widens it.
 - **After a meeting is read** (coordinator decision 2026-11-02; `afterAct`, bound to the record
   engine's after-action seam `useAfterAction` in `composition/plugins.ts`): when a meeting becomes `read`
-  by `finish_reading` or `finish_bundle_work` (not `fail_…` / `skip_…`), its `bundle` link's record —
+  by `finish_reading` (not `fail_…` / `skip_…`), or a まとまり is linked to a meeting already read
+  without one (the minutes service's `link_bundle`, told through `afterAction`; the meeting stays
+  read, `minutes.md` "A まとまり chosen later"; a person's choice moves it as their AI), its `bundle` link's record —
   readable by the member — moves to a business plugin's `ai_turn` step: an enabled, not stopped
   contract-2 business plugin with an `ai_turn` step whose `for.type` is that record's type, and
   **exactly one** action of that type with `to` = one of those steps' states, the current state in
@@ -96,7 +98,7 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
 - Another company: the record and the plugin are the same 404 as none; no turns.
 - Test (after a meeting): `plugin-steps.test.ts` "a meeting read moves its まとまり…" (read → the
   deal at the step's state by the AI for the reader, its note naming the meeting, the step in the
-  turns; the まとまり chosen later the same, its failed part nothing; no まとまり / already the AI's turn
+  turns; the まとまり chosen later by a person the same — the meeting stays read, no run, once; no まとまり / already the AI's turn
   / not the assignee / two AI ways → nothing; a person-only way is not a second way) and "the core's
   minutes reading writes nothing…" (a minutes-reading run reads the deal, cannot update it) —
   mutation-checked.

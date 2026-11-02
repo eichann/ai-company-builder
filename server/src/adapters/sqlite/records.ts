@@ -14,7 +14,7 @@ import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
 } from '../../ports/records'
-import { MIGRATION_ACTOR, OUTSIDE_TIME_ACTION } from '../../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION } from '../../../shared/core/core-types'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 import { skillUsesJson } from './skill-uses'
@@ -146,6 +146,36 @@ export function migrateCompanyOutsideTimes(conn: Database.Database, companyId: s
       version2.run(companyId, r.record_id)
       entry.run(companyId, r.record_id, r.version + 1, OUTSIDE_TIME_ACTION, r.state, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind,
         MIGRATION_ACTOR.source, at, JSON.stringify([{ field: 'occurred_at', before: null, after: r.meeting_at }]))
+      moved++
+    }
+    return moved
+  })()
+}
+
+/**
+ * Meeting version 4 (minutes.md "A まとまり chosen later"): a meeting left in version 3's
+ * `bundle_waiting` / `bundle_working` (an AI run for the まとまり's part, which is no more) goes back
+ * to `read`, as a new ledger entry (action BUNDLE_PART_ENDED_ACTION, the server's migration
+ * actor — cause `system`, never a person) with a compare-and-set on the version. Idempotent:
+ * nothing is left in those states afterwards.
+ */
+export function migrateCompanyBundleParts(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const rows = conn.prepare(`
+      SELECT s.record_id, s.state, s.version FROM record_state s
+      JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+      WHERE s.company_id = ? AND r.type = 'meeting' AND s.state IN ('bundle_waiting', 'bundle_working')
+    `).all(companyId) as Array<{ record_id: string; state: string; version: number }>
+    const write = conn.prepare(`UPDATE record_state SET state = 'read', version = version + 1, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?`)
+    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
+        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, 'read', ?, ?, ?, ?, '', ?, '[]', 0, 4)`)
+    const version4 = conn.prepare(`UPDATE records SET type_version = 4 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 4)`)
+    let moved = 0
+    for (const r of rows) {
+      if (write.run(at, companyId, r.record_id, r.version).changes !== 1) continue
+      version4.run(companyId, r.record_id)
+      entry.run(companyId, r.record_id, r.version + 1, BUNDLE_PART_ENDED_ACTION, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind, MIGRATION_ACTOR.source, at,
+        JSON.stringify([{ field: 'state', before: r.state, after: 'read' }]))
       moved++
     }
     return moved

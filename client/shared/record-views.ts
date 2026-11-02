@@ -4,7 +4,7 @@
 // member may not read); the renderer only draws them. Pure: types and wording.
 import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
-import { OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
 
@@ -127,6 +127,11 @@ const ENGINE_ACTIONS: Record<string, string> = {
   [WAIT_OVER_ACTION]: '見込みの日時が過ぎたので、追いかけの番にしました',
   // The startup carry-over of a meeting's outside time (records.md "Outside time").
   [OUTSIDE_TIME_ACTION]: '外で起きた日時を共通の欄に写しました',
+  // Meeting version 4 (minutes.md "A まとまり chosen later"): the まとまり's part is no more.
+  [BUNDLE_PART_ENDED_ACTION]: 'まとまりの分を終わりにして「読んだ」に戻しました',
+  // Version 3's actions, still in older meetings' 経緯.
+  start_bundle_work: 'まとまりの分を始めました', finish_bundle_work: 'まとまりの分を終えました', fail_bundle_work: 'まとまりの分をできませんでした',
+  retry_bundle_work: 'まとまりの分をやり直しにしました', skip_bundle_work: 'まとまりの分をしないことにしました',
 }
 
 /** One line of 経緯 per ledger entry, newest first. */
