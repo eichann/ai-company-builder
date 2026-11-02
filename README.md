@@ -81,7 +81,7 @@ pnpm dev       # launches the client
 
 On first launch the client asks for a server URL — enter `http://localhost:3001`.
 
-> **AI chat needs Claude Code.** The client runs AI chat by spawning the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your machine, so install it and sign in first. The client itself runs natively on **Windows, macOS, and Linux** — WSL2 is not required for the client.
+> **AI chat needs Claude Code.** The client runs AI chat by spawning the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your machine, so install it and sign in first. The packaged client is built for **macOS** (tested in CI) and **Windows** (built, not yet tested in CI) and runs natively there — WSL2 is not required for the client. No Linux package is built.
 > - **Windows**: install [Git for Windows](https://git-scm.com/download/win), then in PowerShell run `irm https://claude.ai/install.ps1 | iex`
 > - **macOS / Linux**: run `curl -fsSL https://claude.ai/install.sh | bash`
 >

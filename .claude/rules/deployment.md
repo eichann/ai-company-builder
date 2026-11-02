@@ -157,6 +157,15 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   team supports the latest three stable majors, so plan the next bump before then) with
   electron-builder 26. Electron 45 runs on **macOS 13 (Ventura) or later** (Electron 44 dropped
   macOS 12); Windows 10+. Voice input additionally needs macOS 26 (`voice-input.ts`).
+- Platforms (`client/package.json` `build`): **macOS** (dmg + zip) is the shipped, CI-verified
+  app — every client, sync-harness, UI and universal-git job runs on macOS runners.
+  **Windows** (nsis) is built but not CI-verified: its code paths are deliberate (Claude Code
+  spawn through cmd.exe, `taskkill` trees, `core.longpaths`, sandbox record-only, Codex not
+  offered) and only typecheck covers them; check it by hand before handing a Windows build to
+  anyone. **Linux** has no packaging target: the POSIX spawn wrappers' `exec N>&-` fails under
+  dash (`/bin/sh` on Debian/Ubuntu; see the `test-client` comment in `ci.yml`), so the client
+  tests cannot pass there. Code that is already cross-platform (e.g. `sandboxPlatform` naming
+  linux) stays; add a Linux target only together with that fix and a Linux CI job.
 - Since Electron 42 the `electron` package downloads its binary on first use (`npx electron`,
   `require('electron')`, `pnpm dev`), not in `postinstall`; `npx install-electron` fetches it
   ahead of time, and `ELECTRON_SKIP_BINARY_DOWNLOAD` no longer exists. The package wants Node
