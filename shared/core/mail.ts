@@ -16,7 +16,7 @@
  * - A person presses send; the hash of the version on screen must equal the
  *   server's. Nothing here sends.
  */
-import { addDays, isCalendarDate, nextBusinessDay } from './business-days'
+import { addBusinessDays, addDays, isCalendarDate } from './business-days'
 import { canonicalJson } from './fixed-content'
 import { japanDateTime } from './task-settings'
 
@@ -187,10 +187,7 @@ export const AWAIT_REPLY_MAX_DAYS = 180
 
 /** The default day to notice silence: the `AWAIT_REPLY_BUSINESS_DAYS`-th business day after `sentAt` (Japan date). */
 export function awaitReplyDefault(sentAt: Date, companyHolidays: Iterable<string> = []): string {
-  const own = [...companyHolidays]
-  let day = japanDateTime(sentAt).date
-  for (let i = 0; i < AWAIT_REPLY_BUSINESS_DAYS; i++) day = nextBusinessDay(day, own)
-  return day
+  return addBusinessDays(japanDateTime(sentAt).date, AWAIT_REPLY_BUSINESS_DAYS, companyHolidays)
 }
 
 /** Why `until` (a picked day, `YYYY-MM-DD`) cannot be the day to wait until at `now`, or null. */
