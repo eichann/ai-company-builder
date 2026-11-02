@@ -183,7 +183,10 @@ the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんな
 whose turn and the due and opening the task; the right column starts with its やること, each with
 whose turn. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
-「AI が反映しました：<what>」 with its time.
+「AI が反映しました：<what>」 with its time. **見られる人** at the top right of a record's card
+(`SeenBy`, the lock only for 「あなただけ」): main asks `POST …/viewers { records: [id] }` with the card
+and passes only what the server answered for that record (`viewers`); a record left out shows
+nothing (`client/tests/record-card-viewers.test.ts`).
 Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)

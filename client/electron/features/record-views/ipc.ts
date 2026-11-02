@@ -18,6 +18,7 @@ import {
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
+import type { ViewersAnswer, ViewersLabel } from '../../../../shared/types/viewers'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
 export interface RecordViewsDeps {
@@ -91,13 +92,14 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
     async card(companyId: string, recordId: string): Promise<RecordCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       const id = encodeURIComponent(recordId)
-      const [item, history, defs, members, runs, me] = await Promise.all([
+      const [item, history, defs, members, runs, me, viewers] = await Promise.all([
         call(companyId, 'GET', `/records/item/${id}`),
         call(companyId, 'GET', `/records/item/${id}/history`),
         types(companyId),
         memberNames(companyId),
         call(companyId, 'GET', '/ai-runs'),
         myId(),
+        call(companyId, 'POST', '/viewers', { records: [recordId] }),
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200) return failure(item)
@@ -130,6 +132,7 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           history: historyLines(entries, def, members),
           links,
           ai: aiOnRecord(recordId, runList, entries, def, members),
+          ...viewersOf(viewers, recordId),
         },
       }
     },
@@ -173,6 +176,12 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       return {}
     }
   }
+}
+
+/** 見られる人 of this record, only when the server answered it (a record left out says nothing). */
+function viewersOf(a: Answer, recordId: string): { viewers?: ViewersLabel } {
+  const label = a?.status === 200 ? (a.json?.data as ViewersAnswer | undefined)?.records?.[recordId] : undefined
+  return label && typeof label.text === 'string' && typeof label.kind === 'string' ? { viewers: label } : {}
 }
 
 /**

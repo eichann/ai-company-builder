@@ -4,6 +4,7 @@ import type { RecordCardView, RecordViewSummary } from '../../../../shared/recor
 import { CALM } from '../../../../shared/thing-words'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
 import { LinkedColumn } from '../../../shared/ui/LinkedColumn'
+import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
@@ -73,6 +74,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult }:
   const rows = [...linkRows(card.links, rootPath).map(r => (turns.has(r.key) ? { ...r, sub: turns.get(r.key) ?? undefined } : r)), ...consult.rows]
   return (
     <RecordPage testId="record-card" kind={record.thing} name={record.typeLabel} title={record.title} chips={chips} from={from} actions={actions}
+      seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
       top={card.ai && <AiBand ai={card.ai} />}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
