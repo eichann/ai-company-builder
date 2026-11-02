@@ -144,6 +144,17 @@ what is linked **directly**, one group per kind by its plain name (`typeLabel` =
 「ほか n 件」 (`foldLinks`). Rows show the name, not the state; a finished request (`finished`) is
 faint and struck through. A file's own 「つながっているもの」 uses the same column.
 
+A **meeting** and a **来た連絡** get their own parts in the record card (`RecordDetails.tsx`, built by
+main with `recordDetailOf`, `client/shared/record-details.ts`; the fields they show are not repeated
+under ほかの項目): a meeting's thin line (when, members who attended + 社外 n人, 担当), 「文字起こしを
+開く」「Gemini のメモを開く」 (Google Docs by the ids in `source_ref`) and 「カレンダーの予定を開く」 (the
+meeting's day: ACB keeps no calendar id to build the event's own link), the summary as the body, and
+決めたこと / 宿題 apart (its linked decisions and tasks). A 来た連絡: who and where it came from,
+返事が要る, 「要約（本文は Slack にあります）」 — ACB keeps no body — 「Slack で開く」 / 「Gmail で開く」
+(only from a well-formed `slack:<channel>:<ts>` / `gmail:<id>` pointer), and the screen's thread slot
+(`renderSource`: the thread around it and the reply draft). Links out go through `shell:openExternal`.
+Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
+
 ## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
 
 - 「相談する」 on the card (next to the title) and on a list row (on hover) run `chat.consultAbout`
