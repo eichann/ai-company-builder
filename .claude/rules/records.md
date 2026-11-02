@@ -108,7 +108,7 @@ engine the day it is turned on.
   a create may not fill it (400 `MONEY_NEEDS_APPROVAL`), removing it is breaking — `plugins.md`
   "Money", tests `tests/unit/record-types.test.ts`, `record-money-field.test.ts`), `links` (target type
   or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
-  cardinality, inverse label),
+  cardinality, inverse label, `origin: true` — "Linking records later"),
   `states`, `initial`, `create_states` (states a create may start in instead — "Task version
   5"), `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK" — / who_unless — "Task
@@ -251,6 +251,40 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
 
+### Linking records later, and where a record came from (owner decision 2026-11-02)
+
+「つなぐ・外す」 for record links, the same shape as files ("Linking files later"):
+`POST /records/item/:recordId/record-links` (+ `/remove`) `{ link, target, expectedVersion, note? }`
+(session only; contract `RecordLinkRequest` / `RecordLinkResult`), engine `recordLink`
+(`services/record-engine/record-links.ts`). 取り消す is the generic undo of its entry.
+
+- **Origin links** (出どころ): a link definition may say `origin: true` — where the record came
+  from, which is history rather than filing. Core: task v10 `meeting` (もとの会議), `interaction`
+  (もとの連絡), `prepared` (AI が用意したもの); decision v5 `meeting`, `approval`; reply_request v3
+  `interaction`, `prepared`. They are set when the record is made (create, the service writer, the
+  action that makes them — `finish_prep`'s `prepared`) and are never linked or removed through these
+  routes: 400 `LINK_IS_ORIGIN`, nothing written. Adding or dropping the mark is not breaking. The
+  filing links (bundle, counterpart, related, files) can be.
+- Who: anyone who reads the record; the member's AI only where the type lets the AI act (no AI
+  route yet). Not on `SERVICE_STATE_TYPES` (403 `STATE_CHANGED_BY_SERVICE`) nor a company's own
+  file record (400 `FILE_RECORD`).
+- Linking: the target must be a live record the caller reads, of the link's type or implementing
+  its interface, that the record may reach (`linkAllowed`) — another type, an unreadable record,
+  another company's and a missing id get one answer, 400 `BAD_LINK`. A `one` link (bundle) is
+  replaced (「変える」); already linked → `changed: false`, no entry. Removing: a target not linked
+  and one the caller cannot see get the same 404 `LINK_NOT_FOUND`. Only the link changes: the other
+  record is never touched (「相手の記録は消えません」).
+- Ledger: action `link_record` / `unlink_record`, state unchanged, change `links.<name>` (ids
+  comma-joined, before / after), version + 1 (`VERSION_CONFLICT`). Nobody is told.
+- The detail (`GET /records/item/:recordId`) marks each link that cannot be removed by hand with
+  `fixed: true` — an origin link, a link of a `SERVICE_STATE_TYPES` record or of a file record —
+  on both sides (the meeting's view of a task's `meeting` link too), so the screen offers
+  「…」→「つながりを外す」 only where it works.
+- Test: `server/tests/unit/record-record-links.test.ts` (removing and undoing, the other record
+  untouched; a `one` link replaced; stale version; origin refused both ways with nothing written;
+  `fixed` on both sides; which core links are origins; one answer for unseen targets both ways) —
+  mutation-checked. Permission matrix rows + `CROSS`.
+
 ### Due with a time (task version 3)
 
 A value of kind `date` is `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (the company's clock, no zone;
@@ -326,9 +360,9 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION`): at startup, every company whose map has the task
-  type stores the core version 9 when nothing as new is stored, then every task's index row says
-  version 9 (`type_version`). No value changes, so no ledger entry. Idempotent.
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 10 since "Linking records
+  later"): at startup, every company whose map has the task type stores that core version when
+  nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
   checker completes; only the requester decides 終わったら; 引き受けた recorded with the 完了 by the
@@ -556,6 +590,7 @@ GET     /records/problems          owner/admin (paths may be private: owners/adm
 POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
+POST    /records/item/:recordId/record-links (+ /remove) link a record later ("Linking records later")
 POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
 POST    /records/item/:recordId/opened         the app opened it: the turn-holder's first opening kept ("Whose turn it was")
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
@@ -693,7 +728,7 @@ Milestone 4 adds four (people by id in person fields):
   unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
   the drafts its AI made).
-- `decision` (決めたこと, server — version 4; version 1 was a file, "Decisions" below):
+- `decision` (決めたこと, server — version 5 marks `meeting` / `approval` as origin links; version 1 was a file, "Decisions" below):
   `recorded_by` [ai, human], `important`, `exception` (例外（この件だけ）, version 4), `decided_by` (null when the AI recorded it), `owner`
   (the linked meeting's assignee at creation, else the member — `who` cannot name "the meeting's
   assignee"), `source_key`, `why` (long_text), `source`; links `bundle`,

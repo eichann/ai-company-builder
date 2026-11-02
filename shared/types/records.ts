@@ -15,6 +15,9 @@
  *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
  *   POST /records/item/:recordId/file-links        FileLinkRequest → FileLinkResult (link a file later)
  *   POST /records/item/:recordId/file-links/remove FileLinkRequest → FileLinkResult (remove that link)
+ *   POST /records/item/:recordId/record-links        RecordLinkRequest → RecordLinkResult (link a record later)
+ *   POST /records/item/:recordId/record-links/remove RecordLinkRequest → RecordLinkResult (remove that link;
+ *                                                  取り消す = POST …/undo { version: entry.version, expectedVersion })
  *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only → a folder; session only)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState
@@ -24,7 +27,8 @@
  * NOTE_REQUIRED / ARG_REQUIRED / BAD_VALUE / BAD_ATTACHMENT / BAD_MATERIAL
  * (400), ATTACHMENT_NOT_SYNCED (409: push the file first), CHANGED_SINCE (409, undo),
  * FILE_NOT_LINKABLE (400: a file the caller cannot read, or one the record may
- * not reach — never says which or where), LINK_NOT_FOUND (404, removing).
+ * not reach — never says which or where), LINK_NOT_FOUND (404, removing), LINK_IS_ORIGIN
+ * (400: an origin link — where the record came from — is never linked or removed by hand).
  *
  * While the feature is off for the company, every route but the settings
  * answers 404 `RECORDS_DISABLED`. Answers, counts and link lists hold only
@@ -184,6 +188,13 @@ export interface RecordLinkView {
    * when the server could not tell.
    */
   broken?: boolean
+  /**
+   * The link cannot be removed by hand (no 「…」→「つながりを外す」): it says where the record came
+   * from (an `origin` link: もとの会議・もとの連絡・AI が用意したもの), or the record's links change only
+   * through its service or its file. Absent = it can be removed (`record-links/remove`,
+   * `file-links/remove`).
+   */
+  fixed?: true
 }
 
 export interface RecordDetail {
@@ -285,6 +296,27 @@ export interface ShareRecordRequest {
   note?: string
   proposedBy?: 'ai'
   conversationId?: string
+}
+
+/**
+ * Linking a record to another later, or removing that link (records.md "Linking records later"):
+ * `link` is a record link of the source's type that is not an origin one (task: bundle,
+ * counterpart, related); `target` the other record's id. A `one` link (bundle) is replaced.
+ */
+export interface RecordLinkRequest {
+  link: string
+  target: string
+  expectedVersion: number
+  note?: string
+  proposedBy?: 'ai'
+  conversationId?: string
+}
+
+/** The answer: the record after the change and its ledger entry (`link_record` / `unlink_record`; null when nothing changed). */
+export interface RecordLinkResult {
+  record: RecordSummary
+  entry: LedgerEntry | null
+  changed: boolean
 }
 
 export interface FileLinkResult {

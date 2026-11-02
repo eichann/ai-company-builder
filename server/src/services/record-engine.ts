@@ -26,7 +26,7 @@
  *   refusals.ts         refusals shared by the operations and other services
  *   links.ts            interface links, `links.<name>` ledger values, link rows
  *   context.ts          what every member-facing operation shares (open, reader, state, tell)
- *   create.ts / act.ts / undo.ts / file-links.ts / share.ts / history.ts
+ *   create.ts / act.ts / undo.ts / file-links.ts / record-links.ts / share.ts / history.ts
  *                       the member-facing operations
  *   external-writer.ts  results of a connector plugin's exchange (no route reaches it)
  *   service-writer.ts   service-owned types of the core services (no route reaches it)
@@ -35,6 +35,7 @@ import { acting } from './record-engine/act'
 import { engineContext } from './record-engine/context'
 import { creating } from './record-engine/create'
 import { fileLinking } from './record-engine/file-links'
+import { recordLinking } from './record-engine/record-links'
 import { ledgerReading } from './record-engine/history'
 import { sharing } from './record-engine/share'
 import type { RecordEngineDeps } from './record-engine/types'
@@ -57,7 +58,7 @@ export {
   type ServiceWriteFailed, type ServiceWriteFailure, type ServiceWriteResult,
 } from './record-engine/service-writer'
 
-/** The member-facing engine (records routes, a member's AI): create, act, undo, fileLink, share, history, atVersion. */
+/** The member-facing engine (records routes, a member's AI): create, act, undo, fileLink, recordLink, share, history, atVersion. */
 export function createRecordEngine(deps: RecordEngineDeps) {
   const ctx = engineContext(deps)
   return {
@@ -65,6 +66,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     ...acting(ctx),
     ...undoing(ctx),
     ...fileLinking(ctx),
+    ...recordLinking(ctx),
     ...sharing(ctx),
     ...ledgerReading(ctx),
     /** Bound once by the plugins lane (composition/plugins.ts): the business roles' holders for `role:<name>`. */

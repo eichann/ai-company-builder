@@ -288,6 +288,8 @@ const MATRIX: Row[] = [
   // Linking a file later: any member who reads the record and the file (a missing record → 404 for all).
   r('POST /api/companies/:companyId/records/item/:recordId/file-links', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/record-links', w => ({ path: `${C(w)}/records/item/deal-nosuch01/record-links`, body: { link: 'bundle', target: 'deal-nosuch02', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/record-links/remove', w => ({ path: `${C(w)}/records/item/deal-nosuch01/record-links/remove`, body: { link: 'bundle', target: 'deal-nosuch02', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   // The app opened a record (the turn-holder's first opening is kept): any member who reads it.
   r('POST /api/companies/:companyId/records/item/:recordId/opened', w => ({ path: `${C(w)}/records/item/deal-nosuch01/opened`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/share', w => ({ path: `${C(w)}/records/item/deal-nosuch01/share`, body: { folder: '営業部', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
@@ -564,6 +566,8 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/records/item/:recordId/history', (w, id) => ({ path: `${C(w)}/records/item/${id}/history` }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/file-links', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/record-links', (w, id) => ({ path: `${C(w)}/records/item/${id}/record-links`, body: { link: 'related', target: 'task-nosuch02', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/record-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/record-links/remove`, body: { link: 'related', target: 'task-nosuch02', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/opened', (w, id) => ({ path: `${C(w)}/records/item/${id}/opened`, body: {} }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/share', (w, id) => ({ path: `${C(w)}/records/item/${id}/share`, body: { folder: '営業部', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),

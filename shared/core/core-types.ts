@@ -52,6 +52,12 @@
  * from 引き受け待ち by the assignee also records the acceptance (`ACCEPTANCE.finishes`).
  * Tasks of earlier versions are moved to 9 at startup (`TASK_VERSION`).
  *
+ * Version 10 (owner decision 2026-11-02, つなぐ・外す): the links that say where a task came
+ * from — `meeting`, `interaction`, `prepared` — are marked `origin` (出どころ) and are never
+ * linked or removed by hand; the others (bundle, counterpart, related, files) are filing and
+ * can be (records.md "Linking records later"). `decision` v5 marks `meeting` / `approval`,
+ * `reply_request` v3 `interaction` / `prepared` the same way.
+ *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
@@ -89,7 +95,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 9
+version: 10
 implements: [request]
 storage: server
 fields:
@@ -113,9 +119,9 @@ links:
   related:      { label: 関係するタスク, target: task, cardinality: many }
   bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: tasks }
   counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: tasks }
-  prepared:     { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: tasks }
-  meeting:      { label: もとの会議, target: meeting, cardinality: one, inverse: tasks }
-  interaction:  { label: もとの連絡, target: interaction, cardinality: one, inverse: tasks }
+  prepared:     { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: tasks, origin: true }
+  meeting:      { label: もとの会議, target: meeting, cardinality: one, inverse: tasks, origin: true }
+  interaction:  { label: もとの連絡, target: interaction, cardinality: one, inverse: tasks, origin: true }
 states: [todo, in_progress, review, waiting, done, cancelled, preparing, declined, awaiting_acceptance]
 initial: todo
 create_states: [preparing]
@@ -283,7 +289,7 @@ final: [sent, discarded]
 `,
   decision: `---
 label: 決めたこと
-version: 4
+version: 5
 storage: server
 fields:
   title:       { label: 件名, kind: text, source: file }
@@ -297,8 +303,8 @@ fields:
   source_key:  { label: 元の項目の目印, kind: text, source: server }
 links:
   bundle:      { label: まとまり, interface: bundle, cardinality: one, inverse: decisions }
-  meeting:     { label: 会議, target: meeting, cardinality: one, inverse: decisions }
-  approval:    { label: 承認のお願い, target: approval, cardinality: one, inverse: decisions }
+  meeting:     { label: 会議, target: meeting, cardinality: one, inverse: decisions, origin: true }
+  approval:    { label: 承認のお願い, target: approval, cardinality: one, inverse: decisions, origin: true }
 states: [unconfirmed, confirmed, retracted]
 initial: unconfirmed
 final: [confirmed, retracted]
@@ -314,7 +320,7 @@ actions:
 `,
   reply_request: `---
 label: 返事のお願い
-version: 2
+version: 3
 implements: [request, prepared, outside_event]
 storage: server
 fields:
@@ -334,10 +340,10 @@ fields:
   trigger_ref:   { label: きっかけの連絡への目印, kind: text, source: server }
   replied_by:    { label: 返信した人, kind: person, source: server }
 links:
-  interaction:   { label: もとの連絡, target: interaction, cardinality: one, inverse: reply_requests }
+  interaction:   { label: もとの連絡, target: interaction, cardinality: one, inverse: reply_requests, origin: true }
   bundle:        { label: まとまり, interface: bundle, cardinality: one, inverse: reply_requests }
   counterpart:   { label: 相手, interface: counterpart, cardinality: one, inverse: reply_requests }
-  prepared:      { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: reply_requests }
+  prepared:      { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: reply_requests, origin: true }
 states: [preparing, open, waiting_reply, checking, closed, dropped]
 initial: preparing
 final: [closed, dropped]
@@ -504,11 +510,11 @@ export const ACCEPTANCE: Readonly<Record<string, {
 }
 
 /**
- * The task version every task is moved to at startup (records.md "Task version 9"; adapters/sqlite/records.ts
+ * The task version every task is moved to at startup (the core task version; records.md "Task version 9"; adapters/sqlite/records.ts
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 9
+export const TASK_VERSION = 10
 
 /** The acceptance rule of a type, or undefined. */
 export function acceptanceOf(type: string) {

@@ -105,7 +105,7 @@ describe('the core types the inbox writes', () => {
   it('a 返事のお願い: made by the inbox only, a request with end conditions, and the one type whose AI may end it', () => {
     const rr = def('reply_request')
     // Version 2 (B4) only adds 「もう返した」 (a reply ACB cannot see: the phone, another channel).
-    expect(rr.version).toBe(2)
+    expect(rr.version).toBeGreaterThanOrEqual(2)
     const change = compareTypeDefinitions(parsed('reply_request', REPLY_REQUEST_V1_TEXT), rr)
     expect(change.breaking).toEqual([])
     expect(change.versionProblem).toBeNull()

@@ -184,7 +184,7 @@ export function migrateCompanyBundleParts(conn: Database.Database, companyId: st
 }
 
 /**
- * Task version 9 (records.md "Task version 9"): every task of a company whose map holds the task
+ * Task versions 9 and up (records.md "Task version 9"): every task of a company whose map holds the task
  * type is moved to `TASK_VERSION`. The core definition of that version is stored first when no
  * version at least as new is there (as `ensureCoreTypes` would on the next index run), so the
  * engine answers by it from the first request. Only the index row's `type_version` changes — no
