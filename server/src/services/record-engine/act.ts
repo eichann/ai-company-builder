@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { INTERFACES, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
+import { actionWho, INTERFACES, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -78,17 +78,19 @@ export function acting(ctx: EngineContext) {
       }
       // Duty 2: who?
       const place = row.path ?? row.folder ?? ''
-      const manages = (userId: string) => action.who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
+      // `who_unless` (task version 9: the assignee does not complete a task to be checked first).
+      const who = actionWho(action, current.fields)
+      const manages = (userId: string) => who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
       // `role:<name>` (plan C3): held on this record (its plugin, its まとまり), by the one resolution.
       const holds = (userId: string) => (role: string) => ctx.roles()?.holdsOnRecord(member.companyId, row.type, row.id, role, userId) === true
-      let byWho = mayAct(action.who, member, actor, current.fields, manages(member.userId), holds(member.userId))
+      let byWho = mayAct(who, member, actor, current.fields, manages(member.userId), holds(member.userId))
       // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
       // or department they stand in for — never the absentee's role (no admin powers), and every
       // read check above and below stays the delegate's own.
       let onBehalfOf: string | null = null
       if (!byWho) {
         for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
-          if (mayAct(action.who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee), holds(absentee))) {
+          if (mayAct(who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee), holds(absentee))) {
             byWho = true
             onBehalfOf = absentee
             break
@@ -217,7 +219,7 @@ export function acting(ctx: EngineContext) {
         const originChange = linkChanges.find(l => l.name === acceptance.origin)
         nextState = applyAcceptance(deps, {
           companyId: member.companyId, type: row.type, typeVersion: row.typeVersion ?? 0, personal: row.personalOwner !== null,
-          state: nextState, fields: nextFields,
+          state: nextState, fromState: current.state, fields: nextFields,
           assigneeChanged: typeof args.assignee === 'string' && args.assignee !== (current.fields.assignee ?? null),
           memberId: member.userId, actorKind: actor.kind, onBehalfOf,
           originIds: originChange ? originChange.targets : records.linksFrom([row.id]).filter(l => l.name === acceptance.origin && l.targetId !== null).map(l => l.targetId as string),

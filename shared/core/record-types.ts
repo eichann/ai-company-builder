@@ -205,6 +205,16 @@ export interface ActionDef {
    */
   okFrom?: string[]
   /**
+   * YAML `who_unless` (task version 9, 「終わったら：確かめてから」): `who` entries that do NOT
+   * qualify while the record's server choice fields hold the given options —
+   * `{ assignee: { when_done: check } }`: the assignee completes a task unless it is to be
+   * checked first. Every condition of an entry must hold for it to be dropped; an empty value
+   * matches no option. The entry is dropped for the person and for their delegate alike; an
+   * `ok_from` naming the same field still applies (the OK path). Absent = `who` as written
+   * (left out of the definition then, so existing stored JSON compares equal). `actionWho`.
+   */
+  whoUnless?: Record<string, Record<string, string>>
+  /**
    * YAML `links`: record links (not file links) the action may set (task
    * version 5: `set_bundle` → `bundle`, `finish_prep` → `prepared`). The body
    * gives `links: { <name>: id | [ids] | null }`; a link left out stays as it
@@ -238,6 +248,19 @@ export interface TypeDefinition {
    */
   createStates?: string[]
   actions: Record<string, ActionDef>
+}
+
+/**
+ * The `who` of an action on a record holding `fields` (its `who_unless` applied): what the engine
+ * checks and what a screen offers from. Pure.
+ */
+export function actionWho(action: Pick<ActionDef, 'who' | 'whoUnless'>, fields: Readonly<Record<string, unknown>>): string[] {
+  const unless = action.whoUnless
+  if (!unless) return action.who
+  return action.who.filter(w => {
+    const when = Object.prototype.hasOwnProperty.call(unless, w) ? unless[w] : undefined
+    return !when || !Object.entries(when).every(([field, option]) => fields[field] === option)
+  })
 }
 
 /** The server fields an action with `ok_from` writes (whose OK it was / an OK from outside ACB). */
@@ -501,7 +524,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'links', 'via']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'who_unless', 'links', 'via']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -560,6 +583,28 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
           err(`操作「${aname}」に ok_from を書くときは、欄「${OK_FIELDS.by}」（kind: person, source: server）と「${OK_FIELDS.note}」（kind: text, source: server）が要ります`)
         } else okFrom = o as string[]
       }
+      let whoUnless: Record<string, Record<string, string>> | undefined
+      if (a.who_unless !== undefined && a.who_unless !== null) {
+        const wu = a.who_unless
+        const bad = () => err(`操作「${aname}」の who_unless は「who の名前: { 選択の欄（source: server）: その選択肢 }」の形で書いてください`)
+        if (!isYamlMap(wu) || Object.keys(wu).length === 0) bad()
+        else {
+          const parsed: Record<string, Record<string, string>> = {}
+          let fine = true
+          for (const [w, cond] of Object.entries(wu)) {
+            if (!(who ?? []).includes(w) || !isYamlMap(cond) || Object.keys(cond).length === 0) { fine = false; continue }
+            const c: Record<string, string> = {}
+            for (const [field, option] of Object.entries(cond)) {
+              const fd = fields[field]
+              if (!fd || fd.kind !== 'choice' || fd.source !== 'server' || typeof option !== 'string' || !(fd.options ?? []).includes(option)) { fine = false; continue }
+              c[field] = option
+            }
+            parsed[w] = c
+          }
+          if (!fine) bad()
+          else whoUnless = parsed
+        }
+      }
       let actionLinks: string[] | undefined
       if (a.links !== undefined && a.links !== null) {
         const l = list(a.links)
@@ -589,6 +634,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         args,
         handTo,
         ...(okFrom ? { okFrom } : {}),
+        ...(whoUnless ? { whoUnless } : {}),
         ...(actionLinks ? { links: actionLinks } : {}),
         ...(via ? { via } : {}),
       }

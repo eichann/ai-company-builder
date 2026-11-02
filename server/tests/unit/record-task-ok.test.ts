@@ -58,9 +58,13 @@ function company(id: string) {
   ensureCoreTypes(records, TS)
 }
 
-/** A task requested by alice, assigned to bob, in progress (version 2), in `folder`. */
+/**
+ * A task requested by alice, assigned to bob, to be checked first (終わったら：確かめてから — since
+ * task version 9 the OK path is that case's: 知らせるだけ lets bob finish without one), in progress
+ * (version 2), in `folder`.
+ */
 async function startedTask(folder?: string) {
-  const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '提案書を作る', ...(folder ? { folder } : {}), fields: { assignee: 'u-bob' } })).record
+  const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '提案書を作る', ...(folder ? { folder } : {}), fields: { assignee: 'u-bob', when_done: 'check' } })).record
   ok(await engine.act(m('u-bob'), HUMAN, t.id, 'start', { expectedVersion: 1 }))
   notified = []
   return t

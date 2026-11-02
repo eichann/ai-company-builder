@@ -14,7 +14,8 @@ import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
 } from '../../ports/records'
-import { BUNDLE_PART_ENDED_ACTION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION } from '../../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
+import { canonicalTypeJson } from '../../../shared/core/record-types'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 import { skillUsesJson } from './skill-uses'
@@ -179,6 +180,29 @@ export function migrateCompanyBundleParts(conn: Database.Database, companyId: st
       moved++
     }
     return moved
+  })()
+}
+
+/**
+ * Task version 9 (records.md "Task version 9"): every task of a company whose map holds the task
+ * type is moved to `TASK_VERSION`. The core definition of that version is stored first when no
+ * version at least as new is there (as `ensureCoreTypes` would on the next index run), so the
+ * engine answers by it from the first request. Only the index row's `type_version` changes — no
+ * value does (9 only adds), so no ledger entry and nothing in the 経緯. Idempotent; returns the
+ * tasks moved.
+ */
+export function migrateCompanyTaskVersion(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const stored = conn.prepare(`SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'task'`).get(companyId) as { v: number | null }
+    if (stored.v === null) return 0
+    if (stored.v < TASK_VERSION) {
+      const def = coreTypeDefinitions().find(d => d.name === 'task')
+      if (!def || def.version !== TASK_VERSION) throw new Error('core task definition is not at TASK_VERSION')
+      conn.prepare(`INSERT INTO record_types (company_id, name, version, definition, source, commit_sha, created_at) VALUES (?, 'task', ?, ?, 'core', NULL, ?)`)
+        .run(companyId, def.version, canonicalTypeJson(def), at)
+    }
+    return conn.prepare(`UPDATE records SET type_version = ? WHERE company_id = ? AND type = 'task' AND (type_version IS NULL OR type_version < ?)`)
+      .run(TASK_VERSION, companyId, TASK_VERSION).changes
   })()
 }
 

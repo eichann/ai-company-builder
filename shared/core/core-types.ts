@@ -41,6 +41,17 @@
  * request waits is the company's setting (`ACCEPTANCE` below, task settings);
  * a `meeting` link says which meeting a task is homework of.
  *
+ * Version 9 (owner decision 2026-11-02 「着手しないで完了にできる」): 完了 from any state but
+ * 準備中 (the AI's turn: 「自分で進める」 first); 着手 is optional (「進めている印をつける」) and
+ * no start is ever made up. `when_done` (終わったら): `notify` (知らせるだけ — empty means the
+ * same, the default when asking) lets the assignee complete, the requester told and able to
+ * reopen (やり直す); `check` (確かめてから) takes the assignee out of `complete`'s `who`
+ * (`who_unless`) — they hand it to the checker (`reviewer`, 確かめる人) with 「終わったので
+ * 見てもらう」 and the checker's OK completes it, or they complete stating the checker's OK given
+ * elsewhere (version 4's `ok_from`: the one place an OK statement is still asked). Completing
+ * from 引き受け待ち by the assignee also records the acceptance (`ACCEPTANCE.finishes`).
+ * Tasks of earlier versions are moved to 9 at startup (`TASK_VERSION`).
+ *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
@@ -78,7 +89,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 8
+version: 9
 implements: [request]
 storage: server
 fields:
@@ -89,13 +100,14 @@ fields:
   next_actor:   { label: 次に動く人, kind: person, source: server }
   waiting_on:   { label: 待っているもの, kind: text, source: server }
   due:          { label: 期限, kind: date, source: server }
-  reviewer:     { label: レビューする人, kind: person, source: server }
+  reviewer:     { label: 確かめる人, kind: person, source: server }
   ok_by:        { label: OKした人, kind: person, source: server }
   ok_note:      { label: OKのいきさつ, kind: text, source: server }
   tags:         { label: タグ, kind: tags, source: server }
   wait_until:   { label: 返事・届く見込み, kind: date, source: server }
   prep_summary: { label: AIが用意したこと, kind: long_text, source: server }
   accepted_by:  { label: 引き受けた人, kind: person, source: server }
+  when_done:    { label: 終わったら, kind: choice, options: [notify, check], option_labels: { notify: 知らせるだけ, check: 確かめてから }, source: server }
 links:
   files:        { label: 関係するファイル, target: file, cardinality: many }
   related:      { label: 関係するタスク, target: task, cardinality: many }
@@ -109,15 +121,15 @@ initial: todo
 create_states: [preparing]
 final: [done, cancelled]
 actions:
-  start:          { label: 着手する, from: [todo, waiting], to: in_progress, who: [assignee, ai], hand_to: assignee }
-  request_review: { label: レビューを依頼する, from: [in_progress], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
+  start:          { label: 進めている印をつける, from: [todo, waiting], to: in_progress, who: [assignee, ai], hand_to: assignee }
+  request_review: { label: 終わったので見てもらう, from: [todo, in_progress, waiting, awaiting_acceptance], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
   send_back:      { label: 差し戻す, from: [review], to: in_progress, who: [reviewer], notify: assignee, note: required, decision: true, hand_to: assignee }
   assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting, declined, awaiting_acceptance], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
-  complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], ok_from: [assignee], notify: [requested_by, ok_by], attach: [files], note: optional, decision: true }
+  complete:       { label: 完了にする, from: [todo, in_progress, review, waiting, awaiting_acceptance, declined], to: done, who: [assignee, requested_by, reviewer], who_unless: { assignee: { when_done: check } }, ok_from: [assignee], notify: [requested_by, reviewer, ok_by], attach: [files], note: optional, decision: true }
   cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
-  reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
+  reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, reviewer, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
   finish_prep:    { label: 用意ができた, from: [preparing], to: todo, who: [ai], args: { prep_summary: long_text }, links: [prepared], notify: assignee, hand_to: assignee }
   hand_over:      { label: 先に渡す, from: [preparing], to: todo, who: [ai], links: [prepared], notify: assignee, note: required, hand_to: assignee }
   take_over:      { label: 自分で進める, from: [preparing], to: todo, who: [assignee, requested_by], notify: assignee, note: optional, hand_to: assignee }
@@ -126,6 +138,8 @@ actions:
   set_tags:       { label: タグを付ける, who: [requested_by, assignee, ai], args: { tags: tags } }
   set_wait_until: { label: 見込みの日時を決める, who: [requested_by, assignee, ai], args: { wait_until: date }, note: optional }
   set_bundle:     { label: まとまりに入れる, who: [requested_by, assignee, ai], links: [bundle], note: optional }
+  set_when_done:  { label: 終わったらを決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { when_done: choice }, notify: assignee, note: optional }
+  set_reviewer:   { label: 確かめる人を決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { reviewer: person }, notify: reviewer, note: optional }
 ---
 # タスク
 
@@ -133,6 +147,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、AI が理由を添えて「先に渡す」で早めに渡します。担当と頼んだ人は「自分で進める」でいつでも引き取れます。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
 お客さまなどの相手は「まとまり」（案件など）からたどります。まとまりに入らないタスクだけ、「相手」を直接つなぎます。
 ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が「引き受ける」と担当の番になります（どんなときに自動で引き受けたことになるかは会社の設定で決めます）。
+完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
 `,
   interaction: `---
 label: やりとり
@@ -469,6 +484,9 @@ export const WAIT_OVER: Readonly<Record<string, { field: string; from: string; a
  *   (accepted → `acceptedBy` = the assignee, and `state` becomes `into`;
  *   not → `state`, the assignee's turn). The asker is the actor when the
  *   action changed the assignee, else `requester`.
+ * - leaving `state` straight into one of `finishes` (完了 from 引き受け待ち, task version 9) by a
+ *   person acting as the assignee records the acceptance in the same entry (`acceptedBy` = the
+ *   assignee): 「引き受けた」 is in the history with the 完了; anyone else finishing it does not.
  * - entering one of `releases` (受けられない) forgets the acceptance; an
  *   assignee changed there is asked like a new request (`into`).
  * - `origin` / `attendees`: the meeting a task is homework of, and its field
@@ -476,14 +494,21 @@ export const WAIT_OVER: Readonly<Record<string, { field: string; from: string; a
  * - owner-only records never wait (only their owner is ever in them).
  */
 export const ACCEPTANCE: Readonly<Record<string, {
-  since: number; state: string; into: string; working: readonly string[]; releases: readonly string[]
+  since: number; state: string; into: string; working: readonly string[]; releases: readonly string[]; finishes: readonly string[]
   assignee: string; acceptedBy: string; requester: string; origin: string; attendees: string
 }>> = {
   task: {
-    since: 7, state: 'awaiting_acceptance', into: 'todo', working: ['todo', 'in_progress', 'review', 'waiting'], releases: ['declined'],
+    since: 7, state: 'awaiting_acceptance', into: 'todo', working: ['todo', 'in_progress', 'review', 'waiting'], releases: ['declined'], finishes: ['done'],
     assignee: 'assignee', acceptedBy: 'accepted_by', requester: 'requested_by', origin: 'meeting', attendees: 'attendees',
   },
 }
+
+/**
+ * The task version every task is moved to at startup (records.md "Task version 9"; adapters/sqlite/records.ts
+ * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
+ * index row says it (no value changes, so no ledger entry).
+ */
+export const TASK_VERSION = 9
 
 /** The acceptance rule of a type, or undefined. */
 export function acceptanceOf(type: string) {
