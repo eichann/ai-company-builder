@@ -138,6 +138,8 @@ describe('parseTaskSettings', () => {
       autoRun: { enabled: true, memberDefault: true, dailyLimit: 30, stopAfterFailures: 3 },
       // Owner decision 2026-11-02: 受信を読む allowed, each member starts off.
       readIncoming: { allowed: true, memberDefault: false },
+      // チームの進め方 off (owner decision 2026-11-02).
+      teamMode: false,
       acceptance: { sameDepartment: true, managerToMember: true, meetingHomework: true },
       companyHolidays: [],
       // Owner decision 2026-11-02: the core's 束ねるもの is 「プロジェクト」 until the company names it.
@@ -150,13 +152,15 @@ describe('parseTaskSettings', () => {
     const before: Record<string, unknown> = { ...defaultTaskSettings(), autoRun: { enabled: false, dailyLimit: 9, stopAfterFailures: 2 } }
     delete before.acceptance
     delete before.readIncoming
+    delete before.teamMode
     expect(parseTaskSettings(before)).toEqual({
       value: {
         ...before, autoRun: { enabled: false, memberDefault: true, dailyLimit: 9, stopAfterFailures: 2 },
-        readIncoming: DEFAULT_TASK_SETTINGS.readIncoming, acceptance: DEFAULT_TASK_SETTINGS.acceptance,
+        readIncoming: DEFAULT_TASK_SETTINGS.readIncoming, teamMode: false, acceptance: DEFAULT_TASK_SETTINGS.acceptance,
       },
     })
     expect(parseTaskSettings({ ...defaultTaskSettings(), readIncoming: { allowed: 'yes', memberDefault: false } })).toHaveProperty('error')
+    expect(parseTaskSettings({ ...defaultTaskSettings(), teamMode: 'on' })).toHaveProperty('error')
     expect(parseTaskSettings({ ...defaultTaskSettings(), autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun, memberDefault: 1 } })).toHaveProperty('error')
     expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: 'yes', managerToMember: true, meetingHomework: true } })).toHaveProperty('error')
     expect(parseTaskSettings({ ...defaultTaskSettings(), acceptance: { sameDepartment: true, managerToMember: true } })).toHaveProperty('error')

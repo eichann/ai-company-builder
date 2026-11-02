@@ -13,6 +13,7 @@
  *   limit and "stop after N failures in a row"; sending and approving are
  *   always pressed by a person; each member turns their own on / off, starting
  *   from the company's 初めの値 (2026-11-02, `work-switches.ts`);
+ * - チームの進め方 on / off (default off, 2026-11-02): the team's steps on a task are offered;
  * - 受信を読む: allowed (default) / not, and each member's 初めの値 (off by
  *   default; `work-switches.ts`). The one company switch for it: Google's
  *   `inbox` feature follows it (google-connector.md);
@@ -83,6 +84,12 @@ export interface TaskSettings {
   autoRun: AutoRunSettings
   /** 受信を読む: whether members may use it and what they start with (`work-switches.ts`). */
   readIncoming: WorkSwitchPolicy
+  /**
+   * チームの進め方 (owner decision 2026-11-02, default off): the team's steps on a task — 引き受け待ち,
+   * 確かめる人・レビューと差し戻し, 受けられない, 返事待ち, 代わりの人 — are offered. Off: a task is
+   * one's own (未着手 → 進めている → 完了 / やめる), with 人に頼む. The company decides it, not each member.
+   */
+  teamMode: boolean
   acceptance: AcceptanceSettings
   /** The company's own days off, by date. */
   companyHolidays: CompanyHoliday[]
@@ -113,6 +120,8 @@ export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   autoRun: Object.freeze({ enabled: true, memberDefault: true, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
   // 受信を読む: allowed, each member starts off (owner decision 2026-11-02).
   readIncoming: Object.freeze({ ...DEFAULT_WORK_SWITCH_POLICIES.readIncoming }) as WorkSwitchPolicy,
+  // チームの進め方: off until the company turns it on (owner decision 2026-11-02).
+  teamMode: false,
   // Owner decision 2026-11-01: only asking someone in another department waits for 「引き受ける」.
   acceptance: Object.freeze({ sameDepartment: true, managerToMember: true, meetingHomework: true }) as AcceptanceSettings,
   companyHolidays: [],
@@ -126,6 +135,7 @@ export function defaultTaskSettings(): TaskSettings {
     reply: { ...DEFAULT_TASK_SETTINGS.reply },
     autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun },
     readIncoming: { ...DEFAULT_TASK_SETTINGS.readIncoming },
+    teamMode: DEFAULT_TASK_SETTINGS.teamMode,
     acceptance: { ...DEFAULT_TASK_SETTINGS.acceptance },
     companyHolidays: [],
     bundleName: DEFAULT_TASK_SETTINGS.bundleName,
@@ -188,6 +198,9 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
   if (!isObject(read)) return { error: 'readIncoming must be an object' }
   if (typeof read.allowed !== 'boolean') return { error: 'readIncoming.allowed must be true or false' }
   if (typeof read.memberDefault !== 'boolean') return { error: 'readIncoming.memberDefault must be true or false' }
+  // Added 2026-11-02: left out (an older document or admin console) → off.
+  const teamMode = input.teamMode === undefined ? DEFAULT_TASK_SETTINGS.teamMode : input.teamMode
+  if (typeof teamMode !== 'boolean') return { error: 'teamMode must be true or false' }
 
   // Added after the first release of the page: a document saved before it (or an older admin
   // console's PUT) has none and takes the defaults rather than failing as a whole.
@@ -224,6 +237,7 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
       reply: { rule: reply.rule as ReplyRule, sameDayCutoff: reply.sameDayCutoff },
       autoRun: { enabled: auto.enabled, memberDefault: autoMemberDefault, dailyLimit: auto.dailyLimit, stopAfterFailures: auto.stopAfterFailures },
       readIncoming: { allowed: read.allowed, memberDefault: read.memberDefault },
+      teamMode,
       acceptance: { sameDepartment: acc.sameDepartment as boolean, managerToMember: acc.managerToMember as boolean, meetingHomework: acc.meetingHomework as boolean },
       companyHolidays,
       bundleName,

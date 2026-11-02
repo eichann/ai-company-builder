@@ -25,6 +25,7 @@ export function cloneSettings(s: TaskSettings): TaskSettings {
     reply: { ...s.reply },
     autoRun: { ...s.autoRun },
     readIncoming: { ...s.readIncoming },
+    teamMode: s.teamMode,
     acceptance: { ...s.acceptance },
     companyHolidays: s.companyHolidays.map((h) => ({ ...h })),
     bundleName: s.bundleName,

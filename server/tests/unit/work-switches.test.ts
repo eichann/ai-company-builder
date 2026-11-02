@@ -9,7 +9,8 @@
  *   toggle turned off carries over as "off"; it runs once and never overwrites a later choice;
  * - a member cannot turn on what the company does not allow (409, nothing stored), and their
  *   choice of off stands when the company allows it again;
- * - one member's choice is theirs alone, and another company's member is a stranger.
+ * - one member's choice is theirs alone, and another company's member is a stranger;
+ * - チームの進め方 is the company's alone (off by default): read beside the switches, never set there.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -84,5 +85,12 @@ describe('a member\'s own switch', () => {
     // Someone who never chose follows the 初めの値; another member is untouched by Sato's choice.
     expect(switches.isOn('a', 'u-tanaka', 'autoRun')).toBe(true)
     expect(switches.set(m('u-sato'), { switch: 'nothing', on: true })).toMatchObject({ ok: false, kind: 'bad-request' })
+  })
+
+  it('チームの進め方 is the company\'s alone: shown with the switches, off until the company turns it on, never a member\'s choice', () => {
+    expect(switches.my(m('u-sato')).teamMode).toEqual({ on: false })
+    settings.a.teamMode = true
+    expect(switches.my(m('u-sato')).teamMode).toEqual({ on: true })
+    expect(switches.set(m('u-sato'), { switch: 'teamMode', on: false })).toMatchObject({ ok: false, kind: 'bad-request' })
   })
 })
