@@ -21,6 +21,14 @@
   },
   "build": {
     "appId": "com.ai-company-builder.client",
+    "protocols": [
+      {
+        "name": "AI Company Builder",
+        "schemes": [
+          "ai-company-builder"
+        ]
+      }
+    ],
     "productName": "AICompanyBuilder",
     "directories": {
       "output": "dist"

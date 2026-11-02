@@ -473,3 +473,13 @@ test('skills:makePrivate never marks a skill the company already has: shared her
   assert.match(exclude(), /\n営業\/\.claude\/skills\/mine\/\n# <<< ACB private skills <<<\n$/)
   assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), 'node_modules/\n')
 })
+
+test('an invitation link (open-url) never points an app that has a server at another one', async () => {
+  const { app } = await import('./ipc-harness/fake-electron.ts')
+  let prevented = false
+  app.emit('open-url', { preventDefault: () => { prevented = true } }, 'ai-company-builder://open?server=https%3A%2F%2Fother.example.com')
+  assert.equal(prevented, true)
+  assert.equal(await h.invoke('appLink:serverOffer'), null)
+  assert.equal((await h.invoke<{ success: boolean }>('appLink:acceptServer')).success, false)
+  assert.equal(await h.invoke('config:getServerUrl'), SERVER_URL)
+})

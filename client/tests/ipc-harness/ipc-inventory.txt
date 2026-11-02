@@ -29,6 +29,9 @@ contract.invoke api:createCompany
 contract.invoke api:getCompanies
 contract.invoke api:getDepartments
 contract.invoke app:closeResponse
+contract.invoke appLink:acceptServer
+contract.invoke appLink:dismissServer
+contract.invoke appLink:serverOffer
 contract.invoke approvals:approve
 contract.invoke approvals:get
 contract.invoke approvals:sameAs
@@ -290,6 +293,7 @@ contract.type EditorBackupResult.error = error?: string
 contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.acceptAppLinkServer = acceptAppLinkServer: Invoke<'appLink:acceptServer'>
 contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
 contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
@@ -321,6 +325,7 @@ contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'broke
 contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
 contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
+contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'appLink:dismissServer'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
@@ -329,6 +334,7 @@ contract.type ElectronAPI.getAbsences = getAbsences: Invoke<'absences:get'>
 contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
 contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
+contract.type ElectronAPI.getAppLinkServerOffer = getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
@@ -606,6 +612,9 @@ contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { arg
 contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+contract.type IpcInvokeChannels.'appLink:acceptServer' = 'appLink:acceptServer': { args: []; result: SimpleResult }
+contract.type IpcInvokeChannels.'appLink:dismissServer' = 'appLink:dismissServer': { args: []; result: void }
+contract.type IpcInvokeChannels.'appLink:serverOffer' = 'appLink:serverOffer': { args: []; result: { server: string } | null }
 contract.type IpcInvokeChannels.'approvals:approve' = 'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:get' = 'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:sameAs' = 'approvals:sameAs': { args: [companyId: string, approvalId: string, recordId: string, linkMeeting: boolean]; result: ApprovalResult }
@@ -860,6 +869,9 @@ main.handle api:createCompany @ features/auth/ipc.ts (name: string)
 main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
+main.handle appLink:acceptServer @ features/app-link/ipc.ts ()
+main.handle appLink:dismissServer @ features/app-link/ipc.ts ()
+main.handle appLink:serverOffer @ features/app-link/ipc.ts ()
 main.handle approvals:approve @ features/approvals/ipc.ts (companyId, approvalId, hash, reason)
 main.handle approvals:get @ features/approvals/ipc.ts (companyId, approvalId)
 main.handle approvals:sameAs @ features/approvals/ipc.ts (companyId, approvalId, recordId, linkMeeting)
@@ -1046,6 +1058,8 @@ main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
+preload acceptAppLinkServer -> invoke appLink:acceptServer()
+preload acceptAppLinkServer : () => Promise<SimpleResult>
 preload actOnTask -> invoke tasks:act($0, $1, $2)
 preload actOnTask : (companyId: string, recordId: string, input: TaskActInput) => Promise<TaskWriteResult>
 preload addAbsence -> invoke absences:add($0, $1)
@@ -1108,6 +1122,8 @@ preload disconnectGoogle -> invoke google:disconnect($0)
 preload disconnectGoogle : (companyId: string) => Promise<GoogleStatusResult>
 preload disconnectSlack -> invoke slack:disconnect($0)
 preload disconnectSlack : (companyId: string) => Promise<SlackStatusResult>
+preload dismissAppLinkServer -> invoke appLink:dismissServer()
+preload dismissAppLinkServer : () => Promise<void>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
@@ -1124,6 +1140,8 @@ preload getAgentInteractions -> invoke agent-interaction:list()
 preload getAgentInteractions : () => Promise<AgentInteractionRequest[]>
 preload getApiKeyStatus -> invoke config:getApiKeyStatus()
 preload getApiKeyStatus : () => Promise<ApiKeyStatus>
+preload getAppLinkServerOffer -> invoke appLink:serverOffer()
+preload getAppLinkServerOffer : () => Promise<{ server: string; } | null>
 preload getApproval -> invoke approvals:get($0, $1)
 preload getApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload getAuthMode -> invoke config:getAuthMode()

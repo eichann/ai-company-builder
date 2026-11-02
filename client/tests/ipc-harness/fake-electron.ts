@@ -133,6 +133,7 @@ const readyPromise = new Promise<void>(resolve => { fake.ready = resolve })
 export const app = {
   isPackaged: false,
   requestSingleInstanceLock: () => true,
+  setAsDefaultProtocolClient: () => true,
   quit: () => { throw new Error('app.quit() called under test') },
   on: (event: string, fn: (...args: unknown[]) => void) => { appEvents.on(event, fn); return app },
   emit: (event: string, ...args: unknown[]) => appEvents.emit(event, ...args),

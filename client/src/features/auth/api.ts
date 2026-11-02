@@ -12,6 +12,18 @@ export type ServerUrlWrites = ElectronPort<'setServerUrl'>
 /** Checking a typed address: main contacts that server, so what the member typed leaves the computer. */
 export type ServerUrlOutbound = ElectronPort<'validateServerUrl'>
 
+/**
+ * The server address an invitation's 「アプリを開く」 link offered (main holds it; null when
+ * none, or when the app already has a server).
+ */
+export type AppLinkReads = ElectronPort<'getAppLinkServerOffer'>
+/**
+ * Using that address (main checks it answers as an ACB server, then makes it this computer's
+ * server: sign-in sends the password there from now on) or forgetting it. The renderer never
+ * names the address: main uses the one the link brought.
+ */
+export type AppLinkWrites = ElectronPort<'acceptAppLinkServer' | 'dismissAppLinkServer'>
+
 /** Signing in: the email and password are sent to the company server. */
 export type SignInOutbound = ElectronPort<'signIn'>
 /** Signing up: the email, password and name are sent and the server creates an account. */
@@ -38,6 +50,18 @@ export function setServerUrl(url: string, writes: ServerUrlWrites = window.elect
 
 export function validateServerUrl(url: string, outbound: ServerUrlOutbound = window.electronAPI) {
   return outbound.validateServerUrl(url)
+}
+
+export function getAppLinkServerOffer(reads: AppLinkReads = window.electronAPI) {
+  return reads.getAppLinkServerOffer()
+}
+
+export function acceptAppLinkServer(writes: AppLinkWrites = window.electronAPI) {
+  return writes.acceptAppLinkServer()
+}
+
+export function dismissAppLinkServer(writes: AppLinkWrites = window.electronAPI) {
+  return writes.dismissAppLinkServer()
 }
 
 export function signIn(email: string, password: string, outbound: SignInOutbound = window.electronAPI) {

@@ -629,6 +629,10 @@ export interface IpcInvokeChannels {
   'config:getServerUrl': { args: []; result: string | null }
   'config:setServerUrl': { args: [url: string]; result: boolean }
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
+  // The server address from an invitation's 「アプリを開く」 link (features/app-link): offered, shown, accepted by the member
+  'appLink:serverOffer': { args: []; result: { server: string } | null }
+  'appLink:acceptServer': { args: []; result: SimpleResult }
+  'appLink:dismissServer': { args: []; result: void }
   // Extra environment variable names passed to AI processes (agents/agent-env.ts), this computer only
   'config:getAgentEnvPassthrough': { args: []; result: string[] }
   'config:setAgentEnvPassthrough': { args: [names: string[]]; result: { names: string[]; invalid: string[]; denied: string[] } }
@@ -848,6 +852,9 @@ export interface ElectronAPI {
   getServerUrl: Invoke<'config:getServerUrl'>
   setServerUrl: Invoke<'config:setServerUrl'>
   validateServerUrl: Invoke<'config:validateServerUrl'>
+  getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
+  acceptAppLinkServer: Invoke<'appLink:acceptServer'>
+  dismissAppLinkServer: Invoke<'appLink:dismissServer'>
   getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
   setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 
