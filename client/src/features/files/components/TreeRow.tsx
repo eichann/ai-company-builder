@@ -1,5 +1,5 @@
 import { memo } from 'react'
-import { CaretRight, SpinnerGap, CloudArrowDown, FolderSimpleDashed, LockSimple } from '@phosphor-icons/react'
+import { CaretRight, SpinnerGap, CloudArrowDown, CloudSlash, FolderSimpleDashed, LockSimple } from '@phosphor-icons/react'
 import { FolderIcon } from '../../../shared/ui/FileIcons'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { ReadOnlyBadge } from '../../../shared/ui/ReadOnlyBadge'
@@ -21,6 +21,8 @@ export interface RowActions {
   drop: (entry: FileEntry, e: React.DragEvent) => void
   download: (entry: FileEntry) => void
   clearSelection: () => void
+  /** The 「大きすぎて共有されていません」 mark was pressed: explain why and what to do. */
+  explainTooLarge: (entry: FileEntry) => void
 }
 
 interface TreeRowProps {
@@ -35,12 +37,14 @@ interface TreeRowProps {
   privateRoot: MyPrivateFolder | null
   review: ReviewBadge
   downloading: boolean
+  /** A file over 100 MB that sync keeps on this computer (useUnsharedLargeFiles). */
+  tooLarge: boolean
   actions: React.MutableRefObject<RowActions>
 }
 
 export const TreeRow = memo(function TreeRow({
   entry, depth, isExpanded, isHighlighted, isLoading, isDragOver, isDragSource,
-  showReadOnly, privateRoot, review, downloading, actions,
+  showReadOnly, privateRoot, review, downloading, tooLarge, actions,
 }: TreeRowProps) {
   // A folder this computer does not download: muted, not expandable, not a
   // drop target; one click downloads it.
@@ -139,6 +143,20 @@ export const TreeRow = memo(function TreeRow({
         </span>
       )}
       {showReadOnly && <ReadOnlyBadge compact />}
+      {tooLarge && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={e => { e.stopPropagation(); actions.current.explainTooLarge(entry) }}
+          onDoubleClick={e => e.stopPropagation()}
+          title="大きすぎて共有されていません（押すと理由とできることを表示）"
+          aria-label={`${entry.name}は大きすぎて共有されていません`}
+          className="flex flex-shrink-0 items-center gap-0.5 rounded px-1 text-[10px] font-medium text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+          data-too-large
+        >
+          <CloudSlash size={12} />共有されていません
+        </button>
+      )}
       {/* 依頼バッジ: UIからの依頼ボタンは非表示にしたが、
           Slack通知連携で review-request を再利用予定のため残してある */}
       {review === 'request' && (

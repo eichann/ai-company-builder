@@ -564,6 +564,7 @@ export interface IpcInvokeChannels {
   'git:commitFileDiff': { args: [repoPath: string, commitHash: string, filePath: string]; result: GitCommitFileDiffResult }
   // folderPath '' = the whole company (electron/git-search.ts)
   'git:listFiles': { args: [repoPath: string, folderPath: string]; result: GitListFilesResult }
+  'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
   'git:grep': { args: [repoPath: string, query: string, folderPath: string]; result: GitGrepResult }
   // folderPath: a folder or one file (「前の版」); inside a private folder, read from its own repository
   'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult }
@@ -940,6 +941,7 @@ export interface ElectronAPI {
   gitFileDiff: Invoke<'git:fileDiff'>
   gitCommitFileDiff: Invoke<'git:commitFileDiff'>
   gitListFiles: Invoke<'git:listFiles'>
+  gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
   gitGrep: Invoke<'git:grep'>
   gitLog: Invoke<'git:log'>
   gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>

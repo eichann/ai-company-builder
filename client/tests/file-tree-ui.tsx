@@ -7,6 +7,7 @@
 // window.__acbCalls  every write the tree asked for, as [method, ...args]
 // window.__acbSelected  the paths onSelectFile received, in order
 // ?tasks=off  the company shows no task list: no 「やることにつなぐ…」
+// 営業部/議事録/会議の録画.mp4 is over 100 MB: sync keeps it on this computer
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -35,7 +36,7 @@ const DISK: Record<string, Entry[]> = {
     { name: '2026春.md.review.0b7c-4f1e.json', isDirectory: false },
     { name: '見積.xlsx', isDirectory: false },
   ],
-  [`${DEPT}/議事録`]: [{ name: '10月.md', isDirectory: false }],
+  [`${DEPT}/議事録`]: [{ name: '10月.md', isDirectory: false }, { name: '会議の録画.mp4', isDirectory: false }],
   [`${DEPT}/機密`]: [{ name: '契約.md', isDirectory: false }],
 }
 
@@ -104,6 +105,8 @@ installElectronAPI({
   // A name a private folder this member cannot read already uses (the server knows).
   reservedPathRefusal: async p => (split(p)[1] === '人事評価' ? '「人事評価」という名前は使えません。別の名前にしてください。' : null),
   getMyPrivateFolders: async () => ({ success: true, folders: FOLDERS }),
+  // Over 100 MB and kept on this computer by sync (company-relative).
+  gitUnsharedLargeFiles: async () => ({ success: true, files: ['営業部/議事録/会議の録画.mp4'] }),
 })
 
 useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })

@@ -3,7 +3,7 @@
 // summary of pending changes, a file's earlier versions (「前の版」), file names
 // (Cmd+P) and content search (electron/git-search.ts).
 //   git:preview, git:revertFile, git:fileDiff, git:commitFileDiff,
-//   git:generateSummary, git:listFiles, git:log, git:grep, git:getBinaryStatus
+//   git:generateSummary, git:listFiles, git:unsharedLargeFiles, git:log, git:grep, git:getBinaryStatus
 
 import fs from 'fs'
 import path from 'path'
@@ -13,6 +13,7 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 import type { AppGit } from '../../services/app-git'
 import type { CommitMessagesFor } from '../../services/commit-messages'
 import { previewChanges, withScratchIndex } from '../../sync/preview'
+import { findUnsharedLargeFiles } from '../../sync/large-files'
 import type { PathGuard } from '../ports'
 import { keepCurrentVersion } from '../backups/keep-current'
 
@@ -178,6 +179,18 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
     } catch (err) {
       console.error('Git ls-files error:', err)
       return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
+    }
+  })
+
+  // Files over the size limit that sync does not share (the file tree's
+  // 「大きすぎて共有されていません」 mark), company-relative. Read-only.
+  ipc.handle('git:unsharedLargeFiles', async (_, repoPath: string) => {
+    try {
+      const safePath = paths.validate(repoPath)
+      return { success: true, files: await findUnsharedLargeFiles(appGit.create(safePath, { GIT_NO_LAZY_FETCH: '1' }), safePath) }
+    } catch (err) {
+      console.error('Unshared large files error:', err instanceof Error ? err.message : err)
+      return { success: false, files: [] }
     }
   })
 
