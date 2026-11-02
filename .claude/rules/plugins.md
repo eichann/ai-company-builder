@@ -557,6 +557,16 @@ POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved ag
 POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確かめる」 (P8, below)
 ```
 
+- **Starting values** (管理画面の見直し 2-4, owner decision 2026-11-02; set once, never over what a
+  company chose): a business plugin's **first install turns it on** at once when it can run (as
+  `PUT …/enabled` would, history `enable` with `from: install`; one that cannot stays off), and
+  turns the records feature on. The departments it is used in = the departments whose folders hold
+  its mapping's `visible_to_folder`s (the recommended mapping at install, or the first saved
+  mapping). With them, on a business plugin's first install / first mapping and on a connector's
+  first install: the connector's relay **read scope, while empty**, becomes those departments
+  (history `read-scope`, `from: starting-values`), and each role the business plugin declares,
+  **while never assigned**, goes to those departments' 部署の管理役 (`plugin-roles.md`). Tests:
+  `tests/integration/plugins.test.ts` 「starting values」, `plugin-roles.test.ts`.
 - Tables (company handle `plugins`, `adapters/sqlite/plugins.ts`): `plugin_installs` (version,
   fingerprint, enabled, `key_id`, mapping version in force), `plugin_mappings` (every version's
   YAML), `plugin_history` (install / change / enable / disable / mapping / restore; JSON without

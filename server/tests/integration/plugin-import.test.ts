@@ -123,7 +123,8 @@ beforeAll(async () => {
   db.prepare('DELETE FROM scope_rules WHERE company_id = ? AND scope_id = ?').run(CO, sales)
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'im-r1', ?, 'everyone', NULL, 0, 0, ?)`).run(CO, sales, ts())
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'im-r2', ?, 'user', 'im-member', 1, 1, ?)`).run(CO, sales, ts())
-  db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(CO, ts(), 'im-owner')
+  // A new company starts with the records feature on (管理画面の見直し 2-4).
+  expect(db.prepare('SELECT enabled FROM record_settings WHERE company_id = ?').get(CO)).toEqual({ enabled: 1 })
 
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
@@ -299,7 +300,8 @@ describe('runs, stops and connections', () => {
 
     // Another company is not affected: a record with the same id there is neither hidden nor marked.
     const other = (await services.companies.create('im-other-owner', 'Other', 'import-other')).id as string
-    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(other, ts(), 'im-other-owner')
+    // A new company starts with the records feature on (管理画面の見直し 2-4).
+    expect(db.prepare('SELECT enabled FROM record_settings WHERE company_id = ?').get(other)).toEqual({ enabled: 1 })
     db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, ?, 'deal', 'other company', ?, ?)").run(other, oldDeal, ts(), ts())
     const otherOwner = { companyId: other, userId: 'im-other-owner', role: 'owner' }
     const seen = services.records.query(otherOwner, { type: 'deal' }).value

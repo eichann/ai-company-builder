@@ -833,8 +833,10 @@ async function seed(): Promise<World> {
 
   // The company map, on in both companies (rows written directly: turning it on
   // through the API would start an index run in the background), with a record in the other.
+  // A company made through the API already starts with it on (管理画面の見直し 2-4).
   for (const c of [co, other]) {
-    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(c, expires, USER.owner)
+    db.prepare(`INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)
+      ON CONFLICT(company_id) DO UPDATE SET enabled = 1`).run(c, expires, USER.owner)
   }
   db.prepare("INSERT INTO records (company_id, id, type, path, title, created_at, updated_at) VALUES (?, 'deal-other001', 'deal', '営業部/商談.md', '他社の商談', ?, ?)")
     .run(other, expires, expires)

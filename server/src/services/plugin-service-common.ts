@@ -106,6 +106,11 @@ export interface PluginServiceDeps {
    * Recorded in the key broker's history as this member's change.
    */
   relayReadOnly: (member: Member, service: string) => void
+  /**
+   * Turn the company's records feature on (records.md "Off per company") when a business plugin
+   * starts: its types and operations need it (管理画面の見直し 2-4). Optional: tests without it skip.
+   */
+  recordsOn?: (member: Member) => void
 }
 
 /**

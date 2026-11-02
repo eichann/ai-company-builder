@@ -45,6 +45,11 @@ per まとまり, who holds which role. The core roles 本人 (`self`), 部署�
 - Bound once in `composition/plugins.ts` (`recordEngine.useRoles`, `approvals.useRoles`); before
   binding a `role:` entry matches no one.
 
+- Starting value (管理画面の見直し 2-4): a declared role never assigned gets the 部署の管理役 of the
+  departments the business plugin is used in, when its first install or first mapping names them
+  (`plugins.ts` `seedStartingValues`, history `assign` by the admin who installed). Nothing a company
+  assigned is changed; a role assigned `[]` stays nobody.
+
 ## Hook points
 
 - **Engine `who`** (`record-engine/act.ts` `mayAct(..., holdsRole)`): `role:<name>` is met by the

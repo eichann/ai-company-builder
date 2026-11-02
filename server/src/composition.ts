@@ -316,6 +316,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
+    // A business plugin starting turns the records feature on (bound to `records`, made below).
+    recordsOn: member => {
+      const now = records.settings(member)
+      if (now.ok && !now.value.enabled) records.updateSettings(member, { enabled: true })
+    },
   })
 
   // The connector (P5): the only part that talks to an outside system for a plugin; the engine's
