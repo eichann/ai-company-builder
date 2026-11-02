@@ -128,7 +128,8 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
    one line on what it does (`actionHint`). **チームの進め方** (`team`, on until its setting exists):
    off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける, 返事待ち,
-   見てもらう, 受けられない and 差し戻す. Actions that take the task off the member's turn (受けられない,
+   見てもらう and 差し戻す — how the card looks, not a permission (the server allows them either way);
+   引き受ける and 受けられない stay on any task someone asked of the member. Actions that take the task off the member's turn (受けられない,
    返事待ち, 人に頼む, やめる（しまう）, 見てもらう) open a window that says **何が起きるか** and **知らせる人**
    first (`leavingWords`); a reason where the type requires one. After a press the card says what
    happened with **［取り消す］** (`tasks:undo` → `POST …/undo { version, expectedVersion }` of that

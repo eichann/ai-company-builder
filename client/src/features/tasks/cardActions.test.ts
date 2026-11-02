@@ -28,12 +28,14 @@ test('確かめてから: the assignee\'s main action is 「終わったので�
   assert.equal(whenDoneLine(c), '終わったら：阿部さんに確かめてもらう（阿部さんの OK で完了）')
 })
 
-test('チームの進め方 off, or a task nobody else is in: no team actions (返事待ち・受けられない・進めている印)', () => {
+test('チームの進め方 off, or a task nobody else is in: no team actions (返事待ち・進めている印); 受けられない and 引き受ける stay on what someone asked', () => {
   const asked = card(task('todo', { assignee: ME, requested_by: BOSS }))
   const on = names(placeActions(asked, true)).more
   assert.ok(on.includes('wait') && on.includes('decline') && on.includes('start'))
   const off = names(placeActions(asked, false)).more
-  assert.ok(!off.includes('wait') && !off.includes('decline') && !off.includes('start'))
+  assert.ok(!off.includes('wait') && !off.includes('start'))
+  assert.ok(off.includes('decline'))
+  assert.equal(placeActions(card(task('awaiting_acceptance', { assignee: ME, requested_by: BOSS })), false).main?.action, 'accept')
   const own = names(placeActions(card(task('todo', { assignee: ME, requested_by: ME })), true)).more
   assert.ok(!own.includes('wait') && !own.includes('start'))
 })

@@ -3,8 +3,13 @@
 // list confirm first (what happens, who is told) and can be undone right after.
 import type { TaskCardAction, TaskCardData } from '../../../shared/task-card'
 
-/** Actions of チームの進め方: offered only with it on, and only on a task someone else is in. */
-const TEAM_ACTIONS = new Set(['start', 'wait', 'request_review', 'decline', 'send_back'])
+/**
+ * Actions of チームの進め方: offered only with it on, and only on a task someone else is in. It is
+ * how the card looks, not a permission (the server allows them either way).
+ */
+const TEAM_ACTIONS = new Set(['start', 'wait', 'request_review', 'send_back'])
+/** Needed whenever someone asked it of the member, whatever チームの進め方 says (引き受ける needs no list: it is never hidden). */
+const ASKED_ACTIONS = new Set(['decline'])
 /** Actions that take the task out of the member's turn: confirmed first, then 「取り消す」. */
 export const LEAVING_ACTIONS = new Set(['decline', 'wait', 'assign', 'cancel', 'request_review'])
 /** Shown elsewhere on the card (the due's 「延ばす」). */
@@ -25,7 +30,7 @@ const rank = (action: string) => (ORDER.indexOf(action) + 1 || 99)
 export function placeActions(card: TaskCardData, team: boolean): ActionPlacement {
   const withSomeone = !!card.names.requester && !(card.roles.assignee && card.roles.requester)
   const offered = card.actions.filter(a => !ELSEWHERE.has(a.action))
-    .filter(a => !TEAM_ACTIONS.has(a.action) || (team && withSomeone) || isHandToChecker(card, a))
+    .filter(a => (!TEAM_ACTIONS.has(a.action) || (team && withSomeone) || isHandToChecker(card, a)) && (!ASKED_ACTIONS.has(a.action) || withSomeone))
   const find = (name: string, pred: (a: TaskCardAction) => boolean = () => true) => offered.find(a => a.action === name && pred(a)) ?? null
   const state = card.record.state
 
