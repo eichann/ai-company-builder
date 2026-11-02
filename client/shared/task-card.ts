@@ -4,6 +4,7 @@
  * is offered from the type definition and the member's place in the record (assignee, requester,
  * OK-giver); the server's engine still decides every action. Pure.
  */
+import { WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
 import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
@@ -100,6 +101,25 @@ export interface TaskCardData {
   runs: TaskCardRun[]
   /** Members by name (for 「誰の OK か」 and person arguments), the member excluded. */
   people: Array<{ id: string; name: string }>
+  /** 返事待ち's part: while waiting or after the clock gave it back; null otherwise. */
+  wait: TaskCardWait | null
+  /** The company's own holidays (`YYYY-MM-DD`): the chips and the days count business days. */
+  holidays: string[]
+}
+
+/**
+ * 返事待ち and its 見込み (task version 12): while the task waits, and after the clock gave it
+ * back (「先方からの返事が来ていません（3日）」, ［催促の下書きを作る］［もう少し待つ］［完了にする］).
+ */
+export interface TaskCardWait {
+  /** 待っているもの (`waiting_on`). */
+  on: string | null
+  /** 見込み (`wait_until`, `YYYY-MM-DD[THH:MM]`), or null (a task that waited before version 12). */
+  until: string | null
+  /** Given back by the clock (`waitCameBack`): when it began to wait (ISO), null when unknown. Null while waiting. */
+  cameBack: { waitedSince: string | null } | null
+  /** ［見込みを変える］ (`set_wait_until`): the member may, the task still waiting. */
+  canChange: boolean
 }
 
 export type TaskCardResult =
@@ -140,6 +160,8 @@ export interface TaskCardSources {
   runs: AiRunView[]
   /** The company's チームの進め方 (`/me/work-switches` `teamMode.on`); absent = off. */
   teamMode?: boolean
+  /** The company's own holidays (`GET /task-settings`); absent = none. */
+  holidays?: string[]
 }
 
 export function taskCardOf(src: TaskCardSources): TaskCardData {
@@ -218,6 +240,15 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     return { runId: x.id, label: x.label, canRetry: unknown.length === 0, unknown }
   })
 
+  // 返事待ち (task version 12): the 見込み while waiting; given back by the clock, what to do next.
+  const back = r.state === WAIT_OVER.task.personTurn && r.type === 'task' ? waitCameBack(r.type, [...src.entries].sort((a, b) => a.version - b.version)) : null
+  const setWaitUntil = def?.actions.set_wait_until
+  const wait: TaskCardWait | null = r.state === 'waiting' || back ? {
+    on: str(r.fields.waiting_on), until: str(r.fields.wait_until),
+    cameBack: back ? { waitedSince: back.waitedSince } : null,
+    canChange: r.state === 'waiting' && !!setWaitUntil && personMay(setWaitUntil.who),
+  } : null
+
   const created = src.entries.find(e => e.version === 1) ?? null
   const origin: TaskCardOrigin | null = originLink ? {
     kind: originLink.kind, recordId: originLink.record.id, title: originLink.record.title || '（名前なし）',
@@ -240,6 +271,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
+    wait, holidays: src.holidays ?? [],
   }
 }
 

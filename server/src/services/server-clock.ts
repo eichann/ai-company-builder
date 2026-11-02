@@ -105,7 +105,8 @@ export function createServerClock(deps: ServerClockDeps) {
           recordId: s.recordId, action: WAIT_OVER_ACTION, expectedVersion: s.version, to,
           // The assignee's turn (also while the AI prepares: 「AI の番」 shows whose).
           ...(assignee ? { fields: { next_actor: assignee } } : {}),
-          actor: { ...CLOCK_ACTOR }, note: '返事・届く見込みの日時が過ぎました',
+          // 経緯 says why it came back, with the 見込み it passed (「返事の見込み（11/6）を過ぎました」).
+          actor: { ...CLOCK_ACTOR }, note: waitOverNote(fields[rule.field]),
         })
         // `stale`: someone moved it in between — their change stands; the next run looks again.
         if (r.ok) moved++
@@ -152,3 +153,9 @@ export function createServerClock(deps: ServerClockDeps) {
 }
 
 export type ServerClock = ReturnType<typeof createServerClock>
+
+/** The clock's 経緯 note: 「返事の見込み（11/6）を過ぎました」, 「…（11/6 15:00）…」 with a time. */
+export function waitOverNote(waitUntil: LedgerValue | undefined): string {
+  const m = typeof waitUntil === 'string' ? /^\d{4}-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?/.exec(waitUntil) : null
+  return m ? `返事の見込み（${Number(m[1])}/${Number(m[2])}${m[3] ? ` ${m[3]}` : ''}）を過ぎました` : '返事の見込みを過ぎました'
+}

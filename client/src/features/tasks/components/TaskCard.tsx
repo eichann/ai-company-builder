@@ -26,6 +26,7 @@ import { BundleField } from './BundleField'
 import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
 import { TagField } from './TagField'
+import { WaitBand } from './WaitParts'
 
 interface Props {
   companyId: string
@@ -42,6 +43,8 @@ interface Props {
   shareFolders?: ShareFolder[]
   /** 「相談する」: the member's latest consultation about this task, else a new one (AppShell: `chat.consultAbout`). */
   onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
+  /** ［催促の下書きを作る］ on a task whose 返事の見込み passed (AppShell: `chat.consultAbout` with purpose `nudge`). */
+  onNudge?: (record: { id: string; title: string }) => void
   /** Consultations whose main topic is this task (this PC's), listed in 「つながっているもの」. */
   consultations?: readonly LinkedConsultation[]
   /** Tags in use in the member's list (most used first), for 「タグの候補」. */
@@ -69,7 +72,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -136,7 +139,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
     onCreateBundle={bundleKind ? (title: string) => change(async () => {
@@ -178,12 +181,13 @@ interface BodyProps {
   shareFolders: ShareFolder[]
   onShare: (folder: string) => Promise<string | null>
   onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
+  onNudge?: (record: { id: string; title: string }) => void
   consultations: readonly LinkedConsultation[]
   tagField: ReactNode
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, consultations, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -231,7 +235,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
         {card.names.assignee && <span className="text-[11.5px] text-gray-500 dark:text-zinc-400">担当 {card.names.assignee}さん{card.names.requester && !(card.roles.assignee && card.roles.requester) && card.names.requester !== card.names.assignee ? `・頼んだ人 ${card.names.requester}さん` : ''}</span>}
       </>}
       actions={<>
-        <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} onRun={onRun} />
+        <TaskActions key={`${record.state}@${record.version}`} card={card} busy={busy} team={team} today={now.date} onRun={onRun} />
       </>}
       from={card.origin && <OriginLine origin={card.origin} />}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
@@ -249,6 +253,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           )}
         </>} />}>
       {doneLine && <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">{doneLine}</p>}
+      <WaitBand key={`${record.state}@${record.version}`} card={card} today={now.date} busy={busy} onRun={onRun} {...(onNudge ? { onNudge: () => onNudge({ id: record.id, title: record.title }) } : {})} />
       {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[12.5px] text-emerald-800 dark:text-emerald-300"><CheckCircle size={14} weight="fill" />{card.okLine}</p>}
 
       {(card.prepSummary || card.prepared.length > 0) && (

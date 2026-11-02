@@ -116,7 +116,9 @@ compare-and-set and ledger), and writes notices.
   `autoRun.enabled`; no assignee → the company's 初めの値; `tasks.md` "Each member's switches") and `preparing` is an AI turn of the type, else to `todo`
   (the assignee's turn); `next_actor` = the assignee; the assignee is told (`wait_over`). Ledger
   action `wait_over`, actor `CLOCK_ACTOR` (kind `external`, id `acb:clock`, source 「ACB の時計」
-  — the history shows the source). No new action or state in the task type: the moves are listed
+  — the history shows the source), note 「返事の見込み（11/6）を過ぎました」 (`waitOverNote`; the 経緯 shows
+  it as the line). Since task version 12 every new 返事待ち has a `wait_until` (`records.md` "Task
+  version 12"); a waiting task without one is never moved. No new action or state in the task type: the moves are listed
   in `SERVICE_TRANSITIONS.task`, and the service writer allows a type that is not service-owned
   only those state changes (never a field-only change). A task someone moved meanwhile is
   `stale` and left alone.
@@ -146,7 +148,9 @@ carry on. The app never acts on the signal itself: it only asks the server again
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
   (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `markRead` / `settings` /
   `setSetting`, event `notifications:changed`. Sign-out and quit forget everything.
-- **Mac notifications (E-27)** only for an approval request or an item new in 「あなたの番」,
+- **Mac notifications (E-27)** only for an approval request or an item new in 「あなたの番」 — a
+  返事待ち task given back by the clock counts as new (`turnItemKey`: the server's `waitCameBack`; it was
+  in the list while it waited), worded 「返事の見込みを過ぎました（あなたの番に戻りました）」 —
   computed from what the server answered (never from a signal), through the shell layer
   (`DesktopShell.notify`, Electron's `Notification` in `electron-adapter.ts`; a click focuses the
   main window). The first look at a company notifies nothing; at most 3 per check. Words in

@@ -23,7 +23,7 @@
  * with 「変更前の値を書き戻す」 for the person.
  */
 import { z, type ZodTypeAny } from 'zod'
-import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
+import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { DATE_VALUE_RE, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
@@ -372,7 +372,13 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         expectedVersion: z.number().int().min(0).describe('records_get で見た version / the version you read'),
         note: a.note === 'required' ? z.string().min(1).max(2000) : z.string().max(2000).optional(),
       }
-      for (const [arg, kind] of Object.entries(a.args)) shape[arg] = kindSchema(kind, t.fields[arg]?.options)
+      for (const [arg, kind] of Object.entries(a.args)) {
+        // A core default (task version 12: 返事待ち's 見込み): the AI should say it; left out, the server fills it.
+        const byDefault = argDefaultOf(t.name, name, arg)
+        shape[arg] = byDefault
+          ? kindSchema(kind, t.fields[arg]?.options).optional().describe(`${t.fields[arg]?.label ?? arg}：いつごろ来そうか。相手の言葉（「金曜までに」「来週」）や中身から考えて必ず入れる。省くと ${byDefault.businessDays} 営業日後になる。日付（YYYY-MM-DD）か日時（YYYY-MM-DDTHH:MM） / when it is expected: always give it (from what they said or the matter); left out = ${byDefault.businessDays} business days later`)
+          : kindSchema(kind, t.fields[arg]?.options)
+      }
       // Record links the action sets (task: set_bundle → bundle, finish_prep → prepared). Left out = unchanged.
       const links = a.links ?? []
       if (links.length > 0) {
@@ -386,13 +392,17 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
           ? ` ${a.okFrom.map(f => t.fields[f]?.label ?? f).join('・')}も、誰の OK か（OK した人か、ACB の外でもらった OK のいきさつ）を書けば画面で行える。済んだようなら本人に提案してよい。` +
             ` The ${a.okFrom.join(' / ')} may also do it on screen, stating whose OK it was; you may suggest it, never do it.`
           : '')
+      const defaulted = Object.keys(a.args).filter(arg => argDefaultOf(t.name, name, arg))
+      const defaultNote = defaulted.length > 0
+        ? `${defaulted.map(arg => t.fields[arg]?.label ?? arg).join('・')}（${defaulted.join(', ')}）も一緒に入れる（見込みを過ぎると担当の番に戻り、追いかけになる）。`
+        : ''
       specs.push({
         name: tool, readOnly: false, schema: z.object(shape).strict(),
         display: actionToolDisplay(a.label),
-        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ?? '状態はそのまま'}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${aiNote}\n` +
-          `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}`,
+        description: `「${t.label}」の「${a.label}」（${from} → ${a.to ?? '状態はそのまま'}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
+          `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}${defaulted.length > 0 ? ` Give ${defaulted.join(', ')} too (when it passes, the task returns to its assignee for a follow-up).` : ''}`,
         request: input => {
-          const args = Object.fromEntries(Object.keys(a.args).map(k => [k, input[k]]))
+          const args = Object.fromEntries(Object.keys(a.args).filter(k => input[k] !== undefined).map(k => [k, input[k]]))
           return {
             method: 'POST', path: `/item/${enc(String(input.id))}/actions/${enc(name)}`,
             body: { expectedVersion: input.expectedVersion, ...(input.note !== undefined ? { note: input.note } : {}), args, ...(input.links !== undefined ? { links: input.links } : {}) },

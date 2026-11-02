@@ -12,7 +12,8 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
-import { acceptanceOf } from '../../../shared/core/core-types'
+import { acceptanceOf, argDefaultOf, argDefaultValue } from '../../../shared/core/core-types'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
@@ -37,6 +38,13 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     (w === 'dept_manager' && managesPlace) ||
     (w.startsWith(ROLE_WHO_PREFIX) && holdsRole?.(w.slice(ROLE_WHO_PREFIX.length)) === true) ||
     values[w] === member.userId)
+}
+
+/** The company's `YYYY-MM-DDTHH:MM` when the engine was built without `companyDay` (the default zone). */
+function japanNow(ms: number): string {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: DEFAULT_COMPANY_TIME_ZONE, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    .formatToParts(new Date(ms)).map(x => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`
 }
 
 /** An action called from where its type's `via` does not list (records.md "Where an action may be called from"). */
@@ -127,6 +135,13 @@ export function acting(ctx: EngineContext) {
       for (const k of Object.keys(rawArgs)) if (!(k in action.args)) return bad(`Unknown argument ${k}`)
       const args: Record<string, LedgerValue> = {}
       for (const [name, kind] of Object.entries(action.args)) {
+        // A core default (task version 12: 返事待ち's 見込み, 3 business days) for an app or an AI that gave none.
+        const byDefault = rawArgs[name] === undefined || rawArgs[name] === null ? argDefaultOf(row.type, actionName, name) : undefined
+        if (byDefault) {
+          const day = deps.companyDay?.(member.companyId) ?? { now: japanNow(clock.nowMs()), holidays: [] }
+          args[name] = argDefaultValue(byDefault, current.fields[name], day.now, day.holidays)
+          continue
+        }
         if (rawArgs[name] === undefined || rawArgs[name] === null) return bad(`${name} is required`, 'ARG_REQUIRED')
         const v = checkValue(kind, rawArgs[name], def.fields[name]?.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')

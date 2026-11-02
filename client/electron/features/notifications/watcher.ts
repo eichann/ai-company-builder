@@ -11,7 +11,7 @@
 
 import type { NotificationList } from '../../../../shared/types/notifications'
 import type { NoticesActionResult, NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { desktopNoticeFor, newTurnItems, NO_NOTICES, NOTICES_OFFLINE_TEXT } from '../../../shared/notifications-app'
+import { desktopNoticeFor, newTurnItems, NO_NOTICES, NOTICES_OFFLINE_TEXT, turnItemKey } from '../../../shared/notifications-app'
 
 export interface NotificationsWatcherDeps {
   baseUrl: () => string
@@ -37,10 +37,13 @@ const NOTICE_ID = /^[A-Za-z0-9-]{1,100}$/
 type Answer = { status: number; body: { data?: unknown; error?: unknown } | null }
 
 function turnItemOf(r: unknown): TurnItem | null {
-  const x = r as { id?: unknown; type?: unknown; title?: unknown; state?: unknown; fields?: Record<string, unknown> } | null
+  const x = r as { id?: unknown; type?: unknown; title?: unknown; state?: unknown; fields?: Record<string, unknown>; waitCameBack?: unknown } | null
   if (!x || typeof x.id !== 'string' || !RECORD.test(x.id) || typeof x.type !== 'string' || typeof x.title !== 'string') return null
   const due = x.fields?.due
-  return { id: x.id, type: x.type, title: x.title.slice(0, 200), state: typeof x.state === 'string' ? x.state : null, due: typeof due === 'string' ? due : null }
+  return {
+    id: x.id, type: x.type, title: x.title.slice(0, 200), state: typeof x.state === 'string' ? x.state : null, due: typeof due === 'string' ? due : null,
+    ...(x.waitCameBack && typeof x.waitCameBack === 'object' ? { waitCameBack: true as const } : {}),
+  }
 }
 
 function noticeListOf(data: unknown): NotificationList | null {
@@ -87,7 +90,7 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
 
   function notifyNewTurns(companyId: string, items: TurnItem[]) {
     const before = seenTurn.get(companyId) ?? null
-    seenTurn.set(companyId, new Set(items.map(i => i.id)))
+    seenTurn.set(companyId, new Set(items.map(turnItemKey)))
     for (const item of newTurnItems(before, items).slice(0, 3)) {
       const { title, body } = desktopNoticeFor(item)
       try { deps.desktopNotify?.(title, body) } catch { /* no notification: the title bar still shows it */ }

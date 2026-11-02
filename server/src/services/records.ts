@@ -13,7 +13,7 @@ import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permiss
 import { aiTurnStates, noTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import { turnsOf } from '../../shared/core/record-turns'
-import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP } from '../../shared/core/core-types'
+import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
@@ -476,7 +476,15 @@ export function createRecordService(deps: RecordServiceDeps) {
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       const waiting = waitingFor(records, [member.userId, ...actsFor(member)], oldConnectionIds(member)).filter(w => reader.record(w.row))
-      return ok(turnAnswer(records, member, waiting))
+      const answer = turnAnswer(records, member, waiting)
+      // Given back by the clock (task version 12): 「先方からの返事が来ていません（n日）」 and the Mac notice.
+      for (const r of answer.records) {
+        const rule = Object.prototype.hasOwnProperty.call(WAIT_OVER, r.type) ? WAIT_OVER[r.type] : undefined
+        if (!rule || r.state !== rule.personTurn || typeof r.fields[rule.field] !== 'string') continue
+        const back = waitCameBack(r.type, records.ledger(r.id))
+        if (back) r.waitCameBack = back
+      }
+      return ok(answer)
     },
 
     /**

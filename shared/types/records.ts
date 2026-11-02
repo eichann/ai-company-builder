@@ -167,6 +167,13 @@ export interface RecordSummary {
    * Absent otherwise.
    */
   waitOver?: true
+  /**
+   * 「あなたの番」 only: the server clock gave it back because its 見込み (`wait_until`) passed and
+   * it is still the person's (`waitCameBack`, shared/core/core-types.ts; task version 12) — when
+   * the wait began (`waitedSince`, ISO; null when not known) and when it came back. Absent
+   * otherwise (an older server never sends it).
+   */
+  waitCameBack?: { waitedSince: string | null; overAt: string }
 }
 
 export interface RecordQueryResult {

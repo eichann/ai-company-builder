@@ -4,6 +4,9 @@
  * server with the member's session (the server already left out what the member may
  * not read); this only sorts and words it. Pure: main, the renderer and tests import it.
  */
+import { addBusinessDays, addDays, businessDaysBetween, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
+import { argDefaultOf } from '../../shared/core/core-types'
+import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { parseTagsValue } from '../../shared/core/record-types'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
@@ -264,21 +267,75 @@ export interface TaskSources {
   bundleKindNames?: Record<string, string>
   /** Record id → its まとまり, when it has one. */
   bundles: Record<string, { id: string; title: string }>
+  /** The company's today (`YYYY-MM-DD`) and own holidays: a wait given back counts business days. */
+  today?: string
+  holidays?: string[]
 }
+
+/** Business days of 返事待ち's default 見込み (the core's `ARG_DEFAULTS`). */
+const WAIT_DEFAULT_BUSINESS_DAYS = argDefaultOf('task', 'wait', 'wait_until')?.businessDays ?? 3
 
 const nameOf = (people: Record<string, string>, id: unknown): string =>
   typeof id === 'string' && id ? (people[id] ?? 'メンバー') : 'メンバー'
 
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
 
+/** A 見込み in short: `2026-11-06` → 11/6, `2026-11-06T15:00` → 11/6 15:00. */
+export function waitUntilText(until: string): string {
+  const m = /^\d{4}-(\d{2})-(\d{2})(?:T(\d{2}:\d{2}))?$/.exec(until)
+  return m ? `${Number(m[1])}/${Number(m[2])}${m[3] ? ` ${m[3]}` : ''}` : until
+}
+
+/** One chip of 「いつごろ来そうか」: its words and the 見込み it sets (`YYYY-MM-DD`). */
+export interface WaitChoice {
+  key: 'tomorrow' | 'three' | 'next-week'
+  label: string
+  until: string
+}
+
+/**
+ * The chips of 「いつごろ来そうか」 (task version 12) from the company's `today`: ［明日］ (the next
+ * business day — 「次の営業日」 when that is not tomorrow), ［3日後］ (3 business days: also what
+ * the server sets when nothing is chosen, `ARG_DEFAULTS`), ［来週］ (the same weekday next week,
+ * or the business day after it). ［日を選ぶ］ is the screen's own date field.
+ */
+export function waitChoices(today: string, holidays: Iterable<string> = []): WaitChoice[] {
+  const own = [...holidays]
+  const next = nextBusinessDay(today, own)
+  const week = addDays(today, 7)
+  return [
+    { key: 'tomorrow', label: next === addDays(today, 1) ? '明日' : '次の営業日', until: next },
+    { key: 'three', label: '3日後', until: addBusinessDays(today, WAIT_DEFAULT_BUSINESS_DAYS, own) },
+    { key: 'next-week', label: '来週', until: isBusinessDay(week, own) ? week : nextBusinessDay(week, own) },
+  ]
+}
+
+/** The 見込み when nothing is chosen (the server's own default: 3 business days after today). */
+export function defaultWaitUntil(today: string, holidays: Iterable<string> = []): string {
+  return addBusinessDays(today, WAIT_DEFAULT_BUSINESS_DAYS, holidays)
+}
+
+/** 「返事待ち：先方からの返事（11/6 ごろまで）」 (task version 12: the 見込み while it waits). */
+export function waitingLine(on: string | null, until: string | null): string {
+  return `返事待ち${on ? `：${on}` : ''}${until ? `（${waitUntilText(until)} ごろまで）` : ''}`
+}
+
+/**
+ * 「先方からの返事が来ていません（3日）」: a task the clock gave back (`waitCameBack`). The days are
+ * business days since it began to wait, up to `today` (company date; the company's holidays
+ * skipped); left out when not known or none yet.
+ */
+export function cameBackLine(on: string | null, waitedSince: string | null, today: string, holidays: Iterable<string> = []): string {
+  const since = waitedSince && !Number.isNaN(Date.parse(waitedSince)) ? dayWindow(Date.parse(waitedSince), DEFAULT_COMPANY_TIME_ZONE).date : null
+  const days = since ? businessDaysBetween(since, today, holidays) : 0
+  return `${on ?? '返事'}が来ていません${days > 0 ? `（${days}日）` : ''}`
+}
+
 /** Who or what an item waits for, in members' words (null when it is the member's own). */
 function waitingWords(r: RecordSummary, me: string, people: Record<string, string>): string | null {
   const assignee = r.fields.assignee
   if (r.state === 'awaiting_acceptance') return `${nameOf(people, assignee)}さんに頼んだ・引き受け待ち`
-  if (r.state === 'waiting') {
-    const on = text(r.fields.waiting_on)
-    return on ? `返事待ち：${on}` : '返事待ち'
-  }
+  if (r.state === 'waiting') return waitingLine(text(r.fields.waiting_on), text(r.fields.wait_until))
   if (r.state === 'preparing') return assignee === me ? 'AI が用意しています' : `AI が用意しています（担当 ${nameOf(people, assignee)}さん）`
   const next = typeof r.fields.next_actor === 'string' && r.fields.next_actor ? r.fields.next_actor : assignee
   if (next === me) return null
@@ -320,6 +377,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
     if (r.state === 'awaiting_acceptance') add(r, 'acceptance', null)
     else if (r.state === 'waiting') add(r, 'others', waitingWords(r, src.me, src.people))
     else if (r.state === 'declined') add(r, 'mine', `${nameOf(src.people, r.fields.assignee)}さんが受けられないと返しました`)
+    else if (r.waitCameBack && src.today) add(r, 'mine', cameBackLine(text(r.fields.waiting_on), r.waitCameBack.waitedSince, src.today, src.holidays ?? []))
     else add(r, 'mine', null)
   }
   for (const q of src.bundleQuestions ?? []) {

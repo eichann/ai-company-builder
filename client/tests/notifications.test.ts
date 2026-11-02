@@ -117,6 +117,30 @@ test('the watcher reads with the session in a header; a Mac notification only fo
   assert.deepEqual(watcher.state('co'), NO_NOTICES)
 })
 
+test('a 返事待ち task the clock gave back is news once (Mac notification), though it was in the list while it waited', async () => {
+  const waiting = { id: 'task-aaaaaa01', type: 'task', title: '見積の返事', state: 'waiting', fields: {} }
+  const server: Server = { turn: [waiting], notices: NOTICES, calls: [] }
+  const shown: Array<[string, string]> = []
+  const watcher = createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp/', cookies: () => ['s=1'], onChanged: () => {}, desktopNotify: (title, body) => shown.push([title, body]),
+    fetch: fakeServer(server), log: quiet, setInterval: () => 0, clearInterval: () => {},
+  })
+  await watcher.watch('co')
+  // The member started it themselves: same item, nothing new.
+  server.turn = [{ ...waiting, state: 'in_progress' }]
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.deepEqual(shown, [])
+  server.turn = [{ ...waiting, state: 'todo', waitCameBack: { waitedSince: '2026-11-02T01:00:00.000Z', overAt: '2026-11-07T00:00:00.000Z' } }]
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.deepEqual(shown, [['返事の見込みを過ぎました（あなたの番に戻りました）', '見積の返事']])
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.equal(shown.length, 1)
+  watcher.stop()
+})
+
 test('records off: no title bar parts; refusals of bad input', async () => {
   const watcher = createNotificationsWatcher({
     baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},

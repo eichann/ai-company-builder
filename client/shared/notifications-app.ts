@@ -17,6 +17,16 @@ export interface TurnItem {
   state: string | null
   /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, or null. */
   due: string | null
+  /** The server clock gave it back: its 返事の見込み passed (`waitCameBack`, task version 12). */
+  waitCameBack?: true
+}
+
+/**
+ * What 「new in あなたの番」 compares: the record, and whether its wait came back — a 返事待ち task
+ * was already in the list while it waited, so coming back is news of its own (one notice).
+ */
+export function turnItemKey(item: TurnItem): string {
+  return item.waitCameBack ? `${item.id}#back` : item.id
 }
 
 /** 「あなたの番」 by kind (I.2): 「承認のお願い 3件 — 承認してください」 and its items, in the order first met. */
@@ -77,14 +87,16 @@ export function shortDue(due: string): string {
  */
 export function newTurnItems(before: ReadonlySet<string> | null, next: TurnItem[]): TurnItem[] {
   if (before === null) return []
-  return next.filter(i => !before.has(i.id))
+  return next.filter(i => !before.has(turnItemKey(i)))
 }
 
 /** The Mac notification's words for one new item (the app's own words; no other content). */
 export function desktopNoticeFor(item: TurnItem): { title: string; body: string } {
   return item.type === 'approval'
     ? { title: '承認のお願いが来ました', body: item.title }
-    : { title: 'あなたの番に新しく来ました', body: item.title }
+    : item.waitCameBack
+      ? { title: '返事の見込みを過ぎました（あなたの番に戻りました）', body: item.title }
+      : { title: 'あなたの番に新しく来ました', body: item.title }
 }
 
 /**

@@ -7,6 +7,7 @@ import type { TaskActInput } from '../../../../shared/tasks'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { actionHint, actionText, doneWords, leavingWords, LEAVING_ACTIONS, placeActions } from '../cardActions'
+import { WaitDialog } from './WaitParts'
 
 const FIELD = 'w-full rounded border border-gray-300 bg-transparent px-2 py-1 text-[12.5px] dark:border-zinc-600'
 
@@ -15,11 +16,13 @@ interface Props {
   busy: boolean
   /** チームの進め方 (off: one's own steps only). */
   team: boolean
+  /** The company's today (`YYYY-MM-DD`): 返事待ち's chips count from it. */
+  today: string
   /** Runs the steps in order; null = done, else the reason in words. `done` is said afterwards with 取り消す. */
   onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>, done?: string) => Promise<string | null>
 }
 
-export function TaskActions({ card, busy, team, onRun }: Props) {
+export function TaskActions({ card, busy, team, today, onRun }: Props) {
   const [open, setOpen] = useState<TaskCardAction | null>(null)
   const [error, setError] = useState<string | null>(null)
   const { main, status, more } = placeActions(card, team)
@@ -40,7 +43,10 @@ export function TaskActions({ card, busy, team, onRun }: Props) {
         onClick: () => { if (!busy) void press(a) },
       }))} />
       {error && <p role="alert" className="basis-full text-[12px] text-red-600 dark:text-red-400">{error}</p>}
-      {open && <ActionDialog card={card} action={open} busy={busy} onClose={() => setOpen(null)} onRun={onRun} />}
+      {open && (open.action === 'wait'
+        // 返事待ち says until when too (task version 12): its own window with the chips.
+        ? <WaitDialog card={card} today={today} again={false} busy={busy} onClose={() => setOpen(null)} onRun={onRun} />
+        : <ActionDialog card={card} action={open} busy={busy} onClose={() => setOpen(null)} onRun={onRun} />)}
     </>
   )
 }

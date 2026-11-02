@@ -70,7 +70,7 @@ import { createRecordService } from './services/records'
 import { createBundleKinds } from './services/bundle-kinds'
 import { createPeopleNames } from './services/people-names'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
-import { createNotificationService } from './services/notifications'
+import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createSkillUseService } from './services/skill-uses'
 import { createServerClock } from './services/server-clock'
@@ -289,6 +289,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
     // 会議から AI が作るやること: 案として出す / 自動で作る (records.md "Task version 11").
     proposesFromMeeting: companyId => taskSettings.settingsOf(companyId).meetingTasks === 'propose',
+    // 返事待ち's default 見込み (records.md "Task version 12"): the company's day and holidays.
+    companyDay: companyId => ({
+      now: companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE),
+      holidays: taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    }),
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,

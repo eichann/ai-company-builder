@@ -109,8 +109,8 @@ function wire(limits?: { moves: number; notices: number }) {
 /** A task alice asked bob for, now waiting for a reply expected at `waitUntil`. */
 async function waitingTask(waitUntil: string, co = 'a') {
   const t = ok(engine.create(m('u-alice', co), HUMAN, { type: 'task', title: '見積の返事', fields: { assignee: 'u-bob' } })).record
-  ok(await engine.act(m('u-bob', co), HUMAN, t.id, 'set_wait_until', { expectedVersion: 1, args: { wait_until: waitUntil } }))
-  ok(await engine.act(m('u-bob', co), HUMAN, t.id, 'wait', { expectedVersion: 2, args: { waiting_on: '先方の返事' } }))
+  // Task version 12: the 見込み is set with the wait, in one entry.
+  ok(await engine.act(m('u-bob', co), HUMAN, t.id, 'wait', { expectedVersion: 1, args: { waiting_on: '先方の返事', wait_until: waitUntil } }))
   return t.id
 }
 
@@ -141,7 +141,7 @@ describe('the server clock: a wait that is over', () => {
 
     nowMs = jst('2026-11-05T15:01')
     expect((await clock.runOnce()).moved).toBe(1)
-    expect(stateOf(timed)).toMatchObject({ state: 'todo', version: 4 })
+    expect(stateOf(timed)).toMatchObject({ state: 'todo', version: 3 })
     expect(fieldsOf(timed).next_actor).toBe('u-bob')
     expect(source.forCompany('a').records.ledger(timed).at(-1)).toMatchObject({ action: 'wait_over', actorId: CLOCK_ACTOR.id, actorKind: 'external', actorSource: CLOCK_ACTOR.source })
     // A day-only wait is over when its day is.
@@ -239,8 +239,7 @@ describe('the server clock: notices', () => {
 
   it('an owner-only record’s notices reach its owner only — never another member named in it, nor an owner/admin', async () => {
     const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分用：歯医者', personal: true, fields: { assignee: 'u-alice' } })).record
-    ok(await engine.act(m('u-alice'), HUMAN, t.id, 'set_wait_until', { expectedVersion: 1, args: { wait_until: '2026-11-04' } }))
-    ok(await engine.act(m('u-alice'), HUMAN, t.id, 'wait', { expectedVersion: 2, args: { waiting_on: '予約' } }))
+    ok(await engine.act(m('u-alice'), HUMAN, t.id, 'wait', { expectedVersion: 1, args: { waiting_on: '予約', wait_until: '2026-11-04' } }))
     // Say its stored values name bob as requester and it is overdue (e.g. data written before
     // owner-only records): the requester still has to read it.
     const s = stateOf(t.id)

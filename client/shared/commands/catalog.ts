@@ -40,6 +40,7 @@ export const COMMANDS = defineCommands([
       recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/).describe('The record the consultation is about'),
       title: z.string().min(1).max(300).describe('The record\'s title, for the new consultation\'s title and first message'),
       fresh: z.boolean().optional().describe('「＋新しい相談」: start a new one even when one about it exists'),
+      purpose: z.enum(['nudge']).optional().describe('Why it is started: `nudge` = ［催促の下書きを作る］ (always a new one; the AI drafts, never sends)'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },

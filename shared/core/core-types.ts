@@ -67,6 +67,12 @@
  * can be (records.md "Linking records later"). `decision` v5 marks `meeting` / `approval`,
  * `reply_request` v3 `interaction` / `prepared` the same way.
  *
+ * Version 12 (owner decision 2026-11-03 「②」 返事待ちに見込みを): 「返事待ちにする」 (`wait`) also
+ * says until when — its args gain `wait_until`, set in the same entry. Left out (an app released
+ * before, or the AI not giving one), the engine fills it: 3 business days after the company's
+ * today (`ARG_DEFAULTS`). When it passes the server clock gives the task back (`WAIT_OVER`), and
+ * `waitCameBack` tells a task given back so from any other 未着手.
+ *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
@@ -104,12 +110,13 @@
  * interface (相手: a 顧客, a guest, an applicant). A link target that is a type
  * is always a core type (`server/tests/unit/core-types-interfaces.test.ts`).
  */
+import { addBusinessDays } from './business-days'
 import { parseTypeFile, type TypeDefinition } from './record-types'
 
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 11
+version: 12
 implements: [request]
 storage: server
 fields:
@@ -147,7 +154,7 @@ actions:
   request_review: { label: 終わったので見てもらう, from: [todo, in_progress, waiting, awaiting_acceptance], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
   send_back:      { label: 差し戻す, from: [review], to: in_progress, who: [reviewer], notify: assignee, note: required, decision: true, hand_to: assignee }
   assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting, declined, awaiting_acceptance], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
-  wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text }, note: optional }
+  wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text, wait_until: date }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
   complete:       { label: 完了にする, from: [todo, in_progress, review, waiting, awaiting_acceptance, declined], to: done, who: [assignee, requested_by, reviewer], who_unless: { assignee: { when_done: check } }, ok_from: [assignee], notify: [requested_by, reviewer, ok_by], attach: [files], note: optional, decision: true }
   cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined, awaiting_acceptance], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
@@ -173,6 +180,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 お客さまなどの相手は「まとまり」（案件など）からたどります。まとまりに入らないタスクだけ、「相手」を直接つなぎます。
 ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が「引き受ける」と担当の番になります（どんなときに自動で引き受けたことになるかは会社の設定で決めます）。
 完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
+「返事待ち」にするときは、いつごろ来そうか（返事の見込み）も決めます。決めなければ 3 営業日後です。見込みを過ぎても返事待ちのままなら、担当の番に戻ります（自動で進めるなら、AI が催促の下書きを用意します）。
 会議から AI が作る宿題は、会社の設定が「案として出す」（初めはこれ）なら「案」になります。案はだれの番でもなく、一覧にも出ません。「議事録を確認する」やることの中で、人が「足す」とふつうのやることに、「要らない」でしまいます（消しません。「案に戻す」で戻せます）。
 `,
   interaction: `---
@@ -569,7 +577,7 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 11
+export const TASK_VERSION = 12
 
 /**
  * Proposals (案, task version 11): a record of `type` that the member's **AI** creates with its
@@ -656,6 +664,68 @@ export function enteredByWaitOver(ledger: ReadonlyArray<{ action: string; actorI
  * the server lets it be claimed only for a task `enteredByWaitOver` (services/records.ts `aiTurnOf`).
  */
 export const TASK_WAIT_OVER_STEP = 'task-wait-over'
+
+/**
+ * Defaults for an action argument left out (task version 12, owner decision 2026-11-03 「②」):
+ * type → action → argument → the rule. `businessDays`: that many business days after the
+ * company's today (weekends, Japanese public holidays and the company's own holidays skipped:
+ * business-days.ts `addBusinessDays`). The engine applies it when the argument is absent or null
+ * (an app released before version 12 sends none), so a 返事待ち always has a 見込み the clock
+ * follows. A company's own type file cannot say this: only the core's rules.
+ */
+export const ARG_DEFAULTS: Readonly<Record<string, Readonly<Record<string, Readonly<Record<string, { businessDays: number }>>>>>> = {
+  task: { wait: { wait_until: { businessDays: 3 } } },
+}
+
+/**
+ * The value an argument left out gets (`ARG_DEFAULTS`): a 見込み still ahead of `now` stays (an app
+ * that set it first with `set_wait_until`, then `wait`), anything else — none, or one that already
+ * passed (「もう少し待つ」 after the clock gave it back) — becomes `businessDays` after today.
+ * `now`: the company's `YYYY-MM-DDTHH:MM`.
+ */
+export function argDefaultValue(rule: { businessDays: number }, current: unknown, now: string, companyHolidays: Iterable<string> = []): string {
+  const today = now.slice(0, 10)
+  if (typeof current === 'string' && /^\d{4}-\d{2}-\d{2}/.test(current)) {
+    const day = current.slice(0, 10)
+    if (day > today || (day === today && (current.length === 10 || current.slice(0, 16) > now.slice(0, 16)))) return current
+  }
+  return addBusinessDays(today, rule.businessDays, companyHolidays)
+}
+
+/** The default rule of one argument, or undefined. */
+export function argDefaultOf(type: string, action: string, arg: string): { businessDays: number } | undefined {
+  const own = <T>(o: Readonly<Record<string, T>> | undefined, k: string) => (o && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined)
+  return own(own(own(ARG_DEFAULTS, type), action), arg)
+}
+
+/**
+ * A record the server clock gave back to its person because its wait was over (task version 12,
+ * 「先方からの返事が来ていません」): the clock's `wait_over` is its newest state change, or the only
+ * later ones went through the AI's turn back to the person (`WAIT_OVER[type].aiTurn` →
+ * `personTurn`: the AI drafted the nudge). `waitedSince`: when it began to wait (the `at` of the
+ * newest entry into `from` before that), null when the ledger does not say. Null for anything
+ * else — a wait ended by a person, a record of a type with no clock. The caller checks that the
+ * record is still in `personTurn`.
+ */
+export function waitCameBack(type: string, ledger: ReadonlyArray<{ action: string; actorId: string; at: string; fromState: string | null; toState: string | null }>): { waitedSince: string | null; overAt: string } | null {
+  const rule = Object.prototype.hasOwnProperty.call(WAIT_OVER, type) ? WAIT_OVER[type] : undefined
+  if (!rule) return null
+  let i = ledger.length - 1
+  for (; i >= 0; i--) {
+    const e = ledger[i]
+    if (e.toState === null || e.toState === e.fromState) continue
+    if (e.action === WAIT_OVER_ACTION && e.actorId === CLOCK_ACTOR.id) break
+    if (e.fromState === rule.aiTurn && e.toState === rule.personTurn) continue
+    return null
+  }
+  if (i < 0) return null
+  const overAt = ledger[i].at
+  for (let j = i - 1; j >= 0; j--) {
+    const e = ledger[j]
+    if (e.toState === rule.from && e.fromState !== rule.from) return { waitedSince: e.at, overAt }
+  }
+  return { waitedSince: null, overAt }
+}
 
 /**
  * The ledger action of the startup carry-over of a meeting's outside time

@@ -142,8 +142,8 @@ describe('a task whose wait is over (the PC\'s task-wait-over step)', () => {
     const made = await preparingTask('相談で作った下ごしらえ')
     const t = await session('u-bob', 'POST', '/records/item', { type: 'task', title: '見積の返事', fields: { assignee: 'u-bob' } })
     const id = t.body.data.record.id as string
-    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/set_wait_until`, { expectedVersion: 1, args: { wait_until: '2020-01-06' } })).status).toBe(200)
-    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/wait`, { expectedVersion: 2, args: { waiting_on: '先方の見積' } })).status).toBe(200)
+    // Task version 12: the 見込み goes with the wait (one action).
+    expect((await session('u-bob', 'POST', `/records/item/${id}/actions/wait`, { expectedVersion: 1, args: { waiting_on: '先方の見積', wait_until: '2020-01-06' } })).status).toBe(200)
     // 自動で進める is on by default: the clock moves it to the AI's turn.
     await services.serverClock.runOnce()
     const list = (await session('u-bob', 'GET', '/records/ai-turn')).body.data.records as Json[]

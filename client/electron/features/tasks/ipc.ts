@@ -26,6 +26,7 @@
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
 
+import { isCalendarDate } from '../../../../shared/core/business-days'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
@@ -65,6 +66,12 @@ const opKey = (key: unknown): key is string => typeof key === 'string' && OPERAT
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
+
+/** The company's own holidays from `GET /task-settings` (dates only; unreadable → none: weekends and public holidays still count). */
+function holidaysOf(answer: Answer): string[] {
+  const list = answer?.status === 200 ? (answer.json?.data as { settings?: { companyHolidays?: unknown } } | undefined)?.settings?.companyHolidays : null
+  return Array.isArray(list) ? list.map(h => (h as { date?: unknown })?.date).filter((d): d is string => isCalendarDate(d)).slice(0, 400) : []
+}
 
 type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: unknown } | null } | null
 
@@ -161,10 +168,12 @@ export function createTasksApi(deps: TasksDeps) {
     async card(companyId: string, recordId: string): Promise<TaskCardResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return { success: false, offline: false, error: '入力が正しくありません。' }
       const id = encodeURIComponent(recordId)
-      const [me, item, history, defs, names, runs, switches, viewers] = await Promise.all([
+      const [me, item, history, defs, names, runs, switches, viewers, settings] = await Promise.all([
         myId(), call(companyId, 'GET', `/records/item/${id}`), call(companyId, 'GET', `/records/item/${id}/history`),
         typeDefs(companyId), people(companyId), call(companyId, 'GET', '/ai-runs'), call(companyId, 'GET', '/me/work-switches'),
         call(companyId, 'POST', '/viewers', { records: [recordId] }),
+        // The company's holidays: 返事待ち's chips and 「返事が来ていません（n日）」 count business days.
+        call(companyId, 'GET', '/task-settings'),
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200 || !me) {
@@ -185,7 +194,7 @@ export function createTasksApi(deps: TasksDeps) {
       const meeting = meetingAnswer?.status === 200 ? meetingAnswer.json?.data as RecordDetail : undefined
       // 見られる人: only the server's answer for this task (one left out shows nothing).
       const seen = viewers?.status === 200 ? (viewers.json?.data as ViewersAnswer | undefined)?.records?.[recordId] : undefined
-      const card = taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, ...(meeting ? { meeting } : {}) })
+      const card = taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, holidays: holidaysOf(settings), ...(meeting ? { meeting } : {}) })
       return { success: true, card: seen && typeof seen.text === 'string' ? { ...card, viewers: seen } : card }
     },
 
@@ -318,6 +327,7 @@ export function createTasksApi(deps: TasksDeps) {
         if (t.definition.implements?.length) typeImplements[t.definition.name] = t.definition.implements
       }
       const ids = (settings?.status === 200 ? (settings.json?.data as { settings?: { taskListDepartmentIds?: unknown } }).settings?.taskListDepartmentIds : null)
+      const holidays = holidaysOf(settings)
       const doneToday = [...done1, ...done2]
       // An older server without the route, or no answer: nothing asks (the list itself still shows).
       const bundleQuestions = questions?.status === 200 ? (questions.json?.data as MeetingBundleQuestions | undefined)?.questions ?? [] : []
@@ -337,6 +347,7 @@ export function createTasksApi(deps: TasksDeps) {
           ...(bundleKinds ? { bundleKinds } : {}), myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, typeImplements, people: names, bundles: linked,
             ...(bundleKinds ? { bundleKindNames: Object.fromEntries(bundleKinds.kinds.map(k => [k.type, k.name])) } : {}),
             bundleQuestions,
+            today: dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).date, holidays,
           }),
         },
       }
