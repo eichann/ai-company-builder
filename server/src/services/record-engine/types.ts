@@ -51,6 +51,11 @@ export interface RecordEngineDeps {
    */
   autoAccepts?: (companyId: string, q: AcceptanceQuestion) => boolean
   /**
+   * Does the company want the AI's homework of a meeting as proposals (案, `PROPOSALS`;
+   * TaskSettings.meetingTasks `propose`)? Without it the AI's creates start as before.
+   */
+  proposesFromMeeting?: (companyId: string) => boolean
+  /**
    * After an action was written (state and ledger committed): a core service that must follow up
    * on a person's action (the inbox: 「もう返した」 drops the prepared reply drafts). Never throws
    * into the engine; nothing is undone when it fails.

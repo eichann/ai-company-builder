@@ -26,6 +26,7 @@ export function cloneSettings(s: TaskSettings): TaskSettings {
     autoRun: { ...s.autoRun },
     readIncoming: { ...s.readIncoming },
     acceptance: { ...s.acceptance },
+    meetingTasks: s.meetingTasks,
     companyHolidays: s.companyHolidays.map((h) => ({ ...h })),
   }
 }

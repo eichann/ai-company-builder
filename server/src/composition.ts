@@ -82,6 +82,7 @@ import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createMeetingOutputService } from './services/meeting-outputs'
+import { createMinutesReview } from './services/minutes-review'
 import { createDecisionService } from './services/decisions'
 import { createCalendarService } from './services/calendar'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
@@ -276,7 +277,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // A meeting output's item key → its id: what one reading made is made once (minutes.md).
     tokenDigest: sha256TokenDigest,
     // 「もう返した」 drops the prepared reply drafts (inbox.md; lane B, built below; called after construction only).
-    afterAct: (companyId, change) => inboxLane.inbox.afterAct(companyId, change),
+    afterAct: (companyId, change) => {
+      inboxLane.inbox.afterAct(companyId, change)
+      // A meeting just read: its 「議事録を確認する」 for the assignee (minutes.md "The review task"; built below).
+      minutesReview.afterAct(companyId, change)
+    },
+    // 会議から AI が作るやること: 案として出す / 自動で作る (records.md "Task version 11").
+    proposesFromMeeting: companyId => taskSettings.settingsOf(companyId).meetingTasks === 'propose',
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -287,6 +294,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
   })
+  const minutesReview = createMinutesReview({ companyData: shared.companyData, writer: serviceRecords, tokenDigest: sha256TokenDigest })
   // The content store's eraser: only the server clock's retention run here (no route; records.md).
   const contentEraser = sqliteRecordContentEraser(conn)
   const decisions = createDecisionService({

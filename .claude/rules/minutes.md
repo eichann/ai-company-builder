@@ -143,6 +143,28 @@ meeting's reading makes is made once per meeting and item, decided by the server
   duplicates list and merge), `outbound-mail.test.ts` 「the meeting's mail is made once」,
   `client/tests/outbound-mail-tools.test.ts` (the AI told), `minutes-app.test.ts` (the first message).
 
+## The AI's proposals and 「議事録を確認する」 (owner decision 2026-11-02, plan F)
+
+- **Proposals (案)**: the homework the AI makes while reading (`records_create` with
+  `links.meeting`) starts as a proposal when the company's 「会議から AI が作るやること」 is
+  「案として出す」 (default; `tasks.md` `meetingTasks`), as a task at once when 「自動で作る」.
+  A proposal is nobody's turn; a person adds it (`adopt`) or puts it away (`dismiss`, kept,
+  `propose_again` brings it back) — records.md "Task version 11". The first message tells the AI
+  to leave proposals as they are.
+- **The review task** (`services/minutes-review.ts`, wired as the engine's `afterAct`): when a
+  meeting becomes `read` — internal or external — its assignee gets one task
+  「議事録を確認する：<meeting title>」 (`task_kind: minutes_review`; requested_by = assignee, so
+  it is their own; the meeting's folder; `meeting` link = its origin). Its id is derived from the
+  meeting (`meetingOutputId`, key `MINUTES_REVIEW_KEY`): never two, also for a second reading or
+  two at once. Ledger actor `MINUTES_ACTOR` (`acb:minutes`, cause system). Nothing completes it by
+  itself — handling every proposal leaves it open; the assignee completes it. A meeting without an
+  assignee gets none; a failure is logged and never changes the reading.
+- The app: `tasks:proposals (companyId, meetingId)` lists the meeting's proposals (proposed and put
+  away, `TaskProposal`); 足す / 要らない / 案に戻す are `tasks:act` with `adopt` / `dismiss` /
+  `propose_again`.
+- Test: `server/tests/unit/meeting-proposals.test.ts`; `minutes.test.ts`'s output counts leave the
+  review task out.
+
 ## The text
 
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin

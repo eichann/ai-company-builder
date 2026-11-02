@@ -255,6 +255,13 @@ export interface TypeDefinition {
    * (task version 5: `preparing`, the AI's turn before the person's). Absent = only `initial`.
    */
   createStates?: string[]
+  /**
+   * YAML `proposal_states` (task version 11, owner decision 2026-11-02 「AI のタスクの案」): states
+   * where the record is only a proposal (案) — nobody's turn, nobody told on entering it, left out
+   * of 「あなたの番」 and the turn lists, until a person takes it up. Not final (it can still
+   * become work). Absent = none (so stored definitions compare equal). `noTurnStates`.
+   */
+  proposalStates?: string[]
   actions: Record<string, ActionDef>
 }
 
@@ -369,6 +376,14 @@ export function interfaceProblems(name: string, def: Pick<TypeDefinition, 'field
 }
 
 /**
+ * The states where no person's turn is waiting: final, the AI's turn, and proposals (案,
+ * `proposal_states`). 「あなたの番」, the turn holder and the create's notice use it.
+ */
+export function noTurnStates(def: TypeDefinition): Set<string> {
+  return new Set([...def.final, ...aiTurnStates(def), ...(def.proposalStates ?? [])])
+}
+
+/**
  * The states where it is the AI's turn: a state some action only the AI may
  * do (`who` exactly `[ai]`) starts from (from null = every non-final state).
  * 「AI の番」 lists them; 「あなたの番」 leaves them out (the person's turn
@@ -406,7 +421,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'create_states', 'proposal_states', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -515,6 +530,12 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     const c = list(raw.create_states)
     if (!c || !c.every(s => typeof s === 'string' && states.includes(s) && !final.includes(s))) err('create_states は states のうち final でない状態の名前の並びで書いてください')
     else if (c.length > 0) createStates = [...new Set(c as string[])]
+  }
+  let proposalStates: string[] | undefined
+  if (raw.proposal_states !== undefined && raw.proposal_states !== null) {
+    const c = list(raw.proposal_states)
+    if (!c || !c.every(s => typeof s === 'string' && states.includes(s) && !final.includes(s))) err('proposal_states は states のうち final でない状態の名前の並びで書いてください')
+    else if (c.length > 0) proposalStates = [...new Set(c as string[])]
   }
 
   const implementsRaw = list(raw.implements)
@@ -669,6 +690,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       initial,
       final,
       ...(createStates ? { createStates } : {}),
+      ...(proposalStates ? { proposalStates } : {}),
       actions,
     },
   }

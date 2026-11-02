@@ -139,6 +139,8 @@ describe('parseTaskSettings', () => {
       // Owner decision 2026-11-02: 受信を読む allowed, each member starts off.
       readIncoming: { allowed: true, memberDefault: false },
       acceptance: { sameDepartment: true, managerToMember: true, meetingHomework: true },
+      // Owner decision 2026-11-02 (plan F): the AI's homework of a meeting is a proposal first.
+      meetingTasks: 'propose',
       companyHolidays: [],
     })
     expect(parseTaskSettings(defaultTaskSettings())).toEqual({ value: DEFAULT_TASK_SETTINGS })

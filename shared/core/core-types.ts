@@ -52,6 +52,15 @@
  * from 引き受け待ち by the assignee also records the acceptance (`ACCEPTANCE.finishes`).
  * Tasks of earlier versions are moved to 9 at startup (`TASK_VERSION`).
  *
+ * Version 11 (owner decision 2026-11-02, plan F 「AI のタスクの案」「議事録を確認する」): state
+ * `proposed` (案) — `proposal_states`: nobody's turn, nobody told, out of every list — and
+ * `dismissed` (要らない: final, kept, never deleted; `propose_again` brings it back). A person
+ * takes a proposal up with `adopt` (足す → todo, acceptance applies as for any request) or puts it
+ * away with `dismiss` (also a task the AI made at once, not started yet: 「要らない」 everywhere); never the AI. The AI's homework of a meeting starts as a proposal when the
+ * company says 「案として出す」 (`PROPOSALS`, TaskSettings.meetingTasks). Field `task_kind`
+ * `minutes_review` marks 「議事録を確認する」, the one task per meeting the server makes for the
+ * meeting's assignee when it is read (services/minutes-review.ts).
+ *
  * Version 10 (owner decision 2026-11-02, つなぐ・外す): the links that say where a task came
  * from — `meeting`, `interaction`, `prepared` — are marked `origin` (出どころ) and are never
  * linked or removed by hand; the others (bundle, counterpart, related, files) are filing and
@@ -95,7 +104,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 10
+version: 11
 implements: [request]
 storage: server
 fields:
@@ -114,6 +123,7 @@ fields:
   prep_summary: { label: AIが用意したこと, kind: long_text, source: server }
   accepted_by:  { label: 引き受けた人, kind: person, source: server }
   when_done:    { label: 終わったら, kind: choice, options: [notify, check], option_labels: { notify: 知らせるだけ, check: 確かめてから }, source: server }
+  task_kind:    { label: 種類, kind: choice, options: [minutes_review], option_labels: { minutes_review: 議事録を確認する }, source: server }
 links:
   files:        { label: 関係するファイル, target: file, cardinality: many }
   related:      { label: 関係するタスク, target: task, cardinality: many }
@@ -122,10 +132,11 @@ links:
   prepared:     { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: tasks, origin: true }
   meeting:      { label: もとの会議, target: meeting, cardinality: one, inverse: tasks, origin: true }
   interaction:  { label: もとの連絡, target: interaction, cardinality: one, inverse: tasks, origin: true }
-states: [todo, in_progress, review, waiting, done, cancelled, preparing, declined, awaiting_acceptance]
+states: [todo, in_progress, review, waiting, done, cancelled, preparing, declined, awaiting_acceptance, proposed, dismissed]
 initial: todo
-create_states: [preparing]
-final: [done, cancelled]
+create_states: [preparing, proposed]
+proposal_states: [proposed]
+final: [done, cancelled, dismissed]
 actions:
   start:          { label: 進めている印をつける, from: [todo, waiting], to: in_progress, who: [assignee, ai], hand_to: assignee }
   request_review: { label: 終わったので見てもらう, from: [todo, in_progress, waiting, awaiting_acceptance], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
@@ -146,6 +157,9 @@ actions:
   set_bundle:     { label: まとまりに入れる, who: [requested_by, assignee, ai], links: [bundle], note: optional }
   set_when_done:  { label: 終わったらを決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { when_done: choice }, notify: assignee, note: optional }
   set_reviewer:   { label: 確かめる人を決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { reviewer: person }, notify: reviewer, note: optional }
+  adopt:          { label: 足す, from: [proposed], to: todo, who: [requested_by, dept_manager, admin], notify: assignee, note: optional, hand_to: assignee }
+  dismiss:        { label: 要らない, from: [proposed, todo, awaiting_acceptance], to: dismissed, who: [requested_by, dept_manager, admin], note: optional }
+  propose_again:  { label: 案に戻す, from: [dismissed], to: proposed, who: [requested_by, dept_manager, admin], note: optional }
 ---
 # タスク
 
@@ -154,6 +168,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 お客さまなどの相手は「まとまり」（案件など）からたどります。まとまりに入らないタスクだけ、「相手」を直接つなぎます。
 ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が「引き受ける」と担当の番になります（どんなときに自動で引き受けたことになるかは会社の設定で決めます）。
 完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
+会議から AI が作る宿題は、会社の設定が「案として出す」（初めはこれ）なら「案」になります。案はだれの番でもなく、一覧にも出ません。「議事録を確認する」やることの中で、人が「足す」とふつうのやることに、「要らない」でしまいます（消しません。「案に戻す」で戻せます）。
 `,
   interaction: `---
 label: やりとり
@@ -396,6 +411,13 @@ export const SERVICE_STATE_TYPES: readonly string[] = ['approval', 'outbound_mes
 export const SERVICE_RECEIPT_TYPES: readonly string[] = ['interaction']
 
 /**
+ * Core types a server service makes for a person besides those (minutes.md "The review task":
+ * 「議事録を確認する」 for the meeting's assignee). Only the services composition.ts hands the
+ * writer reach this; they stay creatable by the generic routes too.
+ */
+export const SERVICE_MADE_TYPES: readonly string[] = ['task']
+
+/**
  * The state changes the service writer (server/src/services/record-engine.ts
  * `createServiceRecordWriter`) may make, per type: from one of `from` to `to`.
  * A change of fields that keeps the state is always allowed.
@@ -514,7 +536,33 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 10
+export const TASK_VERSION = 11
+
+/**
+ * Proposals (案, task version 11): a record of `type` that the member's **AI** creates with its
+ * `origin` link set (the meeting it is homework of) starts in `state` when the company proposes
+ * (TaskSettings.meetingTasks `propose`, the default), else as before (`create`). A person's
+ * create never does; nothing else changes it. Made once per meeting and item as every output
+ * (minutes.md "Outputs made once": a dismissed proposal stays the answer, it is not proposed
+ * again).
+ */
+export const PROPOSALS: Readonly<Record<string, { state: string; origin: string }>> = {
+  task: { state: 'proposed', origin: 'meeting' },
+}
+
+/** The proposal rule of a type, or undefined. */
+export function proposalOf(type: string) {
+  return Object.prototype.hasOwnProperty.call(PROPOSALS, type) ? PROPOSALS[type] : undefined
+}
+
+/** `task_kind` of 「議事録を確認する」 (minutes.md "The review task"). */
+export const MINUTES_REVIEW_KIND = 'minutes_review'
+
+/** The item key of a meeting's review task (its id is derived from it, `meetingOutputId`: one per meeting). */
+export const MINUTES_REVIEW_KEY = 'minutes-review'
+
+/** The minutes intake as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
+export const MINUTES_ACTOR = Object.freeze({ id: 'acb:minutes', kind: 'external' as const, source: 'ACB の議事録の受付' })
 
 /** The acceptance rule of a type, or undefined. */
 export function acceptanceOf(type: string) {

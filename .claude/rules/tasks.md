@@ -53,6 +53,10 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   **off**); missing in an older document → those defaults. It is the company's **one** switch for
   reading members' mail and Slack: Google's company `inbox` feature reads and writes it
   (`google-connector.md` "One consent"; `setReadIncomingAllowed`).
+- `meetingTasks` (会議から AI が作るやること, owner decision 2026-11-02, plan F): `propose` (案として出す,
+  the default) — the AI's homework of a meeting is a proposal a person adds or puts away — or
+  `create` (自動で作る) — a task at once, as before (`records.md` "Task version 11"). A document
+  without it reads the default. Admin: the card 「会議から AI が作るやること」.
 - `acceptance` (引き受け, owner decision 2026-11-01; `records.md` "Acceptance"): when a request
   someone else is asked to do counts as accepted by itself — `sameDepartment` (the asker and the
   assignee belong to a common department), `managerToMember` (the asker manages a department the

@@ -75,6 +75,27 @@ export type BundleChoicesResult =
   | { success: true; bundles: BundleChoice[] }
   | { success: false; offline: boolean; error: string }
 
+/**
+ * One of the AI's proposals (案) from a meeting (records.md "Task version 11"), as 「議事録を確認する」
+ * lists them: `proposed` waits for 「足す」 (action `adopt`) or 「要らない」 (`dismiss`); `dismissed`
+ * is put away (「案に戻す」 `propose_again`). Each through `tasks:act` at `version`.
+ */
+export interface TaskProposal {
+  id: string
+  title: string
+  state: 'proposed' | 'dismissed'
+  version: number
+  /** Who it would be for (member id) and their name. */
+  assignee: string | null
+  assigneeName: string | null
+  /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, or null. */
+  due: string | null
+}
+
+export type TaskProposalsResult =
+  | { success: true; proposals: TaskProposal[] }
+  | { success: false; offline: boolean; error: string }
+
 /** The words of the 「あなたの番」 item for a meeting read without a まとまり. */
 export const MEETING_NEEDS_BUNDLE_TEXT = 'どのまとまり（案件など）の会議か選んでください'
 /** The words when the server suggests one まとまり. */

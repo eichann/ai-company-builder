@@ -118,7 +118,7 @@ engine the day it is turned on.
   or `file` — or `interface: <name>` instead of `target`, "Links to an interface" below —,
   cardinality, inverse label, `origin: true` — "Linking records later"),
   `states`, `initial`, `create_states` (states a create may start in instead — "Task version
-  5"), `actions` (from / to / who / notify / attach / note / history_line /
+  5"), `proposal_states` (proposals: nobody's turn — "Task version 11"), `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args / ok_from — "Completing on someone's OK" — / who_unless — "Task
   version 9" — / links — record links the action sets, "Task version 5"), `implements` (interfaces, `INTERFACES`, "Core interfaces"
   below: `request` needs `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the
@@ -259,6 +259,35 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
 
+### Task version 11: the AI's proposals (案) and 「議事録を確認する」 (owner decision 2026-11-02, plan F)
+
+Additive over version 10 (two states, one field, three actions, a wider `dismiss`):
+
+- **Proposals**: state `proposed` (案), listed in the new generic key **`proposal_states`**
+  (`TypeDefinition.proposalStates`): not final, but nobody's turn — `noTurnStates` (final ∪ the
+  AI's turn ∪ proposals) is what 「あなたの番」 (`waitingFor`), `turnHolder`, Slack's turn DMs and
+  the create's notice leave out; an action into a proposal state tells only whom it names, never
+  `next_actor`. The app's open-task queries list states explicitly and so never include it.
+- **Who proposes** (`PROPOSALS` in `shared/core/core-types.ts`, engine `create.ts`): a task the
+  member's **AI** creates with its `meeting` link starts in `proposed` when the company proposes
+  (`TaskSettings.meetingTasks` `propose`, the default; `tasks.md`), as before (`todo`) when it
+  creates (`create`) — through `deps.proposesFromMeeting`. A person's create never proposes (it
+  may still start in `proposed` itself: `create_states`). The made-once rule is unchanged and
+  runs first (minutes.md "Outputs made once"): reading again finds a proposal, even a put-away
+  one, and does not propose it again.
+- **Taking it up** — people only (`who: [requested_by, dept_manager, admin]`, never the AI):
+  `adopt` (足す: proposed → todo, `hand_to` / `notify` the assignee; acceptance applies as for any
+  request), `dismiss` (要らない: proposed / todo / awaiting_acceptance → `dismissed`, final, kept —
+  never deleted; also a task the AI made at once), `propose_again` (案に戻す: dismissed →
+  proposed). The meeting duplicates list leaves `dismissed` out like `cancelled`.
+- Field `task_kind` (choice `minutes_review`): 「議事録を確認する」, made by the server
+  (minutes.md "The review task") through the service writer, which may now also create `task`
+  (`SERVICE_MADE_TYPES`).
+- Test: `server/tests/unit/meeting-proposals.test.ts` (proposal or task by the setting, a
+  person's never; nobody's turn and nobody told; adopt / dismiss by people only, the assignee told;
+  a second reading reuses the put-away one; the review task once, linked as origin, open until
+  completed) — mutation-checked.
+
 ### Linking records later, and where a record came from (owner decision 2026-11-02)
 
 「つなぐ・外す」 for record links, the same shape as files ("Linking files later"):
@@ -372,8 +401,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 10 since "Linking records
-  later"): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 11 since "Task version
+  11"): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the

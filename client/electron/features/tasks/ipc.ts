@@ -8,6 +8,8 @@
 //                 opening it tells the server (POST …/opened), as the record card does
 //   tasks:bundles the unfinished まとまり the member reads, for 「どのまとまりの会議ですか？」 (the choice
 //                 itself is minutes:linkBundle)
+//   tasks:proposals  the AI's proposals (案) from one meeting, proposed and put away, for
+//                 「議事録を確認する」 (足す / 要らない / 案に戻す go through tasks:act)
 //   tasks:linkFile / tasks:unlinkFile   a company file or folder linked to a task, or the link
 //                 taken away (records.md "Linking files later": the server checks the member reads
 //                 both, and refuses a private folder's file for a task outside it)
@@ -31,7 +33,7 @@ import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
-  type BundleChoicesResult, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskWriteResult,
+  type BundleChoicesResult, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
@@ -185,6 +187,30 @@ export function createTasksApi(deps: TasksDeps) {
       }
     },
 
+    async proposals(companyId: string, meetingId: string): Promise<TaskProposalsResult> {
+      if (!COMPANY.test(companyId) || typeof meetingId !== 'string' || !RECORD_ID_RE.test(meetingId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      const [a, names] = await Promise.all([
+        call(companyId, 'POST', '/records/query', { type: 'task', state: ['proposed', 'dismissed'], link: { name: 'meeting', id: meetingId }, limit: 200 }),
+        people(companyId),
+      ])
+      const list = records(a)
+      if (!list) {
+        const f = failure('proposals', a)
+        return { success: false, offline: f.offline, error: f.error }
+      }
+      const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : null)
+      return {
+        success: true,
+        proposals: list.filter(r => r.state === 'proposed' || r.state === 'dismissed').map(r => {
+          const assignee = str(r.fields.assignee)
+          return {
+            id: r.id, title: r.title || '（名前なし）', state: r.state as 'proposed' | 'dismissed', version: r.version,
+            assignee, assigneeName: assignee ? names[assignee] ?? null : null, due: str(r.fields.due),
+          }
+        }),
+      }
+    },
+
     async linkFile(companyId: string, recordId: string, companyPath: string, expectedVersion: number, remove: boolean): Promise<TaskWriteResult> {
       const path = typeof companyPath === 'string' ? fileLinkPath(companyPath.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
@@ -306,6 +332,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))
   ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))
   ipc.handle('tasks:bundles', (_event, companyId) => api.bundles(typeof companyId === 'string' ? companyId : ''))
+  ipc.handle('tasks:proposals', (_event, companyId, meetingId) => api.proposals(typeof companyId === 'string' ? companyId : '', meetingId))
   ipc.handle('tasks:linkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
   ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>

@@ -1,4 +1,4 @@
-import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../../shared/core/core-types'
+import { SERVICE_MADE_TYPES, SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, serviceTransitionAllowed } from '../../../shared/core/core-types'
 import { findPrivateScope } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { TypeDefinition } from '../../../shared/core/record-types'
@@ -143,7 +143,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
   function prepare(companyId: string, input: ServiceCreateInput) {
     const records = companyData.forCompany(companyId).records
     if (!records.settings().enabled) return fail('records-off')
-    if (!SERVICE_OWNED_TYPES.includes(input.type) && !SERVICE_RECEIPT_TYPES.includes(input.type)) return fail('not-service-owned')
+    if (!SERVICE_OWNED_TYPES.includes(input.type) && !SERVICE_RECEIPT_TYPES.includes(input.type) && !SERVICE_MADE_TYPES.includes(input.type)) return fail('not-service-owned')
     const def = currentTypes(records).get(input.type)?.definition
     if (!def) return fail('type-unknown')
     const title = input.title.normalize('NFC').trim()
