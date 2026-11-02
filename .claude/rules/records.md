@@ -459,6 +459,34 @@ migration, once, per company), `record-types.test.ts` (each interface's fields, 
 final states; no interface of one's own), `record-service-types.test.ts` (a decision's `bundle`
 takes any まとまり) — mutation-checked.
 
+### Bundle kinds (束ねる種類, owner decision 2026-11-02)
+
+What a department makes as its 束ねるもの is decided **without a setting** (`services/bundle-kinds.ts`,
+`GET /records/bundle-kinds`, any member, contract `BundleKindsResult`):
+
+- A department where an **enabled business plugin's** type implementing `bundle` lives (案件
+  `deal`, 番組…) makes that kind. "Lives" = the plugin's current mapping places that type's
+  records at or under the department folder (`visible_to_folder` of an object whose `record_type`
+  it is — read from the mapping's text, the connector's package is not needed), or live records
+  of that type are there already. Two business kinds in one department: the one with more
+  signals, then the type name. There is **no "use both" setting** (owner: no more admin screens;
+  a company needing both is the plugin's question then).
+- Every other department makes the core's ordinary kind, core type **`project`** (version 1,
+  implements `bundle`: `owner`, `purpose`, `due`; links `counterpart`, `files`; active → done /
+  cancelled and back, by the owner, an admin or the department's manager; anyone may create one),
+  `CORE_BUNDLE_TYPE`.
+- Names: a business kind keeps its type's label; the core kind is called by the company's
+  `TaskSettings.bundleName` (`tasks.md`; default 「プロジェクト」, one per company — not per
+  department). Screens never say 「まとまり」 (the code's word, `bundle`).
+- The answer: `core` (the core kind under the company's name), `departments` (each department's
+  id, folder and kind) and `kinds` (every kind in use, for places where kinds mix — the company-wide
+  list 「案件・プロジェクトごと」, searching across departments). A turned-off plugin, another
+  company's plugin and records decide nothing.
+- Test: `server/tests/unit/bundle-kinds.test.ts` (no business kind → the core's under the
+  company's name; mapping placement and records each decide; off and other companies decide
+  nothing; records off → `RECORDS_DISABLED`; the name's checks and default) — mutation-checked.
+  Permission matrix row.
+
 ### Outside time (owner decision 2026-11-01 「流れを測れる記録」)
 
 Something that happened outside ACB (a mail or call received, a meeting) has two times: when it

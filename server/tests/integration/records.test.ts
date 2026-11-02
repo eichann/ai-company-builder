@@ -173,7 +173,7 @@ describe('the company map, end to end', () => {
     await services.records.refreshIndex(owner)
     expect(titles(await api('u-member', 'POST', '/query', {}))).toEqual(['A社', 'A社 提案'])
     const types = await api('u-member', 'GET', '/types')
-    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'meeting', 'outbound_message', 'reply_request', 'task'])
+    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'meeting', 'outbound_message', 'project', 'reply_request', 'task'])
     const detail = await api('u-member', 'GET', '/item/customer-cust0001')
     expect(detail.body.data?.links).toEqual([expect.objectContaining({ name: 'customer', direction: 'in', record: expect.objectContaining({ id: 'deal-deal0001' }) })])
   })

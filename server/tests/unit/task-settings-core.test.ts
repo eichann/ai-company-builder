@@ -140,6 +140,8 @@ describe('parseTaskSettings', () => {
       readIncoming: { allowed: true, memberDefault: false },
       acceptance: { sameDepartment: true, managerToMember: true, meetingHomework: true },
       companyHolidays: [],
+      // Owner decision 2026-11-02: the core's 束ねるもの is 「プロジェクト」 until the company names it.
+      bundleName: 'プロジェクト',
     })
     expect(parseTaskSettings(defaultTaskSettings())).toEqual({ value: DEFAULT_TASK_SETTINGS })
   })

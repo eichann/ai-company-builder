@@ -86,11 +86,19 @@ export interface TaskSettings {
   acceptance: AcceptanceSettings
   /** The company's own days off, by date. */
   companyHolidays: CompanyHoliday[]
+  /**
+   * The name of the core's ordinary 束ねるもの (`project`, records.md "Bundle kinds") in this
+   * company — what departments without a business plugin's kind make and see (default
+   * 「プロジェクト」). One per company (owner decision 2026-11-02); a business plugin's kind
+   * (案件・番組) keeps its own name.
+   */
+  bundleName: string
 }
 
 export const TASK_SETTINGS_LIMITS = {
   departments: 500,
   holidays: 400,
+  bundleNameLength: 20,
   holidayNameLength: 50,
   dailyLimit: { min: 1, max: 500 },
   stopAfterFailures: { min: 1, max: 20 },
@@ -108,6 +116,7 @@ export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   // Owner decision 2026-11-01: only asking someone in another department waits for 「引き受ける」.
   acceptance: Object.freeze({ sameDepartment: true, managerToMember: true, meetingHomework: true }) as AcceptanceSettings,
   companyHolidays: [],
+  bundleName: 'プロジェクト',
 }) as TaskSettings
 
 /** A fresh, mutable copy of the defaults. */
@@ -119,7 +128,18 @@ export function defaultTaskSettings(): TaskSettings {
     readIncoming: { ...DEFAULT_TASK_SETTINGS.readIncoming },
     acceptance: { ...DEFAULT_TASK_SETTINGS.acceptance },
     companyHolidays: [],
+    bundleName: DEFAULT_TASK_SETTINGS.bundleName,
   }
+}
+
+// eslint-disable-next-line no-control-regex
+const NAME_FORBIDDEN_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/
+
+/** A 束ねるもの's name as stored (NFC, trimmed, inner whitespace one space), or null when unusable. */
+export function normalizeBundleName(value: unknown): string | null {
+  if (typeof value !== 'string' || NAME_FORBIDDEN_RE.test(value)) return null
+  const t = value.normalize('NFC').replace(/\s+/g, ' ').trim()
+  return t === '' || [...t].length > TASK_SETTINGS_LIMITS.bundleNameLength ? null : t
 }
 
 const CUTOFF_RE = /^([01]\d|2[0-3]):([0-5]\d)$/
@@ -194,6 +214,10 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
   }
   companyHolidays.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
 
+  // Added later (束ねる種類, 2026-11-02): left out → 「プロジェクト」 (a stored document or an older PUT keeps reading).
+  const bundleName = input.bundleName === undefined ? DEFAULT_TASK_SETTINGS.bundleName : normalizeBundleName(input.bundleName)
+  if (bundleName === null) return { error: `bundleName: 1–${L.bundleNameLength} characters on one line` }
+
   return {
     value: {
       taskListDepartmentIds,
@@ -202,6 +226,7 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
       readIncoming: { allowed: read.allowed, memberDefault: read.memberDefault },
       acceptance: { sameDepartment: acc.sameDepartment as boolean, managerToMember: acc.managerToMember as boolean, meetingHomework: acc.meetingHomework as boolean },
       companyHolidays,
+      bundleName,
     },
   }
 }

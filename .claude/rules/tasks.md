@@ -62,6 +62,11 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   Owner-only and one's own tasks never wait. `services/task-acceptance.ts` answers through the
   company's handle only. A stored document (or an older admin console's `PUT`) without
   `acceptance` takes these defaults rather than failing.
+- `bundleName` (束ねるものの名前, owner decision 2026-11-02): what the core's ordinary 束ねるもの
+  (`project`) is called in this company — one name for the company, default 「プロジェクト」, one
+  line of 1–20 characters (NFC, trimmed). A document (or an older admin console's `PUT`) without
+  it reads the default. Departments with a business plugin's kind use that kind's own name
+  (`records.md` "Bundle kinds"). Admin: the card 「やることを束ねるものの名前」.
 - `companyHolidays`: the company's own days off (`{ date: YYYY-MM-DD, name }`, ≤ 400, years
   2000–2100), stored sorted.
 
