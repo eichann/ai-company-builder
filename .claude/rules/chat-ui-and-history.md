@@ -114,6 +114,13 @@ one place an added agent brings its own controls; everything else asks the regis
   hidden. Folding only hides rows: pagination counts all rows, and 「続きを読み込む」 hides while
   終わったもの is folded. Tests: `src/features/chat/conversationGroups.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
+- **Narrowed to what is open** (owner 2026-11-02, 新しい画面のデモ J): while a record is open in the
+  middle (AppShell's `activeRecordId`, given as `focus`), the list shows only consultations whose
+  main topic (`topicRecordId`) is that record itself — never those of the things inside it (a
+  案件's やること's consultations show when that やること is open) — plus the one on screen
+  (`focusConversationRows`). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
+  it back; opening another record narrows again); a search always looks at every consultation.
+  Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts`.
 - Group headings are sticky within their section (owner, 2026-10-30): while a group's rows scroll,
   its heading stays at the top of the list until the next group's heading takes over. The sticky
   wrapper has the sidebar's opaque background so rows never show through. Test: the

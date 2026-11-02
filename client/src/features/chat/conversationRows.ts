@@ -39,3 +39,12 @@ export function paginateConversationRows(rows: ReturnType<typeof buildConversati
   const visibleRows = rows.filter(row => row.tab || row.session?.pinned || ++historyCount <= historyLimit)
   return { visibleRows, remaining: Math.max(0, historyCount - historyLimit) }
 }
+
+/**
+ * The list narrowed to what is open in the middle (新しい画面のデモ J): only consultations whose main
+ * topic is that record itself — not those of the things inside it (a 案件's やること's consultations
+ * show when that やること is open). The conversation on screen stays listed so it never vanishes.
+ */
+export function focusConversationRows<T extends { tab?: ConversationTab; session?: ChatSessionSummary }>(rows: T[], recordId: string, activeTabId: string): T[] {
+  return rows.filter(row => row.session?.topicRecordId === recordId || row.tab?.id === activeTabId)
+}

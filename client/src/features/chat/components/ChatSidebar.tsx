@@ -3,7 +3,7 @@ import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, Circ
 import type { ChatSessionSummary } from '../../../../shared/chat-history'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 
-import { paginateConversationRows, buildConversationRows, isEmptyConversation, type ConversationTab } from '../conversationRows'
+import { paginateConversationRows, buildConversationRows, focusConversationRows, isEmptyConversation, type ConversationTab } from '../conversationRows'
 import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../consultationStatus'
 import { useConsultationStatuses } from '../consultationStatusStore'
 import { useCollapsedGroups } from '../hooks/useCollapsedGroups'
@@ -25,6 +25,8 @@ interface Props {
   windows?: ReadonlyMap<string, ChatWindowStatus>
   /** Opens it in a window of its own, or brings that window to the front. */
   onOpenInWindow?: (sessionId: string) => void
+  /** The record open in the middle: the list shows only consultations about it until 「すべて表示」. */
+  focus?: { recordId: string; title: string } | null
 }
 
 const NO_WINDOWS: ReadonlyMap<string, ChatWindowStatus> = new Map()
@@ -74,7 +76,7 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
   </h3>
 }
 
-export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenSession, onCloseTab, onNew, onHide, windows = NO_WINDOWS, onOpenInWindow }: Props) {
+export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenSession, onCloseTab, onNew, onHide, windows = NO_WINDOWS, onOpenInWindow, focus }: Props) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
   const [query, setQueryState] = useState('')
   const [historyLimit, setHistoryLimit] = useState(20)
@@ -128,10 +130,14 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
     return () => { alive = false; window.clearTimeout(timer) }
   }, [companyId, query, sessions])
 
+  // 「すべて表示」 lifts the narrowing for the record it was pressed on; opening another record narrows again.
+  const [showAllFor, setShowAllFor] = useState<string | null>(null)
+  const focused = focus && showAllFor !== focus.recordId && !query.trim() ? focus : null
   // Consultations other windows show are listed as open, with those windows' statuses.
   const rows = useMemo(() => {
-    return buildConversationRows(sessions, [...tabs, ...windowTabs(windows, tabs)], query, contentMatches ?? undefined)
-  }, [sessions, tabs, windows, query, contentMatches])
+    const all = buildConversationRows(sessions, [...tabs, ...windowTabs(windows, tabs)], query, contentMatches ?? undefined)
+    return focused ? focusConversationRows(all, focused.recordId, activeTabId) : all
+  }, [sessions, tabs, windows, query, contentMatches, focused, activeTabId])
 
   // Each open tab's live status (consultationStatusStore, or the other window's); history rows are done.
   const localStatuses = useConsultationStatuses()
@@ -176,11 +182,19 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
         <input aria-label="相談を検索" placeholder="タイトル・本文を検索" value={query} onChange={e => setQuery(e.target.value)} className="w-full min-w-0 bg-transparent text-xs outline-none" />
         {query && <button onClick={() => setQuery('')} aria-label="検索をクリア"><X size={12} /></button>}
       </label>
-      <p className="text-xs text-gray-500" aria-live="polite">{loading ? '読み込み中…' : `${rows.length}件${query.trim() ? 'の検索結果' : 'の相談'}`}</p>
+      {focused
+        ? <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500" aria-live="polite">
+          <span className="min-w-0 truncate">「{focused.title}」についての相談</span>
+          <button type="button" onClick={() => setShowAllFor(focused.recordId)} className="shrink-0 text-accent hover:underline">すべて表示</button>
+        </p>
+        : <p className="flex items-center gap-2 text-xs text-gray-500" aria-live="polite">
+          {loading ? '読み込んでいます' : `${rows.length}件${query.trim() ? 'の検索結果' : 'の相談'}`}
+          {focus && showAllFor === focus.recordId && !query.trim() && <button type="button" onClick={() => setShowAllFor(null)} className="text-accent hover:underline">「{focus.title}」の相談だけにする</button>}
+        </p>}
     </div>
     {error && <div role="alert" className="px-3 pb-2 text-xs text-red-600">{error}<button onClick={() => refreshRef.current()} className="block underline mt-1">再読み込み</button></div>}
     <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-3">
-      {!loading && !rows.length && <p className="p-3 text-xs text-gray-500">{query ? '一致する相談がありません。' : 'まだ相談はありません。'}</p>}
+      {!loading && !rows.length && <p className="p-3 text-xs text-gray-500">{query ? '一致する相談がありません。' : focused ? 'このことについての相談は、まだありません。' : 'まだ相談はありません。'}</p>}
       {groups.map((group, groupIndex) => <section key={group.key} aria-label={group.label}>
         <GroupHeading group={group} first={groupIndex === 0} count={groupCounts.get(group.key) ?? group.rows.length}
           folded={collapsed.has(group.key)} onToggle={toggleGroup}
