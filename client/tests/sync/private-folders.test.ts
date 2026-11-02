@@ -120,7 +120,7 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  scenario('a large file inside the private folder is not named in the company .gitignore', async t => {
+  scenario('a large file inside the private folder is ignored in its own clone, never named in a shared .gitignore', async t => {
     const { world, reader } = create(t)
     ok(await reader.sync(), 'reader')
     // Sparse file: > 100 MB on disk listing, no real bytes.
@@ -130,7 +130,10 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     fs.closeSync(fd)
     ok(await reader.sync(), 'reader')
     assert.doesNotMatch(world.serverFile('.gitignore')?.toString() ?? '', /big\.bin|評価/)
-    assert.match(world.scopeFile(HR, '.gitignore')?.toString() ?? '', /big\.bin/, 'ignored inside the scope repository instead')
+    assert.doesNotMatch(world.scopeFile(HR, '.gitignore')?.toString() ?? '', /big\.bin/, 'nor in the private folder\'s shared .gitignore')
+    assert.match(fs.readFileSync(reader.path(`${HR}/.git/info/exclude`), 'utf-8'), /^\/big\.bin$/m, 'ignored on this computer, in the private folder\'s own clone')
+    assert.doesNotMatch(fs.readFileSync(reader.path('.git/info/exclude'), 'utf-8'), /big\.bin/)
+    assert.equal(world.scopeFile(HR, 'big.bin'), null)
     await settleAndCheck(world)
   })
 
