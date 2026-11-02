@@ -2,7 +2,8 @@ import type { Dispatch, SetStateAction } from 'react'
 import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
-import { FileSearchModal } from '../features/search/components/FileSearchModal'
+import { FindPalette } from '../features/search/components/FindPalette'
+import type { PaletteRecent } from '../features/search/model'
 import { BackupHistorySlideOver } from '../features/sync/components/BackupHistorySlideOver'
 import { SettingsPanel } from '../features/settings/components/SettingsPanel'
 import { ConnectToolsScreen } from '../features/settings/components/ConnectToolsScreen'
@@ -26,6 +27,9 @@ interface Props {
   showFileSearch: boolean
   onCloseFileSearch: () => void
   onFileSearchSelect: (filePath: string) => void
+  /** 探す ⌘K: the tabs open in the middle (newest first), and opening a record found. */
+  recentTabs: PaletteRecent[]
+  onOpenRecord: (recordId: string) => void
   showSettings: boolean
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; at: number } | null
@@ -63,14 +67,18 @@ export function AppDialogs(props: Props) {
           />
         )}
 
-        {/* File Search Modal (Cmd+P) */}
-        <FileSearchModal
-          isOpen={showFileSearch}
-          onClose={onCloseFileSearch}
-          rootPath={rootPath}
-          departmentFolder={departmentFolder}
-          onSelectFile={onFileSearchSelect}
-        />
+        {/* 探す ⌘K / ⌘P: open anything by its name (mounted only while open, so it starts empty) */}
+        {showFileSearch && (
+          <FindPalette
+            onClose={onCloseFileSearch}
+            rootPath={rootPath}
+            companyId={companyId}
+            departmentFolder={departmentFolder}
+            recent={props.recentTabs}
+            onSelectFile={onFileSearchSelect}
+            onOpenRecord={props.onOpenRecord}
+          />
+        )}
 
         {/* 「仕事の道具をつなぐ」: opens by itself only when something is new (settings has it too) */}
         {companyId && <ConnectToolsScreen key={companyId} companyId={companyId} firstRun />}

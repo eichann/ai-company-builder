@@ -209,17 +209,32 @@ test('skills: a skill the AI adds appears; a burst of events is one rescan', asy
 })
 
 // The app's shortcuts are commands (.claude/rules/commands.md): app-wide, so they work wherever the focus is.
-test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 探す tab with the cursor in its box', async ({ page }) => {
+test('shortcuts: ⌘P and ⌘K open 探す by name, ⌘⇧F the 探す tab with the cursor in its box', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   type Keys = { key: string; metaKey?: boolean; shiftKey?: boolean }
   const press = (init: Keys) => page.evaluate((i: Keys) => {
     (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { ...i, bubbles: true }))
   }, init)
   await press({ key: 'p', metaKey: true })
-  const nameSearch = page.getByPlaceholder('ファイル名で検索...')
+  const nameSearch = page.getByPlaceholder('やること・案件・ファイルなどを名前で探す')
   await expect(nameSearch).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(nameSearch).toHaveCount(0)
+  // ⌘K: the same 探す window; records the server finds by name come first, then files; Enter opens.
+  await press({ key: 'k', metaKey: true })
+  await expect(nameSearch).toBeFocused()
+  await nameSearch.fill('提案')
+  const options = page.getByRole('listbox', { name: '開くもの' }).getByRole('option')
+  await expect(options.first()).toContainText('A社 提案書を仕上げる')
+  await expect(page.getByRole('listbox', { name: '開くもの' })).toContainText('B社_提案.md')
+  await nameSearch.press('Enter')
+  await expect(nameSearch).toHaveCount(0)
+  await expect(page.getByRole('tablist', { name: '開いているもの' }).getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveAttribute('aria-selected', 'true')
+  // With nothing typed it lists what is open, newest first.
+  await press({ key: 'k', metaKey: true })
+  await expect(page.getByText('最近開いたもの')).toBeVisible()
+  await expect(options.first()).toContainText('A社 提案書を仕上げる')
+  await page.keyboard.press('Escape')
   await press({ key: 'f', metaKey: true, shiftKey: true })
   await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeFocused()
 })

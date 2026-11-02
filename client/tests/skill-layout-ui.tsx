@@ -136,6 +136,8 @@ const api: Partial<ElectronAPI> = {
   readDirectoryTree: async (dir: string, max?: number) => { record('readDirectoryTree', [dir]); return tree(dir, 0, max ?? 2) },
   readDirectory: async (dir: string) => { record('readDirectory', [dir]); return listDir(dir) },
   readFile: async (path: string) => FILES[path] ?? null,
+  // 探す ⌘K lists the company's files by name (company paths under the folder).
+  gitListFiles: async (_root: string, folder: string) => ({ success: true, files: Object.keys(FILES).filter(p => p.startsWith(`${ROOT}/`)).map(p => p.slice(ROOT.length + 1)).filter(p => !folder || p.startsWith(`${folder}/`)) }),
   readFileBinary: async () => null,
   watchCompany: async () => ({ success: true }),
   unwatchCompany: async () => ({ success: true }),

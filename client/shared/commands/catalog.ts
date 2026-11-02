@@ -110,7 +110,12 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
   },
   {
-    // The 「ファイルを探す」 dialog (search by file name).
+    // 探す ⌘K: open anything by its name (やること, 案件, ファイル…) — the same window as ⌘P.
+    id: 'find.byName', title: '名前で探して開く', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+k', area: 'app' },
+  },
+  {
+    // ⌘P, kept for members used to it: the same 探す window.
     id: 'file.search', title: 'ファイルを名前で探す', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
   },

@@ -1,7 +1,8 @@
 // 探す's kind chips (言葉の決まり 5.: 「探す」の種類の札): one chip per kind that has something in the
 // results — never an empty one — named and drawn like everywhere else. Pure.
 import type { RecordViewSummary } from '../../../shared/record-views'
-import { bundleWords, THING_NAMES, type ThingKind } from '../../../shared/thing-words'
+import { foldAsciiCase } from '../../../../shared/core/paths'
+import { bundleWords, thingName, THING_NAMES, type ThingKind, type ThingRecord } from '../../../shared/thing-words'
 
 export interface FindChip {
   id: string
@@ -42,4 +43,47 @@ export function findChips(records: readonly RecordViewSummary[], fileCount: numb
     }
   }
   return chips
+}
+
+// --- 探す ⌘K: open anything by its name ----------------------------------------------------
+
+/** A tab open in the middle, for 「最近開いたもの」: a file (company path) or a record with its look. */
+export type PaletteRecent = { key: string; path: string } | { key: string; recordId: string; record: ThingRecord & { title: string } }
+
+export interface PaletteItem {
+  key: string
+  title: string
+  /** A company path, when it is a file. */
+  path?: string
+  recordId?: string
+  record?: ThingRecord
+  /** The kind's plain name shown at the right (やること, 案件…). */
+  kindName: string
+}
+
+const MAX_FILES = 30
+
+/**
+ * What ⌘K lists: with nothing typed, the open tabs (newest first); typed, the records the server
+ * found by those words, then the files whose path holds them (A–Z folded), records first.
+ */
+export function paletteItems(query: string, files: readonly string[], records: readonly RecordViewSummary[], recent: readonly PaletteRecent[]): PaletteItem[] {
+  const q = query.trim()
+  if (!q) {
+    return recent.map(r => 'path' in r
+      ? { key: r.key, title: r.path.split('/').pop() ?? r.path, path: r.path, kindName: THING_NAMES.file }
+      : { key: r.key, title: r.record.title, recordId: r.recordId, record: r.record, kindName: thingName(r.record) })
+  }
+  const fold = (t: string) => foldAsciiCase(t.normalize('NFC'))
+  const fq = fold(q)
+  const out: PaletteItem[] = records.map(r => ({
+    key: `record:${r.id}`, title: r.title, recordId: r.id, kindName: r.typeLabel,
+    record: { type: r.type, typeLabel: r.typeLabel, implements: r.thing === 'bundle' ? ['bundle'] : undefined },
+  }))
+  let n = 0
+  for (const f of files) {
+    if (n >= MAX_FILES) break
+    if (fold(f).includes(fq)) { out.push({ key: `file:${f}`, title: f.split('/').pop() ?? f, path: f, kindName: THING_NAMES.file }); n++ }
+  }
+  return out
 }

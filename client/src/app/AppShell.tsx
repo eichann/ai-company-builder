@@ -8,6 +8,7 @@ import { usePlaceHistory } from '../features/editor/hooks/usePlaceHistory'
 import { PlaceNavigation } from '../features/editor/components/PlaceNavigation'
 import { FileSidePanel } from './FileSidePanel'
 import { SearchPanel } from '../features/search/components/SearchPanel'
+import type { PaletteRecent } from '../features/search/model'
 import { useAppStore } from '../stores/appStore'
 import { useSkills } from '../features/skills/hooks/useSkills'
 import { useSparseCheckout } from '../shared/hooks/useSparseCheckout'
@@ -245,6 +246,7 @@ export function AppShell() {
     requestAnimationFrame(() => searchInputRef.current?.focus())
   })
   useCommandHandler('file.search', () => setShowFileSearch(true))
+  useCommandHandler('find.byName', () => setShowFileSearch(true))
   // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
   useCommandHandler('settings.openOwnKey', ({ service }) => {
@@ -341,6 +343,13 @@ export function AppShell() {
     if (m.ai?.canRetry) actions.push({ label: 'もう一度', run: () => aiTurnItems?.retry(m.id) })
     if (m.ai?.canHand) actions.push({ label: '人に渡す', run: () => aiTurnItems?.handOver(m.id) })
     return { ...m, actions }
+  })
+  // 探す ⌘K's 「最近開いたもの」: the tabs open in the middle, newest first.
+  const recentTabs: PaletteRecent[] = [...openFiles].reverse().flatMap((key): PaletteRecent[] => {
+    const id = recordIdOfTab(key)
+    if (id) return recordLooks[id] ? [{ key, recordId: id, record: recordLooks[id] }] : []
+    const path = rootPath ? companyPathOf(key, rootPath) : null
+    return path ? [{ key, path }] : []
   })
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
@@ -585,6 +594,8 @@ export function AppShell() {
         showFileSearch={showFileSearch}
         onCloseFileSearch={() => setShowFileSearch(false)}
         onFileSearchSelect={handleFileSearchSelect}
+        recentTabs={recentTabs}
+        onOpenRecord={id => openTab(recordTabKey(id))}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}
