@@ -640,3 +640,101 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     db.prepare("UPDATE record_state SET state = 'open' WHERE company_id = ? AND record_id = ?").run(CO, other)
   })
 })
+
+describe('what a meeting\'s reading makes is made once (FB 29)', () => {
+  const TITLE = '修正見積（150万円）を鈴木様へ送付'
+  let followUpId: string
+  let first: string
+  const task = (token: string, meetingId: string, title: string, key?: string) => call(null, 'POST', '/api/records-ai/item', {
+    type: 'task', title, fields: { assignee: 'mn-sato' }, links: { meeting: meetingId }, ...(key ? { key } : {}),
+  }, token)
+  const tasksOf = (meetingId: string) => (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'meeting' AND target_id = ?").all(CO, meetingId) as Json[])
+    .map(r => r.source_id as string).filter(id => id.startsWith('task-'))
+
+  it('a second reading reuses the task (same key, or the same title written differently); a different item is still made', async () => {
+    followUpId = minutesRows().find(r => r.title.includes('2回目')).id
+    const token = await tokenFor('mn-sato')
+    const made = await task(token, salesId, TITLE, 'task:1')
+    expect(made.status, made.text).toBe(201)
+    first = made.body.data.record.id
+    // The reading run again: the same key (its title reworded), and no key but the same title in other spacing.
+    const again = await task(await tokenFor('mn-sato'), salesId, '修正見積を鈴木様へ', 'task:1')
+    expect([again.status, again.body.data.record.id, again.body.data.reused]).toEqual([200, first, true])
+    expect(again.body.data.note).toContain('すでに作られていた')
+    const reworded = await task(token, salesId, '修正見積 (１５０万円) を 鈴木様へ送付。')
+    expect([reworded.status, reworded.body.data.record.id]).toEqual([200, first])
+    const other = await task(token, salesId, 'カリキュラム案を送る', 'task:2')
+    expect(other.status, other.text).toBe(201)
+    expect(tasksOf(salesId).sort()).toEqual([first, other.body.data.record.id].sort())
+    // A key needs its meeting.
+    const loose = await call(null, 'POST', '/api/records-ai/item', { type: 'task', title: 'x', key: 'task:9' }, token)
+    expect([loose.status, loose.body.code]).toEqual([400, 'KEY_NEEDS_MEETING'])
+  })
+
+  it('another meeting is never matched: the same title and key there make its own task', async () => {
+    const token = await tokenFor('mn-sato')
+    const there = await task(token, followUpId, TITLE, 'task:1')
+    expect(there.status, there.text).toBe(201)
+    expect(there.body.data.record.id).not.toBe(first)
+    expect(tasksOf(followUpId)).toEqual([there.body.data.record.id])
+  })
+
+  it('decisions: the same title or key of one meeting once; another meeting\'s `1` is its own', async () => {
+    const token = await tokenFor('mn-sato')
+    const decide = (meetingId: string, title: string, key?: string) => call(null, 'POST', '/api/records-ai/decisions', {
+      folder: '営業部', title, why: '先方と合意した', source: '見積金額を120万円から150万円に改めることで合意した', links: { meeting: meetingId }, ...(key ? { key } : {}),
+    }, token)
+    const a = await decide(salesId, '見積は150万円にする', '1')
+    expect(a.status, a.text).toBe(201)
+    const sameKey = await decide(salesId, '見積を150万円に改める', '1')
+    expect([sameKey.status, sameKey.body.data.record.id, sameKey.body.data.reused]).toEqual([200, a.body.data.record.id, true])
+    const sameTitle = await decide(salesId, '見積は 150万円 にする')
+    expect([sameTitle.status, sameTitle.body.data.record.id]).toEqual([200, a.body.data.record.id])
+    const elsewhere = await decide(followUpId, '見積は150万円にする', '1')
+    expect(elsewhere.status, elsewhere.text).toBe(201)
+    expect(elsewhere.body.data.record.id).not.toBe(a.body.data.record.id)
+  })
+
+  it('duplicates made before the rule: owner/admin list them by meeting and title, and merge cancels the extras with a note (nothing deleted)', async () => {
+    // Two more copies made before the rule (later than the first): created without the link, then linked by hand.
+    at('2026-12-02T09:00:00+09:00')
+    const engine = services.recordEngine
+    const sato = { companyId: CO, userId: 'mn-sato', role: 'member' }
+    const copies: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const r = engine.create(sato, { kind: 'ai', source: 'claude-code' }, { type: 'task', title: TITLE, fields: { assignee: 'mn-sato' } })
+      expect(r.ok, JSON.stringify(r)).toBe(true)
+      const id = (r as Json).value.record.id as string
+      db.prepare("INSERT INTO record_links (company_id, source_id, name, position, target_id, target_path) VALUES (?, ?, 'meeting', 0, ?, NULL)").run(CO, id, salesId)
+      copies.push(id)
+    }
+    expect((await call('mn-sato', 'GET', `${C()}/records/meeting-duplicates`)).status).toBe(403)
+    const listed = await call('mn-owner', 'GET', `${C()}/records/meeting-duplicates`)
+    expect(listed.status, listed.text).toBe(200)
+    const group = (listed.body.data.groups as Json[]).find(g => g.meetingId === salesId && g.type === 'task')
+    expect(group.keep.id).toBe(first)
+    expect(group.duplicates.map((d: Json) => d.id).sort()).toEqual([...copies].sort())
+    expect(group.mergeable).toBe(true)
+    // Another meeting's task of the same title is not a duplicate of this one.
+    expect((listed.body.data.groups as Json[]).some(g => g.meetingId === followUpId)).toBe(false)
+
+    expect((await call('mn-sato', 'POST', `${C()}/records/meeting-duplicates/merge`, { keepId: first, duplicateIds: copies })).status).toBe(403)
+    const otherTask = tasksOf(salesId).find(id => id !== first && !copies.includes(id)) as string
+    const wrong = await call('mn-owner', 'POST', `${C()}/records/meeting-duplicates/merge`, { keepId: first, duplicateIds: [otherTask] })
+    expect([wrong.status, wrong.body.code]).toEqual([400, 'NOT_DUPLICATES'])
+    const merged = await call('mn-owner', 'POST', `${C()}/records/meeting-duplicates/merge`, { keepId: first, duplicateIds: copies })
+    expect(merged.status, merged.text).toBe(200)
+    expect(merged.body.data).toMatchObject({ keptId: first, failed: [] })
+    for (const id of copies) {
+      const item = await call('mn-owner', 'GET', `${C()}/records/item/${id}`)
+      expect(item.body.data.record.state).toBe('cancelled')
+      const entries = (await call('mn-owner', 'GET', `${C()}/records/item/${id}/history`)).body.data.entries as Json[]
+      const last = entries.reduce((x: Json, y: Json) => (y.version > x.version ? y : x))
+      expect([last.action, last.actorId]).toEqual(['cancel', 'mn-owner'])
+      expect(last.note).toContain(first)
+    }
+    expect((await call('mn-owner', 'GET', `${C()}/records/item/${first}`)).body.data.record.state).not.toBe('cancelled')
+    const after = await call('mn-owner', 'GET', `${C()}/records/meeting-duplicates`)
+    expect((after.body.data.groups as Json[]).some(g => g.meetingId === salesId && g.type === 'task')).toBe(false)
+  })
+})

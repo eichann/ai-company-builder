@@ -2,6 +2,7 @@ import type { LedgerEntry, LedgerValue, LedgerVia } from '../../../shared/core/r
 import type { ActionVia } from '../../../shared/core/record-types'
 import type { Clock, IdGenerator } from '../../ports/clock'
 import type { CompanyDataSource } from '../../ports/company-data'
+import type { TokenDigest } from '../../ports/key-broker'
 import type { RecordFileWriter } from '../../ports/record-files'
 import type { Transactions } from '../../ports/transactions'
 import type { Member } from '../access'
@@ -36,6 +37,8 @@ export interface RecordEngineDeps {
    * keep only kind, record, version and actor — never a value — and push nothing but a version.
    */
   notify: (companyId: string, userIds: string[], change?: RecordChange) => void
+  /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
+  tokenDigest?: TokenDigest
   /**
    * The absent members this member covers today (代わりの人, services/absences.ts,
    * the one resolution point): `who` may then also be met as one of them. None without it.

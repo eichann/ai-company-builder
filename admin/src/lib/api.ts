@@ -44,6 +44,8 @@ import {
   memberRoleSchema,
   membersSchema,
   minutesFolderSchema,
+  meetingDuplicatesSchema,
+  meetingDuplicatesMergedSchema,
   overviewSchema,
   permissionsSchema,
   pluginListSchema,
@@ -918,6 +920,16 @@ export type { InboxSettingsView } from '../../../shared/types/inbox'
 export type { IntakeSettings, SharedAddress } from '../../../shared/core/intake-settings'
 
 import type { IntakeSettings } from '../../../shared/core/intake-settings'
+
+// What one meeting's reading made twice (minutes.md "Outputs made once"): owner/admin list them and
+// merge (each duplicate cancelled / retracted with a note naming the kept one; nothing is deleted).
+export type { MeetingDuplicateGroup, MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
+
+export const meetingDuplicatesApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/records/meeting-duplicates`, meetingDuplicatesSchema),
+  merge: (companyId: string, keepId: string, duplicateIds: string[]) =>
+    getData(`/api/companies/${enc(companyId)}/records/meeting-duplicates/merge`, meetingDuplicatesMergedSchema, { method: 'POST', body: { keepId, duplicateIds } }),
+}
 
 export const inboxSettingsApi = {
   /** Every member reads; canEdit says whether the caller may change them. */

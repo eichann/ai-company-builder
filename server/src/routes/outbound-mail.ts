@@ -47,7 +47,8 @@ outboundMailRoute.post('/outbound-recipients', companyMember, serviceBody, async
 outboundMailRoute.post('/outbound', companyMember, serviceBody, async (c) => {
   const m = c.var.member
   const body = c.var.body
-  return answer(c, await outboundMail.create(m, humanWith(body), body), 201)
+  const result = await outboundMail.create(m, humanWith(body), body)
+  return answer(c, result, result.ok && result.value.reused ? 200 : 201)
 })
 
 outboundMailRoute.get('/outbound/:messageId', companyMember, async (c) => {

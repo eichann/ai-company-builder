@@ -438,6 +438,18 @@ describe('outbound mail', () => {
     expect((await person('m-sato', 'POST', `/outbound/${d.id}/discard`, {})).body.data.draft.state).toBe('discarded')
   })
 
+  it('the meeting\'s mail is made once: reading again with the same subject returns the earlier one; another subject is a new draft', async () => {
+    const to = [pick(recipients, 'calendar', GOOGLE_SEED.customerSuzuki).ref]
+    const before = (db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND type = 'outbound_message'").get(CO) as Json).n
+    const again = await ai(token, 'POST', '/outbound', { meetingId, toRefs: to, subject: '本日は ありがとうございました。', body: '別の本文' })
+    expect(again.status, again.text).toBe(200)
+    expect([again.body.data.draft.id, again.body.data.reused]).toEqual([draft.id, true])
+    expect((db.prepare("SELECT COUNT(*) AS n FROM records WHERE company_id = ? AND type = 'outbound_message'").get(CO) as Json).n).toBe(before)
+    const other = await ai(token, 'POST', '/outbound', { meetingId, toRefs: to, subject: '資料のご送付', body: '本文' })
+    expect(other.status, other.text).toBe(201)
+    expect(other.body.data.draft.id).not.toBe(draft.id)
+  })
+
   it('no access or refresh token in any answer, log line or table; no subject, body or address in a log line', async () => {
     const haystack = [...answers, ...logLines].join('\n')
     for (const prefix of ['ya29.fake-', '1//fake-']) expect(haystack).not.toContain(prefix)

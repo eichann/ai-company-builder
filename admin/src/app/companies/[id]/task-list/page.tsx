@@ -24,6 +24,7 @@ import {
 } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { IntakeSettingsSection } from './intake-settings'
+import { MeetingDuplicatesSection } from './meeting-duplicates'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -84,6 +85,7 @@ export default function TaskListSettingsPage() {
             />
           ) : null)}
         {isAdmin && <IntakeSettingsSection departments={departments.data ?? []} />}
+        {isAdmin && <MeetingDuplicatesSection />}
         <MembershipCard departments={departments.data} error={departments.error} onRetry={departments.reload} />
       </div>
     </>

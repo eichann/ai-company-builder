@@ -1213,7 +1213,8 @@ and (with the ledger's actions) when it finished. Nobody presses 着手 for it.
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
 `decisions_record`): `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-important?, exception?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
+important?, exception?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key, or the
+same title of the same meeting: `minutes.md` "Outputs made once"; a key with a meeting link is that meeting's).
 - A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
   row (`path` null, `folder` = the department folder) and its state `unconfirmed`, with `why` /
   `source` as server fields (the summary is the start of `why`, what text search reads). Earlier

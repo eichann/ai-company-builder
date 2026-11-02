@@ -274,7 +274,7 @@ describe('decisions', () => {
   it('the same key twice records once', async () => {
     const first = ok(await decisions.record(m('u-alice'), AI, body({ key: 'minutes-abc123:decision:2' })))
     const again = ok(await decisions.record(m('u-alice'), AI, body({ key: 'minutes-abc123:decision:2', title: '言い換えた件名' })))
-    expect(again).toEqual({ record: first.record, created: false })
+    expect(again).toMatchObject({ record: first.record, created: false, reused: true })
     // At the same moment, too.
     const both = await Promise.all([1, 2].map(() => decisions.record(m('u-alice'), AI, body({ key: 'k-same-time' }))))
     expect(both.map(x => ok(x).record.id)[0]).toBe(ok(both[1]).record.id)

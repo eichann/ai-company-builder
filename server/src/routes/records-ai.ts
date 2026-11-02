@@ -124,7 +124,10 @@ recordsAiRoute.get('/item/:recordId/history', aiReads, (c) => {
 recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
-  return keyedWrite(c, h, 'record-create', body, async () => answer(c, recordEngine.create(h.member, aiActor(h), body), 201))
+  return keyedWrite(c, h, 'record-create', body, async () => {
+    const result = recordEngine.create(h.member, aiActor(h), body)
+    return answer(c, result, result.ok && result.value.reused ? 200 : 201)
+  })
 })
 
 recordsAiRoute.post('/item/:recordId/actions/:action', aiActs, serviceBody, async (c) => {
@@ -202,7 +205,10 @@ recordsAiRoute.post('/outbound-recipients', aiReads, serviceBody, async (c) => {
 recordsAiRoute.post('/outbound', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
-  return keyedWrite(c, h, 'mail-draft', body, async () => answer(c, await outboundMail.create(h.member, aiActor(h), body), 201))
+  return keyedWrite(c, h, 'mail-draft', body, async () => {
+    const result = await outboundMail.create(h.member, aiActor(h), body)
+    return answer(c, result, result.ok && result.value.reused ? 200 : 201)
+  })
 })
 
 recordsAiRoute.get('/outbound/:messageId', aiReads, (c) => {

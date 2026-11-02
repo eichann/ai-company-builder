@@ -46,6 +46,8 @@ function fakeServer(scope: 'read' | 'act') {
     if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope, expiresAt: 'x' })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [{ definition: { name: 'outbound_message', storage: 'server', actions: {}, fields: {} } as unknown as TypeDefinition }] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
+    // The same mail of the same meeting made before (minutes.md "Outputs made once"): the server answers that one.
+    if (url.endsWith('/api/records-ai/outbound') && String(init.body).includes('"subject":"again"')) return json(200, { draft: draft(), reused: true })
     if (url.endsWith('/api/records-ai/outbound')) return json(201, { draft: draft() })
     if (url.endsWith(`/api/records-ai/outbound/${draft().id}`) && (init.method ?? 'GET') === 'GET') return json(200, { draft: draft({ state: 'sent', version: 3 }) })
     return json(200, { ok: true })
@@ -92,6 +94,15 @@ test('a draft carries refs only (an address is refused), goes with the record to
   assert.equal(stored.mailDrafts?.length, 1)
   const back = sessionMessageToUIMessage(stored).parts.find(p => p.type === MAIL_DRAFT_PART_TYPE) as { data: unknown }
   assert.deepEqual(readMailDraftCard(back.data), cards[0])
+})
+
+test('a mail the meeting already has is reused, and the AI is told not to make it again', async () => {
+  const { tools } = await turn('act')
+  const told = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 'again', body: 'b' }))
+  assert.equal(told.reused, true)
+  assert.match(told.note, /Do not create it again/)
+  const fresh = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
+  assert.equal(fresh.reused, undefined)
 })
 
 test('showing a draft again only reads it and adds a new card in its current state', async () => {

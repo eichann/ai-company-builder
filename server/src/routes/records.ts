@@ -13,7 +13,11 @@
  *   GET     /records/ai-turn      any member: 「AI の番」 — their records waiting for an AI-only action
  *   POST    /records/decisions    any member: record a decision (the server writes its file;
  *                                 services/decisions.ts)
- *   POST    /records/item         any member: a server-only record (state engine, 4-3)
+ *   POST    /records/item         any member: a server-only record (state engine, 4-3); the same item of
+ *                                 the same meeting answers the existing one (200, `reused`)
+ *   GET     /records/meeting-duplicates        owner/admin: what one meeting made twice (same type, title)
+ *   POST    /records/meeting-duplicates/merge  owner/admin: { keepId, duplicateIds } cancel / retract the
+ *                                 duplicates with a note naming the kept one (nothing deleted)
  *   POST    /records/item/:recordId/actions/:action   run an action of the record's type
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
  *   POST    /records/item/:recordId/file-links        { path, link?, expectedVersion, note? } link a file later
@@ -43,7 +47,7 @@ export const recordsRoute = new Hono()
 const HUMAN = { kind: 'human' } as const
 /** A person's action, with the provenance their app reports (informational only, never authorizes: record-engine.ts). */
 const humanWith = (body: unknown) => ({ ...HUMAN, ...selfReportedProvenance(body) })
-const { records, recordEngine, recordAiTokens, decisions } = services
+const { records, recordEngine, recordAiTokens, decisions, meetingOutputs } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
@@ -108,7 +112,19 @@ recordsRoute.post('/records/item', companyMember, serviceBody, async (c) => {
   const body = c.var.body
   const result = recordEngine.create(member, humanWith(body), body)
   if (!result.ok) return refusal(c, result)
-  return c.json({ success: true, data: result.value }, 201)
+  return c.json({ success: true, data: result.value }, result.value.reused ? 200 : 201)
+})
+
+recordsRoute.get('/records/meeting-duplicates', companyMember, (c) => {
+  const result = meetingOutputs.duplicates(c.var.member)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+recordsRoute.post('/records/meeting-duplicates/merge', companyMember, serviceBody, async (c) => {
+  const result = await meetingOutputs.merge(c.var.member, c.var.body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
 })
 
 recordsRoute.post('/records/item/:recordId/actions/:action', companyMember, serviceBody, async (c) => {
