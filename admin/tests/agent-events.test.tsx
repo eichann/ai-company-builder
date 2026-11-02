@@ -36,7 +36,7 @@ import {
 import type { AgentEventRecord, AgentEventSettings, AgentEventViewers, Capabilities } from '@/lib/api'
 import { AGENT_EVENT_VIEWER_MODES } from '../../shared/types/agent-events'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { COMPANY_ID, clientActivity, managerCapabilities, ok, ownerCapabilities } from './fixtures'
+import { COMPANY_ID, clientActivity, homeOf, managerCapabilities, ok, ownerCapabilities, quietOverview } from './fixtures'
 import type { Call } from './mock-api'
 
 const nav = vi.hoisted(() => ({ search: '', replace: vi.fn(), pathname: '' }))
@@ -263,7 +263,9 @@ describe('navigation', () => {
   })
 
   it('a manager the setting lets read it finds it on the home', async () => {
-    stubApi({ ...managerCapabilities, canViewAgentEvents: true })
+    stubApi({ ...managerCapabilities, canViewAgentEvents: true }, {
+      [`GET ${base}/home`]: { body: ok(homeOf(quietOverview, { view: 'manager', setup: null, departments: [{ id: 'd_sales', name: '営業部' }] })) },
+    })
     renderInCompany(<OverviewPage />)
     expect(await screen.findByRole('link', { name: 'AI の操作の記録' })).toHaveAttribute('href', `/companies/${COMPANY_ID}/advanced/ai-safety/events`)
   })

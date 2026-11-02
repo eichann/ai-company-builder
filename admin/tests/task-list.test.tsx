@@ -12,7 +12,7 @@ import { ADVANCED_ITEM, NAV_ITEMS, type NavContext } from '@/components/app/app-
 import type { AbsenceCreated, Capabilities, DepartmentMembersView, MemberAbsencesView, TaskSettingsView } from '@/lib/api'
 import { defaultTaskSettings } from '../../shared/core/task-settings'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { departments, managerCapabilities, ok, ownerCapabilities } from './fixtures'
+import { departments, homeOf, managerCapabilities, ok, ownerCapabilities, quietOverview } from './fixtures'
 import type { Call } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -95,6 +95,19 @@ describe('仕事の進め方・会社の暦', () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
     expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ ...defaultTaskSettings(), companyHolidays: [{ date: '2026-12-29', name: '年末' }] })
+  })
+
+  it('会社の暦: 「足すものはない」 marks the holidays checked (「最初にやること」 6), and saving the holidays does too', async () => {
+    const home = homeOf(quietOverview)
+    const unchecked = { ...home, setup: { ...home.setup!, done: 5, steps: home.setup!.steps.map((st) => (st.id === 'holidays' ? { ...st, done: false } : st)) } }
+    const calls = stubApi(ownerCapabilities, () => ({ members: [], canEdit: true }), {
+      [`GET ${base}/home`]: { body: ok(unchecked) },
+      [`PUT ${base}/home/holidays-checked`]: { body: ok(home) },
+    })
+    renderInCompany(<CalendarSettingsPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '足すものはない' }))
+    expect(await screen.findByText('会社の休みは確かめてあります')).toBeInTheDocument()
+    expect(calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/home/holidays-checked')).map((c) => c.body)).toEqual([{ checked: true }])
   })
 
   it('a daily limit outside the allowed range cannot be saved', async () => {
