@@ -22,6 +22,8 @@ interface Props {
   state: NoticesState
   /** Open a record (AppShell: its card, or a consultation while there is no card screen). */
   onOpen: (target: NoticeTarget) => void
+  /** Show the task list (the morning's 「今日のあなたの番」 is about no one record). */
+  onOpenTasks?: () => void
 }
 
 type Open = 'turn' | 'bell' | 'settings' | null
@@ -33,7 +35,7 @@ type Open = 'turn' | 'bell' | 'settings' | null
  * Each list item opens its record; reading the bell's list marks nothing until
  * an item is opened or 「すべて既読」 is pressed, so the other PC's dot stays honest.
  */
-export function TitleBarNotices({ companyId, state, meetings = [], onOpen }: Props) {
+export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpenTasks }: Props) {
   const [open, setOpen] = useState<Open>(null)
   const [kinds, setKinds] = useState<Record<string, boolean> | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -133,7 +135,8 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen }: Pro
                 onClick={() => {
                   setOpen(null)
                   if (!item.read) void markNoticesRead(companyId, [item.id])
-                  onOpen({ recordId: item.recordId, title: item.recordTitle })
+                  if (item.recordId === '') onOpenTasks?.()
+                  else onOpen({ recordId: item.recordId, title: item.recordTitle })
                 }}>
                 <span className={`block ${item.read ? 'text-gray-500 dark:text-zinc-400' : 'font-medium text-gray-800 dark:text-zinc-100'}`}>
                   {!item.read && <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />}

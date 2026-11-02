@@ -10,7 +10,9 @@
  * - the watcher reads with the session in the Cookie header (never the URL),
  *   and a signal for a company not on screen asks nothing;
  * - a Mac notification only for an item new in 「あなたの番」 (the first look
- *   notifies nothing), approval requests in their own words;
+ *   notifies nothing), approval requests in their own words, or a notice the
+ *   server marks fresh (`desktop`) — once per PC, kept across a restart, the
+ *   morning summary opening the task list; being asked speaks for its turn item;
  * - sign-out forgets everything;
  * - for a department without the task list, its meetings reach the title bar: a まとまり to
  *   choose and received minutes, counted as the member's only when the AI will not read them.
@@ -138,6 +140,48 @@ test('a 返事待ち task the clock gave back is news once (Mac notification), t
   watcher.signal('co')
   await tick(); await tick()
   assert.equal(shown.length, 1)
+  watcher.stop()
+})
+
+test('the server’s fresh notices are Mac notifications once per PC — also on the first look, across a restart; being asked speaks for its new turn item', async () => {
+  const morning = { id: 'n-morning', kind: 'morning_summary', recordId: '', recordType: '', recordTitle: '', version: 0, text: '今日のあなたの番 2件（期限が今日 1件）', createdAt: '2026-11-04T23:30:00Z', read: false, desktop: { title: '今日のあなたの番 2件（期限が今日 1件）', body: 'やることの一覧で確かめてください' } }
+  const stale = { ...morning, id: 'n-old', text: '11月2日の「今日のあなたの番」（朝の知らせ）', desktop: undefined }
+  const server: Server = { turn: [task('task-aaaaaa01', '見積書')], notices: { available: true, unread: 2, items: [morning, stale] }, calls: [] }
+  const shown: Array<[string, string, string]> = []
+  let saved: string[] = []
+  const store = { load: () => saved, save: (ids: string[]) => { saved = ids } }
+  const start = () => createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},
+    desktopNotify: (title, body, click) => shown.push([title, body, click.target]), shownNotices: store,
+    fetch: fakeServer(server), log: quiet, setInterval: () => 0, clearInterval: () => {},
+  })
+  let watcher = start()
+  await watcher.watch('co')
+  // The record-less morning summary is kept (it opens the task list); only the fresh one is shown.
+  assert.deepEqual(watcher.state('co').notices.items.map(i => i.id), ['n-morning', 'n-old'])
+  assert.deepEqual(shown, [['今日のあなたの番 2件（期限が今日 1件）', 'やることの一覧で確かめてください', 'tasks']])
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.equal(shown.length, 1)
+  // Quit and start again the same morning: not shown twice.
+  watcher.stop()
+  watcher = start()
+  await watcher.watch('co')
+  assert.equal(shown.length, 1)
+
+  // Asked: the notice speaks for the new turn item — one notification, the asker's words.
+  const asked = { id: 'n-asked', kind: 'asked', recordId: 'task-bbbbbb02', recordType: 'task', recordTitle: '提案書', version: 1, text: 'Aliceさんから「提案書」を頼まれました', createdAt: '2026-11-05T01:00:00Z', read: false, desktop: { title: 'Aliceさんから頼まれました', body: '提案書' } }
+  server.notices = { available: true, unread: 3, items: [asked, morning, stale] }
+  server.turn = [task('task-aaaaaa01', '見積書'), task('task-bbbbbb02', '提案書')]
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.deepEqual(shown.slice(1), [['Aliceさんから頼まれました', '提案書', 'app']])
+  // A notice id from the server that is not a plain id, or a record-less row of a kind about a record, is dropped.
+  server.notices = { available: true, unread: 2, items: [{ ...asked, id: 'bad id!' }, { ...asked, id: 'n-x', recordId: '' }] }
+  watcher.signal('co')
+  await tick(); await tick()
+  assert.deepEqual(watcher.state('co').notices.items, [])
+  assert.equal(shown.length, 2)
   watcher.stop()
 })
 

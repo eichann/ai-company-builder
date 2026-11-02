@@ -193,6 +193,7 @@ const api: ElectronAPI = {
   getNotificationSettings: (companyId: string) => invoke('notifications:settings', companyId),
   setNotificationSetting: (companyId: string, kind: string, on: boolean) => invoke('notifications:setSetting', companyId, kind, on),
   onNotificationsChanged: callback => subscribe('notifications:changed', callback),
+  onNotificationsOpenTasks: callback => subscribe('notifications:openTasks', callback),
   searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
   getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
   getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),

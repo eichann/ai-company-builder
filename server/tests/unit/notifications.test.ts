@@ -110,6 +110,9 @@ function subscribe(co: string, userId: string): PushEvent[] {
   return got
 }
 
+/** The company's acceptance setting for the engine (team mode: every request waits for 引き受ける). */
+let autoAccepts: ((companyId: string) => boolean) | undefined
+
 function wire() {
   const shared = {
     companyData: source,
@@ -123,19 +126,21 @@ function wire() {
     roleOf,
     accounts: { byIds: ids => new Map(ids.map(id => [id, { email: `${id}@example.com`, name: id.replace('u-', '').replace(/^./, c => c.toUpperCase()) }])) },
     push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+    membersOf: co => MEMBERS[co] ?? [],
   })
   const notify = (companyId: string, userIds: string[], change?: RecordChange) => {
     push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) })
     if (change) service.recordChange(companyId, userIds, change)
   }
   const isMember = (co: string, userId: string) => (MEMBERS[co] ?? []).includes(userId)
-  engine = createRecordEngine({ ...shared, files: { appendHistoryLine: async () => true, fileAtCommit: async () => true }, managedFolders: () => [], isMember, roleOf, notify })
+  engine = createRecordEngine({ ...shared, files: { appendHistoryLine: async () => true, fileAtCommit: async () => true }, managedFolders: () => [], isMember, roleOf, notify, ...(autoAccepts ? { autoAccepts } : {}) })
   writer = createServiceRecordWriter({ ...shared, isMember, roleOf, notify })
   return service
 }
 
 beforeEach(() => {
   nowMs = Date.parse('2026-11-02T01:00:00.000Z')
+  autoAccepts = undefined
   conn = new Database(':memory:')
   initDatabase(conn)
   source = sqliteCompanyData(conn)
@@ -158,10 +163,8 @@ describe('notices from the engine', () => {
       ['due_changed', 'Bobさんが「提案書を作る」の期限を11月20日 15:00に変えました'],
     ])
     expect(list('u-carol').items.map(i => [i.kind, i.text])).toEqual([['ok_completed', 'Bobさんが「提案書を作る」を、あなたの OK で完了にしました']])
-    // bob was handed the task (create) — someone else's affair by default (off) — and acted on the rest.
-    expect(list('u-bob')).toMatchObject({ available: true, unread: 0, items: [] })
-    ok(notices.setSettings(m('u-bob'), { kinds: { others: true } }))
-    expect(list('u-bob').items.map(i => i.text)).toEqual(['Aliceさんが「提案書を作る」であなたを担当にしました'])
+    // bob was asked (create: on by default) and acted on the rest himself.
+    expect(list('u-bob').items.map(i => [i.kind, i.text])).toEqual([['asked', 'Aliceさんから「提案書を作る」を頼まれました']])
   })
 
   it('task v5: 受けられない comes back to the requester (on by default); the AI’s preparation tells the assignee', async () => {
@@ -175,7 +178,7 @@ describe('notices from the engine', () => {
     // While it is the AI's turn nobody is told; the AI's hand-over tells the assignee.
     expect(list('u-bob').items.map(i => i.recordId)).not.toContain(p.id)
     ok(await engine.act(m('u-alice'), { kind: 'ai' as const, source: 'claude-code' }, p.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '空きを確かめました' } }))
-    expect(list('u-bob').items.filter(i => i.recordId === p.id).map(i => i.text)).toEqual(['「下調べ」の用意ができた（Aliceさんの AI）'])
+    expect(list('u-bob').items.filter(i => i.recordId === p.id).map(i => i.text)).toEqual(['Aliceさんから「下調べ」を頼まれました（AI が用意しました）'])
   })
 
   it('an approval’s result is the requester’s notice', async () => {
@@ -229,12 +232,12 @@ describe('notices from the engine', () => {
     expect(JSON.stringify(aliceA)).not.toMatch(/社外秘|先方|task-/)
     expect(aliceB).toEqual([])
     expect(mallory).toEqual([])
-    // bob acted: his own act tells him nothing (only the records signal of being handed the task).
-    expect(bob.filter(e => e.kind === 'notifications')).toEqual([])
+    // bob was asked (one signal) and then acted: his own act tells him nothing more.
+    expect(bob.filter(e => e.kind === 'notifications')).toHaveLength(1)
     // A writer that names the actor (a plugin's write done for bob): bob is still not told.
     const entry = source.forCompany('a').records.ledger(t.id).at(-1)!
     notices.recordChange('a', ['u-bob'], { type: 'task', entry, fields: {} })
-    expect(bob.filter(e => e.kind === 'notifications')).toEqual([])
+    expect(bob.filter(e => e.kind === 'notifications')).toHaveLength(1)
     ok(notices.setSettings(m('u-bob'), { kinds: { others: true } }))
     expect(list('u-bob').items.map(i => i.version)).not.toContain(entry.version)
   })
@@ -309,7 +312,7 @@ describe('notices computed when read', () => {
     nowMs = Date.parse('2026-11-04T00:00:00.000Z') // 11-04 09:00 in Japan
     expect(list('u-alice').items.map(i => [i.kind, i.text])).toEqual([['overdue', '「提案書を作る」が期限（11月2日）を過ぎています']])
     expect(list('u-alice').items).toHaveLength(1)
-    expect(list('u-bob').items).toEqual([])
+    expect(list('u-bob').items.filter(i => i.kind !== 'asked')).toEqual([])
     // Their own task (requester = assignee) is no notice.
     ok(engine.create(m('u-carol'), HUMAN, { type: 'task', title: '自分の', fields: { assignee: 'u-carol', due: '2026-11-01' } }))
     expect(list('u-carol').items).toEqual([])
@@ -323,6 +326,129 @@ describe('notices computed when read', () => {
     expect(list('u-alice').items.map(i => i.kind)).toEqual(['ai_turn_stuck'])
     nowMs += 48 * 3600_000
     expect(list('u-alice').items).toHaveLength(1)
-    expect(list('u-bob').items).toEqual([])
+    expect(list('u-bob').items.filter(i => i.kind !== 'asked')).toEqual([])
+  })
+})
+
+/** `YYYY-MM-DDTHH:MM` in Japan → the server clock's ms. */
+const jst = (local: string) => Date.parse(`${local}:00+09:00`)
+const ofKind = (userId: string, kind: string) => list(userId).items.filter(i => i.kind === kind)
+const rowsOf = (kind: string) => conn.prepare('SELECT user_id, dedupe_key FROM notifications WHERE kind = ? ORDER BY rowid').all(kind) as Array<{ user_id: string; dedupe_key: string }>
+
+describe('noticing one’s own turn without Slack (owner decision 2026-11-03)', () => {
+  it('「今日のあなたの番」: once per business morning per member with a turn, counts when read, none on days off or late', async () => {
+    nowMs = jst('2026-11-02T10:00')
+    await startedTask({ title: '見積書', due: '2026-11-04' })
+    await startedTask({ title: '議事録', due: '2026-11-02' })
+    ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '下書き', fields: { assignee: 'u-bob' } }))
+    // 文化の日 (a holiday): no morning.
+    nowMs = jst('2026-11-03T09:00')
+    notices.sweep('a', 500)
+    expect(rowsOf('morning_summary')).toEqual([])
+    nowMs = jst('2026-11-04T08:29')
+    notices.sweep('a', 500)
+    expect(rowsOf('morning_summary')).toEqual([])
+    nowMs = jst('2026-11-04T08:30')
+    const bobPc = subscribe('a', 'u-bob')
+    notices.sweep('a', 500)
+    notices.sweep('a', 500)
+    // Only bob has something in あなたの番 (alice asked; the others have nothing): one notice, one signal.
+    expect(rowsOf('morning_summary')).toEqual([{ user_id: 'u-bob', dedupe_key: 'morning_summary:2026-11-04' }])
+    expect(bobPc.filter(e => e.kind === 'notifications')).toHaveLength(1)
+    const [summary] = ofKind('u-bob', 'morning_summary')
+    expect(summary).toMatchObject({
+      recordId: '', text: '今日のあなたの番 3件（期限が今日 1件・期限を過ぎた 1件）',
+      desktop: { title: '今日のあなたの番 3件（期限が今日 1件・期限を過ぎた 1件）' },
+    })
+    // Opened after 15:00: no Mac notification any more (the notice stays in the bell).
+    nowMs = jst('2026-11-04T15:00')
+    expect(ofKind('u-bob', 'morning_summary')[0].desktop).toBeUndefined()
+    // A day the server first runs after 15:00 gets none; Saturday none.
+    nowMs = jst('2026-11-05T15:01')
+    notices.sweep('a', 500)
+    nowMs = jst('2026-11-07T09:00')
+    notices.sweep('a', 500)
+    expect(rowsOf('morning_summary')).toHaveLength(1)
+    // The next business morning: one more. The kind turned off: not shown.
+    nowMs = jst('2026-11-09T09:00')
+    notices.sweep('a', 500)
+    expect(ofKind('u-bob', 'morning_summary')).toHaveLength(2)
+    ok(notices.setSettings(m('u-bob'), { kinds: { morning_summary: false } }))
+    expect(ofKind('u-bob', 'morning_summary')).toEqual([])
+  })
+
+  it('「明日が期限」: to the assignee on the last business day before the due, once per due value, never when finished', async () => {
+    nowMs = jst('2026-11-02T10:00')
+    const t = await startedTask({ title: '見積書', due: '2026-11-05' })
+    const monday = await startedTask({ title: '月曜の資料', due: '2026-11-09T10:00' })
+    const done = await startedTask({ title: '終わったもの', due: '2026-11-05' })
+    ok(await engine.act(m('u-alice'), HUMAN, done.id, 'cancel', { expectedVersion: 2, note: '不要になりました' }))
+    nowMs = jst('2026-11-04T08:59')
+    notices.sweep('a', 500)
+    expect(rowsOf('due_tomorrow')).toEqual([])
+    nowMs = jst('2026-11-04T09:00')
+    notices.sweep('a', 500)
+    notices.sweep('a', 500)
+    expect(rowsOf('due_tomorrow')).toEqual([{ user_id: 'u-bob', dedupe_key: `due_tomorrow:${t.id}:2026-11-05` }])
+    expect(ofKind('u-bob', 'due_tomorrow')).toMatchObject([{ text: '「見積書」は明日（11月5日）が期限です', desktop: { title: '明日が期限です', body: '見積書' } }])
+    expect(ofKind('u-alice', 'due_tomorrow')).toEqual([])
+    // The due moved: the old one is no longer news; told again for the new value, on its own eve.
+    ok(await engine.act(m('u-bob'), HUMAN, t.id, 'set_due', { expectedVersion: 2, args: { due: '2026-11-06' } }))
+    expect(ofKind('u-bob', 'due_tomorrow')[0].desktop).toBeUndefined()
+    nowMs = jst('2026-11-05T09:00')
+    notices.sweep('a', 500)
+    expect(rowsOf('due_tomorrow').map(r => r.dedupe_key)).toEqual([`due_tomorrow:${t.id}:2026-11-05`, `due_tomorrow:${t.id}:2026-11-06`])
+    // A Monday due: Friday is the last business day before it (nothing on Wednesday or Thursday).
+    nowMs = jst('2026-11-06T09:00')
+    notices.sweep('a', 500)
+    expect(ofKind('u-bob', 'due_tomorrow').filter(i => i.recordId === monday.id))
+      .toMatchObject([{ text: '「月曜の資料」の期限は11月9日 10:00です（その前の最後の営業日のお知らせ）', desktop: { title: '11月9日が期限です' } }])
+    // The cancelled task was never told; the kind off → not shown.
+    expect(rowsOf('due_tomorrow').map(r => r.dedupe_key).join()).not.toContain(done.id)
+    expect(rowsOf('due_tomorrow')).toHaveLength(3)
+    ok(notices.setSettings(m('u-bob'), { kinds: { due_tomorrow: false } }))
+    expect(ofKind('u-bob', 'due_tomorrow')).toEqual([])
+  })
+
+  it('being asked: once per assignment — by a person, by someone’s AI, and when the own AI hands over', async () => {
+    const bobPc = subscribe('a', 'u-bob')
+    // A person asks.
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '見積書', fields: { assignee: 'u-bob' } })).record
+    expect(ofKind('u-bob', 'asked')).toMatchObject([{ recordId: t.id, text: 'Aliceさんから「見積書」を頼まれました', desktop: { title: 'Aliceさんから頼まれました', body: '見積書' } }])
+    expect(bobPc.filter(e => e.kind === 'notifications')).toHaveLength(1)
+    // The same change told again (a retry) writes and signals nothing more.
+    const entry = source.forCompany('a').records.ledger(t.id).at(-1)!
+    notices.recordChange('a', ['u-bob'], { type: 'task', entry, fields: { assignee: 'u-bob', requested_by: 'u-alice', next_actor: 'u-bob' } })
+    expect(ofKind('u-bob', 'asked')).toHaveLength(1)
+    expect(bobPc.filter(e => e.kind === 'notifications')).toHaveLength(1)
+    // Someone's AI asks (alice's AI creates it for bob).
+    const byAi = ok(engine.create(m('u-alice'), { kind: 'ai' as const, source: 'claude-code' }, { type: 'task', title: '下調べ', fields: { assignee: 'u-bob' } })).record
+    expect(ofKind('u-bob', 'asked').filter(i => i.recordId === byAi.id).map(i => i.text)).toEqual(['Aliceさんから「下調べ」を頼まれました'])
+    // Prepared by bob's own AI first: told when his AI hands it over (he did not ask it of himself), once.
+    const p = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '準備', state: 'preparing', fields: { assignee: 'u-bob' } })).record
+    expect(ofKind('u-bob', 'asked').map(i => i.recordId)).not.toContain(p.id)
+    ok(await engine.act(m('u-bob'), { kind: 'ai' as const, source: 'claude-code' }, p.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '確かめました' } }))
+    expect(ofKind('u-bob', 'asked').filter(i => i.recordId === p.id).map(i => i.text)).toEqual(['Aliceさんから「準備」を頼まれました（AI が用意しました）'])
+    // His own AI making his own task: nothing.
+    const own = ok(engine.create(m('u-bob'), { kind: 'ai' as const, source: 'claude-code' }, { type: 'task', title: '自分の', fields: { assignee: 'u-bob' } })).record
+    expect(ofKind('u-bob', 'asked').map(i => i.recordId)).not.toContain(own.id)
+    expect(ofKind('u-bob', 'asked')).toHaveLength(3)
+    // Asking is about the assignee: alice (the requester) never gets `asked`.
+    expect(ofKind('u-alice', 'asked')).toEqual([])
+    // Twelve hours on, being asked is no longer a Mac notification.
+    nowMs += 12 * 3600_000
+    expect(ofKind('u-bob', 'asked').every(i => i.desktop === undefined)).toBe(true)
+  })
+
+  it('being asked with team mode on: the 引き受け待ち notice asks to decide, once', async () => {
+    autoAccepts = () => false
+    notices = wire()
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '見積書', fields: { assignee: 'u-bob' } })).record
+    expect(t.state).toBe('awaiting_acceptance')
+    expect(ofKind('u-bob', 'asked').map(i => i.text)).toEqual(['Aliceさんから「見積書」を頼まれました。引き受けるか、受けられないかを決めてください'])
+    ok(await engine.act(m('u-bob'), HUMAN, t.id, 'accept', { expectedVersion: 1 }))
+    expect(ofKind('u-bob', 'asked')).toHaveLength(1)
+    ok(notices.setSettings(m('u-bob'), { kinds: { asked: false } }))
+    expect(ofKind('u-bob', 'asked')).toEqual([])
   })
 })

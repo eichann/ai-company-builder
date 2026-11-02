@@ -9,6 +9,7 @@ contract.events fs:changes
 contract.events handoff:changed
 contract.events minutes:changed
 contract.events notifications:changed
+contract.events notifications:openTasks
 contract.events plugins:changed
 contract.events setup:progress
 contract.events sparse:progress
@@ -423,6 +424,7 @@ contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromCha
 contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
 contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minutes:changed'>
 contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
+contract.type ElectronAPI.onNotificationsOpenTasks = onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
 contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
@@ -596,6 +598,7 @@ contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChange
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
 contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
+contract.type IpcEventChannels.'notifications:openTasks' = 'notifications:openTasks': [data: { companyId: string }]
 contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
@@ -1061,6 +1064,7 @@ main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
 main.send minutes:changed @ main.ts
 main.send notifications:changed @ main.ts
+main.send notifications:openTasks @ main.ts
 main.send plugins:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
@@ -1321,6 +1325,8 @@ preload onMinutesChanged -> on minutes:changed(<fn>) ; removeListener minutes:ch
 preload onMinutesChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onNotificationsChanged -> on notifications:changed(<fn>) ; removeListener notifications:changed(<fn>)
 preload onNotificationsChanged : (callback: (data: { companyId: string; }) => void) => () => void
+preload onNotificationsOpenTasks -> on notifications:openTasks(<fn>) ; removeListener notifications:openTasks(<fn>)
+preload onNotificationsOpenTasks : (callback: (data: { companyId: string; }) => void) => () => void
 preload onPluginsChanged -> on plugins:changed(<fn>) ; removeListener plugins:changed(<fn>)
 preload onPluginsChanged : (callback: (change: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)

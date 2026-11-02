@@ -36,7 +36,9 @@ a plugin can never draw a notice (§2-2).
   create / act / undo, the service writer, the external writer). `composition.ts`
   `notifyRecords` sends the `records` signal as before and hands the entry to
   `services/notifications.ts` `recordChange`, which writes one notice per named member — **never
-  the entry's actor, and only a member who can read the record now** (an owner-only record's
+  the entry's actor (except their own AI handing them what someone else asked: `asked` below; the
+  engine's `tell` names the member for an AI actor's entry for that), and only a member who can
+  read the record now** (an owner-only record's
   notice reaches its owner alone, owners/admins included; `records.md`) — and pushes `{ kind: 'notifications', version }` to those who have that
   kind on. A failure there is logged and never fails the engine's write.
 - **Absence** (`records.md` "Absence and the delegate"; `coverOf` / `managersOf` injected): a
@@ -56,12 +58,45 @@ a plugin can never draw a notice (§2-2).
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
   (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee) and `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`, both on by default),
-  `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above), `others` (everything else: handed
-  to you — also the AI's 「用意ができた」 / 「先に渡す」 and 「自分で進める」 of task v5 —, sent back,
+  `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above),
+  `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
+  「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
   assignee hears at the hand-over. **Defaults (E-25)**: all on except `others` (CC and others' affairs). A
   member switches kinds (`PUT /me/notifications/settings`); kept per company × member on the
   server, so both PCs agree. Kinds filter at read time (notices are always stored).
+- **Noticing one's own turn without Slack** (owner decision 2026-11-03; all on by default, each
+  switchable like the other kinds; no new counter — they are bell notices, the title bar's count
+  stays 「あなたの番」's):
+  - `asked` 「Aliceさんから「…」を頼まれました」 (`askedOf`): a request type's entry that leaves the
+    member its assignee in a person's turn and either made them the assignee (a create, an
+    `assign`; by a person or anyone's AI) or handed it over from a turn that told nobody
+    (`noTurnStates`: the AI's preparation — also by the member's own AI —, a proposal; text +
+    「（AI が用意しました）」). The asker is `requested_by`, else whoever made them the assignee —
+    never the member. In 引き受け待ち the text adds 「引き受けるか、受けられないかを決めてください」.
+    **Once per assignment**: dedupe key `asked:<record>:<version that made them the assignee>`,
+    so a hand-over after a create that already told them, or a retried notify, writes nothing;
+    the row's actor is the asker.
+  - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
+    on a company business day (weekends, Japanese holidays, the company's days off: none) from
+    `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
+    (`membersOf`) who is not absent today and has something in 「あなたの番」 (`waitingFor` with whom
+    they cover, read with their reader — the title bar's items), key `morning_summary:<day>`. A
+    server down until after 15:00 skips the day (no evening greeting). **No record and no counts
+    stored** (`recordId` ''; `RECORDLESS_NOTIFICATION_KINDS`): the counts are built when read —
+    today's shows 「あなたの番」 as it is now, an older one only 「11月4日の「今日のあなたの番」（朝の知らせ）」.
+    Opening it shows the task list.
+  - `due_tomorrow` 「「…」は明日（11月5日）が期限です」: the server clock, from `DUE_TOMORROW_FROM`
+    09:00 of **the last business day before the due's day** (`dueTomorrowDays`: today a business
+    day, the due's day after today and not after the next business day — a Monday or
+    after-holiday due is told on the business day before), to the assignee who can read it, the
+    request not final (done / cancelled never), once per due value (`due_tomorrow:<record>:<due>`
+    — a moved due is told again on its own eve).
+  - Fresh ones carry `desktop: { title, body }` in the list answer — the server's clock decides
+    what may still be a Mac notification: the morning summary of today, unread, before 15:00 and
+    with something in the turn; 「明日が期限」 unread, before the due's day, the due unchanged, not
+    final; `asked` unread within `ASKED_DESKTOP_FRESH_MS` (12 h). The new kinds are not handed to
+    `outside` (Slack) from the clock; `asked` rows go there like the engine's other notices.
 - Written by the server clock (below, `notifications.sweep`), with the same rule run again when
   the member reads as a safety net (same dedupe keys, so never twice): **overdue** (A-2) — a
   request the member asked of **someone else** (assignee set and not them), not final, to the
@@ -122,7 +157,9 @@ compare-and-set and ledger), and writes notices.
   in `SERVICE_TRANSITIONS.task`, and the service writer allows a type that is not service-owned
   only those state changes (never a field-only change). A task someone moved meanwhile is
   `stale` and left alone.
-- **Notices**: `notifications.sweep(companyId, limit)` (overdue and stuck AI turns, above).
+- **Notices**: `notifications.sweep(companyId, limit)` (overdue, stuck AI turns, acceptance
+  waiting, 「明日が期限」 and 「今日のあなたの番」, above; at most `limit` members per run for the
+  summary, the ones already told today skipped through `usersWithKey`).
 - **Expired content**: `expireContent` — the content store's retention, per company
   (`RecordContentEraser.eraseExpired`, reason `retention`; `records.md` "The content store").
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
@@ -148,12 +185,22 @@ carry on. The app never acts on the signal itself: it only asks the server again
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
   (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `markRead` / `settings` /
   `setSetting`, event `notifications:changed`. Sign-out and quit forget everything.
-- **Mac notifications (E-27)** only for an approval request or an item new in 「あなたの番」 — a
+- **Mac notifications (E-27)** only for an approval request, an item new in 「あなたの番」, or a
+  notice the server marks fresh (`desktop`, above) — `desktopNoticesOf` in
+  `client/shared/notifications-app.ts`: a fresh notice is shown **also on the first look** (the
+  server decides freshness: the app opened at 10:00 gets that morning's summary) and **once per
+  PC** — the ids shown are kept in `<userData>/notices-shown.json` (`shown-store.ts`, ids only),
+  so a restart does not greet twice; a new turn item whose record has a fresh `asked` notice is
+  not notified again (one notification per request, the asker's words). Clicking the morning
+  summary's notification focuses the window and sends `notifications:openTasks` (the renderer
+  shows the task list; `useOpenTasksRequest`), the others only focus. An app released before this
+  drops a notice with `recordId` '' (its parser wants a record id), so it only sees the bell's
+  unread number include it. Otherwise for turn items — a
   返事待ち task given back by the clock counts as new (`turnItemKey`: the server's `waitCameBack`; it was
   in the list while it waited), worded 「返事の見込みを過ぎました（あなたの番に戻りました）」 —
   computed from what the server answered (never from a signal), through the shell layer
   (`DesktopShell.notify`, Electron's `Notification` in `electron-adapter.ts`; a click focuses the
-  main window). The first look at a company notifies nothing; at most 3 per check. Words in
+  main window). The first look at a company notifies no turn item; at most 3 per check. Words in
   `client/shared/notifications-app.ts` `desktopNoticeFor` (the record's title as the body).
 - Renderer: `src/features/notifications/` — `TitleBarNotices` in the title bar (`TitleBar`
   `notices` slot, composed by `AppShell`). **Two roles, never mixed** (新しい画面のデモ I.1 / I.2):
@@ -175,7 +222,12 @@ carry on. The app never acts on the signal itself: it only asks the server again
 
 ## Tests
 
-`server/tests/unit/notifications.test.ts` (a member never receives nor marks another's;
+`server/tests/unit/notifications.test.ts` (one morning summary per business day per member with
+a turn — none on a holiday, a weekend, before 08:30 or first run after 15:00, never twice, counts
+built when read, gone when the kind is off; 「明日が期限」 once per due value to the assignee on the
+last business day before it, not for a cancelled task, again for a moved due; `asked` once per
+assignment for a person, someone's AI, the own AI's hand-over and 引き受け待ち, never the requester —
+mutation-checked; a member never receives nor marks another's;
 cross-company; the push is kind + version only, to the told members, never the actor; gone when
 access is lost; read state shared by two service instances = two PCs; default kinds and switches;
 overdue once, the next business morning, only for the requester; stuck AI turn after 24 h),
@@ -189,9 +241,12 @@ owner; another company untouched and still run when one fails; one company's bac
 run; no overlapping runs), permission-matrix rows,
 owner-only record's notices only to its owner (not other members, not owners/admins; no row, no
 signal), `client/tests/notifications.test.ts` (signal only refetches, content-carrying event dropped, an
-unknown kind dropped without closing, session in the header, Mac notification only for new items),
+unknown kind dropped without closing, session in the header, Mac notification only for new items;
+a fresh notice once per PC across a restart, also on the first look, the morning summary opening
+the task list, `asked` speaking for its new turn item),
 `client/tests/ui/title-bar-notices.spec.ts` (opening a notice marks only it read and opens its
-record; the dot goes; 「あなたの番」 lists what waits) — each mutation-checked.
+record; the dot goes; 「あなたの番」 lists what waits; the morning summary opens the task list) —
+each mutation-checked.
 
 ## Not yet
 

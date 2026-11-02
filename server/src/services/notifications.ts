@@ -15,14 +15,21 @@
  *   per version) are written by the server clock (`sweep`, services/
  *   server-clock.ts); the same rule runs when the member reads, as a safety
  *   net — the dedupe keys make the two meet once.
+ * - Noticing one's own turn without Slack (owner decision 2026-11-03): being
+ *   asked (`asked`, on every person's assignment and on the AI's hand-over of
+ *   what someone asked, once per assignment), the business morning's
+ *   「今日のあなたの番」 (`morning_summary`, the clock, once per member and
+ *   business day, counts only — built when read) and a due on the next
+ *   business day (`due_tomorrow`, the clock, to the assignee, once per due
+ *   value). Fresh ones carry `desktop`: the app's Mac notification.
  * - The push channel carries only `{ kind: 'notifications', version }`, a
  *   fresh value: the app asks again; it never acts on the signal.
  */
-import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX } from '../../shared/types/notifications'
+import { isNotificationKind, NOTIFICATION_DEFAULTS, NOTIFICATION_KINDS, NOTIFICATION_LIST_MAX, RECORDLESS_NOTIFICATION_KINDS } from '../../shared/types/notifications'
 import type { NotificationItem, NotificationKind, NotificationList, NotificationSettings } from '../../shared/types/notifications'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
-import { aiTurnStates, type TypeDefinition } from '../../shared/core/record-types'
+import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
 import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { AccountDirectory } from '../ports/accounts'
@@ -68,6 +75,10 @@ export interface NotificationServiceDeps {
   coverOf?: (companyId: string, userId: string) => AbsenceCover | null
   managersOf?: (companyId: string, userId: string) => string[]
   activeAbsences?: (companyId: string) => Array<{ userId: string; delegateId: string }>
+  /** Every member of the company (the morning summary is per member). None without it: no summary. */
+  membersOf?: (companyId: string) => string[]
+  /** Whom the member covers today (their 「あなたの番」 holds those items too; services/absences.ts). */
+  actsFor?: (companyId: string, userId: string) => string[]
 }
 
 /** Why an absentee's item reaches nobody (a `delegate_stopped` notice's dedupe key ends with it). */
@@ -103,6 +114,33 @@ export function overdueMorning(nowMs: number, timeZone: string, holidays: string
  */
 export function acceptanceReminderAt(waitingSince: string, holidays: string[]): string {
   return `${nextBusinessDay(waitingSince.slice(0, 10), new Set(holidays))}T${waitingSince.slice(11, 16)}`
+}
+
+/**
+ * 「今日のあなたの番」 (owner decision 2026-11-03): written from this time of a
+ * business morning (company time) by the server clock, and not after
+ * MORNING_SUMMARY_UNTIL — a server that was down all morning skips the day
+ * rather than greet the member in the evening. The app shows it as a Mac
+ * notification only until then too (it opened late: no stale greeting).
+ */
+export const MORNING_SUMMARY_FROM = '08:30'
+export const MORNING_SUMMARY_UNTIL = '15:00'
+/** 「明日が期限」 is written from this time of the last business day before the due's day. */
+export const DUE_TOMORROW_FROM = '09:00'
+/** Being asked shows as a Mac notification only this long after it happened (an app opened days later stays quiet). */
+export const ASKED_DESKTOP_FRESH_MS = 12 * 60 * 60_000
+
+/**
+ * The due days a 「明日が期限」 notice is written for today (`YYYY-MM-DD`,
+ * company time): today is a business day and the due's day is after today
+ * but not after the next business day — the due's eve, or, when the days
+ * before the due are off (a Monday due, a due on a holiday), the last
+ * business day before it. Null on a day off. `[from, toExclusive)` compare
+ * as text with a date or a date + time due.
+ */
+export function dueTomorrowDays(today: string, holidays: string[]): { from: string; toExclusive: string } | null {
+  if (!isBusinessDay(today, holidays)) return null
+  return { from: addDays(today, 1), toExclusive: addDays(nextBusinessDay(today, new Set(holidays)), 1) }
 }
 
 /** Notices older than this are forgotten (when the member next reads). */
@@ -171,6 +209,37 @@ export function noticeKind(userId: string, change: RecordChange, final: Readonly
   if (stateChanged && str(fields.requested_by) === userId && str(fields.next_actor) === userId && str(fields.assignee) !== userId) return 'request_returned'
   if (str(fields.requested_by) === userId && entry.changes.some(c => c.field === 'due')) return 'due_changed'
   return 'others'
+}
+
+/**
+ * Whether this entry asks `userId` something (`asked`, owner decision
+ * 2026-11-03): a request type's entry that leaves them its assignee in a
+ * person's turn, and either made them the assignee (a create, an `assign`) or
+ * handed it over from a turn that told nobody (the AI's preparation, a
+ * proposal: `noTurnStates`). The asker is the requester (else whoever made
+ * them the assignee), never themselves. `since` is the version of the entry
+ * that made them the assignee: one notice per assignment (dedupe key), so a
+ * hand-over after a create that already told them tells nothing more.
+ */
+export function askedOf(userId: string, change: RecordChange, def: TypeDefinition | undefined, ledger: () => LedgerEntry[]): { asker: string; since: number } | null {
+  if (!def || !def.implements.includes('request')) return null
+  const { entry, fields } = change
+  if (str(fields.assignee) !== userId || entry.toState === null) return null
+  const quiet = noTurnStates(def)
+  if (quiet.has(entry.toState)) return null
+  const madeAssignee = entry.changes.some(c => c.field === 'assignee' && c.after === userId)
+  const handedOver = entry.fromState !== null && entry.fromState !== entry.toState && quiet.has(entry.fromState) && !def.final.includes(entry.fromState)
+  if (!madeAssignee && !handedOver) return null
+  let since = entry.version
+  let assignedBy: string | null = entry.actorId
+  if (!madeAssignee) {
+    const set = [...ledger()].reverse().find(e => e.changes.some(c => c.field === 'assignee' && c.after === userId))
+    if (!set) return null
+    since = set.version
+    assignedBy = set.actorId
+  }
+  const asker = str(fields.requested_by) ?? assignedBy
+  return asker === null || asker === userId ? null : { asker, since }
 }
 
 export function createNotificationService(deps: NotificationServiceDeps) {
@@ -304,8 +373,91 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     if (fresh.length === 0) return 0
     const told = [...new Set(fresh.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId))]
     if (told.length > 0) { try { deps.push(companyId, told) } catch { /* their own check catches up */ } }
-    try { deps.outside?.(companyId, fresh) } catch { /* never fails the notices */ }
+    // The morning summary and 「明日が期限」 are the app's own reminders, not an outside message.
+    const outside = fresh.filter(r => r.kind !== 'morning_summary' && r.kind !== 'due_tomorrow')
+    if (outside.length > 0) { try { deps.outside?.(companyId, outside) } catch { /* never fails the notices */ } }
     return fresh.length
+  }
+
+  const zoneOf = (companyId: string) => deps.timeZoneOf?.(companyId) ?? DEFAULT_COMPANY_TIME_ZONE
+  const holidaysOf = (companyId: string) => deps.holidaysOf?.(companyId) ?? []
+
+  /**
+   * The member's 「あなたの番」 now — the same items the title bar counts
+   * (`records.myTurn`: their own and those of whom they cover, read with
+   * their reader) — with how many are due today and past due (company day).
+   */
+  function turnCounts(companyId: string, handle: CompanyData, userId: string, mayRead: (userId: string, rec: RecordAccessRow) => boolean, today: string) {
+    const waiting = waitingFor(handle.records, [userId, ...(deps.actsFor?.(companyId, userId) ?? [])], new Set(handle.plugins.oldConnectionRecordIds()))
+      .filter(w => mayRead(userId, w.row))
+    let dueToday = 0
+    let overdue = 0
+    for (const s of handle.records.states(waiting.map(w => w.row.id))) {
+      let fields: Record<string, LedgerValue> = {}
+      try { fields = JSON.parse(s.fields) as Record<string, LedgerValue> } catch { continue }
+      const day = str(fields.due)?.slice(0, 10)
+      if (day === today) dueToday++
+      else if (day !== undefined && day < today) overdue++
+    }
+    return { total: waiting.length, dueToday, overdue }
+  }
+
+  /**
+   * 「今日のあなたの番」: on a business day between MORNING_SUMMARY_FROM and
+   * MORNING_SUMMARY_UNTIL (company time), one notice per member who has
+   * something in 「あなたの番」 and is not absent today (`morning_summary:<day>`;
+   * no record — the counts are built when read). Nothing on a day off.
+   */
+  function morningRows(companyId: string, handle: CompanyData, limit: number): NotificationRow[] {
+    const now = companyNow(clock.nowMs(), zoneOf(companyId))
+    const today = now.slice(0, 10)
+    const time = now.slice(11, 16)
+    if (!isBusinessDay(today, holidaysOf(companyId)) || time < MORNING_SUMMARY_FROM || time >= MORNING_SUMMARY_UNTIL) return []
+    const key = `morning_summary:${today}`
+    const done = new Set(handle.notifications.usersWithKey(key))
+    const mayRead = readersIn(companyId, handle)
+    const rows: NotificationRow[] = []
+    for (const userId of (deps.membersOf?.(companyId) ?? []).filter(u => !done.has(u)).slice(0, limit)) {
+      if (deps.coverOf?.(companyId, userId)) continue // absent today: their delegate has it
+      if (turnCounts(companyId, handle, userId, mayRead, today).total === 0) continue
+      rows.push({
+        id: deps.ids.newId(), userId, kind: 'morning_summary', recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
+        dedupeKey: key, createdAt: clock.now(), readAt: null,
+      })
+    }
+    return rows
+  }
+
+  /**
+   * 「明日が期限」: from DUE_TOMORROW_FROM of the last business day before a
+   * request's due day (`dueTomorrowDays`), to its assignee who can read it,
+   * unless it is final (done, cancelled). Once per due value
+   * (`due_tomorrow:<record>:<due>`): a due moved later is told again.
+   */
+  function dueTomorrowRows(companyId: string, handle: CompanyData, defs: Map<string, TypeDefinition>, limit: number): NotificationRow[] {
+    const now = companyNow(clock.nowMs(), zoneOf(companyId))
+    const days = dueTomorrowDays(now.slice(0, 10), holidaysOf(companyId))
+    if (!days || now.slice(11, 16) < DUE_TOMORROW_FROM) return []
+    const open = [...new Set([...defs.values()].flatMap(d => d.states.filter(st => !d.final.includes(st))))]
+    const candidates = handle.records.candidates({ types: [...defs.keys()], states: open, ranges: [{ name: 'due', gte: days.from, lt: days.toExclusive }] }, limit)
+    const byId = new Map(candidates.map(r => [r.id, r]))
+    const mayRead = readersIn(companyId, handle)
+    const rows: NotificationRow[] = []
+    for (const st of handle.records.states(candidates.map(r => r.id))) {
+      const rec = byId.get(st.recordId)
+      const def = rec ? defs.get(rec.type) : undefined
+      if (!rec || !def || st.state === null || def.final.includes(st.state)) continue
+      let fields: Record<string, LedgerValue> = {}
+      try { fields = JSON.parse(st.fields) as Record<string, LedgerValue> } catch { continue }
+      const assignee = str(fields.assignee)
+      const due = str(fields.due)
+      if (assignee === null || due === null || !mayRead(assignee, rec)) continue
+      rows.push({
+        id: deps.ids.newId(), userId: assignee, kind: 'due_tomorrow', recordId: rec.id, recordVersion: st.version, action: '', actorId: null, actorKind: null,
+        dedupeKey: `due_tomorrow:${rec.id}:${due}`, createdAt: clock.now(), readAt: null,
+      })
+    }
+    return rows
   }
 
   /** The read-time safety net: what the member asked for, by the clock's rule (no duplicates: same keys). */
@@ -339,8 +491,29 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         ? `${who}も代わりの人も不在のため、${t}を受け持つ人がいません`
         : `${who}の不在中、代わりの人が${t}を見られないため止まっています（権限が足りない）`
     }
-    const text = textFor(row, t, actor, def, entry)
+    const text = row.kind === 'asked' ? askedText(row, t, personText(row.actorId, names), def, entry) : textFor(row, t, actor, def, entry)
     return row.forUserId ? `（${personText(row.forUserId, names)}の代わり）${text}` : text
+  }
+
+  /** 「Aliceさんから「見積書」を頼まれました」 (+ the AI prepared it first; + 引き受け待ち asks to decide). */
+  function askedText(row: NotificationRow, t: string, asker: string, def: TypeDefinition | undefined, entry: () => LedgerEntry | undefined): string {
+    const since = Number(row.dedupeKey?.split(':').at(-1))
+    const prepared = since !== row.recordVersion ? '（AI が用意しました）' : ''
+    const awaiting = def !== undefined && entry()?.toState === acceptanceOf(def.name)?.state ? '。引き受けるか、受けられないかを決めてください' : ''
+    return `${asker}から${t}を頼まれました${prepared}${awaiting}`
+  }
+
+  /** 「明日が期限」's due (from its dedupe key) and the words for it, relative to `today`. */
+  function dueTomorrowWords(row: NotificationRow, today: string): { due: string; when: string } {
+    const due = row.dedupeKey?.split(':').slice(2).join(':') ?? ''
+    return { due, when: due.slice(0, 10) === addDays(today, 1) ? '明日' : dueText(due.slice(0, 10)) }
+  }
+
+  /** The morning summary's words: 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」. */
+  function morningText(c: { total: number; dueToday: number; overdue: number }): string {
+    if (c.total === 0) return '今日のあなたの番は、いまはありません'
+    const parts = [...(c.dueToday > 0 ? [`期限が今日 ${c.dueToday}件`] : []), ...(c.overdue > 0 ? [`期限を過ぎた ${c.overdue}件`] : [])]
+    return `今日のあなたの番 ${c.total}件${parts.length > 0 ? `（${parts.join('・')}）` : ''}`
   }
 
   function textFor(row: NotificationRow, t: string, actor: string, def: TypeDefinition | undefined, entry: () => LedgerEntry | undefined): string {
@@ -427,13 +600,24 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const recipients = new Set(userIds)
       const stops: NotificationRow[] = []
       const readerOf = readersIn(companyId, handle)
+      let ledger: LedgerEntry[] | null = null
+      const ledgerOf = () => (ledger ??= handle.records.ledger(change.entry.recordId))
       for (const userId of recipients) {
-        if (userId === change.entry.actorId || !mayRead(userId)) continue
-        const kind = noticeKind(userId, change, final)
-        const base = {
-          recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
-          actorKind: change.entry.actorKind, dedupeKey: null, createdAt: now, readAt: null,
-        }
+        if (!mayRead(userId)) continue
+        const asked = askedOf(userId, change, def, ledgerOf)
+        // Never the actor — except their own AI handing them what someone else asked (they did not do that).
+        if (userId === change.entry.actorId && !(asked && change.entry.actorKind === 'ai')) continue
+        const kind = asked ? 'asked' : noticeKind(userId, change, final)
+        const base = asked
+          ? {
+            // Once per assignment; the asker stands as the actor (「〇〇さんから頼まれました」).
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: asked.asker,
+            actorKind: 'human' as const, dedupeKey: `asked:${change.entry.recordId}:${asked.since}`, createdAt: now, readAt: null,
+          }
+          : {
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+            actorKind: change.entry.actorKind, dedupeKey: null, createdAt: now, readAt: null,
+          }
         rows.push({ id: deps.ids.newId(), userId, kind, ...base })
         // An absentee's notice also goes to their delegate (their own read check), or the stop to the managers.
         const cover = deps.coverOf?.(companyId, userId) ?? null
@@ -449,10 +633,13 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       }
       if (stops.length > 0) writeComputed(companyId, handle, stops)
       if (rows.length === 0) return
-      handle.notifications.insert(rows)
-      const told = rows.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId)
+      // An `asked` already told for this assignment is skipped (its dedupe key).
+      const written = new Set(handle.notifications.insert(rows))
+      const fresh = rows.filter(r => written.has(r.id))
+      if (fresh.length === 0) return
+      const told = [...new Set(fresh.filter(r => kindsOf(handle, r.userId)[r.kind as NotificationKind]).map(r => r.userId))]
       if (told.length > 0) deps.push(companyId, told)
-      try { deps.outside?.(companyId, rows) } catch { /* never fails the engine's write */ }
+      try { deps.outside?.(companyId, fresh) } catch { /* never fails the engine's write */ }
     },
 
     /**
@@ -476,6 +663,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const unaccepted = awaiting.length > 0 ? handle.records.candidates({ types: types.filter(t => acceptanceOf(t)), states: awaiting }, limit) : []
       const seen = new Map([...overdue, ...stuck, ...unaccepted].map(r => [r.id, r]))
       let written = writeComputed(companyId, handle, dueRowsOf(companyId, handle, [...seen.values()], defs, null))
+      written += writeComputed(companyId, handle, dueTomorrowRows(companyId, handle, defs, limit))
+      written += writeComputed(companyId, handle, morningRows(companyId, handle, limit))
       // Absences that began (or whose delegate became absent): what waits for the absentee and reaches nobody.
       for (const a of (deps.activeAbsences?.(companyId) ?? []).slice(0, limit)) {
         const cover = deps.coverOf?.(companyId, a.userId)
@@ -505,9 +694,11 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       handle.notifications.prune(member.userId, new Date(clock.nowMs() - NOTIFICATION_KEEP_DAYS * 86_400_000).toISOString())
       const kinds = kindsOf(handle, member.userId)
       const rows = handle.notifications.list(member.userId, ROWS_READ).filter(r => isNotificationKind(r.kind) && kinds[r.kind])
-      const recs = new Map(handle.records.byIds([...new Set(rows.map(r => r.recordId))]).map(r => [r.id, r]))
+      const recordless = new Set<string>(RECORDLESS_NOTIFICATION_KINDS)
+      const recs = new Map(handle.records.byIds([...new Set(rows.filter(r => r.recordId !== '').map(r => r.recordId))]).map(r => [r.id, r]))
       // Read access is checked now: a record the member can no longer read shows nothing.
       const visible = rows.filter(r => {
+        if (recordless.has(r.kind)) return r.recordId === ''
         const rec = recs.get(r.recordId)
         return rec !== undefined && rec.removedAt === null && reader.record(rec)
       })
@@ -516,12 +707,48 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const names = deps.accounts.byIds([...new Set(shown.flatMap(r => [
         ...(r.actorId && r.actorKind !== 'external' ? [r.actorId] : []), ...(r.forUserId ? [r.forUserId] : []),
       ]))])
+      // The company's clock decides what is still fresh enough for a Mac notification (`desktop`).
+      const zone = zoneOf(member.companyId)
+      const nowMs = clock.nowMs()
+      const local = companyNow(nowMs, zone)
+      const today = local.slice(0, 10)
+      let counts: ReturnType<typeof turnCounts> | null = null
+      const countsNow = () => (counts ??= turnCounts(member.companyId, handle, member.userId, (_, rec) => reader.record(rec), today))
+      const dueStates = new Map(handle.records.states(shown.filter(r => r.kind === 'due_tomorrow').map(r => r.recordId)).map(st => [st.recordId, st]))
       const items: NotificationItem[] = shown.map(r => {
+        const read = r.readAt !== null
+        if (r.kind === 'morning_summary') {
+          const day = r.dedupeKey?.split(':')[1] ?? ''
+          // Built when read: today's shows the turn as it is now; an older one only says what it was.
+          const text = day === today ? morningText(countsNow()) : `${dueText(day)}の「今日のあなたの番」（朝の知らせ）`
+          const desktop = day === today && !read && local.slice(11, 16) < MORNING_SUMMARY_UNTIL && countsNow().total > 0
+            ? { title: text, body: 'やることの一覧で確かめてください' } : undefined
+          return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read, ...(desktop ? { desktop } : {}) }
+        }
         const rec = recs.get(r.recordId) as RecordRow
+        const def = types.get(rec.type)?.definition
+        let text: string
+        let desktop: NotificationItem['desktop']
+        if (r.kind === 'due_tomorrow') {
+          const { due, when } = dueTomorrowWords(r, companyNow(Date.parse(r.createdAt), zone).slice(0, 10))
+          text = when === '明日' ? `「${rec.title}」は明日（${dueText(due)}）が期限です` : `「${rec.title}」の期限は${dueText(due)}です（その前の最後の営業日のお知らせ）`
+          const st = dueStates.get(rec.id)
+          let current: string | null = null
+          try { current = st ? str((JSON.parse(st.fields) as Record<string, LedgerValue>).due) : null } catch { current = null }
+          // Still before the due's day, still this due, not finished.
+          if (!read && st && st.state !== null && !def?.final.includes(st.state) && current === due && today < due.slice(0, 10)) {
+            const now = dueTomorrowWords(r, today).when
+            desktop = { title: now === '明日' ? '明日が期限です' : `${now}が期限です`, body: rec.title }
+          }
+        } else {
+          text = textOf(r, rec, def, handle, names)
+          if (r.kind === 'asked' && !read && nowMs - Date.parse(r.createdAt) < ASKED_DESKTOP_FRESH_MS) {
+            desktop = { title: `${personText(r.actorId, names)}から頼まれました`, body: rec.title }
+          }
+        }
         return {
           id: r.id, kind: r.kind as NotificationKind, recordId: rec.id, recordType: rec.type, recordTitle: rec.title,
-          version: r.recordVersion, text: textOf(r, rec, types.get(rec.type)?.definition, handle, names),
-          createdAt: r.createdAt, read: r.readAt !== null, ...(r.forUserId ? { forUserId: r.forUserId } : {}),
+          version: r.recordVersion, text, createdAt: r.createdAt, read, ...(r.forUserId ? { forUserId: r.forUserId } : {}), ...(desktop ? { desktop } : {}),
         }
       })
       return ok({ available: true, unread: visible.filter(r => r.readAt === null).length, items })

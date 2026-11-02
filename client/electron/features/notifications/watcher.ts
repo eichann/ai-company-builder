@@ -6,12 +6,14 @@
 //
 // The push channel's `records` / `notifications` signals carry no content: they
 // only make this module ask the server again (「かもしれない運転」). A Mac
-// notification (E-27) goes out only for an approval request or a new item in
-// 「あなたの番」, and only from what the server answered — never from a signal.
+// notification (E-27) goes out only for an approval request, a new item in
+// 「あなたの番」 or a notice the server marks fresh (`desktop`: the morning's
+// 「今日のあなたの番」, 「明日が期限」, being asked) — only from what the server
+// answered, never from a signal; each notice once per PC (`shownNotices`).
 
-import type { NotificationList } from '../../../../shared/types/notifications'
-import type { NoticesActionResult, NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { desktopNoticeFor, newTurnItems, NO_NOTICES, NOTICES_OFFLINE_TEXT, turnItemKey } from '../../../shared/notifications-app'
+import { RECORDLESS_NOTIFICATION_KINDS, type NotificationItem, type NotificationList } from '../../../../shared/types/notifications'
+import type { DesktopTarget, NoticesActionResult, NoticesState, TurnItem } from '../../../shared/notifications-app'
+import { desktopNoticesOf, NO_NOTICES, NOTICES_OFFLINE_TEXT, turnItemKey } from '../../../shared/notifications-app'
 
 export interface NotificationsWatcherDeps {
   baseUrl: () => string
@@ -20,8 +22,10 @@ export interface NotificationsWatcherDeps {
   onChanged: (companyId: string) => void
   /** Keep the company's push channel open, so its signals arrive. */
   watchSignals?: (companyId: string) => void
-  /** A Mac notification (the shell's); a click brings the app's window forward. */
-  desktopNotify?: (title: string, body: string) => void
+  /** A Mac notification (the shell's); a click brings the app's window forward (and opens `target`). */
+  desktopNotify?: (title: string, body: string, click: { companyId: string; target: DesktopTarget }) => void
+  /** The notice ids already shown as a Mac notification on this PC (kept across restarts). */
+  shownNotices?: { load(): string[]; save(ids: string[]): void }
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
   setInterval?: (fn: () => void, ms: number) => unknown
@@ -29,6 +33,8 @@ export interface NotificationsWatcherDeps {
 }
 
 export const NOTICES_CHECK_INTERVAL_MS = 5 * 60_000
+/** Notice ids remembered as shown (the newest; older ones are no longer fresh anyway). */
+const SHOWN_KEEP = 300
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const RECORD = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
@@ -46,10 +52,25 @@ function turnItemOf(r: unknown): TurnItem | null {
   }
 }
 
+const RECORDLESS = new Set<string>(RECORDLESS_NOTIFICATION_KINDS)
+
+function noticeOf(i: NotificationItem): NotificationItem | null {
+  if (!i || typeof i.id !== 'string' || !NOTICE_ID.test(i.id) || typeof i.text !== 'string' || typeof i.recordId !== 'string') return null
+  // A notice is about a record, except the kinds about none (the morning summary: '').
+  if (!(RECORD.test(i.recordId) || (i.recordId === '' && RECORDLESS.has(i.kind)))) return null
+  const d = i.desktop as { title?: unknown; body?: unknown } | undefined
+  const out: NotificationItem = { ...i }
+  delete out.desktop
+  if (typeof d === 'object' && d !== null && typeof d.title === 'string' && typeof d.body === 'string') {
+    out.desktop = { title: d.title.slice(0, 200), body: d.body.slice(0, 200) }
+  }
+  return out
+}
+
 function noticeListOf(data: unknown): NotificationList | null {
   const x = data as Partial<NotificationList> | null
   if (!x || typeof x.available !== 'boolean' || typeof x.unread !== 'number' || !Array.isArray(x.items)) return null
-  const items = x.items.filter(i => i && typeof i.id === 'string' && typeof i.text === 'string' && typeof i.recordId === 'string' && RECORD.test(i.recordId))
+  const items = x.items.map(noticeOf).filter((i): i is NotificationItem => i !== null)
   return { available: x.available, unread: x.unread, items }
 }
 
@@ -88,12 +109,25 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
   }
 
-  function notifyNewTurns(companyId: string, items: TurnItem[]) {
+  let shown: Set<string> | null = null
+  const shownIds = (): Set<string> => {
+    if (shown === null) {
+      try { shown = new Set(deps.shownNotices?.load() ?? []) } catch { shown = new Set() }
+    }
+    return shown
+  }
+
+  function notifyDesktop(companyId: string, items: TurnItem[], notices: NotificationItem[]) {
     const before = seenTurn.get(companyId) ?? null
     seenTurn.set(companyId, new Set(items.map(turnItemKey)))
-    for (const item of newTurnItems(before, items).slice(0, 3)) {
-      const { title, body } = desktopNoticeFor(item)
-      try { deps.desktopNotify?.(title, body) } catch { /* no notification: the title bar still shows it */ }
+    const ids = shownIds()
+    const out = desktopNoticesOf(before, items, notices, ids)
+    for (const n of out) {
+      try { deps.desktopNotify?.(n.title, n.body, { companyId, target: n.target }) } catch { /* no notification: the title bar still shows it */ }
+      if (!n.key.startsWith('turn:')) ids.add(n.key)
+    }
+    if (out.some(n => !n.key.startsWith('turn:'))) {
+      try { deps.shownNotices?.save([...ids].slice(-SHOWN_KEEP)) } catch { /* shown again after a restart at worst */ }
     }
   }
 
@@ -117,7 +151,7 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
         const items = (data?.records ?? []).map(turnItemOf).filter((i): i is TurnItem => i !== null)
         const list = noticeListOf(notices.body?.data)
         if (!list) return
-        if (companyId === current) notifyNewTurns(companyId, items)
+        if (companyId === current) notifyDesktop(companyId, items, list.items)
         publish(companyId, {
           available: list.available,
           myTurn: { total: typeof data?.total === 'number' ? data.total : items.length, items },
@@ -187,6 +221,7 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
       if (timer !== null) { stopEvery(timer); timer = null }
       known.clear()
       seenTurn.clear()
+      shown = null
     },
   }
 }

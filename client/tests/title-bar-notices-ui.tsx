@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
 // Preview page for the title bar's 「あなたの番 N」 and bell (features/notifications): the real hook
 // and component over a fake main process that keeps the read state like the server does (the
-// read answer comes back through `notifications:changed`). What was opened shows in `#opened`,
+// read answer comes back through `notifications:changed`). What was opened shows in `#opened`
+// (the morning's 「今日のあなたの番」: `task list`),
 // the ids marked read in `#read`. `?meetings=1`: a department without the task list, whose meetings
 // (a まとまり to choose, received minutes) the title bar carries; their buttons write `#opened`.
 import { useState } from 'react'
@@ -27,6 +28,7 @@ let state: NoticesState = {
     available: true, unread: 1,
     items: [
       { id: 'n-1', kind: 'request_done', recordId: 'task-preview03', recordType: 'task', recordTitle: '提案書を作る', version: 4, text: '佐藤さんが「提案書を作る」を完了にしました', createdAt: '2026-11-01T06:00:00.000Z', read: false },
+      { id: 'n-m', kind: 'morning_summary', recordId: '', recordType: '', recordTitle: '', version: 0, text: '今日のあなたの番 2件（期限が今日 1件）', createdAt: '2026-11-01T00:00:00.000Z', read: true },
       { id: 'n-0', kind: 'due_changed', recordId: 'task-preview04', recordType: 'task', recordTitle: '請求書', version: 2, text: '佐藤さんが「請求書」の期限を11月7日に変えました', createdAt: '2026-10-31T06:00:00.000Z', read: true },
     ],
   },
@@ -60,7 +62,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。</p>
-      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} /></header>
+      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} onOpenTasks={() => setOpened('task list')} /></header>
       <pre id="opened">{opened}</pre>
       <pre id="read">{read}</pre>
     </main>

@@ -146,7 +146,7 @@ describe('the server clock: a wait that is over', () => {
     expect(source.forCompany('a').records.ledger(timed).at(-1)).toMatchObject({ action: 'wait_over', actorId: CLOCK_ACTOR.id, actorKind: 'external', actorSource: CLOCK_ACTOR.source })
     // A day-only wait is over when its day is.
     expect(stateOf(dayOnly).state).toBe('waiting')
-    expect(ok(notices.list(m('u-bob'))).items.map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。追いかけてください'])
+    expect(ok(notices.list(m('u-bob'))).items.filter(i => i.kind === 'wait_over').map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。追いかけてください'])
 
     const before = { ledger: source.forCompany('a').records.ledger(timed).length, notices: noticeRows().length, pushes: pushed.length }
     expect((await clock.runOnce()).moved).toBe(0)
@@ -162,7 +162,7 @@ describe('the server clock: a wait that is over', () => {
     autoRun.a = true
     await clock.runOnce()
     expect(stateOf(id).state).toBe('preparing')
-    expect(ok(notices.list(m('u-bob'))).items.map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。AI が追いかけを用意します'])
+    expect(ok(notices.list(m('u-bob'))).items.filter(i => i.kind === 'wait_over').map(i => i.text)).toEqual(['「見積の返事」の返事・届く見込みの日時が過ぎました。AI が追いかけを用意します'])
   })
 
   it('the assignee’s own 自動で進める decides: off → their turn; the company not allowing it → nobody’s AI', async () => {

@@ -231,6 +231,7 @@ const api: Partial<ElectronAPI> = {
   }] : [] }) as never,
   onPluginsChanged: () => () => {},
   onNotificationsChanged: () => () => {},
+  onNotificationsOpenTasks: () => () => {},
   getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
 }
 installElectronAPI(api)

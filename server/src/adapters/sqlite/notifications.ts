@@ -33,6 +33,9 @@ export function sqliteNotificationRepository(conn: Database.Database, companyId:
       })()
       return written
     },
+    usersWithKey(dedupeKey) {
+      return (conn.prepare('SELECT user_id FROM notifications WHERE company_id = ? AND dedupe_key = ?').all(companyId, dedupeKey) as Array<{ user_id: string }>).map(r => r.user_id)
+    },
     list(userId, limit) {
       const rows = conn.prepare(
         `SELECT ${COLUMNS} FROM notifications WHERE company_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,

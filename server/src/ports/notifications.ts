@@ -10,9 +10,10 @@ export interface NotificationRow {
   id: string
   userId: string
   kind: string
+  /** '' for a notice about no record (the morning summary). */
   recordId: string
   recordVersion: number
-  /** The ledger action it came from ('' for a notice computed when read: overdue, AI turn stuck). */
+  /** The ledger action it came from ('' for a computed notice: overdue, AI turn stuck, morning summary, due tomorrow). */
   action: string
   actorId: string | null
   actorKind: 'human' | 'ai' | 'external' | null
@@ -31,6 +32,8 @@ export interface NotificationRow {
 export interface NotificationRepository {
   /** Insert these notices; a row whose dedupe key the member already has is skipped. The ids written. */
   insert(rows: NotificationRow[]): string[]
+  /** The members of this company who already have a notice with this dedupe key. */
+  usersWithKey(dedupeKey: string): string[]
   /** The member's newest notices (newest first), at most `limit`. */
   list(userId: string, limit: number): NotificationRow[]
   /** Mark the member's notices read (`ids` null = all of them); the number changed. */

@@ -61,6 +61,7 @@ import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
 import { registerNotificationsIpc } from './features/notifications/ipc'
+import { fileShownStore } from './features/notifications/shown-store'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
@@ -251,13 +252,18 @@ const minutes = createMinutesChecker({
 lifecycle.beforeQuit(() => minutes.stop())
 registerMinutesIpc(ipc, minutes)
 // The title bar's 「あなたの番」 and bell (features/notifications): read with the session here; a Mac
-// notification only for an approval request or a new item in あなたの番 (E-27).
+// notification only for an approval request, a new item in あなたの番 or a fresh notice the server marks (E-27).
 const notices = createNotificationsWatcher({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
   onChanged: companyId => appWindow.send('notifications:changed', { companyId }),
   watchSignals: companyId => agentControl.watchSignals(companyId),
-  desktopNotify: (title, body) => desktopShell.notify(title, body, () => mainWindowHost.focus()),
+  // A click brings the window forward; the morning's 「今日のあなたの番」 also opens the task list.
+  desktopNotify: (title, body, click) => desktopShell.notify(title, body, () => {
+    mainWindowHost.focus()
+    if (click.target === 'tasks') appWindow.send('notifications:openTasks', { companyId: click.companyId })
+  }),
+  shownNotices: fileShownStore(path.join(userDataDir(), 'notices-shown.json')),
 })
 recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId) }
 noticesSignal = companyId => notices.signal(companyId)

@@ -27,6 +27,11 @@ export const NOTIFICATION_KINDS = [
   'wait_over',
   'acceptance_waiting',
   'delegate_stopped',
+  // Noticing one's own turn without Slack (owner decision 2026-11-03): asked of you, the business
+  // morning's 「今日のあなたの番」, a due on the next business day.
+  'asked',
+  'morning_summary',
+  'due_tomorrow',
   // Stage 3–4 lanes (plan 段階3・4a・4b 並行): each lane adds its kinds only right
   // below its own marker; the line under each block stays unchanged.
   // lane A ▼ (reserved: connection_broken)
@@ -58,6 +63,9 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   wait_over: '待っている返事・届くものの見込みの日時が過ぎた（追いかけの番）',
   acceptance_waiting: '頼んだことが 1 営業日たっても引き受けられていない',
   delegate_stopped: '不在の人の代わりが受け持てないもの（部署の管理役へ）',
+  asked: 'だれかから頼まれた（あなたが担当になった）',
+  morning_summary: '営業日の朝の「今日のあなたの番」（件数だけ）',
+  due_tomorrow: '担当していることの期限が次の営業日に来る（明日が期限）',
   // lane A ▼
   // ── lane A ▲
   // lane B ▼
@@ -82,6 +90,9 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   wait_over: true,
   acceptance_waiting: true,
   delegate_stopped: true,
+  asked: true,
+  morning_summary: true,
+  due_tomorrow: true,
   // lane A ▼
   // ── lane A ▲
   // lane B ▼
@@ -93,10 +104,17 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   others: false,
 }
 
+/**
+ * The kinds about no single record: `recordId`, `recordType` and `recordTitle`
+ * are '' (the morning summary opens the task list).
+ */
+export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary']
+
 /** One notice as the member's app shows it. */
 export interface NotificationItem {
   id: string
   kind: NotificationKind
+  /** '' for a kind about no record (`RECORDLESS_NOTIFICATION_KINDS`). */
   recordId: string
   recordType: string
   /** The record's title now. */
@@ -110,6 +128,13 @@ export interface NotificationItem {
    * absentee's notice, and on a stop told to a department manager.
    */
   forUserId?: string
+  /**
+   * Present while the app may show this notice as a Mac notification (E-27):
+   * unread and still fresh by the company's clock (the morning summary until
+   * 15:00 of its day, a due-tomorrow before the due's day, being asked within
+   * 12 hours). The server's words; the app shows each notice id once.
+   */
+  desktop?: { title: string; body: string }
   createdAt: string
   read: boolean
 }
