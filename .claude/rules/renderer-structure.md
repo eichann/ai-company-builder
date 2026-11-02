@@ -224,8 +224,12 @@ D7–D9, confirmed 2026-10-30).
 - **Panel registry (built, Phase 4-6).** The left panel's tabs are a list of registered panels,
   today's three (スキル / ファイル / 検索; the 履歴 tab gave way to a file's 「前の版」) included: `src/features/workspace/leftPanels.ts`
   (`LeftPanel`: id, title, icon, optional badge count and visibility, mount policy, `onOpen`,
-  `render`; `resolveLeftPanel`) drawn by `components/LeftPanelTabs.tsx` (names on one line; too
-  narrow for all of them — `tabStripWidth` — icons only, the name kept as tooltip and accessible name); `src/app/AppShell.tsx`
+  `render`; `resolveLeftPanel`) drawn by `components/LeftPanelTabs.tsx`. Every tab
+  always shows its name on one line (owner 2026-11-02: never icons only, never a name broken
+  across lines): icon and name side by side when the strip has room (`tabStripWidth`), else the
+  name (11 px) under its icon; when even that does not fit (many plugin tabs) the strip scrolls
+  sideways and the chosen tab is scrolled into view. The narrow column's minimum (`PANE_LIMITS.fileTree`,
+  200 px) is what the five tabs need stacked (`tests/ui/tasks-layout.spec.ts`); `src/app/AppShell.tsx`
   registers them. A remembered id with no shown panel opens the first one, and the saved id is
   kept (an extension's tab may register later; `skill-layout-state.spec.ts`). An extension's
   entry will carry the text its manifest declares and render the app's isolated frame, never its

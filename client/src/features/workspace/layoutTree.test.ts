@@ -22,7 +22,7 @@ test('a saved size can never push a pane outside its limits (no 0 px tree, no wi
     files: { ...DEFAULT_LAYOUT.files, sizes: [0, null] },
   }))
   assert.deepEqual(layout.screen.sizes, [1200, null])
-  assert.deepEqual(layout.files.sizes, [120, null])
+  assert.deepEqual(layout.files.sizes, [200, null])
 })
 
 test('a size that is not a number keeps that pane at its default; the flexible pane stays flexible', () => {

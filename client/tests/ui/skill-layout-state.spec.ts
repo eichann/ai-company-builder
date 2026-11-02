@@ -146,7 +146,7 @@ test.describe('panel dividers', () => {
     expect(await at(treeDivider(page))).toBe(260)
   })
 
-  test('the file tree follows the pointer within 120–400 px', async ({ page }) => {
+  test('the file tree follows the pointer within 200–400 px (200: the left tabs fit stacked)', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
@@ -154,7 +154,7 @@ test.describe('panel dividers', () => {
     await drag(page, treeDivider(page), 300)
     await expect.poll(() => at(treeDivider(page))).toBe(400)
     await drag(page, treeDivider(page), -500)
-    await expect.poll(() => at(treeDivider(page))).toBe(120)
+    await expect.poll(() => at(treeDivider(page))).toBe(200)
   })
 
   test('the left side follows the pointer from 300 px up to the room the chat needs; 60 px past that hides the chat, which comes back at that width', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
 import { resolveLeftPanel, shownPanels, tabStripWidth, type LeftPanel } from '../leftPanels'
 
@@ -18,44 +18,58 @@ export function LeftPanelTabs({ panels, selectedId, onSelect }: Props) {
   if (activeId && !visited.has(activeId)) setVisited(new Set([...visited, activeId]))
   // The tab whose peek is open (pointer on the tab or its peek, or focus on the tab).
   const [peeking, setPeeking] = useState<string | null>(null)
-  // Too narrow for every name on one line: icons only (the name stays as the tooltip).
-  const [stripRef, iconsOnly] = useIsNarrowerThan<HTMLDivElement>(tabStripWidth(shown))
+  // Too narrow for icon and name side by side: the name goes under the icon, smaller. Names always
+  // show; when even that does not fit (many plugin tabs) the strip scrolls sideways.
+  const [stripRef, stacked] = useIsNarrowerThan<HTMLDivElement>(tabStripWidth(shown))
+  // The chosen tab scrolled into view when it changes (only the strip scrolls, never the page).
+  const activeRef = useCallback((button: HTMLButtonElement | null) => {
+    const strip = button?.closest('[data-left-tabs]')
+    if (!button || !strip || button.dataset.leftTab !== activeId) return
+    const b = button.getBoundingClientRect()
+    const s = strip.getBoundingClientRect()
+    if (b.left < s.left) strip.scrollLeft -= s.left - b.left
+    else if (b.right > s.right) strip.scrollLeft += b.right - s.right
+  }, [activeId])
 
   return (
     <>
-      <div ref={stripRef} data-left-tabs className="flex-shrink-0 flex min-w-0 overflow-x-auto border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
+      <div ref={stripRef} data-left-tabs className="flex-shrink-0 flex min-w-0 overflow-x-auto overflow-y-hidden border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
         {shown.map(panel => {
           const active = panel.id === activeId
           const Icon = panel.icon
+          const mark = panel.badgeCount ? (
+            <span className="block min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
+              {panel.badgeCount}
+            </span>
+          ) : panel.dot ? <span data-new-dot aria-label="新しいものがあります" className="block h-2 w-2 rounded-full bg-accent" /> : null
           const tab = (
             <button
               key={panel.id}
+              ref={active ? activeRef : undefined}
               type="button"
               title={panel.title}
-              aria-label={iconsOnly ? panel.title : undefined}
               data-left-tab={panel.id}
               onClick={() => { setPeeking(null); onSelect(panel.id); panel.onOpen?.() }}
               className={`
-                flex flex-shrink-0 items-center gap-1.5 px-2.5 py-2.5 text-[13px] font-medium whitespace-nowrap
-                border-b-2 transition-colors
+                relative flex flex-shrink-0 font-medium whitespace-nowrap border-b-2 transition-colors
+                ${stacked
+                  ? 'grow basis-auto flex-col items-center gap-0.5 px-[3px] pt-1.5 pb-1 text-[11px] leading-[14px]'
+                  : 'items-center gap-1.5 px-2.5 py-2.5 text-[13px]'}
                 ${active
                   ? 'border-accent text-gray-900 dark:text-zinc-100'
                   : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
                 }
               `}
             >
-              <Icon size={16} weight={active ? 'fill' : 'regular'} className="flex-shrink-0" />
-              {!iconsOnly && panel.title}
-              {panel.badgeCount ? (
-                <span className="min-w-[18px] px-1.5 rounded-full bg-accent text-white text-[11px] leading-[18px] text-center">
-                  {panel.badgeCount}
-                </span>
-              ) : panel.dot ? <span data-new-dot aria-label="新しいものがあります" className="h-2 w-2 rounded-full bg-accent" /> : null}
+              <Icon size={stacked ? 18 : 16} weight={active ? 'fill' : 'regular'} className="flex-shrink-0" />
+              <span data-left-tab-name>{panel.title}</span>
+              {/* After the name, so the accessible name starts with it; stacked, it sits at the icon's corner. */}
+              {mark && (stacked ? <span className="absolute top-1 left-1/2 ml-1.5">{mark}</span> : mark)}
             </button>
           )
           if (!panel.peek) return tab
           return (
-            <div key={panel.id} className="relative flex" data-peek-for={panel.id}
+            <div key={panel.id} className={`relative flex ${stacked ? 'grow basis-auto' : ''}`} data-peek-for={panel.id}
               onMouseEnter={() => setPeeking(panel.id)} onMouseLeave={() => setPeeking(p => (p === panel.id ? null : p))}
               onFocus={() => setPeeking(panel.id)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPeeking(null) }}
               onKeyDown={e => { if (e.key === 'Escape') setPeeking(null) }}>
