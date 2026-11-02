@@ -704,3 +704,15 @@ test.describe('two chat panes', () => {
     await expect(paneInput(page, '左の欄')).not.toHaveText('右の欄あて')
   })
 })
+
+test('the list narrows to consultations about the record open in the middle; 「すべて表示」 lifts it', async ({ page }) => {
+  await page.goto('/tests/chat-header-ui.html?history=many&focus=task-0000aa')
+  const list = page.getByRole('complementary', { name: 'AIへの相談' })
+  await expect(list).toContainText('「見積書を作り直す」についての相談')
+  await expect(list.getByText('終わった相談 4', { exact: true })).toBeVisible()
+  await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
+  await list.getByRole('button', { name: 'すべて表示' }).click()
+  await expect(list.getByText('終わった相談 1', { exact: true })).toBeVisible()
+  await list.getByRole('button', { name: '「見積書を作り直す」の相談だけにする' }).click()
+  await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
+})

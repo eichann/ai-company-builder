@@ -44,6 +44,8 @@ interface ChatPanelProps {
   aiTurnQueue?: readonly AiTurnCandidate[]
   /** Each waiting record's state and the member's 「もう一度」 / 「人に渡す」 (shown by the screens that list them). */
   onAiTurnItems?: (view: AiTurnItemsView) => void
+  /** The record open in the middle: the list narrows to consultations about it (「すべて表示」 lifts it). */
+  focus?: { recordId: string; title: string } | null
 }
 
 const NO_AI_TURNS: readonly AiTurnCandidate[] = []
@@ -55,7 +57,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, focus }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -189,7 +191,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       {sidebarOpen && <>
         {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
         <div className={compact ? 'absolute inset-y-0 left-0 z-30 shadow-xl' : 'shrink-0'}>
-          <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId}
+          <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId} focus={focus}
             windows={chatWindows} onOpenInWindow={id => void moveToWindow(id)}
             onSelectTab={id => { setActiveTabId(id); if (compact) setSidebarOpen(false) }}
             onOpenSession={id => { openOrFocus(id); if (compact) setSidebarOpen(false) }}

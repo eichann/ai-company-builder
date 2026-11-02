@@ -473,6 +473,7 @@ export function AppShell() {
             paneId={paneId}
             aiTurnQueue={aiTurns}
             onAiTurnItems={setAiTurnItems}
+            focus={activeRecordId ? { recordId: activeRecordId, title: recordLooks[activeRecordId]?.title ?? '' } : null}
           />
         ) : (
         <>

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, paginateConversationRows } from './conversationRows'
+import { buildConversationRows, focusConversationRows, paginateConversationRows } from './conversationRows'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -39,4 +39,10 @@ test('history expands by page while open/pinned rows stay visible and search cov
   const searched = paginateConversationRows(buildConversationRows(sessions,tabs,'history-44'),20)
   assert.equal(searched.visibleRows[0].session?.id,'history-44')
   assert.equal(searched.remaining,0)
+})
+test('narrowed to the record open in the middle: only consultations whose topic is that record itself, and the one on screen', () => {
+  const sessions = [session('deal', { topicRecordId: 'deal-01', updatedAt: '2026-01-03' }), session('task-of-deal', { topicRecordId: 'task-01' }), session('plain'), session('shown', { updatedAt: '2026-01-02' })]
+  const rows = buildConversationRows(sessions, [{ id: 'tab-shown', title: 'shown', sessionId: 'shown' }], '')
+  assert.deepEqual(focusConversationRows(rows, 'deal-01', 'tab-shown').map(r => r.session?.id).sort(), ['deal', 'shown'])
+  assert.deepEqual(focusConversationRows(rows, 'deal-01', 'other-tab').map(r => r.session?.id), ['deal'])
 })
