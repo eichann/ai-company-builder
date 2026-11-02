@@ -84,3 +84,16 @@ test('「AIへの相談」 in 「つながっているもの」: the consultatio
   await expect(page.locator('#opened')).toHaveText('consult meeting-0000aa false\nconsult meeting-0000aa true')
   expectNoPageErrors(state)
 })
+
+test('a meeting\'s 案件 sits at its head (not on the right); a link is taken off from its 「…」 and put back', async ({ page }) => {
+  const state = await openPreview(page, 'record-card')
+  await expect(page.getByTestId('bundle-field')).toHaveText('A社 研修導入・外せる')
+  const side = page.getByRole('complementary', { name: 'つながっているもの' })
+  await expect(side).not.toContainText('A社 研修導入')
+  await side.getByRole('button', { name: '「窓口は3つにする」の操作' }).click()
+  await page.getByRole('menuitem', { name: /つながりを外す/ }).click()
+  await expect(page.locator('#opened')).toHaveText('unlink decision-000001 meeting=meeting-0000aa@3')
+  await side.getByRole('status').getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#opened')).toHaveText('unlink decision-000001 meeting=meeting-0000aa@3\nundo decision-000001 4@4')
+  expectNoPageErrors(state)
+})

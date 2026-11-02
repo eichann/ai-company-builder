@@ -67,6 +67,8 @@ export interface RecordCardLink {
    * the record holding it (`id`, its `version` now) and the link's name there. Absent = no 「…」.
    */
   removable?: RemovableLink
+  /** The record's own 案件・プロジェクト (its `bundle` link): shown at its head, not on the right. */
+  bundle?: true
 }
 
 /** What `recordLinks:remove` needs to take one link off (and `tasks:undo` to put it back). */
@@ -81,6 +83,8 @@ export function removableOf(self: Pick<RecordSummary, 'id' | 'version'>, l: { na
 }
 export interface RecordCardView {
   record: RecordViewSummary
+  /** The record's version now (what a link change sends as `expectedVersion`). */
+  version?: number
   /** A meeting's, a 来た連絡's or a bundle's own parts (`record-details.ts`); absent for other kinds. */
   detail?: RecordDetailView
   /** 見られる人 (who can see it, `POST …/viewers`); absent when the server did not say. */

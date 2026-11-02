@@ -61,6 +61,7 @@ import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
 import { companyPathOf, listShownFor, tagCounts } from '../features/tasks/model'
@@ -326,7 +327,8 @@ export function AppShell() {
       ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} onChoose={setChoosingBundle} onChanged={taskList.reload} />
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, 'プロジェクト')} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>

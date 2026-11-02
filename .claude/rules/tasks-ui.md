@@ -294,7 +294,13 @@ the kind's own name (`bundleWord`; until the department's kind arrives from `bun
 `tasks:linkRecord` / `tasks:unlinkRecord` → `POST …/record-links[/remove] { link, target,
 expectedVersion }` (main checks the link name and both ids before any request) and answer the ledger
 entry's version; each change says what it did with ［取り消す］ (`tasks:undo` of that entry, on the
-record that holds the link). Tests: `client/tests/task-card.test.ts`, `tests/ui/task-card.spec.ts`. Main sends only a path inside the
+record that holds the link). Tests: `client/tests/task-card.test.ts`, `tests/ui/task-card.spec.ts` The **record card** does the same
+(`recordViews:card` marks `removable` and the record's own `bundle` link, and answers its `version`):
+「…」→「つながりを外す」 with ［取り消す］ on every row not `fixed`, and on a meeting or a 来た連絡 the
+same 案件・プロジェクト field at its head (the screen's `renderBundleField`, `src/app/recordBundleField.tsx`:
+a meeting is linked through `minutes:linkBundle` so its 案件's step follows, anything else through
+`tasks:linkRecord`; ［外す］ only where the link can be removed). Tests: `client/tests/record-card-links.test.ts`,
+`tests/ui/record-card.spec.ts`. Main sends only a path inside the
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
