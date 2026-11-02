@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_LAYOUT, parseLayout, serializeLayout, withPaneSize } from './layoutTree'
+import { DEFAULT_LAYOUT, firstLayout, paneSize, parseLayout, serializeLayout, withPaneSize } from './layoutTree'
 
 const saved = (trees: unknown, version: unknown = 1) => JSON.stringify({ version, trees })
 
@@ -42,4 +42,21 @@ test('a tree of another shape (panes renamed, added or reordered) is ignored, sp
   const layout = parseLayout(saved({ screen: swapped, files: { ...DEFAULT_LAYOUT.files, sizes: [260, null] } }))
   assert.deepEqual(layout.screen, DEFAULT_LAYOUT.screen)
   assert.deepEqual(layout.files.sizes, [260, null])
+})
+
+test('a first start fits the window: on a 1280 px notebook the left tab, the middle and the consultation all fit (I.8)', () => {
+  const l = firstLayout(1280)
+  const side = paneSize(l.screen, 'side')!
+  const tree = paneSize(l.files, 'fileTree')!
+  // The consultation keeps ~420 px and the middle is wider than the narrow column.
+  assert.equal(1280 - side, 420)
+  assert.ok(side - tree >= 560, `middle ${side - tree}`)
+  // Never smaller than today's look, never past the side's limit.
+  assert.equal(paneSize(firstLayout(800).screen, 'side'), 550)
+  assert.equal(paneSize(firstLayout(4000).screen, 'side'), 1200)
+  // What the member saved wins; nothing saved takes the first look for the window.
+  const saved = serializeLayout({ ...DEFAULT_LAYOUT, screen: withPaneSize(DEFAULT_LAYOUT.screen, 'side', 712) })
+  assert.equal(paneSize(parseLayout(saved, 1280).screen, 'side'), 712)
+  assert.deepEqual(parseLayout(null, 1280), l)
+  assert.deepEqual(parseLayout('not json', 1280), l)
 })
