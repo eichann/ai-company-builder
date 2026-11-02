@@ -2,7 +2,7 @@
 // The company decides whether each may be used (管理画面の「詳しい設定」); one it stops is greyed
 // with 「会社の設定で止まっています」. The server decides; this only shows and asks.
 import { SpinnerGap } from '@phosphor-icons/react'
-import { Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
+import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
 import { WORK_SWITCH_COMPANY_OFF_TEXT, type WorkSwitch } from '../../../../shared/work-switches'
 import { CALM } from '../../../../shared/thing-words'
 import { useWorkSwitches } from '../hooks/useWorkSwitches'
@@ -27,7 +27,8 @@ function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string;
   )
 }
 
-export function MySwitchesSection({ companyId }: { companyId: string }) {
+/** `onOpenGoogle`: 受信を読む is on but Google has not let ACB read the mail yet — the way to 「Google で許可」. */
+export function MySwitchesSection({ companyId, onOpenGoogle }: { companyId: string; onOpenGoogle?: () => void }) {
   const { loadRef, switches, error, busy, change } = useWorkSwitches(companyId)
   return (
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
@@ -47,6 +48,12 @@ export function MySwitchesSection({ companyId }: { companyId: string }) {
                     <p className="text-[13.5px] font-medium">{w.title}</p>
                     <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">{w.text}</p>
                     {!s.allowed && <p className="mt-1 text-[12px] font-medium text-amber-700 dark:text-amber-300">{WORK_SWITCH_COMPANY_OFF_TEXT}</p>}
+                    {w.key === 'readIncoming' && s.on && !switches.readIncoming.connected.mail && (
+                      <p data-needs-google className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-amber-700 dark:text-amber-300">
+                        メールを読むには、Google で許可が要ります。
+                        {onOpenGoogle && <Button size="sm" onClick={onOpenGoogle}>Google で許可する</Button>}
+                      </p>
+                    )}
                   </div>
                   <Toggle on={s.on} label={w.title} disabled={!s.allowed || busy !== null} onChange={on => void change(w.key, on)} />
                 </div>

@@ -10,6 +10,7 @@
 //   role   owner (default) | admin | member — the member's role in the company
 //   tab    a settings section to open first (default: ダウンロードするフォルダ; mine = 自分の設定)
 //   company  the company's 受信を読む: allowed (default) | off
+//   mail   no = Google has not let ACB read the member's mail yet
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -28,7 +29,7 @@ const tab = params.get('tab') ?? 'sync'
 const policy = { readIncoming: params.get('company') !== 'off', autoRun: true }
 const chosen: Record<string, boolean | null> = { readIncoming: null, autoRun: null }
 const switchState = (k: 'readIncoming' | 'autoRun', def: boolean) => ({ on: policy[k] && (chosen[k] ?? def), allowed: policy[k], companyDefault: def, chosen: chosen[k] })
-const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: true, chat: false } }, autoRun: switchState('autoRun', true) })
+const mySwitches = () => ({ readIncoming: { ...switchState('readIncoming', false), connected: { mail: params.get('mail') !== 'no', chat: false } }, autoRun: switchState('autoRun', true) })
 const switchesSet: string[] = []
 if (theme === 'dark') document.documentElement.classList.add('dark')
 

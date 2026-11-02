@@ -29,3 +29,13 @@ test('a switch the company stops is greyed out with the reason and cannot be tur
   await expect(page.getByRole('switch', { name: 'AI が自動で進める' })).toBeEnabled()
   expectNoPageErrors(state)
 })
+
+test('受信を読む on without Google\'s permission says so and leads to 「Google で許可」', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine', mail: 'no' })
+  await expect(page.locator('[data-needs-google]')).toHaveCount(0)
+  await page.getByRole('switch', { name: '受信を読む' }).click()
+  await expect(page.locator('[data-needs-google]')).toContainText('Google で許可が要ります')
+  await page.getByRole('button', { name: 'Google で許可する' }).click()
+  await expect(page.getByRole('button', { name: 'Google' })).toHaveAttribute('aria-current', 'page')
+  expectNoPageErrors(state)
+})

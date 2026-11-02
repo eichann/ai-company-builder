@@ -375,7 +375,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService }: Se
             ) : activeTab === 'slack' ? (
               <SlackSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'mine' ? (
-              <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} />
+              <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} onOpenGoogle={() => setActiveTab('google')} />
             ) : activeTab === 'absences' ? (
               <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'aienv' ? (
