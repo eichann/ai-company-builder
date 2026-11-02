@@ -111,6 +111,8 @@ const tree = (dir: string, depth: number, max: number): TreeNode[] =>
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
+    // 自分の設定 → 「Google で許可する」 opens the Google section: offline here, it says so.
+    getGoogleStatus: async () => ({ success: false, offline: true, error: 'サーバーにつながりませんでした。' }),
     getWorkSwitches: async () => ({ success: true, switches: mySwitches() }),
     setWorkSwitch: async (_companyId: string, which: 'readIncoming' | 'autoRun', on: boolean) => {
       switchesSet.push(`${which}:${on}`)
