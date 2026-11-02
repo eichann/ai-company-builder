@@ -68,11 +68,6 @@
       "target": [
         "nsis"
       ]
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ]
     }
   },
   "dependencies": {

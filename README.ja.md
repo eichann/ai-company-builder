@@ -85,7 +85,7 @@ pnpm dev       # クライアントが起動する
 
 初回起動時にサーバーURLを聞かれるので `http://localhost:3001` を入力してください。
 
-> **AI チャットには Claude Code が必要です。** クライアントは AI チャットを動かす際、お使いのマシン上で [Claude Code](https://docs.anthropic.com/ja/docs/claude-code) CLI を起動します。先にインストールしてログインしてください。クライアント本体は **Windows・macOS・Linux でネイティブに動作します**（クライアントに WSL2 は不要です）。
+> **AI チャットには Claude Code が必要です。** クライアントは AI チャットを動かす際、お使いのマシン上で [Claude Code](https://docs.anthropic.com/ja/docs/claude-code) CLI を起動します。先にインストールしてログインしてください。配布用のクライアントは **macOS**（CI で検証済み）と **Windows**（ビルドのみ、CI では未検証）向けに作られ、ネイティブに動作します（クライアントに WSL2 は不要です）。Linux 向けのパッケージは作っていません。
 > - **Windows**: [Git for Windows](https://git-scm.com/download/win) をインストールし、PowerShell で `irm https://claude.ai/install.ps1 | iex` を実行
 > - **macOS / Linux**: `curl -fsSL https://claude.ai/install.sh | bash` を実行
 >
