@@ -22,6 +22,7 @@ const MACOS = {
   // on Ubuntu, where multi-digit fds fail (a known Linux-only bug; Linux is
   // not a shipped platform). These tests spawn real children through them.
   'tests/agent-env.test.ts': 'spawns through the /bin/sh fd-closing wrapper',
+  'tests/commit-message.test.ts': 'spawns a fake CLI through claude-oneshot (the /bin/sh wrapper)',
   'tests/permission-mode.test.ts': 'spawns a /bin/sh CLI through the Claude Code wrapper',
   'tests/sandbox-claude.test.ts': 'spawns a /bin/sh CLI through the Claude Code wrapper',
   'tests/voice-helper.test.ts': 'spawns the helper through voice-process.ts',
