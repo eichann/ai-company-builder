@@ -1,6 +1,6 @@
 // The task card (tests/task-card-ui.tsx, features/tasks, tasks-ui.md "The card"). Guards: what the
-// AI prepared is on top; the assignee completes only by naming whose OK (start first, then
-// complete with it, each at its version); 受けられない needs a reason; 延ばす sends a new due; a
+// AI prepared is on top; on a task to be checked first the assignee completes only by naming whose
+// OK (from 未着手 too since task version 9, at the version shown); 受けられない needs a reason; 延ばす sends a new due; a
 // run with an unknown outside result is settled by the member; the completed card states the OK
 // in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
 // owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
@@ -22,7 +22,7 @@ test('prepared things on top; completing on whose OK; 受けられない needs a
   await expect(submit).toBeDisabled()
   await form.getByLabel('OK をくれた人').selectOption({ label: '阿部さん' })
   await submit.click()
-  await expect(page.locator('#acted')).toHaveText('start@3,complete@4:ok=u-abe/')
+  await expect(page.locator('#acted')).toHaveText('complete@3:ok=u-abe/')
 
   await page.getByRole('button', { name: '受けられない' }).click()
   const decline = page.getByRole('group', { name: '受けられない' })
