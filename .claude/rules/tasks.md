@@ -10,7 +10,9 @@ paths:
   - "server/src/adapters/sqlite/task-settings.ts"
   - "server/tests/integration/task-settings.test.ts"
   - "server/tests/unit/task-settings-core.test.ts"
-  - "admin/src/app/companies/*/task-list/**"
+  - "admin/src/app/companies/*/advanced/work/**"
+  - "admin/src/app/companies/*/advanced/calendar/**"
+  - "admin/src/components/advanced/task-settings-page.tsx"
   - "admin/src/lib/task-settings.ts"
   - "admin/src/components/departments/department-members-dialog.tsx"
   - "admin/tests/task-list.test.tsx"
@@ -155,7 +157,9 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 
 ## Admin console
 
-`/companies/[id]/task-list` (menu 「やることの一覧」, owner/admin and department managers):
+「詳しい設定 › 仕事の進め方」 `/companies/[id]/advanced/work` and 「会社の暦」 `/advanced/calendar` (owner/admin;
+管理画面の見直し 2-3, `admin/src/components/advanced/task-settings-page.tsx`; the old `/task-list` redirects;
+who belongs to a department — 所属, 不在と代わりの人 — is on 「部署」, for department managers too):
 plain questions in Japanese, no builder words (型・プラグイン・つなぎ先). Owners/admins answer the
 company questions (one save for all, with a sticky bar; 「人に頼んだとき、相手が「引き受ける」を押すまで待ちますか？」 is one
 checkbox per automatic case; the reply card shows today's example

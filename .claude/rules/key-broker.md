@@ -15,7 +15,7 @@ paths:
   - "server/src/services/key-broker.ts"
   - "server/src/routes/key-broker.ts"
   - "server/tests/integration/key-broker.test.ts"
-  - "admin/src/app/companies/*/api-keys/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/keys/**"
   - "admin/src/components/key-broker/**"
   - "admin/src/lib/key-broker.ts"
   - "admin/tests/key-broker.test.tsx"
@@ -143,7 +143,7 @@ disable and delete still work). Audience departments must be the company's, peop
   `allDepartments` (K2 rows, an older admin page) is converted by `upgradeBrokerAudience`:
   departments listed → work in them by everyone (± people); none → 全社, by everyone or the added
   people. `usableBy` (「今使える人」) lists dial ②; dial ① is decided per consultation.
-- Admin page 「API キー」 (`admin/src/app/companies/[id]/api-keys/page.tsx`, menu `api-keys`,
+- Admin page 「API キー」 (`admin/src/app/companies/[id]/advanced/ai-safety/keys/page.tsx`, 「詳しい設定 › AI の安全」,
   owners/admins): company keys and members' own keys (last 4, destinations, 使える仕事 (dial ①)
   and 使える人 (dial ②), caps,
   「非公開の内容を送ってよい」, status, 「今使える人」), register / edit settings / replace /
@@ -457,7 +457,7 @@ who uses it).
   have applied (no other key to fall back to) → `validate` reason `key-stopped` → 403
   `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
   reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
-  「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
+  「すべての鍵を止める」 with a confirmation, on 「AI を止める」 only — one place, 管理画面の見直し 2-4; the API キー page links there) disables every active key, company and own, each in
   the history; resuming is per key. It also stops every member's **OAuth permission (Google, every provider)** in the
   company at once (`onStopAll` → `memberOAuth.stopAll`: grants `stopped`, the sealed refresh
   tokens cleared, revoked at the provider in the background); a member resumes with 「Google で許可」

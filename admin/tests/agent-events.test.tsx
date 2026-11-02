@@ -6,8 +6,9 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import AgentEventsPage from '@/app/companies/[id]/agent-events/page'
-import { AppShell, NAV_ITEMS } from '@/components/app/app-shell'
+import AgentEventsPage from '@/app/companies/[id]/advanced/ai-safety/events/page'
+import OverviewPage from '@/app/companies/[id]/page'
+import { ADVANCED_ITEM, AppShell } from '@/components/app/app-shell'
 import { changeLines, draftDays } from '@/components/agent-events/settings-view'
 import {
   AGENT_KINDS,
@@ -35,7 +36,7 @@ import {
 import type { AgentEventRecord, AgentEventSettings, AgentEventViewers, Capabilities } from '@/lib/api'
 import { AGENT_EVENT_VIEWER_MODES } from '../../shared/types/agent-events'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { clientActivity, managerCapabilities, ok, ownerCapabilities } from './fixtures'
+import { COMPANY_ID, clientActivity, managerCapabilities, ok, ownerCapabilities } from './fixtures'
 import type { Call } from './mock-api'
 
 const nav = vi.hoisted(() => ({ search: '', replace: vi.fn(), pathname: '' }))
@@ -256,20 +257,15 @@ describe('filters in the URL', () => {
 // ---------------------------------------------------------------------------
 
 describe('navigation', () => {
-  const item = NAV_ITEMS.find((i) => i.segment === 'agent-events')!
-
-  it('owner/admin always; a manager only when the setting allows; members never', () => {
-    expect(item.label).toBe('AI の操作の記録')
-    expect(item.visible!({ isAdmin: true, isManager: false, canViewAgentEvents: true })).toBe(true)
-    expect(item.visible!({ isAdmin: false, isManager: true, canViewAgentEvents: false })).toBe(false)
-    expect(item.visible!({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(true)
-    expect(item.visible!({ isAdmin: false, isManager: false, canViewAgentEvents: false })).toBe(false)
+  it('the log is inside 「詳しい設定 › AI の安全」 (owners and admins); not in the menu of a manager', () => {
+    expect(ADVANCED_ITEM.visible!({ isAdmin: true, isManager: false, canViewAgentEvents: true })).toBe(true)
+    expect(ADVANCED_ITEM.visible!({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
   })
 
-  it('the sidebar follows /me/capabilities', async () => {
+  it('a manager the setting lets read it finds it on the home', async () => {
     stubApi({ ...managerCapabilities, canViewAgentEvents: true })
-    renderInCompany(<AppShell>page</AppShell>)
-    expect((await screen.findAllByRole('link', { name: 'AI の操作の記録' })).length).toBeGreaterThan(0)
+    renderInCompany(<OverviewPage />)
+    expect(await screen.findByRole('link', { name: 'AI の操作の記録' })).toHaveAttribute('href', `/companies/${COMPANY_ID}/advanced/ai-safety/events`)
   })
 
   it('hidden from a manager while only admins may read', async () => {

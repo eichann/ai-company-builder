@@ -14,7 +14,7 @@ paths:
   - "client/electron/services/agent-push-channel.ts"
   - "client/electron/services/agent-policy-store.ts"
   - "client/tests/agent-stop.test.ts"
-  - "admin/src/app/companies/*/agent-stop/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/stop/**"
   - "admin/src/components/agent-stop/**"
   - "admin/src/lib/agent-stop.ts"
   - "admin/tests/agent-stop.test.tsx"
@@ -159,7 +159,7 @@ turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop
   外部の MCP), 理由 (optional, ≤ 500, admins only), a sentence of what will happen, 止める. The
   bar and the page share one query (`agent-stop-context.tsx`, `AgentStopProvider` in
   `AppShell`), so a stop shows on both at once. Members and managers never load it.
-- **Page** `admin/src/app/companies/[id]/agent-stop/page.tsx` (nav `agent-stop`, owner/admin):
+- **Page** `admin/src/app/companies/[id]/advanced/ai-safety/stop/page.tsx` (「詳しい設定 › AI の安全 › AI を止める」, owner/admin; the old `/agent-stop` redirects; the only place with 「すべての鍵を止める」):
   いま止めているもの with 解除 (asks first, `ConfirmDialog`), 「停止に対応していないアプリ: N 人」 (names
   and builds behind 「一覧を表示」, 「版は不明」), API キー (counts, 「すべての鍵を止める」 →
   `POST /broker/stop-all` with a confirmation, a link to 「API キー」; shown only while the broker

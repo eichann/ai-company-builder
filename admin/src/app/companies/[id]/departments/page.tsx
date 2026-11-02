@@ -48,6 +48,7 @@ import { describeError } from '@/lib/errors'
 import { useDepartmentManagers } from '@/lib/managers'
 import { useQuery } from '@/lib/use-query'
 import { cn } from '@/lib/utils'
+import { MembershipCard } from '@/components/advanced/task-settings-page'
 
 export default function DepartmentsPage() {
   const { companyId, isAdmin, managedDepartmentIds } = useCompany()
@@ -227,6 +228,11 @@ export default function DepartmentsPage() {
           </DndContext>
         </Card>
       )}
+
+      {/* 所属する人・不在と代わりの人 (管理画面の見直し 2-3: here, one place; was on 「やることの一覧」). */}
+      <div className="mt-6">
+        <MembershipCard departments={departments.data} error={departments.error} onRetry={departments.reload} />
+      </div>
 
       {isAdmin && (
         <>
