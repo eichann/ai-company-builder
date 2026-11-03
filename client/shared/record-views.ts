@@ -31,7 +31,7 @@ export interface RecordViewSummary {
   summary: string
   stateLabel: string | null
   updatedAt: string
-  /** Owner-only (「自分だけ」): only the member reading it sees it. */
+  /** Owner-only (「あなただけ」): only the member reading it sees it. */
   personal?: true
   /** A decision marked 例外（この件だけ）: never a precedent for another case. */
   exception?: true

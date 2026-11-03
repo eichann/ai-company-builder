@@ -1,6 +1,6 @@
 // ACB foundation: dropping something on a record links it (owner decision 2026-11-03), used by the
 // tasks feature (the task card, the list's rows) and the records feature (record card, 案件).
-import { useState, type DragEvent } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { isPathWithin, normalizePathSeparators } from '../lib/path'
 import type { DropLinkChoice, DroppedThing } from '../../../shared/link-drop'
 import { draggedConsultation, draggedFilePaths, draggedRecord, isLinkableDrag } from '../lib/dragTypes'
@@ -23,6 +23,12 @@ export interface LinkDropOptions {
   ports?: { links?: LinkDrops; topics?: ConsultationTopics }
 }
 
+/**
+ * How long a refusal (「同じものどうしはつなげません。」) stays at the place it was dropped on (owner
+ * 2026-11-03, 使い心地のメモ #4); what was done (with ［取り消す］) and a question stay until the next drop.
+ */
+export const DROP_REFUSAL_MS = 5000
+
 const companyPath = (path: string, rootPath: string): string | null => {
   const p = normalizePathSeparators(path)
   const root = normalizePathSeparators(rootPath).replace(/\/+$/, '')
@@ -36,8 +42,17 @@ const companyPath = (path: string, rootPath: string): string | null => {
  * per target, so a drop on a list row speaks where the list shows its messages.
  */
 export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports = {} }: LinkDropOptions) {
-  const [notice, setNotice] = useState<LinkDropNotice | null>(null)
+  const [state, setState] = useState<{ notice: LinkDropNotice; target: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The notice belongs to the record dropped on (a list row speaks under that row); a refusal fades.
+  const shown = useRef<string>('')
+  const setNotice = (notice: LinkDropNotice | null) => {
+    if (timer.current !== null) { clearTimeout(timer.current); timer.current = null }
+    const target = shown.current
+    setState(notice ? { notice, target } : null)
+    if (notice?.kind === 'error') timer.current = setTimeout(() => { timer.current = null; setState(s => (s?.notice === notice ? null : s)) }, DROP_REFUSAL_MS)
+  }
 
   const link = async (targetId: string, dropped: DroppedThing, choice?: string): Promise<void> => {
     setBusy(true)
@@ -79,6 +94,7 @@ export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports 
 
   /** Drop handler for `targetId`: true when it took the drop. */
   const drop = (targetId: string, e: Pick<DragEvent, 'dataTransfer'>): boolean => {
+    shown.current = targetId
     const data = e.dataTransfer
     const record = draggedRecord(data)
     if (record) { void link(targetId, { kind: 'record', id: record.id }); return true }
@@ -91,7 +107,10 @@ export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports 
   }
 
   return {
-    notice, busy, clear: () => setNotice(null),
+    notice: state?.notice ?? null,
+    /** The record the notice is about (the one dropped on). */
+    target: state?.target ?? null,
+    busy, clear: () => setNotice(null),
     accepts: (e: Pick<DragEvent, 'dataTransfer'>) => isLinkableDrag(e.dataTransfer),
     drop,
   }

@@ -165,6 +165,16 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
   await target.dispatchEvent('drop', { dataTransfer: consultation })
   await expect(page.locator('#acted')).toContainText('topic s-7=task-mine02')
   await expect(page.getByRole('status').filter({ hasText: '「見積の相談」をこのやることについての相談にしました' })).toBeVisible()
+
+  // A refusal shows right under the row it was dropped on (owner 2026-11-03, 使い心地のメモ #4), then fades.
+  const thanks = page.getByTestId('task-row').filter({ hasText: 'お礼メールを確かめて送る' })
+  const decision = await page.evaluateHandle(() => { const dt = new DataTransfer(); dt.setData('application/x-acb-record', JSON.stringify({ id: 'decision-0000yy', title: '今回だけ値引き' })); return dt })
+  await thanks.dispatchEvent('dragover', { dataTransfer: decision })
+  await thanks.dispatchEvent('drop', { dataTransfer: decision })
+  const under = thanks.locator('xpath=following-sibling::*[1]')
+  await expect(under.getByRole('alert')).toHaveText('やることには決めたことはつなげません')
+  await expect(page.getByRole('alert')).toHaveCount(1)
+  await expect(under.getByRole('alert')).toHaveCount(0, { timeout: 8000 })
   expectNoPageErrors(state)
 })
 

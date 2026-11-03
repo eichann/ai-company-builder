@@ -2,7 +2,7 @@
 // AI prepared is on top; on a task to be checked first the assignee completes only by naming whose
 // OK (from 未着手 too since task version 9, at the version shown); 受けられない needs a reason; 延ばす sends a new due; a
 // run with an unknown outside result is settled by the member; the completed card states the OK
-// in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
+// in words; 「あなただけ」 said once (top right, never a chip beside the state) and 例外（この件だけ） show; 「部署に出す」 is offered only on an
 // owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
 // only on a task linking the 来た連絡 it came from; 返事待ちにする is in 「…」 without チームの進め方; the 「…」 of
 // 2026-11-03 (アーカイブ and ［戻す］, 「終わったら」 as one item, 「自分が担当する」 on top, 要らない only on a proposal).
@@ -14,7 +14,9 @@ test('prepared things on top; completing on whose OK; 受けられない needs a
   const card = page.getByTestId('task-card')
   await expect(card.getByRole('region', { name: 'AI が用意したもの' })).toContainText('窓口を3つにした下書き')
   await expect(page.getByTestId('prepared')).toHaveText('用意したもの：お礼メール')
-  await expect(card).toContainText('自分だけ')
+  // 「あなただけ」 once, top right (見られる人); no second chip beside 未着手 (owner 2026-11-03).
+  await expect(card.getByText('あなただけ', { exact: true })).toHaveCount(1)
+  await expect(card).not.toContainText('自分だけ')
   await expect(card.getByRole('complementary', { name: 'つながっているもの' })).toContainText('例外（この件だけ）')
 
   // 確かめてから: the one main action is 「終わったので見てもらう」; completing on an OK given elsewhere is in 「…」.
@@ -107,7 +109,7 @@ test('「部署に出す」 on an owner-only task sends the chosen department; a
   const submit = form.getByRole('button', { name: 'この部署に出す' })
   await expect(submit).toBeDisabled()
   await form.getByLabel('出す先の部署').selectOption({ label: '経理部' })
-  await expect(form).toContainText('「経理部」を見られる人みんなに見えるようになります。あとから「自分だけ」には戻せません。')
+  await expect(form).toContainText('「経理部」を見られる人みんなに見えるようになります。あとから「あなただけ」には戻せません。')
   await submit.click()
   await expect(page.locator('#acted')).toHaveText('share 経理@3')
   expectNoPageErrors(state)
@@ -126,61 +128,118 @@ test('「相談する」 on the card (no consultation yet) asks for a consultati
   expectNoPageErrors(state)
 })
 
-// Owner 2026-11-02: tags could only be added (quick add, AI suggestions), never removed or added
-// later by hand. Guards: the field opens an editor for who may set tags; × removes one; a tag in
-// use is picked rather than a near spelling; a new word only from 「新しいタグにする」; the AI's
-// suggestions inside it; the server's refusal shown; a 案件's name offers ［案件につなぐ］; a finished
-// task's tags are read only.
-test('「タグ」: removed with ×, picked from the tags in use, a new word only when chosen, AI suggestions inside', async ({ page }) => {
+// Owner 2026-11-02: tags could only be added, never removed or added later by hand; 2026-11-03
+// (使い心地のメモ #6): the editor was 「ダサい」 — now pills in the field and a small popover combobox.
+// Guards: × on a pill removes one; the popover opens from the field (or ＋), lists the company's
+// tags with ✓ on the task's own (picking a checked one takes it off), ↑↓ Enter pick, a tag in use
+// is taken rather than a near spelling, 「『〇〇』を作る」 only when nothing is that word; the AI's
+// suggestions are a quiet row inside it; Esc and a press outside close it; the server's refusal
+// shows; a 案件's name offers ［案件につなぐ］; a finished task's tags are read only.
+// SCREENSHOTS=<dir> writes the field and the popover (light and dark).
+test('「タグ」: pills with ×, a popover combobox (✓, ↑↓ Enter, 作る), AI suggestions inside, Esc / outside closes', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
-  await card.getByRole('button', { name: /^タグ：営業、見積/ }).click()
-  const editor = card.getByRole('group', { name: 'タグを変える' })
-  await editor.getByRole('button', { name: '#見積 を外す' }).click()
+  await card.getByRole('button', { name: '#見積 を外す' }).click()
   await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業')
 
-  // 「けいり」 is not in use; 「経」 matches 経理 — Enter picks the tag in use, never a near spelling.
-  const input = editor.getByRole('textbox', { name: 'タグを足す' })
-  await input.fill('経')
-  await expect(editor.getByRole('option', { name: /#経理/ })).toBeVisible()
+  const opener = card.getByRole('button', { name: /^タグを足す・外す/ })
+  await expect(opener).toHaveAttribute('aria-label', 'タグを足す・外す（いま：営業、見積）')
+  await opener.click()
+  const popover = page.getByRole('dialog', { name: 'タグ' })
+  const input = popover.getByRole('combobox', { name: 'タグを探す・作る' })
+  await expect(input).toBeFocused()
+  // The task's own tags checked first, then the tags in use; the AI's suggestion as one quiet row.
+  await expect(popover.getByRole('option')).toHaveText(['#営業', '#見積', '#経理'])
+  await expect(popover.getByRole('option', { name: '#営業' })).toHaveAttribute('aria-selected', 'true')
+  await expect(popover.getByRole('option', { name: '#経理' })).toHaveAttribute('aria-selected', 'false')
+  await expect(popover).toContainText('合いそうなタグ：#経理')
+  if (process.env.SCREENSHOTS) {
+    await page.setViewportSize({ width: 1100, height: 900 })
+    await card.screenshot({ path: `${process.env.SCREENSHOTS}/tag-popover.png` })
+  }
+
+  // ↓↓ Enter on 経理 adds it (a tag in use, never a near spelling).
+  await input.press('ArrowDown')
+  await input.press('ArrowDown')
   await input.press('Enter')
   await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業,set_tags@3:tags=営業|見積|経理')
+  // Picking a checked one takes it off.
+  await popover.getByRole('option', { name: '#営業' }).click()
+  await expect(page.locator('#acted')).toContainText('set_tags@3:tags=見積')
 
-  // Nothing in use matches: Enter adds the new word.
+  // Typing filters; a word nothing is gets 「『〇〇』を作る」 as the last row, and Enter makes it.
+  await input.fill('経')
+  await expect(popover.getByRole('option')).toHaveText(['#経理', '「経」を作る'])
   await input.fill('急ぎ')
-  await expect(editor.getByRole('option')).toHaveText(['「急ぎ」を新しいタグにする'])
+  await expect(popover.getByRole('option')).toHaveText(['「急ぎ」を作る'])
   await input.press('Enter')
   await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|急ぎ')
 
-  // The server's refusal, in its words.
+  // The server's refusal, in its words, inside the popover.
   await input.fill('禁止')
   await input.press('Enter')
-  await expect(editor.getByRole('alert')).toHaveText('このタグは付けられません。')
+  await expect(popover.getByRole('alert')).toHaveText('このタグは付けられません。')
 
-  await editor.getByRole('button', { name: 'AI にタグの候補を出してもらう' }).click()
-  await editor.getByRole('button', { name: '#経理 を付ける' }).click()
+  // The AI's suggestion adds only when picked.
+  await popover.getByRole('button', { name: '#経理 を付ける（AI の候補）' }).click()
   await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|経理')
+
+  // Esc closes; so does a press outside.
+  await input.press('Escape')
+  await expect(popover).toHaveCount(0)
+  await opener.click()
+  await expect(popover).toBeVisible()
+  await card.getByRole('heading').first().click()
+  await expect(popover).toHaveCount(0)
   expectNoPageErrors(state)
 
   const done = await openPreview(page, 'task-card', { task: 'done' })
   await expect(page.getByTestId('task-card')).toContainText('了承を得たとして')
-  await expect(page.getByRole('button', { name: /^タグ：/ })).toHaveCount(0)
-  await expect(page.getByTestId('task-card')).toContainText('#営業 #見積')
+  await expect(page.getByRole('button', { name: /^タグを足す・外す/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /を外す$/ })).toHaveCount(0)
+  await expect(page.getByTestId('task-card')).toContainText('#営業')
   expectNoPageErrors(done)
 })
 
 test('「タグ」: a word that is a 案件\'s name offers ［案件につなぐ］ (the same link), adding it as a tag stays possible', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const card = page.getByTestId('task-card')
-  await card.getByRole('button', { name: /^タグ：/ }).click()
-  const editor = card.getByRole('group', { name: 'タグを変える' })
-  await editor.getByRole('textbox', { name: 'タグを足す' }).fill('B社 新人研修')
-  await expect(editor.getByRole('note')).toContainText('『B社 新人研修』は案件の名前です。案件につなぎますか？')
-  await editor.getByRole('note').getByRole('button', { name: '案件につなぐ' }).click()
+  await card.getByRole('button', { name: /^タグを足す・外す/ }).click()
+  const popover = page.getByRole('dialog', { name: 'タグ' })
+  const input = popover.getByRole('combobox', { name: 'タグを探す・作る' })
+  await input.fill('B社 新人研修')
+  await expect(popover.getByRole('note')).toContainText('『B社 新人研修』は案件の名前です。')
+  await popover.getByRole('note').getByRole('button', { name: '案件につなぐ' }).click()
   await expect(page.locator('#acted')).toHaveText('link task-0000aa bundle=deal-0002cd@3')
-  await editor.getByRole('textbox', { name: 'タグを足す' }).fill('B社 新人研修')
-  await editor.getByRole('option', { name: /新しいタグにする/ }).click()
+  await input.fill('B社 新人研修')
+  await popover.getByRole('option', { name: /を作る/ }).click()
   await expect(page.locator('#acted')).toContainText('set_tags@3:tags=営業|見積|B社 新人研修')
+  expectNoPageErrors(state)
+})
+
+// 「延ばす」 (使い心地のメモ #7): more choices, and the popover closes on Esc and on a press outside.
+test('「延ばす」: more choices; Esc and a press outside close it', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  const button = card.getByRole('button', { name: '延ばす' })
+  const choices = page.getByRole('group', { name: '延ばす' })
+  await button.click()
+  await expect(choices.getByRole('button', { name: /あしたの朝/ })).toBeVisible()
+  await expect(choices.getByRole('button', { name: /来月のはじめ/ })).toBeVisible()
+  await expect(choices.getByRole('button', { name: /2週間後/ })).toBeVisible()
+  if (process.env.SCREENSHOTS) await card.screenshot({ path: `${process.env.SCREENSHOTS}/postpone.png` })
+  await page.keyboard.press('Escape')
+  await expect(choices).toHaveCount(0)
+  await button.click()
+  await expect(choices).toBeVisible()
+  await card.getByRole('heading').first().click()
+  await expect(choices).toHaveCount(0)
+  // The ＋ファイル・フォルダをつなぐ picker closes the same way.
+  await card.getByRole('button', { name: 'ファイル・フォルダをつなぐ' }).click()
+  const picker = card.getByRole('group', { name: 'つなぐファイル・フォルダ' })
+  await expect(picker).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(picker).toHaveCount(0)
   expectNoPageErrors(state)
 })
 
@@ -500,10 +559,15 @@ test('a record dropped on the card links it with ［取り消す］; one no link
   await done.getByRole('button', { name: '取り消す' }).click()
   await expect(page.locator('#acted')).toHaveText('drop task-0000aa task-0000zz target:related,undo 9@9')
 
+  // The refusal shows at the drop zone it was dropped on (owner 2026-11-03, 使い心地のメモ #4), then fades.
   const refused = await dropOnLinks(page, 'application/x-acb-record', { id: 'decision-0000yy', title: '今回だけ値引き' })
   await refused.drop()
-  await expect(links.getByRole('alert')).toHaveText('やることには決めたことはつなげません')
+  const zone = links.locator('[data-link-drop-zone]')
+  await expect(zone.getByRole('alert')).toHaveText('やることには決めたことはつなげません')
+  await expect(links.getByRole('alert')).toHaveCount(1)
   await expect(page.locator('#acted')).not.toContainText('decision-0000yy')
+  if (process.env.SCREENSHOTS) await links.screenshot({ path: `${process.env.SCREENSHOTS}/drop-refused-at-zone.png` })
+  await expect(zone.getByRole('alert')).toHaveCount(0, { timeout: 8000 })
   expectNoPageErrors(state)
 })
 

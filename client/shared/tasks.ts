@@ -41,7 +41,7 @@ export interface TaskListItem {
   turn: TaskTurn
   /** Whose turn or what it waits for, in words (「田中さんの番」「返事待ち：先方の見積」), when not the member's. */
   waitingFor: string | null
-  /** Owner-only (「自分だけ」): only the member sees it. */
+  /** Owner-only (「あなただけ」): only the member sees it. */
   personal: boolean
   /** The member asked it of themselves (requester and assignee): they may finish it from the list. */
   own: boolean

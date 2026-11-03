@@ -9,7 +9,7 @@ import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
 import type { BundleKind } from '../../../../../shared/types/records'
-import { CALM } from '../../../../shared/thing-words'
+import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
 import { fileRow, pathFacts, recordRow, type NotDownloadedFolderOf } from '../../records/components/linkRows'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
@@ -267,7 +267,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       chips={<>
         {record.stateLabel && <Chip tone={record.state === 'done' ? 'green' : 'gray'}>{record.stateLabel}</Chip>}
         {turn && <Chip>{turn}</Chip>}
-        <RecordMarks record={record} />
+        {/* 「あなただけ」 is said once, top right (見られる人), owner 2026-11-03. */}
+        <RecordMarks record={record} personal={false} />
         {card.names.assignee && <span className="text-[11.5px] text-gray-500 dark:text-zinc-400">担当 {card.names.assignee}さん{card.names.requester && !(card.roles.assignee && card.roles.requester) && card.names.requester !== card.names.assignee ? `・頼んだ人 ${card.names.requester}さん` : ''}</span>}
       </>}
       actions={<>
@@ -275,15 +276,15 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       </>}
       from={card.origin && <OriginLine origin={card.origin} />}
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
-      seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
+      seenBy={card.viewers ? <SeenBy who={card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
         extras={[{ name: 'ファイル', kind: 'file', action: <>
           <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
         </>, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
-        drop={{ label: `ファイル・フォルダ・やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) } }}
+        drop={{ label: `ファイル・フォルダ・やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) },
+          notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }}
         notice={<>
-          <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} />
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
           {unlinked && (
             <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
