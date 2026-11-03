@@ -10,7 +10,7 @@
  */
 import type { ChatSession } from './chat-history'
 import { describePath, type TargetContext } from './agent-events'
-import { RECORD_ID_RE } from '../../shared/core/records'
+import { TOPIC_RECORD_RE as RECORD_ID_RE } from './task-consult'
 
 /** The chat part that says a new file was linked: `{ path, title }` (stored with the reply). */
 export const FILE_LINKED_PART_TYPE = 'data-file-linked'

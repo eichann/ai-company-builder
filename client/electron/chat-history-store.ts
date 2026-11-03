@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatSessionSummary } from '../shared/chat-history'
 import { normalizeSearchText, summarizeSession } from '../shared/chat-history-summary'
 import { isAgentId } from '../shared/agents/registry'
-import { RECORD_ID_RE } from '../../shared/core/records'
+import { TOPIC_RECORD_RE } from '../shared/task-consult'
 
 interface HistoryFile {
   sessions: ChatSession[]
@@ -473,7 +473,7 @@ export class ChatHistoryStore {
       delete session.topicRecordId
       session.topicDetached = true
     } else if (patch.topicRecordId !== undefined) {
-      if (typeof patch.topicRecordId !== 'string' || !RECORD_ID_RE.test(patch.topicRecordId)) throw new Error('不正な記録です。')
+      if (typeof patch.topicRecordId !== 'string' || !TOPIC_RECORD_RE.test(patch.topicRecordId)) throw new Error('不正な記録です。')
       session.topicRecordId = patch.topicRecordId
     }
     this.replace(entry, session)
