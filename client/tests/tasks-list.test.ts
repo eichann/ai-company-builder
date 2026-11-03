@@ -8,6 +8,9 @@ import assert from 'node:assert/strict'
 import { createTasksApi } from '../electron/features/tasks/ipc'
 import { cameBackLine, classifyTasks, defaultWaitUntil, waitChoices, type TaskSources } from '../shared/tasks'
 import type { RecordSummary } from '../../shared/types/records'
+import { turnTiming } from '../../shared/core/turn-timing'
+import { thisWeeksTurn, type TurnItem } from '../shared/notifications-app'
+import { companyNow, listSections } from '../src/features/tasks/model'
 
 const ME = 'u-me'
 function rec(id: string, state: string, fields: Record<string, string | null> = {}, extra: Partial<RecordSummary> = {}): RecordSummary {
@@ -56,6 +59,35 @@ test('返事待ち (task version 12): the row says its 見込み; once the clock
   assert.deepEqual(at['task-todo01'], ['mine', null])
   // The company's own holiday is not counted.
   assert.equal(cameBackLine('先方からの返事', '2026-11-03T01:00:00.000Z', '2026-11-09', ['2026-11-05']), '先方からの返事が来ていません（3日）')
+})
+
+test('「あなたの番」 in the list is exactly what the title bar counts (and the morning summary): a resting task goes to 先のこと / いつか in both', () => {
+  // Tuesday 2026-11-03 10:00 in Japan.
+  const now = companyNow(Date.parse('2026-11-03T01:00:00.000Z'))
+  const myTurn = [
+    rec('task-week01', 'todo', { due: '2026-11-06' }),
+    rec('task-next01', 'todo', { due: '2026-11-20' }),
+    rec('task-none01', 'todo'),
+    rec('task-asked1', 'todo', { requested_by: 'u-tanaka' }),
+    rec('task-strt01', 'in_progress'),
+    rec('task-strt02', 'in_progress', { due: '2026-12-01' }),
+    rec('task-mins01', 'todo', { task_kind: 'minutes_review' }),
+    rec('task-prep01', 'todo', { prep_summary: '下書きを用意しました' }),
+    rec('task-back01', 'todo', {}, { waitCameBack: { waitedSince: null, overAt: '2026-11-02T00:00:00.000Z' } }),
+    rec('task-decl01', 'declined', { assignee: 'u-tanaka' }),
+  ]
+  const items = classifyTasks(src({ myTurn, today: now.date }))
+  const sections = Object.fromEntries(listSections(items, [], 'turn', now).map(x => [x.key, x.items.map(i => i.id).sort()]))
+  const turnItems: TurnItem[] = myTurn.map(r => {
+    const t = turnTiming(r, now.date)
+    return { id: r.id, type: r.type, title: r.title, state: r.state, due: null, ...(t !== 'now' ? { timing: t } : {}) }
+  })
+  const bar = thisWeeksTurn(turnItems, turnItems.length)
+  assert.deepEqual(sections.mine, bar.items.map(i => i.id).sort())
+  assert.equal(bar.total, 7)
+  assert.deepEqual(sections.later, ['task-next01'])
+  assert.deepEqual(sections.someday, ['task-asked1', 'task-none01'])
+  assert.equal(bar.resting, 3)
 })
 
 test('「いつごろ来そうか」 chips: 明日 (the next business day), 3日後 (3 business days, the default), 来週 (same weekday, or the next business day)', () => {

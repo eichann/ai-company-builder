@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
@@ -120,6 +120,10 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     return null
   }
 
+  // What a drop on a row said, right under that row (a refusal fades after a few seconds).
+  const dropNotice = (id: string) => linkDrop.notice && linkDrop.target === id
+    ? <div key={`drop:${id}`} className="ml-7 mr-2 mb-1"><LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /></div>
+    : null
   const row = (i: TaskListItem) => {
     const ai = i.turn === 'ai' ? aiOf(i.id) : null
     const extra: Array<{ label: string; run: () => void }> = []
@@ -135,8 +139,9 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       extra.push({ label: '今は読まない', run: () => void meetingActions.skip(i.id).then(e => { setMessage(e); list.reload() }) })
     }
     return (
+      <Fragment key={i.id}>
       <TaskRow
-        key={i.id} item={i.needsBundle && !i.suggestedBundle ? { ...i, waitingFor: meetingWords.ask } : i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
+        item={i.needsBundle && !i.suggestedBundle ? { ...i, waitingFor: meetingWords.ask } : i} now={now} active={activeRecordId === i.id} ai={ai} busy={busy === i.id}
         onOpen={onOpen}
         onFinish={i.check ? () => press(i) : null}
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
@@ -146,6 +151,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
         onConsult={i.type === 'task' && onConsult ? () => onConsult({ id: i.id, title: i.title }) : null}
         extra={extra}
       />
+      {dropNotice(i.id)}
+      </Fragment>
     )
   }
   // 「まとまりを選ぶ会議 n件」: one row for the meetings of one 相手 or series, opened to show each.
@@ -228,7 +235,6 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             ))}
           </div>
         )}
-        {linkDrop.notice && <div className="mx-3 my-1"><LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /></div>}
         {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
           {list.data === null && !list.error && <p className="px-2.5 py-2 text-[12px] text-gray-400">{CALM.loading}</p>}

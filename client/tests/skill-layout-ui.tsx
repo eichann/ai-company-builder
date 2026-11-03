@@ -115,6 +115,11 @@ const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
 // A file link clicked in a consultation's own window, after main checked it.
 const fileRequests = emitter<{ path: string }>()
+// The consultation's AI changed the task (records:changed): its version and linked files grow.
+const recordsChanged = emitter<{ companyId: string }>()
+let taskVersion = 2
+let taskFiles = ['営業部/提案書/A社_提案.md']
+let cardReads = 0
 const calls: Array<{ name: string; args: unknown[] }> = []
 const record = (name: string, args: unknown[]) => { calls.push({ name, args }) }
 
@@ -212,15 +217,15 @@ const api: Partial<ElectronAPI> = {
     : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
   // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
   getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
-    ? { success: true, card: {
-      record: { ...RECORD_TASK, state: 'in_progress', version: 2 }, due: null, tags: [], purpose: null,
+    ? (cardReads++, await sleep(120), { success: true, card: {
+      record: { ...RECORD_TASK, state: 'in_progress', version: taskVersion }, due: null, tags: [], purpose: null,
       fields: [{ label: '担当', value: '田中 太郎' }],
       roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, assigneeId: 'u-tanaka', self: { id: 'u-me', name: null }, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
-      files: [{ path: '営業部/提案書/A社_提案.md' }],
+      files: taskFiles.map(path => ({ path })),
       links: [{ label: '決めたこと', record: RECORD_DECISION }],
       history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
       runs: [], people: [], wait: null, holidays: [], fromIncoming: false,
-    } }
+    } })
     : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
   getRecordsForFile: async (_companyId: string, companyPath: string) => {
     record('getRecordsForFile', [companyPath])
@@ -245,7 +250,7 @@ const api: Partial<ElectronAPI> = {
   // ?tasks=1: the やること tab (features/tasks) with a few rows; otherwise records give no list.
   getTaskList: async () => params.get('tasks') === '1'
     ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
-      id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: 1, due: null,
+      id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
     })) } }
     : { success: true, data: { available: false, listDepartmentIds: null, items: [] } },
@@ -256,6 +261,7 @@ const api: Partial<ElectronAPI> = {
   }] : [] }) as never,
   onPluginsChanged: () => () => {},
   onNotificationsChanged: () => () => {},
+  onRecordsChanged: recordsChanged.subscribe,
   onNotificationsOpenTasks: () => () => {},
   getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
 }
@@ -272,6 +278,13 @@ Object.assign(window, {
     emit(changes: Array<{ type: string; path: string }>) { fileChanges.emit(changes) },
     /** A consultation's own window asked main to open this file here. */
     fileFromChatWindow(path: string) { fileRequests.emit({ path }) },
+    /** The consultation's AI linked a file to the task: a new version, and main says records changed. */
+    aiLinksFile(path: string) {
+      taskVersion += 1
+      taskFiles = [...taskFiles, path]
+      recordsChanged.emit({ companyId: COMPANY })
+    },
+    cardReads: () => cardReads,
   },
 })
 

@@ -4,15 +4,35 @@ import { normalizeTag, TAG_MAX_LENGTH, TAGS_MAX_COUNT } from '../../../../shared
 import type { BundleChoice } from '../../../shared/tasks'
 import { tagKey } from '../../../shared/tag-suggest'
 
+/** One row of the tag popover: a tag, and whether the task has it (a check mark; picking it takes it off). */
+export interface TagOption { tag: string; selected: boolean }
+
 /**
- * Tags in use (most used first) the member may mean: those containing what is typed, spelled
- * loosely (width, case, katakana / hiragana); nothing typed → the most used. The task's own
- * tags are left out.
+ * The rows of the tag popover (owner 2026-11-03, 使い心地のメモ #6): the task's tags and the tags in
+ * use (most used first) that contain what is typed, spelled loosely (width, case, katakana /
+ * hiragana), each once. Nothing typed → the task's tags first, then the most used. A tag spelled
+ * exactly like the typed word (loosely) comes first, so Enter picks it rather than a near one.
  */
-export function tagCandidates(typed: string, current: readonly string[], inUse: readonly string[], limit = 8): string[] {
+export function tagOptions(typed: string, current: readonly string[], inUse: readonly string[], limit = 12): TagOption[] {
   const key = tagKey(typed.trim())
   const own = new Set(current.map(tagKey))
-  return inUse.filter(t => !own.has(tagKey(t)) && (!key || tagKey(t).includes(key))).slice(0, limit)
+  const seen = new Set<string>()
+  const all: TagOption[] = []
+  for (const tag of [...current, ...inUse]) {
+    const k = tagKey(tag)
+    if (seen.has(k) || (key && !k.includes(key))) continue
+    seen.add(k)
+    all.push({ tag, selected: own.has(k) })
+  }
+  const exact = all.filter(o => key && tagKey(o.tag) === key)
+  return [...exact, ...all.filter(o => !exact.includes(o))].slice(0, limit)
+}
+
+/** 「『〇〇』を作る」: the typed word as a new tag, when no row is that word already (loosely). */
+export function newTagOffer(typed: string, options: readonly TagOption[]): string | null {
+  const tag = normalizeTag(typed)
+  if (tag === null) return null
+  return options.some(o => tagKey(o.tag) === tagKey(tag)) ? null : tag
 }
 
 export type TagAdd =

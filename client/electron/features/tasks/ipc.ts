@@ -45,7 +45,7 @@ import { linkedPaths } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  ARCHIVE_PAGE, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
+  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
   type ArchivedTasksResult, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -414,15 +414,18 @@ export function createTasksApi(deps: TasksDeps) {
 
     /**
      * The folded 「アーカイブ」 at the bottom of the list: archived tasks assigned to the member or asked
-     * by them, newest first, `ARCHIVE_PAGE` at a time from `cursor` (`archivePage`). The server
+     * by them within `ARCHIVE_SHOWN_DAYS` (the server's `finishedSince`: when it entered the archive),
+     * newest first, `ARCHIVE_PAGE` at a time from `cursor` (`archivePage`). The server
      * answers only what the member reads (someone's own task to its owner alone).
      */
     async archived(companyId: string, cursor: unknown): Promise<ArchivedTasksResult> {
       if (!COMPANY.test(companyId) || !isArchiveCursor(cursor)) return { success: false, offline: false, error: '入力が正しくありません。' }
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
+      // Only what was archived within ARCHIVE_SHOWN_DAYS (entered 「アーカイブ」 since then): older ones stay in 探す.
+      const since = new Date(now() - ARCHIVE_SHOWN_DAYS * 24 * 60 * 60 * 1000).toISOString()
       const query = (field: 'assignee' | 'requested_by', offset: number) =>
-        call(companyId, 'POST', '/records/query', { type: 'task', state: ['cancelled'], fields: { [field]: id }, limit: ARCHIVE_PAGE, offset })
+        call(companyId, 'POST', '/records/query', { type: 'task', state: ['cancelled'], fields: { [field]: id }, finishedSince: since, limit: ARCHIVE_PAGE, offset })
       const [assigned, asked] = await Promise.all([query('assignee', cursor.assignee), query('requested_by', cursor.requester)])
       const page = (a: Answer) => (a?.status === 200 ? a.json?.data as RecordQueryResult | undefined : undefined)
       const a = page(assigned)

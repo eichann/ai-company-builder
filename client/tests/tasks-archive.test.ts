@@ -1,8 +1,9 @@
 // The archive (アーカイブ, tasks-ui.md "The archive"): `tasks:archived` in main and `archivePage`
 // (client/shared/tasks.ts). Guards: 20 per page, newest first, each archived task once across all
 // pages though one's own task is in both queries; 「さらに読み込む」 stops when both are read; only
-// archived tasks of the member (assignee or requester) are asked for; a bad cursor never reaches
-// the server; an archived task is not in 今日終わったこと.
+// archived tasks of the member (assignee or requester) are asked for, archived within 30 days
+// (older ones only left out of the fold); a bad cursor never reaches the server; an archived task
+// is not in 今日終わったこと.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTasksApi } from '../electron/features/tasks/ipc'
@@ -18,18 +19,20 @@ const task = (id: string, minute: number, fields: Record<string, string>): Recor
 const serverOrder = (list: RecordSummary[]) => [...list].sort((a, b) => (a.updatedAt === b.updatedAt ? (a.id < b.id ? -1 : 1) : a.updatedAt > b.updatedAt ? -1 : 1))
 
 /** A server holding archived tasks: answers `/records/query` by its field, offset and limit, as the real one pages. */
-function server(all: RecordSummary[]) {
+function server(all: RecordSummary[], nowMs?: number) {
   const queries: Array<Record<string, unknown>> = []
   const api = createTasksApi({
+    ...(nowMs !== undefined ? { now: () => nowMs } : {}),
     baseUrl: () => 'https://acb.test',
     cookies: () => ['session=abc'],
     log: { warn: () => {} },
     fetch: (async (url: string, init: RequestInit) => {
       if (url.endsWith('/api/me')) return new Response(JSON.stringify({ data: { id: ME } }), { status: 200 })
-      const body = JSON.parse(String(init.body)) as { state: string[]; fields: Record<string, string>; limit: number; offset: number }
+      const body = JSON.parse(String(init.body)) as { state: string[]; fields: Record<string, string>; finishedSince?: string; limit: number; offset: number }
       queries.push(body)
       const [[field, value]] = Object.entries(body.fields)
-      const matching = serverOrder(all.filter(r => body.state.includes(r.state ?? '') && r.fields[field] === value))
+      // finishedSince: entered the final state since then (here the last change is the archiving).
+      const matching = serverOrder(all.filter(r => body.state.includes(r.state ?? '') && r.fields[field] === value && (!body.finishedSince || r.updatedAt >= body.finishedSince)))
       return new Response(JSON.stringify({ data: { total: matching.length, records: matching.slice(body.offset, body.offset + body.limit) } }), { status: 200 })
     }) as unknown as typeof fetch,
   })
@@ -45,7 +48,7 @@ test('「さらに読み込む」 pages 20 at a time, newest first, each archive
   }
   // Someone else's archived task never shows.
   all.push(task('task-other0', 99, { assignee: 'u-tanaka', requested_by: 'u-abe' }))
-  const h = server(all)
+  const h = server(all, Date.parse('2026-11-10T00:00:00.000Z'))
   let cursor: ArchiveCursor | null = { assignee: 0, requester: 0 }
   const pages: string[][] = []
   while (cursor) {
@@ -67,6 +70,18 @@ test('「さらに読み込む」 pages 20 at a time, newest first, each archive
     assert.equal(q.limit, ARCHIVE_PAGE)
     assert.deepEqual(Object.values(q.fields as object), [ME])
   }
+})
+
+test('the folded archive shows only the last 30 days of archiving; older ones are only left out (asked for nothing older)', async () => {
+  const nowMs = Date.parse('2026-12-15T00:00:00.000Z')
+  const day = 24 * 60 * 60 * 1000
+  const archived = (id: string, daysAgo: number) => ({ ...task(id, 0, { assignee: ME, requested_by: ME }), updatedAt: new Date(nowMs - daysAgo * day).toISOString() })
+  const h = server([archived('task-recent', 1), archived('task-edge29', 29), archived('task-old031', 31), archived('task-old200', 200)], nowMs)
+  const r = await h.api.archived('co1', { assignee: 0, requester: 0 })
+  assert.ok(r.success)
+  assert.deepEqual(r.items.map(i => i.id), ['task-recent', 'task-edge29'])
+  assert.equal(r.next, null)
+  for (const q of h.queries) assert.equal(q.finishedSince, new Date(nowMs - 30 * day).toISOString())
 })
 
 test('a page never goes past a window whose query has more; the next page picks up there', () => {

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { CircleNotch } from '@phosphor-icons/react'
 import type { RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
-import { CALM } from '../../../../shared/thing-words'
+import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
 import { LinkedColumn, type LinkedDrop } from '../../../shared/ui/LinkedColumn'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
@@ -91,7 +91,6 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     })
     : null
   const notes = <>
-    <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} />
     {error && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
     {notice && (
       <p role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
@@ -101,7 +100,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     )}
   </>
   return <CardBody card={card} rootPath={rootPath} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
-    field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) } }} onUnlink={(link, label) => void unlink(link, label)}
+    field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
 
@@ -117,7 +116,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
   const chips = <>
     {record.stateLabel && <Chip tone="accent">{record.stateLabel}</Chip>}
     {detail?.kind === 'incoming' && detail.needsReply && <Chip tone="amber">返事が要る</Chip>}
-    <RecordMarks record={record} />
+    <RecordMarks record={record} personal={false} />
   </>
   let from: ReactNode = null
   let actions: ReactNode = null
@@ -143,7 +142,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
   })), ...consult.rows]
   return (
     <RecordPage testId="record-card" kind={record.thing} name={record.typeLabel} title={record.title} chips={chips} from={from} actions={actions}
-      seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
+      seenBy={card.viewers ? <SeenBy who={card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
       top={card.ai && <AiBand ai={card.ai} onShowHistory={() => setHistoryOpen(true)} />}
       bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>

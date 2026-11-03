@@ -53,7 +53,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
               // A tab dragged onto a record's 「つながっているもの」 links what it shows (owner decision 2026-11-03).
               draggable
               onDragStart={e => {
-                if (recordId) startRecordDrag(e.dataTransfer, { id: recordId, title: look?.title ?? '' })
+                if (recordId) startRecordDrag(e.dataTransfer, { id: recordId, title: look?.title ?? '', ...(look ? { word: thingName(look) } : {}) })
                 else {
                   e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([filePath]))
                   e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED

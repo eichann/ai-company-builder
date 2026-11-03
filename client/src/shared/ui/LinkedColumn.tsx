@@ -38,6 +38,8 @@ export interface LinkedDrop {
   label: string
   accepts: (e: DragEvent) => boolean
   onDrop: (e: DragEvent) => void
+  /** What the last drop said (done, a choice, a refusal): shown inside the frame, where it was dropped. */
+  notice?: ReactNode
 }
 
 /**
@@ -96,6 +98,7 @@ export function LinkedColumn({ rows, extras = [], first, drop, notice }: {
       })}
       {drop && (
         <div data-link-drop-zone className={`rounded-md border border-dashed px-2 py-2 text-center text-[11px] ${over ? 'border-accent text-accent' : 'border-gray-300 text-gray-400 dark:border-zinc-700'}`}>
+          {drop.notice && !over && <div className="mb-1.5 text-left">{drop.notice}</div>}
           ここに落とすと、つながります
           {!over && <span className="block text-[10px]">{drop.label}</span>}
         </div>

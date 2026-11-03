@@ -76,6 +76,40 @@ test('a task opens as a tab beside the files; it stays when the left tab changes
   expectNoPageErrors(state)
 })
 
+// Owner 2026-11-03 (使い心地のメモ #3): when the consultation's AI changed the task (linked a file),
+// the whole task screen flickered — the card was keyed by its version, so every version remounted
+// it (read again from nothing, folds closed). Now the same card updates in place: the new file shows,
+// the open 経緯 stays open, and neither the card nor the list ever shows 「読み込んでいます」 again.
+test('the AI changing the task updates its open card in place: no remount, no loading flash, folds kept', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1' })
+  await leftTab(page, /^やること/).click()
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await list.getByText('A社 提案書を仕上げる').click()
+  const card = page.getByTestId('record-tab')
+  await expect(card.getByText('A社_提案.md').first()).toBeVisible()
+  await card.getByRole('button', { name: /経緯/ }).click()
+  await expect(card.getByText('山田 花子：作りました')).toBeVisible()
+  // Mark the card's node and watch for any loading text from now on.
+  await card.getByTestId('task-card').evaluate(el => { (el as HTMLElement).dataset.sameNode = '1' })
+  await page.evaluate(() => {
+    const w = window as unknown as { __flashed: boolean }
+    w.__flashed = false
+    new MutationObserver(() => { if (document.getElementById('root')!.textContent!.includes('読み込んでいます')) w.__flashed = true })
+      .observe(document.getElementById('root')!, { childList: true, subtree: true, characterData: true })
+  })
+  const reads = await page.evaluate(() => (window as unknown as { __acbLayout: { cardReads: () => number } }).__acbLayout.cardReads())
+  await page.evaluate(() => (window as unknown as { __acbLayout: { aiLinksFile: (p: string) => void } }).__acbLayout.aiLinksFile('営業部/提案書/見積メモ.md'))
+  await expect(card.getByText('見積メモ.md').first()).toBeVisible()
+  await expect(card.getByTestId('task-card')).toHaveAttribute('data-same-node', '1')
+  await expect(card.getByText('山田 花子：作りました')).toBeVisible()
+  await expect(list.getByText('A社 提案書を仕上げる')).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { __flashed: boolean }).__flashed)).toBe(false)
+  // One change, one read of the card (the list's newer version asks nothing more once shown).
+  await page.waitForTimeout(400)
+  expect(await page.evaluate(() => (window as unknown as { __acbLayout: { cardReads: () => number } }).__acbLayout.cardReads())).toBeLessThanOrEqual(reads + 2)
+  expectNoPageErrors(state)
+})
+
 // Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
 // column; then (#516) showed icons only. Owner 2026-11-02: the names always show. Narrow: the name
 // (11 px, one line) under its icon, every tab inside the column even at its minimum; wide: side by side.

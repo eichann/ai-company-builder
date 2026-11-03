@@ -7,6 +7,7 @@ import type { RecordCardHistoryLine } from '../../../../shared/record-views'
 import type { TaskCardData, TaskCardOrigin } from '../../../../shared/task-card'
 import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
+import { useDismiss } from '../../../shared/hooks/useDismiss'
 import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { dueText, dueWhen, postponeChoices, type CompanyNow } from '../model'
@@ -36,10 +37,13 @@ export function OriginLine({ origin }: { origin: TaskCardOrigin }) {
 /** 期限 with 「延ばす」, and the tags (`tagField`, `TagField.tsx`). */
 export function DueAndTags({ card, now, busy, onPostpone, tagField }: { card: TaskCardData; now: CompanyNow; busy: boolean; onPostpone: ((due: string) => void) | null; tagField: ReactNode }) {
   const [open, setOpen] = useState(false)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  // A press outside the field (its 延ばす and the choices) or Esc closes the choices.
+  useDismiss(box, open, () => setOpen(false))
   const overdue = card.due ? dueWhen(card.due, now) === 'overdue' : false
   return (
     <div className="grid grid-cols-2 gap-2">
-      <div className="relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
+      <div ref={setBox} className="relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
         <div className="flex items-center gap-1 text-[11px] text-gray-500"><CalendarBlank size={11} />{overdue ? '期限切れ' : '期限'}</div>
         <div className="flex items-center gap-2">
           <span className={`text-[15px] font-bold tabular-nums ${overdue ? 'text-red-600 dark:text-red-400' : ''}`}>{card.due ? dueText(card.due, now) : <span className="text-[13px] font-normal text-gray-400">なし</span>}</span>
@@ -47,7 +51,7 @@ export function DueAndTags({ card, now, busy, onPostpone, tagField }: { card: Ta
         </div>
         {open && onPostpone && (
           <div role="group" aria-label="延ばす" className="absolute left-0 top-full z-30 mt-1 w-[250px] rounded-lg border border-gray-200 bg-white p-1 text-[12px] shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-            {postponeChoices(now).map(c => (
+            {postponeChoices(now, card.holidays).map(c => (
               <button key={c.label} type="button" onClick={() => { setOpen(false); onPostpone(c.due) }} className="flex w-full justify-between rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-700">
                 <span>{c.label}</span><span className="tabular-nums text-gray-400">{dueText(c.due, now)}</span>
               </button>

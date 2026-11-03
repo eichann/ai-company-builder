@@ -144,6 +144,23 @@ test('chat request body: pending attachments go with one send only, and the hand
   assert.equal(next.referenceFiles, undefined)
 })
 
+// A dropped record is read for the AI once (record-drop.ts): a later request must not carry it again.
+test('chat request body: dropped records go with one send only', () => {
+  const s = sources({ pendingRecordIds: { current: ['task-0001ab'] } })
+  assert.deepEqual(buildChatRequestBody(s).droppedRecordIds, ['task-0001ab'])
+  assert.equal(buildChatRequestBody(s).droppedRecordIds, undefined)
+})
+
+// The bubble's 「やること『…』を AI に渡しました」 survives a restart (it is how the member knows the AI read it).
+test('a message\'s dropped records survive the history round trip', () => {
+  const dropped = [{ id: 'task-0001ab', title: '見積を直す', word: 'やること' }]
+  const msg = { id: 'u1', role: 'user', metadata: { droppedRecords: dropped }, parts: [{ type: 'text', text: 'これはいつまで？' }] } as UIMessage
+  const stored = uiMessageToSessionMessage(msg, T)
+  assert.deepEqual(stored.droppedRecords, dropped)
+  assert.deepEqual((sessionMessageToUIMessage(stored).metadata as { droppedRecords?: unknown }).droppedRecords, dropped)
+  assert.equal('droppedRecords' in uiMessageToSessionMessage({ id: 'u2', role: 'user', parts: [{ type: 'text', text: 'x' }] } as UIMessage, T), false)
+})
+
 test('chat request body: creates the app session id when missing; no company → no hand-off receipt; no department → undefined', () => {
   const s = sources({ appSessionId: { current: null }, companyId: { current: undefined }, activeDepartment: { current: undefined }, promptSuggestions: () => false })
   const body = buildChatRequestBody(s)

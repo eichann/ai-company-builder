@@ -22,6 +22,13 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   await expect(later).not.toContainText('来期の研修メニュー')
   await later.getByRole('button', { name: /先のこと/ }).click()
   await expect(later).toContainText('来期の研修メニュー')
+  // Not started with no due: 「いつか」, folded, not in あなたの番 (owner 2026-11-03).
+  const someday = section('いつか')
+  await expect(section('あなたの番')).not.toContainText('業界の本を読む')
+  await expect(someday).not.toContainText('業界の本を読む')
+  await someday.getByRole('button', { name: /いつか/ }).click()
+  await expect(someday).toContainText('業界の本を読む')
+  if (process.env.SCREENSHOTS) await page.getByRole('region', { name: 'やることの一覧' }).screenshot({ path: `${process.env.SCREENSHOTS}/list-someday.png` })
 
   // 〇〇ごと takes its word from the kinds in the list; each 案件 with its items, then 「案件なし」.
   await page.getByRole('button', { name: '案件ごと' }).click()
@@ -158,6 +165,16 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
   await target.dispatchEvent('drop', { dataTransfer: consultation })
   await expect(page.locator('#acted')).toContainText('topic s-7=task-mine02')
   await expect(page.getByRole('status').filter({ hasText: '「見積の相談」をこのやることについての相談にしました' })).toBeVisible()
+
+  // A refusal shows right under the row it was dropped on (owner 2026-11-03, 使い心地のメモ #4), then fades.
+  const thanks = page.getByTestId('task-row').filter({ hasText: 'お礼メールを確かめて送る' })
+  const decision = await page.evaluateHandle(() => { const dt = new DataTransfer(); dt.setData('application/x-acb-record', JSON.stringify({ id: 'decision-0000yy', title: '今回だけ値引き' })); return dt })
+  await thanks.dispatchEvent('dragover', { dataTransfer: decision })
+  await thanks.dispatchEvent('drop', { dataTransfer: decision })
+  const under = thanks.locator('xpath=following-sibling::*[1]')
+  await expect(under.getByRole('alert')).toHaveText('やることには決めたことはつなげません')
+  await expect(page.getByRole('alert')).toHaveCount(1)
+  await expect(under.getByRole('alert')).toHaveCount(0, { timeout: 8000 })
   expectNoPageErrors(state)
 })
 
@@ -244,6 +261,8 @@ test('「アーカイブ」 at the bottom: folded until opened, 20 newest first,
   await archive.getByRole('button', { name: 'さらに読み込む' }).click()
   await expect(rows).toHaveCount(45)
   await expect(archive.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(0)
+  // At the end: where the older ones are (the fold shows the last 30 days; nothing is deleted).
+  await expect(archive).toContainText('30日より前のものは、探すタブから見つかります')
   if (process.env.SCREENSHOTS) await archive.screenshot({ path: `${process.env.SCREENSHOTS}/archive-section-end.png` })
   await expect(page.locator('#acted')).toHaveText('archived 0,archived 20,archived 40')
   await rows.nth(44).click()

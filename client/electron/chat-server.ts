@@ -43,6 +43,8 @@ import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
 import { FILE_LINKED_PART_TYPE, taskTopicInstructions, taskTopicOf } from '../shared/consultation-task'
+import { droppedRecordIdsOf, droppedRecordsContext, recordTopicInstructions, withTextBeforeLatestUserMessage } from '../shared/record-drop'
+import { TOPIC_RECORD_RE } from '../shared/task-consult'
 import { isTodayFolderPath } from '../shared/today-folder'
 import { skillLoadedBy, type AgentToolEvent, type SkillUseSighting } from '../shared/agent-events'
 import type { ToolStopCheck } from '../shared/agent-stop'
@@ -76,6 +78,8 @@ export interface ChatServerConfig extends AgentHost {
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
    */
   consultationTopic?: (companyId: string, conversationId: string) => { topicRecordId?: string; topicDetached?: boolean } | null
+  /** This PC's consultations about a record (their titles, newest first), but `exceptConversationId`: in a dropped record's summary. */
+  consultationsAbout?: (companyId: string, recordId: string, exceptConversationId?: string) => string[]
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -287,6 +291,7 @@ export async function startChatServer(config: ChatServerConfig) {
       aiTurnStep: requestedStep,
       pluginStep: requestedPluginStep,
       todayFolder: requestedTodayFolder,
+      droppedRecordIds: requestedDroppedRecords,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -445,6 +450,21 @@ export async function startChatServer(config: ChatServerConfig) {
     const topicAtStart = records && !aiTurnStep ? topicOf() : null
     const topicTask = topicAtStart ? await records!.readTask(topicAtStart) : null
     if (topicTask) finalSystemPrompt = (finalSystemPrompt || '') + taskTopicInstructions(topicTask, isTodayFolderPath(requestedTodayFolder) ? requestedTodayFolder : null)
+    else if (records && !aiTurnStep) {
+      // A topic that is not a やること (案件, 会議…): one line naming it, never its contents (record-drop.ts).
+      const topicId = (() => { try { return companyId && appSessionId ? config.consultationTopic?.(companyId, appSessionId)?.topicRecordId : undefined } catch { return undefined } })()
+      if (topicId && TOPIC_RECORD_RE.test(topicId)) finalSystemPrompt = (finalSystemPrompt || '') + recordTopicInstructions(topicId)
+    }
+    // Records dropped on the input (record-drop.ts): read now, once, with the member's token; the summary goes
+    // with this message only (it stays in the agent's own session; later turns are told to use records_get).
+    const droppedIds = records && !aiTurnStep ? droppedRecordIdsOf(requestedDroppedRecords) : []
+    const droppedContext = droppedIds.length > 0
+      ? droppedRecordsContext(await Promise.all(droppedIds.map(id => {
+        let about: string[] = []
+        try { about = companyId ? config.consultationsAbout?.(companyId, id, appSessionId) ?? [] : [] } catch { /* the titles are a nicety */ }
+        return records!.readDroppedRecord(id, about)
+      })))
+      : null
     const onFileCreated = records && !aiTurnStep && companyId && appSessionId
       ? (companyPath: string) => {
         const task = topicOf()
@@ -564,6 +584,9 @@ export async function startChatServer(config: ChatServerConfig) {
     } else {
       console.log(`[chat-server] Messages: ${modelMessages.length} (no pruning in CLI mode)`)
     }
+
+    // The dropped records' summary goes in the latest user message, before the member's words.
+    if (droppedContext) finalMessages = withTextBeforeLatestUserMessage(finalMessages, droppedContext)
 
     // Inject images into the last user message (sent via transport body)
     if (images && images.length > 0) {

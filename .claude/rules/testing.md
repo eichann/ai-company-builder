@@ -103,7 +103,14 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
 handle for a 15k-file company and a first file-tree view of one ~55 KB read (#151); search of
 「の」 over ~6.5k files capped at 500 matches / < 1 MB, folder `git log` (#153); autosave of an
 ~8 MB history returning at once, summaries < 500 KB, the 564-message conversation rendering only
-its latest window (#154); the renderer bundle ≤ 2.55 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; 2.5 → 2.55 on 2026-11-03 for drag-to-link, owner decision; reasons in the script).
+its latest window (#154); the renderer bundle ≤ 3.0 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; 2.5 → 2.55 on 2026-11-03 for drag-to-link, 2.55 → 3.0 on 2026-11-03 「ちょっと上げて良い」, owner decisions; reasons in the script).
+- **Growth per pull request** (owner decision 2026-11-03, with the 3.0 MiB budget): on a pull request
+  the job also builds the base (the checkout is the PR merged into its base, so `HEAD^1` is the base
+  tip; `git worktree`, install, `vite build`) and `check-bundle-size.mjs --base <dir>` fails when the
+  renderer JS grows by more than 50 KB (`--max-growth-kb`). Built in the same job rather than read from
+  a committed baseline: one runner and toolchain for both sizes, nothing to keep up to date, no
+  conflicts between parallel PRs. Over 50 KB: lazy-load what is new, or split the change; an exception
+  is the owner's decision. Locally: build the base into another folder and pass `--base`.
 
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.

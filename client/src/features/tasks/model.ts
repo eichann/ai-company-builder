@@ -3,7 +3,10 @@
 // company's day (Japan time until a company setting exists, calendar.md).
 import type { CalendarEvent } from '../../../shared/calendar'
 import type { TaskListItem } from '../../../shared/tasks'
+import type { TaskCardResult } from '../../../shared/task-card'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
+import { weekEndOf } from '../../../../shared/core/turn-timing'
+import { isBusinessDay, nextBusinessDay } from '../../../../shared/core/business-days'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
@@ -28,6 +31,17 @@ export function companyNow(ms: number, timeZone = DEFAULT_COMPANY_TIME_ZONE): Co
   return { date: `${p('year')}-${p('month')}-${p('day')}`, time: `${p('hour')}:${p('minute')}`, weekday, ms }
 }
 
+/**
+ * What the card shows after a read answered (`useTaskCard`): two reads may race and the older
+ * answer land last, so an answer with an older version than the one shown is ignored; a failed
+ * re-read keeps a shown card (unless the task is gone).
+ */
+export function nextCard(prev: TaskCardResult | null, next: TaskCardResult): TaskCardResult {
+  if (!prev?.success) return next
+  if (!next.success) return next.notFound ? next : prev
+  return next.card.record.version < prev.card.record.version ? prev : next
+}
+
 /** `YYYY-MM-DD` plus `days`. */
 export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split('-').map(Number)
@@ -40,8 +54,7 @@ export function addDays(date: string, days: number): string {
  * Sunday it is next week's Sunday, so tomorrow's work never folds away.
  */
 export function weekEnd(now: CompanyNow): string {
-  const toSunday = (7 - now.weekday) % 7
-  return addDays(now.date, toSunday < 2 ? toSunday + 7 : toSunday)
+  return weekEndOf(now.date)
 }
 
 export type DueWhen = 'overdue' | 'today' | 'week' | 'later' | 'none'
@@ -113,7 +126,8 @@ export interface ListSection {
 
 /**
  * The sections of the list. By turn: 引き受け待ち, あなたの番 (today's meetings to come mixed
- * in), AI の番, ほかの人の番・返事待ち, 先のこと (the member's own far-future items, folded),
+ * in), AI の番, ほかの人の番・返事待ち, 先のこと (tasks not started due after this week, folded),
+ * いつか (tasks not started with no due, folded),
  * 今日終わったこと (with today's meetings that are over). By date: 期限切れ, 今日,
  * 明日, 今週, あとで (folded), 期限なし, 今日終わったこと. By bundle: each one with its open items,
  * then 「〇〇なし」. Empty sections are left out.
@@ -127,14 +141,19 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
   const sorted = (list: TaskListItem[]) => [...list].sort(byDue)
   const sections: ListSection[] = []
   if (mode === 'turn') {
+    // Only a task resting in the member's turn (not started, nothing to press) leaves 「あなたの番」:
+    // due after this week → 先のこと, no due → いつか (shared/core/turn-timing.ts; the title bar's
+    // count and the morning summary leave out the same ones).
     const mine = open.filter(i => i.turn === 'mine')
-    const later = mine.filter(i => dueWhen(i.due, now) === 'later')
+    const later = mine.filter(i => i.resting && dueWhen(i.due, now) === 'later')
+    const someday = mine.filter(i => i.resting && i.due === null)
     sections.push(
       { key: 'acceptance', title: '引き受け待ち', items: sorted(open.filter(i => i.turn === 'acceptance')), events: [], foldable: false, note: '引き受けるか、受けられないかを決めてください' },
-      { key: 'mine', title: 'あなたの番', items: sorted(mine.filter(i => !later.includes(i))), events: coming, foldable: false },
+      { key: 'mine', title: 'あなたの番', items: sorted(mine.filter(i => !later.includes(i) && !someday.includes(i))), events: coming, foldable: false },
       { key: 'ai', title: 'AI の番', items: sorted(open.filter(i => i.turn === 'ai')), events: [], foldable: false },
       { key: 'others', title: 'ほかの人の番・返事待ち', items: sorted(open.filter(i => i.turn === 'others')), events: [], foldable: false },
       { key: 'later', title: '先のこと', items: sorted(later), events: [], foldable: true, note: `${dueText(addDays(weekEnd(now), 1), now)}から` },
+      { key: 'someday', title: 'いつか', items: sorted(someday), events: [], foldable: true, note: '期限のない、まだ始めていないもの' },
     )
   } else if (mode === 'bundle') {
     // Each bundle with open items, in the order of its earliest due; then those in none.
@@ -198,15 +217,41 @@ export function listShownFor(departmentId: string | null, listDepartmentIds: rea
   return departmentId === null ? listDepartmentIds.length > 0 : listDepartmentIds.includes(departmentId)
 }
 
-/** 「延ばす」's quick choices from now, in company time (a passed one is left out). */
-export function postponeChoices(now: CompanyNow): Array<{ label: string; due: string }> {
+/**
+ * 「延ばす」's choices from now, in company time (owner 2026-11-03, 使い心地のメモ #7: more of them, no
+ * date picker): 1時間あと, 今日の夕方, あしたの朝, あさって, 今週の金曜, 来週の月曜, 来週の金曜, 2週間後,
+ * 来月のはじめ. A day that is a weekend or a holiday (Japan's and the company's, `holidays`) moves to
+ * the next business day; one already past (today or before) or on the same day as an earlier
+ * choice is left out, so each row is a different day.
+ */
+export function postponeChoices(now: CompanyNow, holidays: readonly string[] = []): Array<{ label: string; due: string }> {
   const [h, m] = now.time.split(':').map(Number)
   const nextHour = h + (m > 0 ? 2 : 1)
   const out: Array<{ label: string; due: string }> = []
   if (nextHour <= 23) out.push({ label: '1時間あと', due: `${now.date}T${String(nextHour).padStart(2, '0')}:00` })
-  if (now.time < '17:00') out.push({ label: '今日の夕方', due: `${now.date}T17:00` })
-  out.push({ label: 'あしたの朝', due: `${addDays(now.date, 1)}T09:00` })
-  out.push({ label: '来週の月曜', due: `${addDays(now.date, ((8 - now.weekday) % 7) || 7)}T09:00` })
+  // 今日の夕方 only while it is later than 1時間あと (never the same time twice).
+  if (nextHour < 17) out.push({ label: '今日の夕方', due: `${now.date}T17:00` })
+  const business = (day: string) => (isBusinessDay(day, holidays) ? day : nextBusinessDay(day, holidays))
+  const nextMonday = addDays(now.date, ((8 - now.weekday) % 7) || 7)
+  const [y, mo] = now.date.split('-').map(Number)
+  const nextMonth = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, '0')}-01`
+  const days: Array<{ label: string; day: string; time?: string }> = [
+    { label: 'あしたの朝', day: addDays(now.date, 1), time: '09:00' },
+    { label: 'あさって', day: addDays(now.date, 2) },
+    // The week runs Monday to Sunday: on a Saturday or Sunday this week's Friday is past.
+    { label: '今週の金曜', day: addDays(now.date, now.weekday === 0 ? -2 : 5 - now.weekday) },
+    { label: '来週の月曜', day: nextMonday, time: '09:00' },
+    { label: '来週の金曜', day: addDays(nextMonday, 4) },
+    { label: '2週間後', day: addDays(now.date, 14) },
+    { label: '来月のはじめ', day: nextMonth },
+  ]
+  const taken = new Set<string>()
+  for (const c of days) {
+    const day = business(c.day)
+    if (day <= now.date || taken.has(day)) continue
+    taken.add(day)
+    out.push({ label: c.label, due: c.time ? `${day}T${c.time}` : day })
+  }
   return out
 }
 

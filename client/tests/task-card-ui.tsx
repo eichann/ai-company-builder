@@ -111,6 +111,10 @@ installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
   dropLinkOnRecord: fakeDropLink(line => show('acted', line)),
   patchChatSession: async (_c, sessionId, patch) => { show('acted', `topic ${sessionId}=${String(patch.topicRecordId)}`); return {} as never },
+  // The titles 「…に切り替えますか？」 names (a consultation about another やること dropped on the card).
+  getConsultationTopics: async (_c, ids) => ({ success: true, topics: Object.fromEntries(ids.map(id => [id, {
+    own: { id, title: id === 'task-0000bb' ? '会場を押さえる' : 'A社 見積書を 150万円 で作り直す', thing: 'task' as const, typeLabel: null, kindName: 'やること' }, bundle: null,
+  }])) }),
   createBundle: async (_c, input) => { show('acted', `create ${input.type} ${input.title} folder=${input.folder ?? ''}`); return { success: true, recordId: 'deal-0009zz' } },
   linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },

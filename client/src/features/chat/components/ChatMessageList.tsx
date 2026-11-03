@@ -2,11 +2,13 @@
 import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
-import { Sparkle, CaretUp, File, PencilSimple, ArrowCounterClockwise } from '@phosphor-icons/react'
+import { Sparkle, CaretUp, File, PencilSimple, ArrowCounterClockwise, ListChecks } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { AssistantMessageParts } from './MessageParts'
 import { earlierAnchor, windowStart } from '../messageWindow'
 import { appInstructionOf } from '../../../../shared/app-instruction'
+import { droppedRecordsOf } from '../../../../shared/record-drop'
+import { droppedRecordLine } from '../recordDrop'
 
 // The conversation's messages: only the latest are rendered (messageWindow.ts;
 // 「以前のメッセージを表示」 keeps the reading position), each one memoised, and
@@ -113,8 +115,20 @@ function UserMessageBubble({
     )
   }
 
+  const droppedRecords = droppedRecordsOf(message)
   return (
     <div className="group relative">
+      {/* Records dropped on the input that went to the AI with this message (record-drop.ts). */}
+      {droppedRecords.length > 0 && (
+        <div className="mb-1.5 flex flex-col items-end gap-1" data-dropped-records>
+          {droppedRecords.map(r => (
+            <span key={r.id} className="inline-flex max-w-full items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-accent/15 text-accent dark:bg-accent/20 dark:text-accent/90 border border-accent/20">
+              <ListChecks size={10} className="flex-shrink-0" aria-hidden />
+              <span className="truncate">{droppedRecordLine(r, true)}</span>
+            </span>
+          ))}
+        </div>
+      )}
       {/* Reference files indicator */}
       {referenceFiles && referenceFiles.length > 0 && (
         <div className="mb-1.5 flex justify-end">

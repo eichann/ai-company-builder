@@ -19,6 +19,22 @@ export interface TurnItem {
   due: string | null
   /** The server clock gave it back: its 返事の見込み passed (`waitCameBack`, task version 12). */
   waitCameBack?: true
+  /**
+   * Not this week's (shared/core/turn-timing.ts): a task not started, nothing to press, due after
+   * this week (`later`) or with no due (`someday`). Absent = this week's turn (counted).
+   */
+  timing?: 'later' | 'someday'
+}
+
+/**
+ * The title bar's 「あなたの番」 from the server's whole turn: only this week's items, counted (the
+ * server's morning summary counts the same); `resting` = those left for the list's 「先のこと」 /
+ * 「いつか」. Items past the server's first 200 are counted as this week's (never hidden).
+ */
+export function thisWeeksTurn(items: readonly TurnItem[], total: number): NoticesState['myTurn'] {
+  const week = items.filter(i => !i.timing)
+  const resting = items.length - week.length
+  return { total: week.length + Math.max(0, total - items.length), items: week, ...(resting > 0 ? { resting } : {}) }
 }
 
 /**
@@ -53,7 +69,8 @@ export function turnGroups(items: readonly TurnItem[]): TurnGroup[] {
 export interface NoticesState {
   /** false: the company's records are off (or nothing could be read yet) — no title bar parts. */
   available: boolean
-  myTurn: { total: number; items: TurnItem[] }
+  /** This week's turn (`thisWeeksTurn`): what the title bar lists and counts. */
+  myTurn: { total: number; items: TurnItem[]; resting?: number }
   notices: NotificationList
 }
 

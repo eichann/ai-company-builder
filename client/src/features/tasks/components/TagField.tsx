@@ -1,14 +1,14 @@
-// The task card's 「タグ」 field (owner 2026-11-02): read only, or — for who may set tags — an inline
-// editor: the tags as chips with ×, an input offering the tags in use (picking one is the main
-// path, so 「営業」 and 「営業部」 do not both appear), the AI's 「候補を出す」, and a hint when the
-// typed word is the name of a 案件・プロジェクト. Each change is one `set_tags`; the server decides.
-import { useState } from 'react'
-import { Hash, Plus, Sparkle, X } from '@phosphor-icons/react'
+// The task card's 「タグ」 field (owner 2026-11-03, 使い心地のメモ #6: 「まともなものにして欲しい」): the tags
+// as pills in the field (× takes one off), and — for who may set tags — a small popover anchored to
+// it: a search box, the company's tags (most used first, ✓ on the task's own; ↑↓ Enter), 「『〇〇』を
+// 作る」 when nothing matches, the AI's suggestions as one quiet row, and the 案件 hint as a quiet line.
+// Each change is one `set_tags` with the whole list; the server decides.
+import { useId, useState } from 'react'
+import { Check, Hash, MagnifyingGlass, Plus, Sparkle, X } from '@phosphor-icons/react'
 import type { BundleChoice } from '../../../../shared/tasks'
-import { useEventListener } from '../../../shared/hooks/useEventListener'
-import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { useDismiss } from '../../../shared/hooks/useDismiss'
 import { getBundleChoices, suggestTaskTags } from '../api'
-import { bundleNamed, tagCandidates, tagToAdd } from '../tagEditor'
+import { bundleNamed, newTagOffer, tagOptions, tagToAdd } from '../tagEditor'
 
 interface Props {
   companyId: string
@@ -29,7 +29,10 @@ interface Props {
   linkedBundleId?: string | null
 }
 
-const CHIP = 'inline-flex items-center gap-0.5 rounded-full bg-white px-2 py-px text-[12px] font-medium shadow-sm ring-1 ring-gray-200 dark:bg-zinc-900 dark:ring-zinc-700'
+const PILL = 'inline-flex h-[22px] items-center gap-0.5 rounded-md bg-white pl-1.5 pr-1 text-[12px] font-medium text-gray-700 ring-1 ring-gray-200 dark:bg-zinc-900 dark:text-zinc-200 dark:ring-zinc-700'
+const POPOVER = 'absolute left-0 top-full z-30 mt-1 w-[290px] overflow-hidden rounded-lg border border-gray-200 bg-white text-[12.5px] text-gray-800 shadow-xl dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100'
+
+type Row = { kind: 'tag'; tag: string; selected: boolean } | { kind: 'new'; tag: string }
 
 export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onSet, onLinkBundle, bundleType, linkedBundleId = null }: Props) {
   const [open, setOpen] = useState(false)
@@ -39,18 +42,17 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
   const [bundles, setBundles] = useState<BundleChoice[] | null>(null)
   const [suggested, setSuggested] = useState<string[] | null>(null)
   const [asking, setAsking] = useState(false)
-  const [root, setRoot] = useState<HTMLDivElement | null>(null)
-  useEventListener(typeof document === 'undefined' ? null : document, 'mousedown', e => {
-    if (root && !root.contains(e.target as Node)) setOpen(false)
-  }, { enabled: open })
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  const listId = useId()
+  const close = () => { setOpen(false); setTyped(''); setIndex(0); setError(null) }
+  useDismiss(box, open, close)
 
-  const candidates = tagCandidates(typed, tags, tagsInUse)
-  const add = tagToAdd(typed, tags, tagsInUse)
-  // A word nothing in use matches is a new tag; with matches, Enter picks the highlighted one.
-  const exact = add?.kind === 'add' && tagsInUse.includes(add.tag)
-  const offerNew = add?.kind === 'add' && !exact
-  const rows = [...candidates.map(t => ({ tag: t, isNew: false })), ...(offerNew && add?.kind === 'add' ? [{ tag: add.tag, isNew: true }] : [])]
+  const options = tagOptions(typed, tags, tagsInUse)
+  const created = newTagOffer(typed, options)
+  const rows: Row[] = [...options.map(o => ({ kind: 'tag' as const, ...o })), ...(created ? [{ kind: 'new' as const, tag: created }] : [])]
+  const active = Math.min(index, Math.max(rows.length - 1, 0))
   const named = onLinkBundle && bundles ? bundleNamed(typed, bundles.filter(b => b.id !== linkedBundleId && (!bundleType || b.id.startsWith(`${bundleType}-`)))) : null
+  const shownSuggestions = (suggested ?? []).filter(t => !tags.includes(t))
 
   const run = async (next: string[]) => {
     setError(null)
@@ -58,16 +60,16 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
     if (failure) setError(failure)
     return failure
   }
-  const pick = async (tag: string) => {
+  const add = async (tag: string) => {
     const a = tagToAdd(tag, tags, tagsInUse)
     if (!a) return
     if (a.kind === 'refused') { setError(a.reason); return }
-    if (!(await run(a.tags))) { setTyped(''); setIndex(0); setSuggested(s => s?.filter(t => t !== a.tag) ?? null) }
+    if (!(await run(a.tags))) { setTyped(''); setIndex(0) }
   }
   const remove = (tag: string) => void run(tags.filter(t => t !== tag))
-  const start = () => {
-    setOpen(true)
-    if (onLinkBundle && bundles === null) void getBundleChoices(companyId).then(r => setBundles(r.success ? r.bundles : []), () => setBundles([]))
+  const choose = (row: Row) => {
+    if (row.kind === 'tag' && row.selected) remove(row.tag)
+    else void add(row.tag)
   }
   const ask = async () => {
     setAsking(true)
@@ -79,80 +81,92 @@ export function TagField({ companyId, title, tags, tagsInUse, canEdit, busy, onS
       setAsking(false)
     }
   }
-  const askable = tagsInUse.some(t => !tags.includes(t))
-
-  if (!open) {
-    const shown = tags.length ? tags.map(t => `#${t}`).join(' ') : <span className="font-normal text-gray-400">なし</span>
-    return (
-      <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60">
-        <div className="flex items-center gap-1 text-[11px] text-gray-500"><Hash size={11} />タグ</div>
-        {canEdit
-          ? <button type="button" disabled={busy} onClick={start} title="タグを足す・外す" aria-label={`タグ：${tags.length ? tags.join('、') : 'なし'}（押すと変えられます）`}
-            className="-mx-1 w-[calc(100%+0.5rem)] rounded px-1 text-left text-[13.5px] font-medium hover:bg-gray-100 dark:hover:bg-zinc-700/60">{shown}</button>
-          : <div className="text-[13.5px] font-medium">{shown}</div>}
-      </div>
-    )
+  const start = () => {
+    if (!canEdit || busy) return
+    setOpen(true)
+    if (onLinkBundle && bundles === null) void getBundleChoices(companyId).then(r => setBundles(r.success ? r.bundles : []), () => setBundles([]))
+    // Only suggestions: nothing is added until the member picks one (asked once per card).
+    if (suggested === null && !asking && tagsInUse.some(t => !tags.includes(t))) void ask()
   }
+
   return (
-    <div ref={setRoot} role="group" aria-label="タグを変える" className="relative col-span-2 rounded-lg bg-gray-50 px-3 py-2 ring-1 ring-accent/40 dark:bg-zinc-800/60"
-      onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}>
-      <div className="flex items-center gap-1 text-[11px] text-gray-500">
-        <Hash size={11} />タグ
-        <button type="button" onClick={() => setOpen(false)} className="ml-auto rounded px-1 text-[11px] text-gray-500 hover:bg-gray-100 hover:text-accent dark:hover:bg-zinc-700">閉じる</button>
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1">
+    <div ref={setBox} className={`relative rounded-lg bg-gray-50 px-3 py-2 dark:bg-zinc-800/60 ${open ? 'ring-1 ring-accent/40' : ''}`}>
+      <div className="flex items-center gap-1 text-[11px] text-gray-500"><Hash size={11} />タグ</div>
+      <div className={`mt-0.5 flex min-h-[24px] flex-wrap items-center gap-1 ${canEdit ? 'cursor-text' : ''}`}
+        onClick={e => { if (e.target === e.currentTarget) start() }}>
         {tags.map(t => (
-          <span key={t} className={CHIP}>#{t}
-            <button type="button" disabled={busy} onClick={() => remove(t)} aria-label={`#${t} を外す`} className="rounded-full p-px text-gray-400 hover:bg-gray-100 hover:text-red-600 disabled:opacity-40 dark:hover:bg-zinc-700"><X size={10} /></button>
+          <span key={t} className={PILL}>
+            <span className="text-gray-400 dark:text-zinc-500">#</span>{t}
+            {canEdit && (
+              <button type="button" disabled={busy} onClick={() => remove(t)} aria-label={`#${t} を外す`}
+                className="ml-0.5 rounded p-px text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 dark:hover:bg-zinc-700 dark:hover:text-zinc-100"><X size={10} weight="bold" /></button>
+            )}
           </span>
         ))}
-        <input autoFocus value={typed} disabled={busy} aria-label="タグを足す" placeholder={tags.length ? '足すタグ' : 'タグを入れる（例：営業）'}
-          onChange={e => { setTyped(e.target.value); setIndex(0); setError(null) }}
-          onKeyDown={e => {
-            if (e.nativeEvent.isComposing) return
-            if (e.key === 'ArrowDown') { e.preventDefault(); setIndex(i => Math.min(i + 1, rows.length - 1)) }
-            if (e.key === 'ArrowUp') { e.preventDefault(); setIndex(i => Math.max(i - 1, 0)) }
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              const row = rows[index]
-              if (row) void pick(row.tag)
-              else if (add?.kind === 'refused') setError(add.reason)
-            }
-            if (e.key === 'Backspace' && !typed && tags.length) remove(tags[tags.length - 1])
-          }}
-          className="min-w-[8em] flex-1 bg-transparent py-0.5 text-[12.5px] outline-none placeholder:text-gray-400" />
-      </div>
-      {rows.length > 0 && (
-        <ul role="listbox" aria-label="タグの候補" className="mt-1 max-h-[200px] overflow-y-auto rounded-md border border-gray-200 bg-white p-0.5 text-[12px] dark:border-zinc-700 dark:bg-zinc-900">
-          {rows.map((r, i) => (
-            <li key={`${r.isNew ? 'new' : 'use'}:${r.tag}`} role="option" aria-selected={i === index}>
-              <button type="button" disabled={busy} onMouseEnter={() => setIndex(i)} onClick={() => void pick(r.tag)}
-                className={`flex w-full items-center gap-1 rounded px-2 py-1 text-left ${i === index ? 'bg-accent/10 text-accent' : ''}`}>
-                {r.isNew ? <><Plus size={10} />「{r.tag}」を新しいタグにする</> : <>#{r.tag}<span className="ml-auto text-[10px] text-gray-400">使われているタグ</span></>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {named && (
-        <p role="note" className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-md bg-indigo-500/10 px-2 py-1 text-[11.5px] text-indigo-900 dark:text-indigo-200">
-          『{named.title}』は{named.typeLabel}の名前です。{named.typeLabel}につなぎますか？
-          <button type="button" disabled={busy} onClick={() => void onLinkBundle?.(named).then(f => { if (f) setError(f); else setTyped('') })} className={SMALL_BUTTON}>{named.typeLabel}につなぐ</button>
-        </p>
-      )}
-      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-gray-500 dark:text-zinc-400">
-        {askable && suggested === null && (
-          <button type="button" disabled={asking || busy} onClick={() => void ask()} className="inline-flex items-center gap-1 rounded border border-gray-300 px-1.5 py-px hover:border-accent hover:text-accent disabled:opacity-50 dark:border-zinc-600">
-            <Sparkle size={10} weight="fill" />{asking ? '候補を探しています…' : 'AI にタグの候補を出してもらう'}
+        {tags.length === 0 && !canEdit && <span className="text-[13px] text-gray-400">なし</span>}
+        {canEdit && (
+          <button type="button" disabled={busy} onClick={() => (open ? close() : start())} aria-expanded={open} aria-haspopup="dialog"
+            aria-label={`タグを足す・外す（いま：${tags.length ? tags.join('、') : 'なし'}）`}
+            className="inline-flex h-[22px] items-center gap-0.5 rounded-md px-1.5 text-[12px] border border-dashed border-gray-300 text-gray-500 hover:border-accent/60 hover:text-accent disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-400">
+            <Plus size={10} weight="bold" />{tags.length === 0 && 'タグ'}
           </button>
         )}
-        {suggested !== null && (suggested.length === 0
-          ? <span>合いそうなタグは見つかりませんでした。</span>
-          : <>AI の候補：{suggested.map(t => (
-            <button key={t} type="button" disabled={busy} onClick={() => void pick(t)} className="rounded border border-accent/40 px-1 text-accent hover:bg-accent/10 disabled:opacity-50">#{t} を付ける</button>
-          ))}</>)}
       </div>
-      {error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+      {!open && error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
+
+      {open && (
+        <div role="dialog" aria-label="タグ" className={POPOVER}>
+          <div className="flex items-center gap-1.5 border-b border-gray-100 px-2.5 py-1.5 dark:border-zinc-700">
+            <MagnifyingGlass size={12} className="shrink-0 text-gray-400" />
+            <input autoFocus value={typed} disabled={busy} role="combobox" aria-label="タグを探す・作る" aria-expanded aria-controls={listId}
+              aria-activedescendant={rows.length > 0 ? `${listId}-${active}` : undefined} placeholder="タグを探す・作る"
+              onChange={e => { setTyped(e.target.value); setIndex(0); setError(null) }}
+              onKeyDown={e => {
+                if (e.nativeEvent.isComposing) return
+                if (e.key === 'ArrowDown') { e.preventDefault(); setIndex(Math.min(active + 1, rows.length - 1)) }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setIndex(Math.max(active - 1, 0)) }
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (rows[active]) choose(rows[active])
+                  else if (typed.trim()) { const a = tagToAdd(typed, tags, tagsInUse); if (a?.kind === 'refused') setError(a.reason) }
+                }
+                if (e.key === 'Backspace' && !typed && tags.length) remove(tags[tags.length - 1])
+              }}
+              className="min-w-0 flex-1 bg-transparent py-0.5 outline-none placeholder:text-gray-400" />
+          </div>
+          <ul id={listId} role="listbox" aria-label="タグ" aria-multiselectable className="max-h-[220px] overflow-y-auto p-1">
+            {rows.length === 0 && <li className="px-2 py-1.5 text-[11.5px] text-gray-400">{tagsInUse.length === 0 ? '言葉を入れると、タグを作れます' : '見つかりません'}</li>}
+            {rows.map((r, i) => (
+              <li key={`${r.kind}:${r.tag}`} id={`${listId}-${i}`} role="option" aria-selected={r.kind === 'tag' && r.selected} data-active={i === active || undefined}
+                onMouseEnter={() => setIndex(i)} onMouseDown={e => e.preventDefault()} onClick={() => { if (!busy) choose(r) }}
+                className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 ${i === active ? 'bg-gray-100 dark:bg-zinc-700' : ''}`}>
+                {r.kind === 'new'
+                  ? <><Plus size={12} className="shrink-0 text-accent" /><span className="truncate">「{r.tag}」を作る</span></>
+                  : <><span className="flex w-3 shrink-0 justify-center text-accent">{r.selected && <Check size={12} weight="bold" />}</span>
+                    <span className="truncate"><span className="text-gray-400 dark:text-zinc-500">#</span>{r.tag}</span></>}
+              </li>
+            ))}
+          </ul>
+          {(asking || shownSuggestions.length > 0) && (
+            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+              <Sparkle size={11} weight="fill" className="shrink-0 text-accent/80" />
+              {asking ? '合いそうなタグを探しています…' : <>合いそうなタグ：{shownSuggestions.map(t => (
+                <button key={t} type="button" disabled={busy} onClick={() => void add(t)} aria-label={`#${t} を付ける（AI の候補）`}
+                  className="rounded px-0.5 text-accent hover:bg-accent/10 disabled:opacity-50">#{t}</button>
+              ))}</>}
+            </div>
+          )}
+          {named && (
+            <p role="note" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-gray-500 dark:border-zinc-700 dark:text-zinc-400">
+              『{named.title}』は{named.typeLabel}の名前です。
+              <button type="button" disabled={busy} onClick={() => void onLinkBundle?.(named).then(f => { if (f) setError(f); else setTyped('') })}
+                className="text-accent hover:underline disabled:opacity-50">{named.typeLabel}につなぐ</button>
+            </p>
+          )}
+          {error && <p role="alert" className="border-t border-gray-100 px-2.5 py-1.5 text-[11.5px] text-red-600 dark:border-zinc-700 dark:text-red-400">{error}</p>}
+          <p className="border-t border-gray-100 px-2.5 py-1 text-[10.5px] text-gray-400 dark:border-zinc-700 dark:text-zinc-500">↑↓ で選ぶ・Enter で付ける／外す・Esc で閉じる</p>
+        </div>
+      )}
     </div>
   )
 }

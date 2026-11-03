@@ -69,7 +69,7 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
       className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${over ? 'outline-dashed outline-2 outline-accent' : ''} ${active ? 'bg-accent/10 dark:bg-accent/20' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
       // The row itself can be dragged onto a record's 「つながっているもの」 (or another row) to link it.
       draggable
-      onDragStart={e => startRecordDrag(e.dataTransfer, { id: item.id, title: item.title })}
+      onDragStart={e => startRecordDrag(e.dataTransfer, { id: item.id, title: item.title, word: item.typeLabel })}
       onDragOver={onDrop ? e => {
         if (!isLinkableDrag(e.dataTransfer)) return
         e.preventDefault()

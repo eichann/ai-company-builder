@@ -32,7 +32,7 @@ export function TodayFolderSetting({ choices, chosenId, defaultName, chosenMissi
         <div className="min-w-0 flex-1">
           <p className="text-[13.5px] font-medium">今日のフォルダ</p>
           <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
-            日付ごとのメモの置き場所です。あなたの Mac だけにあり、同期されません。ファイルの欄の「今日のフォルダを開く」と、自分だけのやることの「＋新しいファイル」がここを使います。
+            日付ごとのメモの置き場所です。あなたの Mac だけにあり、同期されません。ファイルの欄の「今日のフォルダを開く」と、あなただけのやることの「＋新しいファイル」がここを使います。
           </p>
           {folderNow && <p className="mt-1 truncate font-mono text-[11.5px] text-zinc-500 dark:text-zinc-400" title={folderNow}>{folderNow}/</p>}
           {chosenMissingName && <p className="mt-1 text-[12px] text-amber-700 dark:text-amber-300">「{chosenMissingName}」はこのPCにダウンロードしていないため、{defaultName ? `「${defaultName}」を使っています。` : '今日のフォルダを作れません。'}</p>}

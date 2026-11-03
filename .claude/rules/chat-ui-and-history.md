@@ -25,6 +25,8 @@ paths:
   - "client/tests/tool-rows-real-path.test.ts"
   - "client/shared/acb-tool-displays.ts"
   - "client/electron/records/tool-providers.ts"
+  - "client/shared/record-drop.ts"
+  - "client/tests/record-drop.test.ts"
 ---
 
 # Chat panel, chat history store and chat rendering
@@ -123,6 +125,41 @@ one place an added agent brings its own controls; everything else asks the regis
   (`focusConversationRows`). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
   it back; opening another record narrows again); a search always looks at every consultation.
   Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- **A record dropped on the input** (owner, 2026-11-03 「使い心地のメモ」 #5). A record drag (a task row,
+  a 探す row, a record tab in the middle; `tasks-ui.md` "Drag sources") onto the composer:
+  - **The drop frame says what will happen** (`features/chat/recordDrop.ts` `composerDragOf` /
+    `dropFrameText`, read from the drag types only): a file (the tree, a file tab, a found file, an
+    image) 「ここに落とすと、AI が読みます」 — the reference behaviour is unchanged —, a record
+    「ここに落とすと、この<やること／案件／会議の記録…>の相談になります」. A consultation drag is not taken.
+  - **The topic**: none → the record becomes it (`setTopic`, plus `patchChatSession { topicRecordId }`
+    when the conversation is already stored — this clears `topicDetached`, the member chose it; an
+    unsaved one takes it with its first save). The same record → nothing to change. Another →
+    asked inline above the input (`TopicSwitchAsk.tsx`): 「『A』の相談を『B』の相談に切り替えますか？」
+    ［切り替える］［このまま］. The chip names the topic's kind (`TopicChip.tsx`).
+  - **Read once, with the next message** (chosen over an immediate one-off turn: no AI turn the
+    member did not ask for, and the member says what they want to know): the record waits as a chip
+    in the composer (「やること『…』を AI に渡します」, × takes it off; ≤ 5, once each) — whichever
+    way the topic question went —; the next send puts the ids in the request (`droppedRecordIds`,
+    consumed once by `chatRequestBody.ts`) and in the message's metadata (`droppedRecords`, stored
+    with the message, the bubble's 「…を AI に渡しました」). An edit, an app instruction or a send
+    while the AI works (steering) does not take them; they wait for the next real request.
+  - **Main** (`chat-server.ts`, not in an unattended step, only with record tools — Claude Code and
+    Codex, Codex's read token included) reads each with the turn's token
+    (`RecordTools.readDroppedRecord`: `GET /item/:id`, so only what the member may read, `people`
+    for names) and builds the summary (`client/shared/record-drop.ts` `droppedRecordSummary`: kind,
+    title, id, state, whose turn for a やること, the card's fields, summary, linked files with
+    folder / broken marks, まとまり, 相手, other linked records, this PC's consultations about it
+    (`consultationsAbout`)). `droppedRecordsContext` wraps it (「このとき1回だけ読んだ要約」: answer from it
+    without tools when it is enough; it is not given again; use records_get / records_history for
+    more) and it goes first in **the latest user message only** (`withTextBeforeLatestUserMessage`),
+    so it stays in the agent's own session and is never re-sent. Unreadable or no record tools →
+    nothing is added. Every turn of a consultation about a record that is not a やること gets only
+    one line naming it (`recordTopicInstructions`); a task's is `taskTopicInstructions`.
+  Tests: `src/features/chat/recordDrop.test.ts` (frame words per drag, topic decision, waiting list),
+  `tests/record-drop.test.ts` (summary contents, once-only wrapper, latest message only, id filter),
+  `tests/chat-panel-helpers.test.ts` (request body consumes them once; `droppedRecords` round trip),
+  `tests/ui/chat-record-drop.spec.ts` (real drags from the middle's tabs, `chat-header-ui.html?tabs=1`:
+  record → topic + one request only; switching asks; file tab → read, no topic; `SCREENSHOTS=<dir>`).
 - **Searching the list** (owner, 2026-11-03). The box at the top of 「AIへの相談」 narrows as the
   member types (no Enter; 200 ms after the last key; an IME's unconfirmed text never narrows,
   confirming does; Esc or × empties it, and empty is the normal list, the narrowing to the record
@@ -267,7 +304,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `client/tests/consultation-task.test.ts`.
 - A message stores its tool calls only as `[Tool: name]` text (plus `toolLines`, see 「Tool rows」); what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
-  `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
+  `consultationReferences`, `droppedRecords` (records dropped on the input that went with it,
+  kept in the user message's metadata), `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
   `data-plugin-operation` parts; `plugins.md` "The app"), `secondOpinions` (the other AI's answer,
 「Codex の答えを全部見る」, `chat-and-agents.md`), `minutesDealChoices`
