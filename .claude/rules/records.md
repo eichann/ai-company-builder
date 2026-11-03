@@ -265,8 +265,10 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   from the tree onto a task row or the task card, and the card's 「＋ファイルをつなぐ」 / 「外す」,
   all through `tasks:linkFile` / `tasks:unlinkFile` with the session (`tasks-ui.md` "Linking
   files"); the AI links with `records_link_file` / `records_unlink_file`.
-- The consultation AI: no consultation is linked to a task in the app yet (only a minutes
-  consultation stores `minutesId`, `minutes.md`). `records_get` returns the file links (`path`,
+- The consultation AI: a consultation about a task (its topic, `tasks-ui.md` "Consultations centre
+  on the task") gets the files the AI newly creates linked as the AI (`RecordTools.linkNewFile`:
+  `file-links` with the turn's act token at the version read, note 「AI が相談の中で作ったファイル」,
+  once more on `VERSION_CONFLICT`; a read token links nothing). `records_get` returns the file links (`path`,
   `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.

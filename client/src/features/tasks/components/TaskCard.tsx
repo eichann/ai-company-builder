@@ -50,6 +50,8 @@ interface Props {
   onNudge?: (record: { id: string; title: string }) => void
   /** Consultations whose main topic is this task (this PC's), listed in 「つながっているもの」. */
   consultations?: readonly LinkedConsultation[]
+  /** 「…」→「このやることから外す」 on one of them (AppShell: the chat history's topic taken off). */
+  onDetachConsultation?: (sessionId: string) => void
   /** Tags in use in the member's list (most used first), for 「タグの候補」. */
   tagsInUse?: string[]
   /** チームの進め方, when the screen decides it; else the company's setting the card read. */
@@ -80,7 +82,7 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation }: Props) {
   const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -147,7 +149,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
@@ -203,11 +205,12 @@ interface BodyProps {
   onConsult?: (record: { id: string; title: string }, fresh?: boolean) => void
   onNudge?: (record: { id: string; title: string }) => void
   consultations: readonly LinkedConsultation[]
+  onDetachConsultation?: (sessionId: string) => void
   tagField: ReactNode
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -250,7 +253,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
     })),
   ]
   // 「AIへの相談」 on the right: the consultations about this task, ［相談する］［＋新しい相談］.
-  const consult = consultationLinks(consultations, onConsult && (fresh => onConsult({ id: record.id, title: record.title }, fresh)))
+  const consult = consultationLinks(consultations, onConsult && (fresh => onConsult({ id: record.id, title: record.title }, fresh)), onDetachConsultation)
   const postpone = card.actions.find(a => a.action === 'set_due')
   const doneLine = whenDoneLine(card)
   const turn = record.state === 'preparing' ? 'AI の番' : null

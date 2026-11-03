@@ -36,6 +36,7 @@ import type { ToolApprovals } from '../agent-interactions/ipc'
 import type { ChatHistoryEvents } from '../chat-history/ipc'
 import type { PrivateFolderGuards } from '../private-folders/guards'
 import { buildSystemPrompt } from './system-prompt'
+import { topicAfterTaskMade } from '../../../shared/consultation-task'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
@@ -149,7 +150,16 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
       const onRecordChanged = deps.recordsChanged ? () => deps.recordsChanged?.(companyId) : undefined
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, onRecordChanged, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
+      // A task the AI makes in a consultation without a topic becomes its topic (consultation-task.ts).
+      const onRecordCreated = (made: { id: unknown; type: unknown }) => {
+        const topic = topicAfterTaskMade(deps.history.get(companyId, conversationId), made)
+        if (topic && deps.history.patch(companyId, conversationId, { topicRecordId: topic })) deps.chatHistory.changed({ companyId, sessionId: conversationId, kind: 'patch' })
+      }
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
+    },
+    consultationTopic: (companyId, conversationId) => {
+      const session = deps.history.get(companyId, conversationId)
+      return session ? { topicRecordId: session.topicRecordId, topicDetached: session.topicDetached } : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({

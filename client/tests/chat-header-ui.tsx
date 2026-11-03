@@ -43,6 +43,8 @@ import type { TaskListItem } from '../shared/tasks'
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
 //                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
 //                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
+//   ?topic=1       with ?history=edit: the restored conversation is about a readable やること (the topic chip
+//                  with ×; taking it off is recorded in __acbChat.patches)
 //   ?minutes=1     the task list beside the chat with one received minutes record in 「AI の番」
 //                  (「自分で読み取る」); the deal choice card's links are recorded in __acbChat.minutesLinks
 
@@ -58,6 +60,7 @@ const longHistory = params.get('history') === 'long'
 const editHistory = params.get('history') === 'edit'
 // Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
 const manyHistory = params.get('history') === 'many'
+const topicOn = params.get('topic') === '1'
 // history=many: 終わった相談 4 is about a やること (in a 案件), 6 about one the member cannot read, 7 about a 案件.
 const MANY_TOPICS: Record<number, string> = { 3: 'task-0000aa', 5: 'task-0000ff', 6: 'deal-0000bb' }
 const DEAL = { id: 'deal-0000bb', title: '株式会社サンプル', thing: 'bundle' as const, typeLabel: '案件', kindName: '案件' }
@@ -93,7 +96,7 @@ function longSession() {
 }
 function editSession() {
   const at = (n: number) => new Date(now - n * 60_000).toISOString()
-  return { id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', createdAt: at(10), updatedAt: at(6), revision: 1, messages: [
+  return { id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', createdAt: at(10), updatedAt: at(6), revision: 1, ...(topicOn ? { topicRecordId: 'task-0000aa' } : {}), messages: [
     { id: 'eu1', role: 'user', content: '見積書を作って', timestamp: at(10), referenceFiles: ['営業部/価格表/2026-10改定.pdf'] },
     { id: 'ea1', role: 'assistant', content: '見積書のたたき台を作りました。', timestamp: at(9) },
     { id: 'eu2', role: 'user', content: '単価を見直して', timestamp: at(8) },
@@ -170,7 +173,7 @@ installElectronAPI({
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
   getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, ...(MANY_TOPICS[i] ? { topicRecordId: MANY_TOPICS[i] } : {}), messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
     : longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
-    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', topicRecordId: 'task-0000ed', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
+    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', topicRecordId: topicOn ? 'task-0000aa' : 'task-0000ed', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
   // What the company server lets this member read of those topics: task-0000ff is not readable.
   getConsultationTopics: async (_company, ids) => ({ success: true, topics: Object.fromEntries(ids.map(id => [id, TOPICS[id] ?? null])) }),
@@ -183,6 +186,7 @@ installElectronAPI({
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
   saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
+  patchChatSession: async (_company: string, sessionId: string, patch) => { control.patches.push({ sessionId, ...patch }); return null },
   // The synchronous save before a send, recorded in order with the requests.
   flushChatSession: (_company: string, session: ChatSession) => {
     if (manual) control.requests.push({ path: 'flushChatSession', body: JSON.parse(JSON.stringify(session)) })
@@ -245,6 +249,8 @@ let currentSessionId: string | null = null
 let steerCount = 0
 const control = {
   requests: [] as Array<{ path: string; body: Record<string, unknown> | null }>,
+  /** Metadata changes the chat asked main for (the topic taken off). */
+  patches: [] as Array<Record<string, unknown>>,
   steerStatus: 'delivered' as SteerStatus,
   suggestion: null as string | null,
   open: () => current !== null,

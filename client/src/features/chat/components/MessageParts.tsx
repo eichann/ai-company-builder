@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
-import { Brain, CaretUp, CircleNotch } from '@phosphor-icons/react'
+import { Brain, CaretUp, CircleNotch, LinkSimple } from '@phosphor-icons/react'
 import type { ConsultationReference } from '../../../../shared/consultation-reference'
 import { ConsultationReferenceLink } from './ConsultationReference'
 import { MarkdownMessage } from './MarkdownMessage'
@@ -12,6 +12,7 @@ import { REVIEW_PART_TYPE, readReviewRecord } from '../../../../shared/review-re
 import { ReviewRequestCard } from './ReviewRequestCard'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
+import { FILE_LINKED_PART_TYPE, fileLinkedLine, readFileLinkedPart } from '../../../../shared/consultation-task'
 import { MailDraftCard } from './MailDraftCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
@@ -141,6 +142,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === MAIL_DRAFT_PART_TYPE) {
           const card = readMailDraftCard((part as { data?: unknown }).data)
           return card ? <MailDraftCard key={item.key} card={card} /> : null
+        }
+        if (part.type === FILE_LINKED_PART_TYPE) {
+          const linked = readFileLinkedPart((part as { data?: unknown }).data)
+          return linked ? <p key={item.key} data-file-linked className="my-1 flex items-center gap-1 text-[11.5px] text-gray-500 dark:text-zinc-400"><LinkSimple size={11} aria-hidden />{fileLinkedLine(linked)}</p> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

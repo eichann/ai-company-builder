@@ -19,10 +19,12 @@ function when(at: string): string {
  * consultation about it already, its row opens it, so only ［＋新しい相談］ (`fresh`); with none,
  * ［相談する］ starts one.
  */
-export function consultationLinks(consultations: readonly LinkedConsultation[], onConsult?: (fresh: boolean) => void): { rows: LinkedRow[]; extra: LinkedGroupExtra | null } {
+export function consultationLinks(consultations: readonly LinkedConsultation[], onConsult?: (fresh: boolean) => void, onDetach?: (sessionId: string) => void): { rows: LinkedRow[]; extra: LinkedGroupExtra | null } {
   const rows: LinkedRow[] = consultations.map(c => ({
     key: `consultation:${c.sessionId}`, name: NAME, kind: 'consultation', label: c.title, sub: when(c.updatedAt),
     onOpen: () => { void runCommand('chat.openConsultation', { sessionId: c.sessionId }).catch(() => {}) },
+    // A task's consultation (owner decision 2026-11-03): taken off, it no longer links its new files here.
+    ...(onDetach ? { menu: [{ label: 'このやることから外す', hint: '相談は残ります。新しく作ったファイルも、もうつなぎません', onClick: () => onDetach(c.sessionId) }] } : {}),
   }))
   if (!onConsult) return { rows, extra: null }
   return {

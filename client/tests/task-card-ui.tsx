@@ -147,7 +147,7 @@ function Preview() {
         onNudge={r => show('acted', `nudge ${r.id}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
-        tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} />
+        tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} onDetachConsultation={id => show('acted', `detach ${id}`)} />
     </main>
   )
 }
