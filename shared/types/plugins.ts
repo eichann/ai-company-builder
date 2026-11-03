@@ -4,7 +4,7 @@
  * versions and history. Owner/admin only (the admin page 「つなぎ先」, P8).
  * No answer ever holds a key value: an install names the key by id.
  */
-import type { FieldPolicy, OperationKind, OperationReach, PluginKind, PluginRole, UndoKind } from '../core/plugins'
+import type { FieldPolicy, OperationKind, OperationReach, PluginKind, PluginRole, PluginStepProcedurePin, PluginStepStart, UndoKind } from '../core/plugins'
 
 /** Why a company's plugin cannot run now (each kill switch and each missing piece). */
 export type PluginProblem =
@@ -263,4 +263,86 @@ export interface PluginAiOperation {
 /** The company's running connector plugins, as the member's AI may use them (GET /api/records-ai/plugins). */
 export interface PluginAiTools {
   plugins: Array<{ id: string; label: string; operations: PluginAiOperation[] }>
+}
+
+/**
+ * A business plugin's package the member's app keeps (plan C2, plugins.md
+ * "Handing packages to the app"): listed in the agent policy
+ * (`GET /me/agent-policy` → `plugins`) for every member of a company that
+ * turned the plugin on. `current` is the version the company chose; `pinned`
+ * an older one some work is still pinned to (stored by C5). A plugin turned
+ * off, or a version the operator stopped, is not listed: the app removes it.
+ */
+export interface DistributedPlugin {
+  id: string
+  version: string
+  /** Fingerprint v2 (shared/core/plugin-fingerprint.ts): what the app checks the files against. */
+  fingerprint: string
+  use: 'current' | 'pinned'
+}
+
+/**
+ * A business plugin's step as it applies to a record (plan C5,
+ * plugin-steps.md): the step's ceiling — its `tools` and `connector_roles`,
+ * never more whichever procedure runs.
+ */
+export interface PluginStepView {
+  pluginId: string
+  step: string
+  label: string
+  start: PluginStepStart
+  /** The plugin procedure's file in the package (`steps/<name>.md`), of the version the work runs. */
+  procedure: string
+  tools: string[]
+  connectorRoles: string[]
+}
+
+/** GET …/me/plugin-steps/records/:recordId: a step at the record's state, with the work's pin (null before its first run). */
+export interface PluginStepOnRecord extends PluginStepView {
+  pin: PluginStepProcedurePin | null
+}
+
+/** GET …/me/plugin-step-turns: one record waiting at a `start: ai_turn` step (the member's 「AI の番」). */
+export interface PluginStepTurn extends PluginStepView {
+  recordId: string
+  /** The record's version now. */
+  version: number
+}
+
+/**
+ * POST …/me/plugin-steps/records/:recordId/:pluginId/:step/start (a
+ * `start: person` step): the work's pinned procedure and the step's ceiling.
+ */
+export interface PluginStepStartView extends PluginStepView {
+  recordId: string
+  version: number
+  pin: PluginStepProcedurePin
+}
+
+/** GET / PUT …/plugins/:pluginId/step-skills (owner/admin): the company's Skill per overridable step. */
+export interface PluginStepSkillsView {
+  steps: Array<{ step: string; label: string; overridable: boolean; skill: string | null }>
+}
+
+/**
+ * GET …/plugins/:pluginId/roles (owner/admin; plan C3, plugin-roles.md): the
+ * business plugin's declared roles with the company's assignment, the
+ * まとまり overrides and the history (member ids only).
+ */
+export interface PluginRolesView {
+  pluginId: string
+  label: string
+  roles: Array<{ name: string; label: string; description: string | null; userIds: string[] }>
+  /** A まとまり's own holders; `title` only when the viewer may read that record. */
+  overrides: Array<{ role: string; bundleId: string; title: string | null; userIds: string[] }>
+  history: Array<{ role: string; bundleId: string | null; action: 'assign' | 'override' | 'clear-override'; userIds: string[]; at: string; by: string }>
+}
+
+/** GET …/plugins/:pluginId/package/:version (any member, a listed version only): the package's files. */
+export interface PluginPackageDownload {
+  id: string
+  version: string
+  fingerprint: string
+  /** Every file of the package (`signature.yaml` too; it is not part of the fingerprint), bytes as base64. */
+  files: Array<{ path: string; base64: string }>
 }

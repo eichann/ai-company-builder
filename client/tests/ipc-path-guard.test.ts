@@ -53,6 +53,8 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'brokerKeys:moveFromEnv': { args: ['co', IN, 'OPENAI_API_KEY'], paths: [1] },
   'privateFolders:reservedPathRefusal': { args: [IN_FILE], paths: [0] },
   'git:sync': { args: [IN, 'co', 'msg'], paths: [0] },
+  'aiTurns:claim': { args: ['co', 'deal-0a1b2c3d4e5f', 1, 'conv-guard-0001', IN], paths: [4] },
+  'pluginSteps:start': { args: ['co', 'deal-0a1b2c3d4e5f', 'sample-sales', 'prepare', IN], paths: [4] },
   'git:autoSync': { args: [IN, 'co', 'receive', { unsavedEdits: false, needsMember: false, offline: false }], paths: [0] },
   'git:preview': { args: [IN], paths: [0] },
   'git:generateSummary': { args: [IN], paths: [0] },
@@ -60,9 +62,9 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'git:fileDiff': { args: [IN, 'a.txt', 'modified'], paths: [0] },
   'git:commitFileDiff': { args: [IN, 'abcdef0', 'a.txt'], paths: [0] },
   'git:listFiles': { args: [IN, ''], paths: [0] },
+  'git:unsharedLargeFiles': { args: [IN], paths: [0] },
   'git:grep': { args: [IN, 'q', ''], paths: [0] },
   'git:log': { args: [IN, '', 5], paths: [0] },
-  'git:showCommit': { args: [IN, 'abcdef0', ''], paths: [0] },
   'git:setupCompanyRemote': { args: [IN, 'co', []], paths: [0] },
   'git:inspectCompanyFolder': { args: [IN, 'co'], paths: [0] },
   'git:sparseGetExclusions': { args: [IN], paths: [0] },
@@ -78,6 +80,13 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'skills:toggleNurturing': { args: [IN_FILE, true], paths: [0] },
   'tools:start': { args: [IN, 'dev'], paths: [0] },
   'chatWindow:openFile': { args: [IN_FILE], paths: [0], fromChatWindow: true },
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 /** Parameters named like a path that are not a local path to check (channel → parameter → why). */
@@ -91,15 +100,25 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'git:commitFileDiff': { filePath: 'a repository pathspec' },
   'git:listFiles': { folderPath: 'a folder inside the repository (git-search.ts normalizeSearchFolder)' },
   'git:grep': { folderPath: 'a folder inside the repository (git-search.ts normalizeSearchFolder)' },
-  'git:log': { folderPath: 'a repository pathspec' },
-  'git:showCommit': { folderPath: 'a repository pathspec' },
+  'git:log': { folderPath: 'a repository pathspec (a folder or one file); a private folder clone it lies in is validated before use' },
+  'recordViews:forFile': { companyPath: 'a company path sent to the server (fileLinkPath-checked), never read from disk' },
   'git:setupCompanyRemote': { selectedPaths: 'department folder names to download' },
   'git:folderSizes': { folder: 'a repository folder sent to the server' },
+  'tasks:linkFile': { companyPath: 'a company-relative path sent to the server (records.md "Linking files later"); nothing local is read or written' },
+  'tasks:share': { folder: 'a company-relative department folder sent to the server (records.md "Owner-only records"); nothing local is read or written' },
+  'tasks:unlinkFile': { companyPath: 'a company-relative path sent to the server; nothing local is read or written' },
   'git:sparseUncommittedChanges': { folders: 'repository folders (git pathspecs)' },
   'privateFolders:createContext': { parentPath: 'a company-relative folder sent to the server' },
   'skills:list': { departmentFolder: 'relative to the checked root: absolute / .. refused, the joined path validated and kept under that root (ipc-app.test.ts)' },
   'skills:publish': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
   'skills:makePrivate': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 const PATH_LIKE = /path|root|folder|dir/i

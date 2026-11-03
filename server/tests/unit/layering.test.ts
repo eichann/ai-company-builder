@@ -3,7 +3,7 @@
  *
  *   routes (HTTP) → services (rules, authorization) → ports (interfaces)
  *                                                       ↑
- *                          adapters (SQLite, git, clock) ┘   wired in src/composition.ts
+ *                          adapters (SQLite, git, clock) ┘   wired in src/composition.ts (+ composition/*.ts)
  *
  * - ports/ import nothing but each other and shared/core (types).
  * - services/ import ports, other services, shared/core and the pure lib
@@ -84,10 +84,11 @@ describe('server layering', () => {
   it('only the composition root imports adapters', () => {
     for (const file of tsFiles(SRC)) {
       const rel = relative(SRC, file)
+      // composition/*.ts: the lanes' parts of the composition root (server.md "Lane markers").
       // cli/: operator commands run on their own (e.g. generate-broker-kek.ts), each its own composition root.
       // db/index.ts: the schema's startup seeding runs the scope store (adapters/sqlite/permission-store.ts)
       // on the connection it is migrating, before any service exists.
-      if (rel === 'composition.ts' || rel === 'db/index.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
+      if (rel === 'composition.ts' || /^composition\/[^/]+\.ts$/.test(rel) || rel === 'db/index.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
       for (const spec of importsOf(file)) {
         expect(target(file, spec), `${rel}: ${spec}`).not.toMatch(/^adapters\//)
       }

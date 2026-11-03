@@ -16,9 +16,11 @@
  * - A person presses send; the hash of the version on screen must equal the
  *   server's. Nothing here sends.
  */
+import { addBusinessDays, addDays, isCalendarDate } from './business-days'
 import { canonicalJson } from './fixed-content'
+import { japanDateTime } from './task-settings'
 
-export const RECIPIENT_SOURCES = ['calendar', 'hubspot', 'member', 'typed'] as const
+export const RECIPIENT_SOURCES = ['calendar', 'hubspot', 'member', 'typed', 'thread'] as const
 export type RecipientSource = typeof RECIPIENT_SOURCES[number]
 
 export const RECIPIENT_SOURCE_LABELS: Record<RecipientSource, string> = {
@@ -26,6 +28,7 @@ export const RECIPIENT_SOURCE_LABELS: Record<RecipientSource, string> = {
   hubspot: 'HubSpot の連絡先',
   member: 'ACB のメンバー',
   typed: 'あなたが入力',
+  thread: 'スレッドの相手',
 }
 
 /** A recipient as the server offers it: an opaque ref, the address, a display name and where it was found. */
@@ -73,12 +76,28 @@ export function canonicalMailText(text: string): string {
   return text.replace(/\r\n?/g, '\n').normalize('NFC')
 }
 
+/**
+ * A reply into a conversation of the member's own mailbox (A4, outbound-mail.md
+ * "Replies"): the provider's conversation id and the `In-Reply-To` /
+ * `References` the message carries — fixed with the draft, so the hash covers them.
+ */
+export interface MailReplyHeaders {
+  threadId: string
+  inReplyTo: string
+  references: string[]
+}
+
+/** One `Message-ID` as a header may carry it: `<…>` with nothing that could end the header. */
+export const MESSAGE_ID_RE = /^<[\x21-\x3b\x3d\x3f-\x7e]{3,250}>$/
+export const REPLY_REFERENCES_MAX = 20
+
 export interface MailContent {
   from: string
   to: string[]
   cc: string[]
   subject: string
   body: string
+  reply?: MailReplyHeaders
 }
 
 // eslint-disable-next-line no-control-regex
@@ -114,10 +133,71 @@ export function mailContentCanonical(c: MailContent): string {
     subject: canonicalMailText(c.subject),
     body: canonicalMailText(c.body),
     attachments: [],
+    // Only a reply carries it (a draft made before replies keeps its hash).
+    ...(c.reply ? { reply: { threadId: c.reply.threadId, inReplyTo: c.reply.inReplyTo, references: [...c.reply.references] } } : {}),
   })
+}
+
+/** A reply's subject: the thread's own, with one 「Re: 」. */
+export function replySubject(subject: string): string {
+  const s = subject.trim()
+  return /^re:/i.test(s) ? s : `Re: ${s}`.trim()
+}
+
+// ---- Chat replies (A4: Slack's 返事, one `outbound_message` type for every channel) ----
+
+export const CHAT_REPLY_LIMITS = { body: 4_000 } as const
+
+/** A reply posted into a chat thread as the member: the thread is fixed with the draft. */
+export interface ChatReplyContent {
+  /** The member's ACB email (their chat permission is for it). */
+  from: string
+  channelId: string
+  threadTs: string
+  body: string
+}
+
+export function chatReplyProblems(c: { body: string }): string[] {
+  const problems: string[] = []
+  if (c.body.trim() === '') problems.push('本文を書いてください')
+  if (c.body.length > CHAT_REPLY_LIMITS.body) problems.push(`本文は ${CHAT_REPLY_LIMITS.body} 文字までです`)
+  if (BODY_BAD.test(c.body)) problems.push('本文に使えない文字が入っています')
+  return problems
+}
+
+export function chatReplyCanonical(c: ChatReplyContent): string {
+  return canonicalJson({ v: 1, kind: 'chat_reply', from: c.from, thread: { channel: c.channelId, ts: c.threadTs }, body: canonicalMailText(c.body) })
 }
 
 /** Links in a body (shown on the card: 「本文にリンクが N つあります」). */
 export function countLinks(body: string): number {
   return (body.match(/\bhttps?:\/\/[^\s<>"'）)]+/gi) ?? []).length
 }
+
+/**
+ * 「返事を待つ」 at 確かめて送る (outbound-mail.md "Waiting for their answer"): a new mail we send
+ * first may wait for the other side's answer. Their silence is noticed on the morning of the day
+ * the member picked — by default the third business day after sending (weekends, Japanese public
+ * holidays and the company's own holidays are off) — at `AWAIT_REPLY_TIME` (company clock).
+ */
+export const AWAIT_REPLY_BUSINESS_DAYS = 3
+export const AWAIT_REPLY_TIME = '09:00'
+/** The furthest day the member may pick (days after today). */
+export const AWAIT_REPLY_MAX_DAYS = 180
+
+/** The default day to notice silence: the `AWAIT_REPLY_BUSINESS_DAYS`-th business day after `sentAt` (Japan date). */
+export function awaitReplyDefault(sentAt: Date, companyHolidays: Iterable<string> = []): string {
+  return addBusinessDays(japanDateTime(sentAt).date, AWAIT_REPLY_BUSINESS_DAYS, companyHolidays)
+}
+
+/** Why `until` (a picked day, `YYYY-MM-DD`) cannot be the day to wait until at `now`, or null. */
+export function awaitReplyUntilProblem(until: unknown, now: Date): string | null {
+  if (!isCalendarDate(until)) return '返事を待つ日は、日付（YYYY-MM-DD）で選んでください。'
+  const today = japanDateTime(now).date
+  if (until < today) return '返事を待つ日には、今日かそれよりあとの日を選んでください。'
+  if (until > addDays(today, AWAIT_REPLY_MAX_DAYS)) return `返事を待つ日は、${AWAIT_REPLY_MAX_DAYS} 日先までで選んでください。`
+  return null
+}
+
+/** The stored 返事の見込み of a picked day (`wait_until`, the company's clock): that day's morning. */
+export const awaitReplyWaitUntil = (until: string) => `${until}T${AWAIT_REPLY_TIME}`

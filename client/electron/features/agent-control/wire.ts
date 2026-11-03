@@ -8,6 +8,8 @@ import { createAgentStop, type StoppableTurns } from '../../services/agent-stop'
 import { createAgentEventSender } from '../../services/agent-event-sender'
 import { createAgentEventRecorder } from '../../services/agent-events'
 import type { AppLifecycle } from '../ports'
+import { createPluginFetcher } from '../plugins/fetch'
+import { createPluginPackageStore } from '../plugins/store'
 
 export interface AgentControlDeps {
   serverUrl: () => string
@@ -19,9 +21,13 @@ export interface AgentControlDeps {
   lifecycle: AppLifecycle
   /** A `records` signal for a company (no content: the listener asks the server again). */
   onRecords?: (companyId: string) => void
+  /** A `notifications` signal for a company (no content: the listener asks the server again). */
+  onNotifications?: (companyId: string) => void
+  /** The plugin packages a company lists and this app keeps changed (its plugin screens change, A6). */
+  onPluginsChanged?: (companyId: string) => void
 }
 
-export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords }: AgentControlDeps) {
+export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications, onPluginsChanged }: AgentControlDeps) {
   // The member's AI policy per company (「AI の囲い」 and the stop), read at each chat turn.
   // The stop part is also kept on disk per account (the emergency stop survives a restart offline).
   const policy = createAgentPolicyStore({
@@ -29,6 +35,17 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     cookies: session.cookies,
     userId: session.userId,
     dir: () => path.join(userDataDir(), 'agent-policy'),
+  })
+  // The business plugins' packages the policy lists (plan C2): fetched, verified and kept under
+  // <userData>/plugins; removed when no company lists them. The renderer sees only their screens (A6).
+  const pluginPackages = createPluginPackageStore({
+    dir: () => path.join(userDataDir(), 'plugins'),
+    userId: session.userId,
+    fetchPackage: createPluginFetcher({ baseUrl: serverUrl, cookies: session.cookies }),
+    onChanged: onPluginsChanged,
+  })
+  policy.onPolicy((companyId, answer) => {
+    if (answer.plugins) void pluginPackages.sync(companyId, answer.plugins)
   })
   // The push channel's only effect is a policy refetch; a received stop stops
   // the company's running turns (services/agent-stop.ts).
@@ -40,6 +57,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
       void policy.refresh(companyId)
     },
     onRecords,
+    onNotifications,
   })
   lifecycle.beforeQuit(() => pushChannel.stopAll())
   const stop = createAgentStop({ policy, watch: companyId => pushChannel.watch(companyId), turns })
@@ -58,6 +76,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
 
   return {
     policy,
+    pluginPackages,
     stop,
     events,
     eventSender,

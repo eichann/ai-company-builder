@@ -82,6 +82,12 @@ describe('errors', () => {
     expect(describeError(new ApiError(500, 'boom'))).toMatch(/少し待って/)
     expect(describeError(new TypeError('Failed to fetch'))).toMatch(/サーバーに接続できません/)
   })
+
+  it('shows a failed company creation in the server\'s own words: nothing was kept, try again', () => {
+    const message = '会社を作成できませんでした。途中までの内容は残していません。少し待ってから、もう一度お試しください。'
+    const err = new ApiError(503, message, { error: message, code: 'COMPANY_CREATION_FAILED' })
+    expect(describeError(err)).toBe(message)
+  })
 })
 
 describe('redirects', () => {

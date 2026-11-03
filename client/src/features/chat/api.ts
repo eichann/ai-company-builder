@@ -5,6 +5,8 @@ import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 
 /** Reading the chat history on this computer: summaries, one conversation, body search, changes. */
 export type ChatHistoryReads = ElectronPort<'getChatSessionSummaries' | 'getChatSession' | 'searchChatSessions' | 'onChatHistoryChanged'>
+/** Reading from the company server the やること / 案件 consultations are about (only what the member may read). */
+export type ConsultationTopicReads = ElectronPort<'getConsultationTopics'>
 /** Writing the chat history on this computer: save, rename / pin, delete. */
 export type ChatHistoryWrites = ElectronPort<'saveChatSession' | 'flushChatSession' | 'patchChatSession' | 'deleteChatSession'>
 /** Reading a conversation's hand-off memo (this computer). */
@@ -49,6 +51,10 @@ export function getChatSession(companyId: string, sessionId: string, reads: Chat
 /** Ids of the conversations whose messages match (searched in the main process). */
 export function searchChatSessions(companyId: string, query: string, reads: ChatHistoryReads = window.electronAPI) {
   return reads.searchChatSessions(companyId, query)
+}
+
+export function getConsultationTopics(companyId: string, recordIds: string[], reads: ConsultationTopicReads = window.electronAPI) {
+  return reads.getConsultationTopics(companyId, recordIds)
 }
 
 /** Saves, patches and deletes from any tab; returns the unsubscribe. */
@@ -234,7 +240,7 @@ export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFro
 export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation' | 'recreatePluginOperation'>
 
 /** The approval card: reading a request and the person's own acts on it, with their session (never the AI's). */
-export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval'>
+export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval' | 'sameAsApproval'>
 
 export function getApproval(companyId: string, approvalId: string, outbound: ApprovalOutbound = window.electronAPI) {
   return outbound.getApproval(companyId, approvalId)
@@ -252,6 +258,10 @@ export function withdrawApproval(companyId: string, approvalId: string, outbound
   return outbound.withdrawApproval(companyId, approvalId)
 }
 
+export function sameAsApproval(companyId: string, approvalId: string, recordId: string, linkMeeting: boolean, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.sameAsApproval(companyId, approvalId, recordId, linkMeeting)
+}
+
 export function undoPluginOperation(companyId: string, pluginId: string, operationId: string, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {
   return outbound.undoPluginOperation(companyId, pluginId, operationId, conversationId)
 }
@@ -266,10 +276,15 @@ export function recreatePluginOperation(companyId: string, pluginId: string, ope
 }
 
 /** 「どの案件の議事録ですか？」: the person links the minutes to a deal with their session (nothing goes to HubSpot). */
-export type MinutesDealWrites = ElectronPort<'linkMinutesDeal'>
+export type MinutesBundleWrites = ElectronPort<'linkMinutesBundle' | 'declineMinutesBundle'>
 
-export function linkMinutesDeal(companyId: string, minutesId: string, dealId: string, writes: MinutesDealWrites = window.electronAPI) {
-  return writes.linkMinutesDeal(companyId, minutesId, dealId)
+export function linkMinutesBundle(companyId: string, minutesId: string, bundleId: string, writes: MinutesBundleWrites = window.electronAPI) {
+  return writes.linkMinutesBundle(companyId, minutesId, bundleId)
+}
+
+/** 「まとまりはない（社内の会議など）」 from the consultation's card. */
+export function declineMinutesBundle(companyId: string, minutesId: string, writes: MinutesBundleWrites = window.electronAPI) {
+  return writes.declineMinutesBundle(companyId, minutesId)
 }
 
 /**
@@ -278,6 +293,13 @@ export function linkMinutesDeal(companyId: string, minutesId: string, dealId: st
  * reaches outside the company; 「メールを送る許可」 opens Google's page in the member's browser.
  */
 export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle'>
+
+/** Reading one draft as the server holds it now (a task's 「AI が用意したもの」 shows the latest). */
+export type MailReads = ElectronPort<'getOutboundMail'>
+
+export function getOutboundMail(companyId: string, messageId: string, reads: MailReads = window.electronAPI) {
+  return reads.getOutboundMail(companyId, messageId)
+}
 
 /** The port the mail card uses (preview pages pass their own). */
 export function mailOutbound(): MailOutbound {
@@ -289,4 +311,30 @@ export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
 
 export function listOwnBrokerKeys(companyId: string, reads: OwnKeyStatusReads = window.electronAPI) {
   return reads.listOwnBrokerKeys(companyId)
+}
+
+/** The company's 「自動で進める」 and its limits (AI turns run automatically: ai-turns.md). */
+export type AutoTurnSettingsReads = ElectronPort<'getAutoTurnSettings'>
+/**
+ * Taking a record's AI turn and settling it afterwards: changes the shared record (one PC wins
+ * the claim; an unfinished one goes back to 「AI の番」), with the AI's token or the session in main.
+ */
+export type AiTurnWrites = ElectronPort<'claimAiTurn' | 'settleAiTurn' | 'retryAiTurn'>
+
+export function getAutoTurnSettings(companyId: string, reads: AutoTurnSettingsReads = window.electronAPI) {
+  return reads.getAutoTurnSettings(companyId)
+}
+
+/** `companyRoot`: the company folder, where a company Skill pinned as a plugin step's procedure is read (plugin-steps.md). */
+export function claimAiTurn(companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.claimAiTurn(companyId, recordId, expectedVersion, conversationId, companyRoot)
+}
+
+export function settleAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.settleAiTurn(companyId, recordId)
+}
+
+/** 「もう一度」 on the server's execution run (S10b): a run held for a person goes back to the AI. */
+export function retryAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.retryAiTurn(companyId, recordId)
 }

@@ -23,17 +23,34 @@
  * in tests/unit/company-scoped-sql.test.ts, which fails on any new statement
  * that touches a company's rows without a company condition.
  */
+import type { AiRunRepository } from './ai-runs'
 import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
+import type { GoogleDriveRepository } from './google-drive'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { InvitationRepository } from './invitations'
+import type { NotificationRepository } from './notifications'
 import type { OrphanedScopeReader } from './orphaned-scopes'
 import type { OutboundMailRepository } from './outbound-mail'
 import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
 import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
+import type { SecondOpinionSettingRepository } from './second-opinion'
+import type { SkillUseRepository } from './skill-uses'
+import type { TaskSettingsRepository } from './task-settings'
 
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+import type { IdentityRepository } from './identities'
+import type { InboxRepository } from './inbox'
+// lane B ▲
+// lane C ▼
+import type { PluginStepRepository } from './plugin-steps'
+import type { PluginRoleRepository } from './plugin-roles'
+// lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
   readonly companyId: string
@@ -50,10 +67,37 @@ export interface CompanyData {
   readonly plugins: PluginRepository
   /** The Google connection: the OAuth client, members' grants, pending starts (ports/connectors.ts). */
   readonly connectors: ConnectorRepository
+  /** Google Drive: what members picked with Google Picker, and the puts' receipts (ports/google-drive.ts). */
+  readonly googleDrive: GoogleDriveRepository
   /** Outbound mail: drafts, their recipients per version, typed addresses, send attempts (ports/outbound-mail.ts). */
   readonly outbound: OutboundMailRepository
   /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */
   readonly fixedPayloads: FixedPayloadRepository
+  /** Notices per member, their read state and kind switches (ports/notifications.ts). */
+  readonly notifications: NotificationRepository
+  /** Task settings (task list departments, reply 目安, auto-run) and department membership (ports/task-settings.ts). */
+  readonly tasks: TaskSettingsRepository
+  /** Execution runs of 「AI の番」 and their outside operations by idempotency key (ports/ai-runs.ts, S10b). */
+  readonly aiRuns: AiRunRepository
+  /** Which company Skills members' consultations used (ports/skill-uses.ts, records.md "Which Skill"). */
+  readonly skillUses: SkillUseRepository
+  /** 「もう一方の AI に聞く」: allowed for this company or not (ports/second-opinion.ts). */
+  readonly secondOpinion: SecondOpinionSettingRepository
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  /** Matching people and companies (名寄せ): identities, proposals, history (ports/identities.ts, identity.md). */
+  readonly identities: IdentityRepository
+  /** The inbox (来た連絡): settings, messages seen, connections and unchecked gaps (ports/inbox.ts, inbox.md). */
+  readonly inbox: InboxRepository
+  // lane B ▲
+  // lane C ▼
+  /** A business plugin's steps: each work's pinned procedure, the company's Skill per step (ports/plugin-steps.ts, plugin-steps.md). */
+  readonly pluginSteps: PluginStepRepository
+  /** Business roles (役割): the company's assignments, まとまり overrides, history (ports/plugin-roles.ts, plugin-roles.md). */
+  readonly pluginRoles: PluginRoleRepository
+  // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

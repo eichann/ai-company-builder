@@ -1,4 +1,7 @@
 import type { UIMessage } from 'ai'
+import { RESTORED_TOOL_PART_TYPE, failureOf, readToolLine, toolLineOf, type ToolLine } from '../../../shared/tool-display'
+import { secondOpinionTargetOf } from '../../../shared/agents/second-opinion'
+import { agentShortLabel } from '../../../shared/agents/registry'
 
 /**
  * Render plan for an assistant message's parts (pure, no React).
@@ -10,6 +13,7 @@ import type { UIMessage } from 'ai'
  *  - tool calls made inside a subagent (`callProviderMetadata[<provider>]
  *    .parentToolCallId`, e.g. set by ai-sdk-provider-claude-code) are nested under
  *    the subagent's own `Agent`/`Task` row instead of flat in the conversation;
+ *  - consecutive finished calls of the same tool become one row (「決めたことを 2 件残しました」);
  *  - long runs of consecutive top-level tool rows collapse into one summary row;
  *  - each row carries primitive fields so memoised views can compare by value.
  */
@@ -41,7 +45,13 @@ export function getToolDisplayName(toolName: string): string {
     executeCommand: 'コマンド実行',
     readSkillFile: 'スキルファイル読取',
   }
-  return names[toolName] || toolName
+  if (names[toolName]) return names[toolName]
+  // 「もう一方の AI に聞く」: the approval asks before the call, in the present (「Codex に聞く」).
+  const otherAi = secondOpinionTargetOf(toolName)
+  if (otherAi) return `${agentShortLabel(otherAi)} に聞く`
+  // A tool the app has no name for (a member's own MCP server): never the raw `mcp__…` id.
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(toolName)
+  return mcp ? `道具（${mcp[1]}・${mcp[2]}）` : toolName
 }
 
 export interface ToolRow {
@@ -51,9 +61,16 @@ export interface ToolRow {
   input?: unknown
   output?: unknown
   errorText?: string
-  /** Row label derived from the input (`path`, else `command`). */
-  inputSummary: string
+  /** What the row says, in plain Japanese (shared/tool-display.ts): from the stream, else built here. */
+  line: ToolLine
+  /** The call did not work: the app's own refusal sentence when there is one. */
+  failure?: { reason?: string }
   parentToolCallId?: string
+}
+
+/** The row's line: the one the main process put on the part, else the built-in / unknown-tool line. */
+function lineOf(toolName: string, input: unknown, metadata: unknown): ToolLine {
+  return readToolLine(metadata) ?? toolLineOf(toolName, input)
 }
 
 export interface ToolItem {
@@ -76,7 +93,17 @@ export interface AgentItem {
   signature: string
 }
 
-export type ToolOrAgent = ToolItem | AgentItem
+/** Consecutive finished calls of one tool, shown as one row (「決めたことを 2 件残しました」) that expands. */
+export interface SameItem {
+  kind: 'same'
+  key: string
+  /** The latest call (what run bookkeeping reads). */
+  row: ToolRow
+  rows: ToolRow[]
+  signature: string
+}
+
+export type ToolOrAgent = ToolItem | AgentItem | SameItem
 
 export interface RunItem {
   kind: 'run'
@@ -105,14 +132,6 @@ export function isTerminalState(state: string): boolean {
   return state === 'output-available' || state === 'output-error' || state === 'output-denied'
 }
 
-export function inputSummaryOf(input: unknown): string {
-  if (!input || typeof input !== 'object') return ''
-  const inp = input as Record<string, unknown>
-  if (inp.path) return String(inp.path)
-  if (inp.command) return String(inp.command)
-  return ''
-}
-
 /** The subagent call this tool call ran inside: `parentToolCallId` in whichever provider's metadata carries it. */
 function parentOf(part: { callProviderMetadata?: unknown }): string | undefined {
   const meta = part.callProviderMetadata
@@ -127,27 +146,45 @@ function parentOf(part: { callProviderMetadata?: unknown }): string | undefined 
 /** Tool row for a `tool-*` or `dynamic-tool` part, else undefined. */
 export function toolRowOf(part: Part): ToolRow | undefined {
   if (part.type === 'dynamic-tool') {
+    const output = 'output' in part ? part.output : undefined
+    const errorText = 'errorText' in part ? part.errorText : undefined
+    const failure = failureOf(part.state, errorText, output)
     return {
       toolCallId: part.toolCallId,
       toolName: part.toolName,
       state: part.state,
       input: part.input,
-      output: 'output' in part ? part.output : undefined,
-      errorText: 'errorText' in part ? part.errorText : undefined,
-      inputSummary: inputSummaryOf(part.input),
+      output,
+      errorText,
+      line: lineOf(part.toolName, part.input, part.callProviderMetadata),
+      ...(failure ? { failure } : {}),
       parentToolCallId: parentOf(part),
+    }
+  }
+  if (part.type === RESTORED_TOOL_PART_TYPE) {
+    // A call of a restored conversation (chatSessionMessages.ts): its name and line only.
+    const p = part as { id?: string; data?: { toolName?: unknown; line?: unknown } }
+    const toolName = typeof p.data?.toolName === 'string' ? p.data.toolName : ''
+    if (!toolName) return undefined
+    const line = p.data?.line as ToolLine | undefined
+    return {
+      toolCallId: p.id ?? toolName, toolName, state: 'output-available',
+      line: line && typeof line.label === 'string' && typeof line.many === 'string' ? line : toolLineOf(toolName, {}),
     }
   }
   if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
     const p = part as { type: string; toolCallId: string; state: string; input?: unknown; output?: unknown; errorText?: string; callProviderMetadata?: unknown }
+    const toolName = p.type.slice('tool-'.length)
+    const failure = failureOf(p.state, p.errorText, p.output)
     return {
       toolCallId: p.toolCallId,
-      toolName: p.type.slice('tool-'.length),
+      toolName,
       state: p.state,
       input: p.input,
       output: p.output,
       errorText: p.errorText,
-      inputSummary: inputSummaryOf(p.input),
+      line: lineOf(toolName, p.input, p.callProviderMetadata),
+      ...(failure ? { failure } : {}),
       parentToolCallId: parentOf(p),
     }
   }
@@ -155,7 +192,29 @@ export function toolRowOf(part: Part): ToolRow | undefined {
 }
 
 function rowSignature(row: ToolRow): string {
-  return `${row.toolCallId}:${row.state}:${row.inputSummary.length}:${row.inputSummary.slice(0, 80)}:${row.errorText ? 1 : 0}`
+  return `${row.toolCallId}:${row.state}:${row.line.label}:${row.line.detail ?? ''}:${row.failure ? `!${row.failure.reason ?? ''}` : ''}`
+}
+
+/** Calls that may share one row: finished, worked, and the same tool (a running or failed call keeps its own row). */
+function joinable(item: ToolOrAgent): item is ToolItem {
+  return item.kind === 'tool' && item.row.state === 'output-available' && !item.row.failure
+}
+
+/** Merges consecutive joinable calls of one tool into a SameItem (keyed by the first call, so it stays mounted as it grows). */
+export function groupSameCalls(items: readonly ToolOrAgent[]): ToolOrAgent[] {
+  const out: ToolOrAgent[] = []
+  for (let i = 0; i < items.length;) {
+    const first = items[i]
+    let end = i + 1
+    if (joinable(first)) {
+      while (end < items.length && joinable(items[end]) && items[end].row.toolName === first.row.toolName) end++
+    }
+    if (end - i < 2) { out.push(first); i = end; continue }
+    const rows = items.slice(i, end).map(item => item.row)
+    out.push({ kind: 'same', key: `same:${first.key}`, row: rows[rows.length - 1], rows, signature: rows.map(rowSignature).join(',') })
+    i = end
+  }
+  return out
 }
 
 /** Parts that render nothing and therefore do not break a run of tool rows. */
@@ -189,16 +248,16 @@ export function planParts(parts: readonly Part[]): PlanItem[] {
       return { kind: 'tool', key: row.toolCallId, row }
     }
     visiting.add(row.toolCallId)
-    const children = (childrenOf.get(row.toolCallId) ?? []).map(build)
+    const children = groupSameCalls((childrenOf.get(row.toolCallId) ?? []).map(build))
     visiting.delete(row.toolCallId)
     let toolCount = 0
     let runningCount = 0
     const tail: string[] = []
     for (const child of children) {
-      toolCount += 1 + (child.kind === 'agent' ? child.toolCount : 0)
+      toolCount += child.kind === 'same' ? child.rows.length : 1 + (child.kind === 'agent' ? child.toolCount : 0)
       runningCount += (isRunningState(child.row.state) ? 1 : 0) + (child.kind === 'agent' ? child.runningCount : 0)
     }
-    for (const child of children.slice(-GROUP_PAGE_SIZE)) tail.push(child.kind === 'agent' ? child.signature : rowSignature(child.row))
+    for (const child of children.slice(-GROUP_PAGE_SIZE)) tail.push(child.kind === 'tool' ? rowSignature(child.row) : child.signature)
     const description = typeof (row.input as { description?: unknown } | undefined)?.description === 'string'
       ? (row.input as { description: string }).description : ''
     return {
@@ -220,20 +279,21 @@ export function planParts(parts: readonly Part[]): PlanItem[] {
   let run: ToolOrAgent[] = []
   const flush = () => {
     if (run.length === 0) return
+    const key = `run:${run[0].key}`
+    const items = groupSameCalls(run)
     // Collapse only when that actually hides something (a run of subagent
     // groups, which always stay visible, renders as is).
-    const tail = run.length > RUN_COLLAPSE_THRESHOLD ? visibleRunItems(run) : run
-    const collapsible = tail.length < run.length
+    const tail = items.length > RUN_COLLAPSE_THRESHOLD ? visibleRunItems(items) : items
+    const collapsible = tail.length < items.length
     let runningCount = 0
-    for (const item of run) runningCount += isRunningState(item.row.state) ? 1 : 0
-    const visible = tail
+    for (const item of items) runningCount += isRunningState(item.row.state) ? 1 : 0
     plan.push({
       kind: 'run',
-      key: `run:${run[0].key}`,
-      items: run,
+      key,
+      items,
       collapsible,
       runningCount,
-      signature: `${run.length}|${runningCount}|${visible.map(item => item.kind === 'agent' ? item.signature : rowSignature(item.row)).join(',')}`,
+      signature: `${items.length}|${runningCount}|${tail.map(item => item.kind === 'tool' ? rowSignature(item.row) : item.signature).join(',')}`,
     })
     run = []
   }
@@ -270,7 +330,7 @@ export function toolRowPropsEqual(prev: { row: ToolRow }, next: { row: ToolRow }
   if (a === b) return true
   if (a.toolCallId !== b.toolCallId || a.state !== b.state || a.toolName !== b.toolName) return false
   if (isTerminalState(b.state)) return true
-  return a.errorText === b.errorText && a.inputSummary === b.inputSummary
+  return a.errorText === b.errorText && a.line.label === b.line.label && a.line.detail === b.line.detail
 }
 
 export function signaturePropsEqual(prev: { item: { key: string; signature: string } }, next: { item: { key: string; signature: string } }): boolean {

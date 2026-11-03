@@ -116,11 +116,12 @@ export interface CreateDepartmentInput {
 
 export interface UpdateDepartmentInput {
   name?: string
-  nameEn?: string
+  /** null clears it (the admin console sends null for an emptied field). */
+  nameEn?: string | null
   folder?: string
   icon?: string
   color?: string
-  description?: string
+  description?: string | null
   sortOrder?: number
   isActive?: boolean
 }

@@ -8,19 +8,34 @@ contract.events chatWindow:fileRequested
 contract.events fs:changes
 contract.events handoff:changed
 contract.events minutes:changed
+contract.events notifications:changed
+contract.events notifications:openTasks
+contract.events plugins:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
 contract.events voice:event
 contract.events writeAccess:changed
+contract.invoke absences:add
+contract.invoke absences:get
+contract.invoke absences:remove
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
+contract.invoke aiTurns:claim
+contract.invoke aiTurns:pluginTurns
+contract.invoke aiTurns:retry
+contract.invoke aiTurns:settings
+contract.invoke aiTurns:settle
 contract.invoke api:createCompany
 contract.invoke api:getCompanies
 contract.invoke api:getDepartments
 contract.invoke app:closeResponse
+contract.invoke appLink:acceptServer
+contract.invoke appLink:dismissServer
+contract.invoke appLink:serverOffer
 contract.invoke approvals:approve
 contract.invoke approvals:get
+contract.invoke approvals:sameAs
 contract.invoke approvals:sendBack
 contract.invoke approvals:withdraw
 contract.invoke auth:getSession
@@ -34,6 +49,7 @@ contract.invoke brokerKeys:delete
 contract.invoke brokerKeys:list
 contract.invoke brokerKeys:moveFromEnv
 contract.invoke brokerKeys:save
+contract.invoke calendar:today
 contract.invoke chat-server:getInfo
 contract.invoke chatHistory:deleteSession
 contract.invoke chatHistory:getSession
@@ -49,6 +65,8 @@ contract.invoke chatWindow:open
 contract.invoke chatWindow:openFile
 contract.invoke chatWindow:reportStatus
 contract.invoke codex:status
+contract.invoke companySetup:defaultParentFolder
+contract.invoke companySetup:myDepartments
 contract.invoke config:getAgentEnvPassthrough
 contract.invoke config:getApiKeyStatus
 contract.invoke config:getAuthMode
@@ -96,22 +114,31 @@ contract.invoke git:log
 contract.invoke git:preview
 contract.invoke git:revertFile
 contract.invoke git:setupCompanyRemote
-contract.invoke git:showCommit
 contract.invoke git:sparseGetExclusions
 contract.invoke git:sparseSetExclusions
 contract.invoke git:sparseUncommittedChanges
 contract.invoke git:sync
+contract.invoke git:unsharedLargeFiles
 contract.invoke google:connect
+contract.invoke google:connectAll
 contract.invoke google:disconnect
+contract.invoke google:markSeen
 contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke minutes:bundleQuestion
 contract.invoke minutes:check
-contract.invoke minutes:linkDeal
+contract.invoke minutes:linkBundle
+contract.invoke minutes:noBundle
 contract.invoke minutes:notices
 contract.invoke minutes:skip
 contract.invoke minutes:watch
+contract.invoke notifications:markRead
+contract.invoke notifications:setSetting
+contract.invoke notifications:settings
+contract.invoke notifications:state
+contract.invoke notifications:watch
 contract.invoke outboundMail:addRecipient
 contract.invoke outboundMail:discard
 contract.invoke outboundMail:get
@@ -122,18 +149,52 @@ contract.invoke outboundMail:update
 contract.invoke pluginOperations:reconcile
 contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
+contract.invoke pluginSteps:onRecord
+contract.invoke pluginSteps:start
+contract.invoke plugins:bridge
+contract.invoke plugins:screens
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
 contract.invoke privateFolders:reservedPathRefusal
+contract.invoke recordViews:card
+contract.invoke recordViews:find
+contract.invoke recordViews:findHome
+contract.invoke recordViews:forFile
+contract.invoke recordViews:search
+contract.invoke recordViews:topics
 contract.invoke shell:openExternal
 contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
+contract.invoke slack:connect
+contract.invoke slack:disconnect
+contract.invoke slack:markSeen
+contract.invoke slack:setFeature
+contract.invoke slack:status
+contract.invoke tasks:act
+contract.invoke tasks:bundleKinds
+contract.invoke tasks:bundles
+contract.invoke tasks:card
+contract.invoke tasks:create
+contract.invoke tasks:createBundle
+contract.invoke tasks:linkFile
+contract.invoke tasks:linkRecord
+contract.invoke tasks:list
+contract.invoke tasks:proposals
+contract.invoke tasks:reconcile
+contract.invoke tasks:retryRun
+contract.invoke tasks:share
+contract.invoke tasks:suggestTags
+contract.invoke tasks:undo
+contract.invoke tasks:unlinkFile
+contract.invoke tasks:unlinkRecord
+contract.invoke threads:get
 contract.invoke tool-approval-response
 contract.invoke tools:start
 contract.invoke tools:stop
+contract.invoke viewers:get
 contract.invoke voice:cancel
 contract.invoke voice:capabilities
 contract.invoke voice:devices
@@ -142,6 +203,8 @@ contract.invoke voice:resetPrompt
 contract.invoke voice:setPrompt
 contract.invoke voice:start
 contract.invoke voice:stop
+contract.invoke workSwitches:get
+contract.invoke workSwitches:set
 contract.invoke writeAccess:get
 contract.send fs:startDrag
 contract.sync chatHistory:flushSession
@@ -155,6 +218,7 @@ contract.type AuthResult = export interface AuthResult { }
 contract.type AuthResult.error = error?: string
 contract.type AuthResult.success = success: boolean
 contract.type AuthUser = export interface AuthUser { }
+contract.type AuthUser.canCreateCompany = canCreateCompany?: boolean
 contract.type AuthUser.email = email: string
 contract.type AuthUser.emailVerified = emailVerified: boolean
 contract.type AuthUser.id = id: string
@@ -236,6 +300,9 @@ contract.type EditorBackupResult.error = error?: string
 contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.acceptAppLinkServer = acceptAppLinkServer: Invoke<'appLink:acceptServer'>
+contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
+contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
 contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
@@ -243,29 +310,46 @@ contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<
 contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
 contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
+contract.type ElectronAPI.callPluginBridge = callPluginBridge: Invoke<'plugins:bridge'>
 contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
+contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
+contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
+contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
+contract.type ElectronAPI.createBundle = createBundle: Invoke<'tasks:createBundle'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
 contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
 contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
+contract.type ElectronAPI.createTask = createTask: Invoke<'tasks:create'>
+contract.type ElectronAPI.declineMinutesBundle = declineMinutesBundle: Invoke<'minutes:noBundle'>
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
 contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
+contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
+contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'appLink:dismissServer'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
+contract.type ElectronAPI.findRecords = findRecords: Invoke<'recordViews:find'>
+contract.type ElectronAPI.findRecordsHome = findRecordsHome: Invoke<'recordViews:findHome'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
 contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
+contract.type ElectronAPI.getAbsences = getAbsences: Invoke<'absences:get'>
 contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
 contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
+contract.type ElectronAPI.getAppLinkServerOffer = getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
+contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
+contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
+contract.type ElectronAPI.getBundleKinds = getBundleKinds: Invoke<'tasks:bundleKinds'>
+contract.type ElectronAPI.getCalendarToday = getCalendarToday: Invoke<'calendar:today'>
 contract.type ElectronAPI.getChatServerInfo = getChatServerInfo: Invoke<'chat-server:getInfo'>
 contract.type ElectronAPI.getChatSession = getChatSession: Invoke<'chatHistory:getSession'>
 contract.type ElectronAPI.getChatSessionSummaries = getChatSessionSummaries: Invoke<'chatHistory:getSummaries'>
@@ -273,20 +357,36 @@ contract.type ElectronAPI.getChatWindowContext = getChatWindowContext: Invoke<'c
 contract.type ElectronAPI.getClaudeCodeStatus = getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'>
 contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'>
 contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
+contract.type ElectronAPI.getConsultationTopics = getConsultationTopics: Invoke<'recordViews:topics'>
+contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
+contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
+contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
+contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
+contract.type ElectronAPI.getNotificationsState = getNotificationsState: Invoke<'notifications:state'>
 contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMail:get'>
 contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
 contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => string
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
+contract.type ElectronAPI.getPluginScreens = getPluginScreens: Invoke<'plugins:screens'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
+contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
+contract.type ElectronAPI.getRecordThread = getRecordThread: Invoke<'threads:get'>
+contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
+contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
+contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
+contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
+contract.type ElectronAPI.getTaskProposals = getTaskProposals: Invoke<'tasks:proposals'>
+contract.type ElectronAPI.getViewers = getViewers: Invoke<'viewers:get'>
+contract.type ElectronAPI.getWorkSwitches = getWorkSwitches: Invoke<'workSwitches:get'>
 contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
 contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
 contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
@@ -300,14 +400,21 @@ contract.type ElectronAPI.gitLog = gitLog: Invoke<'git:log'>
 contract.type ElectronAPI.gitPreview = gitPreview: Invoke<'git:preview'>
 contract.type ElectronAPI.gitRevertFile = gitRevertFile: Invoke<'git:revertFile'>
 contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
-contract.type ElectronAPI.gitShowCommit = gitShowCommit: Invoke<'git:showCommit'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
+contract.type ElectronAPI.gitUnsharedLargeFiles = gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
-contract.type ElectronAPI.linkMinutesDeal = linkMinutesDeal: Invoke<'minutes:linkDeal'>
+contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFile'>
+contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
+contract.type ElectronAPI.linkRecordToRecord = linkRecordToRecord: Invoke<'tasks:linkRecord'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
+contract.type ElectronAPI.listPersonSteps = listPersonSteps: Invoke<'pluginSteps:onRecord'>
+contract.type ElectronAPI.listPluginStepTurns = listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
+contract.type ElectronAPI.markGoogleSeen = markGoogleSeen: Invoke<'google:markSeen'>
+contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
+contract.type ElectronAPI.markSlackSeen = markSlackSeen: Invoke<'slack:markSeen'>
 contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
 contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
@@ -322,6 +429,9 @@ contract.type ElectronAPI.onFileChanges = onFileChanges: Subscribe<'fs:changes'>
 contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
 contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
 contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minutes:changed'>
+contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
+contract.type ElectronAPI.onNotificationsOpenTasks = onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
+contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -336,25 +446,36 @@ contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, 
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
 contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
+contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
+contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
 contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
+contract.type ElectronAPI.retryAiTurn = retryAiTurn: Invoke<'aiTurns:retry'>
+contract.type ElectronAPI.retryTaskRun = retryTaskRun: Invoke<'tasks:retryRun'>
+contract.type ElectronAPI.sameAsApproval = sameAsApproval: Invoke<'approvals:sameAs'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
+contract.type ElectronAPI.searchRecords = searchRecords: Invoke<'recordViews:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
 contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
 contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundMail:send'>
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
+contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFeature'>
+contract.type ElectronAPI.setWorkSwitch = setWorkSwitch: Invoke<'workSwitches:set'>
+contract.type ElectronAPI.settleAiTurn = settleAiTurn: Invoke<'aiTurns:settle'>
+contract.type ElectronAPI.shareTask = shareTask: Invoke<'tasks:share'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
 contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
@@ -363,10 +484,15 @@ contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
 contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
 contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDrag'>) => void
+contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps:start'>
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
+contract.type ElectronAPI.suggestTaskTags = suggestTaskTags: Invoke<'tasks:suggestTags'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
 contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
+contract.type ElectronAPI.undoTaskAction = undoTaskAction: Invoke<'tasks:undo'>
+contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
+contract.type ElectronAPI.unlinkRecordFromRecord = unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
 contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
@@ -375,6 +501,7 @@ contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:
 contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
 contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
 contract.type ElectronAPI.watchMinutes = watchMinutes: Invoke<'minutes:watch'>
+contract.type ElectronAPI.watchNotifications = watchNotifications: Invoke<'notifications:watch'>
 contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
@@ -458,10 +585,6 @@ contract.type GitResult.success = success: boolean
 contract.type GitResult.untrackedPersonalFiles = untrackedPersonalFiles?: string[]
 contract.type GitResult.writeDeniedBackupPath = writeDeniedBackupPath?: string
 contract.type GitResult.writeDeniedFiles = writeDeniedFiles?: string[]
-contract.type GitShowCommitResult = export interface GitShowCommitResult { }
-contract.type GitShowCommitResult.error = error?: string
-contract.type GitShowCommitResult.files = files: Array<{ status: string; path: string }>
-contract.type GitShowCommitResult.success = success: boolean
 contract.type InspectCompanyFolderResult = export interface InspectCompanyFolderResult { }
 contract.type InspectCompanyFolderResult.decision = decision?: CompanyFolderDecisionView
 contract.type InspectCompanyFolderResult.error = error?: string
@@ -480,20 +603,35 @@ contract.type IpcEventChannels.'chatWindow:fileRequested' = 'chatWindow:fileRequ
 contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChangeEvent[]]
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
 contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
+contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
+contract.type IpcEventChannels.'notifications:openTasks' = 'notifications:openTasks': [data: { companyId: string }]
+contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
 contract.type IpcEventChannels.'voice:event' = 'voice:event': [event: VoiceEvent]
 contract.type IpcEventChannels.'writeAccess:changed' = 'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
 contract.type IpcInvokeChannels = export interface IpcInvokeChannels { }
+contract.type IpcInvokeChannels.'absences:add' = 'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
+contract.type IpcInvokeChannels.'absences:get' = 'absences:get': { args: [companyId: string]; result: AbsencesResult }
+contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
+contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
+contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
+contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
+contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
+contract.type IpcInvokeChannels.'aiTurns:settle' = 'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
 contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { args: [name: string]; result: CompanyResult }
 contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+contract.type IpcInvokeChannels.'appLink:acceptServer' = 'appLink:acceptServer': { args: []; result: SimpleResult }
+contract.type IpcInvokeChannels.'appLink:dismissServer' = 'appLink:dismissServer': { args: []; result: void }
+contract.type IpcInvokeChannels.'appLink:serverOffer' = 'appLink:serverOffer': { args: []; result: { server: string } | null }
 contract.type IpcInvokeChannels.'approvals:approve' = 'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:get' = 'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+contract.type IpcInvokeChannels.'approvals:sameAs' = 'approvals:sameAs': { args: [companyId: string, approvalId: string, recordId: string, linkMeeting: boolean]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:sendBack' = 'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'approvals:withdraw' = 'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'auth:getSession' = 'auth:getSession': { args: []; result: SessionResult }
@@ -507,6 +645,7 @@ contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { arg
 contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
 contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
 contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'calendar:today' = 'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
 contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
 contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
 contract.type IpcInvokeChannels.'chatHistory:getSession' = 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null }
@@ -522,6 +661,8 @@ contract.type IpcInvokeChannels.'chatWindow:open' = 'chatWindow:open': { args: [
 contract.type IpcInvokeChannels.'chatWindow:openFile' = 'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
 contract.type IpcInvokeChannels.'chatWindow:reportStatus' = 'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
 contract.type IpcInvokeChannels.'codex:status' = 'codex:status': { args: []; result: CodexStatus }
+contract.type IpcInvokeChannels.'companySetup:defaultParentFolder' = 'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
+contract.type IpcInvokeChannels.'companySetup:myDepartments' = 'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
 contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
 contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
 contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
@@ -569,44 +710,87 @@ contract.type IpcInvokeChannels.'git:log' = 'git:log': { args: [repoPath: string
 contract.type IpcInvokeChannels.'git:preview' = 'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
 contract.type IpcInvokeChannels.'git:revertFile' = 'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
 contract.type IpcInvokeChannels.'git:setupCompanyRemote' = 'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
-contract.type IpcInvokeChannels.'git:showCommit' = 'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult }
 contract.type IpcInvokeChannels.'git:sparseGetExclusions' = 'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
 contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
+contract.type IpcInvokeChannels.'git:unsharedLargeFiles' = 'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
 contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
+contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
 contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
-contract.type IpcInvokeChannels.'minutes:linkDeal' = 'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:linkBundle' = 'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:noBundle' = 'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
+contract.type IpcInvokeChannels.'notifications:markRead' = 'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+contract.type IpcInvokeChannels.'notifications:setSetting' = 'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
+contract.type IpcInvokeChannels.'notifications:settings' = 'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
+contract.type IpcInvokeChannels.'notifications:state' = 'notifications:state': { args: [companyId: string]; result: NoticesState }
+contract.type IpcInvokeChannels.'notifications:watch' = 'notifications:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'outboundMail:addRecipient' = 'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:discard' = 'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:get' = 'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:recipients' = 'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:resolve' = 'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
-contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
+contract.type IpcInvokeChannels.'pluginSteps:onRecord' = 'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
+contract.type IpcInvokeChannels.'pluginSteps:start' = 'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
+contract.type IpcInvokeChannels.'plugins:bridge' = 'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
+contract.type IpcInvokeChannels.'plugins:screens' = 'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null }
+contract.type IpcInvokeChannels.'recordViews:card' = 'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
+contract.type IpcInvokeChannels.'recordViews:find' = 'recordViews:find': { args: [companyId: string, text: string, today: string]; result: FindResult }
+contract.type IpcInvokeChannels.'recordViews:findHome' = 'recordViews:findHome': { args: [companyId: string, today: string, from: string, to: string]; result: FindHomeResult }
+contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
+contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
+contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'slack:connect' = 'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
+contract.type IpcInvokeChannels.'slack:disconnect' = 'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:markSeen' = 'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:setFeature' = 'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:status' = 'slack:status': { args: [companyId: string]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:bundleKinds' = 'tasks:bundleKinds': { args: [companyId: string]; result: BundleKindsAnswer }
+contract.type IpcInvokeChannels.'tasks:bundles' = 'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
+contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
+contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:createBundle' = 'tasks:createBundle': { args: [companyId: string, input: BundleCreateInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:linkRecord' = 'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
+contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
+contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
+contract.type IpcInvokeChannels.'tasks:undo' = 'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:unlinkRecord' = 'tasks:unlinkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'threads:get' = 'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
 contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
+contract.type IpcInvokeChannels.'viewers:get' = 'viewers:get': { args: [companyId: string, query: ViewersQuery]; result: ViewersResult }
 contract.type IpcInvokeChannels.'voice:cancel' = 'voice:cancel': { args: [requestId: string]; result: void }
 contract.type IpcInvokeChannels.'voice:capabilities' = 'voice:capabilities': { args: []; result: VoiceCapabilities }
 contract.type IpcInvokeChannels.'voice:devices' = 'voice:devices': { args: []; result: VoiceDeviceList }
@@ -615,6 +799,8 @@ contract.type IpcInvokeChannels.'voice:resetPrompt' = 'voice:resetPrompt': { arg
 contract.type IpcInvokeChannels.'voice:setPrompt' = 'voice:setPrompt': { args: [instructions: string]; result: VoicePromptSettings }
 contract.type IpcInvokeChannels.'voice:start' = 'voice:start': { args: [requestId: string, deviceId?: string]; result: void }
 contract.type IpcInvokeChannels.'voice:stop' = 'voice:stop': { args: [requestId: string]; result: void }
+contract.type IpcInvokeChannels.'workSwitches:get' = 'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
+contract.type IpcInvokeChannels.'workSwitches:set' = 'workSwitches:set': { args: [companyId: string, which: WorkSwitch, on: boolean]; result: WorkSwitchesResult }
 contract.type IpcInvokeChannels.'writeAccess:get' = 'writeAccess:get': { args: [companyId: string, refresh?: boolean]; result: WriteAccess | null }
 contract.type IpcSendChannels = export interface IpcSendChannels { }
 contract.type IpcSendChannels.'fs:startDrag' = 'fs:startDrag': { args: [filePath: string] }
@@ -688,14 +874,26 @@ contract.type ToolInfo.hasPackageJson = hasPackageJson: boolean
 contract.type ToolInfo.name = name: string
 contract.type ToolInfo.path = path: string
 contract.type ToolInfo.startCommand = startCommand?: string
+main.handle absences:add @ features/absences/ipc.ts (companyId, input)
+main.handle absences:get @ features/absences/ipc.ts (companyId)
+main.handle absences:remove @ features/absences/ipc.ts (companyId, absenceId)
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
+main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId, companyRoot)
+main.handle aiTurns:pluginTurns @ features/ai-turns/ipc.ts (companyId)
+main.handle aiTurns:retry @ features/ai-turns/ipc.ts (companyId, recordId)
+main.handle aiTurns:settings @ features/ai-turns/ipc.ts (companyId)
+main.handle aiTurns:settle @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle api:createCompany @ features/auth/ipc.ts (name: string)
 main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
+main.handle appLink:acceptServer @ features/app-link/ipc.ts ()
+main.handle appLink:dismissServer @ features/app-link/ipc.ts ()
+main.handle appLink:serverOffer @ features/app-link/ipc.ts ()
 main.handle approvals:approve @ features/approvals/ipc.ts (companyId, approvalId, hash, reason)
 main.handle approvals:get @ features/approvals/ipc.ts (companyId, approvalId)
+main.handle approvals:sameAs @ features/approvals/ipc.ts (companyId, approvalId, recordId, linkMeeting)
 main.handle approvals:sendBack @ features/approvals/ipc.ts (companyId, approvalId, reason)
 main.handle approvals:withdraw @ features/approvals/ipc.ts (companyId, approvalId)
 main.handle auth:getSession @ features/auth/ipc.ts ()
@@ -709,6 +907,7 @@ main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, servi
 main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
 main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
 main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
+main.handle calendar:today @ features/calendar/ipc.ts (companyId: string)
 main.handle chat-server:getInfo @ main.ts ()
 main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
 main.handle chatHistory:getSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
@@ -724,6 +923,8 @@ main.handle chatWindow:open @ features/chat-windows/ipc.ts (sessionId: string, r
 main.handle chatWindow:openFile @ features/chat-windows/ipc.ts (filePath: string)
 main.handle chatWindow:reportStatus @ features/chat-windows/ipc.ts (status: unknown)
 main.handle codex:status @ features/settings/ipc.ts ()
+main.handle companySetup:defaultParentFolder @ features/company-setup/ipc.ts ()
+main.handle companySetup:myDepartments @ features/company-setup/ipc.ts (companyId: string)
 main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
 main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
 main.handle config:getAuthMode @ features/settings/ipc.ts ()
@@ -771,44 +972,87 @@ main.handle git:log @ features/git-history/ipc.ts (repoPath: string, folderPath:
 main.handle git:preview @ features/git-history/ipc.ts (repoPath: string)
 main.handle git:revertFile @ features/git-history/ipc.ts (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted')
 main.handle git:setupCompanyRemote @ features/company-setup/ipc.ts (repoPath: string, companyId: string, selectedPaths?: string[])
-main.handle git:showCommit @ features/git-history/ipc.ts (repoPath: string, commitHash: string, folderPath?: string)
 main.handle git:sparseGetExclusions @ features/download-choices/ipc.ts (repoPath: string)
 main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath: string, excluded: string[])
 main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
 main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string, commitMessage: string)
+main.handle git:unsharedLargeFiles @ features/git-history/ipc.ts (repoPath: string)
 main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
+main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
+main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:check @ features/minutes/ipc.ts (companyId)
-main.handle minutes:linkDeal @ features/minutes/ipc.ts (companyId, minutesId, dealId)
+main.handle minutes:linkBundle @ features/minutes/ipc.ts (companyId, minutesId, bundleId)
+main.handle minutes:noBundle @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
+main.handle notifications:markRead @ features/notifications/ipc.ts (companyId, ids)
+main.handle notifications:setSetting @ features/notifications/ipc.ts (companyId, kind, on)
+main.handle notifications:settings @ features/notifications/ipc.ts (companyId)
+main.handle notifications:state @ features/notifications/ipc.ts (companyId)
+main.handle notifications:watch @ features/notifications/ipc.ts (companyId)
 main.handle outboundMail:addRecipient @ features/outbound-mail/ipc.ts (companyId, messageId, email, name)
 main.handle outboundMail:discard @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:get @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:recipients @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:resolve @ features/outbound-mail/ipc.ts (companyId, messageId, sent)
-main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash)
+main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply)
 main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, messageId, edit, conversationId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
+main.handle pluginSteps:onRecord @ features/plugin-steps/ipc.ts (companyId, recordId)
+main.handle pluginSteps:start @ features/plugin-steps/ipc.ts (companyId, recordId, pluginId, step, companyRoot)
+main.handle plugins:bridge @ features/plugins/bridge-ipc.ts (companyId, plugin, op, args)
+main.handle plugins:screens @ features/plugins/screens.ts (companyId)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
 main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts (targetPath: string)
+main.handle recordViews:card @ features/record-views/ipc.ts (companyId, recordId)
+main.handle recordViews:find @ features/record-views/ipc.ts (companyId, text, today)
+main.handle recordViews:findHome @ features/record-views/ipc.ts (companyId, today, from, to)
+main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, companyPath)
+main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
+main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
+main.handle slack:connect @ features/slack/ipc.ts (companyId: string, features: SlackFeature[])
+main.handle slack:disconnect @ features/slack/ipc.ts (companyId: string)
+main.handle slack:markSeen @ features/slack/ipc.ts (companyId: string)
+main.handle slack:setFeature @ features/slack/ipc.ts (companyId: string, feature: SlackFeature, on: boolean)
+main.handle slack:status @ features/slack/ipc.ts (companyId: string)
+main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:bundleKinds @ features/tasks/ipc.ts (companyId)
+main.handle tasks:bundles @ features/tasks/ipc.ts (companyId)
+main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
+main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
+main.handle tasks:createBundle @ features/tasks/ipc.ts (companyId, input)
+main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
+main.handle tasks:linkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:list @ features/tasks/ipc.ts (companyId)
+main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
+main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
+main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
+main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
+main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
+main.handle tasks:undo @ features/tasks/ipc.ts (companyId, recordId, version, expectedVersion)
+main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
+main.handle tasks:unlinkRecord @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle threads:get @ features/threads/ipc.ts (companyId, recordId)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
 main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
+main.handle viewers:get @ features/viewers/ipc.ts (companyId, query)
 main.handle voice:cancel @ voice-input.ts (id: string)
 main.handle voice:capabilities @ voice-input.ts (<capabilities>)
 main.handle voice:devices @ voice-input.ts ()
@@ -817,6 +1061,8 @@ main.handle voice:resetPrompt @ voice-input.ts ()
 main.handle voice:setPrompt @ voice-input.ts (instructions: unknown)
 main.handle voice:start @ voice-input.ts (id: unknown, deviceId?: unknown)
 main.handle voice:stop @ voice-input.ts (id: string)
+main.handle workSwitches:get @ features/work-switches/ipc.ts (companyId)
+main.handle workSwitches:set @ features/work-switches/ipc.ts (companyId, which, on)
 main.handle writeAccess:get @ features/sync/ipc.ts (companyId: string, refresh?: boolean)
 main.on chatHistory:flushSession @ features/chat-history/ipc.ts (companyId: string, session: ChatSession)
 main.on fs:startDrag @ features/fs/ipc.ts (filePath: string)
@@ -829,11 +1075,20 @@ main.send chatWindow:fileRequested @ features/chat-windows/ipc.ts
 main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
 main.send minutes:changed @ main.ts
+main.send notifications:changed @ main.ts
+main.send notifications:openTasks @ main.ts
+main.send plugins:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
+preload acceptAppLinkServer -> invoke appLink:acceptServer()
+preload acceptAppLinkServer : () => Promise<SimpleResult>
+preload actOnTask -> invoke tasks:act($0, $1, $2)
+preload actOnTask : (companyId: string, recordId: string, input: TaskActInput) => Promise<TaskWriteResult>
+preload addAbsence -> invoke absences:add($0, $1)
+preload addAbsence : (companyId: string, input: AbsenceAddInput) => Promise<AbsenceAddResult>
 preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
 preload addOutboundMailRecipient : (companyId: string, messageId: string, email: string, name?: string | undefined) => Promise<OutboundMailResult>
 preload answerCloseRequest -> invoke app:closeResponse($0)
@@ -848,16 +1103,26 @@ preload backupOpenFolder -> invoke backup:openFolder($0)
 preload backupOpenFolder : (backupPath: string) => Promise<SimpleResult>
 preload backupRestore -> invoke backup:restore($0, $1, $2)
 preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
+preload callPluginBridge -> invoke plugins:bridge($0, $1, $2, $3)
+preload callPluginBridge : (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => Promise<PluginBridgeAnswer>
 preload checkMinutes -> invoke minutes:check($0)
 preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
+preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3, $4)
+preload claimAiTurn : (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string | undefined) => Promise<AiTurnClaimResult>
 preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
-preload connectGoogle : (companyId: string, features: ("minutes" | "mail")[]) => Promise<GoogleConnectResult>
+preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox")[]) => Promise<GoogleConnectResult>
+preload connectGoogleAll -> invoke google:connectAll($0)
+preload connectGoogleAll : (companyId: string) => Promise<GoogleConnectResult>
+preload connectSlack -> invoke slack:connect($0, $1)
+preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload createBundle -> invoke tasks:createBundle($0, $1)
+preload createBundle : (companyId: string, input: BundleCreateInput) => Promise<TaskWriteResult>
 preload createCompany -> invoke api:createCompany($0)
 preload createCompany : (name: string) => Promise<CompanyResult>
 preload createDirectory -> invoke fs:createDirectory($0)
@@ -866,6 +1131,10 @@ preload createFile -> invoke fs:createFile($0, $1)
 preload createFile : (path: string, content: string) => Promise<FileOpResult>
 preload createPrivateFolder -> invoke privateFolders:create($0, $1)
 preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
+preload createTask -> invoke tasks:create($0, $1)
+preload createTask : (companyId: string, input: TaskCreateInput) => Promise<TaskWriteResult>
+preload declineMinutesBundle -> invoke minutes:noBundle($0, $1)
+preload declineMinutesBundle : (companyId: string, minutesId: string) => Promise<MinutesActionResult>
 preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)
 preload deleteChatSession : (companyId: string, sessionId: string) => Promise<boolean>
 preload deleteItem -> invoke fs:delete($0)
@@ -876,24 +1145,44 @@ preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
 preload discardOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload disconnectGoogle -> invoke google:disconnect($0)
 preload disconnectGoogle : (companyId: string) => Promise<GoogleStatusResult>
+preload disconnectSlack -> invoke slack:disconnect($0)
+preload disconnectSlack : (companyId: string) => Promise<SlackStatusResult>
+preload dismissAppLinkServer -> invoke appLink:dismissServer()
+preload dismissAppLinkServer : () => Promise<void>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
+preload findRecords -> invoke recordViews:find($0, $1, $2)
+preload findRecords : (companyId: string, text: string, today: string) => Promise<FindResult>
+preload findRecordsHome -> invoke recordViews:findHome($0, $1, $2, $3)
+preload findRecordsHome : (companyId: string, today: string, from: string, to: string) => Promise<FindHomeResult>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
 preload flushChatSession : (companyId: string, session: ChatSession) => ChatSaveReceipt
 preload focusChatWindow -> invoke chatWindow:focus($0)
 preload focusChatWindow : (sessionId: string) => Promise<boolean>
 preload folderSizes -> invoke git:folderSizes($0, $1, $2, $3)
 preload folderSizes : (repoPath: string, companyId: string, folder: string, measure: string[]) => Promise<FolderSizesResponse>
+preload getAbsences -> invoke absences:get($0)
+preload getAbsences : (companyId: string) => Promise<AbsencesResult>
 preload getAgentEnvPassthrough -> invoke config:getAgentEnvPassthrough()
 preload getAgentEnvPassthrough : () => Promise<string[]>
 preload getAgentInteractions -> invoke agent-interaction:list()
 preload getAgentInteractions : () => Promise<AgentInteractionRequest[]>
 preload getApiKeyStatus -> invoke config:getApiKeyStatus()
 preload getApiKeyStatus : () => Promise<ApiKeyStatus>
+preload getAppLinkServerOffer -> invoke appLink:serverOffer()
+preload getAppLinkServerOffer : () => Promise<{ server: string; } | null>
 preload getApproval -> invoke approvals:get($0, $1)
 preload getApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
+preload getAutoTurnSettings -> invoke aiTurns:settings($0)
+preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
+preload getBundleChoices -> invoke tasks:bundles($0)
+preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
+preload getBundleKinds -> invoke tasks:bundleKinds($0)
+preload getBundleKinds : (companyId: string) => Promise<BundleKindsAnswer>
+preload getCalendarToday -> invoke calendar:today($0)
+preload getCalendarToday : (companyId: string) => Promise<CalendarTodayResult>
 preload getChatServerInfo -> invoke chat-server:getInfo()
 preload getChatServerInfo : () => Promise<ChatServerInfo | null>
 preload getChatSession -> invoke chatHistory:getSession($0, $1)
@@ -908,6 +1197,10 @@ preload getCodexStatus -> invoke codex:status()
 preload getCodexStatus : () => Promise<CodexStatus>
 preload getCompanies -> invoke api:getCompanies()
 preload getCompanies : () => Promise<CompaniesResult>
+preload getConsultationTopics -> invoke recordViews:topics($0, $1)
+preload getConsultationTopics : (companyId: string, recordIds: string[]) => Promise<ConsultationTopicsResult>
+preload getDefaultParentFolder -> invoke companySetup:defaultParentFolder()
+preload getDefaultParentFolder : () => Promise<{ success: boolean; folder?: string | undefined; }>
 preload getDepartments -> invoke api:getDepartments($0)
 preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
 preload getEnvStatus -> invoke env:status($0)
@@ -916,10 +1209,18 @@ preload getGoogleStatus -> invoke google:status($0)
 preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
+preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
+preload getMeetingBundleQuestion : (companyId: string, minutesId: string) => Promise<MeetingBundleQuestionResult>
 preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
+preload getMyDepartments -> invoke companySetup:myDepartments($0)
+preload getMyDepartments : (companyId: string) => Promise<{ success: boolean; departmentIds?: string[] | undefined; }>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
+preload getNotificationSettings -> invoke notifications:settings($0)
+preload getNotificationSettings : (companyId: string) => Promise<{ success: true; kinds: Record<string, boolean>; } | { success: false; error: string; }>
+preload getNotificationsState -> invoke notifications:state($0)
+preload getNotificationsState : (companyId: string) => Promise<NoticesState>
 preload getOutboundMail -> invoke outboundMail:get($0, $1)
 preload getOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload getOutboundMailRecipients -> invoke outboundMail:recipients($0, $1)
@@ -928,14 +1229,34 @@ preload getPathForFile -> (no IPC)
 preload getPathForFile : (file: File) => string
 preload getPermissionMode -> invoke config:getPermissionMode()
 preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
+preload getPluginScreens -> invoke plugins:screens($0)
+preload getPluginScreens : (companyId: string) => Promise<PluginScreensResult>
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
 preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
+preload getRecordCard -> invoke recordViews:card($0, $1)
+preload getRecordCard : (companyId: string, recordId: string) => Promise<RecordCardResult>
+preload getRecordThread -> invoke threads:get($0, $1)
+preload getRecordThread : (companyId: string, recordId: string) => Promise<RecordThreadResult>
+preload getRecordsForFile -> invoke recordViews:forFile($0, $1)
+preload getRecordsForFile : (companyId: string, companyPath: string) => Promise<RecordListResult>
 preload getServerUrl -> invoke config:getServerUrl()
 preload getServerUrl : () => Promise<string | null>
 preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
+preload getSlackStatus -> invoke slack:status($0)
+preload getSlackStatus : (companyId: string) => Promise<SlackStatusResult>
 preload getStats -> invoke fs:stat($0)
 preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
+preload getTaskCard -> invoke tasks:card($0, $1)
+preload getTaskCard : (companyId: string, recordId: string) => Promise<TaskCardResult>
+preload getTaskList -> invoke tasks:list($0)
+preload getTaskList : (companyId: string) => Promise<TaskListResult>
+preload getTaskProposals -> invoke tasks:proposals($0, $1)
+preload getTaskProposals : (companyId: string, meetingId: string) => Promise<TaskProposalsResult>
+preload getViewers -> invoke viewers:get($0, $1)
+preload getViewers : (companyId: string, query: ViewersQuery) => Promise<ViewersResult>
+preload getWorkSwitches -> invoke workSwitches:get($0)
+preload getWorkSwitches : (companyId: string) => Promise<WorkSwitchesResult>
 preload getWriteAccess -> invoke writeAccess:get($0, $1)
 preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
 preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)
@@ -962,22 +1283,36 @@ preload gitRevertFile -> invoke git:revertFile($0, $1, $2)
 preload gitRevertFile : (repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<SimpleResult>
 preload gitSetupCompanyRemote -> invoke git:setupCompanyRemote($0, $1, $2)
 preload gitSetupCompanyRemote : (repoPath: string, companyId: string, selectedPaths?: string[] | undefined) => Promise<GitResult & { refused?: boolean | undefined; }>
-preload gitShowCommit -> invoke git:showCommit($0, $1, $2)
-preload gitShowCommit : (repoPath: string, commitHash: string, folderPath?: string | undefined) => Promise<GitShowCommitResult>
 preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
+preload gitUnsharedLargeFiles -> invoke git:unsharedLargeFiles($0)
+preload gitUnsharedLargeFiles : (repoPath: string) => Promise<{ success: boolean; files: string[]; }>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
-preload linkMinutesDeal -> invoke minutes:linkDeal($0, $1, $2)
-preload linkMinutesDeal : (companyId: string, minutesId: string, dealId: string) => Promise<MinutesActionResult>
+preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
+preload linkFileToTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
+preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)
+preload linkMinutesBundle : (companyId: string, minutesId: string, bundleId: string) => Promise<MinutesActionResult>
+preload linkRecordToRecord -> invoke tasks:linkRecord($0, $1, $2)
+preload linkRecordToRecord : (companyId: string, recordId: string, input: RecordLinkInput) => Promise<TaskWriteResult>
 preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
 preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
+preload listPersonSteps -> invoke pluginSteps:onRecord($0, $1)
+preload listPersonSteps : (companyId: string, recordId: string) => Promise<PluginStepButton[]>
+preload listPluginStepTurns -> invoke aiTurns:pluginTurns($0)
+preload listPluginStepTurns : (companyId: string) => Promise<QueuedPluginStep[]>
 preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)
 preload makeSkillPrivate : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult & { code?: "already_shared" | undefined; }>
+preload markGoogleSeen -> invoke google:markSeen($0)
+preload markGoogleSeen : (companyId: string) => Promise<GoogleStatusResult>
+preload markNotificationsRead -> invoke notifications:markRead($0, $1)
+preload markNotificationsRead : (companyId: string, ids: string[] | "all") => Promise<NoticesActionResult>
+preload markSlackSeen -> invoke slack:markSeen($0)
+preload markSlackSeen : (companyId: string) => Promise<SlackStatusResult>
 preload moveEnvKeyToServer -> invoke brokerKeys:moveFromEnv($0, $1, $2)
 preload moveEnvKeyToServer : (companyId: string, rootPath: string, name: string) => Promise<OwnKeyMoveResult>
 preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)
@@ -1006,6 +1341,12 @@ preload onHandoffChanged -> on handoff:changed(<fn>) ; removeListener handoff:ch
 preload onHandoffChanged : (callback: (scope: { companyId: string; sessionId: string; }) => void) => () => void
 preload onMinutesChanged -> on minutes:changed(<fn>) ; removeListener minutes:changed(<fn>)
 preload onMinutesChanged : (callback: (data: { companyId: string; }) => void) => () => void
+preload onNotificationsChanged -> on notifications:changed(<fn>) ; removeListener notifications:changed(<fn>)
+preload onNotificationsChanged : (callback: (data: { companyId: string; }) => void) => () => void
+preload onNotificationsOpenTasks -> on notifications:openTasks(<fn>) ; removeListener notifications:openTasks(<fn>)
+preload onNotificationsOpenTasks : (callback: (data: { companyId: string; }) => void) => () => void
+preload onPluginsChanged -> on plugins:changed(<fn>) ; removeListener plugins:changed(<fn>)
+preload onPluginsChanged : (callback: (change: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)
@@ -1034,10 +1375,14 @@ preload readFileBinary -> invoke fs:readFileBinary($0)
 preload readFileBinary : (path: string) => Promise<ArrayBuffer | null>
 preload reconcilePluginOperation -> invoke pluginOperations:reconcile($0, $1, $2)
 preload reconcilePluginOperation : (companyId: string, pluginId: string, operationId: string) => Promise<PluginOperationResult>
+preload reconcileTaskRun -> invoke tasks:reconcile($0, $1, $2, $3)
+preload reconcileTaskRun : (companyId: string, runId: string, key: string, done: boolean) => Promise<TaskWriteResult>
 preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, $3, $4)
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
+preload removeAbsence -> invoke absences:remove($0, $1)
+preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
 preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
@@ -1050,28 +1395,46 @@ preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
 preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
 preload respondToolApproval -> invoke tool-approval-response($0, $1)
 preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
+preload retryAiTurn -> invoke aiTurns:retry($0, $1)
+preload retryAiTurn : (companyId: string, recordId: string) => Promise<{ ok: boolean; }>
+preload retryTaskRun -> invoke tasks:retryRun($0, $1)
+preload retryTaskRun : (companyId: string, runId: string) => Promise<TaskWriteResult>
+preload sameAsApproval -> invoke approvals:sameAs($0, $1, $2, $3)
+preload sameAsApproval : (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => Promise<ApprovalResult>
 preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
 preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
 preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)
 preload saveOwnBrokerKey : (companyId: string, service: string, secret: string, displayName?: string | undefined) => Promise<OwnKeysResult>
 preload searchChatSessions -> invoke chatHistory:search($0, $1)
 preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
+preload searchRecords -> invoke recordViews:search($0, $1)
+preload searchRecords : (companyId: string, text: string) => Promise<RecordListResult>
 preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
-preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2)
-preload sendOutboundMail : (companyId: string, messageId: string, hash: string) => Promise<OutboundMailResult>
+preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3)
+preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
+preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
 preload setPermissionMode : (mode: "auto" | "default" | "bypassPermissions") => Promise<boolean>
 preload setServerUrl -> invoke config:setServerUrl($0)
 preload setServerUrl : (url: string) => Promise<boolean>
+preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)
+preload setSlackFeature : (companyId: string, feature: "read" | "reply" | "notices", on: boolean) => Promise<SlackStatusResult>
+preload setWorkSwitch -> invoke workSwitches:set($0, $1, $2)
+preload setWorkSwitch : (companyId: string, which: "readIncoming" | "autoRun", on: boolean) => Promise<WorkSwitchesResult>
+preload settleAiTurn -> invoke aiTurns:settle($0, $1)
+preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
+preload shareTask -> invoke tasks:share($0, $1, $2, $3)
+preload shareTask : (companyId: string, recordId: string, folder: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload signIn -> invoke auth:signIn($0, $1)
 preload signIn : (email: string, password: string) => Promise<AuthResult>
 preload signOut -> invoke auth:signOut()
@@ -1088,14 +1451,24 @@ preload sparseUncommittedChanges -> invoke git:sparseUncommittedChanges($0, $1)
 preload sparseUncommittedChanges : (repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>
 preload startDrag -> send fs:startDrag($0)
 preload startDrag : (filePath: string) => void
+preload startPersonStep -> invoke pluginSteps:start($0, $1, $2, $3, $4)
+preload startPersonStep : (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string | undefined) => Promise<PluginStepStartResult>
 preload startTool -> invoke tools:start($0, $1, $2)
 preload startTool : (toolPath: string, startCommand?: string | undefined, companyId?: string | undefined) => Promise<StartToolResult>
 preload stopTool -> invoke tools:stop($0)
 preload stopTool : (toolPath: string) => Promise<StopToolResult>
+preload suggestTaskTags -> invoke tasks:suggestTags($0, $1, $2)
+preload suggestTaskTags : (companyId: string, title: string, tagsInUse: string[]) => Promise<TagSuggestions>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
 preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
 preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)
 preload undoPluginOperation : (companyId: string, pluginId: string, operationId: string, conversationId?: string | undefined) => Promise<PluginOperationResult>
+preload undoTaskAction -> invoke tasks:undo($0, $1, $2, $3)
+preload undoTaskAction : (companyId: string, recordId: string, version: number, expectedVersion: number) => Promise<TaskWriteResult>
+preload unlinkFileFromTask -> invoke tasks:unlinkFile($0, $1, $2, $3)
+preload unlinkFileFromTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
+preload unlinkRecordFromRecord -> invoke tasks:unlinkRecord($0, $1, $2)
+preload unlinkRecordFromRecord : (companyId: string, recordId: string, input: RecordLinkInput) => Promise<TaskWriteResult>
 preload unwatchCompany -> invoke fs:unwatch($0)
 preload unwatchCompany : (rootPath: string) => Promise<SimpleResult>
 preload updateEnv -> invoke env:update($0, $1)
@@ -1128,8 +1501,10 @@ preload watchCompany -> invoke fs:watch($0)
 preload watchCompany : (rootPath: string) => Promise<SimpleResult>
 preload watchMinutes -> invoke minutes:watch($0)
 preload watchMinutes : (companyId: string | null) => Promise<void>
+preload watchNotifications -> invoke notifications:watch($0)
+preload watchNotifications : (companyId: string | null) => Promise<void>
 preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
-unmatched.preloadApiUnusedByRenderer getOutboundMail
+unmatched.preloadApiUnusedByRenderer getViewers

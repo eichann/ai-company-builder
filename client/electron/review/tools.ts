@@ -9,6 +9,8 @@
  */
 import { z } from 'zod'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
+import type { ToolDisplay } from '../../shared/tool-display'
+import { fixedToolDisplay } from '../../shared/acb-tool-displays'
 import { REVIEW_LIMITS, REVIEW_SERVER, REVIEW_TOOL, companyRelativePath, readReviewRequest, type ReviewRecord } from '../../shared/review-request'
 
 export { REVIEW_SERVER, REVIEW_TOOL, REVIEW_TOOL_ID } from '../../shared/review-request'
@@ -29,6 +31,9 @@ export const REVIEW_ACCEPTED = '確認のお願いをメンバーに表示しま
 
 /** The instruction added to the app's system prompt when the tool is available. */
 export const REVIEW_INSTRUCTIONS = `\n\n【確認をお願いする】${'`'}mcp__${REVIEW_SERVER}__${REVIEW_TOOL}${'`'} は、メンバーに成果物の確認を頼んで作業を止める道具です。スキルが人の確認を求めているとき、メンバーが先に見たいと言ったとき、他の人が読む文書を書き上げて判断が分かれるときにだけ使ってください。それ以外では使わないでください。呼んだら次のステップに進まず、そのまま返事を終えてください。`
+
+/** How the call reads in the chat (`client/shared/acb-tool-displays.ts`). */
+export const reviewDisplay: ToolDisplay = fixedToolDisplay(`mcp__${REVIEW_SERVER}__${REVIEW_TOOL}`)
 
 export interface ReviewTools { execute(input: unknown): Promise<string> }
 

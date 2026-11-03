@@ -16,7 +16,8 @@
  *   are server-only (imported records create no files, §8-3);
  * - `available_to` limits a package to the listed companies (§8-4);
  * - values translate both ways without loss, and a mapping that could not
- *   write back unambiguously is refused;
+ *   write back unambiguously is refused; a tags field (stored as JSON text)
+ *   is never mapped, so that text never reaches the outside system;
  * - the same mechanism takes a second, differently shaped package (§6-11).
  */
 import { describe, expect, it } from 'vitest'
@@ -124,8 +125,10 @@ describe('a declaration is data only', () => {
   })
 
   it('refuses a contract this build does not know', () => {
-    expect(manifestErrors(crmWith('contract: 1', 'contract: 2')).join()).toContain('contract')
-    expect(manifestErrors(salesWith('contract: 1', 'contract: 2')).join()).toContain('contract')
+    for (const bad of ['contract: 3', 'contract: 0', 'contract: "2"']) {
+      expect(manifestErrors(crmWith('contract: 1', bad)).join()).toContain('contract')
+      expect(manifestErrors(salesWith('contract: 1', bad)).join()).toContain('contract')
+    }
   })
 
   it('sends only to one https host: no http, IP, localhost, port, query, or another host for a built-in service', () => {
@@ -174,16 +177,16 @@ describe('operations that reach people outside the company are never automatic',
     const manifest = { ...p.manifest, operations: { ...p.manifest.operations } }
     manifest.operations.update_deal = { ...manifest.operations.update_deal, reaches: 'external' }
     manifest.operations.add_note = { ...manifest.operations.add_note, reaches: 'external', policy: 'auto' }
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'next_step')).toBe('auto')
-    expect(effectiveFieldPolicy(manifest, p.mapping, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'next_step')).toBe('auto')
+    expect(effectiveFieldPolicy({ ...p, manifest }, p.mapping, 'update_deal', 'next_step')).toBe('prior')
     expect(effectiveOperationPolicy(manifest, 'add_note')).toBe('prior')
   })
 
   it('a field the mapping does not write is off; the company overrides the default', () => {
     const p = crm()
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'closed')).toBe('off')
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'close_date')).toBe('prior')
-    expect(effectiveFieldPolicy(p.manifest, p.mapping, 'update_deal', 'amount')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'closed')).toBe('off')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'close_date')).toBe('prior')
+    expect(effectiveFieldPolicy(p, p.mapping, 'update_deal', 'amount')).toBe('prior')
   })
 })
 
@@ -300,7 +303,7 @@ describe('a connector is a shared part; a business plugin uses it (owner decisio
 
   it("a business plugin cannot own a core type's name (one owner per type name)", () => {
     expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, task]')).join()).toContain('型「task」は本体の型です')
-    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, minutes]')).join()).toContain('本体の型')
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, meeting]')).join()).toContain('本体の型')
   })
 })
 
@@ -309,17 +312,17 @@ describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
     const p = crm()
     const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
     if (!write.ok) throw new Error(write.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, write.value, 'update_deal', 'stage')).toBe('prior')
+    expect(effectiveFieldPolicy(p, write.value, 'update_deal', 'stage')).toBe('prior')
     expect(manifestErrors(salesWith('  stage: off', '  stage: auto')).join()).toContain('auto）にできません')
     const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
     expect(policy.ok ? [] : policy.errors.join()).toContain('auto）にできません')
     // Whatever is stored: a mapping object built by hand still answers prior.
     const forged = { ...write.value, policy: { stage: 'auto' as const } }
-    expect(effectiveFieldPolicy(p.manifest, forged, 'update_deal', 'stage')).toBe('prior')
+    expect(effectiveFieldPolicy(p, forged, 'update_deal', 'stage')).toBe('prior')
     // A field reading the same property as the stage cannot be written automatically either.
     const shared = parsePluginMapping('deal:\n  fields:\n    next_step: { from: dealstage, write: true }\n    stage: { from: dealstage, write: false, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
     if (!shared.ok) throw new Error(shared.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
   })
 
   it('the policy is judged on the outside property: an auto field cannot reach what a stricter field reads', () => {
@@ -327,10 +330,10 @@ describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
     // `closed` (prior) and `next_step` (auto) read the same outside property: writing next_step is prior.
     const m = parsePluginMapping('deal:\n  fields:\n    next_step: { from: shared_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
     if (!m.ok) throw new Error(m.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, m.value, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, m.value, 'update_deal', 'next_step')).toBe('prior')
     const alone = parsePluginMapping('deal:\n  fields:\n    next_step: { from: own_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
     if (!alone.ok) throw new Error(alone.errors.join())
-    expect(effectiveFieldPolicy(p.manifest, alone.value, 'update_deal', 'next_step')).toBe('auto')
+    expect(effectiveFieldPolicy(p, alone.value, 'update_deal', 'next_step')).toBe('auto')
   })
 
   it('decision: only on operations that write; update_deal is one', () => {
@@ -361,6 +364,14 @@ describe('available_to (§8-4)', () => {
 describe('translating values', () => {
   const p = crm()
   const hubspotLike = { dealname: '研修導入', dealstage: 'qualifiedtobuy', kakudo: 'medium', next_step: '資料送付', closedate: '2026-12-15T00:00:00Z', amount: '1200000', is_closed_won: 'false', owner_id: '75123001' }
+
+  it('a tags field cannot be mapped either way (its stored JSON text would be written outside as is)', () => {
+    const withTags = { ...p, types: { ...p.types, deal: { ...p.types.deal, fields: { ...p.types.deal.fields, labels: { label: 'タグ', kind: 'tags' as const, source: 'server' as const } } } } }
+    for (const write of [true, false]) {
+      const m = parsePluginMapping(`deal:\n  fields:\n    labels: { from: hs_tag, write: ${write} }\n`, withTags)
+      expect(m.ok ? [] : m.errors.join()).toContain('タグの欄')
+    }
+  })
 
   it('outside → ACB through the mapping', () => {
     const r = externalToAcb(p, p.mapping, 'deal', hubspotLike)
@@ -466,6 +477,54 @@ describe('create operations (milestone 4: log_meeting, create_deal; design 節�
     const m = parsePluginMapping(`${CRM_SALES.mapping}  log_meeting: prior\n`, p)
     if (!m.ok) throw new Error(m.errors.join())
     expect(effectiveOperationPolicy(p.manifest, 'log_meeting', m.value)).toBe('prior')
+  })
+})
+
+describe('similar records before a create of a record (plugins.md "Similar records", owner decision 2026-11-02)', () => {
+  const HUB = readPackage('sample-hub')
+  const SIMILAR_LINE = '    similar: { by: [counterpart, name], search: search_deals, status: stage }\n'
+  const SEARCH = '    kind: search\n    object: deal\n    counterpart: { object: company, property: associations.company }\n'
+  const hubWith = (from: string, to: string) => { expect(HUB.manifest).toContain(from); return { ...HUB, manifest: HUB.manifest.replace(from, to) } }
+  const salesUse = (from: string, to: string) => { expect(SALES.manifest).toContain(from); return { ...SALES, manifest: SALES.manifest.replace(from, to) } }
+
+  it('a connector search is read only and no operation; the business plugin\'s similar resolves it, with the 相手 object', () => {
+    const hub = valid(HUB).manifest
+    expect(hub.searches).toEqual({ search_deals: { label: '似ている取引を探す', object: 'deal', counterpart: { object: 'company', property: 'associations.company' } } })
+    expect(hub.operations.search_deals).toBeUndefined()
+    const p = use(SALES, HUB)
+    expect(p.manifest.operations.create_deal.similar).toEqual({
+      by: ['counterpart', 'name'], status: 'stage',
+      search: { operation: 'search_deals', label: '似ている取引を探す', object: 'deal', counterpart: { object: 'company', property: 'associations.company' } },
+    })
+    expect(p.manifest.operations.search_deals).toBeUndefined()
+    // Without `similar` nothing changes (by name through the object's search, as before).
+    expect(use({ ...SALES, manifest: SALES.manifest.replace(SIMILAR_LINE, '') }, HUB).manifest.operations.create_deal.similar).toBeUndefined()
+  })
+
+  it('a connector search needs the object\'s search call, says how it matches a 相手, and takes no write keys', () => {
+    expect(useErrors(SALES, hubWith(SEARCH, '    kind: search\n    object: contact\n')).join()).toContain('探す操作の対象には search が要ります')
+    expect(useErrors(SALES, hubWith(SEARCH, SEARCH.replace('associations.company', 'associations company'))).join()).toContain('counterpart の property は外の項目名')
+    expect(useErrors(SALES, hubWith(SEARCH, SEARCH.replace('object: company,', 'object: ticket,'))).join()).toContain('counterpart の object は objects にある名前')
+    expect(useErrors(SALES, hubWith(SEARCH, `${SEARCH}    undo: archive\n`)).join()).toContain('undo')
+    expect(useErrors(SALES, hubWith(SEARCH, `${SEARCH}    who: [viewer]\n`)).join()).toContain('業務のプラグインの operations に書きます')
+  })
+
+  it('similar: only on a create of a record, by counterpart / name, a choice field as status, a search of the same object', () => {
+    const errs = (f: Files, h: Files = HUB) => useErrors(f, h).join('\n')
+    expect(errs(salesUse('  refresh_deal:\n    who: [viewer, ai]\n', '  refresh_deal:\n    who: [viewer, ai]\n    similar: { by: [name] }\n'))).toContain('記録を新しく作る操作だけ')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [] }\n'))).toContain('similar の by は')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [name, name] }\n'))).toContain('similar の by は')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [domain] }\n'))).toContain('similar の by は')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [name], when: always }\n'))).toContain('when')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [name], status: next_step }\n'))).toContain('選ぶ欄（choice）ではありません')
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [name], search: find_deals }\n'))).toContain('探す操作（kind: search）にありません')
+    expect(errs(SALES, hubWith(SEARCH, '    kind: search\n    object: meeting\n'))).toContain('対象「deal」を探すものではありません')
+    // By 相手 only, with a search that cannot match one: refused (it would never ask anything).
+    expect(errs(salesUse(SIMILAR_LINE, '    similar: { by: [counterpart], search: search_deals }\n'), hubWith(SEARCH, '    kind: search\n    object: deal\n'))).toContain('by のどれでも探せません')
+    // The 相手 object must be one of the business plugin's types (its records hold the outside id).
+    expect(errs(salesUse('  company: { record_type: customer }\n', ''))).toContain('相手で探すには、対象「company」を objects で')
+    // A search is not an operation the business plugin uses directly.
+    expect(errs(salesUse('  refresh_deal:\n', '  search_deals:\n    who: [viewer]\n  refresh_deal:\n'))).toContain('探す操作です')
   })
 })
 

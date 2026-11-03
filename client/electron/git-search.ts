@@ -1,5 +1,5 @@
 // Content search, file-name listing and folder history for the app's search
-// tab, Cmd+P and history panel (main.ts git:grep / git:listFiles / git:log).
+// tab, Cmd+P and a file's 「前の版」 (git:grep / git:listFiles / git:log).
 // No Electron import: tests/git-search.test.ts runs it against scratch repos.
 //
 // Why the limits (measured on a ~6.5k-file company, 2026-10-23): searching
@@ -396,7 +396,7 @@ export async function listCompanyFiles(cmd: GitCommand, scope: SearchScope, sign
 }
 
 // ---------------------------------------------------------------------------
-// Folder history (git:log)
+// History of a folder or a file (git:log)
 // ---------------------------------------------------------------------------
 
 export interface LogCommit {
@@ -411,7 +411,7 @@ const FIELD = '\x1f'
 const RECORD = '\x1e'
 
 /**
- * A commit the renderer names (history panel, commit diff): a full or
+ * A commit the renderer names (「前の版」, commit diff): a full or
  * abbreviated hex object id, nothing else. Anything that could be read as an
  * option (`--output=<file>` makes `git show` write a file) or as a revision
  * expression is refused before git runs.
@@ -421,19 +421,14 @@ export function commitIdArg(value: unknown): string {
   throw new Error('Invalid commit id')
 }
 
-/** `git show --name-status` for one commit, optionally limited to a folder; paths always after `--`. */
-export function showCommitArgs(commit: unknown, folder?: unknown): string[] {
-  return ['show', '--name-status', '--pretty=format:', commitIdArg(commit), '--', ...(typeof folder === 'string' && folder ? [folder] : [])]
-}
-
 /** `git show` of one file in one commit; the path always after `--`. */
 export function commitFileDiffArgs(commit: unknown, filePath: unknown): string[] {
   if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid file path')
-  return ['show', commitIdArg(commit), '--', filePath]
+  return ['show', commitIdArg(commit), '--', `:(literal)${filePath}`]
 }
 
 /**
- * `git log` for a folder. No `--follow`: simple-git's `file` option added it,
+ * `git log` for a folder or one file (「前の版」; a literal pathspec matches both). No `--follow`: simple-git's `file` option added it,
  * which made git track renames of the *folder* path commit by commit — 0.9 s
  * instead of 0.02 s on a 5k-file department, with the same commits (rename
  * following only works for a single file anyway).
@@ -442,7 +437,7 @@ export function gitLogArgs(folder: string, limit: number): string[] {
   const n = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 1000) : 50
   const args = ['log', `--max-count=${n}`, `--format=%H${FIELD}%aI${FIELD}%aN${FIELD}%s${FIELD}%b${RECORD}`]
   const f = normalizeSearchFolder(folder)
-  if (f) args.push('--', `:(literal)${f}/`)
+  if (f) args.push('--', `:(literal)${f}`)
   return args
 }
 

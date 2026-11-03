@@ -59,6 +59,7 @@ const TYPES: Record<string, string> = {
   MemberRole: '{ userId: string; companyId: string; role: Role }',
   Capabilities: 'Capabilities',
   Overview: 'Overview',
+  AdminHome: 'AdminHome',
   ClientActivity: 'ClientActivity[]',
   Permissions: '{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }',
   ScopeRulesResult: 'ScopeRulesResult',
@@ -76,20 +77,30 @@ const TYPES: Record<string, string> = {
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
   AgentStops: 'AgentStopView',
+  SecondOpinion: 'SecondOpinionView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
+  Slack: 'SlackAdminView',
+  CoreConnectors: 'CoreConnectorsView',
   MinutesFolder: 'MinutesFolderSetting',
   Plugins: '{ plugins: PluginListItem[] }',
   Plugin: 'PluginDetail',
+  PluginRoles: 'PluginRolesView',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
-  InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
+  InvitationValidate: 'InvitationPreview',
   InvitationAccept: '{ companyId: string; companyName: string; role: Role }',
   Departments: 'Department[]',
   Department: 'Department',
   DepartmentStats: '{ files: number; folders: number; exists: boolean }',
   Managers: '{ managers: DepartmentManager[] }',
+  DepartmentMembers: 'DepartmentMembersView',
+  TaskSettings: 'TaskSettingsView',
+  InboxSettings: 'InboxSettingsView',
+  Absences: 'MemberAbsencesView',
+  AbsenceCreated: 'AbsenceCreated',
+  AbsenceRemoved: '{ removed: true }',
   Success: '{ success: boolean }',
   DepartmentDelete: '{ success: boolean; deletedFiles?: number; deletedFolders?: number }',
   DepartmentSync: '{ success: boolean; added: number; removed: number }',
@@ -222,10 +233,14 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { secondOpinionRoute } = await import('../../src/routes/second-opinion')
+  const { taskSettingsRoute } = await import('../../src/routes/task-settings')
+  const { inboxRoute } = await import('../../src/routes/inbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   const { pluginsRoute } = await import('../../src/routes/plugins')
   const { googleRoute } = await import('../../src/routes/google')
+  const { coreConnectorsRoute } = await import('../../src/routes/core-connectors')
   await (await import('../../src/composition')).services.pluginShelf.load()
   // The same mounts as src/app.ts.
   app = new Hono()
@@ -237,10 +252,17 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', secondOpinionRoute)
+  app.route('/api/companies/:companyId', taskSettingsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
+  app.route('/api/companies/:companyId', inboxRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/absences')).absencesRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
   app.route('/api/companies/:companyId', googleRoute)
+  app.route('/api/companies/:companyId', coreConnectorsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/slack-connection')).slackRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api', invitationsRoute)
 
@@ -267,6 +289,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   it('capabilities / overview / push rejections', async () => {
     await expectShape('Capabilities', USERS.member, 'GET', `${base}/me/capabilities`)
     await expectShape('Overview', USERS.owner, 'GET', `${base}/overview`)
+    await expectShape('AdminHome', USERS.owner, 'GET', `${base}/home`)
+    await expectShape('AdminHome', USERS.owner, 'PUT', `${base}/home/holidays-checked`, { checked: true })
     await expectShape('PushRejections', USERS.owner, 'GET', `${base}/push-rejections?limit=10`)
   })
 
@@ -277,9 +301,18 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('DepartmentStats', USERS.owner, 'GET', `${base}/departments/${created.id}/stats`)
     await expectShape('Managers', USERS.owner, 'PUT', `${base}/departments/${created.id}/managers`, { userIds: [USERS.member] })
     await expectShape('Managers', USERS.owner, 'GET', `${base}/departments/${created.id}/managers`)
+    await expectShape('DepartmentMembers', USERS.owner, 'PUT', `${base}/departments/${created.id}/members`, { userIds: [USERS.member] })
+    await expectShape('DepartmentMembers', USERS.member, 'GET', `${base}/departments/${created.id}/members`)
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)
     await expectShape('DepartmentSync', USERS.owner, 'POST', `${base}/departments/sync`, undefined, false)
     await expectShape('DepartmentDelete', USERS.owner, 'DELETE', `${base}/departments/${created.id}`, undefined, false)
+  })
+
+  it('不在・代わりの人 (absences)', async () => {
+    const today = (await expectShape('Absences', USERS.owner, 'GET', `${base}/absences?userId=${USERS.member}`)).today as string
+    const created = await expectShape('AbsenceCreated', USERS.owner, 'POST', `${base}/absences`, { userId: USERS.member, from: today, until: today, delegateId: USERS.admin })
+    await expectShape('Absences', USERS.member, 'GET', `${base}/absences?userId=${USERS.member}`)
+    await expectShape('AbsenceRemoved', USERS.owner, 'DELETE', `${base}/absences/${created.absence.id}`)
   })
 
   it('permissions: read, edit, effective access, folders, the outdated-apps refusal', async () => {
@@ -344,9 +377,23 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   })
 
   it('AI sandbox (「AI の囲い」)', async () => {
+    await expectShape('TaskSettings', USERS.member, 'GET', `${base}/task-settings`)
+    await expectShape('TaskSettings', USERS.owner, 'PUT', `${base}/task-settings`, {
+      taskListDepartmentIds: null, reply: { rule: 'same-day', sameDayCutoff: '17:00' },
+      autoRun: { enabled: false, dailyLimit: 30, stopAfterFailures: 3 }, companyHolidays: [{ date: '2026-12-29', name: '年末' }],
+    })
+    await expectShape('InboxSettings', USERS.member, 'GET', `${base}/inbox-settings`)
+    await expectShape('InboxSettings', USERS.owner, 'PUT', `${base}/inbox-settings`, {
+      multipleTo: 'unsure', ccOnly: 'nothing', memberReply: 'close', excludeInternal: true, internalDomains: ['group.example'], excludeBulk: true, sharedAddresses: [],
+    })
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
+  })
+
+  it('「もう一方の AI に聞く」', async () => {
+    await expectShape('SecondOpinion', USERS.owner, 'GET', `${base}/second-opinion`)
+    await expectShape('SecondOpinion', USERS.admin, 'PUT', `${base}/second-opinion`, { allowed: true })
   })
 
   it('emergency stop (「AI の緊急停止」)', async () => {
@@ -366,6 +413,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PATCH', `${base}/broker/keys/${id}`, { status: 'disabled', allowPrivateContent: true })
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/services/gmail`, { category: 'person', rule: 'user-only', ownKeyHosts: ['gmail.googleapis.com'] })
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/services/gemini/own-keys`, { allowed: true })
+    await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/services/gemini/default-key`, { keyId: null })
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/relay-services/crm`, { label: '顧客管理', baseUrl: 'https://api.crm.example.com/v2', header: 'x-api-key', format: '{key}', checkPath: '/me' })
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/relay-services/crm`)
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { memberKeysAllowed: false })
@@ -374,10 +422,24 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
   })
 
+  it('つなぎ先 → Slack', async () => {
+    await expectShape('Slack', USERS.owner, 'GET', `${base}/slack`)
+    // No bot key: saving it would ask Slack (nothing leaves this test).
+    await expectShape('Slack', USERS.owner, 'PUT', `${base}/slack/app`, { teamId: 'T0CONTRACT', clientId: '1111.2222', clientSecret: 'slack-NOT-REAL-contract-0000', signingSecret: 'slack-NOT-REAL-signing-0000' })
+    await expectShape('Slack', USERS.owner, 'PUT', `${base}/slack/enabled`, { enabled: false })
+    const { db } = await import('../../src/db')
+    db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)
+      VALUES (?, ?, 'slack', 's-contract', 'm@example.com', '[]', NULL, 'revoked', ?, ?)`).run(CO, USERS.member, new Date().toISOString(), new Date().toISOString())
+    const view = await expectShape('Slack', USERS.owner, 'DELETE', `${base}/slack/grants/${USERS.member}`)
+    expect(view.grants.map((g: Loose) => g.userId)).toEqual([USERS.member])
+    expect(JSON.stringify(view)).not.toContain('slack-NOT-REAL')
+  })
+
   it('つなぎ先 → Google', async () => {
     await expectShape('Google', USERS.owner, 'GET', `${base}/google`)
     await expectShape('Google', USERS.owner, 'PUT', `${base}/google/client`, { clientId: '123456789012-contract.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-contract-0000', domain: 'example.com' })
     await expectShape('Google', USERS.owner, 'PUT', `${base}/google/enabled`, { enabled: false })
+    await expectShape('Google', USERS.owner, 'PUT', `${base}/google/features`, { feature: 'inbox', on: false })
     // A member's permission as the callback stores it (the admin stops it).
     const { db } = await import('../../src/db')
     db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)
@@ -391,6 +453,14 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: null })
   })
 
+  it('つなぎ先 → つないでいるサービス', async () => {
+    const view = await expectShape('CoreConnectors', USERS.owner, 'GET', `${base}/connectors`)
+    expect(view.connectors.map((c: Loose) => c.id)).toEqual(['google', 'slack'])
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: 'google' })
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: null })
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connectors/google/enabled`, { enabled: true })
+  })
+
   it('つなぎ先 (connector plugins)', async () => {
     await expectShape('Plugins', USERS.owner, 'GET', `${base}/plugins`)
     // A business plugin and the connector it uses, each on its own (owner decision 2026-11-01).
@@ -402,6 +472,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-sales/mapping/restore`, { version: 1 })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/read-scope`, { departmentIds: [], userIds: [USERS.owner] })
+    // Business roles (plan C3): this package declares none, the shape is the same.
+    await expectShape('PluginRoles', USERS.owner, 'GET', `${base}/plugins/sample-sales/roles`)
   })
 
   it('invitations', async () => {
@@ -469,6 +541,8 @@ describe('the admin console\'s requests do what the admin means on the server', 
     await A.departmentsApi.setManagers(CO, dept.id, [USERS.member])
     expect(db.prepare('SELECT user_id FROM department_managers WHERE department_id = ?').all(dept.id)).toEqual([{ user_id: USERS.member }])
     expect((await A.departmentsApi.getManagers(CO, dept.id)).managers.map(m => m.userId)).toEqual([USERS.member])
+    await A.departmentsApi.setMembers(CO, dept.id, [USERS.member, USERS.admin])
+    expect((await A.departmentsApi.getMembers(CO, dept.id)).members.map(m => m.userId).sort()).toEqual([USERS.admin, USERS.member].sort())
   })
 
   it('permission edits: writing changes as asked, reading is never taken away', async () => {
@@ -531,6 +605,10 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(JSON.parse(stored.destinations)).toEqual({ hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/'], models: ['gpt-5-mini'] })
     expect(JSON.parse(stored.audience)).toMatchObject({ allDepartments: false, everyone: false, addUserIds: [USERS.member] })
     expect(JSON.parse(stored.caps).requestsPerMemberPerDay).toBe(50)
+    await A.keyBrokerApi.setDefaultKey(CO, 'openai', id)
+    expect(row('SELECT default_key_id FROM broker_services WHERE company_id = ? AND service = ?', CO, 'openai').default_key_id).toBe(id)
+    await A.keyBrokerApi.setDefaultKey(CO, 'openai', null)
+    expect(row('SELECT default_key_id FROM broker_services WHERE company_id = ? AND service = ?', CO, 'openai').default_key_id).toBeNull()
     await A.keyBrokerApi.update(CO, id, { status: 'disabled' })
     expect(row('SELECT status FROM broker_keys WHERE id = ?', id).status).toBe('disabled')
     await A.keyBrokerApi.replaceSecret(CO, id, 'fake-test-key-NOT-REAL-builder-3333')
@@ -562,6 +640,29 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
     await A.googleApi.setEnabled(CO, true)
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+  })
+
+  it('つなぎ先 → Slack: the app and the switch reach the server as chosen; empty secrets keep the stored ones', async () => {
+    await A.slackApi.saveApp(CO, { teamId: 'T0BUILDER', clientId: '3333.4444', clientSecret: 'slack-NOT-REAL-builder-5555', signingSecret: 'slack-NOT-REAL-signing-6666' })
+    expect(row('SELECT team_id, client_id, client_secret_last4 FROM slack_apps WHERE company_id = ?', CO))
+      .toEqual({ team_id: 'T0BUILDER', client_id: '3333.4444', client_secret_last4: '5555' })
+    await A.slackApi.saveApp(CO, { teamId: 'T0BUILDER', clientId: '3333.4444' })
+    expect(row('SELECT client_secret_last4 FROM slack_apps WHERE company_id = ?', CO).client_secret_last4).toBe('5555')
+    await A.slackApi.setEnabled(CO, false)
+    expect(row('SELECT enabled FROM slack_apps WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.slackApi.setEnabled(CO, true)
+    expect(row('SELECT enabled FROM slack_apps WHERE company_id = ?', CO).enabled).toBe(1)
+  })
+
+  it('つないでいるサービス: the switch and the role choice reach the server as chosen', async () => {
+    await A.coreConnectorsApi.setEnabled(CO, 'google', false)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.coreConnectorsApi.setEnabled(CO, 'google', true)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+    await A.coreConnectorsApi.chooseRole(CO, 'calendar', 'google')
+    expect(row('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?', CO, 'calendar').connector_id).toBe('google')
+    await A.coreConnectorsApi.chooseRole(CO, 'calendar', null)
+    expect(row('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?', CO, 'calendar')).toBeUndefined()
   })
 
   it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {

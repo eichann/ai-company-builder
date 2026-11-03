@@ -88,6 +88,14 @@ export interface AgentCapabilities {
    */
   readonly webReader: boolean
   /**
+   * Can be asked for a second opinion by the other agent of a consultation
+   * (「もう一方の AI に聞く」, second-opinion.ts): a one-shot of this agent's own
+   * CLI with no tools at all — it reads only what the app hands it as data,
+   * and cannot write, run commands or reach anything. The asking agent gets
+   * the app tool only in a turn whose member message names this agent.
+   */
+  readonly secondOpinion: boolean
+  /**
    * The app can hand the company's AI sandbox (「AI の囲い」, sandbox-policy.ts)
    * to this agent's own sandbox (mode `enforce`). Without it, `enforce` runs as
    * the company's `onUnavailable` says (record only, or no AI).
@@ -122,6 +130,8 @@ export interface AgentTaskModels {
   readonly handoff?: string
   /** The Web reader (`capabilities.webReader`); absent → the agent's catalog default (Codex). */
   readonly webReader?: string
+  /** A second opinion asked by the other agent (`capabilities.secondOpinion`); absent → the catalog default (Codex). */
+  readonly secondOpinion?: string
 }
 
 export interface AgentDescriptor<ModelId extends string = string> {
@@ -130,6 +140,12 @@ export interface AgentDescriptor<ModelId extends string = string> {
   readonly shortLabel: string
   /** Full name in settings. */
   readonly label: string
+  /**
+   * How a member names this agent in a message (「Codex はどう言ってる？」, 「クロードならどう？」),
+   * compared case-insensitively: a turn whose member message names it may ask it for a second
+   * opinion (second-opinion.ts). Empty = never asked.
+   */
+  readonly askNames: readonly string[]
   /** Static model list in selector order (empty when `liveModelCatalog`). */
   readonly models: readonly AgentModel<ModelId>[]
   /** For a member with no saved choice (owner's decision, 2026-10-23). */
@@ -182,6 +198,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
   id: 'claude-code',
   shortLabel: 'Claude',
   label: 'Claude Code',
+  askNames: ['Claude', 'クロード'],
   models: CLAUDE_MODELS,
   defaultModel: 'opus-5-5',
   defaultEffort: 'medium',
@@ -192,6 +209,8 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     voice: CLAUDE_LIGHT_MODEL,
     handoff: CLAUDE_LIGHT_MODEL,
     webReader: CLAUDE_CHAT_MODEL,
+    // A second opinion is worth the strong model (no tools, one answer).
+    secondOpinion: CLAUDE_CHAT_MODEL,
   },
   brokerReservedServices: ['anthropic'],
   capabilities: {
@@ -211,6 +230,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     handoff: true,
     oneShotText: true,
     webReader: true,
+    secondOpinion: true,
     // macOS / Linux (sandboxPlatform): Claude Code's own sandbox via the SDK `sandbox` option.
     sandbox: true,
     commitMessageFallback: true,
@@ -249,6 +269,7 @@ const CODEX: AgentDescriptor = {
   id: 'codex',
   shortLabel: 'Codex',
   label: 'Codex',
+  askNames: ['Codex', 'コーデックス'],
   // Verified with the app: app-server protocol, permission profiles +
   // features.network_proxy (`codex sandbox`, findings §B.2).
   minCliVersion: '0.153.4',
@@ -282,6 +303,8 @@ const CODEX: AgentDescriptor = {
     handoff: true,
     oneShotText: true,
     webReader: true,
+    // No `tasks.secondOpinion`: the catalog's default chat model at its default effort.
+    secondOpinion: true,
     // macOS: Codex's permission profile + network proxy (codexSandboxConfig), checked per thread.
     sandbox: true,
     commitMessageFallback: false,
@@ -298,6 +321,8 @@ const API_KEY: AgentDescriptor = {
   id: 'api-key',
   shortLabel: 'API',
   label: 'APIキー',
+  // Never asked by name: the other agent asks Claude Code (its CLI), not the member's API key.
+  askNames: [],
   models: [],
   tasks: {
     chat: 'claude-sonnet-4-20250514',
@@ -325,12 +350,22 @@ const API_KEY: AgentDescriptor = {
     oneShotText: true,
     // The app's own loop has no web tools to replace.
     webReader: false,
+    secondOpinion: false,
     sandbox: false,
     commitMessageFallback: true,
     privateFolderCommitMessages: true,
     liveModelCatalog: false,
   },
 }
+
+/**
+ * The app's own small text jobs sent through the company's key (the key broker's relay, the key
+ * the admin chose for the service), whatever agent the member uses: text only, never tools.
+ */
+export const COMPANY_KEY_MODELS = {
+  /** Tag suggestions for a task (client/shared/tag-suggest.ts). */
+  tagSuggest: 'claude-haiku-5-5',
+} as const
 
 export const AGENTS: { readonly [K in AgentId]: K extends 'claude-code' ? AgentDescriptor<ClaudeModelId> : AgentDescriptor } = {
   'claude-code': CLAUDE_CODE,

@@ -19,9 +19,11 @@ interface AuthState {
   /** The one sign-out: the company screen closes and the login screen shows (unsaved tabs are the caller's: useSaveBeforeLeaving). */
   signOut: () => Promise<void>
   checkSession: () => Promise<void>
+  /** Re-read the signed-in account without a loading screen (what it may do can change). */
+  refreshUser: () => Promise<void>
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isLoading: false,
   isInitialized: false,
@@ -94,5 +96,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     } finally {
       set({ isLoading: false, isInitialized: true })
     }
+  },
+
+  refreshUser: async () => {
+    const before = get().user
+    const session = await authApi.getSession().catch(() => null)
+    // Only the same account, still signed in (a sign-out or another sign-in meanwhile wins).
+    if (before && get().user === before && session?.success && session.user?.id === before.id) set({ user: session.user })
   },
 }))

@@ -6,6 +6,9 @@
 //   ?depts=0                 the company has no departments (no picker)
 //   ?pick=cancel             the folder dialog is cancelled
 //   ?setup=fail|manual       the download fails / waits for window.__acbCompany.finishSetup()
+//   ?companies=one           the member belongs to one company (it opens by itself)
+//   ?mine=d1,d2              the departments the member belongs to (所属); none by default
+//   ?create=no|yes           the server's canCreateCompany for this account (absent by default: an older server)
 // Calls the page made are in window.__acbCompany.calls; the opened company is
 // shown under 「開いた会社」.
 import { createRoot } from 'react-dom/client'
@@ -36,7 +39,9 @@ const department = (id: string, name: string, folder: string): DepartmentInfo =>
 })
 const entry = (folder: string, name: string, isDirectory = true): DirectoryEntry => ({ name, isDirectory, path: `${folder}/${name}` })
 
-const companies = params.get('companies') === 'empty' ? [] : [company('c1', '阿部商店', 'owner'), company('c2', '山田工務店', 'member')]
+const companies = params.get('companies') === 'empty' ? []
+  : params.get('companies') === 'one' ? [company('c1', '阿部商店', 'member')]
+    : [company('c1', '阿部商店', 'owner'), company('c2', '山田工務店', 'member')]
 const decisions = {
   empty: { action: 'firstSetup' as const },
   clone: { action: 'existingClone' as const },
@@ -46,7 +51,10 @@ const decisions = {
 const folder = params.get('folder') ?? 'empty'
 
 useAuthStore.setState({
-  user: { id: 'u1', email: 'demo@example.com', name: '阿部', image: null, emailVerified: true },
+  user: {
+    id: 'u1', email: 'demo@example.com', name: '阿部', image: null, emailVerified: true,
+    ...(params.has('create') ? { canCreateCompany: params.get('create') === 'yes' } : {}),
+  },
   signOut: async () => { calls.push(['signOut']) },
 })
 
@@ -72,6 +80,15 @@ installElectronAPI({
     calls.push(['getDepartments', companyId])
     if (params.get('depts') === '0') return { success: true, data: [] }
     return { success: true, data: [department('d1', '営業部', '営業部'), department('d2', '開発', 'development'), department('d3', '入れ子', '営業部/東京')] }
+  },
+  getMyDepartments: async companyId => {
+    calls.push(['getMyDepartments', companyId])
+    const mine = params.get('mine')
+    return { success: true, departmentIds: mine ? mine.split(',') : [] }
+  },
+  getDefaultParentFolder: async () => {
+    calls.push(['getDefaultParentFolder'])
+    return { success: true, folder: '/Users/demo/AI Company Builder' }
   },
   createDirectory: async path => { calls.push(['createDirectory', path]); return true },
   gitSetupCompanyRemote: async (path, companyId, selected) => {

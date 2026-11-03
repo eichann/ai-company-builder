@@ -5,9 +5,13 @@ import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
-import { MINUTES_DEAL_CHOICE_PART_TYPE, readMinutesDealChoiceCard, type MinutesDealChoiceCard } from '../../../shared/minutes-app'
+import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
+import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
+import { toolRowOf } from './toolRows'
+import { appInstructionOf, readAppInstruction } from '../../../shared/app-instruction'
+import { SECOND_OPINION_PART_TYPE, readSecondOpinionRecord, type SecondOpinionRecord } from '../../../shared/agents/second-opinion'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
 // stored history (shared/chat-history.ts ChatSession). Pure; the history
@@ -27,10 +31,13 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const reviewRequests: ReviewRecord[] = []
   const pluginOperations: PluginOperationCard[] = []
   const approvals: ApprovalCardRef[] = []
-  const minutesDealChoices: MinutesDealChoiceCard[] = []
+  const minutesDealChoices: MinutesBundleChoiceCard[] = []
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
+  const secondOpinions: SecondOpinionRecord[] = []
+  const toolLines: Record<string, StoredToolLine> = {}
+  const appInstruction = appInstructionOf(msg)
   for (const part of msg.parts) {
     if (part.type === APPROVAL_PART_TYPE) {
       const ref = readApprovalCardRef((part as { data?: unknown }).data)
@@ -42,14 +49,19 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
       if (card && !pluginOperations.some(c => c.id === card.id)) { pluginOperations.push(card); cardOrder.push(`plugin-op-${card.id}`) }
       continue
     }
-    if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
-      const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
+    if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
+      const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)
       if (card && !minutesDealChoices.some(c => c.id === card.id)) { minutesDealChoices.push(card); cardOrder.push(`minutes-deal-${card.id}`) }
       continue
     }
     if (part.type === MAIL_DRAFT_PART_TYPE) {
       const card = readMailDraftCard((part as { data?: unknown }).data)
       if (card && !mailDrafts.some(c => c.id === card.id)) { mailDrafts.push(card); cardOrder.push(`mail-draft-${card.id}`) }
+      continue
+    }
+    if (part.type === SECOND_OPINION_PART_TYPE) {
+      const record = readSecondOpinionRecord((part as { data?: unknown }).data)
+      if (record && !secondOpinions.some(r => r.id === record.id)) secondOpinions.push(record)
       continue
     }
     if (part.type === REVIEW_PART_TYPE) {
@@ -68,14 +80,12 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (ref && !consultationReferences.some(r => r.id === ref.id)) consultationReferences.push(ref)
     if (part.type === 'text') content += part.text
     if (part.type === 'reasoning') thinking = (thinking || '') + part.text
-    // Summarize tool invocations as text
-    if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
-      const toolName = part.type.replace('tool-', '')
-      content += `\n[Tool: ${toolName}]`
-    }
-    if (part.type === 'dynamic-tool') {
-      const dynPart = part as { toolName: string }
-      content += `\n[Tool: ${dynPart.toolName}]`
+    // Tool calls are kept as `[Tool: name]` markers (the hand-off compares this text), plus the labels of the app's tools.
+    const row = toolRowOf(part)
+    if (row) {
+      content += `\n[Tool: ${row.toolName}]`
+      const stored = storedToolLine(row.toolName, row.line)
+      if (stored) toolLines[row.toolName] = stored
     }
   }
   return {
@@ -93,6 +103,9 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
+    ...(secondOpinions.length ? { secondOpinions } : {}),
+    ...(Object.keys(toolLines).length ? { toolLines } : {}),
+    ...(appInstruction ? { appInstruction } : {}),
   }
 }
 
@@ -124,7 +137,11 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     parts.push({ type: 'reasoning' as const, text: msg.thinking })
   }
   // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
-  parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions))
+  const toolCalls = { n: 0 }
+  for (const part of restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions)) {
+    if (part.type === 'text') parts.push(...restoreToolMarkers(part.text, msg.toolLines, toolCalls))
+    else parts.push(part)
+  }
   for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
   const cards: UIMessage['parts'] = []
   for (const stored of msg.pluginOperations || []) {
@@ -136,23 +153,45 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     if (ref) cards.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
   }
   for (const stored of msg.minutesDealChoices || []) {
-    const card = readMinutesDealChoiceCard(stored)
-    if (card) cards.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card })
+    const card = readMinutesBundleChoiceCard(stored)
+    if (card) cards.push({ type: MINUTES_BUNDLE_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card })
   }
   for (const stored of msg.mailDrafts || []) {
     const card = readMailDraftCard(stored)
     if (card) cards.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card })
   }
   parts.push(...inCardOrder(cards, msg.cardOrder))
+  for (const stored of msg.secondOpinions || []) {
+    const record = readSecondOpinionRecord(stored)
+    if (record) parts.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record })
+  }
   for (const review of msg.reviewRequests || []) {
     const record = readReviewRecord(review)
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })
   }
+  const appInstruction = readAppInstruction(msg.appInstruction)
   return {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
+    ...(appInstruction ? { metadata: { appInstruction } } : {}),
     parts,
   }
+}
+
+/** A stored text with its `\n[Tool: name]` markers turned back into tool rows (saved again as the same markers). */
+export function restoreToolMarkers(text: string, toolLines: SessionMessage['toolLines'], counter = { n: 0 }): UIMessage['parts'] {
+  const parts: UIMessage['parts'] = []
+  let from = 0
+  for (const match of text.matchAll(TOOL_MARKER_RE)) {
+    const at = match.index ?? 0
+    if (at > from) parts.push({ type: 'text', text: text.slice(from, at) })
+    const toolName = match[1]
+    parts.push({ type: RESTORED_TOOL_PART_TYPE, id: `tool-call-${counter.n++}`, data: { toolName, line: restoredToolLine(toolName, toolLines?.[toolName]) } } as UIMessage['parts'][number])
+    from = at + match[0].length
+  }
+  if (from === 0) return [{ type: 'text', text }]
+  if (from < text.length) parts.push({ type: 'text', text: text.slice(from) })
+  return parts
 }
 
 /** Cards in their stored order (`cardOrder`); a card it does not name keeps its place after the named ones. */
@@ -184,7 +223,7 @@ export function greetingMessages(text: string): UIMessage[] {
  * six messages, empty ones dropped.
  */
 export function titleTranscript(messages: UIMessage[]): GenerateTitleRequest['messages'] {
-  return messages.slice(1, 7).map(m => ({
+  return messages.slice(1, 7).filter(m => !appInstructionOf(m)).map(m => ({
     role: m.role as 'user' | 'assistant',
     content: messageText(m),
   })).filter(m => m.content.trim().length > 0)

@@ -1,5 +1,5 @@
 // The left panel's tabs as a list of registered panels (owner decision D7):
-// today's four (スキル / ファイル / 検索 / 履歴) are entries like any other, so
+// today's three (スキル / ファイル / 検索) are entries like any other, so
 // a later extension adds a tab by adding an entry, not by editing the screen.
 import type { ReactNode } from 'react'
 import type { Icon } from '@phosphor-icons/react'
@@ -12,6 +12,8 @@ export interface LeftPanel {
   icon: Icon
   /** A count shown on the tab (e.g. items waiting); nothing for 0 or none. */
   badgeCount?: number | null
+  /** A small dot: something new came since the member last looked (the やること tab: no count, owner 2026-11-02). */
+  dot?: boolean
   /** false = no tab; a remembered id of a hidden panel opens the default one. */
   visible?: boolean
   /**
@@ -19,12 +21,19 @@ export interface LeftPanel {
    * is shown. Either way it then stays mounted, hidden, to keep its state.
    */
   mount: 'always' | 'once-opened'
+  /**
+   * Takes the whole left side, covering the middle (open files and records), which stays mounted:
+   * スキル and a plugin's screen. Otherwise the panel is the narrow column beside the middle (plan A).
+   */
+  wide?: boolean
   /** Extra classes on the panel's container. */
   className?: string
   /** Its tab was clicked (the search panel focuses its box). */
   onOpen?: () => void
-  /** The content. An extension's panel will be the app's isolated frame, never the extension's own code. */
+  /** The content. An extension's panel is the app's isolated frame, never the extension's own code. */
   render: () => ReactNode
+  /** Shown while the pointer rests on (or the keyboard is on) the tab: a plugin's peek, drawn by the core. */
+  peek?: () => ReactNode
 }
 
 /** The panels that have a tab, in order. */
@@ -36,4 +45,13 @@ export function shownPanels(panels: ReadonlyArray<LeftPanel>): LeftPanel[] {
 export function resolveLeftPanel(id: string | null | undefined, panels: ReadonlyArray<LeftPanel>): string | null {
   const shown = shownPanels(panels)
   return shown.find(panel => panel.id === id)?.id ?? shown[0]?.id ?? null
+}
+
+/**
+ * About how wide the tab strip must be to show every tab side by side, icon and name on one line
+ * (13 px a character, the icon, padding). Narrower than this, each tab stacks its name (11 px)
+ * under its icon; the name is always shown, never broken across lines.
+ */
+export function tabStripWidth(panels: ReadonlyArray<Pick<LeftPanel, 'title' | 'badgeCount' | 'dot'>>): number {
+  return panels.reduce((w, p) => w + 20 + 16 + (p.title ? 6 + [...p.title].length * 13 : 0) + (p.badgeCount ? 24 : p.dot ? 12 : 0), 0)
 }

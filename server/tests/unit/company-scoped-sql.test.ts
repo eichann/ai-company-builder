@@ -30,7 +30,7 @@ const SRC = resolve(__dirname, '../../src')
 const CONTROL_PLANE_TABLES: Record<string, string> = {
   companies: 'the registry of companies itself: a row is a company (its id is the company condition)',
   memberships: 'who belongs where: the sign-in check looks a user up across companies before a company is chosen',
-  ssh_keys: 'per user, unused since R1 (still created by db/index.ts)',
+  ssh_keys: 'per user, unused since R1 (still created by db/schema/company.ts)',
 }
 
 /** Better Auth's tables in auth.sqlite: accounts and sessions, shared by every company by design. */
@@ -58,22 +58,29 @@ const HANDLE_TABLES: Record<string, string[]> = {
   departments: ['adapters/sqlite/departments.ts'],
   invitations: ['adapters/sqlite/invitations.ts'],
   scopes: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
-  // db/index.ts: the company_id backfill of rows from before the column (MIGRATION below).
-  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts', 'db/index.ts'],
-  department_managers: ['adapters/sqlite/permission-store.ts', 'db/index.ts'],
+  // db/schema/permissions.ts: the company_id backfill of rows from before the column (MIGRATION below).
+  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts', 'db/schema/permissions.ts'],
+  department_managers: ['adapters/sqlite/permission-store.ts', 'db/schema/permissions.ts'],
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
-  // The company map (records.md).
-  record_settings: ['adapters/sqlite/records.ts'],
+  // The company map (records.md). record-contents.ts: the startup move of older texts into the content store.
+  record_settings: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_types: ['adapters/sqlite/records.ts'],
-  records: ['adapters/sqlite/records.ts'],
+  records: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_links: ['adapters/sqlite/records.ts'],
-  record_state: ['adapters/sqlite/records.ts'],
+  record_state: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_index_heads: ['adapters/sqlite/records.ts'],
   record_index_problems: ['adapters/sqlite/records.ts'],
-  record_ledger: ['adapters/sqlite/records.ts'],
+  record_ledger: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_ai_tokens: ['adapters/sqlite/records.ts'],
+  // The content store (records.md "The content store"): written through the records adapter, erased by the eraser.
+  record_contents: ['adapters/sqlite/record-contents.ts'],
+  // Execution runs of 「AI の番」 (records.md "Execution runs").
+  ai_runs: ['adapters/sqlite/ai-runs.ts'],
+  ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
+  // Which Skill a consultation used (records.md "Which Skill"); copied by the records / Drive adapters through skillUsesJson.
+  consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],
@@ -84,9 +91,13 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_operations: ['adapters/sqlite/plugins.ts'],
   // The Google connection (google-connector.md).
   google_oauth_clients: ['adapters/sqlite/connectors.ts'],
-  connector_grants: ['adapters/sqlite/connectors.ts'],
+  // db/schema/tasks.ts: read once when member_work_switches is made (MIGRATION below).
+  connector_grants: ['adapters/sqlite/connectors.ts', 'db/schema/tasks.ts'],
   oauth_pending: ['adapters/sqlite/connectors.ts'],
   connector_history: ['adapters/sqlite/connectors.ts'],
+  // Google Drive (google-drive.md).
+  google_drive_picks: ['adapters/sqlite/google-drive.ts'],
+  google_drive_puts: ['adapters/sqlite/google-drive.ts'],
   // Outbound mail (outbound-mail.md).
   outbound_mails: ['adapters/sqlite/outbound-mail.ts'],
   outbound_mail_versions: ['adapters/sqlite/outbound-mail.ts'],
@@ -94,9 +105,61 @@ const HANDLE_TABLES: Record<string, string[]> = {
   outbound_sends: ['adapters/sqlite/outbound-mail.ts'],
   // Fixed content of approvals and outbound mail (approvals.md).
   fixed_payloads: ['adapters/sqlite/fixed-payloads.ts'],
+  // Task settings and department membership (tasks.md).
+  task_settings: ['adapters/sqlite/task-settings.ts'],
+  department_members: ['adapters/sqlite/task-settings.ts'],
+  admin_setup_marks: ['adapters/sqlite/task-settings.ts'],
+  member_absences: ['adapters/sqlite/task-settings.ts'],
+  // Each member's own switches (tasks.md); db/schema/tasks.ts: the one-time carry-over when the table is made.
+  member_work_switches: ['adapters/sqlite/task-settings.ts', 'db/schema/tasks.ts'],
+  // 「もう一方の AI に聞く」 (chat-and-agents.md); db/schema/agents.ts: the one-time 'on' for the companies existing when the table is made.
+  second_opinion_settings: ['adapters/sqlite/second-opinion.ts', 'db/schema/agents.ts'],
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // 「仕事の道具をつなぐ」: features already shown to a member (google-connector.md).
+  connector_setup_seen: ['adapters/sqlite/connectors.ts'],
+  // The admin's choice of a core connector per role (connector-roles.md).
+  connector_role_choices: ['adapters/sqlite/connectors.ts'],
+  // lane A ▲
+  // lane B ▼
+  // Matching people and companies (identity.md).
+  identities: ['adapters/sqlite/identities.ts'],
+  identity_members: ['adapters/sqlite/identities.ts'],
+  identity_proposals: ['adapters/sqlite/identities.ts'],
+  identity_history: ['adapters/sqlite/identities.ts'],
+  // The inbox (inbox.md).
+  inbox_settings: ['adapters/sqlite/inbox.ts'],
+  inbox_messages: ['adapters/sqlite/inbox.ts'],
+  inbox_connections: ['adapters/sqlite/inbox.ts'],
+  inbox_gaps: ['adapters/sqlite/inbox.ts'],
+  // lane B ▲
+  // lane C ▼
+  // A plugin step's pins and the company's Skill per step (plugin-steps.md).
+  plugin_step_pins: ['adapters/sqlite/plugin-steps.ts'],
+  plugin_step_skills: ['adapters/sqlite/plugin-steps.ts'],
+  plugin_step_consultations: ['adapters/sqlite/plugin-steps.ts'],
+  // Business roles (plugin-roles.md).
+  plugin_role_assignments: ['adapters/sqlite/plugin-roles.ts'],
+  plugin_role_overrides: ['adapters/sqlite/plugin-roles.ts'],
+  plugin_role_history: ['adapters/sqlite/plugin-roles.ts'],
+  // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository']
+const HANDLE_FACTORIES = [
+  'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
+  'sqliteSecondOpinionSettingRepository',
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  'sqliteIdentityRepository',
+  'sqliteInboxRepository',
+  // lane B ▲
+  // lane C ▼
+  'sqlitePluginStepRepository',
+  'sqlitePluginRoleRepository',
+  // lane C ▲
+]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'
@@ -120,11 +183,14 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['SELECT * FROM broker_tokens WHERE token_hash = ?', BY_TOKEN],
     ['DELETE FROM broker_tokens WHERE expires_at < ?', 'server-wide cleanup of expired tokens (no row is read); to become per company'],
   ],
-  'db/index.ts': [
+  'db/schema/permissions.ts': [
     ['DELETE FROM scope_rules WHERE company_id IS NULL AND scope_id NOT IN (SELECT id FROM scopes)', MIGRATION],
     ['UPDATE scope_rules SET company_id = (SELECT s.company_id FROM scopes s WHERE s.id = scope_rules.scope_id) WHERE company_id IS NULL', MIGRATION],
     ['DELETE FROM department_managers WHERE company_id IS NULL AND department_id NOT IN (SELECT id FROM departments)', MIGRATION],
     ['UPDATE department_managers SET company_id = (SELECT d.company_id FROM departments d WHERE d.id = department_managers.department_id) WHERE company_id IS NULL', MIGRATION],
+  ],
+  'db/schema/tasks.ts': [
+    ["SELECT company_id, user_id, provider, scopes, features_off FROM connector_grants WHERE status = 'active' AND provider IN ('google', 'slack')", MIGRATION],
   ],
   'adapters/sqlite/push-rejections.ts': [
     ["SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}", BUILT_WHERE],
@@ -169,9 +235,9 @@ function hasCompanyCondition(sql: string): boolean {
   return /\bcompany_id\s*=\s*\?|\bcompany_id\s+IN\s*\(/i.test(sql)
 }
 
-/** The application schema: table → its columns (CREATE TABLE in db/index.ts, plus ALTER TABLE … ADD COLUMN). */
+/** The application schema: table → its columns (CREATE TABLE in db/index.ts and db/schema/*.ts, plus ALTER TABLE … ADD COLUMN). */
 function schema(): Map<string, Set<string>> {
-  const source = readFileSync(join(SRC, 'db/index.ts'), 'utf8')
+  const source = [join(SRC, 'db/index.ts'), ...tsFiles(join(SRC, 'db/schema'))].map(f => readFileSync(f, 'utf8')).join('\n')
   const tables = new Map<string, Set<string>>()
   for (const m of source.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\n\s*\);/g)) {
     const cols = m[2].split('\n').map(l => /^\s*(\w+)\s+[A-Z]/.exec(l)?.[1]).filter((c): c is string => !!c && !/^(PRIMARY|UNIQUE|FOREIGN|CHECK)$/.test(c))

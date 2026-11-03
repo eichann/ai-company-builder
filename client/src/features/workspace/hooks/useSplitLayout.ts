@@ -7,12 +7,14 @@ import {
 // Per company in localStorage `layout:<company id>` (layoutTree.ts holds the shape).
 const LAYOUT_KEY_PREFIX = 'layout:'
 
+// Nothing saved: the first look for this window's width (layoutTree.ts `firstLayout`).
 function readLayout(companyId: string | undefined): WorkspaceLayout {
-  if (!companyId) return parseLayout(null)
+  const width = typeof window === 'undefined' ? undefined : window.innerWidth
+  if (!companyId) return parseLayout(null, width)
   try {
-    return parseLayout(localStorage.getItem(`${LAYOUT_KEY_PREFIX}${companyId}`))
+    return parseLayout(localStorage.getItem(`${LAYOUT_KEY_PREFIX}${companyId}`), width)
   } catch {
-    return parseLayout(null)
+    return parseLayout(null, width)
   }
 }
 

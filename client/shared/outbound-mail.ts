@@ -27,6 +27,9 @@ export interface MailDraftCard {
 }
 
 export const MAIL_WORDS = {
+  slackDraft: 'Slack の返事の下書き',
+  slackWhere: '元の Slack のスレッドに、あなたとして返します。',
+  slackSent: 'Slack に返事を送りました。',
   sendButton: '確かめて送る',
   confirmTitle: '送る前に、もう一度確かめてください',
   confirmNote: '中身が変わっていないことを確かめて送ります。送ったメールは取り消せません。',
@@ -43,6 +46,11 @@ export const MAIL_WORDS = {
   consentNote: 'メールを送るには、Google で「メールを送る許可」が要ります。',
   bodyDeleted: '本文は送ってから30日たったため、サーバーから消しました（Gmail の送信済みには残っています）。',
   byAi: 'AI が下書き',
+  awaitReply: (day: string) => `返事を待つ（来なければ ${day}の朝に知らせる）`,
+  awaitReplyDay: '知らせる日',
+  awaitReplyNote: '相手から返事が来たら AI が中身を確かめます。来なければ、その日に AI が催促の下書きを用意します（送るのはあなたです）。',
+  awaitReplyPickDay: '知らせる日を選んでください。',
+  waitingReply: (day: string) => `相手の返事を待っています（来なければ ${day}の朝に知らせます）。`,
 } as const
 
 export const MAIL_STATE_LABELS: Record<OutboundMailState, string> = {
@@ -81,12 +89,23 @@ export function readMailDraft(data: unknown): OutboundMailView | undefined {
   if (to.some(r => !r) || cc.some(r => !r)) return undefined
   const body = typeof d.body === 'string' && d.body.length <= 50_000 ? d.body : null
   return {
-    id: d.id, state: d.state as OutboundMailState, version: d.version, hash: d.hash, from: d.from,
+    id: d.id, state: d.state as OutboundMailState, version: d.version, hash: d.hash,
+    channel: d.channel === 'slack' ? 'slack' : 'email', interactionId: nul(d.interactionId, 80), from: d.from,
     to: to as MailRecipientView[], cc: cc as MailRecipientView[], subject: d.subject, body, bodyDeleted: body === null,
     linkCount: typeof d.linkCount === 'number' ? d.linkCount : 0,
-    minutesId: nul(d.minutesId, 80), dealId: nul(d.dealId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),
+    meetingId: nul(d.meetingId, 80), bundleId: nul(d.bundleId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),
     lastChangedBy: d.lastChangedBy === 'ai' ? 'ai' : 'human', updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt.slice(0, 40) : '',
+    ...readAwaitReply(d.awaitReply),
   }
+}
+
+/** 「返事を待つ」 as the server offered it (absent: not offered — a reply, Slack, an older server or a card stored before). */
+function readAwaitReply(v: unknown): Pick<OutboundMailView, 'awaitReply'> {
+  if (!v || typeof v !== 'object') return {}
+  const a = v as Record<string, unknown>
+  if (typeof a.defaultUntil !== 'string' || !DAY_RE.test(a.defaultUntil)) return {}
+  const chosen = typeof a.chosenUntil === 'string' && DAY_RE.test(a.chosenUntil) ? a.chosenUntil : null
+  return { awaitReply: { expected: a.expected === true, defaultUntil: a.defaultUntil, chosenUntil: chosen } }
 }
 
 /** A stored / streamed card, validated (undefined when malformed). */
@@ -134,6 +153,22 @@ export interface MailDraftEdit {
   ccRefs?: string[]
   subject?: string
   body?: string
+}
+
+/** 「返事を待つ」 ticked at 確かめて送る: the day to notice silence (`YYYY-MM-DD`; the server checks the range). */
+export interface MailAwaitReply { until: string }
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+export function isAwaitReply(v: unknown): v is MailAwaitReply {
+  return !!v && typeof v === 'object' && Object.keys(v).length === 1 && typeof (v as MailAwaitReply).until === 'string' && DAY_RE.test((v as MailAwaitReply).until)
+}
+
+/** `2026-11-06` → 11月6日（金）. */
+export function awaitDayLabel(day: string): string {
+  if (!DAY_RE.test(day)) return day
+  const [y, m, d] = day.split('-').map(Number)
+  const dow = '日月火水木金土'[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return `${m}月${d}日（${dow}）`
 }
 
 /** Validation of what the renderer passes to main (main checks again before calling the server). */

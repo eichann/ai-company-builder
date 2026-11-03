@@ -41,7 +41,8 @@ export const DEFAULT_LAYOUT: WorkspaceLayout = {
 export const PANE_LIMITS: Readonly<Record<string, PaneLimits>> = {
   side: { min: 300, max: 1200, keepForSiblings: 280 + 10, collapseSiblingAfter: 60 },
   chat: { min: 280 },
-  fileTree: { min: 120, max: 400 },
+  // min: the five standard left tabs fit stacked (icon over an 11 px name) without scrolling.
+  fileTree: { min: 200, max: 400 },
 }
 
 export function paneSize(split: SplitNode, paneId: string): number | null {
@@ -101,18 +102,41 @@ function restoreSizes(fallback: SplitNode, saved: unknown): SplitNode {
   return { ...fallback, sizes }
 }
 
-/** What a company saved, or today's look when nothing (or nothing usable) was saved. */
-export function parseLayout(raw: string | null): WorkspaceLayout {
-  if (!raw) return DEFAULT_LAYOUT
+/** What the consultation keeps on a first start; the rest goes to the left tab and the middle. */
+const FIRST_CHAT_WIDTH = 420
+const FIRST_FILE_TREE = 260
+
+/**
+ * The look of a first start (nothing saved) for a window this wide (I.8: the left tab, the middle
+ * and the consultation side by side on a 1280 px notebook): the consultation keeps about 420 px,
+ * the narrow column 260 px, the middle the rest; never smaller than today's look.
+ */
+export function firstLayout(windowWidth: number): WorkspaceLayout {
+  if (!Number.isFinite(windowWidth) || windowWidth <= 0) return DEFAULT_LAYOUT
+  const limits = PANE_LIMITS.side
+  const side = clampWidth(Math.round(windowWidth - FIRST_CHAT_WIDTH), DEFAULT_LAYOUT.screen.sizes[0]!, limits.max ?? Number.POSITIVE_INFINITY)
+  return {
+    screen: withPaneSize(DEFAULT_LAYOUT.screen, 'side', side),
+    files: withPaneSize(DEFAULT_LAYOUT.files, 'fileTree', FIRST_FILE_TREE),
+  }
+}
+
+/**
+ * What a company saved, or the first look when nothing (or nothing usable) was saved: for the
+ * window's width when given (`firstLayout`), else today's look.
+ */
+export function parseLayout(raw: string | null, windowWidth?: number): WorkspaceLayout {
+  const fallback = windowWidth === undefined ? DEFAULT_LAYOUT : firstLayout(windowWidth)
+  if (!raw) return fallback
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; trees?: Record<string, unknown> } | null
-    if (!parsed || parsed.version !== LAYOUT_VERSION || !parsed.trees || typeof parsed.trees !== 'object') return DEFAULT_LAYOUT
+    if (!parsed || parsed.version !== LAYOUT_VERSION || !parsed.trees || typeof parsed.trees !== 'object') return fallback
     return {
       screen: restoreSizes(DEFAULT_LAYOUT.screen, parsed.trees.screen),
       files: restoreSizes(DEFAULT_LAYOUT.files, parsed.trees.files),
     }
   } catch {
-    return DEFAULT_LAYOUT
+    return fallback
   }
 }
 

@@ -7,19 +7,26 @@
  * builds SQL from values and never hits the bound-parameter limit.
  */
 import type Database from 'better-sqlite3'
-import type { ExternalReceipt, LedgerEntry } from '../../../shared/core/record-ledger'
+import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
+import type { ExternalReceipt, LedgerEntry, LedgerVia } from '../../../shared/core/record-ledger'
+import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
 } from '../../ports/records'
+import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
+import { canonicalTypeJson } from '../../../shared/core/record-types'
+import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
+import { sqliteContentStore } from './record-contents'
+import { skillUsesJson } from './skill-uses'
 
 type Row = {
-  id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null
+  id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null
   title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
 }
-const COLUMNS = 'id, type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at'
+const COLUMNS = 'id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at'
 const toRecord = (r: Row): RecordRow => ({
-  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder,
+  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner,
   title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null }
@@ -29,7 +36,8 @@ type LedgerRow = {
   record_id: string; version: number; action: string; from_state: string | null; to_state: string | null; actor_id: string
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
-  proposed_by: string | null; conversation_id: string | null; receipt: string | null
+  proposed_by: string | null; conversation_id: string | null; receipt: string | null; on_behalf_of: string | null; run_id: string | null
+  procedure: string | null; skills: string | null; via: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
@@ -37,14 +45,175 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   decision: r.decision ? JSON.parse(r.decision) : null, isDecision: r.is_decision === 1, typeVersion: r.type_version, reversesVersion: r.reverses_version,
   proposedBy: r.proposed_by === 'ai' ? 'ai' : null, conversationId: r.conversation_id,
   receipt: r.receipt ? JSON.parse(r.receipt) as ExternalReceipt : null,
+  runId: r.run_id,
+  ...(r.run_id ? { procedure: parseAiRunProcedure(r.procedure) } : {}),
+  ...(r.skills ? { skills: parseSkillUses(r.skills) } : {}),
+  ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
+  ...(r.via ? { via: parseLedgerVia(r.via) } : {}),
 })
+
+/** A stored `via` (`{ plugin, version }`), or null when it is not that shape. */
+function parseLedgerVia(text: string): LedgerVia | null {
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>
+    return v && typeof v.plugin === 'string' && typeof v.version === 'string' ? { plugin: v.plugin, version: v.version } : null
+  } catch { return null }
+}
+
+/** Where the content id starts in a reference (`acb-content:<id>:…`, 1-based for substr). */
+const CONTENT_ID_AT = CONTENT_REF_PREFIX.length + 1
 
 /** A LIKE pattern matching `text` anywhere, with %, _ and \ taken literally. */
 function likeAnywhere(text: string): string {
   return `%${text.replace(/[\\%_]/g, m => `\\${m}`)}%`
 }
 
+/**
+ * The core types stop naming a business plugin's types (owner decision 2026-11-01
+ * night, records.md "Core interfaces"): links to `deal` / `customer` became links to
+ * the `bundle` / `counterpart` interfaces, the `minutes` type became `meeting`
+ * (会議), and the links named `minutes` / `about` were renamed. Production had no
+ * record data then; staging data is carried over at startup (db/index.ts, every
+ * company), idempotently — every statement matches only the old shape, so a second
+ * run changes nothing — in one transaction per company:
+ *
+ * - records of type `minutes` become `meeting` (version 1 of the new type); their
+ *   ids (`minutes-…`) stay, so the ledger, contents, notices and the app's
+ *   consultations that point at them stay valid;
+ * - link rows of core records are renamed: task / interaction / meeting
+ *   `customer` → `counterpart`, interaction / meeting / decision `deal` → `bundle`,
+ *   approval / outbound_message `about` → `bundle`, approval / outbound_message /
+ *   decision `minutes` → `meeting`;
+ * - an interaction's text field `counterpart` becomes `counterpart_text` (the
+ *   name `counterpart` is now its link);
+ * - the stored core definitions of `minutes` are dropped (the type no longer
+ *   exists; a company's own file definition, if any, is left alone).
+ *
+ * The ledger is history and is not rewritten: an old `links.deal` entry no longer
+ * matches a link of the type, so undoing it answers CHANGED_SINCE.
+ */
+export function migrateCompanyCoreInterfaceLinks(conn: Database.Database, companyId: string): { records: number; links: number } {
+  return conn.transaction(() => {
+    const records = conn.prepare(`UPDATE records SET type = 'meeting', type_version = 1 WHERE company_id = ? AND type = 'minutes'`).run(companyId).changes
+    const rename = conn.prepare(`
+      UPDATE record_links SET name = ?
+      WHERE company_id = ? AND name = ? AND source_id IN (
+        SELECT r.id FROM records r WHERE r.company_id = ? AND r.type IN (SELECT value FROM json_each(?)))
+    `)
+    const renames: Array<{ old: string; renamed: string; types: string[] }> = [
+      { old: 'customer', renamed: 'counterpart', types: ['task', 'interaction', 'meeting'] },
+      { old: 'deal', renamed: 'bundle', types: ['interaction', 'meeting', 'decision'] },
+      { old: 'about', renamed: 'bundle', types: ['approval', 'outbound_message'] },
+      { old: 'minutes', renamed: 'meeting', types: ['approval', 'outbound_message', 'decision'] },
+    ]
+    let links = 0
+    for (const r of renames) links += rename.run(r.renamed, companyId, r.old, companyId, JSON.stringify(r.types)).changes
+    conn.prepare(`
+      UPDATE record_state SET fields = json_set(json_remove(fields, '$.counterpart'), '$.counterpart_text', json_extract(fields, '$.counterpart'))
+      WHERE company_id = ? AND json_valid(fields) AND json_type(fields, '$.counterpart') IS NOT NULL AND record_id IN (
+        SELECT r.id FROM records r WHERE r.company_id = ? AND r.type = 'interaction')
+    `).run(companyId, companyId)
+    conn.prepare(`DELETE FROM record_types WHERE company_id = ? AND name = 'minutes' AND source = 'core'`).run(companyId)
+    return { records, links }
+  })()
+}
+
+/**
+ * Meeting version 2 (records.md "Outside time"): every meeting whose server values have
+ * `meeting_at` but no `occurred_at` gets it, as a new ledger entry (action
+ * OUTSIDE_TIME_ACTION, the server's migration actor) with a compare-and-set on the
+ * version — the ledger stays the record's history and replays to the same values.
+ * Idempotent: a meeting carried over (or written by the version 2 intake) is skipped.
+ */
+export function migrateCompanyOutsideTimes(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const rows = conn.prepare(`
+      SELECT s.record_id, s.state, s.version, json_extract(s.fields, '$.meeting_at') AS meeting_at FROM record_state s
+      JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+      WHERE s.company_id = ? AND r.type = 'meeting' AND json_valid(s.fields)
+        AND json_type(s.fields, '$.meeting_at') = 'text' AND json_type(s.fields, '$.occurred_at') IS NULL
+    `).all(companyId) as Array<{ record_id: string; state: string | null; version: number; meeting_at: string }>
+    const write = conn.prepare(`
+      UPDATE record_state SET fields = json_set(fields, '$.occurred_at', ?), version = version + 1, updated_at = ?
+      WHERE company_id = ? AND record_id = ? AND version = ?
+    `)
+    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
+        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '[]', 0, 2)`)
+    // The record now holds what version 2 asks (the index row says which version it was made under).
+    const version2 = conn.prepare(`UPDATE records SET type_version = 2 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 2)`)
+    let moved = 0
+    for (const r of rows) {
+      if (write.run(r.meeting_at, at, companyId, r.record_id, r.version).changes !== 1) continue
+      version2.run(companyId, r.record_id)
+      entry.run(companyId, r.record_id, r.version + 1, OUTSIDE_TIME_ACTION, r.state, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind,
+        MIGRATION_ACTOR.source, at, JSON.stringify([{ field: 'occurred_at', before: null, after: r.meeting_at }]))
+      moved++
+    }
+    return moved
+  })()
+}
+
+/**
+ * Meeting version 4 (minutes.md "A まとまり chosen later"): a meeting left in version 3's
+ * `bundle_waiting` / `bundle_working` (an AI run for the まとまり's part, which is no more) goes back
+ * to `read`, as a new ledger entry (action BUNDLE_PART_ENDED_ACTION, the server's migration
+ * actor — cause `system`, never a person) with a compare-and-set on the version. Idempotent:
+ * nothing is left in those states afterwards.
+ */
+export function migrateCompanyBundleParts(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const rows = conn.prepare(`
+      SELECT s.record_id, s.state, s.version FROM record_state s
+      JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+      WHERE s.company_id = ? AND r.type = 'meeting' AND s.state IN ('bundle_waiting', 'bundle_working')
+    `).all(companyId) as Array<{ record_id: string; state: string; version: number }>
+    const write = conn.prepare(`UPDATE record_state SET state = 'read', version = version + 1, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?`)
+    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
+        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, 'read', ?, ?, ?, ?, '', ?, '[]', 0, 4)`)
+    const version4 = conn.prepare(`UPDATE records SET type_version = 4 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 4)`)
+    let moved = 0
+    for (const r of rows) {
+      if (write.run(at, companyId, r.record_id, r.version).changes !== 1) continue
+      version4.run(companyId, r.record_id)
+      entry.run(companyId, r.record_id, r.version + 1, BUNDLE_PART_ENDED_ACTION, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind, MIGRATION_ACTOR.source, at,
+        JSON.stringify([{ field: 'state', before: r.state, after: 'read' }]))
+      moved++
+    }
+    return moved
+  })()
+}
+
+/**
+ * Task versions 9 and up (records.md "Task version 9"): every task of a company whose map holds the task
+ * type is moved to `TASK_VERSION`. The core definition of that version is stored first when no
+ * version at least as new is there (as `ensureCoreTypes` would on the next index run), so the
+ * engine answers by it from the first request. Only the index row's `type_version` changes — no
+ * value does (9 only adds), so no ledger entry and nothing in the 経緯. Idempotent; returns the
+ * tasks moved.
+ */
+export function migrateCompanyTaskVersion(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const stored = conn.prepare(`SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'task'`).get(companyId) as { v: number | null }
+    if (stored.v === null) return 0
+    if (stored.v < TASK_VERSION) {
+      const def = coreTypeDefinitions().find(d => d.name === 'task')
+      if (!def || def.version !== TASK_VERSION) throw new Error('core task definition is not at TASK_VERSION')
+      conn.prepare(`INSERT INTO record_types (company_id, name, version, definition, source, commit_sha, created_at) VALUES (?, 'task', ?, ?, 'core', NULL, ?)`)
+        .run(companyId, def.version, canonicalTypeJson(def), at)
+    }
+    return conn.prepare(`UPDATE records SET type_version = ? WHERE company_id = ? AND type = 'task' AND (type_version IS NULL OR type_version < ?)`)
+      .run(TASK_VERSION, companyId, TASK_VERSION).changes
+  })()
+}
+
 export function sqliteRecordRepository(conn: Database.Database, companyId: string): RecordRepository {
+  // Titles, summaries, content fields, notes and reasons live in the content store
+  // (./record-contents.ts): stored as references on the way in, resolved on the way out.
+  const contents = sqliteContentStore(conn, companyId)
+  const resolveRows = (rows: RecordRow[]): RecordRow[] => {
+    const resolve = contents.resolver(rows.flatMap(r => [{ recordId: r.id, value: r.title }, { recordId: r.id, value: r.summary }]))
+    return rows.map(r => ({ ...r, title: resolve(r.id, r.title), summary: resolve(r.id, r.summary) }))
+  }
   return {
     settings() {
       const r = conn.prepare('SELECT enabled, updated_at, updated_by FROM record_settings WHERE company_id = ?').get(companyId) as
@@ -68,6 +237,28 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         ON CONFLICT(company_id) DO UPDATE SET minutes_folder = excluded.minutes_folder, updated_at = excluded.updated_at, updated_by = excluded.updated_by
       `).run(companyId, at, by, folder)
     },
+    meetingIntake() {
+      const r = conn.prepare('SELECT meeting_intake FROM record_settings WHERE company_id = ?').get(companyId) as { meeting_intake: string | null } | undefined
+      return r?.meeting_intake ?? null
+    },
+    setMeetingIntake(value, by, at) {
+      // A new row keeps the feature off (enabled 0); an existing row keeps its switch.
+      conn.prepare(`
+        INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, meeting_intake) VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET meeting_intake = excluded.meeting_intake, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, at, by, value)
+    },
+    meetingBundleDays() {
+      const r = conn.prepare('SELECT meeting_bundle_days FROM record_settings WHERE company_id = ?').get(companyId) as { meeting_bundle_days: number | null } | undefined
+      return r?.meeting_bundle_days ?? null
+    },
+    setMeetingBundleDays(days, by, at) {
+      // A new row keeps the feature off (enabled 0); an existing row keeps its switch.
+      conn.prepare(`
+        INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, meeting_bundle_days) VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET meeting_bundle_days = excluded.meeting_bundle_days, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, at, by, days)
+    },
 
     typeVersions() {
       return (conn.prepare('SELECT name, version, definition, source, commit_sha, created_at FROM record_types WHERE company_id = ? ORDER BY name, version')
@@ -81,24 +272,33 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     find(id) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND id = ?`).get(companyId, id) as Row | undefined
-      return r ? toRecord(r) : null
+      return r ? resolveRows([toRecord(r)])[0] : null
     },
     findByPath(path) {
       const r = conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path = ? AND removed_at IS NULL`).get(companyId, path) as Row | undefined
-      return r ? toRecord(r) : null
+      return r ? resolveRows([toRecord(r)])[0] : null
     },
     fileRecordsIn(scopeId) {
-      return (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path IS NOT NULL AND removed_at IS NULL AND scope_id IS ?`)
+      const rows = (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND path IS NOT NULL AND removed_at IS NULL AND scope_id IS ?`)
         .all(companyId, scopeId) as Row[]).map(toRecord)
+      return resolveRows(rows)
     },
     upsert(row) {
+      const b = contents.batch(row.id, row.type)
+      const title = b.put(row.title)
+      const summary = b.put(row.summary)
       conn.prepare(`
-        INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, title, summary, created_at, updated_at, removed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, id) DO UPDATE SET type = excluded.type, type_version = excluded.type_version, scope_id = excluded.scope_id,
           path = excluded.path, folder = excluded.folder, title = excluded.title, summary = excluded.summary,
           updated_at = excluded.updated_at, removed_at = excluded.removed_at
-      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.title, row.summary, row.createdAt, row.updatedAt, row.removedAt)
+      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.personalOwner, title, summary, row.createdAt, row.updatedAt, row.removedAt)
+      b.flush(row.updatedAt)
+    },
+    setPlace(id, place, at) {
+      conn.prepare('UPDATE records SET folder = ?, personal_owner = ?, updated_at = ? WHERE company_id = ? AND id = ?')
+        .run(place.folder, place.personalOwner, at, companyId, id)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)
@@ -141,33 +341,62 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     states(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare('SELECT record_id, state, fields, version, updated_at FROM record_state WHERE company_id = ? AND record_id IN (SELECT value FROM json_each(?))')
-        .all(companyId, JSON.stringify(ids)) as Array<{ record_id: string; state: string | null; fields: string; version: number; updated_at: string }>)
-        .map((r): RecordStateRow => ({ recordId: r.record_id, state: r.state, fields: r.fields, version: r.version, updatedAt: r.updated_at }))
+      const rows = (conn.prepare(`SELECT s.record_id, s.state, s.fields, s.version, s.updated_at, r.type FROM record_state s
+          LEFT JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+          WHERE s.company_id = ? AND s.record_id IN (SELECT value FROM json_each(?))`)
+        .all(companyId, JSON.stringify(ids)) as Array<{ record_id: string; state: string | null; fields: string; version: number; updated_at: string; type: string | null }>)
+      const fields = contents.resolveFields(rows.map(r => ({ recordId: r.record_id, type: r.type, fields: r.fields })))
+      return rows.map((r, i): RecordStateRow => ({ recordId: r.record_id, state: r.state, fields: fields[i], version: r.version, updatedAt: r.updated_at }))
     },
 
     writeState(row, expectedVersion) {
+      const type = contents.typeOfRecord(row.recordId)
+      const b = contents.batch(row.recordId, type)
+      const stored = contents.storeFields(b, type, row.fields)
+      let r
       if (expectedVersion === 0) {
-        const r = conn.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(company_id, record_id) DO NOTHING')
-          .run(companyId, row.recordId, row.state, row.fields, row.version, row.updatedAt)
-        return r.changes === 1
+        r = conn.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(company_id, record_id) DO NOTHING')
+          .run(companyId, row.recordId, row.state, stored, row.version, row.updatedAt)
+      } else {
+        r = conn.prepare('UPDATE record_state SET state = ?, fields = ?, version = ?, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?')
+          .run(row.state, stored, row.version, row.updatedAt, companyId, row.recordId, expectedVersion)
       }
-      const r = conn.prepare('UPDATE record_state SET state = ?, fields = ?, version = ?, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?')
-        .run(row.state, row.fields, row.version, row.updatedAt, companyId, row.recordId, expectedVersion)
+      // The texts only when the write happened (a lost compare-and-set stores nothing).
+      if (r.changes === 1) b.flush(row.updatedAt)
       return r.changes === 1
     },
 
     ledger(recordId) {
-      return (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+      const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
+      return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
-    appendLedger(e: LedgerEntry) {
+    noteTurnOpened(o) {
+      return conn.prepare(`INSERT OR IGNORE INTO record_turn_opens (company_id, record_id, turn_version, holder_id, opened_by, opened_at) VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(companyId, o.recordId, o.turnVersion, o.holderId, o.openedBy, o.openedAt).changes === 1
+    },
+    turnOpens(recordId) {
+      return (conn.prepare(`SELECT record_id, turn_version, holder_id, opened_by, opened_at FROM record_turn_opens WHERE company_id = ? AND record_id = ? ORDER BY turn_version`)
+        .all(companyId, recordId) as Array<{ record_id: string; turn_version: number; holder_id: string; opened_by: string; opened_at: string }>)
+        .map(r => ({ recordId: r.record_id, turnVersion: r.turn_version, holderId: r.holder_id, openedBy: r.opened_by, openedAt: r.opened_at }))
+    },
+    appendLedger(entry: LedgerEntry) {
+      const type = contents.typeOfRecord(entry.recordId)
+      const b = contents.batch(entry.recordId, type)
+      const e = contents.storeEntry(b, type, entry)
+      // An entry written in an execution run copies the run's procedure as it is now (records.md
+      // "Which procedure"): a later re-claim never changes what an earlier entry says.
+      // The AI's entry copies the Skills its consultation had used by now (records.md "Which Skill").
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id, procedure, skills, via)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT procedure FROM ai_runs WHERE company_id = ? AND id = ?), ?, ?)`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
-          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null)
+          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null,
+          companyId, e.runId ?? null, e.actorKind === 'ai' ? skillUsesJson(conn, companyId, e.actorId, e.conversationId) : null,
+          e.via ? JSON.stringify({ plugin: e.via.plugin, version: e.via.version }) : null)
+      b.flush(e.at)
     },
 
     candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[] {
@@ -186,24 +415,59 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         if (f.values.includes(null)) { parts.push('json_extract(s.fields, ?) IS NULL'); params.push(`$.${f.name}`) }
         where.push(parts.length > 0 ? `(${parts.join(' OR ')})` : '0')
       }
+      for (const c of filter.contains ?? []) {
+        // A tags value is the JSON text of an array of strings; anything else holds no tag.
+        where.push(`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(json_extract(s.fields, ?)) AND json_type(json_extract(s.fields, ?)) = 'array'
+          THEN json_extract(s.fields, ?) ELSE '[]' END) t WHERE t.type = 'text' AND t.value = ?)`)
+        const at = `$.${c.name}`
+        params.push(at, at, at, c.tag)
+      }
+      for (const r of filter.ranges ?? []) {
+        if (r.gte !== undefined) { where.push('json_extract(s.fields, ?) >= ?'); params.push(`$.${r.name}`, r.gte) }
+        if (r.lt !== undefined) { where.push('json_extract(s.fields, ?) < ?'); params.push(`$.${r.name}`, r.lt) }
+      }
+      if (filter.finishedSince) {
+        // Now in a final state of its type, entered (from another state) at or after `since`.
+        where.push(`r.type || ' ' || s.state IN (SELECT json_extract(value, '$.type') || ' ' || json_extract(value, '$.state') FROM json_each(?))`)
+        params.push(JSON.stringify(filter.finishedSince.finals))
+        where.push(`EXISTS (SELECT 1 FROM record_ledger l WHERE l.company_id = r.company_id AND l.record_id = r.id AND l.to_state = s.state
+          AND (l.from_state IS NULL OR l.from_state <> l.to_state) AND l.at >= ?)`)
+        params.push(filter.finishedSince.since)
+      }
+      if (filter.link) {
+        where.push('EXISTS (SELECT 1 FROM record_links k WHERE k.company_id = r.company_id AND k.source_id = r.id AND k.name = ? AND k.target_id = ?)')
+        params.push(filter.link.name, filter.link.id)
+      }
       if (filter.text) {
-        where.push("(r.title LIKE ? ESCAPE '\\' OR r.summary LIKE ? ESCAPE '\\')")
-        params.push(likeAnywhere(filter.text), likeAnywhere(filter.text))
+        // Title and summary are in the content store (an erased one matches nothing); a row
+        // written before the store (or by an older build) still holds its text.
+        where.push(`(EXISTS (SELECT 1 FROM record_contents c WHERE c.company_id = r.company_id AND c.record_id = r.id AND c.text IS NOT NULL
+            AND c.id IN (substr(r.title, ${CONTENT_ID_AT}, 32), substr(r.summary, ${CONTENT_ID_AT}, 32)) AND c.text LIKE ? ESCAPE '\\')
+          OR (r.title NOT LIKE '${CONTENT_REF_PREFIX}%' AND r.title LIKE ? ESCAPE '\\')
+          OR (r.summary NOT LIKE '${CONTENT_REF_PREFIX}%' AND r.summary LIKE ? ESCAPE '\\'))`)
+        params.push(likeAnywhere(filter.text), likeAnywhere(filter.text), likeAnywhere(filter.text))
+      }
+      let order = 'r.updated_at DESC, r.id'
+      if (filter.sort) {
+        // The field name is bound; only the direction is spliced, from a closed set. Empty values last.
+        const dir = filter.sort.order === 'desc' ? 'DESC' : 'ASC'
+        order = `json_extract(s.fields, ?) IS NULL, json_extract(s.fields, ?) ${dir}, ${order}`
+        params.push(`$.${filter.sort.field}`, `$.${filter.sort.field}`)
       }
       params.push(limit)
       const extra = where.map(w => ` AND ${w}`).join('')
       return (conn.prepare(`
-        SELECT r.id, r.type, r.scope_id, r.path, r.folder FROM records r
+        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner FROM records r
         LEFT JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
         WHERE r.company_id = ? AND r.removed_at IS NULL${extra}
-        ORDER BY r.updated_at DESC, r.id LIMIT ?
-      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null }>)
-        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder }))
+        ORDER BY ${order} LIMIT ?
+      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null }>)
+        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner }))
     },
     byIds(ids) {
       if (ids.length === 0) return []
-      return (conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND removed_at IS NULL AND id IN (SELECT value FROM json_each(?))`)
-        .all(companyId, JSON.stringify(ids)) as Row[]).map(toRecord)
+      return resolveRows((conn.prepare(`SELECT ${COLUMNS} FROM records WHERE company_id = ? AND removed_at IS NULL AND id IN (SELECT value FROM json_each(?))`)
+        .all(companyId, JSON.stringify(ids)) as Row[]).map(toRecord))
     },
 
     head(repo) {
@@ -221,15 +485,16 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
 
     insertAiToken(t) {
-      conn.prepare(`INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(t.id, companyId, t.userId, t.tokenHash, t.scope, t.agent, t.conversationId, t.createdAt, t.expiresAt)
+      conn.prepare(`INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(t.id, companyId, t.userId, t.tokenHash, t.scope, t.agent, t.conversationId, t.createdAt, t.expiresAt,
+        t.runId ?? null, t.runGeneration ?? null)
     },
     aiTokenByHash(tokenHash) {
-      const r = conn.prepare('SELECT id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at FROM record_ai_tokens WHERE company_id = ? AND token_hash = ?')
-        .get(companyId, tokenHash) as { id: string; user_id: string; token_hash: string; scope: 'read' | 'act'; agent: string; conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null } | undefined
+      const r = conn.prepare('SELECT id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at, run_id, run_generation FROM record_ai_tokens WHERE company_id = ? AND token_hash = ?')
+        .get(companyId, tokenHash) as { id: string; user_id: string; token_hash: string; scope: 'read' | 'act'; agent: string; conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null; run_id: string | null; run_generation: number | null } | undefined
       return r ? {
         id: r.id, userId: r.user_id, tokenHash: r.token_hash, scope: r.scope, agent: r.agent, conversationId: r.conversation_id,
-        createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at,
+        createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at, runId: r.run_id, runGeneration: r.run_generation,
       } : null
     },
     revokeAiToken(userId, tokenId, at) {

@@ -31,7 +31,7 @@ export function StopBar() {
       {active > 0 && (
         <p role="status" className="flex-1 font-medium text-destructive">
           AI を止めています（{active} 件）。
-          <Link href={`/companies/${companyId}/agent-stop`} className="ml-1 underline underline-offset-2">
+          <Link href={`/companies/${companyId}/advanced/ai-safety/stop`} className="ml-1 underline underline-offset-2">
             一覧と解除
           </Link>
         </p>

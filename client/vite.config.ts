@@ -24,6 +24,21 @@ export default defineConfig(({ command }) => ({
         },
       },
       {
+        // Google Picker's window only (google-drive.md): hands its page the config once, takes back the picked ids.
+        entry: 'electron/picker-preload.ts',
+        vite: {
+          build: {
+            outDir: 'dist-electron',
+            rollupOptions: {
+              external: ['electron'],
+              output: {
+                format: 'cjs',
+              },
+            },
+          },
+        },
+      },
+      {
         entry: 'electron/preload.ts',
         onstart(args) {
           args.reload()

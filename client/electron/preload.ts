@@ -15,9 +15,22 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
-import type { MailDraftEdit } from '../shared/outbound-mail'
+import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
+import type { AbsenceAddInput } from '../shared/absences'
+import type { WorkSwitch } from '../shared/work-switches'
+import type { ViewersQuery } from '../shared/viewers'
+import type { BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+import type { SlackFeature } from '../shared/slack'
+import type { PluginPackageRef } from '../shared/plugin-bridge'
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
@@ -135,19 +148,63 @@ const api: ElectronAPI = {
   approveApproval: (companyId: string, approvalId: string, hash: string, reason: string) => invoke('approvals:approve', companyId, approvalId, hash, reason),
   sendBackApproval: (companyId: string, approvalId: string, reason: string) => invoke('approvals:sendBack', companyId, approvalId, reason),
   withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
+  sameAsApproval: (companyId: string, approvalId: string, recordId: string, linkMeeting: boolean) => invoke('approvals:sameAs', companyId, approvalId, recordId, linkMeeting),
+  getAbsences: (companyId: string) => invoke('absences:get', companyId),
+  addAbsence: (companyId: string, input: AbsenceAddInput) => invoke('absences:add', companyId, input),
+  removeAbsence: (companyId: string, absenceId: string) => invoke('absences:remove', companyId, absenceId),
+  getWorkSwitches: (companyId: string) => invoke('workSwitches:get', companyId),
+  setWorkSwitch: (companyId: string, which: WorkSwitch, on: boolean) => invoke('workSwitches:set', companyId, which, on),
+  getViewers: (companyId: string, query: ViewersQuery) => invoke('viewers:get', companyId, query),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
+  getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
+  getTaskList: (companyId: string) => invoke('tasks:list', companyId),
+  createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),
+  actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),
+  getTaskCard: (companyId: string, recordId: string) => invoke('tasks:card', companyId, recordId),
+  getBundleChoices: (companyId: string) => invoke('tasks:bundles', companyId),
+  getTaskProposals: (companyId: string, meetingId: string) => invoke('tasks:proposals', companyId, meetingId),
+  getBundleKinds: (companyId: string) => invoke('tasks:bundleKinds', companyId),
+  linkFileToTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:linkFile', companyId, recordId, companyPath, expectedVersion),
+  unlinkFileFromTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:unlinkFile', companyId, recordId, companyPath, expectedVersion),
+  shareTask: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:share', companyId, recordId, folder, expectedVersion),
+  suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
+  retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),
+  reconcileTaskRun: (companyId: string, runId: string, key: string, done: boolean) => invoke('tasks:reconcile', companyId, runId, key, done),
+  createBundle: (companyId: string, input: BundleCreateInput) => invoke('tasks:createBundle', companyId, input),
+  linkRecordToRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:linkRecord', companyId, recordId, input),
+  unlinkRecordFromRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:unlinkRecord', companyId, recordId, input),
+  undoTaskAction: (companyId: string, recordId: string, version: number, expectedVersion: number) => invoke('tasks:undo', companyId, recordId, version, expectedVersion),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),
   getMinutesNotices: (companyId: string) => invoke('minutes:notices', companyId),
   skipMinutes: (companyId: string, minutesId: string) => invoke('minutes:skip', companyId, minutesId),
-  linkMinutesDeal: (companyId: string, minutesId: string, dealId: string) => invoke('minutes:linkDeal', companyId, minutesId, dealId),
+  linkMinutesBundle: (companyId: string, minutesId: string, bundleId: string) => invoke('minutes:linkBundle', companyId, minutesId, bundleId),
+  declineMinutesBundle: (companyId: string, minutesId: string) => invoke('minutes:noBundle', companyId, minutesId),
+  getMeetingBundleQuestion: (companyId: string, minutesId: string) => invoke('minutes:bundleQuestion', companyId, minutesId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),
+  getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
+  claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId, companyRoot),
+  settleAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:settle', companyId, recordId),
+  retryAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:retry', companyId, recordId),
+  watchNotifications: (companyId: string | null) => invoke('notifications:watch', companyId),
+  getNotificationsState: (companyId: string) => invoke('notifications:state', companyId),
+  markNotificationsRead: (companyId: string, ids: string[] | 'all') => invoke('notifications:markRead', companyId, ids),
+  getNotificationSettings: (companyId: string) => invoke('notifications:settings', companyId),
+  setNotificationSetting: (companyId: string, kind: string, on: boolean) => invoke('notifications:setSetting', companyId, kind, on),
+  onNotificationsChanged: callback => subscribe('notifications:changed', callback),
+  onNotificationsOpenTasks: callback => subscribe('notifications:openTasks', callback),
+  searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
+  findRecords: (companyId: string, text: string, today: string) => invoke('recordViews:find', companyId, text, today),
+  findRecordsHome: (companyId: string, today: string, from: string, to: string) => invoke('recordViews:findHome', companyId, today, from, to),
+  getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
+  getConsultationTopics: (companyId: string, recordIds: string[]) => invoke('recordViews:topics', companyId, recordIds),
+  getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),
   getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),
   updateOutboundMail: (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string) => invoke('outboundMail:update', companyId, messageId, edit, conversationId),
   addOutboundMailRecipient: (companyId: string, messageId: string, email: string, name?: string) => invoke('outboundMail:addRecipient', companyId, messageId, email, name),
-  sendOutboundMail: (companyId: string, messageId: string, hash: string) => invoke('outboundMail:send', companyId, messageId, hash),
+  sendOutboundMail: (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null) => invoke('outboundMail:send', companyId, messageId, hash, awaitReply),
   resolveOutboundMail: (companyId: string, messageId: string, sent: boolean) => invoke('outboundMail:resolve', companyId, messageId, sent),
   discardOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:discard', companyId, messageId),
   gitPreview: (repoPath: string) =>
@@ -162,16 +219,18 @@ const api: ElectronAPI = {
     invoke('git:commitFileDiff', repoPath, commitHash, filePath),
   gitListFiles: (repoPath: string, folderPath: string) =>
     invoke('git:listFiles', repoPath, folderPath),
+  gitUnsharedLargeFiles: (repoPath: string) =>
+    invoke('git:unsharedLargeFiles', repoPath),
   gitGrep: (repoPath: string, query: string, folderPath: string) =>
     invoke('git:grep', repoPath, query, folderPath),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>
     invoke('git:log', repoPath, folderPath, limit),
-  gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
-    invoke('git:showCommit', repoPath, commitHash, folderPath),
   gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) =>
     invoke('git:setupCompanyRemote', repoPath, companyId, selectedPaths),
   gitInspectCompanyFolder: (folder: string, companyId: string) =>
     invoke('git:inspectCompanyFolder', folder, companyId),
+  getMyDepartments: (companyId: string) => invoke('companySetup:myDepartments', companyId),
+  getDefaultParentFolder: () => invoke('companySetup:defaultParentFolder'),
   onSetupProgress: callback => subscribe('setup:progress', callback),
 
   // Sparse checkout
@@ -236,6 +295,9 @@ const api: ElectronAPI = {
   getServerUrl: () => invoke('config:getServerUrl'),
   setServerUrl: (url: string) => invoke('config:setServerUrl', url),
   validateServerUrl: (url: string) => invoke('config:validateServerUrl', url),
+  getAppLinkServerOffer: () => invoke('appLink:serverOffer'),
+  acceptAppLinkServer: () => invoke('appLink:acceptServer'),
+  dismissAppLinkServer: () => invoke('appLink:dismissServer'),
   getAgentEnvPassthrough: () => invoke('config:getAgentEnvPassthrough'),
   setAgentEnvPassthrough: (names: string[]) => invoke('config:setAgentEnvPassthrough', names),
 
@@ -292,6 +354,27 @@ const api: ElectronAPI = {
   onFileRequestedFromChatWindow: callback => subscribe('chatWindow:fileRequested', callback),
   onCloseRequested: callback => subscribe('app:closeRequested', callback),
   answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  getSlackStatus: (companyId: string) => invoke('slack:status', companyId),
+  connectSlack: (companyId: string, features: SlackFeature[]) => invoke('slack:connect', companyId, features),
+  disconnectSlack: (companyId: string) => invoke('slack:disconnect', companyId),
+  setSlackFeature: (companyId: string, feature: SlackFeature, on: boolean) => invoke('slack:setFeature', companyId, feature, on),
+  connectGoogleAll: (companyId: string) => invoke('google:connectAll', companyId),
+  markGoogleSeen: (companyId: string) => invoke('google:markSeen', companyId),
+  markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),
+  getRecordThread: (companyId: string, recordId: string) => invoke('threads:get', companyId, recordId),
+  callPluginBridge: (companyId: string, plugin: PluginPackageRef, op: string, args: unknown) => invoke('plugins:bridge', companyId, plugin, op, args),
+  getPluginScreens: (companyId: string) => invoke('plugins:screens', companyId),
+  onPluginsChanged: callback => subscribe('plugins:changed', callback),
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
+  listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
+  startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),
+  // lane C ▲
 }
 
 // The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).

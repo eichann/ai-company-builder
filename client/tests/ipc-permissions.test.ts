@@ -32,7 +32,8 @@ async function assertGuarded(ses: FakeSession) {
     assert.equal(ses.check(permission, appPage), false, `${permission} check from the app's page`)
   }
   // What the app uses, asked by any other page.
-  for (const page of ['https://example.com/', 'file:///Users/me/Downloads/dropped.html', 'blob:file:///0b6c', 'data:text/html,x']) {
+  // A plugin's screen (acb-plugin://, plugin-frame.md) is never the app: it gets nothing.
+  for (const page of ['https://example.com/', 'file:///Users/me/Downloads/dropped.html', 'blob:file:///0b6c', 'data:text/html,x', 'acb-plugin://planning/0.1.0/ui/index.html']) {
     assert.equal(await ses.request('clipboard-sanitized-write', page), false, page)
     assert.equal(ses.check('fullscreen', page), false, page)
   }

@@ -6,6 +6,9 @@ paths:
   - "server/src/adapters/sqlite/connectors.ts"
   - "server/src/services/google-client.ts"
   - "server/src/services/google-connector.ts"
+  - "server/src/services/google-mail.ts"
+  - "server/tests/integration/google-inbox.test.ts"
+  - "server/src/services/member-oauth.ts"
   - "server/src/routes/google.ts"
   - "server/src/routes/oauth.ts"
   - "server/tests/integration/google-connector.test.ts"
@@ -15,18 +18,32 @@ paths:
   - "client/src/features/settings/**/*oogle*"
   - "client/shared/google.ts"
   - "client/tests/google-connect.test.ts"
+  - "server/tests/integration/google-one-consent.test.ts"
+  - "client/src/features/settings/connectTools*.ts"
+  - "client/src/features/settings/components/ConnectToolsScreen.tsx"
+  - "client/src/features/settings/hooks/useConnectTools.ts"
+  - "client/tests/ui/connect-tools.spec.ts"
   - "admin/tests/integrations.test.tsx"
 ---
 
 # The Google connection (milestone 4 G3: 「Google で許可」)
 
 A member allows ACB to use part of their Google account (read their calendar and the Meet
-minutes; send mail they confirmed); the server holds that permission like a key and is the only
-place that talks to Google. Design: 節目4 設計案 §2-2 N1, §3-2, §3-8, §4-5, §4-6, §5-2, §9 q10.
+minutes; send mail they confirmed; read their received mail, 受信を読む); the server holds that permission like a key and is the only
+place that talks to Google. The member's grant, the pending start, the callback and the stops
+are the provider-neutral `services/member-oauth.ts` (`member-oauth.md`); Google is its first
+provider (`createGoogleConnector` registers the descriptor). Design: 節目4 設計案 §2-2 N1, §3-2, §3-8, §4-5, §4-6, §5-2, §9 q10.
 Owner decisions: the member allows it themselves; the Google account must be **the member's own
 ACB email** (case-insensitive), verified, in the company's Workspace domain (no private Gmail);
-ask only for what a feature needs, when first needed; never `drive.readonly`, `gmail.compose`,
-`gmail.readonly`, `gmail.metadata` or domain-wide delegation.
+ask only for the features the company turned on — all of them in one consent (「仕事の道具をつなぐ」,
+owner decision 2026-11-02, "One consent" below), a feature turned on later once more or when first
+used; never `drive`, `drive.readonly`,
+`gmail.compose`, `gmail.metadata`, `gmail.modify`, `https://mail.google.com/` or domain-wide
+delegation (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox` feature,
+off for a company until its admin turns it on (owner decisions 2026-11-01 / 11-02, spec §7-1; each company registers its own internal app, so no
+Google review). Drive (`drive.file` + Google Picker): `google-drive.md`. Google is a built-in
+core connector serving the roles 予定を読む / メールを読む・送る / 会議の記録を読む
+(`connector-roles.md`): the core services reach it only through the role ports.
 
 ## What is stored where (all behind the company handle, `connectors`)
 
@@ -34,14 +51,17 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
   broker's vault (`vault.sealConnector`, purpose `acb-google-client`, bound to the company), its
   last 4, the Workspace domain (lower case), `enabled`, created/updated/by.
 - `connector_grants` (per company, member, provider `google`): `grant_id` (new at every consent),
-  the Google account email, granted scopes (JSON, only `GOOGLE_ALLOWED_SCOPES`), the **refresh
-  token sealed** (purpose `acb-google-grant`, bound to the grant id) — `NULL` unless `active`
+  the Google account email, granted scopes (JSON, only `GOOGLE_ALLOWED_SCOPES`), `features_off`
+  (the member's own switches, enforced by `google-client.ts`: `member-oauth.md`), the **refresh token sealed** (purpose `acb-google-grant` =
+  `grantSealContext('google', …)`, bound to the grant id) — `NULL` unless `active`
   (CHECK) —, `status` active / revoked / stopped + reason, created / updated / `last_used_at`.
 - `oauth_pending`: a started 「Google で許可」 — only the **sha256 of the state**, the **PKCE
   verifier sealed** (purpose `acb-oauth-pending`), member, requested scopes, 10 minutes, single
   use (`DELETE … RETURNING`); a member's new start removes their earlier ones.
 - `connector_history`: every change (client, on/off, grant new / replaced / added, stopped,
   revoked, stop-all) as JSON without any secret.
+- `google_oauth_clients.picker_api_key` / `picker_app_id`: Google Picker's registration
+  (`google-drive.md`); `google_drive_picks` / `google_drive_puts` (Drive's picks and receipts).
 - The **access token** lives only in `google-client.ts`'s memory (per company, member and grant),
   until Google's expiry minus a minute and never more than 1 hour. It is dropped when a grant
   ends, the client or switch changes, or Google answers 401.
@@ -53,11 +73,56 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
 ## Scopes (`shared/core/google.ts`)
 
 `minutes` (予定と議事録を読む) = `calendar.events.readonly`, `meetings.space.readonly`,
-`drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; both with `openid email`.
+`drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
+= `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
-`normalizeGrantedScopes` (Google's report → allowed long forms only).
+`normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeatureOfScope`
+(each feature scope belongs to one feature), `googleFeaturesOff`.
 
-## Routes (`routes/google.ts`, `routes/oauth.ts` → `services/google-connector.ts`)
+## One consent (「仕事の道具をつなぐ」, owner decision 2026-11-02)
+
+- **Company features**: the admin's per-feature switch (`PUT /google/features`, history
+  `features`) over each feature's default: 予定と議事録 and メールを送る are on until turned off
+  (`GOOGLE_COMPANY_DEFAULT_OFF` is empty). Stored as `google_oauth_clients.features_off`
+  (default-on features turned off) and `features_on` (default-off features turned on), both JSON
+  default `[]` (`migrateGoogleCompanyFeatures`, lane A), so a company that never chose keeps the
+  defaults (`googleCompanyFeatureOn`, `googleCompanySwitched`).
+- **受信を読む (`inbox`) is not a Google switch** (owner decision 2026-11-02, `tasks.md` "Each
+  member's switches"): the company's switch is the task settings' `readIncoming.allowed`
+  (default allowed; `PUT /google/features { feature: 'inbox' }` writes it, history line kept —
+  the same switch also covers Slack's reading), and each member has their own (default off;
+  `PUT /me/google/features { feature: 'inbox' }` writes it). Before 2026-11-02 the company
+  switch was Google's own and off until the admin turned it on; a stored `features_on: ['inbox']`
+  is no longer read.
+- What the company offers = `googleCompanyFeatures` (every feature on, Drive only with the
+  Picker registered); what **a member** is offered = `googleMemberFeatures`: 受信を読む only while
+  their own 受信を読む is on (`MyGoogle.companyFeatures`, `{ all }`, 「あとで」). The admin
+  view's `featuresOff` lists every feature off for the company, the defaults included. A feature off is **never asked** (also not one the member
+  allowed before: `googleFeaturesToAsk` = asked ∩ offered ∪ granted ∩ offered — granted ∩ the
+  company's offer, so a member's 受信を読む switched off keeps its scope over a re-consent) and its calls are
+  refused from the next one (`google-client.ts` `scopeStop` → `off`, before anything leaves);
+  members' grants keep the scope until they re-consent or stop. Asking 受信を読む by name
+  (`{ features: ['inbox'] }`, an older app's 「受信を読む許可も足す」) is the member's own choice: their
+  受信を読む turns on.
+- `POST /me/google/connect { all: true }` asks the union of what the company offers in one
+  consent (incremental, `include_granted_scopes`) and marks it **seen**; `{ features }` (asked when
+  first used: Drive's Picker, a mail card) still works for offered features only (409
+  `GOOGLE_FEATURE_COMPANY_OFF`).
+- **Seen** (`connector_setup_seen`, per company, member, provider; `ConnectorRepository.setupSeen`
+  / `addSetupSeen`): the features the app's screen already showed — connected, unticked on
+  Google's page or 「あとで」 (`PUT /me/google/seen`, Slack: `PUT /me/slack/seen`). Kept across
+  「許可をやめる」. `MyGoogle.companyFeatures` / `seen` carry both; the screen opens by itself only
+  for an offered feature neither granted nor seen, so a member who unticks scopes is told once
+  and never asked in a loop.
+- App: `ConnectToolsScreen.tsx` (first run from `app/AppDialogs.tsx`, and 設定 →「仕事の道具をつなぐ」),
+  rules in `features/settings/connectTools.ts` (`connectToolsOffer` decided once at load and kept
+  while the member connects; `connectToolsView`; `googleDeclinedText`), `hooks/useConnectTools.ts`.
+  IPC (lane A): `google:connectAll`, `google:markSeen`, `slack:markSeen`; Slack's button reuses
+  `slack:connect` with `SLACK_SETUP_FEATURES` (`read`, `notices`) and shows only when the company
+  registered Slack. Words: what each connection lets the member do (`TOOL_GOOGLE_TEXT`), no
+  OAuth / scope / token.
+
+## Routes (`routes/google.ts` → `services/google-connector.ts`; `routes/oauth.ts` → `services/member-oauth.ts`)
 
 - Owner/admin, `/api/companies/:id`: `GET /google` (`GoogleAdminView`: configured, client id,
   secret last 4, domain, enabled, the **redirect URI** `<PUBLIC_URL>/api/oauth/google/callback`
@@ -66,15 +131,20 @@ ask only for what a feature needs, when first needed; never `drive.readonly`, `g
   required the first time; left out = kept; who → body → vault (503 `BROKER_OFF`) → practice
   (400 `REAL_KEY_ON_PRACTICE`); a changed client id or domain ends every grant as `revoked`
   `client-changed`); `PUT /google/enabled { enabled }` (404 `NOT_CONFIGURED` before a client);
+  `PUT /google/features { feature, on }` (company-level switch, "One consent");
   `DELETE /google/grants/:userId` (revoke at Google, then `stopped` `admin`; another company's
   member → 404 like a missing one, `CROSS` row). Errors other than the role check are Japanese.
 - Any member: `GET /me/google` (`MyGoogle`: available + reason `not-configured` / `off` /
-  `vault-off` / `operator-stopped`, connected, status, Google email, features, domain, practice);
-  `POST /me/google/connect { features }` → `{ authorizeUrl, expiresAt }` (409
-  `GOOGLE_UNAVAILABLE` + reason); `DELETE /me/google` 「許可をやめる」 (revoke at Google — best
+  `vault-off` / `operator-stopped`, connected, status, Google email, features, `featuresOff`, domain, practice);
+  `PUT /me/google/features { feature, on }` — the member turns one allowed feature off / on (400
+  bad body; 409 `GOOGLE_NOT_CONNECTED` without an active grant, `GOOGLE_FEATURE_NOT_GRANTED` for a
+  feature not allowed);
+  `POST /me/google/connect { features } | { all: true }` → `{ authorizeUrl, expiresAt }` (409
+  `GOOGLE_UNAVAILABLE` + reason, `GOOGLE_FEATURE_COMPANY_OFF`); `PUT /me/google/seen` (「あとで」); `DELETE /me/google` 「許可をやめる」 (revoke at Google — best
   effort —, then the row is deleted; always 200).
-- Public `GET /api/oauth/google/callback?code&state[&error]` (listed in `auth-guards.test.ts`;
-  matrix row: 400 for everyone without a state). Answers a small Japanese page (one sentence,
+- Public `GET /api/oauth/google/callback?code&state[&error]` — the `google` case of
+  `/api/oauth/:provider/callback` (listed in `auth-guards.test.ts`; matrix row: 400 for everyone
+  without a state). This exact path is each company's registered redirect URI: never move it. Answers a small Japanese page (one sentence,
   `no-store`, `no-referrer`, a strict CSP), 200 「許可しました。アプリに戻ってください。」 or 400 with
   a plain refusal; never a secret, nobody's email. The request log prints no query.
 
@@ -86,17 +156,17 @@ base64url of its sha256), `access_type=offline`, `include_granted_scopes=true`, 
 `login_hint` = the member's ACB email, and `prompt=consent` **only when the member has no active
 grant** (a refresh token comes only with a consent).
 
-## The callback (`googleConnector.callback`)
+## The callback (`memberOAuth.callback('google', …)` with Google's descriptor)
 
 1. The state must be `<companyId>.<64 hex>`; the company's handle is opened from it and the
    pending row is taken **inside that company only** by the sha256 of the whole state (the
-   company is inside the hashed value too). Another company's state, a forged, reused or expired
+   company is inside the hashed value too), and must be a `google` start. Another company's state, a forged, reused or expired
    one → 「この許可の手続きは使えません…」, nothing stored. Google's `error` → 「Google で許可され
    ませんでした」.
 2. Switches (operator stop file, client present and on, vault) and membership again.
 3. The code is exchanged with the verifier (`client_secret_post`); userinfo
-   (`www.googleapis.com/oauth2/v3/userinfo`): `email_verified`, `hd` = domain and the email's
-   domain = domain, the email = the member's ACB email (`sameEmail` → `normalizeEmail`). Any
+   (`www.googleapis.com/oauth2/v3/userinfo`, the descriptor's `identify`): `email_verified`,
+   `hd` = domain and the email's domain = domain; then (member-oauth) the email = the member's ACB email (`sameEmail` → `normalizeEmail`). Any
    refusal revokes the tokens Google just issued and stores nothing.
 4. A refresh token → a new grant (`putGrant`, new `grant_id`). None (incremental consent) → the
    stored token is kept and only the scopes change; with no active grant → refused.
@@ -108,7 +178,7 @@ grant** (a refresh token comes only with a consent).
 ## `google-client.ts`: the one place that talks to Google
 
 `googleClient.request(companyId, userId, { api: 'calendar'|'meet'|'drive'|'gmail', method, path,
-query?, body?, scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
+query?, body?, rawBody? (Drive's multipart upload), binary? (an answer's bytes), scope, operation })` → `{ ok: true, status, json, text }` (`text` when the answer
 is not JSON, e.g. Drive export) or `{ ok: false, kind: 'not-sent'|'refused'|'rate-limited'|
 'server-error'|'unknown', reason, status?, googleReason? }`. `googleReason` is Google's short code
 only (never its message). Hosts: calendar / drive / userinfo `www.googleapis.com`, meet
@@ -116,7 +186,9 @@ only (never its message). Hosts: calendar / drive / userinfo `www.googleapis.com
 through the key broker's `UpstreamClient` (address checks, no redirects). Before every attempt,
 in order: operator stop file (`<PLUGINS_DIR>/stopped` with `google` or `*`) → client present →
 on → vault → still a member → grant (`no-grant` / `grant-revoked` / `grant-stopped`) → scope
-granted (`scope-not-granted`) → access token (refresh; `invalid_grant` → the grant becomes
+granted (`scope-not-granted`) → the scope's feature not turned off by the member
+(`feature-off`, `connector_grants.features_off`; also for the Picker's token; for `gmail.readonly`
+the company's 受信を読む → `off` and the member's own → `feature-off`, `readIncoming` dep) → access token (refresh; `invalid_grant` → the grant becomes
 `revoked` `invalid_grant`, only if it is still that grant). A 401 drops the access token and
 retries once. Reads (GET) retry 429 / 5xx / failures before sending (1 s, 2 s, Retry-After ≤
 10 s; 2 retries); **writes are never retried** — an answer lost after sending is `unknown`
@@ -128,10 +200,37 @@ emergency stop (M2) is not checked here: callers decide (a person's send passes,
 ## Stops (each from the next call; test 「every stop works from the next call」)
 
 Company switch off · admin 「止める」 one member · 「すべての鍵を止める」 (`POST /broker/stop-all`
-→ `keyBroker` `onStopAll` → every active grant `stopped` at once, tokens cleared, revoked at
+→ `keyBroker` `onStopAll` → `memberOAuth.stopAll`: every active grant of every provider `stopped` at once, tokens cleared, revoked at
 Google in the background) · the member's 「許可をやめる」 · the operator's stop file · the member
 removed · Google refusing the token. A stopped / revoked grant is resumed only by the member's
 「Google で許可」 again.
+
+`pickerToken(companyId, userId)`: the Picker's own `drive.file`-only token (`google-drive.md`),
+after the same switches and the grant's `drive.file`.
+
+Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`), Drive
+(`google-drive.md`) and
+「今日の予定」 (`calendar.md`, `services/google-calendar.ts`: `calendar.events.list` of `primary`
+for today; no answer is an error there — a stop becomes an empty list with a reason) — all but
+Drive through the role ports (`connector-roles.md`).
+
+## Gmail (`services/google-mail.ts`: the role メールを読む・送る)
+
+- **Read** (`inbox`, `gmail.readonly`, off for a company until its admin turns it on; `MailReader`): `listMessages(companyId, userId, { afterMs,
+  pageToken?, max? ≤ 50 })` → `users/me/messages?q=after:<seconds>&labelIds=INBOX`, then each
+  message's `format=metadata` (From, To, Cc, Subject, Date, Message-ID, In-Reply-To, List-Id,
+  List-Unsubscribe, Precedence, Auto-Submitted, X-Autoreply) → `MailSummary` (addresses lower
+  case, RFC 2047 subjects decoded, `bulk` = a list / newsletter or the promotions / social /
+  forums category, `automated`); `getMessage` → `format=full`, the first text/plain part (else
+  the HTML's text), decoded by its charset (ISO-2022-JP too), NFC, at most 20,000 characters;
+  `getThread` → `users/me/threads/<id>?format=full` (the card's 元のスレッド: the newest 20, 8,000
+  characters each).
+  Only `users/me`. **Nothing stored, nothing of a message logged** (the client's action-log line
+  names `gmail.messages.list` / `.get` only). Failures: `not-connected`, `turned-off`, `stopped`,
+  `not-found`, `unavailable`.
+- **Send** (`mail`, `gmail.send`; `MailSender`): `senderAccount` (the active grant with
+  `gmail.send` and `mail` not off → the Google email; else `consent-needed` / `turned-off`) and
+  `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`).
 
 ## Practice Google (staging)
 
@@ -151,7 +250,7 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
 - Admin 「つなぎ先」→「Google」 (`admin/src/app/companies/[id]/integrations/google.tsx`, owners /
   admins): the redirect URI with 「コピー」, クライアント ID, クライアント シークレット (password
   field, sent once, placeholder shows the last 4; empty = keep), 社内のドメイン, 「Google の設定を
-  保存」, 「オンにする / オフにする」, the practice / operator / vault notices, 「メンバーの許可（読む
+  保存」, 「オンにする / オフにする」, the practice / operator / vault notices, 「会社で使うもの」 (one 「オフにする / オンにする」 per feature; Drive notes it needs the Picker), 「メンバーの許可（読む
   もの・送るもの）」 with 「止める」 (confirmation). Words: 「Google で許可」, 予定と議事録を読む /
   メールを送る — no OAuth, scope, token or plugin on screen.
 - App 設定 →「Google」 (tab after 「自分の鍵」 in 「AI と連携」:
@@ -164,8 +263,11 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
   system browser through the shell's `openExternal` only when it is
   `https://accounts.google.com/o/oauth2/v2/auth` (or the practice Google on `127.0.0.1` /
   `localhost` / `[::1]`, same path: `isGoogleSignInUrl`) and **never returns the URL** to the
-  renderer. There is no Google token on the client at all. Shows the account and
-  予定と議事録を読む / メールを送る; 「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail),
+  renderer. The only Google token on the client is Google Picker's: `drive.file` only, fetched
+  by main with the session and handed to the Picker's own window, never stored
+  (`google-drive.md`). Shows the account and
+  予定と議事録を読む / メールを送る / 受信を読む (「（オフにしています）」 when the member turned one off);
+  「Google で許可」 (minutes), 「メールを送る許可も足す」 (mail), 「受信を読む許可も足す」 (inbox; both only when the company offers them),
   「許可をやめる」 (confirmation); after opening the browser 「ブラウザで Google の画面を開きました。
   許可したらこの画面に戻ってください。」 and a check every 3 s for up to 2 minutes. The first status
   load runs from a callback ref (the `useEffect` cap of `architecture-boundaries.test.ts`). Test:
@@ -175,6 +277,23 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
 
 ## Tests
 
+`server/tests/integration/google-one-consent.test.ts` (「仕事の道具をつなぐ」: 受信を読む allowed by
+default and the company's one switch (task settings), off and on again; offered to a member only
+with their own on; `{ all }` asks exactly
+the company's features, Drive only with the Picker; a company-off feature never asked — by name or
+as one granted before — and its calls refused before anything leaves; scopes unticked on Google's
+page kept out, seen, not asked again; 「あとで」; a company without Google records nothing),
+mutation-checked: the company check in `scopeStop`, `googleFeaturesToAsk`'s company filter, the
+Picker condition. App: `client/src/features/settings/connectTools.test.ts` (opens only for what is
+new, never again once shown, only the new ones later, declined text; mutation-checked: the seen
+filter), `client/tests/ui/connect-tools.spec.ts` (preview `tests/connect-tools-ui.html?state=
+first|new|seen|noslack|settings`), `client/tests/google-connect.test.ts` (connectAll opens only
+the sign-in page). Also `admin/tests/integrations.test.tsx` 「会社で使うもの」.
+`server/tests/integration/google-inbox.test.ts` (受信を読む asked only when first needed (turning
+the member's own on), never in the one consent while it is off, never while the company does not
+allow it, and nothing wider; only the member's own mailbox, Japanese mail decoded, nothing stored or logged;
+the member's switch refuses the next call before anything leaves while the rest works, survives
+a re-consent; メールを送る off; 「つないでいるサービス」), mutation-checked: the `feature-off` check.
 `server/tests/integration/google-connector.test.ts` against the fake Google through the practice
 redirect: who manages the client; a real secret refused in practice mode and one saved earlier
 never sent; the authorization request (PKCE S256, offline, consent only when needed, hd,

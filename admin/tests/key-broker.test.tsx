@@ -6,15 +6,16 @@
 // safe header, its keys going only there, that one switch per built-in service
 // allows own keys without typing a host, that the page says how a saved key's
 // check went (and that a refused key was not saved) without ever showing it, a
-// generic service's check path is a plain path, and what the page says when
-// the server has no key-encryption key.
+// generic service's check path is a plain path, which company key a service
+// uses when several exist (「このサービスは、この鍵を使う」), and what the page
+// says when the server has no key-encryption key.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
-import ApiKeysPage from '@/app/companies/[id]/api-keys/page'
-import { NAV_ITEMS } from '@/components/app/app-shell'
+import ApiKeysPage from '@/app/companies/[id]/advanced/ai-safety/keys/page'
+import { ADVANCED_ITEM } from '@/components/app/app-shell'
 import type { BrokerKeySummary, BrokerView, Capabilities } from '@/lib/api'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -29,9 +30,9 @@ vi.mock('next/navigation', () => ({
 const FAKE = 'fake-test-key-NOT-REAL-admin-0123456789'
 
 const services: BrokerView['services'] = [
-  { service: 'gemini', label: 'Google Gemini', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['generativelanguage.googleapis.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
-  { service: 'openai', label: 'OpenAI', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.openai.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
-  { service: 'hubspot', label: 'HubSpot', builtin: true, category: 'system', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
+  { service: 'gemini', label: 'Google Gemini', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['generativelanguage.googleapis.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, defaultKeyId: null, practice: false },
+  { service: 'openai', label: 'OpenAI', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.openai.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, defaultKeyId: null, practice: false },
+  { service: 'hubspot', label: 'HubSpot', builtin: true, category: 'system', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, defaultKeyId: null, practice: false },
 ]
 
 const view: BrokerView = {
@@ -72,10 +73,9 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
 
 describe('API キー', () => {
   it('is in the menu for owners and admins only, and a member never loads the keys', async () => {
-    const item = NAV_ITEMS.find((i) => i.segment === 'api-keys')!
-    expect(item.label).toBe('API キー')
-    expect(item.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
-    expect(item.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
+    // In the menu only through 「詳しい設定」 (owners and admins).
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
     const calls = stubApi(managerCapabilities)
     renderInCompany(<ApiKeysPage />)
     expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()
@@ -329,6 +329,35 @@ describe('API キー', () => {
       expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
     }
     expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  it('with two company keys for a service the admin chooses which one it uses: only { keyId } is sent; one key needs no choice', async () => {
+    const second: BrokerKeySummary = { ...stored, id: 'k2', displayName: '予備の Gemini', last4: 'ZZ99' }
+    const stopped: BrokerKeySummary = { ...stored, id: 'k3', displayName: '止めた Gemini', last4: 'YY88', status: 'disabled' }
+    const two = { ...view, keys: [stored, second, stopped] }
+    const chosen = { ...two, services: services.map((s) => (s.service === 'gemini' ? { ...s, defaultKeyId: 'k2' } : s)) }
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/broker`]: { body: ok(two) },
+      [`PUT ${base}/broker/services/gemini/default-key`]: () => ({ body: ok(chosen) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    const select = await screen.findByRole('combobox', { name: 'Google Gemini は、この鍵を使う' })
+    // Nothing chosen: the page says the AI cannot use the company key until the admin chooses.
+    expect(screen.getByRole('alert')).toHaveTextContent('どの鍵を使うか選んでください')
+    // A stopped key cannot be chosen.
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['選んでいない', `営業用 Gemini（…${FAKE.slice(-4)}）`, '予備の Gemini（…ZZ99）'])
+    await userEvent.selectOptions(select, 'k2')
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ keyId: 'k2' })
+    await waitFor(() => expect(screen.queryByText(/どの鍵を使うか選んでください/)).not.toBeInTheDocument())
+    expect(document.body.innerHTML).not.toContain(FAKE)
+  })
+
+  it('a service with one company key shows no choice', async () => {
+    stubApi(ownerCapabilities, { [`GET ${base}/broker`]: { body: ok({ ...view, keys: [stored] }) } })
+    renderInCompany(<ApiKeysPage />)
+    expect(await screen.findByText('営業用 Gemini')).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: /この鍵を使う/ })).not.toBeInTheDocument()
   })
 
   it('without a key-encryption key on the server: says so and offers no registration', async () => {

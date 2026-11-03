@@ -23,6 +23,34 @@ export const COMMANDS = defineCommands([
       minutesId: z.string().regex(/^minutes-[0-9a-z]{6,32}$/).optional()
         .describe('The minutes record it reads (「<件名> のあと」): kept with the conversation; only an agent with record actions starts it'),
       pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+      pluginStep: z.object({
+        recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/),
+        pluginId: z.string().regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/).max(40),
+        step: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+      }).optional()
+        .describe('A business plugin\'s person step it was started from (plugin-steps.md): its AI\'s plugin power stays that step\'s'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
+    // 「相談する」 on a record: opens the member's most recent consultation about it, else starts one
+    // with it as the main topic, whose first message has the AI read the record (outbound).
+    id: 'chat.consultAbout', title: 'この件について相談する', class: 'outbound',
+    args: z.object({
+      recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/).describe('The record the consultation is about'),
+      title: z.string().min(1).max(300).describe('The record\'s title, for the new consultation\'s title and first message'),
+      fresh: z.boolean().optional().describe('「＋新しい相談」: start a new one even when one about it exists'),
+      purpose: z.enum(['nudge']).optional().describe('Why it is started: `nudge` = ［催促の下書きを作る］ (always a new one; the AI drafts, never sends)'),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
+    // A consultation listed in a record's 「つながっているもの」: shows it in the chat pane.
+    id: 'chat.openConsultation', title: '相談を開く', class: 'view',
+    args: z.object({
+      sessionId: z.string().min(1).describe('The consultation (conversation id)'),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
     }),
     target: { arg: 'pane', area: 'chat' },
   },
@@ -60,6 +88,11 @@ export const COMMANDS = defineCommands([
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),
   },
   {
+    // Shows a record's card in the editor area (files tab), as a place ← → can return to.
+    id: 'record.open', title: '記録のカードを開く', class: 'view',
+    args: z.object({ recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/) }),
+  },
+  {
     // Runs an action of a record's type through the server's state engine
     // (records.md). It changes shared state and tells the person it names,
     // hence outbound. The member's own screens call it with their session; the
@@ -72,7 +105,10 @@ export const COMMANDS = defineCommands([
       action: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
       expectedVersion: z.number().int().min(0).describe('The record version the member saw'),
       note: z.string().max(2000).optional(),
-      args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+      // A tags argument (set_tags) is a list of short words.
+      args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.string().max(40)).max(20)])).optional(),
+      // Record links the action sets (its definition's `links`: a task's bundle).
+      links: z.record(z.string(), z.union([z.string().max(80), z.array(z.string().max(80)).max(50), z.null()])).optional(),
       // Whose OK it was, for an action the member does through `ok_from` (the assignee completing a task).
       ok: z.object({ by: z.string().max(200).optional(), note: z.string().max(500).optional() }).strict().optional(),
       // The member confirms what their AI suggested in a consultation: informational provenance for the ledger.
@@ -85,13 +121,18 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
   },
   {
-    // The 「ファイルを探す」 dialog (search by file name).
+    // 探す ⌘K: open anything by its name (やること, 案件, ファイル…) — the same window as ⌘P.
+    id: 'find.byName', title: '名前で探して開く', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+k', area: 'app' },
+  },
+  {
+    // ⌘P, kept for members used to it: the same 探す window.
     id: 'file.search', title: 'ファイルを名前で探す', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
   },
   {
-    // The left panel's 検索 tab, with the cursor in its box.
-    id: 'search.show', title: '検索を開く', class: 'view',
+    // The left panel's 探す tab, with the cursor in its box.
+    id: 'search.show', title: '探すを開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },
   },
   {

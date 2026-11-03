@@ -1,4 +1,4 @@
-import type { ApprovalState, ApprovalView } from '../../shared/types/approvals'
+import type { ApprovalState, ApprovalView, SameAsResult } from '../../shared/types/approvals'
 
 /**
  * The chat's approval card (承認のお願い, milestone 4 G6, `.claude/rules/approvals.md`).
@@ -40,7 +40,7 @@ export const APPROVALS_OFFLINE_TEXT = 'サーバーに接続できないため�
 
 /** The answer of the card's IPC calls (`approvals:*`), made with the member's session in main. */
 export type ApprovalResult =
-  | { success: true; approval: ApprovalView; names: Record<string, string> }
+  | { success: true; approval: ApprovalView; names: Record<string, string>; meeting?: SameAsResult['meeting'] }
   | { success: false; offline: boolean; code: string | null; error: string; approval?: ApprovalView; names?: Record<string, string> }
 
 /** A member by name (from the app's member list), else a neutral word — never an id on screen. */
@@ -57,7 +57,7 @@ export function percentText(p: number | null): string | null {
 export function stateLine(v: ApprovalView, names: Record<string, string>): string {
   const first = v.changes[0]
   switch (v.state as ApprovalState) {
-    case 'pending': return `承認待ち：${nameOf(names, v.approver)}さんにお願いしました`
+    case 'pending': return `${nameOf(names, v.approver)}さんの承認待ち`
     case 'approved': return first
       ? `承認されました。${v.systemLabel} の${first.label}も ${first.afterShown} になりました`
       : `承認されました。${v.systemLabel} に反映しました`
@@ -68,9 +68,16 @@ export function stateLine(v: ApprovalView, names: Record<string, string>): strin
   }
 }
 
+/** Who decided: 「Aさん」, or as a delegate 「Aさん（代わりに承認・本来は Bさん）」. */
+export function outcomeByText(outcome: Pick<NonNullable<ApprovalView['outcome']>, 'by' | 'onBehalfOf'>, names: Record<string, string>): string {
+  const by = `${nameOf(names, outcome.by)}さん`
+  return outcome.onBehalfOf ? `${by}（代わりに承認・本来は ${nameOf(names, outcome.onBehalfOf)}さん）` : by
+}
+
 /** The ids a view names (for the names lookup). */
 export function namedMembers(v: ApprovalView): string[] {
-  return [...new Set([v.requestedBy, v.approver, v.outcome?.by].filter((x): x is string => typeof x === 'string' && x.length > 0))]
+  return [...new Set([v.requestedBy, v.approver, v.outcome?.by, v.outcome?.onBehalfOf, ...(v.similar?.items.map(x => x.assignee) ?? [])]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0))]
 }
 
 /** What the AI is told when its request became an approval request (it must not claim the change happened). */

@@ -39,8 +39,14 @@ export class FakeWebContents extends EventEmitter {
   loaded: string | null = null
   /** loadFile's options (the consultation window's `?window=chat`). */
   loadOptions: unknown = undefined
-  windowOpenHandler: (() => unknown) | null = null
-  setWindowOpenHandler(handler: () => unknown): void { this.windowOpenHandler = handler }
+  windowOpenHandler: ((details: { url: string }) => unknown) | null = null
+  setWindowOpenHandler(handler: (details: { url: string }) => unknown): void { this.windowOpenHandler = handler }
+  /** Like Chromium before a navigation: true when a 'will-navigate' listener prevented it. */
+  navigate(url: string): boolean {
+    let prevented = false
+    this.emit('will-navigate', { url, preventDefault: () => { prevented = true } })
+    return prevented
+  }
   send(channel: string, ...args: unknown[]): void { this.sent.push({ channel, args }) }
   isDestroyed(): boolean { return this.destroyed }
   startDrag(item: unknown): void { this.drags.push(item) }
@@ -127,6 +133,7 @@ const readyPromise = new Promise<void>(resolve => { fake.ready = resolve })
 export const app = {
   isPackaged: false,
   requestSingleInstanceLock: () => true,
+  setAsDefaultProtocolClient: () => true,
   quit: () => { throw new Error('app.quit() called under test') },
   on: (event: string, fn: (...args: unknown[]) => void) => { appEvents.on(event, fn); return app },
   emit: (event: string, ...args: unknown[]) => appEvents.emit(event, ...args),
@@ -165,6 +172,14 @@ export const net = {
       return new Response('not found', { status: 404 })
     }
   },
+}
+
+/** Desktop notifications: recorded (title, body) instead of shown. */
+export class Notification extends EventEmitter {
+  static shown: Array<{ title: string; body: string }> = []
+  static isSupported() { return true }
+  constructor(private readonly options: { title: string; body: string }) { super() }
+  show() { Notification.shown.push({ title: this.options.title, body: this.options.body }) }
 }
 
 export const nativeImage = {
@@ -238,5 +253,5 @@ export const ipcRenderer = {
 }
 
 export default {
-  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, session, systemPreferences, contextBridge, ipcRenderer, screen,
+  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, Notification, session, systemPreferences, contextBridge, ipcRenderer, screen,
 }

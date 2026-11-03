@@ -29,7 +29,7 @@ test('a member cannot choose 非公開; a manager gets the viewers list with the
   await page.getByRole('button', { name: '新しいフォルダ…' }).click()
   const dialog = page.getByRole('dialog', { name: '新しいフォルダ' })
   await expect(dialog.getByRole('radio', { name: '非公開' })).toBeDisabled()
-  await expect(dialog.getByText('非公開のフォルダは、管理者か部署の責任者が作れます')).toBeVisible()
+  await expect(dialog.getByText('非公開のフォルダは、管理者か部署の管理役が作れます')).toBeVisible()
 
   await openPreview(page, 'private-folders')
   await page.getByRole('button', { name: '新しいフォルダ…' }).click()

@@ -3,7 +3,7 @@
 import { memo, useState } from 'react'
 import { CheckCircle, EnvelopeSimple, LinkSimple, Robot, Warning } from '@phosphor-icons/react'
 import {
-  MAIL_STATE_LABELS, MAIL_WORDS, recipientLine, type MailDraftCard as Card, type OutboundMailResult,
+  MAIL_STATE_LABELS, MAIL_WORDS, awaitDayLabel, recipientLine, type MailDraftCard as Card, type OutboundMailResult,
 } from '../../../../shared/outbound-mail'
 import type { MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
 import { mailOutbound, type MailOutbound } from '../api'
@@ -36,6 +36,16 @@ function RecipientList({ label, list }: { label: string; list: MailRecipientView
 
 /** From, To / CC with where each address came from, the subject and the whole body. */
 function MailContent({ draft }: { draft: OutboundMailView }) {
+  if (draft.channel === 'slack') {
+    return (
+      <div className="mt-2">
+        <p className="text-xs text-gray-500 dark:text-zinc-400">{MAIL_WORDS.slackWhere}</p>
+        {draft.body !== null
+          ? <pre aria-label="本文" className="mt-1 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2 font-sans text-xs text-gray-800 dark:bg-zinc-900 dark:text-zinc-200">{draft.body}</pre>
+          : <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{MAIL_WORDS.bodyDeleted}</p>}
+      </div>
+    )
+  }
   return (
     <div className="mt-2">
       <p className="text-xs"><span className="text-gray-500 dark:text-zinc-400">差出人：</span>{draft.from}</p>
@@ -48,6 +58,12 @@ function MailContent({ draft }: { draft: OutboundMailView }) {
       {draft.linkCount > 0 && <p className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400"><LinkSimple size={12} aria-hidden />{MAIL_WORDS.links(draft.linkCount)}</p>}
     </div>
   )
+}
+
+/** Today on this PC's calendar (`YYYY-MM-DD`): the date picker's first day. */
+function localDay(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /**
@@ -68,6 +84,9 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
   const [to, setTo] = useState<string[]>([])
   const [cc, setCc] = useState<string[]>([])
   const [typed, setTyped] = useState('')
+  // Confirm step: 「返事を待つ」 (a new mail only), pre-ticked when the AI marked the draft.
+  const [awaitOn, setAwaitOn] = useState(false)
+  const [awaitDay, setAwaitDay] = useState('')
 
   const run = async (fn: () => Promise<OutboundMailResult>, onOk: (r: Extract<OutboundMailResult, { success: true }>) => void) => {
     if (busy) return
@@ -85,14 +104,15 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     }
   }
 
-  const startEdit = () => run(() => outbound.getOutboundMailRecipients(card.companyId, draft.id), r => {
+  const slack = draft.channel === 'slack'
+  const startEdit = () => (slack ? Promise.resolve().then(() => { setBody(draft.body ?? ''); setStep('edit') }) : run(() => outbound.getOutboundMailRecipients(card.companyId, draft.id), r => {
     setChoices(r.recipients?.recipients ?? [])
     setTo(draft.to.map(x => x.ref))
     setCc(draft.cc.map(x => x.ref))
     setSubject(draft.subject)
     setBody(draft.body ?? '')
     setStep('edit')
-  })
+  }))
   const addTyped = () => run(() => outbound.addOutboundMailRecipient(card.companyId, draft.id, typed.trim()), r => {
     if (r.recipient) {
       const added = r.recipient
@@ -101,15 +121,27 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     }
     setTyped('')
   })
-  const save = () => run(() => outbound.updateOutboundMail(card.companyId, draft.id, { expectedVersion: draft.version, toRefs: to, ccRefs: cc, subject, body }, card.conversationId ?? undefined), r => {
+  // A Slack reply has a body only (it goes into its thread).
+  const edit = slack ? { expectedVersion: draft.version, body } : { expectedVersion: draft.version, toRefs: to, ccRefs: cc, subject, body }
+  const save = () => run(() => outbound.updateOutboundMail(card.companyId, draft.id, edit, card.conversationId ?? undefined), r => {
     setDraft(r.draft)
     setStep('view')
     setNotice({ tone: 'ok', text: '下書きを保存しました。' })
   })
-  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash), r => {
+  const offer = !slack && draft.awaitReply ? draft.awaitReply : null
+  const today = localDay()
+  const startConfirm = () => {
+    setNotice(null)
+    setAwaitOn(offer?.expected === true)
+    // A card shown again days later: a default already past is not offered (the member picks a day).
+    setAwaitDay(offer && offer.defaultUntil >= today ? offer.defaultUntil : '')
+    setStep('confirm')
+  }
+  const waitChoice = offer && awaitOn ? { until: awaitDay } : null
+  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash, waitChoice), r => {
     setDraft(r.draft)
     setStep('view')
-    setNotice(r.outcome === 'unknown' ? { tone: 'warn', text: r.message ?? MAIL_WORDS.unknown } : { tone: 'ok', text: 'メールを送りました。' })
+    setNotice(r.outcome === 'unknown' ? { tone: 'warn', text: r.message ?? MAIL_WORDS.unknown } : { tone: 'ok', text: slack ? MAIL_WORDS.slackSent : 'メールを送りました。' })
   })
   const resolve = (sent: boolean) => run(() => outbound.resolveOutboundMail(card.companyId, draft.id, sent), r => {
     setDraft(r.draft)
@@ -128,10 +160,10 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
   }
 
   const toggle = (list: string[], set: (v: string[]) => void, ref: string) => set(list.includes(ref) ? list.filter(r => r !== ref) : [...list, ref])
-  const heading = draft.state === 'draft' ? 'メールの下書き' : MAIL_STATE_LABELS[draft.state]
+  const heading = draft.state === 'draft' ? (slack ? MAIL_WORDS.slackDraft : 'メールの下書き') : MAIL_STATE_LABELS[draft.state]
 
   return (
-    <div role="group" aria-label={`メール：${draft.subject}`} data-state={draft.state} className="my-2 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
+    <div role="group" aria-label={slack ? MAIL_WORDS.slackDraft : `メール：${draft.subject}`} data-state={draft.state} className="my-2 rounded-xl border border-gray-200 p-3 dark:border-zinc-700">
       <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-gray-900 dark:text-zinc-100">
         {draft.state === 'sent' ? <CheckCircle size={15} weight="bold" aria-hidden className="text-emerald-600" />
           : draft.state === 'unknown' ? <Warning size={15} weight="bold" aria-hidden className="text-amber-500" />
@@ -144,7 +176,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
 
       {step === 'edit' ? (
         <div className="mt-2 space-y-2 text-xs">
-          <fieldset>
+          {!slack && <fieldset>
             <legend className="text-gray-500 dark:text-zinc-400">宛先・CC（確かめた宛先から選びます）</legend>
             <ul className="mt-1 space-y-1">
               {choices.map(r => <li key={r.ref} className="flex flex-wrap items-center gap-2">
@@ -158,8 +190,8 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
                 className="min-w-0 flex-1 rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
               <button type="button" className={BUTTON} disabled={busy || typed.trim() === ''} onClick={() => void addTyped()}>入力した宛先を足す</button>
             </div>
-          </fieldset>
-          <label className="block">件名<input value={subject} onChange={e => setSubject(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" /></label>
+          </fieldset>}
+          {!slack && <label className="block">件名<input value={subject} onChange={e => setSubject(e.target.value)} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" /></label>}
           <label className="block">本文<textarea value={body} onChange={e => setBody(e.target.value)} rows={10} className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 font-sans dark:border-zinc-600 dark:bg-zinc-900" /></label>
           <div className="flex gap-2">
             <button type="button" className={PRIMARY} disabled={busy} onClick={() => void save()}>{MAIL_WORDS.save}</button>
@@ -174,6 +206,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
       )}
 
       {notice && <div role="status" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${NOTICE_CLASS[notice.tone]}`}>{notice.text}</div>}
+      {draft.state === 'sent' && draft.awaitReply?.chosenUntil && <p className="mt-2 text-xs text-gray-600 dark:text-zinc-400">{MAIL_WORDS.waitingReply(awaitDayLabel(draft.awaitReply.chosenUntil))}</p>}
       {draft.state === 'unknown' && !notice && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{MAIL_WORDS.unknown}</p>}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -182,13 +215,26 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
           <button type="button" className={PRIMARY} disabled={busy} onClick={() => void consent()}>{MAIL_WORDS.consent}</button>
         </>}
         {draft.state === 'draft' && step === 'view' && <>
-          <button type="button" className={PRIMARY} disabled={busy} onClick={() => { setNotice(null); setStep('confirm') }}>{MAIL_WORDS.sendButton}</button>
+          <button type="button" className={PRIMARY} disabled={busy} onClick={startConfirm}>{MAIL_WORDS.sendButton}</button>
           <button type="button" className={BUTTON} disabled={busy} onClick={() => void startEdit()}>{MAIL_WORDS.edit}</button>
           <button type="button" className={BUTTON} disabled={busy} onClick={() => void discard()}>{MAIL_WORDS.discard}</button>
         </>}
         {draft.state === 'draft' && step === 'confirm' && <>
+          {offer && <fieldset className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs dark:border-zinc-700">
+            <label className="flex items-center gap-1.5 text-gray-800 dark:text-zinc-200">
+              <input type="checkbox" checked={awaitOn} onChange={e => setAwaitOn(e.target.checked)} />
+              {MAIL_WORDS.awaitReply(awaitDay ? awaitDayLabel(awaitDay) : '選んだ日')}
+            </label>
+            {awaitOn && <>
+              <label className="mt-1 flex items-center gap-1.5 pl-5 text-gray-600 dark:text-zinc-400">{MAIL_WORDS.awaitReplyDay}
+                <input type="date" value={awaitDay} min={today} onChange={e => setAwaitDay(e.target.value)}
+                  className="rounded border border-gray-300 px-1.5 py-0.5 text-gray-800 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200" />
+              </label>
+              <p className="mt-1 pl-5 text-[11px] text-gray-500 dark:text-zinc-400">{awaitDay ? MAIL_WORDS.awaitReplyNote : MAIL_WORDS.awaitReplyPickDay}</p>
+            </>}
+          </fieldset>}
           <span className="w-full text-[11px] text-gray-600 dark:text-zinc-400">{MAIL_WORDS.confirmNote}</span>
-          <button type="button" className={PRIMARY} disabled={busy} onClick={() => void send()}>{busy ? '送っています…' : MAIL_WORDS.confirmSend}</button>
+          <button type="button" className={PRIMARY} disabled={busy || (!!waitChoice && !awaitDay)} onClick={() => void send()}>{busy ? '送っています…' : MAIL_WORDS.confirmSend}</button>
           <button type="button" className={BUTTON} disabled={busy} onClick={() => setStep('view')}>やめる</button>
         </>}
         {draft.state === 'unknown' && <>

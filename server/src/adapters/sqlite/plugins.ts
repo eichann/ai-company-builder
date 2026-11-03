@@ -11,20 +11,20 @@ import type { ExternalLinkRow, PluginPolicyAckRow, PluginHistoryRow, PluginInsta
 
 const OP_COLUMNS = `id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object, external_id, record_id,
   actor_id, actor_kind, actor_source, conversation_id, state, fields, written, previous, reason, undo_of, undone_by, record_version, created_at, updated_at,
-  replaced_by, approved_by`
+  replaced_by, approved_by, run_id`
 type OpRow = {
   id: string; plugin_id: string; operation: string; plugin_version: string; fingerprint: string; mapping_version: number; connection_id: string
   account_id: string; object: string; external_id: string | null; record_id: string | null; actor_id: string; actor_kind: 'human' | 'ai'; actor_source: string | null
   conversation_id: string | null; state: PluginOperationRow['state']; fields: string; written: string; previous: string; reason: string | null
   undo_of: string | null; undone_by: string | null; record_version: number | null; created_at: string; updated_at: string
-  replaced_by: string | null; approved_by: string | null
+  replaced_by: string | null; approved_by: string | null; run_id: string | null
 }
 const toOp = (r: OpRow): PluginOperationRow => ({
   id: r.id, pluginId: r.plugin_id, operation: r.operation, pluginVersion: r.plugin_version, fingerprint: r.fingerprint, mappingVersion: r.mapping_version,
   connectionId: r.connection_id, accountId: r.account_id, object: r.object, externalId: r.external_id, recordId: r.record_id, actorId: r.actor_id,
   actorKind: r.actor_kind, actorSource: r.actor_source, conversationId: r.conversation_id, state: r.state, fields: r.fields, written: r.written,
   previous: r.previous, reason: r.reason, undoOf: r.undo_of, undoneBy: r.undone_by, recordVersion: r.record_version, createdAt: r.created_at, updatedAt: r.updated_at,
-  replacedBy: r.replaced_by, approvedBy: r.approved_by,
+  replacedBy: r.replaced_by, approvedBy: r.approved_by, runId: r.run_id,
 })
 
 type LinkRow = {
@@ -180,10 +180,10 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
       })()
     },
     insertOperation(o) {
-      conn.prepare(`INSERT INTO plugin_operations (company_id, ${OP_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      conn.prepare(`INSERT INTO plugin_operations (company_id, ${OP_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, o.id, o.pluginId, o.operation, o.pluginVersion, o.fingerprint, o.mappingVersion, o.connectionId, o.accountId, o.object, o.externalId,
           o.recordId, o.actorId, o.actorKind, o.actorSource, o.conversationId, o.state, o.fields, o.written, o.previous, o.reason, o.undoOf, o.undoneBy,
-          o.recordVersion, o.createdAt, o.updatedAt, o.replacedBy, o.approvedBy)
+          o.recordVersion, o.createdAt, o.updatedAt, o.replacedBy, o.approvedBy, o.runId ?? null)
     },
     updateOperation(id, changes, at) {
       const current = conn.prepare(`SELECT ${OP_COLUMNS} FROM plugin_operations WHERE company_id = ? AND id = ?`).get(companyId, id) as OpRow | undefined

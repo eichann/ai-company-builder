@@ -26,8 +26,12 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ConnectedServicesSection } from './connected-services'
 import { GoogleSection } from './google'
+import { SlackSection } from './slack'
 import { ReadScopeSection } from './read-scope'
+import { RolesSection } from './roles'
+import { StepSkillsSection } from './step-skills'
 import {
   ApiError,
   companiesApi,
@@ -120,8 +124,10 @@ export default function IntegrationsPage() {
         </div>
       )}
       {isAdmin && (
-        <div className="pb-6">
+        <div className="space-y-4 pb-6">
+          <ConnectedServicesSection companyId={companyId} />
           <GoogleSection companyId={companyId} nameOf={nameOf} />
+          <SlackSection companyId={companyId} nameOf={nameOf} />
         </div>
       )}
     </>
@@ -339,6 +345,12 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
             onSave={(scope) => run('読める人を保存しました', () => pluginsApi.setReadScope(companyId, item.id, scope))}
           />
         )}
+
+        {/* 役割 (plan C3): who holds the business's roles in this company. */}
+        {install && business && <RolesSection pluginId={item.id} members={members} nameOf={nameOf} />}
+
+        {/* 手順を会社のスキルで (plan C5): an overridable step run with one of the company's Skills. */}
+        {install && business && <StepSkillsSection pluginId={item.id} />}
 
         {/* On / off */}
         {install && (

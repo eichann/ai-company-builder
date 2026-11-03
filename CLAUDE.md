@@ -18,24 +18,26 @@ Maintainer note (stripped before it reaches Claude's context):
 
 ```
 server/   Hono API + git smart-HTTP server (port 3001). SQLite via better-sqlite3.
-  src/routes → services → ports ← adapters, wired in src/composition.ts; lib/ (git, push-check)
+  src/routes → services → ports ← adapters, wired in src/composition.ts; lib/ = git, push-check,
+  config, auth and storage-free helpers (no SQL except lib/auth.ts: server rule)
 admin/    Next.js admin console (port 3100), production build in Docker.
 client/   Electron desktop app (renderer on Vite, port 5173).
   electron/            main process: main.ts (composition root), features/<domain>/ipc.ts,
                        services/, sync/ (git:sync), agents/ (Claude Code, Codex), guards
   shared/              types + pure helpers used by main, preload and renderer
-  src/                 React renderer; moving to features/<name>/ (components/, hooks/, lib/ are
-                       legacy: renderer-structure rule)
+  src/                 React renderer: app/, features/<name>/, shared/ (ui, hooks, lib, ipc),
+                       stores/ (renderer-structure rule)
   tests/               node tests (*.test.ts), sync-harness/ + sync/, ui/ (Playwright), perf/
 shared/   core/ = the one copy of path, name and permission rules; types/ = API contracts
 data/     SQLite databases and repositories at runtime (gitignored)
 ```
 
 Area rules (load automatically when you touch matching files):
-sync, sync-guards, sync-testing, download-choices, push-check, private-folders,
+ai-turns, sync, sync-guards, sync-testing, download-choices, push-check, private-folders, google-drive,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
-web-research, agent-sandbox, plugins, outbound-mail, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
-commands, server, records, google-connector, minutes,
+web-research, tasks, tasks-ui, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
+commands, server, records, notifications, google-connector, minutes, calendar,
+connector-roles, inbox, slack-connector, identity, plugin-steps, plugin-roles, plugin-frame,
 shared-core, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the
 matching rule file first.
@@ -58,7 +60,8 @@ is missing, the rule files are the complete working instructions.
 - **Push checker** — the server's pre-receive hook (`server/src/lib/push-check/`); its rejection
   markers (`[WRITE_DENIED]`, `[PROTECTED_CONFIG]`, …) drive the app's automatic recoveries.
 - **Roles** — `owner` and `admin` have full access; `member` follows per-folder rules (scopes)
-  for read/write. Any member can also be a **department manager** (`department_managers`), which
+  for read/write. **One exception**: an owner-only record (「持ち主だけ」, `personal_owner`) is
+  seen by its owner alone — not by owners, admins or managers either (`records.md`). Any member can also be a **department manager** (`department_managers`), which
   allows managing that department's private folders and AI instruction files.
 
 ## Commands
@@ -81,7 +84,7 @@ cd admin && npx vitest run                                # admin tests (seconds
 
 Run the tests for the files you touched, not whole suites. The development machine is shared and
 the full client, sync-harness and UI suites take many minutes; CI runs them on every PR (macOS
-runners for the client). If you start a dev server, Vite preview or watcher, stop it when done.
+runners only where a Mac matters). If you start a dev server, Vite preview or watcher, stop it when done.
 
 Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64 32`) and
 `PUBLIC_URL` are required. `docker compose up -d` runs the full stack (see the deployment rule).
@@ -100,7 +103,7 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - **`shared/core` depends on nothing** (no Node built-ins, packages, Electron, React, Hono,
   database or git), so the server, app and admin apply one copy of each rule. A rule change is
   made there. → `shared-core.md`
-- **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`,
+- **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`, `picker-preload.ts`,
   `electron-adapter.ts`, `voice-input.ts`); features and services get ports injected, so another
   desktop shell can replace it. ESLint enforces this. → `ipc-and-main-process.md`
 - **App modules point one way too** (`client/tests/architecture-boundaries.test.ts`, over the
@@ -156,9 +159,11 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - CI (`.github/workflows/ci.yml`): typecheck and changed-file lint always run; on PRs the other
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
-  tests (macOS), Sync harness (macOS); the UI, perf, universal-git and admin jobs should be green
+  tests (macOS) (aggregates a Linux and a macOS half), Sync harness (macOS); the UI, bundle, perf,
+  universal-git and admin jobs should be green
   too. The nightly run (and a manual run) execute everything; a push to main runs the
-  Linux jobs only (typecheck, lint, server, admin) because its PR already ran the macOS ones.
+  Linux jobs only (typecheck, lint, Linux client half, UI, bundle, server, admin) because its PR
+  already ran the macOS ones. macOS jobs can run on a self-hosted Mac (`MAC_RUNNER`; deployment rule).
 - `docs/` holds internal notes and stays uncommitted: this is a public (AGPL) repository, and
   `.git/info/exclude` ignores `/docs/*` except the published `docs/self-hosting/` and
   `docs/images/` (a few older notes are still tracked; leave them, add no new ones). Durable

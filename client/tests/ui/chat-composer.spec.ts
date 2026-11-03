@@ -75,11 +75,11 @@ test('an instruction added while the AI worked is shown where it was taken, betw
   await expect(page.getByText('作業中に追加した指示')).toBeVisible()
   const order = await page.locator('main').evaluate(main => {
     const text = (main as HTMLElement).innerText
-    return [text.indexOf('Read'), text.indexOf('作業中に追加した指示'), text.lastIndexOf('Read'), text.indexOf('承知しました')]
+    return [text.indexOf('ファイルを読みました'), text.indexOf('作業中に追加した指示'), text.lastIndexOf('ファイルを読みました'), text.indexOf('承知しました')]
   })
   expect(order[0]).toBeGreaterThanOrEqual(0)
   expect(order).toEqual([...order].sort((a, b) => a - b))
-  await expect(page.getByRole('button', { name: 'Read' })).toHaveCount(2)
+  await expect(page.getByRole('button', { name: /^ファイルを読みました/ })).toHaveCount(2)
 })
 
 const skill = (page: Page, name: string) => page.getByRole('button', { name: new RegExp(name) })
@@ -120,7 +120,7 @@ test.describe('slash commands', () => {
     for (const key of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp']) await page.keyboard.press(key)
     await page.keyboard.press('Tab')
     await typed(page).toBe('/press-release ')
-    await page.keyboard.press('Meta+a')
+    await page.keyboard.press('ControlOrMeta+a') // select all: ⌘A on macOS, Ctrl+A elsewhere
     await page.keyboard.insertText('/')
     await skill(page, '提案書').click()
     await typed(page).toBe('/proposal ')

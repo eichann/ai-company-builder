@@ -8,11 +8,15 @@
  *                                       the redirect URI to register, members' grants, history
  *   PUT    /google/client               { clientId, clientSecret?, domain } (the secret: sent once, never answered)
  *   PUT    /google/enabled              { enabled }
+ *   PUT    /google/features             { feature, on } — a feature off / on for the whole company (never asked when off)
+ *   PUT    /google/picker               { apiKey?, appId } Google Picker (Drive, google-drive.md); appId null removes it
  *   DELETE /google/grants/:userId       stop a member's permission (revoked at Google too)
  *
  * Any member (the desktop app's 設定 → Google):
  *   GET    /me/google                   my permission: connected, account, what is allowed
- *   POST   /me/google/connect           { features } → { authorizeUrl } (opened in the system browser)
+ *   POST   /me/google/connect           { features } | { all: true } → { authorizeUrl } (opened in the system browser)
+ *   PUT    /me/google/seen              「あとで」 on 「仕事の道具をつなぐ」: what the company offers now is marked shown
+ *   PUT    /me/google/features          { feature, on } — the member turns an allowed feature off / on (受信を読む …)
  *   DELETE /me/google                   「許可をやめる」 (revoked at Google too)
  *
  * No answer ever carries a client secret, a token, a code or a PKCE value.
@@ -20,28 +24,13 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const googleRoute = new Hono()
-const { access, googleConnector } = services
-
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
+const { googleConnector } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -49,44 +38,53 @@ function answer<T>(c: Context, result: Outcome<T>) {
   return c.json({ success: true, data: result.value })
 }
 
-googleRoute.get('/google', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+googleRoute.get('/google', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await googleConnector.adminView(member))
 })
 
-googleRoute.put('/google/client', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await googleConnector.saveClient(member, await jsonBody(c)))
+googleRoute.put('/google/client', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleConnector.saveClient(member, c.var.body))
 })
 
-googleRoute.put('/google/enabled', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await googleConnector.setEnabled(member, await jsonBody(c)))
+googleRoute.put('/google/enabled', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleConnector.setEnabled(member, c.var.body))
 })
 
-googleRoute.delete('/google/grants/:userId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+// The role is checked in the service before the body (who → body → rules).
+googleRoute.put('/google/features', companyMember, serviceBody, async (c) =>
+  answer(c, await googleConnector.setCompanyFeature(c.var.member, c.var.body)))
+
+googleRoute.put('/google/picker', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleConnector.savePicker(member, c.var.body))
+})
+
+googleRoute.delete('/google/grants/:userId', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await googleConnector.stopGrant(member, c.req.param('userId')))
 })
 
-googleRoute.get('/me/google', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+googleRoute.get('/me/google', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await googleConnector.my(member))
 })
 
-googleRoute.post('/me/google/connect', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await googleConnector.connect(member, await jsonBody(c)))
+googleRoute.post('/me/google/connect', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleConnector.connect(member, c.var.body))
 })
 
-googleRoute.delete('/me/google', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+googleRoute.put('/me/google/features', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleConnector.setFeature(member, c.var.body))
+})
+
+googleRoute.put('/me/google/seen', companyMember, async (c) => answer(c, await googleConnector.markSeen(c.var.member)))
+
+googleRoute.delete('/me/google', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await googleConnector.disconnect(member))
 })

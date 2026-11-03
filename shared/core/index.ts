@@ -18,10 +18,16 @@
  *   core-types.ts         the core types task and interaction
  *   upstream-path.ts      the one check of a path sent to an outside service (relay, plugins)
  *   plugins.ts            connector plugins: declaration, mapping, field policies, value translation
+ *                         (re-exports the plugin-*.ts modules, one per responsibility)
  *   fixed-content.ts      canonical JSON of content a person approves or sends (the server hashes it)
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
+ *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
+ *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
+ *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget
+ *   absences.ts           absence and the delegate (代わりの人): the one resolution of who acts for whom today
+ *   connector-roles.ts    the core roles (役目) a core connector serves, and resolving which one serves a role
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -48,3 +54,8 @@ export * from './fixed-content'
 export * from './approvals'
 export * from './mail'
 export * from './minutes'
+export * from './calendar'
+export * from './business-days'
+export * from './task-settings'
+export * from './absences'
+export * from './connector-roles'

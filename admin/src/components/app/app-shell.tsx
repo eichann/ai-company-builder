@@ -9,20 +9,14 @@ import {
   CaretUpDown,
   Check,
   Desktop,
-  Gear,
-  HandPalm,
-  Key,
+  FolderSimple,
+  GearSix,
+  House,
   List,
-  LockKey,
-  LockSimple,
   Moon,
   Plus,
   PlugsConnected,
-  Robot,
-  Barricade,
-  ShieldCheck,
   SignOut,
-  SquaresFour,
   Sun,
   TreeStructure,
   Users,
@@ -48,6 +42,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/lib/auth-context'
 import { useCompany } from '@/lib/company-context'
+import { offersCompanyCreation } from '@/lib/company-creation'
 import { roleLabel } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -67,20 +62,24 @@ export interface NavContext {
   canViewAgentEvents: boolean
 }
 
+/**
+ * The menu (管理画面の見直し 2-3, owner decisions 2026-11-02): five places used day to day, and
+ * 「詳しい設定」 alone at the bottom (`ADVANCED_ITEM`) — 仕事の進め方・会社の暦・来た連絡の決まり・
+ * AI の安全・会社の情報 are inside it. A department manager (部署の管理役) sees ホーム・部署・フォルダ;
+ * a member ホーム・部署. Pages left out of the menu still answer their own URL (each checks who may
+ * use it), and the old URLs lead to the new places.
+ */
 export const NAV_ITEMS: NavItem[] = [
-  { segment: '', label: '概要', icon: SquaresFour },
-  { segment: 'members', label: 'メンバー', icon: Users },
+  { segment: '', label: 'ホーム', icon: House },
+  { segment: 'members', label: 'メンバー', icon: Users, visible: (c) => c.isAdmin },
   { segment: 'departments', label: '部署', icon: TreeStructure },
-  { segment: 'permissions', label: '権限', icon: ShieldCheck, visible: (c) => c.isAdmin || c.isManager },
-  { segment: 'private-folders', label: '非公開フォルダ', icon: LockSimple, visible: (c) => c.isAdmin || c.isManager },
-  { segment: 'security', label: 'セキュリティ', icon: LockKey, visible: (c) => c.isAdmin },
-  { segment: 'agent-events', label: 'AI の操作の記録', icon: Robot, visible: (c) => c.isAdmin || c.canViewAgentEvents },
-  { segment: 'agent-sandbox', label: 'AI の囲い', icon: Barricade, visible: (c) => c.isAdmin },
-  { segment: 'agent-stop', label: 'AI の緊急停止', icon: HandPalm, visible: (c) => c.isAdmin },
-  { segment: 'api-keys', label: 'API キー', icon: Key, visible: (c) => c.isAdmin },
+  // 「権限」 and 「非公開フォルダ」 as one (管理画面の見直し 2-3).
+  { segment: 'folders', label: 'フォルダ', icon: FolderSimple, visible: (c) => c.isAdmin || c.isManager },
   { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
-  { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]
+
+/** 「詳しい設定」: owners and admins (owner decision 2026-11-02: shown to admins, tucked away). */
+export const ADVANCED_ITEM: NavItem = { segment: 'advanced', label: '詳しい設定', icon: GearSix, visible: (c) => c.isAdmin }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -133,27 +132,15 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <CompanySwitcher onNavigate={onNavigate} />
       </div>
       <nav aria-label="メインメニュー" className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        {NAV_ITEMS.filter((item) => !item.visible || item.visible(navContext)).map((item) => {
-          const href = item.segment ? `${base}/${item.segment}` : base
-          const active = item.segment ? pathname.startsWith(href) : pathname === base
-          const IconComponent = item.icon
-          return (
-            <Link
-              key={item.segment}
-              href={href}
-              onClick={onNavigate}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                active && 'bg-sidebar-accent font-medium text-sidebar-foreground'
-              )}
-            >
-              <IconComponent size={18} weight={active ? 'fill' : 'regular'} />
-              {item.label}
-            </Link>
-          )
-        })}
+        {NAV_ITEMS.filter((item) => !item.visible || item.visible(navContext)).map((item) => (
+          <NavLink key={item.segment} item={item} base={base} pathname={pathname} onNavigate={onNavigate} />
+        ))}
       </nav>
+      {ADVANCED_ITEM.visible?.(navContext) && (
+        <nav aria-label="詳しい設定" className="px-3 pb-2">
+          <NavLink item={ADVANCED_ITEM} base={base} pathname={pathname} onNavigate={onNavigate} />
+        </nav>
+      )}
       <div className="border-t border-sidebar-border p-3">
         <UserMenu />
       </div>
@@ -161,10 +148,31 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+function NavLink({ item, base, pathname, onNavigate }: { item: NavItem; base: string; pathname: string; onNavigate?: () => void }) {
+  const href = item.segment ? `${base}/${item.segment}` : base
+  const active = item.segment ? pathname.startsWith(href) : pathname === base
+  const IconComponent = item.icon
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      aria-current={active ? 'page' : undefined}
+      className={cn(
+        'flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        active && 'bg-sidebar-accent font-medium text-sidebar-foreground'
+      )}
+    >
+      <IconComponent size={18} weight={active ? 'fill' : 'regular'} />
+      {item.label}
+    </Link>
+  )
+}
+
 function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter()
   const pathname = usePathname()
   const { companyId, company, companies, role } = useCompany()
+  const { user } = useAuth()
 
   if (!company.data) {
     return (
@@ -215,16 +223,21 @@ function CompanySwitcher({ onNavigate }: { onNavigate?: () => void }) {
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onSelect={() => {
-            onNavigate?.()
-            router.push('/companies/new')
-          }}
-        >
-          <Plus />
-          新しい会社を作成
-        </DropdownMenuItem>
+        {/* Only for those the server lets create a company (its operators). */}
+        {offersCompanyCreation(user) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => {
+                onNavigate?.()
+                router.push('/companies/new')
+              }}
+            >
+              <Plus />
+              新しい会社を作成
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

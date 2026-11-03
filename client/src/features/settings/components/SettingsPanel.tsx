@@ -6,14 +6,18 @@ import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { AutoSyncSettings } from './AutoSyncSettings'
 import { OwnKeysSection } from './OwnKeysSection'
 import { GoogleSection } from './GoogleSection'
+import { SlackSection } from './SlackSection'
+import { ConnectToolsScreen } from './ConnectToolsScreen'
+import { AbsenceSection } from '../../absences/components/AbsenceSection'
+import { MySwitchesSection } from './MySwitchesSection'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, UserCircle, PlugsConnected } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
-import { getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../api'
+import { canEditCompanyGitignore, getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../api'
 import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from '../model'
 import type { EnvVarStatus } from '../../../../shared/env-file'
 
@@ -28,15 +32,21 @@ const commonKeySet = new Set(COMMON_API_KEYS.map(k => k.key))
 
 interface SettingsPanelProps {
   onClose: () => void
-  /** Section to open first (default: ダウンロードするフォルダ). */
+  /** Section to open first (default: 自分の設定). */
   initialTab?: TabType
   /** 「自分の鍵」: the service to show first (from the chat's "no key" card). */
   focusService?: string
 }
 
-export type TabType = 'sync' | 'autosync' | 'gitignore' | 'ownkeys' | 'google' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
+export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
+  {
+    group: 'あなた',
+    items: [
+      { id: 'mine', label: '自分の設定', icon: <UserCircle size={16} /> },
+    ],
+  },
   {
     group: '同期',
     items: [
@@ -48,11 +58,19 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
   {
     group: 'AI と連携',
     items: [
+      { id: 'tools', label: '仕事の道具をつなぐ', icon: <PlugsConnected size={16} /> },
       { id: 'ownkeys', label: '自分の鍵', icon: <LockKey size={16} /> },
       { id: 'google', label: 'Google', icon: <GoogleLogo size={16} /> },
+      { id: 'slack', label: 'Slack', icon: <SlackLogo size={16} /> },
       { id: 'apikeys', label: 'APIキー（このPC）', icon: <Key size={16} /> },
       { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
       { id: 'aienv', label: 'AIに渡す環境変数', icon: <ShieldCheck size={16} /> },
+    ],
+  },
+  {
+    group: '仕事',
+    items: [
+      { id: 'absences', label: '不在と代わりの人', icon: <UserSwitch size={16} /> },
     ],
   },
   {
@@ -68,7 +86,7 @@ const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] t
 const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
 const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
 
-export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, initialTab = 'mine', focusService }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
@@ -82,6 +100,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
   const [newKeyName, setNewKeyName] = useState('')
   const [pastedEnv, setPastedEnv] = useState('')
   const [gitignoreContent, setGitignoreContent] = useState('')
+  // Read-only until the server says this member is an owner or admin (canEditCompanyGitignore).
+  const [gitignoreEditable, setGitignoreEditable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -101,9 +121,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Load .env and .gitignore files on mount
+  // Load .env and .gitignore files (and whether this member may edit the latter) on mount
   useEffect(() => {
     if (!currentCompany?.rootPath) return
+    const companyId = currentCompany.id
+
+    setGitignoreEditable(false)
+    let live = true
+    void canEditCompanyGitignore(companyId).then(editable => { if (live) setGitignoreEditable(editable) })
 
     const loadFiles = async () => {
       setLoading(true)
@@ -131,7 +156,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     }
 
     loadFiles()
-  }, [currentCompany?.rootPath])
+    return () => { live = false }
+  }, [currentCompany?.rootPath, currentCompany?.id])
 
   // After a key moved to the server: the .env changed in main, read its state again.
   const reloadEnvStatus = useCallback(() => {
@@ -205,6 +231,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     setError(null)
     try {
       if (activeTab === 'gitignore') {
+        if (!gitignoreEditable) return
         // Save .gitignore
         const result = await writeGitignore(currentCompany.rootPath, gitignoreContent)
         if (result) {
@@ -236,7 +263,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     } finally {
       setSaving(false)
     }
-  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent])
+  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent, gitignoreEditable])
 
   // Handle backdrop click
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -249,7 +276,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
     return null
   }
 
-  const hasSaveFooter = activeTab === 'apikeys' || activeTab === 'gitignore' || activeTab === 'advanced'
+  const hasSaveFooter = activeTab === 'apikeys' || (activeTab === 'gitignore' && gitignoreEditable) || activeTab === 'advanced'
 
   const loadingState = (
     <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-zinc-500 dark:text-zinc-400">
@@ -341,8 +368,16 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
               </div>
             ) : activeTab === 'ownkeys' ? (
               <OwnKeysSection companyId={currentCompany.id} focusService={focusService} />
+            ) : activeTab === 'tools' ? (
+              <ConnectToolsScreen key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'google' ? (
               <GoogleSection key={currentCompany.id} companyId={currentCompany.id} />
+            ) : activeTab === 'slack' ? (
+              <SlackSection key={currentCompany.id} companyId={currentCompany.id} />
+            ) : activeTab === 'mine' ? (
+              <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} onOpenGoogle={() => setActiveTab('google')} />
+            ) : activeTab === 'absences' ? (
+              <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'aienv' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
@@ -432,9 +467,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
             ) : activeTab === 'gitignore' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="同期しないファイル" description={<>ここに書いたファイルやフォルダは、チームと共有されません（<code className={CODE}>.gitignore</code>）。</>} />
+                {!gitignoreEditable && (
+                  <Callout tone="info"><p>会社全体に効くので、変えられるのは管理者だけです。</p></Callout>
+                )}
                 <textarea
                   value={gitignoreContent}
+                  readOnly={!gitignoreEditable}
                   onChange={(e) => {
+                    if (!gitignoreEditable) return
                     setGitignoreContent(e.target.value)
                     setSaved(false)
                   }}

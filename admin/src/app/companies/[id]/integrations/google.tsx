@@ -22,6 +22,7 @@ import { ApiError, googleApi, type GoogleAdminView, type GoogleFeature, type Goo
 import { copyText } from '@/lib/clipboard'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
+import { GOOGLE_FEATURES } from '../../../../../../shared/core/google'
 import { useQuery } from '@/lib/use-query'
 
 import { MinutesFolderSection } from './minutes-folder'
@@ -30,6 +31,8 @@ import { MinutesFolderSection } from './minutes-folder'
 export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
   mail: 'メールを送る',
+  drive: 'Drive で選んだものを読む・置く',
+  inbox: '受信を読む',
 }
 
 const GRANT_STATUS_TEXT: Record<GoogleGrantSummary['status'], string> = {
@@ -60,7 +63,8 @@ export function GoogleSection({ companyId, nameOf }: { companyId: string; nameOf
         </CardTitle>
         <CardDescription>
           メンバーが「Google で許可」をすると、ACB がその人の予定と Meet の議事録を読めるようになり、
-          本人が「確かめて送る」を押したときだけ、その人の Gmail からメールを送れます。何を読むか・送るかは、メンバーごとに本人が許可します。
+          本人が「確かめて送る」を押したときだけ、その人の Gmail からメールを送れます。本人が「受信を読む」も許可すると、届いたメールを
+          ACB がその場で読めるようになります（メールの中身は ACB に残しません）。何を読むか・送るかは、メンバーごとに本人が許可し、本人がいつでもオフにできます。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -80,6 +84,69 @@ function GoogleBadge({ view }: { view: GoogleAdminView }) {
   if (!view.configured) return <Badge variant="outline">まだつないでいません</Badge>
   if (view.operatorStopped) return <Badge variant="outline">止まっています</Badge>
   return view.enabled ? <Badge>動いています</Badge> : <Badge variant="outline">オフ</Badge>
+}
+
+/**
+ * Google Drive's file picking (google-drive.md): Google Picker needs an API key
+ * and the Cloud project's number. Members then choose, in Google's own screen,
+ * which Drive files the AI may read and which folder it may put proposals in —
+ * ACB sees nothing else in Drive.
+ */
+function DrivePickerSection({ companyId, view, onView }: { companyId: string; view: GoogleAdminView; onView: (v: GoogleAdminView) => void }) {
+  const [apiKey, setApiKey] = useState('')
+  const [appId, setAppId] = useState(view.picker.appId ?? '')
+  const [busy, setBusy] = useState(false)
+
+  async function save(remove = false) {
+    setBusy(true)
+    try {
+      const next = await googleApi.savePicker(companyId, remove ? { appId: null } : { appId: appId.trim(), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) })
+      setApiKey('')
+      if (remove) setAppId('')
+      onView(next)
+      toast.success(remove ? 'Drive のファイル選びを止めました。' : '保存しました。')
+    } catch (err) {
+      toast.error(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="space-y-2" data-testid="google-drive-picker">
+      <h3 className="text-sm font-medium">Google Drive のファイル選び</h3>
+      <p className="text-xs text-muted-foreground">
+        設定すると、メンバーが AI への相談の中で、Google の画面から「読ませるファイル」と「提案書を置くフォルダ」を選べます。
+        ACB が使えるのは、メンバーが選んだファイルとフォルダ、ACB が置いたファイルだけです。
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="break-all rounded bg-muted px-2 py-1 text-xs" data-testid="google-picker-page">{view.picker.pageUrl}</code>
+        <Button variant="outline" size="sm" aria-label="ファイル選びのページをコピー"
+          onClick={async () => { if (await copyText(view.picker.pageUrl)) toast.success('コピーしました') }}>
+          <Copy size={14} /> コピー
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Google Cloud で「Google Picker API」と「Google Drive API」を有効にし、API キーを作って「ウェブサイトの制限」にこのページを足してください（使える API も Picker に絞ります）。
+      </p>
+      <div className="grid max-w-xl gap-3">
+        <div className="grid gap-1">
+          <Label htmlFor="google-picker-key">API キー</Label>
+          <Input id="google-picker-key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="new-password"
+            placeholder={view.picker.apiKeyLast4 ? `登録済み（末尾 ${view.picker.apiKeyLast4}）。取り替えるときだけ入れてください` : ''} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="google-picker-app">プロジェクト番号</Label>
+          <Input id="google-picker-app" value={appId} onChange={(e) => setAppId(e.target.value)} inputMode="numeric" autoComplete="off" spellCheck={false} />
+          <p className="text-xs text-muted-foreground">Google Cloud の「プロジェクト情報」に出ている数字です（クライアント ID と同じプロジェクト）。</p>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => save()} disabled={busy || !appId.trim() || (!view.picker.configured && !apiKey.trim())}>ファイル選びの設定を保存</Button>
+          {view.picker.configured && <Button variant="outline" onClick={() => save(true)} disabled={busy}>ファイル選びを止める</Button>}
+        </div>
+      </div>
+    </section>
+  )
 }
 
 function GoogleBody({ companyId, view, onView, nameOf }: {
@@ -109,6 +176,17 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
     setBusy(true)
     try {
       onView(await googleApi.setEnabled(companyId, !view.enabled))
+    } catch (err) {
+      toast.error(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function setFeature(feature: GoogleFeature, on: boolean) {
+    setBusy(true)
+    try {
+      onView(await googleApi.setFeature(companyId, feature, on))
     } catch (err) {
       toast.error(explain(err))
     } finally {
@@ -177,6 +255,33 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
         )}
       </section>
 
+      {view.configured && (
+        <section className="space-y-2" data-testid="google-company-features">
+          <h3 className="text-sm font-medium">会社で使うもの</h3>
+          <p className="text-xs text-muted-foreground">
+            メンバーはアプリの「仕事の道具をつなぐ」で、ここでオンのものを一度にまとめて許可します。オフにしたものは誰にも許可を求めず、すでに許可した人の分も次から使いません。
+          </p>
+          <ul className="space-y-1">
+            {GOOGLE_FEATURES.map((f) => {
+              const on = !view.featuresOff.includes(f)
+              const needsPicker = f === 'drive' && on && !view.picker.configured
+              return (
+                <li key={f} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="min-w-56">{GOOGLE_FEATURE_TEXT[f]}</span>
+                  <span className="text-muted-foreground">{on ? (needsPicker ? 'オン（下の「ファイル選び」を設定すると使えます）' : 'オン') : 'オフ'}</span>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => setFeature(f, !on)}>{on ? 'オフにする' : 'オンにする'}</Button>
+                  {f === 'inbox' && (
+                    <span className="w-full text-xs text-muted-foreground">
+                      「やることの一覧」の設定の「受信を読む」と同じ切り替えです（Slack も同じ）。オンのときは、各自が自分の設定でオンにした人にだけ許可を求めます。
+                    </span>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
       <section className="space-y-2">
         <h3 className="text-sm font-medium">メンバーの許可（読むもの・送るもの）</h3>
         {view.grants.length === 0 ? (
@@ -188,7 +293,7 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
                 <div className="space-y-0.5">
                   <div className="font-medium">{g.memberName || g.memberEmail || nameOf(g.userId)}</div>
                   <div className="text-xs text-muted-foreground">
-                    Google: {g.googleEmail} ・ {g.features.length > 0 ? g.features.map((f) => GOOGLE_FEATURE_TEXT[f]).join('・') : '（なし）'}
+                    Google: {g.googleEmail} ・ {g.features.length > 0 ? g.features.map((f) => `${GOOGLE_FEATURE_TEXT[f]}${g.featuresOff.includes(f) ? '（本人がオフ）' : ''}`).join('・') : '（なし）'}
                     {g.lastUsedAt ? ` ・ 最後に使った日時 ${formatDateTime(g.lastUsedAt)}` : ''}
                   </div>
                 </div>
@@ -202,6 +307,8 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
         )}
         <p className="text-xs text-muted-foreground">「API キー」の「すべての鍵を止める」でも、全員の Google の許可が止まります。</p>
       </section>
+
+      {view.configured && <DrivePickerSection companyId={companyId} view={view} onView={onView} />}
 
       <MinutesFolderSection companyId={companyId} />
 

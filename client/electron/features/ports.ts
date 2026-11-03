@@ -34,6 +34,35 @@ export interface DesktopShell {
   selectDirectory(): Promise<string | null>
   /** Start a native drag of a (validated) file out of the window that sent the request. */
   startDrag(sender: IpcSender, file: string): void
+  /**
+   * A desktop notification (macOS: the corner banner); `onClick` when the member clicks it.
+   * Does nothing where the system has none.
+   */
+  notify(title: string, body: string, onClick?: () => void): void
+}
+
+/** What the Google Picker page gets from its window (google-drive.md "The Picker"); the token is `drive.file` only. */
+export interface DrivePickerWindowConfig {
+  accessToken: string
+  apiKey: string
+  appId: string
+  scriptOrigin: string
+  mode: 'folder' | 'files'
+  mimeTypes: readonly string[]
+  maxItems: number
+}
+
+export type DrivePickerOutcome =
+  | { action: 'picked'; ids: string[] }
+  | { action: 'cancel' | 'error' | 'closed' | 'timeout' }
+
+/**
+ * Google Picker in a window of its own (the shell's; Electron: electron-adapter.ts
+ * `createDrivePickerWindow`): it loads the server's Picker page and hands the
+ * config — once — only to that page in that window; nothing else ever sees the token.
+ */
+export interface DrivePickerWindow {
+  open(request: { pageUrl: string; config: DrivePickerWindowConfig; timeoutMs: number }): Promise<DrivePickerOutcome>
 }
 
 /** The app quitting, in the order the hooks were added. */

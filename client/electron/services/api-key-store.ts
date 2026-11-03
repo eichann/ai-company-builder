@@ -11,8 +11,12 @@
 //
 // Encryption unavailable (Linux without a keyring; before app ready):
 // saving a new key is refused with a message — never stored in plain text. A
-// plain key already on disk keeps working as before, and the status says it is
-// not encrypted, so the settings screen can warn.
+// plain key already on disk that cannot be moved into encrypted storage is not
+// used either: the API-key mode then behaves as with no key, the status says
+// `storedInPlainText` (the settings screen asks to save it again), and one
+// tagged warning is logged. The plain field stays on disk and the move is
+// retried on every access, so once encryption works (after app ready) the key
+// is encrypted and used again.
 //
 // Never log the key, its length or any part of it.
 
@@ -40,10 +44,13 @@ export const ENCRYPTION_UNAVAILABLE_MESSAGE =
   'このコンピューターでは APIキーを安全に保存する仕組み（キーチェーン）が使えないため、保存できません。Claude Code などほかの接続方法をお使いください。'
 
 export function createApiKeyStore(config: ConfigStore, box: SecretBox, log: (message: string) => void = () => {}): ApiKeyStore {
-  /** Encrypt a plain key left by an older version, when possible. */
+  let warnedPlain = false
+
+  /** Encrypt a plain key left by an older version, when possible. Throws when it cannot. */
   function migrate(current: AppConfig): void {
     const plain = current.anthropicApiKey
-    if (plain === undefined || !box.available()) return
+    if (plain === undefined) return
+    if (!box.available()) throw new Error('encryption unavailable')
     if (typeof plain === 'string' && plain.trim()) {
       current.anthropicApiKeyEncrypted = box.encrypt(plain.trim()).toString('base64')
     }
@@ -61,8 +68,14 @@ export function createApiKeyStore(config: ConfigStore, box: SecretBox, log: (mes
         return undefined
       }
     }
+    // A plain key is never used: it is either moved into encrypted storage (migrate) or ignored.
+    return undefined
+  }
+
+  /** A plain key from an older version that could not be moved into encrypted storage. */
+  function plainLeft(current: AppConfig): boolean {
     const plain = current.anthropicApiKey
-    return typeof plain === 'string' && plain.trim() ? plain.trim() : undefined
+    return typeof plain === 'string' && !!plain.trim()
   }
 
   function load(): AppConfig {
@@ -70,8 +83,11 @@ export function createApiKeyStore(config: ConfigStore, box: SecretBox, log: (mes
     try {
       migrate(current)
     } catch {
-      // Encryption or the write failed: keep the plain key working; retried on the next access.
-      log('[api-key] could not move the API key into encrypted storage; retrying later')
+      // Encryption or the write failed: the plain key is not used; retried on the next access.
+      if (plainLeft(current) && !warnedPlain) {
+        warnedPlain = true
+        log('[api-key] a plain API key from an older version could not be moved into encrypted storage; not using it until it is saved again')
+      }
     }
     return current
   }
@@ -83,12 +99,14 @@ export function createApiKeyStore(config: ConfigStore, box: SecretBox, log: (mes
       const current = load()
       const key = decrypted(current)
       const encryptionAvailable = box.available()
-      if (key) {
-        const plain = !current.anthropicApiKeyEncrypted
-        return { set: true, last4: key.slice(-4), encryptionAvailable, ...(plain ? { storedInPlainText: true } : {}) }
-      }
+      if (key) return { set: true, last4: key.slice(-4), encryptionAvailable }
       const unreadable = typeof current.anthropicApiKeyEncrypted === 'string' && !!current.anthropicApiKeyEncrypted
-      return { set: false, encryptionAvailable, ...(unreadable ? { unreadable: true } : {}) }
+      return {
+        set: false,
+        encryptionAvailable,
+        ...(unreadable ? { unreadable: true } : {}),
+        ...(plainLeft(current) ? { storedInPlainText: true } : {}),
+      }
     },
 
     save(apiKey) {

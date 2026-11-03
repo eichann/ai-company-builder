@@ -13,7 +13,7 @@ paths:
   - "client/tests/agent-event-sender.test.ts"
   - "client/src/shared/lib/agentLogNotice.ts"
   - "client/src/features/chat/components/AgentLogNotice.tsx"
-  - "admin/src/app/companies/*/agent-events/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/events/**"
   - "admin/src/components/agent-events/**"
   - "admin/src/lib/agent-events.ts"
   - "admin/tests/agent-events.test.tsx"
@@ -119,7 +119,10 @@ event loop between chunks; `lib/agent-event-retention.ts` runs it 5 s after star
 the committer date (UTC) of #206's merge commit, `20261024181341`; the admin log page lists the
 members whose app is older.
 
-## Admin console (「AI の操作の記録」, `admin/src/app/companies/[id]/agent-events/page.tsx`)
+## Admin console (「AI の操作の記録」, `admin/src/app/companies/[id]/advanced/ai-safety/events/page.tsx`)
+
+Inside 「詳しい設定 › AI の安全」 (管理画面の見直し 2-4; `/agent-events` redirects, keeping `?tab=`). A department
+manager the viewer setting allows opens it from the home (the menu shows them ホーム・部署・フォルダ only).
 
 - **Navigation**: `NAV_ITEMS` entry `agent-events`, shown when `isAdmin || canViewAgentEvents`.
   `GET /me/capabilities` carries `canViewAgentEvents` (`agentEvents.canRead(member)`, composed
@@ -131,8 +134,9 @@ members whose app is older.
   description (`hidden` → 「非公開（表示できません）」, `outside` → 「会社フォルダの外」 + the
   secret place's kind), the URL filters and the periods. A new enum value in
   `shared/types/agent-events.ts` without a label fails the compiler and
-  `admin/tests/agent-events.test.tsx`. The console says 「部署の責任者」 for managers, as everywhere
-  else in the admin.
+  `admin/tests/agent-events.test.tsx`. The console says 「部署の管理役」 for managers, as everywhere
+  else in the admin and the app (owner decision 2026-11-02: 「責任者」 is kept for the owner of a
+  案件・プロジェクト only; see `server.md` "Accounts and roles").
 - **Log tab** (`components/agent-events/log-view.tsx`): filters in the URL (`period` today / 7d
   (default) / 30d / custom with `from`/`to` days, `member`, `category`, `decision`, `q`,
   `conversation`) so a view can be shared; periods are whole local days. Rows newest first,

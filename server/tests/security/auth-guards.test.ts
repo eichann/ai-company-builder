@@ -9,6 +9,10 @@
  *
  * The only endpoints meant to be reachable without a session are listed in
  * PUBLIC_ENDPOINTS with their reason.
+ *
+ * Every endpoint also names one of src/routes/guards.ts's guards as its first
+ * handler (companyMember, signedIn, publicRoute), so a forgotten check cannot
+ * be written (server.md "Route guards").
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { readdirSync } from 'fs'
@@ -24,16 +28,19 @@ vi.mock('../../src/lib/auth', () => ({
 }))
 
 import { Hono } from 'hono'
+import { guardKind } from '../../src/routes/guards'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
 /** `<file> <METHOD> <path>` → why it needs no session. */
 const PUBLIC_ENDPOINTS: Record<string, string> = {
   'invitations.ts GET /invitations/:token': 'the sign-up page validates an invitation link before an account exists',
-  'oauth.ts GET /google/callback': 'Google sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company) is the proof',
+  'google-drive.ts GET /': 'the static Google Picker page (google-drive.md): it holds no secret; the token reaches it only from the app\'s own Picker window',
+  'slack-connection.ts POST /events/:companyId': 'Slack sends a company\'s events without an ACB session; the company\'s own signing secret (HMAC of the exact body, 5 minutes) is the proof — anything unsigned answers an empty 401 (slack-connector.md)',
+  'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
 
-interface Endpoint { file: string; method: string; path: string; app: Hono }
+interface Endpoint { file: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
 
 const endpoints: Endpoint[] = []
 
@@ -44,9 +51,14 @@ beforeAll(async () => {
     for (const value of Object.values(mod)) {
       if (!(value instanceof Hono)) continue
       const app = new Hono().route('/', value)
+      const seen = new Set<string>()
       for (const r of value.routes) {
         if (r.method === 'ALL') continue // middleware
-        endpoints.push({ file, method: r.method, path: r.path, app })
+        // `get(path, guard, …, handler)` lists one entry per handler: the first is the guard.
+        const key = `${r.method} ${r.path}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        endpoints.push({ file, method: r.method, path: r.path, app, guard: guardKind(r.handler) })
       }
     }
   }
@@ -92,4 +104,17 @@ describe('Authentication guards', () => {
     expect([...publicSeen].sort(), 'a listed public endpoint no longer exists: remove it from PUBLIC_ENDPOINTS')
       .toEqual(Object.keys(PUBLIC_ENDPOINTS).sort())
   })
+
+  it('every endpoint starts with a route guard (companyMember, signedIn, publicRoute)', () => {
+    const missing: string[] = []
+    const wrongPublic: string[] = []
+    for (const e of endpoints) {
+      const key = `${e.file} ${e.method} ${e.path}`
+      if (e.guard === null) missing.push(key)
+      else if ((e.guard === 'public') !== (key in PUBLIC_ENDPOINTS)) wrongPublic.push(`${key} (${e.guard})`)
+    }
+    expect(missing, 'Endpoints without a guard from src/routes/guards.ts as their first handler').toEqual([])
+    expect(wrongPublic, 'publicRoute(...) is for exactly the PUBLIC_ENDPOINTS, and they use it').toEqual([])
+  })
+
 })

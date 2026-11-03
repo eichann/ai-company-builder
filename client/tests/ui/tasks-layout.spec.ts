@@ -1,0 +1,135 @@
+// Files and records open side by side in the middle (plan A, 新しい画面のデモ): the やること tab
+// is the narrow column where the file tree sits, an opened task is a tab next to the open files
+// (its kind's icon and title, no 「ファイルではありません」 line), switching the left tab keeps it,
+// ← → go between file and record tabs, and an app restart brings the record tab back. Main screen:
+// src/app/AppShell.tsx on tests/skill-layout-ui.html?tasks=1. The list itself: tasks-list.spec.ts.
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import { expectNoPageErrors, openPreview } from './helpers'
+
+const chatDivider = (page: Page) => page.getByRole('separator', { name: '左の欄とチャットの境目' })
+// The tab strip comes first; a task row's name may start with 「やること」 too.
+const leftTab = (page: Page, name: RegExp) => page.getByRole('button', { name }).first()
+const middleTabs = (page: Page) => page.getByRole('tablist', { name: '開いているもの' })
+const box = async (locator: Locator) => {
+  const b = (await locator.boundingBox())!
+  return { left: Math.round(b.x), top: Math.round(b.y), right: Math.round(b.x + b.width), bottom: Math.round(b.y + b.height) }
+}
+
+test('a task opens as a tab beside the files; it stays when the left tab changes; ← → and a restart keep it', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1' })
+  const window = page.viewportSize()!
+
+  await leftTab(page, /^ファイル$/).click()
+  // A double click keeps the tab (a single click opens the preview tab the next one replaces).
+  await page.getByRole('button', { name: 'README.md' }).dblclick()
+  await expect(middleTabs(page).getByRole('tab', { name: /README\.md/ })).toBeVisible()
+  const filesDivider = await box(chatDivider(page))
+  const treeDivider = await box(page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' }))
+
+  // No count on the やること tab (the title bar's あなたの番 has it): a dot for what is new, gone once seen.
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toBeVisible()
+  await expect(leftTab(page, /^やること/)).not.toContainText(/\d/)
+  await leftTab(page, /^やること/).click()
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toHaveCount(0)
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await expect(list.getByText('A社 提案書を仕上げる')).toBeVisible()
+  // The list is the narrow column, under the tab strip and down to the bottom; the consultation stays.
+  expect(await box(chatDivider(page))).toEqual(filesDivider)
+  const listBox = await box(list)
+  expect(listBox.right).toBeLessThanOrEqual(treeDivider.left + 2)
+  expect(listBox.bottom).toBe(window.height)
+
+  // The task opens in the middle as a tab, next to README.md; the list stays on the left.
+  await list.getByText('A社 提案書を仕上げる').click()
+  const taskTab = middleTabs(page).getByRole('tab', { name: /A社 提案書を仕上げる/ })
+  await expect(taskTab).toHaveAttribute('aria-selected', 'true')
+  await expect(middleTabs(page).getByRole('tab', { name: /README\.md/ })).toBeVisible()
+  const card = page.getByTestId('record-tab')
+  await expect(card.getByText('A社_提案.md').first()).toBeVisible()
+  const cardBox = await box(card)
+  expect(cardBox.left).toBeGreaterThanOrEqual(treeDivider.right - 2)
+  expect(cardBox.right).toBeLessThanOrEqual(filesDivider.left)
+  await expect(page.getByText('ファイルではありません')).toHaveCount(0)
+  await expect(list).toBeVisible()
+
+  // Switching the left tab keeps the record tab open in the middle; what was seen gets no dot.
+  await leftTab(page, /^ファイル$/).click()
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toHaveCount(0)
+  await expect(taskTab).toHaveAttribute('aria-selected', 'true')
+  await expect(card).toBeVisible()
+
+  // ← back to the file, → forward to the task.
+  await page.getByRole('button', { name: '戻る' }).click()
+  await expect(middleTabs(page).getByRole('tab', { name: /README\.md/ })).toHaveAttribute('aria-selected', 'true')
+  await page.getByRole('button', { name: '進む' }).click()
+  await expect(taskTab).toHaveAttribute('aria-selected', 'true')
+
+  // A wide tab (スキル) covers the middle; coming back shows the same tabs.
+  await leftTab(page, /^スキル$/).click()
+  await expect(card).toBeHidden()
+  await leftTab(page, /^やること/).click()
+  await expect(card).toBeVisible()
+
+  // An app restart brings the record tab back with its title, before the record is read again.
+  await openPreview(page, 'skill-layout', { tasks: '1', keep: '1' })
+  await expect(middleTabs(page).getByRole('tab', { name: /A社 提案書を仕上げる/ })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+// Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
+// column; then (#516) showed icons only. Owner 2026-11-02: the names always show. Narrow: the name
+// (11 px, one line) under its icon, every tab inside the column even at its minimum; wide: side by side.
+const NAMES = ['スキル', 'ファイル', 'やること', '探す', '番組']
+
+async function leftTabsLook(page: Page) {
+  const strip = page.locator('[data-left-tabs]')
+  const s = (await strip.boundingBox())!
+  const looks: Array<'stacked' | 'side by side'> = []
+  for (const name of NAMES) {
+    const tab = strip.locator(`button[title="${name}"]`)
+    const label = tab.locator('[data-left-tab-name]')
+    await expect(label).toBeVisible()
+    await expect(label).toHaveText(name)
+    expect(await label.evaluate(e => parseFloat(getComputedStyle(e).fontSize))).toBeGreaterThanOrEqual(11)
+    const t = (await tab.boundingBox())!
+    const l = (await label.boundingBox())!
+    const icon = (await tab.locator('svg').first().boundingBox())!
+    // One line: never a column of characters.
+    expect(l.height).toBeLessThan(20)
+    // Inside the column, nothing cut off.
+    expect(t.x).toBeGreaterThanOrEqual(s.x - 1)
+    expect(t.x + t.width).toBeLessThanOrEqual(s.x + s.width + 1)
+    looks.push(l.y >= icon.y + icon.height - 1 ? 'stacked' : 'side by side')
+  }
+  return looks
+}
+
+test('at 1440×900 every left tab shows its name on one line: stacked in the narrow column (even at its minimum), side by side when wide', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', plugin: '1' })
+  const strip = page.locator('[data-left-tabs]')
+  await strip.locator('button[title="ファイル"]').click()
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'stacked'))
+  // The new-item dot on やること and the accessible names stay.
+  await expect(leftTab(page, /^やること/).locator('[data-new-dot]')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^探す$/ })).toBeVisible()
+
+  // The narrow column at its minimum: still every name, no tab outside the column.
+  const divider = page.getByRole('separator', { name: 'ファイルツリーとエディタの境目' })
+  const d = (await divider.boundingBox())!
+  await page.mouse.move(d.x + d.width / 2, d.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(d.x - 500, d.y + 200, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(async () => Math.round((await strip.boundingBox())!.width)).toBe(200)
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'stacked'))
+  await page.screenshot({ path: 'test-results/left-tabs-narrow.png' })
+  await strip.locator('button[title="探す"]').click()
+  await expect(page.getByPlaceholder('覚えている言葉で探す')).toBeVisible()
+
+  // スキル covers the whole left side: room for icon and name side by side.
+  await strip.locator('button[title="スキル"]').click()
+  expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'side by side'))
+  await page.screenshot({ path: 'test-results/left-tabs-wide.png' })
+  expectNoPageErrors(state)
+})

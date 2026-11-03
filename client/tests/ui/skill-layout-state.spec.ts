@@ -11,7 +11,7 @@ type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
-const gitLogCalls = async (page: Page) => (await layout(page)).evaluate(l => l.calls.filter(c => c.name === 'gitLog').length)
+const searchBox = (page: Page) => page.getByPlaceholder('覚えている言葉で探す')
 
 const ROOT = '/Users/demo/会社'
 const OTHER_ROOT = '/Users/demo/別会社'
@@ -26,7 +26,7 @@ const restart = (page: Page) => openPreview(page, 'skill-layout', { keep: '1' })
 
 const editorTab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索' | '履歴') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 // Shown only on the 全社 tab while some department is not downloaded (開発部 here).
 const companyWideBanner = (page: Page) => page.getByText('一部の部署がダウンロードされていません。', { exact: false })
 
@@ -68,16 +68,16 @@ test.describe('open files and the left tab', () => {
 
   test('the left tab chosen is the one shown at the next start', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await leftTab(page, '履歴').click()
-    await expect(page.getByText('提案書を更新')).toBeVisible()
+    await leftTab(page, '探す').click()
+    await expect(searchBox(page)).toBeVisible()
     await restart(page)
-    await expect(page.getByText('提案書を更新')).toBeVisible()
+    await expect(searchBox(page)).toBeVisible()
   })
 
   test('a saved left tab this version does not know opens スキル, and the rest of the saved state still restores', async ({ page }) => {
     await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'editor:demo': editorState([GUIDE], GUIDE, 'tasks') }) })
     await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
-    expect(await gitLogCalls(page), 'no other tab was opened').toBe(0)
+    await expect(searchBox(page), 'no other tab was opened').toHaveCount(0)
     await leftTab(page, 'ファイル').click()
     await expect(editorTab(page, GUIDE)).toBeVisible()
   })
@@ -92,8 +92,8 @@ test('a left tab remembered for a panel not registered yet (an extension still l
   await restart(page)
   await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
   expect(await savedTab()).toBe('tasks')
-  await leftTab(page, '履歴').click()
-  await expect.poll(savedTab).toBe('history')
+  await leftTab(page, '探す').click()
+  await expect.poll(savedTab).toBe('search')
 })
 
 test.describe('the chosen department', () => {
@@ -138,28 +138,29 @@ test.describe('panel dividers', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', metaKey: true, shiftKey: true, bubbles: true }))
   })
 
-  test('first start: the left side is 550 px and the file tree 200 px', async ({ page }) => {
+  // A first start fits the 1280 px window (layoutTree.ts firstLayout, I.8): the chat keeps 420 px.
+  test('first start: the left side is 860 px (the chat keeps 420) and the narrow column 260 px', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
-    expect(await at(chatDivider(page))).toBe(550)
-    expect(await at(treeDivider(page))).toBe(200)
+    expect(await at(chatDivider(page))).toBe(860)
+    expect(await at(treeDivider(page))).toBe(260)
   })
 
-  test('the file tree follows the pointer within 120–400 px', async ({ page }) => {
+  test('the file tree follows the pointer within 200–400 px (200: the left tabs fit stacked)', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
-    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await expect.poll(() => at(treeDivider(page))).toBe(360)
     await drag(page, treeDivider(page), 300)
     await expect.poll(() => at(treeDivider(page))).toBe(400)
     await drag(page, treeDivider(page), -500)
-    await expect.poll(() => at(treeDivider(page))).toBe(120)
+    await expect.poll(() => at(treeDivider(page))).toBe(200)
   })
 
   test('the left side follows the pointer from 300 px up to the room the chat needs; 60 px past that hides the chat, which comes back at that width', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await drag(page, chatDivider(page), 150)
-    await expect.poll(() => at(chatDivider(page))).toBe(700)
+    await drag(page, chatDivider(page), -150)
+    await expect.poll(() => at(chatDivider(page))).toBe(710)
     await drag(page, chatDivider(page), -600)
     await expect.poll(() => at(chatDivider(page))).toBe(300)
     // 1280 px window: the chat keeps 280 px (+10), so the left side stops at 990 px.
@@ -174,52 +175,52 @@ test.describe('panel dividers', () => {
     await expect.poll(() => at(chatDivider(page))).toBe(990)
   })
 
-  test('widths come back per company at the next start; a company with nothing saved opens at the defaults', async ({ page }) => {
+  test('widths come back per company at the next start; a company with nothing saved opens at the first look', async ({ page }) => {
     await openPreview(page, 'skill-layout')
     await leftTab(page, 'ファイル').click()
     await drag(page, treeDivider(page), 100)
-    await drag(page, chatDivider(page), 150)
-    await expect.poll(() => at(chatDivider(page))).toBe(700)
-    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await drag(page, chatDivider(page), -150)
+    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await expect.poll(() => at(treeDivider(page))).toBe(360)
 
     await restart(page)
-    await expect.poll(() => at(chatDivider(page))).toBe(700)
-    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await expect.poll(() => at(treeDivider(page))).toBe(360)
 
     await switchCompany(page, 'other')
     await leftTab(page, 'ファイル').click()
-    await expect.poll(() => at(chatDivider(page))).toBe(550)
-    await expect.poll(() => at(treeDivider(page))).toBe(200)
+    await expect.poll(() => at(chatDivider(page))).toBe(860)
+    await expect.poll(() => at(treeDivider(page))).toBe(260)
 
     await switchCompany(page, 'demo')
-    await expect.poll(() => at(chatDivider(page))).toBe(700)
-    await expect.poll(() => at(treeDivider(page))).toBe(300)
+    await expect.poll(() => at(chatDivider(page))).toBe(710)
+    await expect.poll(() => at(treeDivider(page))).toBe(360)
   })
 
   for (const [what, saved] of [
     ['unreadable', '{"version":1,"trees":'],
     ['from a version this app does not know', JSON.stringify({ version: 99, trees: { screen: { sizes: [900, null] } } })],
   ] as const) {
-    test(`a saved layout ${what} opens with the default widths, and dragging still works`, async ({ page }) => {
+    test(`a saved layout ${what} opens with the first look's widths, and dragging still works`, async ({ page }) => {
       await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': saved }) })
       await leftTab(page, 'ファイル').click()
-      expect(await at(chatDivider(page))).toBe(550)
-      expect(await at(treeDivider(page))).toBe(200)
-      await drag(page, chatDivider(page), 50)
-      await expect.poll(() => at(chatDivider(page))).toBe(600)
+      expect(await at(chatDivider(page))).toBe(860)
+      expect(await at(treeDivider(page))).toBe(260)
+      await drag(page, chatDivider(page), -50)
+      await expect.poll(() => at(chatDivider(page))).toBe(810)
     })
   }
 
   test('⌘⇧C hides the chat and brings it back at the width it had', async ({ page }) => {
     await openPreview(page, 'skill-layout')
-    await drag(page, chatDivider(page), 100)
-    await expect.poll(() => at(chatDivider(page))).toBe(650)
+    await drag(page, chatDivider(page), -100)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
     await toggleChatShortcut(page)
     await expect(chatDivider(page)).toHaveCount(0)
     await expect(showChat(page)).toBeVisible()
     await toggleChatShortcut(page)
     await expect(showChat(page)).toHaveCount(0)
-    await expect.poll(() => at(chatDivider(page))).toBe(650)
+    await expect.poll(() => at(chatDivider(page))).toBe(760)
   })
 
   // With the chat hidden the left side takes the rest of the window. Wide content (a long
@@ -243,18 +244,22 @@ test.describe('panel dividers', () => {
         const tree = (await treeDivider(page).boundingBox())!
         const button = (await showChat(page).boundingBox())!
         const box = (await shown(page).boundingBox())!
+        const side = (await page.locator('[data-file-side]').boundingBox())!
         const left = tree.x + tree.width
-        // The show-chat button sits at the window's right edge, the editor between it and the tree.
+        // The show-chat button sits at the window's right edge; the file's side column (つながり・前の版)
+        // just before it, and the editor between that and the tree.
         expect(Math.round(button.x + button.width)).toBe(width)
+        expect(side.x + side.width).toBeLessThanOrEqual(button.x + 1)
+        const right = side.x
         if (view === 'editor') {
           expect(box.x).toBeGreaterThanOrEqual(left - 1)
-          expect(box.x + box.width).toBeLessThanOrEqual(button.x + 1)
-          expect(box.width).toBeGreaterThan(button.x - left - 2)
+          expect(box.x + box.width).toBeLessThanOrEqual(right + 1)
+          expect(box.width).toBeGreaterThan(right - left - 2)
         } else {
           // The preview centres the document (at most 768 px) in the editor.
           expect(box.x).toBeGreaterThanOrEqual(left)
-          expect(box.x + box.width).toBeLessThanOrEqual(button.x)
-          expect(Math.abs(box.x + box.width / 2 - (left + button.x) / 2)).toBeLessThan(20)
+          expect(box.x + box.width).toBeLessThanOrEqual(right)
+          expect(Math.abs(box.x + box.width / 2 - (left + right) / 2)).toBeLessThan(20)
         }
       }
 
@@ -266,8 +271,9 @@ test.describe('panel dividers', () => {
 
       await toggleChatShortcut(page)
       await expect(showChat(page)).toHaveCount(0)
-      expect(await at(chatDivider(page))).toBe(550)
-      expect(await at(treeDivider(page))).toBe(200)
+      // In the smaller window the left side gives way so the chat keeps its room (280 px + 10).
+      expect(await at(chatDivider(page))).toBe(1000 - 290)
+      expect(await at(treeDivider(page))).toBe(260)
     })
   }
 })

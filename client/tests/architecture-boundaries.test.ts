@@ -244,6 +244,9 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
     'the tree hides review sidecars and marks documents with reviews (pure functions: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
   'settings -> voice/components/VoicePromptSettings.tsx': 'the settings panel shows the voice input\'s prompt settings, owned by the voice feature',
   'settings -> voice/components/VoiceShortcutSettings.tsx': 'the settings panel shows the voice input\'s key, owned by the voice feature',
+  'tasks -> records/components/RecordRows.tsx': 'the task card\'s 「つながっているもの」 follows records and files with the record card\'s own rows (one look, record.open / file.open)',
+  'tasks -> records/components/linkRows.tsx': 'the task card\'s 「つながっているもの」 rows are the record card\'s own (a record opens with record.open, a file with file.open; one look)',
+  'settings -> absences/components/AbsenceSection.tsx': 'the settings panel shows 「不在と代わりの人」, owned by the absences feature (like the voice settings)',
   'chat -> voice/components/VoiceShortcutSettings.tsx': 'the chat\'s agent settings show the voice key with the other input settings',
   'chat -> voice/api.ts': 'the composer\'s microphone button (VoiceInputControl) records and transcribes through the voice ports',
   'chat -> voice/microphoneSelection.ts': 'the composer\'s microphone button lists and picks the microphone',
@@ -421,7 +424,7 @@ test('exhaustive-deps is turned off no more often than today, and each time with
  * homes (renderer-structure.md "Effects"). The count may only go down: lower
  * this when you remove effects, never raise it.
  */
-const MAX_USE_EFFECTS = 129
+const MAX_USE_EFFECTS = 127
 
 /** `useEffect(` calls in one file's code (comments do not count). */
 function useEffectCalls(source: string): number {

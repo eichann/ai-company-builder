@@ -324,6 +324,31 @@ export function skillOfCall(tool: string, input: unknown): string | undefined {
   return undefined
 }
 
+/** A Skill the AI loaded in a consultation, as the chat server hands it to main's reporter. */
+export interface SkillUseSighting {
+  companyId: string
+  conversationId: string
+  /** The company folder (absolute). */
+  companyRoot: string
+  /** The consultation's working folder (absolute); the company folder when absent or outside it. */
+  workingDirectory?: string
+  /** The skill folder name the AI loaded. */
+  skill: string
+}
+
+/**
+ * The skill a finished call loaded (records.md "Which Skill"): Claude Code's
+ * `Skill` tool that ran (not refused, not failed) on a plain skill folder name
+ * — never a plugin's `plugin:skill`, never a call that only worked inside a
+ * skill's folder. Codex has no such tool (its skills are instructions it
+ * reads), so nothing it does counts.
+ */
+export function skillLoadedBy(event: Pick<AgentToolEvent, 'tool' | 'skill' | 'outcome'>): string | undefined {
+  if (event.tool !== 'Skill' || !event.skill || event.skill.includes(':')) return undefined
+  if (event.outcome !== 'ok' && event.outcome !== 'unfinished') return undefined // refused (no outcome) or failed
+  return event.skill
+}
+
 // ---------------------------------------------------------------------------
 // Targets
 // ---------------------------------------------------------------------------

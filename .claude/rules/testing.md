@@ -11,7 +11,7 @@ paths:
 
 # Client tests: node tests, renderer UI tests, performance baselines
 
-Run what you touched; CI runs the suites (macOS runners). Sync's harness: `sync-testing.md`.
+Run what you touched; CI runs the suites (Linux, and macOS where a Mac matters). Sync's harness: `sync-testing.md`.
 IPC harness: `ipc-and-main-process.md`. Parity tests: `shared-core.md`. Full text:
 `docs/architecture/testing.md` (internal).
 
@@ -51,11 +51,19 @@ Node tests run with node:test via tsx. Two places:
   `cd client && npx tsx --test tests/<name>.test.ts`. `sync/`, `sync-harness/`, `ipc-harness/`,
   `ui/`, `perf/` and the preview pages stay under `client/tests/`.
 
-CI job "Client tests (macOS)" runs `npx tsx --test tests/*.test.ts` plus every
-`src/**/*.test.ts` (listed with `find`: CI's Node 20 test runner does not expand globs, and bash
-without globstar reads `**` as `*`; keep file names free of spaces), then two Swift tests
-(`audio-level`, `input-route`). macOS on purpose: the POSIX spawn wrappers run `exec N>&-`
-through `/bin/sh`, which on Ubuntu is dash and fails on multi-digit fds.
+CI runs `tests/*.test.ts` plus every `src/**/*.test.ts` through `.github/scripts/client-tests.mjs`
+(it lists them: CI's Node 20 test runner does not expand globs; keep file names free of spaces)
+in two halves, and the required check "Client tests (macOS)" is green only when both passed (or
+were skipped for a PR that does not touch them):
+
+- **"Client tests 1/2 (Linux)"**: every file not in the script's `MACOS` list (most of them).
+- **"Client tests 2/2 (macOS)"**: the `MACOS` list, then two Swift tests (`audio-level`,
+  `input-route`). A file belongs there only when a Linux run would pass without guarding it:
+  it spawns through the POSIX wrappers (`exec N>&-` through `/bin/sh`, dash on Ubuntu, fails on
+  multi-digit fds), relies on FSEvents (recursive `fs.watch`), or asserts the case- and
+  normalization-insensitive volume (`ipc-fs.test.ts`'s darwin branches). Each entry names its
+  reason. A new test with a `process.platform === 'darwin'` branch, a real `/bin/sh` child
+  through those wrappers, or file-system case/NFD behaviour goes on the list.
 
 ## Renderer UI tests (Playwright)
 
@@ -63,7 +71,9 @@ The preview pages `client/tests/*-ui.html` (+ `.tsx`) render the real React comp
 preload API faked (`tests/ui/fixtures/electron-api.ts`: `installElectronAPI`, typed against
 `Window['electronAPI']` from `src/shared/ipc/electron-api.ts`) and, for the chat, a faked chat server.
 Playwright drives them in headless Chromium (`client/tests/ui/*.spec.ts`, CI "Renderer UI tests
-(macOS)").
+(Linux)"). They run on Linux in CI and on a Mac locally: press OS-dependent editing keys as
+`ControlOrMeta+…` (select all, ⌘End), not `Meta+…`; app shortcuts match ⌘ or Ctrl
+(`shared/commands`), so `Meta+Enter` works on both.
 
 ```bash
 cd client
@@ -87,12 +97,13 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
 
 ## Performance baselines
 
-`client/tests/perf/*.perf.test.ts` + `client/scripts/check-bundle-size.mjs`, CI job "Performance
-baselines (macOS)" (not part of `tests/*.test.ts`). They hold earlier wins: one recursive watch
+`client/tests/perf/*.perf.test.ts` (CI "Performance baselines (macOS)": FSEvents and Mac budgets)
++ `client/scripts/check-bundle-size.mjs` (CI "Renderer bundle size (Linux)"); not part of
+`tests/*.test.ts`. They hold earlier wins: one recursive watch
 handle for a 15k-file company and a first file-tree view of one ~55 KB read (#151); search of
 「の」 over ~6.5k files capped at 500 matches / < 1 MB, folder `git log` (#153); autosave of an
 ~8 MB history returning at once, summaries < 500 KB, the 564-message conversation rendering only
-its latest window (#154); the renderer bundle ≤ 2.2 MiB JS.
+its latest window (#154); the renderer bundle ≤ 2.5 MiB JS (raised from 2.2 → 2.3 → 2.5 on 2026-11-02, owner decision; code splitting is planned with the visual batch; reasons in the script).
 
 - Budgets are ~10x a developer Mac (runners vary): they catch order-of-magnitude regressions,
   not drift. Each check prints `[perf] name=value unit (budget …)`; grep the job log for `[perf]`.

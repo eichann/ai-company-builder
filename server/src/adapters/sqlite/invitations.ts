@@ -31,9 +31,9 @@ export function sqliteInvitationRepository(conn: Database.Database, companyId: s
 
     insert(inv) {
       conn.prepare(`
-        INSERT INTO invitations (id, company_id, token, role, created_by, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(inv.id, companyId, inv.token, inv.role, inv.createdBy, inv.expiresAt, inv.createdAt)
+        INSERT INTO invitations (id, company_id, token, role, created_by, expires_at, created_at, department_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(inv.id, companyId, inv.token, inv.role, inv.createdBy, inv.expiresAt, inv.createdAt, JSON.stringify(inv.departmentIds ?? []))
     },
 
     delete(invitationId) {

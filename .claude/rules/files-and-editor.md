@@ -17,6 +17,7 @@ paths:
   - "client/shared/skill-frontmatter.ts"
   - "client/tests/skill-frontmatter.test.ts"
   - "client/src/features/history/**"
+  - "client/src/app/FileSidePanel.tsx"
   - "client/src/features/search/**"
   - "client/src/shared/ipc/diffs.ts"
   - "client/src/shared/ipc/file-events.ts"
@@ -80,15 +81,33 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
   `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
-  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The core menu has no
-  「やることにつなぐ…」: that entry will be contributed by the task plugin through a plugin UI
-  insertion point for this menu (milestone 5; `records.md` "Linking files later").
+  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The menu's
+  「やることにつなぐ…」 is the core's (owner decision 2026-11-01: the task list is the core's, so
+  linking is too): it shows only when the panel gets `onLinkToTask` — `AppShell` passes it while
+  the task list shows for the department on screen — and opens the task feature's chooser
+  (`tasks-ui.md` "Linking files"). The tree's drag data (`src/shared/lib/dragTypes.ts`,
+  `application/x-file-paths`) also links a file dropped on a task row or the task card. The
+  plugin insertion point for this menu (milestone 5) stays for other plugins.
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
-  once opened (history follows the department only while shown, since it runs `git log`).
+  once opened.
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
+- **Too large to share** (owner decision 2026-11-02, 案A): a file sync keeps on this computer
+  because it is over 100 MB (`sync.md` step 4) carries 「共有されていません」 in its row
+  (`TreeRow` `tooLarge`, aria-label 「<name>は大きすぎて共有されていません」). Pressing it opens
+  `components/TooLargeFileHelp.tsx`: why (over 100 MB never reaches anyone else; the file is still
+  here) and what to do — 小さくする (and save it under a new name: the old name stays ignored),
+  分ける, 共有のリンクで渡す. The list comes from main's `git:unsharedLargeFiles`
+  (`findUnsharedLargeFiles` in `electron/sync/large-files.ts`: untracked files over the limit,
+  ignored or not yet; tracked ones are shared and not marked; ignored folders — `.backups/`, private
+  clones, nested repositories kept local — are not entered, so a private folder's own large files
+  are not marked), held per company folder by `hooks/useUnsharedLargeFiles.ts`
+  (`useSyncExternalStore`, reloaded 1.5 s after file events). The sync message's count stays.
+  Tests: `tests/unshared-large-files.test.ts`, `file-tree.spec.ts` 「a file sync keeps on this
+  computer for its size is marked…」.
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
+  `UnsharedLargeFileReads` (the too-large files, read-only git),
   `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
   drop: takes a file from anywhere on the computer; where the dropped file lies comes from
   `getPathForFile`, preload's `webUtils.getPathForFile`, no IPC — `File.path` is gone since
@@ -133,7 +152,9 @@ broke the block) and changes one entry in place (`setFrontmatterField`, the copy
 `skills:list` caches one scan per root + department folder (`''` = company-wide) for 5 s, for
 plain tab switches only. A scan is stale after any event at/under a `.claude/skills/` it reads
 (root → company-wide; inside a department → that department), the `.claude` folder itself, the
-root `.gitignore` (private marks → every scan), or a folder added/removed in the department.
+root `.gitignore` (older apps' private marks → every scan), or a folder added/removed in the department.
+Private marks are kept in this computer's `.git/info/exclude` (`ACB private skills` block,
+`sync/local-ignores.ts`); `skills:makePrivate` / `skills:publish` invalidate the scans themselves.
 Main drops stale scans in `sendFileChanges`; the renderer rescans the shown list and the
 company-wide skills behind slash commands with `{ force: true }` (coalesced 120 ms, deferred
 ≤ 1 s while typing in chat; `src/features/skills/hooks/useSkillsAutoRefresh.ts`) and after every
@@ -142,11 +163,13 @@ successful sync, keeping the list on screen.
 The renderer reaches skills only through `src/features/skills/api.ts`: ports `SkillReads` (list,
 read a file), `SkillToolRuns` (start / stop a skill's tool), `SkillOutbound` (open the tool's
 page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillSharingWrites` (private /
-publish: the `.gitignore` line that decides whether the next sync shares the skill).
+publish: the `.git/info/exclude` line — or an older app's line in the shared `.gitignore`, which
+publish also removes — that decides whether the next sync shares the skill; a company folder
+without a `.git` folder is refused).
 New skill and copy never replace a skill folder that exists (checked first, then main's
 `fs:createFile` / `fs:copy`); a new skill is marked private before anything is written, and
 `skills:makePrivate` refuses (`already_shared`) a folder the index or `origin/main` already has —
-a `.gitignore` line does not stop sync from sharing tracked files (`features/skills/shared-check.ts`,
+an ignore line does not stop sync from sharing tracked files (`features/skills/shared-check.ts`,
 test `ipc-app.test.ts` 「skills:makePrivate never marks…」). The wizard and the copy modal wait for
 the result, disable their buttons meanwhile and show the reason (`role="alert"`); preview
 `client/tests/keep-work-ui.html?view=skills` (`tests/ui/keep-work.spec.ts`).
@@ -194,8 +217,19 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   for the panel itself (`editor-panel.spec.ts`: autosave after 1 s, ⌘S, closing saves first,
   preview tabs pinned on double-click / first edit, ⌘⇧V and its remembered mode, ⌘F in a
   preview, the preview's scroll position, image / PDF views).
-- Open tabs, the active tab and the left panel tab are saved per company in localStorage
-  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`
+- **Files and records share the middle's tabs** (plan A, 新しい画面のデモ 2026-11-02): the left
+  tab (ファイル, やること, 探す…) is the narrow column of the `files` split and the middle
+  (`TabbedEditorPanel`) is beside it for every left tab, so switching the left tab keeps what is
+  open; a `wide` panel (スキル, a plugin's screen; `leftPanels.ts`) covers the middle, which stays
+  mounted. A record is a tab under the key `acb-record:<id>` (`editorTabs.ts` `recordTabKey`; no
+  path can have it), drawn with its kind's icon and title (`RecordTabLook`, told by the card once
+  read: `onLoaded`), and its card is drawn by the screen (`renderRecord`); only file tabs load
+  text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
+  preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
+- Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
+  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records }` (`records`: the open
+  record tabs' titles, so they show at once after a restart; a record tab is not checked against
+  the disk)
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
   (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
   background; any `leftTab` string is kept and one no registered panel has opens the default tab
@@ -247,7 +281,28 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
-## Search, Cmd+P and folder history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
+## Places, ← → and the file's side column (milestone 5 U8, design §7)
+
+- The editor area shows a file tab or a record's card (`features/records/components/RecordCard.tsx`,
+  `records.md` "The app's views"). `features/editor/places.ts` (pure) + `hooks/usePlaceHistory.ts`
+  keep the places shown, like a browser: ← / → (`components/PlaceNavigation.tsx`, in front of the
+  tabs) step through them, a new place drops the forward ones, ≤ 50, a new company starts over;
+  the restored active tab is the first place. `AppShell` records a place for what the member
+  chose (tree, tab, Cmd+P, `file.open`, `record.open`); ← to a closed file opens it again.
+  `TabbedEditorPanel` takes the parts as slots (`navigation`, `overlay` = the card shown instead
+  of the file with the tabs kept, `aside`), so the editor knows nothing of records.
+- Beside the open file, `src/app/FileSidePanel.tsx` (foldable, `localStorage editor:side-open`)
+  composes 「つながっているもの」 (`features/records/components/FileConnections.tsx`) and 「前の版」
+  (`features/history/components/FileVersions.tsx`).
+- **No 履歴 tab** (owner decision §7-8): the commit list of a folder is gone; a file's earlier
+  versions are reached from the file. 「前の版」 lists `git log` of that one file (30) and shows what
+  a version changed (`DiffModal`, commit mode); it reads again after every sync
+  (`features/history/refresh.ts` `refreshFileVersions`, called by `AppShell`). Putting an earlier
+  version back is not built (the 履歴 tab had none either; 復元 of `.backups` is unchanged).
+- UI tests: `tests/ui/skill-layout.spec.ts` (search with records, the card, ← →, 「前の版」 after a
+  sync), `skill-layout-state.spec.ts` (the side column keeps the editor inside the window).
+
+## Search, Cmd+P and a file's history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
 
 - Content search is a fixed string, A–Z case-insensitive (`LC_ALL=C -F -i`), ≤ 20 matches per
   file and **≤ 500 in all**: git's output is streamed and the process killed there (`truncated` →
@@ -257,9 +312,19 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   or a not-downloaded folder (exclude pathspecs); readable private folders in their own clone
   (paths company-relative). Every read runs with `GIT_NO_LAZY_FETCH=1` + `GIT_OPTIONAL_LOCKS=0`
   so a search never downloads a blob. `''` = the whole company (pathspec `.`, never `/`).
-- Folder history uses `git log -- :(literal)<folder>/` without `--follow` (simple-git's `file`
-  option added it: 0.9 s instead of 0.02 s, same commits). `invalidateCommitCache()` also makes
-  the visible history panel re-fetch.
+- `git:log` takes a folder or one file: `git log -- :(literal)<path>` without `--follow`
+  (simple-git's `file` option added it: 0.9 s instead of 0.02 s on a folder, same commits). A path
+  inside a readable private folder is read from that folder's own clone (the deepest `.git` under
+  the company root, validated by the allowed roots), as is `git:commitFileDiff` (`repoHolding`;
+  test `ipc-git.test.ts`). `git:showCommit` was removed with the 履歴 tab.
+- The 探す tab (formerly 検索; the narrow column, `SearchPanel`; `records.md` "探す"): live as the
+  member types (250 ms after the last key, never mid-IME, Enter at once, Esc clears), one row per
+  file however many lines match (its best line shown; it opens at that line, `gotoLine`), records and
+  consultations beside the files. The file contents are grepped in the department on screen, or the
+  whole company after 「全社で探す」 — still one capped `git:grep` per search, the previous one
+  stopped; file names come from one `git:listFiles` of the company kept 30 s; only the found files'
+  times are read (`fs:stat`, ≤ 80). A not-downloaded folder in the scope is said in one line
+  (「ダウンロードしていないフォルダのファイルは探していません」); its files are never searched.
 - The review diff (`src/features/doc-review/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder
@@ -268,5 +333,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
 - The renderer reaches these through read-only ports: `src/features/search/api.ts`
   (`CompanySearchReads`: the file list for Cmd+P, content search, a hit's text),
-  `src/features/history/api.ts` (`CommitHistoryReads`: log, a commit's files) and, for
-  `DiffViewer` (shown by the sync preview and the history), `src/shared/ipc/diffs.ts` (`DiffReads`).
+  `src/features/history/api.ts` (`FileVersionReads`: a file's log) and, for
+  `DiffViewer` (shown by the sync preview and 「前の版」), `src/shared/ipc/diffs.ts` (`DiffReads`).
+  Record hits go through `RecordSearchOutbound` (⌘K) and `RecordFindOutbound` (the 探す tab) in
+  search's `api.ts` (the words go to the server); a found file's time through `FileTimeReads`.

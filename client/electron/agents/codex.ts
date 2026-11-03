@@ -3,6 +3,7 @@ import { COMPANY_FILES_SERVER, startCompanyFilesMcp } from '../company-files/too
 import { REVIEW_SERVER, startReviewMcp } from '../review/tools'
 import { RECORDS_SERVER, startRecordsMcp } from '../records/tools'
 import { WEB_RESEARCH_SERVER, startWebResearchMcp } from '../web-research/tools'
+import { SECOND_OPINION_SERVER, startSecondOpinionMcp } from './second-opinion'
 import { MissingAgentSession } from './recovery'
 import type { AgentInteraction } from '../../shared/agent-interaction'
 import { readQuestions, describePermissions } from './codex-interactions'
@@ -99,6 +100,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       let reviewMcp: Awaited<ReturnType<typeof startReviewMcp>> | undefined
       let recordsMcp: Awaited<ReturnType<typeof startRecordsMcp>> | undefined
       let webResearchMcp: Awaited<ReturnType<typeof startWebResearchMcp>> | undefined
+      let secondOpinionMcp: Awaited<ReturnType<typeof startSecondOpinionMcp>> | undefined
       let askMcp: Awaited<ReturnType<typeof startLoopbackMcp>> | undefined
       // ask_user calls Codex has started and not yet asked (oldest first): links the card to its tool row.
       const askItems: string[] = []
@@ -152,6 +154,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         reviewMcp?.close()
         recordsMcp?.close()
         webResearchMcp?.close()
+        secondOpinionMcp?.close()
         askMcp?.close()
         rpc?.close()
         controller.close()
@@ -290,7 +293,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                   }
                   emit({ type: 'text-end', id: item.id }); openText.delete(item.id)
                 }
-                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === REVIEW_SERVER || item.server === RECORDS_SERVER || item.server === WEB_RESEARCH_SERVER || item.server === CODEX_CHOICE_SERVER)
+                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === REVIEW_SERVER || item.server === RECORDS_SERVER || item.server === WEB_RESEARCH_SERVER || item.server === SECOND_OPINION_SERVER || item.server === CODEX_CHOICE_SERVER)
                 if (appTool && item.server === CODEX_CHOICE_SERVER && item.tool === CODEX_CHOICE_TOOL) {
                   if (message.method === 'item/started' && !tools.has(item.id)) askItems.push(item.id)
                   else if (message.method === 'item/completed') { const at = askItems.indexOf(item.id); if (at >= 0) askItems.splice(at, 1) }
@@ -321,6 +324,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!title && request.review && !ended) reviewMcp = await startReviewMcp(request.review)
             if (!title && request.records && !ended) recordsMcp = await startRecordsMcp(request.records)
             if (!title && request.webResearch && !ended) webResearchMcp = await startWebResearchMcp(request.webResearch)
+            if (!title && request.secondOpinion && !ended) secondOpinionMcp = await startSecondOpinionMcp(request.secondOpinion)
             const askUser = request.askUser
             if (!title && askUser && !ended) {
               askMcp = await startLoopbackMcp(CODEX_CHOICE_SERVER, [codexAskUserTool(
@@ -329,7 +333,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                 interactionAbort.signal,
               )], { toolTimeoutSec: Math.ceil(CHOICE_TIMEOUT_MS / 1000) + 60 })
             }
-            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); reviewMcp?.close(); recordsMcp?.close(); webResearchMcp?.close(); askMcp?.close(); return }
+            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); reviewMcp?.close(); recordsMcp?.close(); webResearchMcp?.close(); secondOpinionMcp?.close(); askMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
             // The full snapshot once per turn; `account/rateLimits/updated` follows as usage changes.
@@ -347,6 +351,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               ...(reviewMcp ? { [REVIEW_SERVER]: reviewMcp.config } : {}),
               ...(recordsMcp ? { [RECORDS_SERVER]: recordsMcp.config } : {}),
               ...(webResearchMcp ? { [WEB_RESEARCH_SERVER]: webResearchMcp.config } : {}),
+              ...(secondOpinionMcp ? { [SECOND_OPINION_SERVER]: secondOpinionMcp.config } : {}),
               ...(askMcp ? { [CODEX_CHOICE_SERVER]: askMcp.config } : {}),
             }
             // 「AI の囲い」 enforce (agent-sandbox.md): the app's permission profile
@@ -402,7 +407,11 @@ export function createCodexConnection(config: Config, createRpc: RpcFactory = de
   return {
     id: 'codex', ownsConversation: true, authenticationError: () => process.platform === 'win32' ? CODEX_WINDOWS_UNSUPPORTED : undefined,
     isMissingSession: (error, id) => error instanceof MissingAgentSession && error.sessionId === id,
-    createChatModel: request => createModel(config, request, false, createRpc, checkVersion),
+    // An unattended step needs the restrictions it names; Codex has none of them built (ai-turns.md).
+    createChatModel: request => {
+      if (request.unattended) throw new Error('Codex: unattended AI turns are not supported')
+      return createModel(config, request, false, createRpc, checkVersion)
+    },
     createTitleModel: request => createModel(config, request || {}, true, createRpc, checkVersion),
     readMetadata(metadata) {
       const value = metadata?.codex as { sessionId?: string } | undefined

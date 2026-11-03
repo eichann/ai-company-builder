@@ -1,24 +1,37 @@
 // Read-only views of the company repository for the renderer: the sync
 // preview (never stages — sync/preview.ts), per-file diffs and revert, the
-// summary of pending changes, history by folder, file names (Cmd+P) and
-// content search (electron/git-search.ts).
+// summary of pending changes, a file's earlier versions (「前の版」), file names
+// (Cmd+P) and content search (electron/git-search.ts).
 //   git:preview, git:revertFile, git:fileDiff, git:commitFileDiff,
-//   git:generateSummary, git:listFiles, git:log, git:showCommit, git:grep,
-//   git:getBinaryStatus
+//   git:generateSummary, git:listFiles, git:unsharedLargeFiles, git:log, git:grep, git:getBinaryStatus
 
 import fs from 'fs'
 import path from 'path'
 import type { SimpleGit } from 'simple-git'
-import { commitFileDiffArgs, companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog, showCommitArgs } from '../../git-search'
+import { commitFileDiffArgs, companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog } from '../../git-search'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { AppGit } from '../../services/app-git'
 import type { CommitMessagesFor } from '../../services/commit-messages'
 import { previewChanges, withScratchIndex } from '../../sync/preview'
+import { findUnsharedLargeFiles } from '../../sync/large-files'
 import type { PathGuard } from '../ports'
 import { keepCurrentVersion } from '../backups/keep-current'
 
 /** Shown when the member's version could not be kept: nothing was undone. */
 export const REVERT_KEEP_FAILED = '今の内容を .backups に保存できなかったため、元に戻しませんでした。何も変更していません。'
+
+/**
+ * The repository holding a company path: a readable private folder is its own clone inside
+ * the company folder, so its files' history is read there (the path made relative to it).
+ */
+function repoHolding(paths: PathGuard, root: string, companyPath: string): { repo: string; rel: string } {
+  const parts = companyPath.split('/').filter(Boolean)
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const dir = path.join(root, ...parts.slice(0, i))
+    if (fs.existsSync(path.join(dir, '.git'))) return { repo: paths.validate(dir), rel: parts.slice(i).join('/') }
+  }
+  return { repo: root, rel: companyPath }
+}
 
 export interface GitHistoryDeps {
   paths: PathGuard
@@ -124,10 +137,10 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
   // Get diff for a specific file in a specific commit
   ipc.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: string, filePath: string) => {
     try {
-      const safePath = paths.validate(repoPath)
-      const git: SimpleGit = appGit.create(safePath)
+      const { repo, rel } = repoHolding(paths, paths.validate(repoPath), String(filePath ?? ''))
+      const git: SimpleGit = appGit.create(repo)
       // A hex commit id only: `--output=<file>` here made git write a file.
-      const diff = await git.raw(commitFileDiffArgs(commitHash, filePath))
+      const diff = await git.raw(commitFileDiffArgs(commitHash, rel))
       return { success: true, diff }
     } catch (err) {
       console.error('Git commit file diff error:', err)
@@ -169,35 +182,28 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
     }
   })
 
-  // Git log filtered by folder path (no --follow: see gitLogArgs)
+  // Files over the size limit that sync does not share (the file tree's
+  // 「大きすぎて共有されていません」 mark), company-relative. Read-only.
+  ipc.handle('git:unsharedLargeFiles', async (_, repoPath: string) => {
+    try {
+      const safePath = paths.validate(repoPath)
+      return { success: true, files: await findUnsharedLargeFiles(appGit.create(safePath, { GIT_NO_LAZY_FETCH: '1' }), safePath) }
+    } catch (err) {
+      console.error('Unshared large files error:', err instanceof Error ? err.message : err)
+      return { success: false, files: [] }
+    }
+  })
+
+  // Git log of a folder or one file (no --follow: see gitLogArgs)
   ipc.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
     try {
-      const git: SimpleGit = appGit.create(paths.validate(repoPath))
-      const raw = await git.raw(gitLogArgs(folderPath, limit))
+      const { repo, rel } = repoHolding(paths, paths.validate(repoPath), normalizeSearchFolder(folderPath))
+      const git: SimpleGit = appGit.create(repo)
+      const raw = await git.raw(gitLogArgs(rel, limit))
       return { success: true, commits: parseGitLog(raw) }
     } catch (err) {
       console.error('Git log error:', err)
       return { success: false, commits: [], error: err instanceof Error ? err.message : 'Failed' }
-    }
-  })
-
-  // Show files changed in a specific commit, filtered by folder
-  ipc.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
-    try {
-      const git: SimpleGit = appGit.create(paths.validate(repoPath))
-      const result = await git.raw(showCommitArgs(commitHash, folderPath))
-      const files: Array<{ status: string; path: string }> = []
-      for (const line of result.trim().split('\n')) {
-        if (!line) continue
-        const [status, ...pathParts] = line.split('\t')
-        if (status && pathParts.length > 0) {
-          files.push({ status: status.charAt(0), path: pathParts.join('\t') })
-        }
-      }
-      return { success: true, files }
-    } catch (err) {
-      console.error('Git show error:', err)
-      return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
     }
   })
 

@@ -1,6 +1,6 @@
 /**
  * Schema changes of milestone 3 on a database made by an earlier build
- * (db/index.ts), each a one-time rebuild that keeps every row:
+ * (db/schema/records.ts, db/schema/plugins.ts), each a one-time rebuild that keeps every row:
  * - record_types.source gains 'plugin' (a connector plugin's types);
  * - plugin_installs.key_id becomes ON DELETE SET NULL, so deleting the key a
  *   plugin uses is never blocked (better-sqlite3 enforces foreign keys) and

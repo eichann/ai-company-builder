@@ -142,7 +142,7 @@ describe('duties 1 and 2: from where, and who', () => {
 
   it('an action outside its from states is refused and changes nothing', async () => {
     const t = newTask()
-    const r = await act(m('u-bob'), t.id, 'complete', { expectedVersion: 1 })
+    const r = await act(m('u-bob'), t.id, 'send_back', { expectedVersion: 1, note: 'x' })
     expect(r).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'ACTION_NOT_ALLOWED_IN_STATE' } })
     expect(source.forCompany('a').records.ledger(t.id)).toHaveLength(1)
   })
@@ -214,8 +214,8 @@ describe('replaying a record’s past (§13.11)', () => {
     ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
     ok(await act(m('u-bob'), t.id, 'assign', { expectedVersion: 2, args: { assignee: 'u-carol' }, note: '担当交代' }))
     ok(await act(m('u-carol'), t.id, 'set_due', { expectedVersion: 3, args: { due: '2026-12-01' } }))
-    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '1'))).toEqual({ version: 1, state: 'todo', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob' } })
-    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '3'))).toEqual({ version: 3, state: 'in_progress', fields: { requested_by: 'u-alice', assignee: 'u-carol', next_actor: 'u-carol' } })
+    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '1'))).toEqual({ version: 1, state: 'todo', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob', accepted_by: 'u-bob' } })
+    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '3'))).toEqual({ version: 3, state: 'in_progress', fields: { requested_by: 'u-alice', assignee: 'u-carol', next_actor: 'u-carol', accepted_by: 'u-carol' } })
     const latest = replayed(engine.atVersion(m('u-mallory'), t.id, '4'))
     const stored = source.forCompany('a').records.states([t.id])[0]
     expect(latest).toEqual({ version: stored.version, state: stored.state, fields: JSON.parse(stored.fields) })

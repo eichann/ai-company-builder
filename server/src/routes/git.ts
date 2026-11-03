@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import { existsSync, mkdirSync } from 'fs'
-import { getUserFromRequest } from '../lib/auth'
 import { REPOS_DIR } from '../lib/config'
 import {
   configureAllBareRepos as configureAllBareReposIn,
@@ -8,6 +7,7 @@ import {
   installPreReceiveHook,
 } from '../lib/git-server'
 import { services } from '../composition'
+import { companyMemberNotFound } from './guards'
 
 /**
  * /api/git — what the desktop app needs to find its company's repository.
@@ -41,19 +41,15 @@ export function configureAllBareRepos(): { total: number; failed: number } {
 }
 
 // Get repository info (members of the company)
-gitRoute.get('/repos/:companyId', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
+const REPO_NOT_FOUND = { success: false, error: 'Repository not found' }
 
-  const companyId = c.req.param('companyId')
+// Not a member: the same answer as for a repository that does not exist.
+gitRoute.get('/repos/:companyId', companyMemberNotFound(REPO_NOT_FOUND), async (c) => {
+  const companyId = c.var.member.companyId
   const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
-  const notFound = () => c.json({ success: false, error: 'Repository not found' }, 404)
+  const notFound = () => c.json(REPO_NOT_FOUND, 404)
 
-  // Not a member: the same answer as for a repository that does not exist.
-  const membership = services.access.memberOf(companyId, user.id)
-  if (!membership || sanitizedId !== companyId) return notFound()
+  if (sanitizedId !== companyId) return notFound()
 
   if (!services.repoStore.companyRepoExists(sanitizedId)) return notFound()
 

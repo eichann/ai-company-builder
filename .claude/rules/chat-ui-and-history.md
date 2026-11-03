@@ -19,6 +19,12 @@ paths:
   - "client/electron/features/chat-windows/**"
   - "client/tests/chat-window*"
   - "client/tests/ipc-chat-windows.test.ts"
+  - "client/shared/tool-display.ts"
+  - "client/electron/tool-display-stream.ts"
+  - "client/tests/tool-display.test.ts"
+  - "client/tests/tool-rows-real-path.test.ts"
+  - "client/shared/acb-tool-displays.ts"
+  - "client/electron/records/tool-providers.ts"
 ---
 
 # Chat panel, chat history store and chat rendering
@@ -33,7 +39,9 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 
 `src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
-per-agent model pickers, buttons; owns its width observer), `ChatMessageList.tsx`
+per-agent model pickers, buttons; owns its width observer: under 420 px — a pane at its narrowest —
+only the meter, the model picker, ＋, the list and settings stay, and nothing is drawn outside the
+pane: `tests/ui/chat-narrow.spec.ts`), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
 dropped files and images in `ComposerAttachments.tsx`, and the text input
 `CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug
@@ -57,7 +65,8 @@ one place an added agent brings its own controls; everything else asks the regis
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
-  chat input.
+  chat input. The one request a tab takes while not shown is `aiTurn`: the automatic 「AI の番」
+  in a fresh background tab (`ai-turns.md`).
 - **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
   assumes one chat on screen:
   - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on
@@ -107,6 +116,28 @@ one place an added agent brings its own controls; everything else asks the regis
   hidden. Folding only hides rows: pagination counts all rows, and 「続きを読み込む」 hides while
   終わったもの is folded. Tests: `src/features/chat/conversationGroups.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
+- **Narrowed to what is open** (owner 2026-11-02, 新しい画面のデモ J): while a record is open in the
+  middle (AppShell's `activeRecordId`, given as `focus`), the list shows only consultations whose
+  main topic (`topicRecordId`) is that record itself — never those of the things inside it (a
+  案件's やること's consultations show when that やること is open) — plus the one on screen
+  (`focusConversationRows`). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
+  it back; opening another record narrows again); a search always looks at every consultation.
+  Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- **Searching the list** (owner, 2026-11-03). The box at the top of 「AIへの相談」 narrows as the
+  member types (no Enter; 200 ms after the last key; an IME's unconfirmed text never narrows,
+  confirming does; Esc or × empties it, and empty is the normal list, the narrowing to the record
+  open in the middle included). It matches the consultation's title, its draft, its body (main's
+  `searchChatSessions`) and the title of the record it is about: its own やること (the topic
+  record), else its 案件 (the topic when that is a 案件) — `consultationLinkedRecord` in
+  `client/shared/consultation-topics.ts`, the same rule 探す uses; a task consultation is not found
+  by its task's 案件. Each row shows that record under its title (link mark, `ThingIcon`, title),
+  with the matched part marked (`markMatches`, NFKC + case-folded as the search), and 「N件」 under
+  the box. Records come from the company server through main (`recordViews:topics`: a plain
+  `GET /records/item/:id` per topic id, never the card's 「開いた」 signal; not found / not allowed →
+  null, never shown or matched; unreachable → left out and asked again), cached per company in
+  `features/chat/consultationTopicsStore.ts` (all asked again when the list shows after a minute).
+  Order and states stay as without a search. Tests: `src/features/chat/conversation-rows.test.ts`,
+  `tests/consultation-topics.test.ts`, `tests/ui/chat-panel.spec.ts` 「the search box finds …」.
 - Group headings are sticky within their section (owner, 2026-10-30): while a group's rows scroll,
   its heading stays at the top of the list until the next group's heading takes over. The sticky
   wrapper has the sidebar's opaque background so rows never show through. Test: the
@@ -226,16 +257,29 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `src/features/chat/api.ts`: `ChatHistoryReads` / `ChatHistoryWrites`, `HandoffReads`, and
   `HandoffOutbound` (`handoff:update` / `handoff:complete` start or schedule the member's AI
   on the conversation, so they are not a plain write).
-- A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
+- A message stores its tool calls only as `[Tool: name]` text (plus `toolLines`, see 「Tool rows」); what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
-  `data-plugin-operation` parts; `plugins.md` "The app"), `minutesDealChoices`
+  `data-plugin-operation` parts; `plugins.md` "The app"), `secondOpinions` (the other AI's answer,
+「Codex の答えを全部見る」, `chat-and-agents.md`), `minutesDealChoices`
   (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
   `outbound-mail.md`). The app's cards come back after the text in
   the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
   more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
-  `minutesId` (and its title, not generated).
+  `minutesId` (and its title, not generated). One started by 「相談する」 keeps `topicRecordId`
+  (its main topic, 主な話題), also in its summary, so the next 「相談する」 finds it
+  (`tasks-ui.md` "Consulting about a task"). A message the app wrote for the AI keeps
+  `appInstruction` (`client/shared/app-instruction.ts`): restored as `metadata.appInstruction`,
+  never drawn as a bubble, previewed or searched (`tasks-ui.md`).
+- **`updatedAt` is when the conversation changed** (staging 2026-11-02: every conversation showed the
+  time a new app version first opened, and the list lost its order): `save()` keeps the stored time
+  unless a message (id, role, words) or the draft differs — a save of the same words with other fields
+  (a newer app's, a restore) never moves it (`sameConversation`). Times an earlier version stamped that
+  way are put back once at load: no draft and saved more than 15 minutes after the last message → the
+  last message's time (`repairedUpdateTimes`), written with the next save. Tests:
+  `client/tests/chat-history-store.test.ts` (「a save of the same words in another shape…」, 「times an
+  earlier version stamped…」).
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail
@@ -274,6 +318,38 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   card after the parts (`features/chat/components/BrokerKeyNeededCard.tsx`, `key-broker.md`
   「自分の鍵」 is the one place for keys). Tool outputs are not stored in history, so a restored
   conversation shows the card only when the AI's text kept the marker.
+- **Tool rows** are plain Japanese for non-engineers (owner, 2026-11-02): never a raw tool id
+  (`mcp__acb_records__…`), not even in brackets. `client/shared/tool-display.ts` (pure):
+  `ToolDisplay` = `label` (finished, 「決めたことを残しました」), `running` (「…しています」), `many`
+  (`{n}`, 「決めたことを {n} 件残しました」) and an optional `describe(input)` detail.
+- **The renderer names every ACB tool by its name alone** (`client/shared/acb-tool-displays.ts`),
+  in every kind of consultation — normal, a person-started step, an unattended 「AI の番」, restored
+  history — without depending on a line from main (staging, 2026-11-02: every row of a minutes
+  reading read 「道具を使いました（acb_records・minutes_read）」). Fixed tools are listed in
+  `ACB_TOOL_DISPLAYS`, and their definitions take `display` from there (`recordToolDisplay`,
+  `fixedToolDisplay`; `RecordToolDescriptor.display` is required, so a provider's new tool in
+  `records/tool-providers.ts` needs an entry). A record type's action (`<type>__<action>`) reads
+  its Japanese action label in the past tense (`actionToolDisplay`: 「議事録を読み終える」 →
+  「議事録を読み終えました」; core types in the renderer, the company's definition in main); a
+  plugin operation reads `pluginOperationDisplay` (main) or a sentence from its name. Built-in
+  agent tools are in `tool-display.ts`. Anything else reads 「ほかの道具を使いました」, muted; its
+  server and tool show only in the expanded row (「道具の名前：…」). `tests/tool-display.test.ts`
+  fails when a tool a turn can get has no Japanese name in the renderer.
+- A detail is a title, a count or a company-relative path (outside the company folder: the file
+  name only), ≤ 40 characters with key/token-looking strings masked (`shortText`): never command
+  text (Bash shows Claude's own `description` only), mail addresses or subjects, URL paths.
+- Main adds what only it knows (`electron/tool-display-stream.ts`, after the payload limits): the
+  company's own type / plugin labels and the detail with the company folder, on the part as
+  `callProviderMetadata.acb.display` (never for an unknown tool). Consecutive finished, successful
+  calls of one tool become one expandable row (`SameItem`). A failed call reads
+  「できませんでした：<reason>」 where the reason is only the app's own Japanese refusal (`{ error }`
+  answer, `failureOf`), never raw English. History keeps calls as `\n[Tool: name]` markers (the
+  hand-off compares that text; `recovery-context.ts` reads restored calls as the same markers) plus
+  `toolLines` (label and `many` of a company's own type / plugin tools, never a detail);
+  restoring turns each marker into a `data-tool-call` part drawn as a row. The rows are
+  `components/ToolRows.tsx`. Tests: `tests/tool-rows-real-path.test.ts` (the real main → renderer
+  path of an AI turn, with and without main's lines, restored), `tests/tool-display.test.ts`,
+  `src/features/chat/tool-rows.test.ts`, `tests/chat-panel-helpers.test.ts`.
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.

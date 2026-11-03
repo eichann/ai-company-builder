@@ -10,16 +10,18 @@ import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import { detectReviewStatus, hasUnseenReviews } from '../../doc-review/model'
 import { reviewStatusOfListing, type FileEntry } from '../fileTreeModel'
-import { treeMenuItems } from '../contextMenuItems'
+import { treeMenuItems, type FileMenuExtraItem } from '../contextMenuItems'
 import { usePrivateFolders } from '../hooks/usePrivateFolders'
 import { useFileTreeModel, useVisibleRows } from '../hooks/useFileTreeModel'
 import { useNotDownloadedFolders } from '../hooks/useNotDownloadedFolders'
+import { useUnsharedLargeFiles } from '../hooks/useUnsharedLargeFiles'
 import { useTreeContextMenu, useTreeSelection } from '../hooks/useTreeSelection'
 import { useFileOperations } from '../hooks/useFileOperations'
 import { useTreeDragDrop } from '../hooks/useTreeDragDrop'
 import { NewFolderDialog } from './NewFolderDialog'
 import { FileTreeHeader, PrivateFolderBanner } from './FileTreeHeader'
 import { TreeRow, type ReviewBadge, type RowActions } from './TreeRow'
+import { TooLargeFileHelp } from './TooLargeFileHelp'
 
 interface FileTreePanelProps {
   rootPath: string
@@ -30,6 +32,10 @@ interface FileTreePanelProps {
   onCreateFile?: () => void
   /** A private folder was created on the server: sync so it reaches this computer. */
   onPrivateFolderCreated?: () => void
+  /** 「やることにつなぐ…」 in the right-click menu: the file or folder's absolute path. Absent: no item. */
+  onLinkToTask?: (path: string) => void
+  /** Items business plugins add to a row's right-click menu (plugin-frame.md "The four slots"); the entry's absolute path. */
+  extraMenuItems?: (entry: { path: string; isDirectory: boolean; notDownloaded?: boolean }) => FileMenuExtraItem[]
 }
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -41,6 +47,8 @@ export function FileTreePanel({
   onSelectFile,
   onDoubleClickFile,
   onPrivateFolderCreated,
+  onLinkToTask,
+  extraMenuItems,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
@@ -64,6 +72,8 @@ export function FileTreePanel({
   const [showDotFiles, setShowDotFiles] = useState(true)
   const { model, treeVersion, isLoading, refreshTree, showChangeIn } = useFileTreeModel(rootPath, departmentPath)
   const notDownloaded = useNotDownloadedFolders(rootPath, model, warn)
+  const isTooLarge = useUnsharedLargeFiles(rootPath)
+  const [tooLargeHelp, setTooLargeHelp] = useState<string | null>(null)
   const { rows, visiblePaths } = useVisibleRows(model, treeVersion, departmentPath, showDotFiles, notDownloaded.withPlaceholders)
   const selection = useTreeSelection()
   const menu = useTreeContextMenu(selection, departmentPath)
@@ -120,6 +130,7 @@ export function FileTreePanel({
     ...dnd.row,
     download: (entry) => { void notDownloaded.downloadFolder(entry) },
     clearSelection: () => selection.setSelectedPaths(new Set()),
+    explainTooLarge: (entry) => setTooLargeHelp(entry.name),
   }
 
   /** The review badge of a file row (from its folder's names; sidecars are hidden). */
@@ -195,6 +206,7 @@ export function FileTreePanel({
                 privateRoot={entry.isDirectory && !entry.notDownloaded ? privateFolders.privateRootAt(entry.path) : null}
                 review={reviewBadgeOf(entry)}
                 downloading={notDownloaded.downloading.has(entry.path)}
+                tooLarge={!entry.isDirectory && isTooLarge(entry.path)}
                 actions={rowActions}
               />
             )
@@ -208,7 +220,13 @@ export function FileTreePanel({
             contextMenu.entry,
             contextMenu.entry?.isDirectory ? contextMenu.entry.path : contextMenu.parentPath,
             contextMenu.selectedSnapshot,
-            { ...ops, download: entry => { void notDownloaded.downloadFolder(entry) }, closeContextMenu: menu.close },
+            {
+              ...ops,
+              download: entry => { void notDownloaded.downloadFolder(entry) },
+              closeContextMenu: menu.close,
+              linkToTask: onLinkToTask ? entry => onLinkToTask(entry.path) : undefined,
+              extraItems: extraMenuItems,
+            },
             t,
           )}
           position={contextMenu.position}
@@ -262,6 +280,8 @@ export function FileTreePanel({
         onConfirm={dnd.confirmMove}
         onCancel={dnd.cancelMove}
       />
+
+      {tooLargeHelp !== null && <TooLargeFileHelp name={tooLargeHelp} onClose={() => setTooLargeHelp(null)} />}
 
       {notice && (
         <div role="status" className="absolute bottom-2 left-2 right-2 flex items-start gap-1.5 px-3 py-2 rounded-md bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 dark:bg-indigo-400/10 dark:border-indigo-400/25 dark:text-indigo-100">

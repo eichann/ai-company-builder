@@ -36,6 +36,9 @@ paths:
   - "client/shared/review-request.ts"
   - "client/src/features/chat/components/ReviewRequestCard.tsx"
   - "client/tests/review-request.test.ts"
+  - "client/shared/agents/second-opinion.ts"
+  - "client/src/features/chat/components/SecondOpinionQuote.tsx"
+  - "client/tests/second-opinion.test.ts"
 ---
 
 # Chat agents (Claude Code, Codex)
@@ -51,22 +54,29 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
   (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
   (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
-  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader) and `capabilities`
+  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader / secondOpinion), `askNames` (how a
+  member names the agent in a message: 「Codex」「コーデックス」, 「Claude」「クロード」) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
-  webReader, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
+  webReader, secondOpinion, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
   `minCliVersion` (Codex: the oldest CLI the app starts, checked with `--version` before a chat
   turn and in the settings check — `agent-sandbox.md`).
 - **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and
   fails on a model id literal anywhere under `client/electron`, `client/src`, `client/shared`.
   A model generation update is a registry-only change. (The API-key mode deliberately uses
   `claude-haiku-5-5` for commit messages but `claude-haiku-4-5-20251001` for voice and titles.)
+  `COMPANY_KEY_MODELS` there holds the models of the app's own text jobs sent through the
+  company's key (the broker's relay), whatever agent the member uses: today `tagSuggest`
+  (`tasks-ui.md` "Tag suggestions").
 - `client/electron/agents/registry.ts` is how each agent starts: `createAgentConnection(id,
   host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting),
   `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`, `runWebReader(id,
   request)` (「Web で調べる」's reader, `web-research.md`).
   `client/tests/agent-registry-factories.test.ts`: every capability-gated factory an agent claims
   exists, and none it does not.
+- An unattended 「AI の番」 step (`unattended` on `createChatModel`, `ai-turns.md`): Claude Code
+  runs it with `settingSources: []`, `strictMcpConfig: true`, only the step's built-in tools and
+  record tools, refusing everything else; Codex and the API key throw on it.
 - Role profiles (`AgentProfile`: role, allowedTools, settingSources, sandbox, cwd) on a chat
   connection: no agent implements one, so any set field throws — a caller can never believe a
   restriction is in force when it is not. Implement a profile inside the agent's factory;
@@ -125,8 +135,12 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - The API-key mode's key is never in any env: main passes it in-process (`createAnthropic`), and
   it rests encrypted in `config.json` (`anthropicApiKeyEncrypted`, Electron `safeStorage` through
   the shell's `SecretBox`; `services/api-key-store.ts`). A plain `anthropicApiKey` from an older
-  version is encrypted on first access and removed. No OS encryption (Linux `basic_text`, no
-  keyring) → saving a key is refused with a message, never stored in plain text. The renderer
+  version is encrypted on first access and removed; when that fails (no OS encryption, the
+  write fails) the plain key is **not used** (API-key mode answers as with no key), one tagged
+  `[api-key]` warning without the value is logged, the status carries `storedInPlainText` and the
+  settings screen asks to save the key again; the move is retried on every access. No OS
+  encryption (Linux `basic_text`, no keyring) → saving a key is refused with a message, never
+  stored in plain text. The renderer
   gets only `config:getApiKeyStatus` (`set`, `last4`, flags), never the key; never log the key or
   its length. Tests: `tests/api-key-store.test.ts`, `tests/ipc-app.test.ts`.
 
@@ -245,6 +259,72 @@ tool), renderer `ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`.
   editor (the `file.open` command, registered by the main screen; `commands.md`). Tests: `client/tests/review-request.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
 
+## 「もう一方の AI に聞く」 (asking the other AI, owner 2026-11-02)
+
+`client/shared/agents/second-opinion.ts` (pure: ids, limits, input check, who may be asked, the
+material, the answer's header, the record), `electron/agents/second-opinion.ts` (the tool),
+`second-opinion-runner.ts` + `claude-second-opinion.ts` / `codex-second-opinion.ts` (the asked
+agent), renderer `SecondOpinionQuote.tsx`. Tests `client/tests/second-opinion.test.ts`
+(each guard mutation-checked).
+
+- A conversation, not a feature screen: no window, card or 「〇〇の案を採る」 button. The member
+  writes 「Codex はどう言ってる？」; the AI says 「Codex に聞いてみます」, calls the tool (row
+  「Codex に聞きました」 + 「この相談とファイル n 件を見せました」), and sums the answer up in the
+  conversation (①… → 直しました / そのままにしました, 「どうしますか？」). The other AI's own words are
+  a folded quote 「Codex の答えを全部見る」 after the reply's text: a `data-second-opinion` part,
+  stored with the reply as `secondOpinions`, drawn as plain text (no links, no images).
+- **Only when the member asked.** `askedTargets(asker, messages)`: the request's last message
+  must be the member's own (not one the app composed, `appInstruction`) and name the agent
+  (registry `askNames`, case-insensitive). Only then does the turn get the tool (`ask_codex`,
+  `ask_claude_code` on MCP server `acb_second_opinion`, one per named agent); in any other turn
+  it does not exist. The description and the system-prompt paragraph also say never on the AI's
+  own initiative. ≤ 2 calls per turn, ≤ 10 per conversation (in memory).
+- **Read-only, narrower than the sandbox.** Registry `capabilities.secondOpinion` (Claude Code,
+  Codex) + factory `runSecondOpinion`: the other agent's own CLI with no tools at all, in a new
+  empty temp folder, the material as JSON data. Claude: `claude -p --safe-mode --tools ""
+  --permission-mode dontAsk --strict-mcp-config --setting-sources "" --disable-slash-commands
+  --no-session-persistence --max-turns 1` (verified on CLI 2.1.316: init `tools: []`,
+  `mcp_servers: []`); an init listing any tool or MCP server, or any `tool_use`, kills it. Codex:
+  the `codex-text.ts` one-shot (shell, apply_patch, web search, plugins… off, MCP servers disabled,
+  read-only, approvals never), only user / agent message and reasoning items. Model:
+  `tasks.secondOpinion` (Claude: the chat Opus; Codex: catalog default).
+- **What it sees** is what the member can see in this consultation: the AI's summary; the
+  conversation's latest 8 messages' text as shown (no tool output, no app-composed message);
+  files the app reads itself — inside the company folder after resolving symlinks, not in a
+  not-downloaded folder, not `.git/`, not secret-looking names (`.env*`, keys, `id_*`, …), text
+  only, ≤ 5 × 40 KB (120 KB in all). Private folders: the private-read guard treats the tool as a
+  send-out (`otherAiMessage`, kind `send`, #465's per-conversation consent); the tool itself also
+  asks (so Codex, without the guard's hooks, is covered too) when the conversation read a
+  private folder or a shown file is in one; no one to ask → refused.
+- **Availability, time, stop.** Claude must be installed and signed in (`claudeReady`), Codex
+  answers `account/read` with ChatGPT; otherwise the AI relays 「Codex がこの PC で使えないので聞け
+  ませんでした」. 180 s per call (Codex's `tool_timeout_sec` leaves room for the private-read
+  question). The member's stop and an administrator's stop (`chat-turns` abort) kill it. The
+  emergency stop's 外部の MCP kind refuses it (category `mcp-external`). Logs carry durations and
+  counts only.
+- **The company allows it or not** (owner decision 2026-11-02: a company contracted with only
+  one AI vendor must not have its content sent to the other). Admin 「詳しい設定 › AI の安全 ›
+  もう一方の AI に聞く」 (`admin/src/app/companies/[id]/advanced/ai-safety/second-opinion/page.tsx`,
+  聞かない / 聞いてよい, saved at once; owner/admin; a company that allows it shows 「変えています」
+  on AI の安全). Server: `GET|PUT /second-opinion` (`routes/second-opinion.ts` →
+  `services/second-opinion-setting.ts` → the handle's `secondOpinion`, table
+  `second_opinion_settings`); **no row = not allowed**. The companies that existed when the
+  setting shipped got `allowed = 1` once, when the table was first made
+  (`db/schema/agents.ts` `migrateSecondOpinionSetting`; a later start never rewrites it), so they
+  kept the feature; companies created afterwards start off. Tests:
+  `server/tests/unit/second-opinion-setting.test.ts`, `admin/tests/second-opinion.test.tsx`.
+- **Enforcement is in the app** — the other AI runs on the member's computer; the server only
+  keeps the setting and hands it out in the member's policy (`GET /me/agent-policy` →
+  `secondOpinion: { allowed }`, a change announced on the push channel like the sandbox,
+  `agent-sandbox.md`). `chat-server.ts` asks `secondOpinionAllowed(companyId)`
+  (`features/chat/server-config.ts`: the policy store, 3 s) only in a turn whose member message
+  names the other agent (`secondOpinionTurn`); anything but an explicit `allowed: true` —
+  forbidden, no policy received in this app run (offline), an older server without the field,
+  a malformed value, a failing check — means **no tool at all**, and the AI gets
+  `secondOpinionForbiddenInstructions` (say it cannot ask; never start the other AI another way).
+  A policy received earlier in the same app run is kept while the server cannot be reached
+  (the policy store's rule). Test: `client/tests/second-opinion-setting.test.ts`.
+
 ## The company map's tools (`acb_records`)
 
 `client/electron/records/` (`records.md` "Typed tools in the app"): generated from the type
@@ -359,3 +439,7 @@ the server: `agent-events.md` ("Sending from the app").
   `stopped-by-admin` the reply first gets the text 「※ 管理者が停止しました。」. The emergency stop
   calls it (`agent-stop.md`); agents also get the request's `toolStop` (a live check per tool
   call, decision `stopped`).
+- **Which Skill** (`records.md` "Which Skill"): `withSkillSightings` wraps a consultation turn's
+  host; a `Skill` call that ran (`skillLoadedBy`) also goes to `onSkillUsed` → main's
+  `services/skill-use-reporter.ts` (folder name + git tree id + dirty, never a path). Codex has
+  no Skill tool: nothing is recorded for it.

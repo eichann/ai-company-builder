@@ -5,7 +5,8 @@
 // (write-access.test.ts), search caps in main (git-search.test.ts). These
 // tests pin what the SkillCentricLayout split (R3) can break: what stays
 // mounted across department and tab switches, the not-downloaded overlay,
-// the read-only marks, and the wiring of search, history and skills refresh.
+// the read-only marks, and the wiring of search (files and records), a record's card,
+// ← →, a file's 「つながっているもの」 / 「前の版」 and skills refresh.
 import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
@@ -16,7 +17,7 @@ declare global { interface Window { __acbLayout: Layout } }
 const ROOT = '/Users/demo/会社'
 const calls = (page: Page, name: string) => page.evaluate(n => window.__acbLayout.calls.filter(c => c.name === n).map(c => c.args), name)
 const deptTab = (page: Page, name: string) => page.getByRole('button', { name, exact: true }).first()
-const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '検索' | '履歴') => page.getByRole('button', { name, exact: true })
+const leftTab = (page: Page, name: 'スキル' | 'ファイル' | '探す') => page.getByRole('button', { name, exact: true })
 const overlay = (page: Page) => page.getByRole('button', { name: 'ダウンロードして同期を開始' })
 
 test('switching departments keeps the file tree mounted with what was expanded or collapsed, without a cold re-read', async ({ page }) => {
@@ -97,36 +98,93 @@ test('read-only folders carry 閲覧のみ in the tree and above an open file', 
   await expect(page.getByText('このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。')).toBeVisible()
 })
 
-test('search: results grouped by file, the cap note when truncated, cleared by a department switch', async ({ page }) => {
+test('探す: one row per file, the cap note when truncated, searched again in another department; a hit opens the file in the middle', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await leftTab(page, '検索').click()
+  await leftTab(page, '探す').click()
   const box = page.getByRole('textbox').filter({ visible: true }).first()
   await expect(box).toBeFocused()
+  // Live: no Enter needed.
   await box.fill('提案')
-  await box.press('Enter')
-  await expect(page.getByText('2ファイル / 3件')).toBeVisible()
-  await expect(page.getByText(/結果が多いため/)).toHaveCount(0)
+  // Two records and two files hold the words; A社_提案.md has two lines and is one row.
+  await expect(page.getByText('営業部の中で 4件')).toBeVisible()
+  await expect(page.locator('[data-hit="file:営業部/提案書/A社_提案.md"]')).toHaveCount(1)
+  await expect(page.getByText(/見つかったところが多いため/)).toHaveCount(0)
   expect(await calls(page, 'gitGrep')).toEqual([['提案', '営業部']])
+  // A file's hit opens that file in a tab in the middle, 探す staying on the left.
+  await page.locator('[data-hit="file:営業部/提案書/A社_提案.md"]').click()
+  await expect(page.getByRole('tablist', { name: '開いているもの' }).getByRole('tab', { name: /A社_提案\.md/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(box).toBeVisible()
 
   await box.fill('の')
   await box.press('Enter')
-  await expect(page.getByText('結果が多いため最初の500件を表示しています。言葉を増やして絞り込んでください。')).toBeVisible()
+  await expect(page.getByText('ファイルの中に見つかったところが多いため、一部だけ出しています。言葉を増やすと絞れます')).toBeVisible()
 
+  // Another department: the same words, searched there.
   await deptTab(page, '総務').click()
-  await expect(page.getByText(/ファイル \/ \d+件/)).toHaveCount(0)
-  await expect(page.getByText(/結果が多いため/)).toHaveCount(0)
+  await expect.poll(async () => (await calls(page, 'gitGrep')).at(-1)).toEqual(['の', '総務'])
 })
 
-test('history refreshes in place after a sync', async ({ page }) => {
+test('探す finds records next to files with a chip for each kind found; a record opens as a card, its links are followed, ← → go back and forth', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   await deptTab(page, '営業部').click()
-  await leftTab(page, '履歴').click()
-  await expect(page.getByText('提案書を更新')).toBeVisible()
-  expect((await calls(page, 'gitLog')).at(-1)).toEqual(['営業部/'])
+  await leftTab(page, '探す').click()
+  const box = page.getByRole('textbox').filter({ visible: true }).first()
+  await box.fill('提案')
+  const records = page.locator('[data-hit^="record:"]')
+  const files = page.locator('[data-hit^="file:"]')
+  const chips = page.getByRole('group', { name: '種類で絞る' })
+  // Only kinds with something found get a chip.
+  await expect(chips.getByRole('button')).toHaveText(['やること1', '決めたこと1', 'ファイル2'])
+  expect(await calls(page, 'findRecords')).toEqual([['demo', '提案']])
+  await chips.getByRole('button', { name: /決めたこと/ }).click()
+  await expect(records).toHaveCount(1)
+  await expect(files).toHaveCount(0)
+  await chips.getByRole('button', { name: /決めたこと/ }).click()
+  await expect(records).toHaveCount(2)
+  const hits = page.locator('[data-find-panel]')
+
+  // A record opens as a card in the editor area of the files tab (a task: the task card).
+  await hits.getByRole('button', { name: /A社 提案書を仕上げる/ }).click()
+  const card = page.getByTestId('task-card')
+  await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
+  // Fields and 経緯 are folded at the bottom until opened.
+  await card.getByRole('button', { name: /ほかの項目/ }).click()
+  await card.getByRole('button', { name: /経緯/ }).click()
+  await expect(card.getByText('田中 太郎', { exact: true })).toBeVisible()
+  await expect(card.getByText('山田 花子：作りました')).toBeVisible()
+
+  // Following the linked file opens it; the file shows what links to it and its earlier versions.
+  await card.getByRole('button', { name: /^A社_提案\.md/ }).click()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByText('A社への提案の骨子。')).toBeVisible()
+  const side = page.getByLabel('つながっているもの', { exact: true })
+  await expect(side.getByRole('button', { name: /A社 提案書を仕上げる/ })).toBeVisible()
+  expect(await calls(page, 'getRecordsForFile')).toContainEqual(['営業部/提案書/A社_提案.md'])
+
+  // ← back to the card, → forward to the file.
+  await page.getByRole('button', { name: '戻る' }).click()
+  await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
+  await page.getByRole('button', { name: '進む' }).click()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByText('A社への提案の骨子。')).toBeVisible()
+})
+
+test('「前の版」 of an open file replaces the 履歴 tab and refreshes in place after a sync', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '営業部').click()
+  await expect(leftTab(page, '探す')).toBeVisible()
+  await expect(page.getByRole('button', { name: '履歴', exact: true })).toHaveCount(0)
+  await leftTab(page, 'ファイル').click()
+  await page.getByRole('button', { name: 'A社_提案.md' }).click()
+  const versions = page.getByLabel('前の版')
+  await expect(versions.getByText('提案書を更新')).toBeVisible()
+  expect((await calls(page, 'gitLog')).at(-1)).toEqual(['営業部/提案書/A社_提案.md'])
   await page.getByRole('button', { name: 'サーバーと同期' }).click()
-  await expect(page.getByText('チームの変更を取り込み')).toBeVisible()
-  await expect(page.getByText('提案書を更新')).toBeVisible()
+  await expect(versions.getByText('チームの変更を取り込み')).toBeVisible()
+  // What one version changed opens as a diff.
+  await versions.getByRole('button', { name: /提案書を更新/ }).click()
+  await expect(page.getByText(/の変更）/)).toBeVisible()
 })
 
 test('skills: a skill the AI adds appears; a burst of events is one rescan', async ({ page }) => {
@@ -153,19 +211,59 @@ test('skills: a skill the AI adds appears; a burst of events is one rescan', asy
 })
 
 // The app's shortcuts are commands (.claude/rules/commands.md): app-wide, so they work wherever the focus is.
-test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 検索 tab with the cursor in its box', async ({ page }) => {
+test('shortcuts: ⌘P and ⌘K open 探す by name, ⌘⇧F the 探す tab with the cursor in its box', async ({ page }) => {
   await openPreview(page, 'skill-layout')
   type Keys = { key: string; metaKey?: boolean; shiftKey?: boolean }
   const press = (init: Keys) => page.evaluate((i: Keys) => {
     (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { ...i, bubbles: true }))
   }, init)
   await press({ key: 'p', metaKey: true })
-  const nameSearch = page.getByPlaceholder('ファイル名で検索...')
+  const nameSearch = page.getByPlaceholder('やること・案件・ファイルなどを名前で探す')
   await expect(nameSearch).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(nameSearch).toHaveCount(0)
+  // ⌘K: the same 探す window; records the server finds by name come first, then files; Enter opens.
+  await press({ key: 'k', metaKey: true })
+  await expect(nameSearch).toBeFocused()
+  await nameSearch.fill('提案')
+  const options = page.getByRole('listbox', { name: '開くもの' }).getByRole('option')
+  await expect(options.first()).toContainText('A社 提案書を仕上げる')
+  await expect(page.getByRole('listbox', { name: '開くもの' })).toContainText('B社_提案.md')
+  await nameSearch.press('Enter')
+  await expect(nameSearch).toHaveCount(0)
+  await expect(page.getByRole('tablist', { name: '開いているもの' }).getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveAttribute('aria-selected', 'true')
+  // With nothing typed it lists what is open, newest first.
+  await press({ key: 'k', metaKey: true })
+  await expect(page.getByText('最近開いたもの')).toBeVisible()
+  await expect(options.first()).toContainText('A社 提案書を仕上げる')
+  await page.keyboard.press('Escape')
   await press({ key: 'f', metaKey: true, shiftKey: true })
-  await expect(page.getByPlaceholder('文言を検索... (Enter)')).toBeFocused()
+  await expect(page.getByPlaceholder('覚えている言葉で探す')).toBeFocused()
+})
+
+test('⌘K finds skills (the shown department\'s and the company-wide ones) and consultations by name; a skill opens in the スキル tab', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { consultations: '1' })
+  await deptTab(page, '営業部').click()
+  const press = () => page.evaluate(() => {
+    (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }))
+  })
+  const nameSearch = page.getByPlaceholder('やること・案件・ファイルなどを名前で探す')
+  const options = page.getByRole('listbox', { name: '開くもの' }).getByRole('option')
+  // A consultation by its title, labelled as the list names it.
+  await press()
+  await nameSearch.fill('見積')
+  await expect(options.filter({ hasText: '見積の相談' })).toContainText('AIへの相談')
+  await page.keyboard.press('Escape')
+  // A company-wide skill while 営業部 is shown: chosen, it opens under 全社 in the スキル tab.
+  await press()
+  await nameSearch.fill('WEEKLY')
+  await expect(options.first()).toContainText('weekly-report')
+  await expect(options.first()).toContainText('スキル')
+  await nameSearch.press('Enter')
+  await expect(nameSearch).toHaveCount(0)
+  // Its card under 全社 (営業部's skills gone) and, chosen, its detail beside it: the heading twice.
+  await expect(page.getByRole('heading', { name: 'weekly-report' })).toHaveCount(2)
+  await expect(page.getByRole('heading', { name: 'proposal' })).toHaveCount(0)
 })
 
 test('a file link clicked in a consultation\'s own window opens here, in the files tab, as a kept tab (file.open)', async ({ page }) => {

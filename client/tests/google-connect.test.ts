@@ -69,3 +69,32 @@ test('a refusal or an offline server answers a sentence built from the status on
   assert.equal(o.success, false)
   assert.ok(!JSON.stringify(o).includes(STATE) && !off.logs.join('\n').includes(STATE))
 })
+
+test('受信を読む is offered only to a connected member without it, and a feature the member turned off says so', async () => {
+  const { googleSectionView } = await import('../shared/google')
+  const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false }
+  const without = googleSectionView({ ...base, features: ['minutes', 'mail'], featuresOff: [] })
+  assert.equal(without.canAddInbox, true)
+  assert.deepEqual(without.allowed, ['予定と議事録を読む', 'メールを送る'])
+  const off = googleSectionView({ ...base, features: ['minutes', 'inbox'], featuresOff: ['inbox'] })
+  assert.equal(off.canAddInbox, false)
+  assert.deepEqual(off.allowed, ['予定と議事録を読む', '受信を読む（オフにしています）'])
+  assert.equal(googleSectionView({ ...base, connected: false, status: null, features: [], featuresOff: [] }).canAddInbox, false)
+  // The company has 受信を読む off (its default): never offered, the server would refuse it.
+  const companyOff = googleSectionView({ ...base, features: ['minutes', 'mail'], featuresOff: [], companyFeatures: ['minutes', 'mail'], seen: [] })
+  assert.equal(companyOff.canAddInbox, false)
+  assert.equal(googleSectionView({ ...base, features: ['minutes'], featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'], seen: [] }).canAddInbox, true)
+})
+
+test('「Google でつなぐ」 (connectAll) asks for { all } and opens only the sign-in page; 「あとで」 is a PUT of /seen', async () => {
+  const h = harness({ status: 200, body: { success: true, data: { authorizeUrl: GOOGLE_URL, expiresAt: '2026-11-01T00:10:00Z' } } })
+  assert.deepEqual(await h.api.connectAll('co1'), { success: true })
+  assert.deepEqual(h.opened, [GOOGLE_URL])
+  assert.deepEqual(h.requests.map(r => [r.method, r.url, r.body]), [['POST', 'https://acb.test/api/companies/co1/me/google/connect', { all: true }]])
+  const lookalike = harness({ status: 200, body: { data: { authorizeUrl: 'https://accounts.google.com.evil.example/o/oauth2/v2/auth' } } })
+  assert.equal((await lookalike.api.connectAll('co1')).success, false)
+  assert.deepEqual(lookalike.opened, [])
+  const seen = harness({ status: 200, body: { success: true, data: { available: true, features: [], seen: ['minutes'] } } })
+  assert.equal((await seen.api.markSeen('co1')).success, true)
+  assert.deepEqual(seen.requests.map(r => [r.method, r.url]), [['PUT', 'https://acb.test/api/companies/co1/me/google/seen']])
+})

@@ -37,7 +37,10 @@ test('a consultation window gets the main window\'s hardened web preferences, lo
   const win = await openWindow('session-prefs')
   const main = BrowserWindow.all[0].options as Prefs
   const prefs = (win.options as Prefs).webPreferences
-  assert.deepEqual(prefs, main.webPreferences)
+  // Only the main window keeps full speed behind other apps: 「AI の番」 runs there (ai-turns.md).
+  const { backgroundThrottling, ...mainHardened } = main.webPreferences
+  assert.equal(backgroundThrottling, false)
+  assert.deepEqual(prefs, mainHardened)
   assert.equal(prefs.contextIsolation, true)
   assert.equal(prefs.nodeIntegration, false)
   assert.equal(prefs.sandbox, true)
@@ -45,7 +48,8 @@ test('a consultation window gets the main window\'s hardened web preferences, lo
   // Same page as the main window (its CSP), told to show only the chat.
   assert.equal(win.webContents.loaded, BrowserWindow.all[0].webContents.loaded)
   assert.deepEqual(win.webContents.loadOptions, { query: { window: 'chat' } })
-  assert.deepEqual(win.webContents.windowOpenHandler?.(), { action: 'deny' })
+  assert.deepEqual(win.webContents.windowOpenHandler?.({ url: 'javascript:alert(1)' }), { action: 'deny' })
+  assert.equal(win.webContents.navigate('https://example.com/'), true)
   win.close()
 })
 

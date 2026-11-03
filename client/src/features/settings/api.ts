@@ -5,6 +5,8 @@
 // those never read a value back: only per name whether it is set.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature } from '../../../shared/google'
+import type { SlackFeature } from '../../../shared/slack'
+import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
@@ -16,6 +18,8 @@ export type CompanyEnvWrites = ElectronPort<'updateEnv'>
 export type GitignoreReads = ElectronPort<'readFile'>
 /** Writing the company folder's .gitignore. */
 export type GitignoreWrites = ElectronPort<'writeFile'>
+/** Asking the company server which companies the member belongs to, with their role in each. */
+export type GitignoreEditorReads = ElectronPort<'getCompanies'>
 /** Reading this computer's list of extra environment variable names the AI may see. */
 export type AgentEnvReads = ElectronPort<'getAgentEnvPassthrough'>
 /** Changing that list: widens or narrows what the AI's processes see on this computer. */
@@ -57,6 +61,24 @@ export function readGitignore(rootPath: string, reads: GitignoreReads = window.e
 
 export function writeGitignore(rootPath: string, content: string, writes: GitignoreWrites = window.electronAPI) {
   return writes.writeFile(gitignorePath(rootPath), content)
+}
+
+/**
+ * May this member edit the company .gitignore on the settings page? It applies to everyone
+ * once synced, so only owners and admins get the editor; anyone else (or an unknown role:
+ * offline, company not listed) sees it read-only. Only the page: sync's essentials and the
+ * .env lines are still written for every member (large files and private skills now go to
+ * .git/info/exclude), and the server does not check who changes the file yet
+ * (.claude/rules/sync-guards.md "Shared files").
+ */
+export async function canEditCompanyGitignore(companyId: string, reads: GitignoreEditorReads = window.electronAPI): Promise<boolean> {
+  try {
+    const result = await reads.getCompanies()
+    const role = result.success ? result.data?.find(c => c.id === companyId)?.role : undefined
+    return role !== undefined && FULL_ACCESS_ROLES.has(role)
+  } catch {
+    return false
+  }
 }
 
 export function getAgentEnvPassthrough(reads: AgentEnvReads = window.electronAPI) {
@@ -117,4 +139,56 @@ export function disconnectGoogle(companyId: string, outbound: GoogleOutbound = w
 /** Sends the .env key `name` to the server as one's own key; the .env loses it only once the server kept it. */
 export function moveEnvKeyToServer(companyId: string, rootPath: string, name: string, outbound: EnvKeyMoveOutbound = window.electronAPI) {
   return outbound.moveEnvKeyToServer(companyId, rootPath, name)
+}
+
+/** Asking the company server about the member's Slack permission (no token ever reaches the app). */
+export type SlackReads = ElectronPort<'getSlackStatus'>
+/** 「Slack で許可」 (main opens Slack's page in the browser), 「許可をやめる」 and the 知らせの DM switch. */
+export type SlackOutbound = ElectronPort<'connectSlack' | 'disconnectSlack' | 'setSlackFeature'>
+
+export function getSlackStatus(companyId: string, reads: SlackReads = window.electronAPI) {
+  return reads.getSlackStatus(companyId)
+}
+
+export function connectSlack(companyId: string, features: SlackFeature[], outbound: SlackOutbound = window.electronAPI) {
+  return outbound.connectSlack(companyId, features)
+}
+
+export function disconnectSlack(companyId: string, outbound: SlackOutbound = window.electronAPI) {
+  return outbound.disconnectSlack(companyId)
+}
+
+export function setSlackFeature(companyId: string, feature: SlackFeature, on: boolean, outbound: SlackOutbound = window.electronAPI) {
+  return outbound.setSlackFeature(companyId, feature, on)
+}
+
+/**
+ * 「仕事の道具をつなぐ」: one Google consent for every feature the company offers (main opens
+ * Google's page; the URL never comes here), and 「あとで」 per service (marks what is offered as shown).
+ */
+export type ConnectToolsOutbound = ElectronPort<'connectGoogleAll' | 'markGoogleSeen' | 'markSlackSeen'>
+
+export function connectGoogleAll(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.connectGoogleAll(companyId)
+}
+
+export function markGoogleSeen(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.markGoogleSeen(companyId)
+}
+
+export function markSlackSeen(companyId: string, outbound: ConnectToolsOutbound = window.electronAPI) {
+  return outbound.markSlackSeen(companyId)
+}
+
+/** 自分の設定: the member's own 受信を読む / AI が自動で進める, as the company server holds them. */
+export type WorkSwitchReads = ElectronPort<'getWorkSwitches'>
+/** Turning one of them on or off (the server refuses turning on what the company does not allow). */
+export type WorkSwitchWrites = ElectronPort<'setWorkSwitch'>
+
+export function getWorkSwitches(companyId: string, reads: WorkSwitchReads = window.electronAPI) {
+  return reads.getWorkSwitches(companyId)
+}
+
+export function setWorkSwitch(companyId: string, which: 'readIncoming' | 'autoRun', on: boolean, writes: WorkSwitchWrites = window.electronAPI) {
+  return writes.setWorkSwitch(companyId, which, on)
 }

@@ -1,0 +1,54 @@
+// 設定 → 自分の設定 (言葉の決まり 5c, src/features/settings/components/MySwitchesSection.tsx) on
+// tests/download-folders-ui.html?tab=mine. Guards: the two switches show the member's own state
+// and a change goes to the server for that switch only; one the company stops is greyed out,
+// says 「会社の設定で止まっています」 and cannot be turned on; the settings open on 自分の設定; a company with
+// neither mail nor chat connected shows no 受信を読む switch, only the line on what connecting does.
+import { test, expect } from '@playwright/test'
+import { expectNoPageErrors, openPreview } from './helpers'
+
+test('the two switches: the member\'s own state, a change sent for that switch only', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine' })
+  const read = page.getByRole('switch', { name: '受信を読む' })
+  const auto = page.getByRole('switch', { name: 'AI が自動で進める' })
+  await expect(read).toHaveAttribute('aria-checked', 'false')
+  await expect(auto).toHaveAttribute('aria-checked', 'true')
+  await read.click()
+  await expect(read).toHaveAttribute('aria-checked', 'true')
+  await auto.click()
+  await expect(auto).toHaveAttribute('aria-checked', 'false')
+  expect(await page.evaluate(() => (window as unknown as { __switchesSet: string[] }).__switchesSet)).toEqual(['readIncoming:true', 'autoRun:false'])
+  await expect(page.getByText('会社の設定で止まっています')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a switch the company stops is greyed out with the reason and cannot be turned on', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine', company: 'off' })
+  const read = page.getByRole('switch', { name: '受信を読む' })
+  await expect(read).toBeDisabled()
+  await expect(read).toHaveAttribute('aria-checked', 'false')
+  await expect(page.locator('[data-my-switch="readIncoming"]')).toContainText('会社の設定で止まっています')
+  await expect(page.getByRole('switch', { name: 'AI が自動で進める' })).toBeEnabled()
+  expectNoPageErrors(state)
+})
+
+test('受信を読む on without Google\'s permission says so and leads to 「Google で許可」', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine', mail: 'no' })
+  await expect(page.locator('[data-needs-google]')).toHaveCount(0)
+  await page.getByRole('switch', { name: '受信を読む' }).click()
+  await expect(page.locator('[data-needs-google]')).toContainText('Google で許可が要ります')
+  await page.getByRole('button', { name: 'Google で許可する' }).click()
+  await expect(page.getByRole('button', { name: 'Google' })).toHaveAttribute('aria-current', 'page')
+  expectNoPageErrors(state)
+})
+
+test('a company with neither mail nor chat connected: no 受信を読む switch, one line on what connecting does; 自動で進める stays', async ({ page }) => {
+  const state = await openPreview(page, 'download-folders', { tab: 'mine', channels: 'none' })
+  await expect(page.getByRole('switch', { name: 'AI が自動で進める' })).toBeVisible()
+  await expect(page.locator('[data-connect-mail-chat]')).toContainText('Gmail・Slack をつなぐと、返事の追いかけを AI がします')
+  await expect(page.getByRole('switch', { name: '受信を読む' })).toHaveCount(0)
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/settings-no-mail-chat.png` })
+  // Where one connects stays: the Google and Slack sections are still in the settings.
+  await expect(page.getByRole('button', { name: 'Google' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Slack' })).toBeVisible()
+  expectNoPageErrors(state)
+})

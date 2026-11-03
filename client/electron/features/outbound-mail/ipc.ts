@@ -5,11 +5,11 @@
 //   outboundMail:recipients     its verified recipients (sources, typed ones included)
 //   outboundMail:update         a new version (the person's edit)
 //   outboundMail:addRecipient   「あなたが入力」 an address
-//   outboundMail:send           「確かめて送る」 with the hash of the version shown
+//   outboundMail:send           「確かめて送る」 with the hash of the version shown (+ 「返事を待つ」's day)
 //   outboundMail:resolve        送られていた／送られていなかった after an unknown send
 //   outboundMail:discard        「捨てる」
 
-import { MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isContentHash, type MailDraftEdit, type OutboundMailResult } from '../../../shared/outbound-mail'
+import { MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isAwaitReply, isContentHash, type MailAwaitReply, type MailDraftEdit, type OutboundMailResult } from '../../../shared/outbound-mail'
 import type { MailRecipientsView, MailRecipientView, OutboundMailView } from '../../../../shared/types/outbound-mail'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -24,6 +24,8 @@ export interface OutboundMailDeps {
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const REF = /^r[0-9a-f]{24}$/
+/** 503s whose sentence is the server's own (a connector stopped), not an outage. */
+const SAID_BY_SERVER = new Set(['GOOGLE_UNAVAILABLE', 'SLACK_UNAVAILABLE'])
 const BAD: OutboundMailResult = { success: false, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 
 type Data = { draft?: OutboundMailView; outcome?: 'sent' | 'unknown'; message?: string; recipient?: MailRecipientView } & Partial<MailRecipientsView>
@@ -62,8 +64,8 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
     const code = typeof json?.code === 'string' ? json.code : null
     log.warn(`[outbound-mail] ${suffix || 'draft'}: answered ${res.status}${code ? ` ${code}` : ''}`)
     return {
-      success: false, offline: res.status >= 500 && code !== 'GOOGLE_UNAVAILABLE', code,
-      error: typeof json?.error === 'string' && (res.status < 500 || code === 'GOOGLE_UNAVAILABLE') ? json.error : `サーバーでエラーが起きました（HTTP ${res.status}）。`,
+      success: false, offline: res.status >= 500 && !SAID_BY_SERVER.has(code ?? ''), code,
+      error: typeof json?.error === 'string' && (res.status < 500 || SAID_BY_SERVER.has(code ?? '')) ? json.error : `サーバーでエラーが起きました（HTTP ${res.status}）。`,
       ...(json?.needsGoogleConsent === 'mail' ? { needsGoogleConsent: 'mail' as const } : {}),
       ...(json?.draft ? { draft: json.draft } : {}),
     }
@@ -88,9 +90,11 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
       if (typeof email !== 'string' || email.length > 254 || (name !== undefined && (typeof name !== 'string' || name.length > 100))) return Promise.resolve(BAD)
       return request(companyId, messageId, 'POST', '/recipients', { email, ...(name ? { name } : {}) })
     },
-    send(companyId: string, messageId: string, hash: string) {
+    send(companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null) {
       if (!isContentHash(hash)) return Promise.resolve(BAD)
-      return request(companyId, messageId, 'POST', '/send', { hash })
+      // 「返事を待つ」: a day only (the server checks it is today … 180 days ahead); anything else never leaves.
+      if (awaitReply !== undefined && awaitReply !== null && !isAwaitReply(awaitReply)) return Promise.resolve(BAD)
+      return request(companyId, messageId, 'POST', '/send', { hash, ...(awaitReply ? { awaitReply: { until: awaitReply.until } } : {}) })
     },
     resolve(companyId: string, messageId: string, sent: boolean) {
       if (typeof sent !== 'boolean') return Promise.resolve(BAD)
@@ -106,7 +110,7 @@ export function registerOutboundMailIpc(ipc: IpcRegistrar, deps: OutboundMailDep
   ipc.handle('outboundMail:recipients', (_event, companyId, messageId) => api.recipients(companyId, messageId))
   ipc.handle('outboundMail:update', (_event, companyId, messageId, edit, conversationId) => api.update(companyId, messageId, edit, conversationId))
   ipc.handle('outboundMail:addRecipient', (_event, companyId, messageId, email, name) => api.addRecipient(companyId, messageId, email, name))
-  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash) => api.send(companyId, messageId, hash))
+  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash, awaitReply) => api.send(companyId, messageId, hash, awaitReply))
   ipc.handle('outboundMail:resolve', (_event, companyId, messageId, sent) => api.resolve(companyId, messageId, sent))
   ipc.handle('outboundMail:discard', (_event, companyId, messageId) => api.discard(companyId, messageId))
 }

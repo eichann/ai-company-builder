@@ -5,15 +5,22 @@
 
 import path from 'path'
 import { pathToFileURL } from 'url'
-import { app, BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
-import { allowPermission, type AppPage } from './permission-policy'
-import type { DesktopShell, WindowPort } from './features/ports'
+import { isPluginAddress, PLUGIN_SCHEME, pluginFrameNavigationAllowed } from '../shared/plugin-bridge'
+import type { PluginFileServer } from './features/plugins/protocol'
+import { allowPermission, isAppPage, type AppPage } from './permission-policy'
+import { webLinkForBrowser } from './external-url'
+import type { DesktopShell, DrivePickerOutcome, DrivePickerWindow, WindowPort } from './features/ports'
+import { isDrivePickerPage, readDrivePickerResult } from './features/google/drive'
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
 import { createCloseGuard, type CloseAnswer, type CloseGuard } from './services/close-guard'
+
+/** Desktop notifications still on screen (one that is garbage-collected loses its click). */
+const liveNotifications = new Set<Notification>()
 
 export const desktopShell: DesktopShell = {
   openPath: (target) => shell.openPath(target),
@@ -32,6 +39,14 @@ export const desktopShell: DesktopShell = {
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='
       ),
     })
+  },
+  notify(title, body, onClick) {
+    if (!Notification.isSupported()) return
+    const shown = new Notification({ title, body })
+    liveNotifications.add(shown)
+    shown.on('click', () => { liveNotifications.delete(shown); onClick?.() })
+    shown.on('close', () => liveNotifications.delete(shown))
+    shown.show()
   },
 }
 
@@ -81,6 +96,36 @@ export function createBroadcastPort(getWindows: () => Array<BrowserWindow | null
 
 export interface WindowBounds { x?: number; y?: number; width: number; height: number }
 
+/**
+ * Every app window shows only the app's page: a link that would open a new
+ * window (`target="_blank"` in a chat answer or a markdown preview,
+ * window.open) or navigate the window away from the app opens in the member's
+ * own browser instead (http / https only; anything else is just refused).
+ * Without this, Electron opened such links in a new app window. Only the main
+ * frame: the PDF preview's iframe is Chromium's viewer and navigates itself.
+ */
+export function keepAppPageInWindow(contents: WebContents, page: AppPage): void {
+  const openInBrowser = (url: string) => {
+    const link = webLinkForBrowser(url)
+    if (link) void shell.openExternal(link).catch(() => { /* no browser: nothing to do */ })
+  }
+  contents.setWindowOpenHandler(({ url, referrer }) => {
+    // A plugin's screen opens nothing, not even in the browser (its sandbox refuses popups too).
+    if (!isPluginAddress(url) && !isPluginAddress(referrer?.url)) openInBrowser(url)
+    return { action: 'deny' }
+  })
+  contents.on('will-navigate', event => {
+    if (isAppPage(event.url, page)) return
+    event.preventDefault()
+    if (!isPluginAddress(event.url)) openInBrowser(event.url)
+  })
+  // A frame showing a plugin's page navigates nowhere; only the app's own frames load one (plugin-frame.md).
+  contents.on('will-frame-navigate', event => {
+    if (event.isMainFrame) return
+    if (!pluginFrameNavigationAllowed(event.frame?.url, event.url)) event.preventDefault()
+  })
+}
+
 /** Saved bounds only when they still lie on a connected display (a monitor may be gone); else only the size. */
 function usableBounds(saved: WindowBounds | undefined, fallback: WindowBounds): WindowBounds {
   if (!saved || !(saved.width >= 420) || !(saved.height >= 480)) return fallback
@@ -95,10 +140,12 @@ function usableBounds(saved: WindowBounds | undefined, fallback: WindowBounds): 
  * Consultation windows (「別ウィンドウで開く」, features/chat-windows): the
  * same page, preload and web preferences as the main window (`webPreferences`
  * is the main window's, so the hardening is one copy), loaded with
- * `?window=chat`; no other page, no popups. The last bounds are remembered.
+ * `?window=chat`; no other page, no popups (`keepAppPageInWindow`). The last
+ * bounds are remembered.
  */
 export function createChatWindowHost(options: {
   webPreferences: () => WebPreferences
+  page: () => AppPage
   load: (win: BrowserWindow) => void
   bounds: { load(): WindowBounds | undefined; save(bounds: WindowBounds): void }
 }) {
@@ -123,8 +170,7 @@ export function createChatWindowHost(options: {
       })
       const id = win.webContents.id
       windows.set(id, win)
-      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-      win.webContents.on('will-navigate', event => event.preventDefault())
+      keepAppPageInWindow(win.webContents, options.page())
       win.once('ready-to-show', () => win.show())
       let confirmed = false
       win.on('close', event => {
@@ -223,6 +269,7 @@ export function createAppPages(appDir: string) {
  */
 export function createMainWindowHost(options: {
   webPreferences: () => WebPreferences
+  page: () => AppPage
   load: (win: BrowserWindow) => void
   askClose: (window: WindowPort) => void
   /** Sent with requests to image.docbase.io (its images answer 403 otherwise). */
@@ -245,10 +292,12 @@ export function createMainWindowHost(options: {
         minWidth: 1000,
         minHeight: 600,
         titleBarStyle: 'hiddenInset',
-        webPreferences: options.webPreferences(),
+        // AI turns run in this window while it is open, also behind other apps or minimized (ai-turns.md).
+        webPreferences: { ...options.webPreferences(), backgroundThrottling: false },
       })
       current = win
       win.on('closed', options.onClosed)
+      keepAppPageInWindow(win.webContents, options.page())
       const winGuard = createCloseGuard({
         ask: () => options.askClose(port),
         close: () => { if (!win.isDestroyed()) win.close() },
@@ -306,6 +355,58 @@ export function createMessageBoxHost(getWindow: () => BrowserWindow | null): Mes
 }
 
 /**
+ * Google Picker in a window of its own (google-drive.md "The Picker"): the
+ * server's static Picker page with its own preload (`picker-preload.js`:
+ * two calls, nothing else of the app), isolated and sandboxed, its own
+ * session partition (Google's sign-in cookies stay out of the app's), no
+ * popups, no navigation away. The config — the drive.file token — is handed
+ * once, on this window's own IPC (`webContents.ipc`), only to its main frame
+ * while it shows the Picker page; the token is dropped when the window closes.
+ */
+export function createDrivePickerWindow(appDir: string): DrivePickerWindow {
+  return {
+    open({ pageUrl, config, timeoutMs }) {
+      return new Promise<DrivePickerOutcome>(resolve => {
+        const win = new BrowserWindow({
+          width: 1060, height: 720, title: 'Google Drive から選ぶ', autoHideMenuBar: true,
+          webPreferences: {
+            preload: path.join(appDir, 'picker-preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
+            partition: 'persist:acb-google-picker', spellcheck: false,
+          },
+        })
+        let handed: typeof config | null = config
+        let settled = false
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const finish = (outcome: DrivePickerOutcome) => {
+          if (settled) return
+          settled = true
+          handed = null
+          clearTimeout(timer)
+          resolve(outcome)
+          if (!win.isDestroyed()) win.close()
+        }
+        timer = setTimeout(() => finish({ action: 'timeout' }), timeoutMs)
+        const fromPickerPage = (frame: Electron.WebFrameMain | null | undefined) =>
+          !!frame && !win.isDestroyed() && frame === win.webContents.mainFrame && isDrivePickerPage(frame.url, pageUrl)
+        win.webContents.ipc.handle('drivePicker:config', event => {
+          if (!fromPickerPage(event.senderFrame)) return null
+          const once = handed
+          handed = null
+          return once
+        })
+        win.webContents.ipc.on('drivePicker:done', (event, result: unknown) => {
+          if (fromPickerPage(event.senderFrame)) finish(readDrivePickerResult(result, config.maxItems))
+        })
+        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+        win.webContents.on('will-navigate', event => { if (!isDrivePickerPage(event.url, pageUrl)) event.preventDefault() })
+        win.on('closed', () => finish({ action: 'closed' }))
+        void win.loadURL(pageUrl).catch(() => finish({ action: 'error' }))
+      })
+    },
+  }
+}
+
+/**
  * Web permissions (camera / microphone, notifications, clipboard, …) on one
  * session: only what the app's own page uses, nothing for any other page
  * (permission-policy.ts). Without a handler Electron grants every request.
@@ -330,11 +431,53 @@ export function guardEverySession(page: AppPage): void {
   void app.whenReady().then(() => denyUnexpectedPermissions(session.defaultSession, page))
 }
 
-/** Register the local-file:// scheme (must run before app.whenReady()). */
+/**
+ * Register the app's schemes (must run before app.whenReady(); Electron takes
+ * one list): local-file:// and acb-plugin:// (a plugin's screen,
+ * plugin-frame.md). acb-plugin is `standard` (relative paths resolve inside
+ * the package) and `secure`; `corsEnabled` only so the frame's module scripts
+ * load (its origin is opaque). Never `bypassCSP`, `supportFetchAPI`,
+ * `allowServiceWorkers` or `stream`: the frame's CSP must hold.
+ */
 export function registerLocalFileScheme(): void {
   protocol.registerSchemesAsPrivileged([
     { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
+    { scheme: PLUGIN_SCHEME, privileges: { standard: true, secure: true, corsEnabled: true } },
   ])
+}
+
+/**
+ * The invitation page's 「アプリを開く」 (`ai-company-builder://open?server=…`): every link the
+ * OS hands the app — macOS `open-url` (also before ready), and the arguments of the first
+ * launch or a second instance (Windows) — goes to `onLink` (features/app-link: it only offers
+ * an https address for the member to confirm). The packaged app registers the scheme through
+ * `build.protocols`; a development run registers its own command.
+ */
+export function receiveAppLinks(scheme: string, onLink: (raw: string) => void, findInArgs: (argv: readonly string[]) => string | null): void {
+  void app.whenReady().then(() => {
+    if (process.defaultApp && process.argv.length >= 2) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, [path.resolve(process.argv[1])])
+    } else {
+      app.setAsDefaultProtocolClient(scheme)
+    }
+  })
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    onLink(url)
+  })
+  app.on('second-instance', (_event, argv) => {
+    const link = findInArgs(argv)
+    if (link) onLink(link)
+  })
+  const atLaunch = findInArgs(process.argv)
+  if (atLaunch) onLink(atLaunch)
+}
+
+/** Serve acb-plugin:// from the verified packages only (`features/plugins/protocol.ts`), once the app is ready. */
+export function servePluginFiles(files: PluginFileServer): void {
+  void app.whenReady().then(() => {
+    protocol.handle(PLUGIN_SCHEME, request => files.serve({ url: request.url, method: request.method }))
+  })
 }
 
 /**

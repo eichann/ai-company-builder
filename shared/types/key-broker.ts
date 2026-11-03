@@ -76,6 +76,14 @@ export interface BrokerServiceView {
    */
   readOnly: boolean
   /**
+   * The company key used for this service when several exist (「このサービスは、この鍵を使う」,
+   * `PUT …/broker/services/:service/default-key`): an active company key of the service, or
+   * null (none chosen; a chosen key that was stopped or deleted is no longer chosen). While two
+   * or more active company keys exist and none is chosen, a member who may use more than one of
+   * them gets no company key until an admin chooses.
+   */
+  defaultKeyId: string | null
+  /**
    * This server sends the service to a practice copy (staging only: 「練習用の
    * HubSpot につながっています」), never in production.
    */
@@ -125,6 +133,18 @@ export interface BrokerReadOnlySwitch {
   readOnly: boolean
 }
 
+/** PUT …/broker/services/:service/default-key — which company key the service uses (null: none chosen). */
+export interface BrokerDefaultKeyChoice {
+  keyId: string | null
+}
+
+/** A chosen key as the history keeps it (never its value: the last 4 at most). */
+export interface BrokerKeyRef {
+  keyId: string
+  displayName: string
+  last4: string
+}
+
 /** How the one check of a just-saved key went (never anything of the key itself). */
 export interface BrokerKeyCheck {
   service: string
@@ -139,6 +159,8 @@ export type BrokerChangeDetail =
   | { action: 'service'; service: string; before: BrokerServiceSetting | null; after: BrokerServiceSetting }
   | { action: 'relay-service'; service: string; before: BrokerRelayDefinition | null; after: BrokerRelayDefinition | null }
   | { action: 'read-only'; service: string; before: boolean; after: boolean }
+  /** The chosen key changed: by an admin, or cleared because that key was stopped / deleted (`because`). */
+  | { action: 'default-key'; service: string; before: BrokerKeyRef | null; after: BrokerKeyRef | null; because?: 'stopped' | 'deleted' }
   | { action: 'settings'; before: { memberKeysAllowed: boolean; internalHosts?: string[] }; after: { memberKeysAllowed: boolean; internalHosts?: string[] } }
 
 export interface BrokerChange {

@@ -4,6 +4,7 @@ import { COMPANY_FILES_SERVER, COMPANY_FILE_TOOL_NAMES, companyFileDescriptions,
 import { REVIEW_SERVER, REVIEW_TOOL, REVIEW_TOOL_ID, reviewDescription, reviewSchema } from '../review/tools'
 import { RECORDS_SERVER, recordToolId } from '../records/tools'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema } from '../web-research/tools'
+import { SECOND_OPINION_SERVER, secondOpinionSchema } from './second-opinion'
 import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
@@ -15,7 +16,7 @@ import { fromClaudeRateLimitInfo } from '../../shared/rate-limits'
 import { agentProgressFromSdkMessage } from '../../shared/agent-progress'
 import type { PermissionMode } from '../../shared/permission-mode'
 import { decideReservedWrite, decideToolWrite } from '../write-guard'
-import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
+import { decidePrivateWrite, noteToolInput, noteToolResult, privateConfirmMessage, recordPrivateConsent } from '../private-read-guard'
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { createClaudeSteer, tapQuery } from './steering'
@@ -39,6 +40,12 @@ export interface ClaudeConnectionConfig extends AgentHostConfig {
 
 /** Claude Code's own web tools, denied when the app's web research is given. */
 export const CLAUDE_BUILTIN_WEB_TOOLS = ['WebFetch', 'WebSearch'] as const
+
+/** Built-in shell, web, file-write and delegation tools an unattended step never gets unless it declares them. */
+export const CLAUDE_UNATTENDED_DENIED_TOOLS: readonly string[] = [
+  'Bash', 'BashOutput', 'KillShell', 'WebFetch', 'WebSearch', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Task', 'Agent',
+]
+const UNATTENDED_REFUSAL = 'この自動の作業では、この道具は使えません。決められた道具だけで進め、できないことは最後にまとめて伝えてください。'
 
 const DANGEROUS_PATTERNS: RegExp[] = [
   // Direct deletion commands
@@ -151,7 +158,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, records, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references: givenReferences, companyFiles: givenCompanyFiles, review: givenReview, records, webResearch: givenWebResearch, secondOpinion: givenSecondOpinion, writeGuard, privateReads, askUser: givenAskUser, onEvent, steering: givenSteering, onPromptSuggestion: givenSuggestion, toolEventContext, sandbox, turnEnv, toolStop, unattended }) {
+      // An unattended step (ai-turns.md) gets only its record tools: nothing else the app adds, nobody to ask.
+      const references = unattended ? undefined : givenReferences
+      const companyFiles = unattended ? undefined : givenCompanyFiles
+      const review = unattended ? undefined : givenReview
+      const webResearch = unattended ? undefined : givenWebResearch
+      const secondOpinion = unattended ? undefined : givenSecondOpinion
+      const askUser = unattended ? undefined : givenAskUser
+      const steering = unattended ? undefined : givenSteering
+      const onPromptSuggestion = unattended ? undefined : givenSuggestion
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -222,13 +238,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // conversation has read a private folder, the member confirms every
         // write to a public place and every send-out — in every permission
         // mode, so the question is asked here and not left to canUseTool.
+        // 許可 covers that kind (write / send) for the rest of the conversation.
         let confirmedPrivate = false
         if (privateReads) {
           noteToolInput(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           const decision = decidePrivateWrite(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           if (decision.ask) {
             const answer = config.requestToolApproval
-              ? await config.requestToolApproval(String(input.tool_name), input.tool_input ?? {}, input.tool_use_id || crypto.randomUUID(), appSessionId, decision.message)
+              ? await config.requestToolApproval(String(input.tool_name), input.tool_input ?? {}, input.tool_use_id || crypto.randomUUID(), appSessionId, privateConfirmMessage(decision))
               : { approved: false }
             if (!answer.approved) {
               console.log(`[hooks] Member declined a write after private reads: ${input.tool_name}`)
@@ -241,6 +258,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
                 },
               }, config.requestToolApproval ? 'member-denied' : 'guard-denied', 'private-read')
             }
+            recordPrivateConsent(privateReads.state, decision.kind)
             confirmedPrivate = true
           }
         }
@@ -346,7 +364,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // Web research changes nothing in the company; after private reads the
         // PreToolUse hook has already asked the member (private-read-guard.ts).
         const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID)) {
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID) || (secondOpinion && secondOpinion.tools.some(t => t.id === toolName))) {
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
         }
         // Request approval from UI
@@ -367,7 +385,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         }, 'member-denied')
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canUseToolFn: any = approvals || askUser
+      const canUseToolFn: any = unattended
+        // Unattended: what allowedTools does not list is refused, never asked (nobody is there).
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
+            const decided = verdict({ behavior: 'deny' as const, message: UNATTENDED_REFUSAL }, 'guard-denied')
+            recordCanUseTool(toolEvents, toolName, toolInput, options?.toolUseID, decided)
+            return decided.result
+          }
+        : approvals || askUser
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
             const decided = await decideCanUseTool(toolName, toolInput, options)
@@ -393,12 +419,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         const recordsServer = records ? createSdkMcpServer({ name: RECORDS_SERVER, tools: records.specs.map(s => tool(s.name, s.description, s.schema.shape, async args => ({ content: [{ type: 'text' as const, text: await records.execute(s.name, args) }] }), { annotations: { readOnlyHint: s.readOnly, destructiveHint: false, openWorldHint: false } })) }) : undefined
         // 「Web で調べる」: a separate reader reads the web (web-research/tools.ts).
         const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
+        // 「もう一方の AI に聞く」 (second-opinion.ts): only the agents the member named this turn.
+        const secondOpinionServer = secondOpinion ? createSdkMcpServer({ name: SECOND_OPINION_SERVER, tools: secondOpinion.tools.map(t => tool(t.name, t.description, secondOpinionSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await secondOpinion.execute(t.name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })) }) : undefined
         const mcpServers = {
           ...(referenceServer ? { acb_consultations: referenceServer } : {}),
           ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
           ...(reviewServer ? { [REVIEW_SERVER]: reviewServer } : {}),
           ...(recordsServer ? { [RECORDS_SERVER]: recordsServer } : {}),
           ...(webResearchServer ? { [WEB_RESEARCH_SERVER]: webResearchServer } : {}),
+          ...(secondOpinionServer ? { [SECOND_OPINION_SERVER]: secondOpinionServer } : {}),
         }
         const allowedTools = [
           ...(referenceServer ? Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) : []),
@@ -407,6 +436,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // Never asked: the type's `who` and the server decide (records.md); an action needing prior approval is none of today's.
           ...(records ? records.specs.map(s => recordToolId(s.name)) : []),
           ...(webResearchServer ? [WEB_RESEARCH_TOOL_ID] : []),
+          ...(secondOpinionServer && secondOpinion ? secondOpinion.tools.map(t => t.id) : []),
         ]
         const state = { missingSession: false, autoRejected: false, sandboxUnavailable: false }
         // Steering + prompt suggestions (steering.ts): watch the query the
@@ -440,7 +470,9 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             ...turnEnv,
             ...(onPromptSuggestion ? { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : {}),
           },
-          settingSources: ['user', 'project'],
+          // Unattended: none of the member's own settings, MCP servers, hooks or plugins (like the hand-off agent).
+          settingSources: unattended ? [] : ['user', 'project'],
+          ...(unattended ? { strictMcpConfig: true, tools: [...unattended.builtinTools] } : {}),
           // With the app's web research, the CLI's own web tools are off for the
           // whole session, subagents included (a deny beats any allow, in every
           // permission mode; WebFetch / WebSearch also bypass the sandbox's
@@ -448,7 +480,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // `disallowedTools`: the provider ignores it whenever allowedTools is set.
           // Under the company sandbox the same flag settings also deny reading its secret places
           // (the sandbox covers only Bash; the Read tool needs these rules).
-          ...(webResearch || sandboxed ? { settings: { permissions: { deny: [...new Set([...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []), ...(sandboxed && enforced ? enforced.permissionsDeny : [])])] } } } : {}),
+          ...(webResearch || sandboxed || unattended ? { settings: { permissions: { deny: [...new Set([
+            ...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []),
+            ...(sandboxed && enforced ? enforced.permissionsDeny : []),
+            // Unattended: shell, web and file writes denied too, unless the step declares them.
+            ...(unattended ? CLAUDE_UNATTENDED_DENIED_TOOLS.filter(name => !unattended.builtinTools.includes(name)) : []),
+          ])] } } } : {}),
           // The company sandbox (agent-sandbox.md): --settings layer, so the company
           // repository's .claude/settings.json cannot loosen it (strictAllowlist,
           // allowUnsandboxedCommands: false). failIfUnavailable: a CLI that cannot

@@ -36,8 +36,32 @@ import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
-import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
-import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
+import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
+import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
+import type { ViewersQuery, ViewersResult } from './viewers'
+import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { NoticesActionResult, NoticesState } from './notifications-app'
+import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
+import type { ConsultationTopicsResult } from './consultation-topics'
+import type { CalendarTodayResult } from './calendar'
+import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
+import type { TagSuggestions } from './tag-suggest'
+import type { TaskCardResult } from './task-card'
+import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
+import type { MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
+import type { RecordThreadResult } from './threads'
+import type { PluginBridgeAnswer } from './plugin-bridge-ops'
+import type { PluginPackageRef } from './plugin-bridge'
+import type { PluginScreensResult } from './plugin-screens'
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+import type { PluginStepButton, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
+// lane C ▲
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -51,6 +75,11 @@ export interface AuthUser {
   name: string | null
   image: string | null
   emailVerified: boolean
+  /**
+   * May this account create a company (GET /api/me; the check POST /api/companies makes)?
+   * Absent from an older server: offered, and the server still refuses.
+   */
+  canCreateCompany?: boolean
 }
 
 /** Sign-in / sign-up: whether it worked. The server's answer (it holds the session token) stays in main. */
@@ -135,7 +164,7 @@ export interface ApiKeyStatus {
   last4?: string
   /** False: this computer cannot encrypt it (no keychain), so a new key cannot be saved. */
   encryptionAvailable: boolean
-  /** A key from an older version still in plain text (encryption unavailable here). */
+  /** A key from an older version left in plain text that could not be encrypted here: not used; save it again. */
   storedInPlainText?: boolean
   /** A stored key this computer cannot decrypt (copied settings, reset keychain): enter it again. */
   unreadable?: boolean
@@ -272,12 +301,6 @@ export interface GitLogResult {
     author: string
     date: string
   }>
-  error?: string
-}
-
-export interface GitShowCommitResult {
-  success: boolean
-  files: Array<{ status: string; path: string }>
   error?: string
 }
 
@@ -468,8 +491,55 @@ export interface IpcInvokeChannels {
   'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
   'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
   'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「これと同じ…です（作らない）」: a create is the same as this existing record (and, when asked, the meeting belongs to it). */
+  'approvals:sameAs': { args: [companyId: string, approvalId: string, recordId: string, linkMeeting: boolean]; result: ApprovalResult }
+  // Settings → 「不在と代わりの人」: the member's own absences, read and changed with their session.
+  /** The member's view (absences, whom they cover today) and the company's members for the picker. */
+  'absences:get': { args: [companyId: string]; result: AbsencesResult }
+  'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
+  'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
+  // 自分の設定 → 「受信を読む」「AI が自動で進める」: the member's own switches, with their session.
+  /** The member's switches (+ the company's 使ってよいか / 初めの値). */
+  'workSwitches:get': { args: [companyId: string]; result: WorkSwitchesResult }
+  /** Turn one on / off (a switch the company does not allow cannot be turned on: `WORK_SWITCH_COMPANY_OFF`). */
+  'workSwitches:set': { args: [companyId: string, which: WorkSwitch, on: boolean]; result: WorkSwitchesResult }
+  // 見られる人 for the lists: the phrase per record id / company path, with the member's session.
+  'viewers:get': { args: [companyId: string, query: ViewersQuery]; result: ViewersResult }
   /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
   'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
+  // 「今日の予定」 (calendar.md): the member's own meetings today, read by the server now (nothing stored).
+  /** Not being able to read the calendar is an empty list with a reason (`data.reason`), not a failure. */
+  'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
+  // The task list (tasks.ts): read and changed with the member's session in main; the server decides who may.
+  'tasks:list': { args: [companyId: string]; result: TaskListResult }
+  /** The list's one line: a task of the member's own (only they see it). */
+  'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
+  'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
+  /** One task's card: what the AI prepared, what the member can do, 経緯, its runs waiting for a person. */
+  'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
+  /** The unfinished まとまり the member reads (for 「どのまとまりの会議ですか？」). */
+  'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
+  /** The AI's proposals (案) from a meeting, proposed and put away (records.md "Task version 11"). */
+  'tasks:proposals': { args: [companyId: string, meetingId: string]; result: TaskProposalsResult }
+  'tasks:bundleKinds': { args: [companyId: string]; result: BundleKindsAnswer }
+  /** A company file or folder linked to a task (`companyPath`: inside the company folder, e.g. `営業/見積.xlsx`). */
+  'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+  'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+  /** 「もう一度」 on a run held for a person. */
+  /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
+  'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+  /** Tags in use that fit a title (AI through the company's key, else local matching); only suggestions. */
+  'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
+  'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
+  /** What the member found in the outside system about an operation whose result was unknown. */
+  'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
+  /** 「取り消す」 right after the member's own action: the ledger's undo of that version (the server checks the actor and later changes). */
+  /** A link between records set later (a `one` link such as bundle is replaced) or taken off; the server decides. */
+  /** 「新しい〇〇にする」: a new 案件・プロジェクト of the department's kind, the member its 責任者 (the server decides). */
+  'tasks:createBundle': { args: [companyId: string, input: BundleCreateInput]; result: TaskWriteResult }
+  'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+  'tasks:unlinkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
+  'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
   'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -479,13 +549,41 @@ export interface IpcInvokeChannels {
   /** 「今は読まない」. */
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
-  'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
+  /** 「まとまりはない（社内の会議など）」: the question closed for good (the person's choice, no AI turn). */
+  'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+  /** The meeting card's question: may a まとまり be chosen, was 「まとまりはない」 chosen. */
+  'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
+  // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
+  'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
+  /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
+  'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
+  /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
+  'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
+  /** 「もう一度」: give the record's execution run the server holds for a person back to the AI (S10b). */
+  'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
+  // The title bar's 「あなたの番」 and bell (notifications.md): read with the member's session in main.
+  /** The company on screen (null: none); starts the 5-minute check. */
+  'notifications:watch': { args: [companyId: string | null]; result: void }
+  'notifications:state': { args: [companyId: string]; result: NoticesState }
+  'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+  'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
+  'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
+  // What the app shows of records (record-views.ts), read with the session in main.
+  'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
+  'recordViews:find': { args: [companyId: string, text: string, today: string]; result: FindResult }
+  'recordViews:findHome': { args: [companyId: string, today: string, from: string, to: string]; result: FindHomeResult }
+  'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
+  /** companyPath: the file's path inside the company folder (`営業部/見積.md`), not a local path. */
+  'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
+  /** The やること / 案件 of the member's AI consultations (topic record ids); unreadable → null. */
+  'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
   'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
-  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
   'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
   'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
@@ -495,11 +593,15 @@ export interface IpcInvokeChannels {
   'git:commitFileDiff': { args: [repoPath: string, commitHash: string, filePath: string]; result: GitCommitFileDiffResult }
   // folderPath '' = the whole company (electron/git-search.ts)
   'git:listFiles': { args: [repoPath: string, folderPath: string]; result: GitListFilesResult }
+  'git:unsharedLargeFiles': { args: [repoPath: string]; result: { success: boolean; files: string[] } }
   'git:grep': { args: [repoPath: string, query: string, folderPath: string]; result: GitGrepResult }
+  // folderPath: a folder or one file (「前の版」); inside a private folder, read from its own repository
   'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult }
-  'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult }
   'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
   'git:inspectCompanyFolder': { args: [folder: string, companyId: string]; result: InspectCompanyFolderResult }
+  // A member's first time without choices (features/company-setup): 所属 and the default folder
+  'companySetup:myDepartments': { args: [companyId: string]; result: { success: boolean; departmentIds?: string[] } }
+  'companySetup:defaultParentFolder': { args: []; result: { success: boolean; folder?: string } }
   'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
   'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
   'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
@@ -540,6 +642,10 @@ export interface IpcInvokeChannels {
   'config:getServerUrl': { args: []; result: string | null }
   'config:setServerUrl': { args: [url: string]; result: boolean }
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
+  // The server address from an invitation's 「アプリを開く」 link (features/app-link): offered, shown, accepted by the member
+  'appLink:serverOffer': { args: []; result: { server: string } | null }
+  'appLink:acceptServer': { args: []; result: SimpleResult }
+  'appLink:dismissServer': { args: []; result: void }
   // Extra environment variable names passed to AI processes (agents/agent-env.ts), this computer only
   'config:getAgentEnvPassthrough': { args: []; result: string[] }
   'config:setAgentEnvPassthrough': { args: [names: string[]]; result: { names: string[]; invalid: string[]; denied: string[] } }
@@ -571,6 +677,38 @@ export interface IpcInvokeChannels {
   'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
   /** The main window's answer to app:closeRequested: `ack` at once, then `close` or `stay`. */
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // The Slack connection (「Slack で許可」, slack-connector.md): the app holds no token; the sign-in URL stays in main.
+  'slack:status': { args: [companyId: string]; result: SlackStatusResult }
+  /** Opens Slack's sign-in page in the system browser (the URL never comes back). */
+  'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
+  /** 「許可をやめる」 (revoked at Slack too). */
+  'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
+  /** The member turns an allowed feature off / on (大事な知らせを DM で受け取る). */
+  'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
+  // 「仕事の道具をつなぐ」 (google-connector.md "One consent"): one Google consent for what the
+  // company offers (the sign-in URL stays in main), and 「あとで」 per service.
+  'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
+  'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
+  'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
+  // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
+  'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
+  // One call a plugin's screen made on its bridge (plugin-frame.md): the host names the plugin, main adds the session.
+  'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
+  /** The screens of the plugins the company lists now and this app keeps, verified (A6, plugin-frame.md). */
+  'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
+  'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
+  /** The `start: person` steps at a record's state (its card's buttons). */
+  'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
+  /** A person starts a step: the server pins the work's procedure; main answers the consultation's first message. */
+  'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
+  // lane C ▲
 }
 
 /** renderer → main, fire and forget: ipcRenderer.send(channel, ...args). */
@@ -593,6 +731,10 @@ export interface IpcEventChannels {
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
   /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
   'minutes:changed': [data: { companyId: string }]
+  /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
+  'notifications:changed': [data: { companyId: string }]
+  /** The morning's 「今日のあなたの番」 Mac notification was clicked: show the task list. */
+  'notifications:openTasks': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -606,6 +748,15 @@ export interface IpcEventChannels {
   'chatWindow:fileRequested': [request: ChatWindowFileRequest]
   /** The member closes the main window or quits: save the open tabs first, then answer app:closeResponse. */
   'app:closeRequested': []
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  /** The plugin packages a company lists and this app keeps changed: ask `plugins:screens` again. */
+  'plugins:changed': [change: { companyId: string }]
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 export type InvokeChannel = keyof IpcInvokeChannels
@@ -716,6 +867,9 @@ export interface ElectronAPI {
   getServerUrl: Invoke<'config:getServerUrl'>
   setServerUrl: Invoke<'config:setServerUrl'>
   validateServerUrl: Invoke<'config:validateServerUrl'>
+  getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
+  acceptAppLinkServer: Invoke<'appLink:acceptServer'>
+  dismissAppLinkServer: Invoke<'appLink:dismissServer'>
   getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
   setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 
@@ -772,14 +926,64 @@ export interface ElectronAPI {
   approveApproval: Invoke<'approvals:approve'>
   sendBackApproval: Invoke<'approvals:sendBack'>
   withdrawApproval: Invoke<'approvals:withdraw'>
+  sameAsApproval: Invoke<'approvals:sameAs'>
+  // Settings → 「不在と代わりの人」.
+  getAbsences: Invoke<'absences:get'>
+  addAbsence: Invoke<'absences:add'>
+  removeAbsence: Invoke<'absences:remove'>
+  // 自分の設定 → 「受信を読む」「AI が自動で進める」.
+  getWorkSwitches: Invoke<'workSwitches:get'>
+  setWorkSwitch: Invoke<'workSwitches:set'>
+  // 見られる人 for the lists.
+  getViewers: Invoke<'viewers:get'>
   recreatePluginOperation: Invoke<'pluginOperations:recreate'>
-  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the deal choice.
+  // 「今日の予定」 for the task list (provider-neutral; no attendee address ever).
+  getCalendarToday: Invoke<'calendar:today'>
+  // The task list (やることの一覧).
+  getTaskList: Invoke<'tasks:list'>
+  createTask: Invoke<'tasks:create'>
+  actOnTask: Invoke<'tasks:act'>
+  getTaskCard: Invoke<'tasks:card'>
+  linkFileToTask: Invoke<'tasks:linkFile'>
+  getBundleChoices: Invoke<'tasks:bundles'>
+  getTaskProposals: Invoke<'tasks:proposals'>
+  getBundleKinds: Invoke<'tasks:bundleKinds'>
+  unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
+  retryTaskRun: Invoke<'tasks:retryRun'>
+  shareTask: Invoke<'tasks:share'>
+  suggestTaskTags: Invoke<'tasks:suggestTags'>
+  reconcileTaskRun: Invoke<'tasks:reconcile'>
+  undoTaskAction: Invoke<'tasks:undo'>
+  createBundle: Invoke<'tasks:createBundle'>
+  linkRecordToRecord: Invoke<'tasks:linkRecord'>
+  unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
+  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>
   getMinutesNotices: Invoke<'minutes:notices'>
   skipMinutes: Invoke<'minutes:skip'>
-  linkMinutesDeal: Invoke<'minutes:linkDeal'>
+  linkMinutesBundle: Invoke<'minutes:linkBundle'>
+  declineMinutesBundle: Invoke<'minutes:noBundle'>
+  getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
   onMinutesChanged: Subscribe<'minutes:changed'>
+  // 「AI の番」 run automatically (the main window only).
+  getAutoTurnSettings: Invoke<'aiTurns:settings'>
+  claimAiTurn: Invoke<'aiTurns:claim'>
+  settleAiTurn: Invoke<'aiTurns:settle'>
+  retryAiTurn: Invoke<'aiTurns:retry'>
+  watchNotifications: Invoke<'notifications:watch'>
+  getNotificationsState: Invoke<'notifications:state'>
+  markNotificationsRead: Invoke<'notifications:markRead'>
+  getNotificationSettings: Invoke<'notifications:settings'>
+  setNotificationSetting: Invoke<'notifications:setSetting'>
+  onNotificationsChanged: Subscribe<'notifications:changed'>
+  onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
+  searchRecords: Invoke<'recordViews:search'>
+  findRecords: Invoke<'recordViews:find'>
+  findRecordsHome: Invoke<'recordViews:findHome'>
+  getRecordCard: Invoke<'recordViews:card'>
+  getRecordsForFile: Invoke<'recordViews:forFile'>
+  getConsultationTopics: Invoke<'recordViews:topics'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>
@@ -793,11 +997,13 @@ export interface ElectronAPI {
   gitFileDiff: Invoke<'git:fileDiff'>
   gitCommitFileDiff: Invoke<'git:commitFileDiff'>
   gitListFiles: Invoke<'git:listFiles'>
+  gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
   gitGrep: Invoke<'git:grep'>
   gitLog: Invoke<'git:log'>
-  gitShowCommit: Invoke<'git:showCommit'>
   gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
   gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'>
+  getMyDepartments: Invoke<'companySetup:myDepartments'>
+  getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
   onSetupProgress: Subscribe<'setup:progress'>
 
   // Sparse checkout
@@ -830,4 +1036,26 @@ export interface ElectronAPI {
   onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
   onCloseRequested: Subscribe<'app:closeRequested'>
   answerCloseRequest: Invoke<'app:closeResponse'>
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // The Slack connection (設定 → Slack): the member's view only, never a token or the sign-in URL.
+  getSlackStatus: Invoke<'slack:status'>
+  connectSlack: Invoke<'slack:connect'>
+  disconnectSlack: Invoke<'slack:disconnect'>
+  setSlackFeature: Invoke<'slack:setFeature'>
+  connectGoogleAll: Invoke<'google:connectAll'>
+  markGoogleSeen: Invoke<'google:markSeen'>
+  markSlackSeen: Invoke<'slack:markSeen'>
+  getRecordThread: Invoke<'threads:get'>
+  callPluginBridge: Invoke<'plugins:bridge'>
+  getPluginScreens: Invoke<'plugins:screens'>
+  onPluginsChanged: Subscribe<'plugins:changed'>
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
+  listPersonSteps: Invoke<'pluginSteps:onRecord'>
+  startPersonStep: Invoke<'pluginSteps:start'>
+  // lane C ▲
 }

@@ -15,6 +15,13 @@
  * claimed invitation can only be accepted by the account that claimed it
  * (an existing member accepting a link they were sent never signs up, so
  * unclaimed invitations stay acceptable by any signed-in user, once).
+ *
+ * 所属 (2026-11-02, 管理画面の見直し 2-2): who invites may name the departments
+ * the invitee will belong to. Accepting adds those rows to department_members
+ * in the same transaction, so the app's first setup can download exactly
+ * those departments without asking (download-choices.md "First setup").
+ * Only departments of the inviting company are accepted (another company's id
+ * answers like an unknown one); a department deleted meanwhile is skipped.
  */
 import type { AccountDirectory, AccountSummary } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -32,12 +39,37 @@ export const MAX_INVITATION_DAYS = 30
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
+/** At most this many departments on one invitation (a company has a handful). */
+export const MAX_INVITATION_DEPARTMENTS = 50
+export const INVITATION_DEPARTMENTS_INVALID = 'departmentIds must be a list of department IDs of this company'
+
+/** What the public invitation page shows before an account exists. */
+export interface InvitationPreview {
+  invitation: InvitationWithCompany
+  /** Who created the link (their name, else their email); null when the account is gone. */
+  inviterName: string | null
+  /** The 所属 departments' names, in the order chosen (deleted ones left out). */
+  departmentNames: string[]
+}
+
+/** The stored JSON list, tolerant of anything unexpected (→ none). */
+function storedDepartmentIds(json: string | null | undefined): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export interface InvitationListItem {
   invitation: InvitationWithCompany
   isExpired: boolean
   isUsed: boolean
   createdBy: AccountSummary | undefined
   usedBy: AccountSummary | undefined | null
+  /** The 所属 the link carries (ids as chosen; a department deleted since is still listed). */
+  departmentIds: string[]
 }
 
 export interface InvitationServiceDeps {
@@ -82,6 +114,7 @@ export function createInvitationService(deps: InvitationServiceDeps) {
         isUsed: !!inv.used_by,
         createdBy: users.get(inv.created_by),
         usedBy: inv.used_by ? users.get(inv.used_by) : null,
+        departmentIds: storedDepartmentIds(inv.department_ids),
       }))
     },
 
@@ -98,13 +131,29 @@ export function createInvitationService(deps: InvitationServiceDeps) {
         : ok(undefined)
     },
 
-    create(member: Member, role: 'admin' | 'member', expiresInDays: number) {
+    /**
+     * The 所属 departments of a new invitation (`departmentIds`, optional): unique ids of
+     * this company's departments. Another company's id is refused like one that does not exist.
+     */
+    departmentsFor(member: Member, departmentIds: unknown): Outcome<string[]> {
+      if (departmentIds === undefined) return ok([])
+      if (!Array.isArray(departmentIds) || !departmentIds.every(id => typeof id === 'string' && id.length > 0)) {
+        return refuse('bad-request', INVITATION_DEPARTMENTS_INVALID)
+      }
+      const unique = [...new Set(departmentIds as string[])]
+      if (unique.length > MAX_INVITATION_DEPARTMENTS) return refuse('bad-request', INVITATION_DEPARTMENTS_INVALID)
+      const departments = companyData.forCompany(member.companyId).departments
+      if (!unique.every(id => departments.exists(id))) return refuse('bad-request', INVITATION_DEPARTMENTS_INVALID)
+      return ok(unique)
+    },
+
+    create(member: Member, role: 'admin' | 'member', expiresInDays: number, departmentIds: string[] = []) {
       const id = ids.newId()
       const token = ids.newToken()
       const createdAt = clock.now()
       const expiresAt = new Date(clock.nowMs() + expiresInDays * DAY_MS).toISOString()
-      invitationsOf(member.companyId).insert({ id, token, role, createdBy: member.userId, expiresAt, createdAt })
-      return { id, token, companyId: member.companyId, role, expiresAt, createdAt }
+      invitationsOf(member.companyId).insert({ id, token, role, createdBy: member.userId, expiresAt, createdAt, departmentIds })
+      return { id, token, companyId: member.companyId, role, expiresAt, createdAt, departmentIds }
     },
 
     delete(member: Member, invitationId: string): Outcome<void> {
@@ -116,8 +165,18 @@ export function createInvitationService(deps: InvitationServiceDeps) {
       return ok(undefined)
     },
 
-    /** The public check behind the invitation page. */
-    check: usable,
+    /** The public check behind the invitation page: the link, who sent it and the 所属 it carries. */
+    check(token: string): Outcome<InvitationPreview> {
+      const found = usable(token)
+      if (!found.ok) return found
+      const invitation = found.value
+      const inviter = accounts.byIds([invitation.created_by]).get(invitation.created_by)
+      const departments = companyData.forCompany(invitation.company_id).departments
+      const departmentNames = storedDepartmentIds(invitation.department_ids)
+        .map(id => departments.find(id)?.name)
+        .filter((name): name is string => !!name)
+      return ok({ invitation, inviterName: inviter?.name || inviter?.email || null, departmentNames })
+    },
 
     /**
      * Run a sign-up that carries an invitation token: claim → sign up → record
@@ -169,6 +228,11 @@ export function createInvitationService(deps: InvitationServiceDeps) {
       const joined = transactions.run(() => {
         if (!invitationsOf(invitation.company_id).consume(invitation.id, userId)) return false
         memberships.insert({ id: membershipId, userId, companyId: invitation.company_id, role: invitation.role, createdAt: timestamp })
+        // 所属 chosen by who invited them (departments deleted since are skipped).
+        const departmentIds = storedDepartmentIds(invitation.department_ids)
+        if (departmentIds.length > 0) {
+          companyData.forCompany(invitation.company_id).tasks.addDepartmentMember(userId, departmentIds, invitation.created_by, timestamp)
+        }
         return true
       })
       if (!joined) {

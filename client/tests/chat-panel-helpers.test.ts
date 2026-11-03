@@ -14,6 +14,9 @@ import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutStee
 import { STEER_PART_TYPE } from '../shared/steer'
 import { CHOICE_PART_TYPE } from '../shared/choice-prompt'
 import { agentInputMessages } from '../electron/agents/session'
+import { RESTORED_TOOL_PART_TYPE } from '../shared/tool-display'
+import { toolRowOf } from '../src/features/chat/toolRows'
+import { visibleContent } from '../electron/handoff/recovery-context'
 
 const T = new Date('2026-10-24T01:02:03.000Z')
 
@@ -37,7 +40,32 @@ test('a reply becomes one history message: text, thinking, tool markers, choice 
   assert.equal(stored.choicePrompts?.[0].at, '確認します。\n[Tool: Read]続けます。'.length)
   // And back: the instruction and the answered prompt return where they were.
   const restored = sessionMessageToUIMessage(stored)
-  assert.deepEqual(restored.parts.map(p => p.type), ['reasoning', 'text', STEER_PART_TYPE, 'text', CHOICE_PART_TYPE, 'text'])
+  assert.deepEqual(restored.parts.map(p => p.type), ['reasoning', 'text', RESTORED_TOOL_PART_TYPE, STEER_PART_TYPE, 'text', CHOICE_PART_TYPE, 'text'])
+})
+
+test('a restored conversation shows the app\'s tool calls in plain Japanese and saves back the same text', () => {
+  const msg = {
+    id: 'a2', role: 'assistant', parts: [
+      { type: 'text', text: '残します。' },
+      { type: 'dynamic-tool', toolName: 'mcp__acb_records__decisions_record', toolCallId: 'd1', state: 'output-available', input: {}, output: 'ok',
+        callProviderMetadata: { acb: { display: { label: '決めたことを残しました', running: '決めたことを残しています', many: '決めたことを {n} 件残しました', detail: '研修対象を営業部全体に' } } } },
+      { type: 'dynamic-tool', toolName: 'Read', toolCallId: 'r1', state: 'output-available', input: { file_path: '/x/営業部/a.md' }, output: 'ok' },
+      { type: 'text', text: '完了。' },
+    ],
+  } as unknown as UIMessage
+  // Through a history file (JSON), as when the app restarts.
+  const stored = JSON.parse(JSON.stringify(uiMessageToSessionMessage(msg, T))) as ReturnType<typeof uiMessageToSessionMessage>
+  assert.equal(stored.content, '残します。\n[Tool: mcp__acb_records__decisions_record]\n[Tool: Read]完了。', 'the markers the hand-off compares are unchanged')
+  assert.deepEqual(stored.toolLines, { mcp__acb_records__decisions_record: { label: '決めたことを残しました', many: '決めたことを {n} 件残しました' } },
+    'only the app tool\'s label is kept, never its detail')
+  const restored = sessionMessageToUIMessage(stored)
+  assert.deepEqual(restored.parts.map(p => p.type), ['text', RESTORED_TOOL_PART_TYPE, RESTORED_TOOL_PART_TYPE, 'text'])
+  assert.equal(messageText(restored), '残します。完了。', 'no raw tool id in the text')
+  const labels = restored.parts.map(toolRowOf).filter(Boolean).map(r => r!.line.label)
+  assert.deepEqual(labels, ['決めたことを残しました', 'ファイルを読みました'])
+  assert.equal(JSON.stringify(uiMessageToSessionMessage(restored, T)), JSON.stringify(stored))
+  // The hand-off's check reads the restored message as the stored text.
+  assert.equal(visibleContent(restored), stored.content)
 })
 
 test('a question and an instruction at the same offset come back in the order they happened (old history keeps its order)', () => {

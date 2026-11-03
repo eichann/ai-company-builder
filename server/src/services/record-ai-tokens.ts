@@ -52,6 +52,8 @@ export interface RecordTokenHolder {
   /** The consultation the token was issued for (recorded in the ledger; informational). */
   conversationId: string
   tokenId: string
+  /** The execution run the token is bound to (S10b), checked current on every call; null for a consultation. */
+  run: { id: string; generation: number } | null
 }
 
 export interface RecordAiTokenDeps {
@@ -62,6 +64,11 @@ export interface RecordAiTokenDeps {
   memberOf: (companyId: string, userId: string) => Member | null
   /** The company's whole AI is stopped (agent-stop.md). */
   companyStopped: (companyId: string) => boolean
+  /** Execution runs (services/ai-runs.ts): binding a token to one, and fencing an older generation. */
+  runs: {
+    bindable(member: Member, run: unknown, conversationId: string): Outcome<{ runId: string; generation: number }>
+    fence(companyId: string, userId: string, runId: string, generation: number): boolean
+  }
 }
 
 const UNAUTHORIZED = { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }
@@ -69,7 +76,12 @@ const UNAUTHORIZED = { error: 'Unauthorized', code: 'RECORD_TOKEN_INVALID' }
 export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
   const { companyData, clock, ids, tokenDigest } = deps
   return {
-    /** POST …/me/record-tokens { conversationId, agent, scope } — with the member's session. */
+    /**
+     * POST …/me/record-tokens { conversationId, agent, scope, run? } — with the member's session.
+     * `run: { id, generation }` binds the token to an execution run the member's app has claimed
+     * for this consultation (S10b): from then on, every call with it is refused once the run is
+     * claimed again (another generation) or no longer running.
+     */
     issue(member: Member, body: unknown): Outcome<RecordTokenIssued> {
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return refuse('bad-request', 'Body must be a JSON object')
@@ -79,6 +91,12 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       }
       if (typeof agent !== 'string' || !/^[a-z0-9_-]{1,40}$/.test(agent)) return refuse('bad-request', 'agent is a short name')
       if (scope !== 'read' && scope !== 'act') return refuse('bad-request', 'scope is read or act')
+      let run: { runId: string; generation: number } | null = null
+      if (b.run !== undefined && b.run !== null) {
+        const bound = deps.runs.bindable(member, b.run, conversationId)
+        if (!bound.ok) return bound
+        run = bound.value
+      }
       const records = companyData.forCompany(member.companyId).records
       if (!records.settings().enabled) return refuse('not-found', 'この会社では記録の機能が有効になっていません', { code: 'RECORDS_DISABLED' })
       const now = clock.nowMs()
@@ -94,7 +112,7 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       const expiresAt = new Date(now + RECORD_TOKEN_TTL_MINUTES * 60_000).toISOString()
       records.insertAiToken({
         id: tokenId, userId: member.userId, tokenHash: tokenDigest.digest(token), scope: granted, agent, conversationId,
-        createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null,
+        createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null, runId: run?.runId ?? null, runGeneration: run?.generation ?? null,
       })
       return ok({ token, tokenId, scope: granted, expiresAt })
     },
@@ -118,7 +136,12 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       if (deps.companyStopped(companyId)) {
         return refuse('forbidden', '管理者が AI の利用を一時停止しています。再開されるまで使えません。', { code: 'ACB_STOPPED' })
       }
-      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId })
+      const run = row.runId && row.runGeneration ? { id: row.runId, generation: row.runGeneration } : null
+      // Fencing (S10b): a token of a run claimed again since (or no longer running) reaches nothing.
+      if (run && !deps.runs.fence(companyId, row.userId, run.id, run.generation)) {
+        return refuse('conflict', 'この実行はほかの PC が引き受け直したか、もう終わっています。ここからの続きは書き込めません。', { code: 'RUN_SUPERSEDED' })
+      }
+      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId, run })
     },
   }
 }

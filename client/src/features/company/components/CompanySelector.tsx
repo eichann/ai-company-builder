@@ -1,12 +1,16 @@
 // Choosing a company and setting its folder up (download-choices.md "First setup").
+// A member's first time asks nothing when it can (管理画面の見直し 2-2): the only company
+// opens by itself in ~/AI Company Builder/<会社名>, downloading the departments they belong
+// to (所属). Any refusal (a folder of their own there, no 所属) falls back to asking.
 import { useState } from 'react'
 import { SignOut, SpinnerGap } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import type { CompanyInfo } from '../../../../shared/ipc-contract'
-import { chooseFolder } from '../api'
+import { chooseFolder, getDefaultParentFolder } from '../api'
 import { prepareCompanyFolder } from '../folderSetup'
-import type { PickableDepartment, SelectorView, SetupKind } from '../model'
+import { companyToOpenWithoutChoosing, offersCompanyCreation, type PickableDepartment, type SelectorView, type SetupKind } from '../model'
+import { hasRememberedCompany } from '../restore-company'
 import { useCompanies } from '../hooks/useCompanies'
 import { useFolderSetup } from '../hooks/useFolderSetup'
 import { CompanyList } from './CompanyList'
@@ -24,10 +28,16 @@ interface PickerState {
 
 export function CompanySelector() {
   const addCompany = useAppStore(s => s.addCompany)
-  const { user, signOut } = useAuthStore()
-  const list = useCompanies()
+  const { user, signOut, refreshUser } = useAuthStore()
+  const canCreate = offersCompanyCreation(user)
+  const list = useCompanies(companies => {
+    const only = user ? companyToOpenWithoutChoosing(companies, hasRememberedCompany(user.id)) : null
+    if (only) void openWithoutChoosing(only)
+  })
   const setup = useFolderSetup(addCompany)
   const [view, setView] = useState<SelectorView>('list')
+  // Opening the only company by itself (until it shows a step or falls back to asking).
+  const [opening, setOpening] = useState<string | null>(null)
   const [selected, setSelected] = useState<CompanyInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The folder 新しく作成 makes the company folder in.
@@ -47,6 +57,8 @@ export function CompanySelector() {
     if (next.kind === 'pick') {
       setPicker({ folder: companyPath, departments: next.departments, backView })
       setView('departments')
+    } else if (next.kind === 'mine') {
+      startSetup(company, companyPath, next.folders, 'firstSetup')
     } else if (next.kind === 'error') {
       setError(next.message)
       setView(backView)
@@ -58,6 +70,24 @@ export function CompanySelector() {
   function startSetup(company: CompanyInfo, companyPath: string, folders: string[], kind: SetupKind) {
     setView('setup')
     void setup.run(company, companyPath, folders, kind)
+  }
+
+  // The only company, nothing remembered: its folder in the default place, no questions.
+  // A refusal there (the member's own files) lands on the folder choice with the reason.
+  async function openWithoutChoosing(company: CompanyInfo) {
+    setOpening(company.name)
+    setSelected(company)
+    try {
+      const parent = await getDefaultParentFolder().catch(() => null)
+      if (!parent?.success || !parent.folder) {
+        setView('clone')
+        return
+      }
+      setParentFolder(parent.folder)
+      await prepare(company, `${parent.folder}/${company.name}`, 'clone')
+    } finally {
+      setOpening(null)
+    }
   }
 
   // 既存のフォルダを開く: the chosen folder itself is the company folder. It is
@@ -73,10 +103,11 @@ export function CompanySelector() {
     if (path) setParentFolder(path)
   }
 
-  if (list.isLoading) {
+  if (list.isLoading || opening) {
     return (
-      <div className="h-full bg-editor-bg flex items-center justify-center">
+      <div className="h-full bg-editor-bg flex flex-col items-center justify-center gap-4">
         <SpinnerGap size={48} className="animate-spin text-accent" />
+        {opening && <p className="text-text-secondary">{opening}を準備しています</p>}
       </div>
     )
   }
@@ -113,14 +144,16 @@ export function CompanySelector() {
           <CompanyList
             companies={list.companies}
             error={error ?? list.loadError}
+            canCreate={canCreate}
             onSelect={select}
             onCreate={() => setView('create')}
           />
         )}
 
-        {view === 'create' && (
+        {view === 'create' && canCreate && (
           <CreateCompanyForm
-            onCreated={company => { list.add(company); select(company) }}
+            // The first company of a fresh server: its creator may not make another.
+            onCreated={company => { list.add(company); select(company); void refreshUser() }}
             onBack={() => setView('list')}
           />
         )}

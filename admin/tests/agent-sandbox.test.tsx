@@ -5,8 +5,8 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import AgentSandboxPage from '@/app/companies/[id]/agent-sandbox/page'
-import { NAV_ITEMS } from '@/components/app/app-shell'
+import AgentSandboxPage from '@/app/companies/[id]/advanced/ai-safety/sandbox/page'
+import { ADVANCED_ITEM } from '@/components/app/app-shell'
 import type { AgentSandboxView, Capabilities } from '@/lib/api'
 import { DEFAULT_SANDBOX_ALLOWED_DOMAINS } from '../../shared/core/agent-sandbox'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -46,10 +46,9 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
 
 describe('AI の囲い', () => {
   it('is in the menu for owners and admins only, and a member never loads the setting', async () => {
-    const item = NAV_ITEMS.find((i) => i.segment === 'agent-sandbox')!
-    expect(item.label).toBe('AI の囲い')
-    expect(item.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
-    expect(item.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
+    // In the menu only through 「詳しい設定」 (owners and admins).
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: false, isManager: true, canViewAgentEvents: true })).toBe(false)
+    expect(ADVANCED_ITEM.visible?.({ isAdmin: true, isManager: false, canViewAgentEvents: false })).toBe(true)
     const calls = stubApi(managerCapabilities)
     renderInCompany(<AgentSandboxPage />)
     expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()

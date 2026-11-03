@@ -1,3 +1,5 @@
+import type { PluginPersonStep, PluginRunStep } from '../../../../shared/ai-turn-steps/plugin'
+import type { AiTurnStep } from '../../../../shared/ai-turn-steps/registry'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
@@ -35,6 +37,8 @@ import { MessageList } from './ChatMessageList'
 import { ToolApprovalBanner } from './ToolApprovalBanner'
 import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
+import { AppInstructionChip } from './AppInstructionChip'
+import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 
 // One chat tab: a conversation with the agent. A composition of hooks
 // (hooks/, one concern each, in the order useChat needs them) and
@@ -81,8 +85,14 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string }
+  /** `instruction`: `message` is the app's instruction to the AI, sent but shown only as a chip (app-instruction.ts). */
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep; instruction?: AppInstruction }
   | { kind: 'insertText'; text: string }
+  /**
+   * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
+   * record with this tab's conversation id; only when that wins, send the first message.
+   */
+  | { kind: 'aiTurn'; step: AiTurnStep | PluginRunStep; title: string; minutesId?: string; claim: (conversationId: string) => Promise<{ message: string } | null> }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
@@ -115,6 +125,10 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const attachments = useMessageAttachments()
   const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
 
+  // The automatic 「AI の番」 send (aiTurn request below): its one request runs only that step's tools.
+  const aiTurnStepRef = useRef<AiTurnStep | PluginRunStep | null>(null)
+  // A business plugin's person step this consultation was started from: its first request binds it (plugin-steps.md).
+  const pluginStepRef = useRef<PluginPersonStep | null>(null)
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
     agentSession: agentSessionRef,
@@ -130,6 +144,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     pendingImages: pendingImagesRef,
     pendingFilePaths: pendingFilePathsRef,
     handoffRequest: handoffRequestRef,
+    aiTurnStep: aiTurnStepRef,
+    pluginStep: pluginStepRef,
   })
 
   // Next-prompt suggestion and messages sent while the AI works. Declared
@@ -159,7 +175,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordIdRef, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     companyId: currentCompany?.id,
@@ -209,7 +225,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   // `editedMessageId`: an edited message is resent — the conversation is cut
   // just before it and the new text sent in its place, through the same steps
   // (synchronous save first, attachments staged) as any other message.
-  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string) => {
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string, instruction?: AppInstruction) => {
     if (!text.trim() && (!files || files.length === 0)) return
     const editing = editedMessageId !== undefined
     // An edit replaces part of the conversation: only while nothing runs.
@@ -251,6 +267,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
 
     const message: UIMessage = {
       id: crypto.randomUUID(), role: 'user',
+      ...(instruction ? { metadata: { appInstruction: instruction } } : {}),
       parts: [{ type: 'text', text: text || '画像を確認してください' }],
     }
     timestampsRef.current.set(message.id, new Date())
@@ -304,8 +321,27 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
       return
     }
+    // Not shown on purpose: the tab is fresh, so its own conversation id is the one the claim names.
+    if (inputRequest?.kind === 'aiTurn') {
+      if (!historyReadyRef.current) return
+      const { step, title, minutesId, claim } = inputRequest
+      onInputRequestConsumed?.()
+      const conversationId = appSessionIdRef.current
+      if (!conversationId || !agentCan(authMode, 'recordActions')) { void claim(''); return }
+      void claim(conversationId).then(claimed => {
+        if (!claimed || appSessionIdRef.current !== conversationId) return
+        const { message } = claimed
+        customTitleRef.current = { title, auto: false }
+        titleGenerationDoneRef.current = true
+        onTitleChange?.(title)
+        if (minutesId) minutesIdRef.current = minutesId
+        aiTurnStepRef.current = step
+        void handleSend(message)
+      })
+      return
+    }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId } = inputRequest
+    const { message, title, minutesId, topicRecordId, pluginStep, instruction } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -317,7 +353,9 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         onTitleChange?.(title)
       }
       if (minutesId) minutesIdRef.current = minutesId
-      if (message) void handleSend(message)
+      if (topicRecordId) topicRecordIdRef.current = topicRecordId
+      if (pluginStep) pluginStepRef.current = pluginStep
+      if (message) void sendTurn(message, undefined, undefined, undefined, instruction)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 
@@ -332,6 +370,16 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const handleEditMessage = useCallback((messageId: string, newText: string) => {
     void sendTurnRef.current(newText, undefined, referenceFilesRef.current.get(messageId), messageId)
   }, [])
+
+  // What the consultation is about, when the app started it with an instruction (shown instead of that
+  // message). It is the first message after the greeting: only the head is looked at, per streamed chunk.
+  const instructionShown = useMemo(() => {
+    for (const message of messages.slice(0, 3)) {
+      const found = message.role === 'user' ? appInstructionOf(message) : null
+      if (found) return found
+    }
+    return null
+  }, [messages])
 
   // ============================================================================
   // Render
@@ -356,6 +404,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       />
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
+
+      {instructionShown && <AppInstructionChip instruction={instructionShown} />}
 
       {historyError && (
         <div role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10">

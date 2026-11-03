@@ -8,6 +8,13 @@
  * Links: a record outside a private folder never shows or reaches a record
  * inside one (a public → private link is ignored for everyone, 4-1); inside
  * the same private folder they work as usual.
+ *
+ * Owner-only records (「持ち主だけ」, records.md "Owner-only records", owner
+ * decision 2026-11-01): a record with a `personalOwner` is readable by that
+ * member alone — **not by owners or admins either** (the one exception to
+ * "owner/admin see everything"), nor department managers or delegates. For
+ * everyone else it is a record that does not exist, through every caller of
+ * this check (answers, counts, links, traversals, 「あなたの番」, the AI, undo).
  */
 import {
   canReadPrivateScope, findPrivateScope, resolveAccess, type PermissionRepository, type ScopeWithRules,
@@ -32,6 +39,8 @@ export function recordReader(member: Member, scopes: ScopeWithRules[]): RecordRe
   }
   return {
     record(r) {
+      // Before every role or folder rule: an owner-only record is its owner's alone.
+      if (r.personalOwner !== null) return r.personalOwner === member.userId
       if (r.path === null) return r.scopeId === null && readable(r.folder ?? '')
       if (r.scopeId !== null) {
         const scope = byId.get(r.scopeId)

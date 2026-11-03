@@ -33,7 +33,7 @@ interface SplitRow {
   right: { lineNo?: number; content: string; type: 'add' | 'context' | 'empty' }
 }
 
-// --- Diff Modal (exported for use in SyncPreviewDialog / CommitHistoryPanel) ---
+// --- Diff Modal (exported for use in SyncPreviewDialog / FileVersions) ---
 
 interface DiffModalProps {
   isOpen: boolean

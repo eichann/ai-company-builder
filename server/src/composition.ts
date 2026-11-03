@@ -7,6 +7,7 @@
  * which tests point at a temporary DATA_DIR. Repositories prepare their
  * statements per call, so building them before initDatabase() is safe.
  */
+import { createHash } from 'crypto'
 import type Database from 'better-sqlite3'
 import { db } from './db'
 import { sqliteCompanyRepository } from './adapters/sqlite/companies'
@@ -20,6 +21,7 @@ import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
+import { sqliteRecordContentEraser } from './adapters/sqlite/record-contents'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
@@ -40,14 +42,22 @@ import { createInvitationService } from './services/invitations'
 import { createClientActivityService } from './services/client-activity'
 import { createPushRejectionRecorder } from './services/push-rejections'
 import { createDepartmentService } from './services/departments'
+import { createAdminHomeService } from './services/admin-home'
 import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
 import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createTaskSettingsService } from './services/task-settings'
+import { createWorkSwitches } from './services/work-switches'
+import { slackFeaturesOf } from './services/slack-client'
+
+import { createViewersService } from './services/viewers'
+import { createAbsenceService } from './services/absences'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
+import { createSecondOpinionSettingService } from './services/second-opinion-setting'
 import { createPushChannel } from './services/push-channel'
 import { createBrokerVault } from './services/broker-vault'
 import { createKeyBrokerService } from './services/key-broker'
@@ -57,7 +67,16 @@ import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
-import { createRecordEngine } from './services/record-engine'
+import { createBundleKinds } from './services/bundle-kinds'
+import { createRecordFind } from './services/record-find'
+import { createPeopleNames } from './services/people-names'
+import { createRecordEngine, type RecordChange } from './services/record-engine'
+import { companyNow, createNotificationService } from './services/notifications'
+import { createAiRunService } from './services/ai-runs'
+import { createSkillUseService } from './services/skill-uses'
+import { createServerClock } from './services/server-clock'
+import { createTaskAcceptance } from './services/task-acceptance'
+import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
 import { createPluginService } from './services/plugins'
@@ -66,16 +85,25 @@ import { createPluginImportService } from './services/plugin-import'
 import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
+import { createMeetingOutputService } from './services/meeting-outputs'
+import { createMinutesReview } from './services/minutes-review'
 import { createDecisionService } from './services/decisions'
-import { createGoogleMeetings } from './services/google-meetings'
+import { createCalendarService } from './services/calendar'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
 import { createMinutesService } from './services/minutes'
 import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createGoogleDriveService } from './services/google-drive'
+import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
-import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, googleFeaturesOf } from '../shared/core/google'
+import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
+import { replyAsIncoming, wireConnectorsLane, wireCoreConnectors } from './composition/connectors'
+import { wireInboxLane } from './composition/inbox'
+import { wirePluginsLane } from './composition/plugins'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -160,13 +188,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
-    // Only the key broker's services (the Google connection checks its own practice values).
-    practiceServices: practiceList.filter(u => u.service !== 'google').map(u => u.service),
+    // Only the key broker's services (the Google and Slack connections check their own practice values).
+    practiceServices: practiceList.filter(u => u.service !== 'google' && u.service !== 'slack').map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
     // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
     managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
-    // 「すべての鍵を止める」 stops members' Google permissions too (bound below).
-    onStopAll: (companyId, by) => { void googleConnector.stopAll(companyId, by) },
+    // 「すべての鍵を止める」 stops members' permissions at every OAuth provider too (bound below).
+    onStopAll: (companyId, by) => { void memberOAuth.stopAll(companyId, by) },
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -178,7 +206,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     brokerEnabled: () => brokerVault.status().enabled,
     onChange: companyId => agentPolicy.announce(companyId),
   })
-  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, digest: sha256TokenDigest, push })
+  // 「もう一方の AI に聞く」: kept here, handed to the apps in their policy (chat-and-agents.md).
+  const secondOpinion = createSecondOpinionSettingService(shared)
+  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, secondOpinion, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
@@ -191,13 +221,91 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
+  // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
+  const taskSettings = createTaskSettingsService({ ...repos, ...shared })
+  // Each member's own 受信を読む / AI が自動で進める within the company's (自分の設定, tasks.md).
+  const workSwitches = createWorkSwitches({
+    ...shared,
+    settingsOf: companyId => taskSettings.settingsOf(companyId),
+    readingConnected: (companyId, userId) => {
+      const connectors = shared.companyData.forCompany(companyId).connectors
+      const google = connectors.grant('google', userId)
+      const slack = connectors.grant('slack', userId)
+      return {
+        mail: google?.status === 'active' && googleFeaturesOf(google.scopes).includes('inbox'),
+        chat: slack?.status === 'active' && slackFeaturesOf(slack.scopes).includes('read') && !slack.featuresOff.includes('read'),
+      }
+    },
+    // The roles are wired below (Google block, Slack in the connectors lane); asked per request only.
+    channelsOf: async companyId => {
+      const [mail, chat] = await Promise.all([
+        coreConnectors.connectorRoles.resolve(companyId, 'mail'),
+        coreConnectors.connectorRoles.resolve(companyId, 'chat'),
+      ])
+      return { mail: mail.ok || mail.reason === 'choice-needed', chat: chat.ok || chat.reason === 'choice-needed' }
+    },
+  })
+  const readIncoming = {
+    allowed: (companyId: string) => taskSettings.settingsOf(companyId).readIncoming.allowed,
+    on: (companyId: string, userId: string) => workSwitches.isOn(companyId, userId, 'readIncoming'),
+  }
+  // Absence and the delegate (代わりの人, records.md): the ONE resolution of who acts for whom
+  // today, handed to my-turn / AI turn, the engine's `who`, approvals and the notices below.
+  const absences = createAbsenceService({
+    ...repos, ...shared,
+    // No per-company zone yet (calendar.md): the one place a setting would replace.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    delegateCannotRead: (companyId, absenteeId, delegateId, setterId) => notifications.delegateCannotRead(companyId, absenteeId, delegateId, setterId),
+  })
+  const actsFor = (companyId: string, userId: string) => absences.actsFor(companyId, userId)
+  const notifications = createNotificationService({
+    ...shared,
+    coverOf: (companyId, userId) => absences.coverOf(companyId, userId),
+    managersOf: (companyId, userId) => absences.managersOf(companyId, userId),
+    activeAbsences: companyId => absences.activeToday(companyId),
+    // 「今日のあなたの番」 (the clock): every member, and whom each covers today (their あなたの番 has those too).
+    membersOf: companyId => repos.memberships.listByCompany(companyId).map(m => m.user_id),
+    actsFor,
+    push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+    // No per-company zone yet (calendar.md): the one place a setting would replace.
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    // 大事な知らせを Slack の DM で (lane A, composition/connectors.ts): called after construction only.
+    outside: (companyId, rows) => connectorsLane.noticesOutside(companyId, rows),
+  })
+  /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
+  const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
+    push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) })
+    if (!change) return
+    try { notifications.recordChange(companyId, userIds, change) } catch (err) { logError('notifications', 'Writing notices failed', err, { company: companyId }) }
+  }
+  // Acceptance (引き受け, records.md "Acceptance"): the company's setting decides when a request waits.
+  const taskAcceptance = createTaskAcceptance({ ...shared, settingsOf: companyId => taskSettings.settingsOf(companyId) })
   const recordEngine = createRecordEngine({
     ...shared,
     files: gitRecordFileWriter(),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
+    actsFor,
+    autoAccepts: taskAcceptance.autoAccepts,
+    // A meeting output's item key → its id: what one reading made is made once (minutes.md).
+    tokenDigest: sha256TokenDigest,
+    // 「もう返した」 drops the prepared reply drafts (inbox.md; lane B, built below; called after construction only).
+    afterAct: (companyId, change) => {
+      inboxLane.inbox.afterAct(companyId, change)
+      // A meeting just read: its 「議事録を確認する」 for the assignee (minutes.md "The review task"; built below).
+      minutesReview.afterAct(companyId, change)
+    },
+    // 会議から AI が作るやること: 案として出す / 自動で作る (records.md "Task version 11").
+    proposesFromMeeting: companyId => taskSettings.settingsOf(companyId).meetingTasks === 'propose',
+    // 返事待ち's default 見込み (records.md "Task version 12"): the company's day and holidays.
+    companyDay: companyId => ({
+      now: companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE),
+      holidays: taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
+    }),
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -206,8 +314,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
   })
+  const minutesReview = createMinutesReview({ companyData: shared.companyData, writer: serviceRecords, tokenDigest: sha256TokenDigest })
+  // The content store's eraser: only the server clock's retention run here (no route; records.md).
+  const contentEraser = sqliteRecordContentEraser(conn)
   const decisions = createDecisionService({
     ...shared,
     writer: serviceRecords,
@@ -226,6 +337,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
+    // A business plugin starting turns the records feature on (bound to `records`, made below).
+    recordsOn: member => {
+      const now = records.settings(member)
+      if (now.ok && !now.value.enabled) records.updateSettings(member, { enabled: true })
+    },
   })
 
   // The connector (P5): the only part that talks to an outside system for a plugin; the engine's
@@ -245,7 +361,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const externalRecords = createExternalRecordWriter({
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
   })
   const pluginImport = createPluginImportService({
     ...shared, plugins, connector: pluginConnector, writer: externalRecords,
@@ -271,6 +387,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     admins: companyId => repos.memberships.listByCompany(companyId).filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.user_id),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    actsFor,
     plugin: async (companyId, pluginId) => {
       const r = await plugins.active(companyId, pluginId, { collectingFacts: true })
       return r.ok ? r.plugin : null
@@ -312,25 +429,60 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
       : `https://${GOOGLE_AUTHORIZE_HOST}`,
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    readIncoming,
+  })
+  // Members' own OAuth permissions, provider-neutral (member-oauth.md); Google registers below.
+  const memberOAuth = createMemberOAuth({
+    ...shared,
+    brokerVault,
+    tokenDigest: sha256TokenDigest,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    redirectUri: provider => `${publicUrl()}${oauthCallbackPath(provider)}`,
   })
   const googleConnector = createGoogleConnector({
     ...shared,
     brokerVault,
     google: googleClient,
-    tokenDigest: sha256TokenDigest,
-    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    memberOAuth,
     redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
+    pickerPageUrl: () => `${publicUrl()}${GOOGLE_PICKER_PAGE_PATH}`,
     practiceGoogle: practiceGoogle !== undefined,
     operatorStopped: () => pluginShelf.isStopped('google', ''),
+    readIncoming: {
+      ...readIncoming,
+      setAllowed: (companyId, allowed, by) => taskSettings.setReadIncomingAllowed(companyId, allowed, by),
+      choose: (member, on) => { void workSwitches.set(member, { switch: 'readIncoming', on }) },
+    },
   })
 
-  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
-  // with the member's own permission; makes `minutes` records through the service writer.
+  // Google Drive (google-drive.md): picked files and folders only (drive.file), through the one Google client.
+  const googleDrive = createGoogleDriveService({
+    ...shared,
+    google: googleClient,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+    vaultEnabled: () => brokerVault.status().enabled,
+    sha256: bytes => createHash('sha256').update(bytes).digest('hex'),
+    // The practice Google serves a stand-in Picker script on staging (tests/fakes/google).
+    pickerScriptOrigin: practiceGoogle
+      ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
+      : 'https://apis.google.com',
+  })
+
+  // The core roles (connector-roles.md): Google registers as a built-in core connector; the core
+  // services below ask a role (予定を読む, 会議の記録を読む, メールを送る), never Google (composition/connectors.ts).
+  const coreConnectors = wireCoreConnectors({ ...shared, googleClient, googleConnector })
+
+  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the role 会議の記録を読む
+  // with the member's own permission; makes `meeting` records through the service writer.
   const minutes = createMinutesService({
     ...shared,
     writer: serviceRecords,
-    meetings: createGoogleMeetings((companyId, userId, req) => googleClient.request(companyId, userId, req)),
+    meetings: coreConnectors.roleProviders.meetings,
     tokenDigest: sha256TokenDigest,
+    // 名寄せ (identity.md): built below with the inbox lane; called only after construction.
+    resolveAddress: (member, address) => inboxLane.identities.resolveAddress(member, address),
+    // A まとまり chosen after the reading moves to the business plugin's step, as after a reading (plugin-steps.md).
+    afterAction: (member, actor, done) => recordEngine.afterAction(member, actor, done),
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
       const accounts = shared.accounts.byIds(rows.map(m => m.user_id))
@@ -341,8 +493,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
 
-  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
-  // permission; the AI drafts only (records-ai routes have no send).
+  // 「これと同じ…です（作らない）」 may also make the request's meeting belong to that record (plugins.md "Similar records").
+  approvals.useMeetingLink((member, meetingId, bundleId) => minutes.linkBundle(member, { kind: 'human', source: null }, meetingId, { bundleId }))
+
+  // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the role
+  // 予定を読む (Google's specifics stay in google-calendar.ts).
+  const calendar = createCalendarService({
+    clock: shared.clock,
+    reader: coreConnectors.roleProviders.calendar,
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+  })
+
+  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own permission
+  // (the role メールを送る); the AI drafts only (records-ai routes have no send).
   const outboundMail = createOutboundMailService({
     ...shared,
     writer: serviceRecords,
@@ -357,25 +520,100 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       })
     },
     // The meeting's attendees, re-read from Google now (minutes.md); unreadable → null (nothing offered).
-    meetingAttendees: async (companyId, userId, minutesId) => {
+    meetingAttendees: async (companyId, userId, meetingId) => {
       const role = access.memberOf(companyId, userId)?.role
       if (!role) return null
-      const r = await minutes.meetingAttendees(companyId, userId, role, minutesId)
+      const r = await minutes.meetingAttendees(companyId, userId, role, meetingId)
       return r.ok ? r.value : null
     },
-    dealContacts: (member, dealId) => pluginImport.dealContacts(member, dealId),
-    gmailSend: (companyId, userId, raw) => googleClient.request(companyId, userId, {
-      api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
-    }),
+    bundleContacts: (member, bundleId) => pluginImport.recordContacts(member, bundleId),
+    // The role メールを送る (the member's own permission at the company's mail connector).
+    mail: coreConnectors.roleProviders.mailSender,
+    // A reply into its 連絡's thread (outbound-mail.md "Replies"): the thread read through メールを読む; Slack's チャットに返す.
+    mailReader: coreConnectors.roleProviders.mailReader,
+    chat: coreConnectors.roleProviders.chatSender,
     companyIds: () => repos.companies.allIds(),
+    // 「返事を待つ」's default day counts the company's business days (task settings).
+    holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
   })
 
+  const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor })
+  // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
+  const aiRuns = createAiRunService({
+    ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),
+    // An unfinished minutes reading goes back to 「届いた」 at once, as the run's doing (the app's step name).
+    afterFailedRun: (member, run) => { if (run.step === 'minutes-reading') minutes.putBackAfterRun(member, run.recordId, run.id) },
+  })
+
+  // The parallel lanes (A connectors, B inbox, C plugins) wire their services in their own files
+  // under composition/ (.claude/rules/server.md "Lane markers"); each lane edits
+  // only its own call, and the marker lines keep the three calls apart for git.
+  // lane A ▼
+  const connectorsLane = wireConnectorsLane({
+    conn, core: coreConnectors, ...shared, brokerVault, upstream, practiceList, memberOAuth,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    operatorStopped: connectorId => pluginShelf.isStopped(connectorId, ''),
+    readsIncoming: readIncoming.on,
+    recordCall: (companyId, userId, e) => {
+      try {
+        agentEvents.recordServerEvent(companyId, userId ?? 'acb:slack-bot', {
+          agent: 'script',
+          tool: `slack:${e.operation.slice(0, 60)}`,
+          category: 'broker',
+          target: { kind: 'broker', service: 'slack', host: e.host, path: e.operation.slice(0, 200), ...(e.status !== null ? { status: e.status } : {}) },
+          decision: 'auto-allowed',
+          outcome: e.ok ? 'ok' : 'error',
+        })
+      } catch {
+        console.warn('[slack] a call could not be recorded')
+      }
+    },
+    publicUrl,
+  })
+  // A reply sent from the card (A4) is the company's own message in its 連絡's thread: the inbox (lane B,
+  // built below; called only after construction) moves the 返事のお願い as for any reply of ours.
+  outboundMail.onReplySent(reply => { inboxLane.inbox.receive(reply.companyId, reply.userId, replyAsIncoming(reply)) })
+  // A new mail sent with 「返事を待つ」 (outbound-mail.md "Waiting for their answer"): the inbox waits for their answer.
+  outboundMail.onAwaitingReply(a => { inboxLane.inbox.awaitOwnMessage({ ...a, channel: 'email' }) })
+  // lane B ▼
+  const inboxLane = wireInboxLane({
+    conn, ...shared, memberships: repos.memberships, serviceRecords,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    taskSettings: companyId => taskSettings.settingsOf(companyId),
+    roles: connectorsLane.connectorRoles,
+    onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
+    bridge: {
+      // Lane C's list (built below; called only after construction): what the company's apps may keep now.
+      listed: companyId => pluginsLane.pluginDistribution.pluginsFor(companyId),
+      shelf: pluginShelf,
+      records: { query: (m, b) => records.query(m, b), get: (m, id) => records.get(m, id) },
+      act: (m, actor, recordId, action, b) => recordEngine.act(m, actor, recordId, action, b),
+      requestApproval: (m, actor, pluginId, recordId, operation, b) => approvals.request(m, actor, pluginId, recordId, operation, b),
+    },
+  })
+  // lane C ▼
+  const pluginsLane = wirePluginsLane({
+    conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, aiRuns, actsFor,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+  })
+  // lanes ▲
+
+  // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
+  const meetingOutputs = createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) })
+
   return {
+    ...connectorsLane,
+    ...inboxLane,
+    ...pluginsLane,
     access,
     outboundMail,
     googleClient,
     googleConnector,
+    googleDrive,
+    memberOAuth,
     minutes,
+    calendar,
     pluginShelf,
     plugins,
     pluginImport,
@@ -389,7 +627,37 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
+    taskSettings,
+    workSwitches,
+    // 見られる人 for the lists (records.md "Who can see it").
+    viewers: createViewersService({ ...repos, ...shared }),
+    // The server clock (notifications.md "The server clock"): started once per process by index.ts.
+    serverClock: createServerClock({
+      ...shared,
+      companyIds: () => repos.companies.allIds(),
+      writer: serviceRecords,
+      notifications,
+      // The AI's turn runs on the assignee's PC: their own 自動で進める (work-switches.ts).
+      autoRunFor: (companyId, assignee) => workSwitches.isOn(companyId, assignee, 'autoRun'),
+      timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+      // The content store's retention (records.md "The content store"): reason `retention`, per company.
+      expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
+      yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
+    }),
     permissionViews,
+    // The admin console's home (server.md "Admin home").
+    adminHome: createAdminHomeService({
+      ...repos, ...shared,
+      overview: m => permissionViews.overview(m),
+      googleUsable: companyId => googleConnector.usable(companyId),
+      meetingDuplicates: m => { const r = meetingOutputs.duplicates(m); return r.ok ? r.value.groups.length : null },
+      stoppedPlugins: async m => {
+        const r = await plugins.list(m)
+        if (!r.ok) return []
+        return r.value.plugins.filter(p => p.install?.enabled && p.install.problem)
+          .map(p => ({ id: p.id, label: p.versions.at(-1)?.label ?? p.id, problem: p.install!.problem as string }))
+      },
+    }),
     permissionEditor: createPermissionEditorService({
       ...repos,
       ...shared,
@@ -401,6 +669,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentSandbox,
     agentStops,
     agentPolicy,
+    secondOpinion,
     push,
     brokerVault,
     keyBroker,
@@ -425,11 +694,23 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
-    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
+    records,
+    // 束ねる種類 (records.md "Bundle kinds"): what each department makes, and the core kind's name.
+    bundleKinds: createBundleKinds({ companyData: shared.companyData, shelf: pluginShelf, settingsOf: companyId => taskSettings.settingsOf(companyId) }),
+    // The names behind person ids in the AI's record answers (records.md "Typed tools in the app").
+    // 探す (records.md "探す"): records found by words, with department, mine, 案件 and summaries.
+    recordFind: createRecordFind({ companyData: shared.companyData }),
+    peopleNames: createPeopleNames({ memberships: repos.memberships, accounts: shared.accounts }),
+    absences,
+    aiRuns,
     recordEngine,
+    // Which company Skill a consultation used (records.md "Which Skill").
+    skillUses: createSkillUseService(shared),
+    notifications,
     decisions,
+    meetingOutputs,
     recordAiTokens: createRecordAiTokenService({
-      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,
+      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped, runs: aiRuns,
     }),
     accounts: shared.accounts,
     repoStore,

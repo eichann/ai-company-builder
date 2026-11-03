@@ -3,18 +3,25 @@
  * which Google permissions (scopes) each ACB feature asks for, the hosts each
  * Google API lives on, and the input rules of the admin's registration.
  *
- * Owner decisions (design §5-2, §9 q8/q10): ask only for what a feature
- * needs, when it is first needed (minutes first, `gmail.send` when mail is
- * first used); never `drive.readonly`, `gmail.compose`, `gmail.readonly`,
- * `gmail.metadata` or domain-wide delegation. The Google account must be the
- * member's own ACB email.
+ * Owner decisions (design §5-2, §9 q8/q10; 2026-11-02 「仕事の道具をつなぐ」):
+ * ask only for the features the company turned on, all of them in one consent
+ * (`googleFeaturesToAsk`); a feature the company turns on later is asked once
+ * more (or when first used); never `drive`, `drive.readonly`, `gmail.compose`,
+ * `gmail.metadata`, `gmail.modify` or domain-wide delegation
+ * (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox`
+ * feature (owner decision 2026-11-01, spec §7-1: the member can turn it off).
+ * The Google account must be the member's own ACB email. 受信を読む's switches are the
+ * member's own 受信を読む within the company's (`work-switches.ts`), not a Google switch.
  *
  * Pure: imports nothing outside shared/core.
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail'] as const
-/** minutes = 予定と議事録を読む, mail = メールを送る. */
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox'] as const
+/**
+ * minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く
+ * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`).
+ */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
 export const GOOGLE_SCOPE = {
@@ -25,7 +32,25 @@ export const GOOGLE_SCOPE = {
   meetReadonly: 'https://www.googleapis.com/auth/meetings.space.readonly',
   driveMeetReadonly: 'https://www.googleapis.com/auth/drive.meet.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
+  /**
+   * Only the files the member picked with Google Picker or ACB created
+   * (owner decision 2026-11-01: least privilege; never `drive` / `drive.readonly`).
+   */
+  driveFile: 'https://www.googleapis.com/auth/drive.file',
+  /** 受信を読む (the `inbox` feature only): the member's received mail, read when needed, never stored. */
+  gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
 } as const
+
+/** Scopes ACB never asks for, holds or hands out (owner decisions; `google-connector.md`). */
+export const GOOGLE_NEVER_SCOPES: readonly string[] = [
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  'https://www.googleapis.com/auth/gmail.compose',
+  'https://www.googleapis.com/auth/gmail.metadata',
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://mail.google.com/',
+]
 
 /** Asked with every feature: to read which account was allowed (and that its address is verified). */
 const IDENTITY_SCOPES = [GOOGLE_SCOPE.openid, GOOGLE_SCOPE.email]
@@ -34,6 +59,8 @@ const IDENTITY_SCOPES = [GOOGLE_SCOPE.openid, GOOGLE_SCOPE.email]
 export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   minutes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.meetReadonly, GOOGLE_SCOPE.driveMeetReadonly],
   mail: [GOOGLE_SCOPE.gmailSend],
+  drive: [GOOGLE_SCOPE.driveFile],
+  inbox: [GOOGLE_SCOPE.gmailReadonly],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -41,6 +68,8 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...IDENTITY_SCOPES,
   ...GOOGLE_FEATURE_SCOPES.minutes,
   ...GOOGLE_FEATURE_SCOPES.mail,
+  ...GOOGLE_FEATURE_SCOPES.drive,
+  ...GOOGLE_FEATURE_SCOPES.inbox,
 ]
 
 /** Google's short names → the long form it reports. */
@@ -71,6 +100,85 @@ export function normalizeGrantedScopes(raw: string | readonly string[]): string[
 /** The features whose every scope is granted. */
 export function googleFeaturesOf(scopes: readonly string[]): GoogleFeature[] {
   return GOOGLE_FEATURES.filter(f => GOOGLE_FEATURE_SCOPES[f].every(s => scopes.includes(s)))
+}
+
+/**
+ * The feature a scope belongs to (each feature scope belongs to exactly one),
+ * null for the identity scopes. The Google client refuses a call whose
+ * feature the member turned off (`connector_grants.features_off`).
+ */
+export function googleFeatureOfScope(scope: string): GoogleFeature | null {
+  return GOOGLE_FEATURES.find(f => GOOGLE_FEATURE_SCOPES[f].includes(scope)) ?? null
+}
+
+/** A member's list of turned-off features as stored → the known features only (unknown entries are ignored). */
+export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => raw.includes(f))
+}
+
+// ---------------------------------------------------------------------------
+// What the company offers its members (owner decision 2026-11-02, 「仕事の道具をつなぐ」).
+
+/**
+ * Off for a company until its admin turns them on; the others are on until the admin turns them
+ * off. Empty since 2026-11-02: 受信を読む (`inbox`) is no longer Google's own company switch — it is
+ * the company's 受信を読む (`work-switches.ts`, the task settings' `readIncoming.allowed`, allowed
+ * by default, each member starting off), which covers Slack's reading too. `featuresOn` is kept
+ * for a feature that needs it again.
+ */
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = []
+
+/**
+ * The admin's switches as stored (default-on features turned off, default-off features turned on)
+ * and the company's 受信を読む (`readIncomingAllowed`), which decides the `inbox` feature.
+ */
+export interface GoogleCompanySwitches {
+  featuresOff: readonly string[]
+  featuresOn: readonly string[]
+  readIncomingAllowed: boolean
+}
+
+/** Whether the company has a feature on (the admin's switch over the feature's default; `inbox` = the company's 受信を読む). */
+export function googleCompanyFeatureOn(feature: GoogleFeature, company: GoogleCompanySwitches): boolean {
+  if (feature === 'inbox') return company.readIncomingAllowed
+  return GOOGLE_COMPANY_DEFAULT_OFF.includes(feature) ? company.featuresOn.includes(feature) : !company.featuresOff.includes(feature)
+}
+
+/** The stored switches after the admin turns one feature on or off (only the list of its default changes; never `inbox`). */
+export function googleCompanySwitched(company: Omit<GoogleCompanySwitches, 'readIncomingAllowed'>, feature: Exclude<GoogleFeature, 'inbox'>, on: boolean): { featuresOff: GoogleFeature[]; featuresOn: GoogleFeature[] } {
+  const defaultOff = GOOGLE_COMPANY_DEFAULT_OFF.includes(feature)
+  return {
+    featuresOff: GOOGLE_FEATURES.filter(f => (f === feature && !defaultOff ? !on : company.featuresOff.includes(f) && !GOOGLE_COMPANY_DEFAULT_OFF.includes(f))),
+    featuresOn: GOOGLE_FEATURES.filter(f => (f === feature && defaultOff ? on : company.featuresOn.includes(f) && GOOGLE_COMPANY_DEFAULT_OFF.includes(f))),
+  }
+}
+
+/**
+ * The features a company offers: every feature on for the company
+ * (`googleCompanyFeatureOn`), and Drive only once Google Picker is registered
+ * (without it Drive cannot be used, so `drive.file` is not asked).
+ */
+export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerConfigured: boolean }): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => googleCompanyFeatureOn(f, company) && (f !== 'drive' || company.pickerConfigured))
+}
+
+/**
+ * What one member is offered (「仕事の道具をつなぐ」's one consent, the screen's 「まだ許可していないもの」):
+ * the company's features, but 受信を読む only while the member's own 受信を読む is on — the
+ * most sensitive scope is never asked of someone who did not turn it on (owner decisions
+ * 2026-11-02).
+ */
+export function googleMemberFeatures(companyFeatures: readonly GoogleFeature[], readIncomingOn: boolean): GoogleFeature[] {
+  return companyFeatures.filter(f => f !== 'inbox' || readIncomingOn)
+}
+
+/**
+ * What one consent asks for: the requested features the company offers, plus
+ * those already granted that the company still offers (Google merges them).
+ * Never a feature the company turned off (least privilege at company level).
+ */
+export function googleFeaturesToAsk(requested: readonly GoogleFeature[], companyFeatures: readonly GoogleFeature[], granted: readonly GoogleFeature[]): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => companyFeatures.includes(f) && (requested.includes(f) || granted.includes(f)))
 }
 
 // ---------------------------------------------------------------------------

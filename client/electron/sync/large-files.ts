@@ -1,5 +1,6 @@
 // Step 4 of git:sync: files over 100 MB are kept out of what sync shares by
-// a line in the root .gitignore (.claude/rules/sync.md, step 4).
+// a line in this computer's .git/info/exclude (./local-ignores.ts; older
+// apps wrote it into the shared root .gitignore — .claude/rules/sync.md, step 4).
 //
 // The scan used to walk and stat the whole company folder — .workspace/, app
 // bundles and other ignored trees included — pruned by a substring test on
@@ -53,7 +54,7 @@ export interface LargeFileScanOptions {
   /**
    * Repository-relative paths never reported (and never entered): the
    * readable private folders' clones and the local-only folders. A large file
-   * there must not be named in the shared .gitignore.
+   * there must not be named in the company repository's ignore lines.
    */
   skip?: (relPath: string) => boolean
 }
@@ -152,4 +153,28 @@ export function largeFilePattern(rel: string): string {
   if (p.startsWith('#') || p.startsWith('!')) p = `\\${p}`
   p = p.replace(/ +$/, spaces => spaces.replace(/ /g, '\\ '))
   return rel.includes('/') ? p : `/${p}`
+}
+
+/**
+ * The files the file tree marks 「大きすぎて共有されていません」: untracked
+ * files over the threshold — ignored already (sync's step 4 did it) or not yet
+ * (the next sync will) — repository-relative, sorted. Tracked large files are
+ * shared and not listed. Ignored folders count as one entry and are not entered
+ * (`--directory`: .backups/, .workspace/, node_modules/, private folders'
+ * clones, nested repositories kept on this computer), so a private folder's
+ * own large files are not listed here. Never downloads a blob.
+ */
+export async function findUnsharedLargeFiles(git: SimpleGit, repoPath: string, threshold = LARGE_FILE_THRESHOLD): Promise<string[]> {
+  const list = (args: string[]) => git.raw(['ls-files', '-z', '--others', '--exclude-standard', ...args])
+    .then(out => out.split('\0').filter(e => e !== '' && !e.endsWith('/')))
+  const [plain, ignored] = await Promise.all([list([]), list(['--ignored', '--directory'])])
+  const out: string[] = []
+  for (const rel of [...new Set([...plain, ...ignored])]) {
+    if (skippedBySegment(rel)) continue
+    try {
+      const st = await fs.promises.lstat(path.join(repoPath, rel))
+      if (st.isFile() && st.size > threshold) out.push(rel)
+    } catch { /* gone meanwhile */ }
+  }
+  return out.sort()
 }

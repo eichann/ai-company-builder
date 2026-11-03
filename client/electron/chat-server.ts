@@ -1,3 +1,4 @@
+import { aiTurnStepAllowsRecordTool, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
@@ -5,9 +6,12 @@ import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
-import { MINUTES_DEAL_CHOICE_PART_TYPE, type MinutesDealChoiceCard } from '../shared/minutes-app'
+import { MINUTES_BUNDLE_CHOICE_PART_TYPE, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import type { WebResearchTools } from './web-research/tools'
+import { createSecondOpinionBudget, createSecondOpinionTools, secondOpinionTurn } from './agents/second-opinion'
+import type { SecondOpinionRequest, SecondOpinionResult } from './agents/second-opinion-runner'
+import { SECOND_OPINION_PART_TYPE, askedTargets, secondOpinionForbiddenInstructions, secondOpinionInstructions } from '../shared/agents/second-opinion'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -24,6 +28,7 @@ import {
   type UIMessage,
 } from 'ai'
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
+import { acbToolDisplays, toolDisplayTransform } from './tool-display-stream'
 import type { AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
 import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatform, type SandboxHost } from '../shared/agents/sandbox-policy'
 import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
@@ -37,6 +42,7 @@ import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-li
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
+import { skillLoadedBy, type AgentToolEvent, type SkillUseSighting } from '../shared/agent-events'
 import type { ToolStopCheck } from '../shared/agent-stop'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
@@ -52,7 +58,17 @@ export interface ChatServerConfig extends AgentHost {
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
   /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onDealChoice?: (card: MinutesDealChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  /**
+   * A business plugin's step run (plugin-steps.md): the tool ceiling main's claim holds for this
+   * consultation and step; null when main holds none (the run is then refused, never widened).
+   */
+  /**
+   * A consultation started from a business plugin's person step (plugin-steps.md): bind it on the
+   * server (its AI's plugin power is that step's, for good). false = not bound: the turn is refused.
+   */
+  bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
+  pluginStepTools?: (conversationId: string, step: string) => { allowsRecordTool(name: string): boolean; builtinTools: string[] } | null
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -60,6 +76,17 @@ export interface ChatServerConfig extends AgentHost {
    * turns its own web tools off.
    */
   createWebResearch?: (request: { agent: AgentId; conversationId: string; signal: AbortSignal }) => { tools: WebResearchTools; instructions: string } | undefined
+  /**
+   * 「もう一方の AI に聞く」 (agents/second-opinion.ts): ask another agent of the registry (its own
+   * CLI, no tools). Offered only in a turn whose member message names that agent.
+   */
+  runSecondOpinion?: (target: AgentId, request: Omit<SecondOpinionRequest, 'host'>) => Promise<SecondOpinionResult>
+  /**
+   * Whether the company allows 「もう一方の AI に聞く」 (its policy's `secondOpinion`, the admin's
+   * 「詳しい設定 › AI の安全」). Asked only for a turn whose member message names the other agent;
+   * false, absent, unknown (offline, an older server) or a failure = not allowed: no tool at all.
+   */
+  secondOpinionAllowed?: (companyId: string) => Promise<boolean>
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -93,6 +120,11 @@ export interface ChatServerConfig extends AgentHost {
   prepareAgentStop?: (companyId: string) => Promise<{ refused?: string; toolStopped: ToolStopCheck }>
   /** False while an administrator has stopped the AI: titles are not generated (the renderer keeps its own). */
   oneShotAiAllowed?: () => boolean
+  /**
+   * A Skill the AI loaded in a consultation (records.md "Which Skill"): the host finds its
+   * folder and reports its version (services/skill-use-reporter.ts). Must not throw or block.
+   */
+  onSkillUsed?: (sighting: SkillUseSighting) => void
 }
 
 // ============================================================================
@@ -120,6 +152,30 @@ const SECURITY_POLICY = `
 export function externalRepositoryInstruction(companyRootPath?: string): string {
   const where = companyRootPath ? `「${companyRootPath.replace(/[\\/]+$/, '')}/.workspace/」` : '会社フォルダ直下の「.workspace/」'
   return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するとき、また新しく git init するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone・git init しようとするとアプリが止めます。それ以外の場所にできたリポジトリは同期で共有されず、同期のたびにメンバーへの確認が表示されます。中身を会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらうようユーザーに伝えてください。`
+}
+
+/**
+ * The host for one consultation's turn (records.md "Which Skill"): every tool
+ * event still goes to the host's own `onToolEvent`, and a Skill the AI loaded
+ * (`skillLoadedBy`) is also handed to `onSkillUsed` with the consultation's
+ * company folder and working folder. Without a consultation (or a host that
+ * takes no sightings) the host is returned unchanged.
+ */
+export function withSkillSightings<H extends Pick<ChatServerConfig, 'onToolEvent' | 'onSkillUsed'>>(
+  config: H,
+  turn: Omit<SkillUseSighting, 'skill'> | undefined,
+): H {
+  const { onSkillUsed, onToolEvent } = config
+  if (!turn || !onSkillUsed) return config
+  return {
+    ...config,
+    onToolEvent: (event: AgentToolEvent) => {
+      onToolEvent?.(event)
+      const skill = skillLoadedBy(event)
+      if (!skill) return
+      try { onSkillUsed({ ...turn, skill }) } catch { /* the record is informational: never in the AI's path */ }
+    },
+  }
 }
 
 /**
@@ -181,6 +237,8 @@ export async function startChatServer(config: ChatServerConfig) {
   const agentSessionMap = new Map<string, AgentSession>()
   // Running turns: steering (extra instructions), next-prompt suggestions, abort handles.
   const chatTurns = createChatTurns(undefined, { cancelInteractions: config.cancelInteractions })
+  // 「もう一方の AI に聞く」: calls per conversation, for the app's lifetime.
+  const secondOpinionBudget = createSecondOpinionBudget()
 
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
@@ -219,6 +277,8 @@ export async function startChatServer(config: ChatServerConfig) {
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
       promptSuggestions,
+      aiTurnStep: requestedStep,
+      pluginStep: requestedPluginStep,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -227,8 +287,20 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authMode = requestedAuthMode || config.getAuthMode()
     if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
-    const connection = createAgentConnection(authMode, config)
+    // Which Skill this consultation used (records.md "Which Skill"): seen in the AI action log's events.
+    const host = withSkillSightings(config, companyId && appSessionId && companyRootPath && !requestedStep
+      ? { companyId, conversationId: appSessionId, companyRoot: companyRootPath, workingDirectory } : undefined)
+    const connection = createAgentConnection(authMode, host)
     const can = AGENTS[authMode].capabilities
+    // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
+    // A step's tool ceiling: a declared kind's (ai-turn-steps/), or a business plugin step's that main's claim holds.
+    const aiTurnStep = requestedStep === undefined ? undefined
+      : isAiTurnStep(requestedStep)
+        ? { allowsRecordTool: (name: string) => aiTurnStepAllowsRecordTool(requestedStep, name), builtinTools: [...aiTurnStepDefinition(requestedStep).tools.builtinTools] }
+        : (appSessionId && config.pluginStepTools?.(appSessionId, requestedStep)) || null
+    if (aiTurnStep === null || (aiTurnStep && (!connection.ownsConversation || !can.recordActions))) {
+      return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
+    }
     // The emergency stop (agent-stop.md): a stopped AI never starts a turn.
     const turnStop = companyId ? await Promise.resolve(config.prepareAgentStop?.(companyId)).catch(() => undefined) : undefined
     if (turnStop?.refused) return c.json({ error: turnStop.refused, code: 'AI_STOPPED' }, 403)
@@ -265,7 +337,7 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
-    const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
+    const references = !aiTurnStep && connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
     const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
     // What this conversation has read from private folders (private-read-guard.ts).
@@ -277,7 +349,7 @@ export async function startChatServer(config: ChatServerConfig) {
       privateState.seeded = true
       try { seedFromMessages(privateContext, privateState, messages, workingDirectory) } catch { /* best effort */ }
     }
-    const createdCompanyFiles = connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
+    const createdCompanyFiles = !aiTurnStep && connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
     const companyFiles = createdCompanyFiles && {
       ...createdCompanyFiles,
       tools: {
@@ -290,7 +362,7 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     // The per-conversation limit needs a conversation id; a request without one counts on its own.
-    const webResearch = connection.ownsConversation && can.webReader
+    const webResearch = !aiTurnStep && connection.ownsConversation && can.webReader
       ? config.createWebResearch?.({ agent: authMode, conversationId: appSessionId || crypto.randomUUID(), signal: c.req.raw.signal }) : undefined
     if (webResearch) finalSystemPrompt = (finalSystemPrompt || '') + webResearch.instructions
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
@@ -298,29 +370,67 @@ export async function startChatServer(config: ChatServerConfig) {
     const injector = createChunkInjector()
     // 「確認をお願いする」 (review/tools.ts): the AI hands its work to the member and
     // stops; the accepted request becomes a part of the reply (the card, stored with it).
-    const review = connection.ownsConversation && workingDirectory
+    const review = !aiTurnStep && connection.ownsConversation && workingDirectory
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
+    // 「もう一方の AI に聞く」 (agents/second-opinion.ts): only the agents the member's own latest
+    // message names; the tool does not exist in any other turn. It stops with the turn
+    // (the member's stop here, an administrator's once the turn is tracked below).
+    const secondOpinionAbort = new AbortController()
+    const stopSecondOpinion = () => secondOpinionAbort.abort()
+    if (c.req.raw.signal.aborted) stopSecondOpinion(); else c.req.raw.signal.addEventListener('abort', stopSecondOpinion, { once: true })
+    const runSecondOpinion = config.runSecondOpinion
+    const namedTargets = !aiTurnStep && connection.ownsConversation && runSecondOpinion && appSessionId && companyRootPath ? askedTargets(authMode, messages) : []
+    // The company decides first (owner decision 2026-11-02): forbidden or unknown = no tool, so
+    // nothing of the company reaches the other vendor from this turn.
+    const secondOpinionAllowed = config.secondOpinionAllowed
+    const secondOpinionChoice = await secondOpinionTurn(namedTargets, companyId && secondOpinionAllowed ? () => secondOpinionAllowed(companyId) : undefined)
+    if (secondOpinionChoice.forbidden) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionForbiddenInstructions(namedTargets)
+    const secondOpinion = runSecondOpinion && appSessionId && companyRootPath
+      ? createSecondOpinionTools({
+        asker: authMode, targets: secondOpinionChoice.targets, conversationId: appSessionId, messages, root: companyRootPath,
+        notDownloaded: writeGuard?.getNotDownloaded, privateReads: privateContext ? { context: privateContext, state: privateState } : undefined,
+        requestApproval: config.requestToolApproval
+          ? (toolId, reason) => config.requestToolApproval!(toolId, {}, crypto.randomUUID(), appSessionId, reason).then(answer => answer.approved)
+          : undefined,
+        run: (target, request) => runSecondOpinion(target, request),
+        budget: secondOpinionBudget, signal: secondOpinionAbort.signal,
+        onAnswer: record => injector.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record }),
+      })
+      : undefined
+    if (secondOpinion) finalSystemPrompt = (finalSystemPrompt || '') + secondOpinionInstructions(secondOpinion.tools.map(t => t.target))
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
-    const records = connection.ownsConversation && can.recordsMcp && companyId
+    // A person step's consultation is bound before its first tools exist; never run it unbound.
+    if (requestedPluginStep && (!companyId || !appSessionId || !config.bindPluginStep
+      || !await config.bindPluginStep(companyId, appSessionId, requestedPluginStep).catch(() => false))) {
+      return c.json({ error: 'この手順の相談を始められませんでした。少し待ってからもう一度ためしてください。', code: 'PLUGIN_STEP_NOT_BOUND' }, 409)
+    }
+    const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
-        companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions,
+        companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
         onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
         // An approval request made or shown: the app's own card (approvals.ts), never the AI's text.
         onApprovalCard: card => injector.push({ type: APPROVAL_PART_TYPE, id: `approval-${card.id}`, data: card }),
         // 「どの案件の議事録ですか？」: the app's own card (minutes-app.ts), never the AI's text.
-        onDealChoice: card => injector.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card }),
+        onBundleChoice: card => injector.push({ type: MINUTES_BUNDLE_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card }),
         // A mail draft (mail_draft_*) becomes the app-drawn card with 「確かめて送る」 (outbound-mail.ts).
         onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
+    // An unattended step sees only the record tools it declares, and cannot call any other.
+    const records = allRecords && aiTurnStep ? {
+      ...allRecords,
+      specs: allRecords.specs.filter(spec => aiTurnStep.allowsRecordTool(spec.name)),
+      execute: (name: string, input: unknown) => aiTurnStep.allowsRecordTool(name)
+        ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具は使えません。'),
+    } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
-    const askUser = connection.ownsConversation && can.choicePrompts
+    const askUser = !aiTurnStep && connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
-    const turn = appSessionId && connection.ownsConversation && (can.steering || can.promptSuggestions)
+    const turn = !aiTurnStep && appSessionId && connection.ownsConversation && (can.steering || can.promptSuggestions)
       ? chatTurns.open(appSessionId, injector, { suggestions: can.promptSuggestions && promptSuggestions !== false }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
@@ -358,7 +468,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -379,7 +489,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // API key mode: add filesystem tools + optional skill tools
     const tools = (() => {
       if (connection.ownsConversation) return undefined
-      const toolEvents = turnToolEvents(config, authMode, modelRequest)
+      const toolEvents = turnToolEvents(host, authMode, modelRequest)
       const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents, turnEnv, turnStop?.toolStopped) : undefined
       const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents, turnStop?.toolStopped) : undefined
       if (!fsTools && !skillTools) return undefined
@@ -454,6 +564,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const activityToken = crypto.randomUUID()
     // The renderer's stop (the request's signal) or the main process's (chat-turns abort).
     const running = chatTurns.track({ appSessionId, companyId }, c.req.raw.signal, injector)
+    if (running.signal.aborted) stopSecondOpinion(); else running.signal.addEventListener('abort', stopSecondOpinion, { once: true })
     let released = false
     const release = (outcome: 'finished' | 'failed' = 'failed') => {
       if (released) return
@@ -503,6 +614,7 @@ export async function startChatServer(config: ChatServerConfig) {
     return limitedUIMessageStreamResponse(result, {
       ownsConversation: connection.ownsConversation,
       inject: injector,
+      label: toolDisplayTransform(acbToolDisplays(records), companyRootPath || workingDirectory || undefined),
       onError: error => error instanceof Error ? error.message : 'AIとの接続でエラーが発生しました。',
     })
   })

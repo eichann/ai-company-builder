@@ -6,6 +6,7 @@ import { Sparkle, CaretUp, File, PencilSimple, ArrowCounterClockwise } from '@ph
 import { useAppStore } from '../../../stores/appStore'
 import { AssistantMessageParts } from './MessageParts'
 import { earlierAnchor, windowStart } from '../messageWindow'
+import { appInstructionOf } from '../../../../shared/app-instruction'
 
 // The conversation's messages: only the latest are rendered (messageWindow.ts;
 // 「以前のメッセージを表示」 keeps the reading position), each one memoised, and
@@ -200,6 +201,8 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const markdownRender = useAppStore((s) => s.chatMarkdownRender)
+  // The app's instruction to the AI is not the member's words: the chat's chip names it instead (app-instruction.ts).
+  if (isUser && appInstructionOf(message)) return null
 
   return (
     // content-visibility: older messages scrolled out of view skip layout and

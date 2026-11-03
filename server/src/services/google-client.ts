@@ -9,7 +9,9 @@
  * the operator's stop file (`<PLUGINS_DIR>/stopped` naming `google` or `*`),
  * the company's client present and on, the vault on, the caller still a
  * member, the member's grant active (an admin's stop, 「すべての鍵を止める」
- * and the member's own 「許可をやめる」 all end it), the scope granted.
+ * and the member's own 「許可をやめる」 all end it), the scope granted, and the
+ * scope's feature not turned off by the member (`features_off`; for 受信を読む, the member's
+ * own switch within the company's: shared/core/work-switches.ts).
  *
  * Secrets: the client secret and the refresh token come out of the vault
  * just before they are sent; the access token lives only in this module's
@@ -26,12 +28,14 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { ConnectorGrantRow } from '../ports/connectors'
+import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
 import type { Clock } from '../ports/clock'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { BrokerVault } from './broker-vault'
+import { grantSealContext } from './member-oauth'
 
 const HEADERS_TIMEOUT_MS = 30_000
 const MAX_READ_RETRIES = 2
@@ -48,7 +52,11 @@ const BEFORE_SENDING: readonly UpstreamFailure[] = ['private-address', 'dns', 't
 export type GoogleStopReason =
   | 'operator-stopped' | 'not-configured' | 'off' | 'vault-off' | 'not-member'
   | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted'
+  /** The member turned this feature off (`features_off`; 受信を読む: their own switch is off). */
+  | 'feature-off'
   | 'practice-real-secret' | 'bad-path' | 'token-refused' | 'token-unavailable'
+  /** Google answered the Picker's token with more than `drive.file`: it is not handed out. */
+  | 'picker-scope-too-wide'
 
 export interface GoogleRequest {
   api: Exclude<GoogleApi, 'oauth' | 'userinfo'>
@@ -58,6 +66,10 @@ export interface GoogleRequest {
   query?: Record<string, string | string[]>
   /** JSON body (writes). */
   body?: unknown
+  /** A body that is not JSON (Drive's multipart upload): sent as is with this content type. */
+  rawBody?: { contentType: string; bytes: Uint8Array }
+  /** The answer is a file (Drive `alt=media`): `bytes` is set and nothing is decoded. */
+  binary?: boolean
   /** The scope this call needs; the call is refused unless the member granted it. */
   scope: string
   /** A short name for the record (`calendar.events.list`, `gmail.send`); never content. */
@@ -72,6 +84,8 @@ export type GoogleResult =
     json: unknown
     /** The answer as text when it is not JSON (Drive export). */
     text: string | null
+    /** The answer's bytes, only for a `binary` request. */
+    bytes?: Uint8Array
   }
   | {
     ok: false
@@ -116,6 +130,11 @@ export interface GoogleClientDeps {
   /** Where the browser signs in (https://accounts.google.com, or the fake Google's origin). */
   authorizeOrigin: string
   sleep(ms: number): Promise<void>
+  /**
+   * 受信を読む (the `inbox` feature): the company's 使ってよいか and the member's own switch
+   * (services/work-switches.ts), read on every call.
+   */
+  readIncoming: { allowed(companyId: string): boolean; on(companyId: string, userId: string): boolean }
 }
 
 async function readBody(body: AsyncIterable<Uint8Array>): Promise<Uint8Array | null> {
@@ -215,6 +234,25 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     return null
   }
 
+  /**
+   * A scope the call needs: granted, its feature not turned off for the company
+   * by the admin (answered like the company switch, `off`), nor by the member
+   * (member-oauth.md "Feature toggles": refused like a scope not granted).
+   */
+  function scopeStop(companyId: string, connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
+    if (!grant.scopes.includes(scope)) return 'scope-not-granted'
+    const feature = googleFeatureOfScope(scope)
+    if (feature === 'inbox') {
+      // 受信を読む: the company's and the member's own switch (work-switches.ts), not Google's.
+      if (!deps.readIncoming.allowed(companyId)) return 'off'
+      return deps.readIncoming.on(companyId, grant.userId) ? null : 'feature-off'
+    }
+    const client = connectors.client()
+    if (feature !== null && client && !googleCompanyFeatureOn(feature, { ...client, readIncomingAllowed: false })) return 'off'
+    if (feature !== null && grant.featuresOff.includes(feature)) return 'feature-off'
+    return null
+  }
+
   /** A usable access token for the member's active grant (refreshing it when needed). */
   async function accessTokenFor(companyId: string, userId: string, grant: ConnectorGrantRow): Promise<{ token: string } | { stop: GoogleStopReason } | { failure: UpstreamFailure | 'answer-too-large' }> {
     const key = cacheKey(companyId, userId, grant.grantId)
@@ -226,7 +264,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     if (!stored || stored.grantId !== grant.grantId) return { stop: 'grant-revoked' }
     const creds = await clientCredentials(companyId)
     if ('stop' in creds) return creds
-    const refreshToken = await deps.brokerVault.openConnector({ purpose: 'acb-google-grant', companyId, id: stored.grantId }, stored.sealed)
+    const refreshToken = await deps.brokerVault.openConnector(grantSealContext('google', companyId, stored.grantId), stored.sealed)
     if (deps.practiceGoogle && !isPracticeGoogleSecret(refreshToken)) return { stop: 'practice-real-secret' }
     const answer = await postForm('/token', {
       grant_type: 'refresh_token', refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.secret,
@@ -328,17 +366,46 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     /** Revokes a token at Google (best effort: false when it could not be confirmed). */
     revoke,
 
-    /** Revokes a member's stored refresh token at Google (best effort; the caller ends the grant either way). */
-    async revokeStored(companyId: string, userId: string): Promise<boolean> {
-      if (!deps.brokerVault.status().enabled) return false
-      const stored = deps.companyData.forCompany(companyId).connectors.refreshToken('google', userId)
-      if (!stored) return false
-      try {
-        const token = await deps.brokerVault.openConnector({ purpose: 'acb-google-grant', companyId, id: stored.grantId }, stored.sealed)
-        return await revoke(token)
-      } catch {
-        return false
+    /**
+     * Google Picker's token (google-drive.md): a fresh access token from the
+     * member's refresh token, asked for `drive.file` only (a subset of the
+     * grant: RFC 6749 §6) and handed out only when Google's answer carries
+     * exactly that scope — never the cached token, which holds every granted
+     * scope (Calendar, Gmail…). Every switch, the grant and `drive.file`
+     * first. Not cached, not logged; one AI-action-log line without it.
+     */
+    async pickerToken(companyId: string, userId: string): Promise<{ ok: true; accessToken: string; expiresAtMs: number } | { ok: false; reason: GoogleStopReason | UpstreamFailure | 'answer-too-large' }> {
+      const off = await switchesOff(companyId, userId)
+      if (off) return { ok: false, reason: off }
+      const connectors = deps.companyData.forCompany(companyId).connectors
+      const grant = connectors.grant('google', userId)
+      const stop = grantStop(grant)
+      if (stop) return { ok: false, reason: stop }
+      const scoped = scopeStop(companyId, connectors, grant!, GOOGLE_SCOPE.driveFile)
+      if (scoped) return { ok: false, reason: scoped }
+      const stored = connectors.refreshToken('google', userId)
+      if (!stored || stored.grantId !== grant!.grantId) return { ok: false, reason: 'grant-revoked' }
+      const creds = await clientCredentials(companyId)
+      if ('stop' in creds) return { ok: false, reason: creds.stop }
+      const refreshToken = await deps.brokerVault.openConnector(grantSealContext('google', companyId, stored.grantId), stored.sealed)
+      if (deps.practiceGoogle && !isPracticeGoogleSecret(refreshToken)) return { ok: false, reason: 'practice-real-secret' }
+      const answer = await postForm('/token', {
+        grant_type: 'refresh_token', refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.secret, scope: GOOGLE_SCOPE.driveFile,
+      })
+      const host = GOOGLE_API_HOSTS.oauth
+      if ('failure' in answer) {
+        deps.record(companyId, userId, { operation: 'drive.picker.token', api: 'oauth', host, status: null, ok: false })
+        return { ok: false, reason: answer.failure }
       }
+      connectors.touchGrant('google', userId, deps.clock.now())
+      const tokens = answer.status >= 200 && answer.status < 300 ? tokensOf(answer.json) : null
+      const narrow = tokens !== null && isDrivePickerTokenScope(tokens.scopes)
+      deps.record(companyId, userId, { operation: 'drive.picker.token', api: 'oauth', host, status: answer.status, ok: narrow })
+      if (!tokens) return { ok: false, reason: answer.status === 400 || answer.status === 401 ? 'token-refused' : 'token-unavailable' }
+      if (!narrow) return { ok: false, reason: 'picker-scope-too-wide' }
+      if (deps.practiceGoogle && !isPracticeGoogleSecret(tokens.accessToken)) return { ok: false, reason: 'practice-real-secret' }
+      const lifetime = Math.min(tokens.expiresInSeconds * 1000 - ACCESS_TOKEN_MARGIN_MS, ACCESS_TOKEN_MAX_MS)
+      return { ok: true, accessToken: tokens.accessToken, expiresAtMs: deps.clock.nowMs() + Math.max(lifetime, 0) }
     },
 
     /**
@@ -353,7 +420,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       const path = pathWithQuery(req)
       if (!path) return notSent('bad-path')
       const isRead = req.method === 'GET'
-      const body = req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
+      const body = req.rawBody ? req.rawBody.bytes : req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
+      const contentType = req.rawBody ? req.rawBody.contentType : 'application/json'
       let retriedAfter401 = false
       for (let attempt = 0; ; attempt++) {
         // Every switch, before every attempt (a stop during a wait applies to the retry too).
@@ -363,13 +431,14 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const grant = connectors.grant('google', userId)
         const stop = grantStop(grant)
         if (stop) return notSent(stop)
-        if (!grant!.scopes.includes(req.scope)) return notSent('scope-not-granted')
+        const scoped = scopeStop(companyId, connectors, grant!, req.scope)
+        if (scoped) return notSent(scoped)
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)
         if ('failure' in token) return { ok: false, kind: 'not-sent', reason: token.failure }
 
         const headers: Record<string, string> = { authorization: `Bearer ${token.token}`, accept: 'application/json', 'accept-encoding': 'identity' }
-        if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = String(body.byteLength) }
+        if (body) { headers['content-type'] = contentType; headers['content-length'] = String(body.byteLength) }
         const sent = await deps.upstream.send({
           host, method: req.method, path, headers,
           body: body ? (async function* () { yield body })() : null,
@@ -390,6 +459,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
           if (!bytes) return { ok: false, kind: isRead ? 'server-error' : 'unknown', reason: 'answer-too-large', status }
           const json = parseJson(bytes)
           if (status >= 200 && status < 300) {
+            if (req.binary) return { ok: true, status, json: null, text: null, bytes }
             return { ok: true, status, json: json === undefined ? null : json, text: json === undefined ? new TextDecoder().decode(bytes) : null }
           }
           if (status === 401 && !retriedAfter401) {

@@ -16,6 +16,7 @@ import { request as httpsRequest } from 'https'
 import type { PracticeUpstream } from '../lib/config'
 import { isPracticeSecret } from '../../shared/core/key-broker'
 import { isPracticeGoogleSecret } from '../../shared/core/google'
+import { isPracticeSlackSecret } from '../../shared/core/slack'
 import type { UpstreamClient } from '../ports/upstream'
 
 /** Headers that carry a key (the built-in services' and the usual ones). */
@@ -30,9 +31,9 @@ export function practiceUpstream(real: UpstreamClient, upstreams: readonly Pract
       if (!upstream) return real.send(req)
       const target = upstream.target
       // A real secret never goes to the practice copy (review §5.8): only practice keys pass,
-      // each service's own kind (HubSpot `pat-fake-…`, Google `ya29.fake-…`).
+      // each service's own kind (HubSpot `pat-fake-…`, Google `ya29.fake-…`, Slack `xoxp-fake-…` / `xoxb-fake-…`).
       // (Registration refuses them too; this holds even for a key saved before the redirect was on.)
-      const practiceValue = upstream.service === 'google' ? isPracticeGoogleSecret : isPracticeSecret
+      const practiceValue = upstream.service === 'google' ? isPracticeGoogleSecret : upstream.service === 'slack' ? isPracticeSlackSecret : isPracticeSecret
       if (CREDENTIAL_HEADERS.some(h => req.headers[h] !== undefined && !practiceValue(req.headers[h]))) {
         return { ok: false, reason: 'practice-real-secret' }
       }

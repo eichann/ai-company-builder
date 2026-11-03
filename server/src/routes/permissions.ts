@@ -20,28 +20,17 @@
  */
 import { createHash } from 'crypto'
 import { Hono } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import { requireFullAccess, type Member } from '../services/access'
+import { requireFullAccess } from '../services/access'
 import { refusal } from './respond'
+import { companyMember } from './guards'
 
 export const permissionsRoute = new Hono()
-const { access, permissionViews, agentEvents } = services
-
-async function authenticateMember(c: { req: { raw: Request; param: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
+const { permissionViews, agentEvents } = services
 
 // GET /api/companies/:companyId/overview
-permissionsRoute.get('/overview', async (c) => {
-  const member = await authenticateMember(c)
-  if (member instanceof Response) return member
+permissionsRoute.get('/overview', companyMember, async (c) => {
+  const member = c.var.member
   const actor = requireFullAccess(member, 'Only owners and admins can view the overview')
   if (!actor.ok) return refusal(c, actor)
 
@@ -49,9 +38,8 @@ permissionsRoute.get('/overview', async (c) => {
 })
 
 // GET /api/companies/:companyId/permissions
-permissionsRoute.get('/permissions', async (c) => {
-  const member = await authenticateMember(c)
-  if (member instanceof Response) return member
+permissionsRoute.get('/permissions', companyMember, async (c) => {
+  const member = c.var.member
 
   const view = await permissionViews.permissions(member)
   if (!view.ok) return refusal(c, view)
@@ -59,9 +47,8 @@ permissionsRoute.get('/permissions', async (c) => {
 })
 
 // GET /api/companies/:companyId/me/capabilities
-permissionsRoute.get('/me/capabilities', async (c) => {
-  const member = await authenticateMember(c)
-  if (member instanceof Response) return member
+permissionsRoute.get('/me/capabilities', companyMember, async (c) => {
+  const member = c.var.member
   return c.json({
     success: true,
     // The admin console shows 「AI の操作の記録」 in its navigation from this flag
@@ -74,9 +61,8 @@ permissionsRoute.get('/me/capabilities', async (c) => {
 // The caller's write access as data the client evaluates per path with
 // resolveAccess()'s semantics (see writeAccessSummary in shared/core/permissions.ts).
 // `version` (also the ETag) changes whenever the answer changes.
-permissionsRoute.get('/me/write-access', async (c) => {
-  const member = await authenticateMember(c)
-  if (member instanceof Response) return member
+permissionsRoute.get('/me/write-access', companyMember, async (c) => {
+  const member = c.var.member
   const summary = permissionViews.writeAccess(member)
   const version = createHash('sha256').update(JSON.stringify({ role: member.role, ...summary })).digest('hex').slice(0, 32)
   const etag = `"${version}"`

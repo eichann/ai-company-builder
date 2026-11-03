@@ -1,25 +1,22 @@
 /**
  * The Google connection (milestone 4 G3, `.claude/rules/google-connector.md`):
  * the company's OAuth client (owner/admin, 「つなぎ先」→「Google」), a member's
- * 「Google で許可」 and 「許可をやめる」, Google's return to the server (the
- * callback), and the stops. Every Google request goes through
- * services/google-client.ts.
+ * 「Google で許可」 and 「許可をやめる」, and the stops. The member's grant,
+ * the pending start, the public callback and the stops are the provider-
+ * neutral services/member-oauth.ts (`.claude/rules/member-oauth.md`); this
+ * module registers Google there as a provider. Every Google request goes
+ * through services/google-client.ts.
  *
  * Owner decisions applied (design §4-6, §9 q10): the member allows it
  * themselves; the refresh token is sealed in the vault and never shown again;
  * only the Google account with the member's own ACB email, verified, in the
  * company's Workspace domain is accepted — anything else stores nothing.
- *
- * The callback is public (Google sends the browser back without an ACB
- * session) and shared by every company: the state is `<companyId>.<random>`,
- * the company's handle is opened from it, and the pending row is found by the
- * state's sha256 inside that company only — a state of another company, a
- * forged one, a reused or an expired one finds nothing (design §3-8).
  */
 import {
-  googleFeaturesOf, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
-  checkGoogleClientId, checkGoogleClientSecret, sameEmail, GOOGLE_FEATURES, type GoogleFeature,
+  googleCompanyFeatureOn, googleCompanyFeatures, googleCompanySwitched, googleFeaturesOf, googleFeaturesOff, googleMemberFeatures, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
+  checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
+import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
 import { emailDomain } from '../../shared/core/mail'
 import type {
   GoogleAdminView, GoogleChange, GoogleChangeAction, GoogleConnectStart, GoogleGrantSummary, GoogleUnavailableReason, MyGoogle,
@@ -28,45 +25,45 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorChangeRow, ConnectorRepository } from '../ports/connectors'
-import type { TokenDigest } from '../ports/key-broker'
-import { logError } from '../lib/error-log'
 import { requireFullAccess, type Member } from './access'
 import type { BrokerVault } from './broker-vault'
 import type { GoogleClient } from './google-client'
+import type { MemberOAuth } from './member-oauth'
 import { ok, refuse, type Outcome } from './outcome'
 
 export const GOOGLE_FORBIDDEN = 'Only owners and admins can manage the Google connection'
-const PENDING_MINUTES = 10
 const HISTORY_LIMIT = 50
 
 export interface GoogleConnectorDeps {
   companyData: CompanyDataSource
   brokerVault: BrokerVault
   google: GoogleClient
+  memberOAuth: MemberOAuth
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
-  tokenDigest: TokenDigest
-  isMember(companyId: string, userId: string): boolean
-  /** `<PUBLIC_URL>/api/oauth/google/callback`, read per call. */
+  /** `<PUBLIC_URL>/api/oauth/google/callback`, read per call (shown to the admin). */
   redirectUri(): string
+  /** `<PUBLIC_URL>/api/google-picker`: the page the Picker's API key must allow (google-drive.md). */
+  pickerPageUrl(): string
   practiceGoogle: boolean
   operatorStopped(): Promise<boolean>
-  /** Warnings (reason codes and ids only); default console. */
-  log?: Pick<Console, 'warn'>
-}
-
-/** The page the browser shows after Google sent it back. */
-export interface CallbackPage {
-  granted: boolean
-  /** One plain Japanese sentence: no secret, nobody's email. */
-  message: string
+  /**
+   * 受信を読む (the `inbox` feature) is the company's and each member's own switch
+   * (services/work-switches.ts), not a Google switch: the admin's Google `inbox` switch and the
+   * member's Google 受信を読む toggle read and write it.
+   */
+  readIncoming: {
+    allowed(companyId: string): boolean
+    on(companyId: string, userId: string): boolean
+    /** The company's 使ってよいか (the task settings' `readIncoming.allowed`). */
+    setAllowed(companyId: string, allowed: boolean, by: string): void
+    /** The member's own choice. */
+    choose(member: Member, on: boolean): void
+  }
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
-
-/** A state as the server makes it: `<companyId>.<64 hex>`. */
-const STATE_RE = /^([A-Za-z0-9_-]{1,100})\.([0-9a-f]{64})$/
 
 const PAGE = {
   granted: '許可しました。アプリに戻ってください。',
@@ -80,24 +77,8 @@ const PAGE = {
   noRefresh: 'Google から必要な情報が届きませんでした。アプリで「許可をやめる」を押してから、もう一度「Google で許可」を押してください。許可は保存していません。',
 }
 
-/** sha256 in hex → base64url (PKCE S256 challenge), without Node's Buffer. */
-function hexToBase64Url(hex: string): string {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-  const bytes: number[] = []
-  for (let i = 0; i < hex.length; i += 2) bytes.push(parseInt(hex.slice(i, i + 2), 16))
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0)
-    out += alphabet[(n >> 18) & 63] + alphabet[(n >> 12) & 63]
-    if (i + 1 < bytes.length) out += alphabet[(n >> 6) & 63]
-    if (i + 2 < bytes.length) out += alphabet[n & 63]
-  }
-  return out
-}
-
 export function createGoogleConnector(deps: GoogleConnectorDeps) {
-  const { companyData, brokerVault, google, accounts, clock, ids } = deps
-  const log = deps.log ?? console
+  const { companyData, brokerVault, google, memberOAuth, accounts, clock, ids } = deps
   const connectorsOf = (companyId: string): ConnectorRepository => companyData.forCompany(companyId).connectors
 
   function change(action: GoogleChangeAction, by: string, userId: string | null, detail: Record<string, unknown>): ConnectorChangeRow {
@@ -111,6 +92,25 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
     if (!client.enabled) return 'off'
     if (!brokerVault.status().enabled) return 'vault-off'
     return null
+  }
+
+  /** What the company offers its members now (google-connector.md "One consent"). */
+  function companyFeaturesOf(companyId: string): GoogleFeature[] {
+    const connectors = connectorsOf(companyId)
+    const client = connectors.client()
+    if (!client) return []
+    return googleCompanyFeatures({ ...client, readIncomingAllowed: deps.readIncoming.allowed(companyId), pickerConfigured: connectors.picker() !== null })
+  }
+
+  /** What one member is offered: 受信を読む only while their own 受信を読む is on. */
+  function memberFeaturesOf(member: Member): GoogleFeature[] {
+    return googleMemberFeatures(companyFeaturesOf(member.companyId), deps.readIncoming.on(member.companyId, member.userId))
+  }
+
+  /** The features a member has turned off: their `features_off`, and 受信を読む while their own switch is off. */
+  function memberFeaturesOff(member: Member, granted: readonly GoogleFeature[], featuresOff: readonly string[]): GoogleFeature[] {
+    const readOn = deps.readIncoming.on(member.companyId, member.userId)
+    return granted.filter(f => (f === 'inbox' ? !readOn : googleFeaturesOff(featuresOff).includes(f)))
   }
 
   async function view(companyId: string): Promise<GoogleAdminView> {
@@ -131,12 +131,17 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       operatorStopped: await deps.operatorStopped(),
       updatedAt: client?.updatedAt ?? null,
       updatedBy: client?.updatedBy ?? null,
+      picker: (() => {
+        const p = connectors.picker()
+        return { configured: p !== null, appId: p?.appId ?? null, apiKeyLast4: p ? p.apiKey.slice(-4) : null, pageUrl: deps.pickerPageUrl() }
+      })(),
       grants: grants.map((g): GoogleGrantSummary => ({
         userId: g.userId,
         memberEmail: people.get(g.userId)?.email ?? null,
         memberName: people.get(g.userId)?.name ?? null,
         googleEmail: g.accountEmail,
         features: googleFeaturesOf(g.scopes),
+        featuresOff: memberFeaturesOff({ companyId, userId: g.userId, role: 'member' }, googleFeaturesOf(g.scopes), g.featuresOff),
         scopes: g.scopes,
         status: g.status,
         createdAt: g.createdAt,
@@ -148,6 +153,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         try { detail = JSON.parse(h.change) as Record<string, unknown> } catch { /* unreadable: shown empty */ }
         return { id: h.id, action: h.action as GoogleChangeAction, at: h.at, by: h.by, byName: people.get(h.by)?.name ?? null, userId: h.userId, detail }
       }),
+      featuresOff: GOOGLE_FEATURES.filter(f => !googleCompanyFeatureOn(f, { featuresOff: client?.featuresOff ?? [], featuresOn: client?.featuresOn ?? [], readIncomingAllowed: deps.readIncoming.allowed(companyId) })),
+      companyFeatures: companyFeaturesOf(companyId),
     }
   }
 
@@ -163,42 +170,58 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       status: grant?.status ?? null,
       googleEmail: grant?.accountEmail ?? null,
       features: grant?.status === 'active' ? googleFeaturesOf(grant.scopes) : [],
+      featuresOff: grant?.status === 'active' ? memberFeaturesOff(member, googleFeaturesOf(grant.scopes), grant.featuresOff) : [],
       domain: client?.domain ?? null,
       practice: deps.practiceGoogle,
+      companyFeatures: reason === null ? memberFeaturesOf(member) : [],
+      seen: googleFeaturesOff(connectors.setupSeen('google', member.userId)),
     }
   }
 
-  /**
-   * Ends every active grant of the company as `status` now (locally, at once),
-   * then revokes the tokens at Google in the background (best effort).
-   */
-  async function endAllGrants(companyId: string, by: string, status: 'revoked' | 'stopped', reason: string, action: GoogleChangeAction): Promise<number> {
-    const connectors = connectorsOf(companyId)
-    const sealed = connectors.grants('google').filter(g => g.status === 'active')
-      .map(g => ({ userId: g.userId, stored: connectors.refreshToken('google', g.userId) }))
-    let ended = 0
-    for (const { userId } of sealed) {
-      if (connectors.endGrant('google', userId, status, reason, clock.now(), change(action, by, userId, { reason }))) ended++
-      google.forget(companyId, userId)
-    }
-    google.forgetCompany(companyId)
-    if (brokerVault.status().enabled) {
-      void (async () => {
-        for (const { stored } of sealed) {
-          if (!stored) continue
-          try {
-            const token = await brokerVault.openConnector({ purpose: 'acb-google-grant', companyId, id: stored.grantId }, stored.sealed)
-            await google.revoke(token)
-          } catch (err) {
-            logError('google', 'revoking a stopped grant at Google failed', err, { company: companyId })
-          }
-        }
-      })()
-    }
-    return ended
-  }
+  // Google as a member-level OAuth provider (member-oauth.ts runs the start, the callback and the stops).
+  memberOAuth.register({
+    id: 'google',
+    label: 'Google',
+    features: GOOGLE_FEATURES,
+    unavailable: unavailableReason,
+    authorizeUrl: params => google.authorizeUrl(params),
+    exchangeCode: (companyId, code, verifier, redirectUri) => google.exchangeCode(companyId, code, verifier, redirectUri),
+    async identify(companyId, accessToken) {
+      const domain = connectorsOf(companyId).client()?.domain ?? ''
+      const info = await google.userInfo(accessToken)
+      if (!info || !info.email) return { ok: false, message: PAGE.failed, why: 'no-userinfo' }
+      if (!info.emailVerified) return { ok: false, message: PAGE.notVerified, why: 'email-not-verified' }
+      if (!domain || !info.hd || info.hd.toLowerCase() !== domain || emailDomain(info.email) !== domain) return { ok: false, message: PAGE.domain(domain), why: 'other-domain' }
+      return { ok: true, email: info.email }
+    },
+    revoke: token => google.revoke(token),
+    normalizeScopes: normalizeGrantedScopes,
+    featuresOf: googleFeaturesOf,
+    forget: (companyId, userId) => google.forget(companyId, userId),
+    forgetCompany: companyId => google.forgetCompany(companyId),
+    pages: PAGE,
+  })
 
   return {
+    /**
+     * Whether the company can use Google now (the core connector's `usable`,
+     * connector-roles.md): set up, on, the vault on, not stopped by the operator.
+     */
+    async usable(companyId: string): Promise<boolean> {
+      return (await unavailableReason(companyId)) === null
+    },
+
+    /** The admin list's state of the core connector (「つないでいるサービス」). */
+    async state(companyId: string): Promise<{ configured: boolean; enabled: boolean; operatorStopped: boolean; usable: boolean }> {
+      const client = connectorsOf(companyId).client()
+      return {
+        configured: client !== null,
+        enabled: client?.enabled ?? false,
+        operatorStopped: await deps.operatorStopped(),
+        usable: (await unavailableReason(companyId)) === null,
+      }
+    },
+
     /** GET …/google (owner/admin). */
     async adminView(member: Member): Promise<Outcome<GoogleAdminView>> {
       const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
@@ -242,7 +265,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       }))
       // Tokens of another client, or accounts of another domain, no longer fit: members allow again.
       if (before && (before.clientId !== clientId || before.domain !== domain.value)) {
-        await endAllGrants(member.companyId, member.userId, 'revoked', 'client-changed', 'grant-revoked')
+        await memberOAuth.endAllGrants('google', member.companyId, member.userId, 'revoked', 'client-changed', 'grant-revoked')
       }
       google.forgetCompany(member.companyId)
       return ok(await view(member.companyId))
@@ -263,24 +286,74 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       return ok(await view(member.companyId))
     },
 
+    /**
+     * PUT …/google/features { feature, on } (owner/admin): turns one feature off / on for the
+     * whole company. Off: never asked of members again, and the Google client refuses its
+     * calls from the next one (members' grants keep the scope until they re-consent or stop).
+     */
+    async setCompanyFeature(member: Member, body: unknown): Promise<Outcome<GoogleAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isObject(body) || !isGoogleFeature(body.feature) || typeof body.on !== 'boolean') {
+        return refuse('bad-request', `feature must be one of: ${GOOGLE_FEATURES.join(', ')}; on must be true or false`)
+      }
+      const connectors = connectorsOf(member.companyId)
+      const client = connectors.client()
+      if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
+      const feature = body.feature
+      if (feature === 'inbox') {
+        // 受信を読む is the company's own switch (task settings `readIncoming.allowed`), Slack's reading too.
+        if (deps.readIncoming.allowed(member.companyId) !== body.on) {
+          deps.readIncoming.setAllowed(member.companyId, body.on, member.userId)
+          connectors.addHistory(change('features', member.userId, null, { feature, on: body.on }))
+        }
+      } else if (googleCompanyFeatureOn(feature, { ...client, readIncomingAllowed: false }) !== body.on) {
+        connectors.setClientFeatures(googleCompanySwitched(client, feature, body.on), clock.now(), member.userId, change('features', member.userId, null, { feature, on: body.on }))
+      }
+      google.forgetCompany(member.companyId)
+      return ok(await view(member.companyId))
+    },
+
+    /**
+     * PUT …/google/picker { apiKey?, appId } (owner/admin): Google Picker's API key and the
+     * Cloud project number (google-drive.md). `apiKey` left out keeps the stored one;
+     * `appId: null` removes both (Drive picking stops from the next call).
+     */
+    async savePicker(member: Member, body: unknown): Promise<Outcome<GoogleAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
+      const connectors = connectorsOf(member.companyId)
+      const client = connectors.client()
+      if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
+      const before = connectors.picker()
+      if (body.appId === null) {
+        if (before) connectors.savePicker(null, clock.now(), member.userId, change('picker', member.userId, null, { removed: true }))
+        return ok(await view(member.companyId))
+      }
+      const appIdError = checkPickerAppId(body.appId)
+      if (appIdError) return refuse('bad-request', appIdError, { code: 'BAD_PICKER_APP_ID' })
+      const hasKey = body.apiKey !== undefined && body.apiKey !== null && body.apiKey !== ''
+      if (hasKey) {
+        const keyError = checkPickerApiKey(body.apiKey)
+        if (keyError) return refuse('bad-request', keyError, { code: 'BAD_PICKER_API_KEY' })
+      }
+      if (!hasKey && !before) return refuse('bad-request', 'Picker の API キーを入れてください。', { code: 'BAD_PICKER_API_KEY' })
+      const apiKey = hasKey ? (body.apiKey as string).trim() : before!.apiKey
+      const appId = (body.appId as string).trim()
+      connectors.savePicker({ apiKey, appId }, clock.now(), member.userId, change('picker', member.userId, null, {
+        before: before ? { appId: before.appId, apiKeyLast4: before.apiKey.slice(-4) } : null,
+        after: { appId, apiKeyLast4: apiKey.slice(-4) },
+      }))
+      return ok(await view(member.companyId))
+    },
+
     /** DELETE …/google/grants/:userId (owner/admin): stops a member's grant (revoked at Google too). */
     async stopGrant(member: Member, userId: string): Promise<Outcome<GoogleAdminView>> {
       const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
       if (!allowed.ok) return allowed
-      const connectors = connectorsOf(member.companyId)
-      const grant = connectors.grant('google', userId)
-      if (!grant) return refuse('not-found', 'Google permission not found')
-      if (grant.status === 'active') {
-        const revoked = await google.revokeStored(member.companyId, userId)
-        connectors.endGrant('google', userId, 'stopped', 'admin', clock.now(), change('grant-stopped', member.userId, userId, { reason: 'admin', revokedAtGoogle: revoked }))
-        google.forget(member.companyId, userId)
-      }
+      if (!await memberOAuth.stopGrant('google', member.companyId, userId, member.userId)) return refuse('not-found', 'Google permission not found')
       return ok(await view(member.companyId))
-    },
-
-    /** 「すべての鍵を止める」 (key broker stop-all): every active grant of the company stops now. */
-    async stopAll(companyId: string, by: string): Promise<number> {
-      return endAllGrants(companyId, by, 'stopped', 'stop-all', 'stop-all')
     },
 
     /** GET …/me/google (any member). */
@@ -288,10 +361,15 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       return ok(await myView(member))
     },
 
-    /** POST …/me/google/connect { features } → the URL the member's browser opens. */
+    /**
+     * POST …/me/google/connect { features } | { all: true } → the URL the member's browser
+     * opens. `all` asks every feature the company offers in one consent (「仕事の道具をつなぐ」)
+     * and marks them seen; a feature the company turned off is never asked.
+     */
     async connect(member: Member, body: unknown): Promise<Outcome<GoogleConnectStart>> {
-      if (!isObject(body) || !Array.isArray(body.features) || body.features.length === 0 || !body.features.every(isGoogleFeature)) {
-        return refuse('bad-request', `features must list one or more of: ${GOOGLE_FEATURES.join(', ')}`)
+      const all = isObject(body) && body.all === true
+      if (!all && (!isObject(body) || !Array.isArray(body.features) || body.features.length === 0 || !body.features.every(isGoogleFeature))) {
+        return refuse('bad-request', `features must list one or more of: ${GOOGLE_FEATURES.join(', ')} (or all: true)`)
       }
       const reason = await unavailableReason(member.companyId)
       if (reason) return refuse('conflict', 'いまは Google とつなげません。管理者に確かめてください。', { code: 'GOOGLE_UNAVAILABLE', reason })
@@ -302,28 +380,35 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       const account = accounts.byIds([member.userId]).get(member.userId)
       const grant = connectors.grant('google', member.userId)
       const active = grant?.status === 'active'
-      // Ask for what the member already allowed too (incremental: Google merges them).
-      const features = new Set<GoogleFeature>(body.features as GoogleFeature[])
-      if (active) for (const f of googleFeaturesOf(grant!.scopes)) features.add(f)
-      const scopes = googleScopesFor([...features])
-
-      const now = clock.nowMs()
-      const state = `${member.companyId}.${ids.newToken()}`
-      const verifier = ids.newToken()
-      const stateHash = deps.tokenDigest.digest(state)
-      connectors.prunePending(clock.now(), member.userId)
-      connectors.putPending({
-        stateHash, provider: 'google', userId: member.userId, scopes,
-        verifier: await brokerVault.sealConnector({ purpose: 'acb-oauth-pending', companyId: member.companyId, id: stateHash }, verifier),
-        createdAt: new Date(now).toISOString(), expiresAt: new Date(now + PENDING_MINUTES * 60_000).toISOString(),
-      })
-      const params: Record<string, string> = {
+      const companyOffers = companyFeaturesOf(member.companyId)
+      const named = all ? [] : (body as { features: GoogleFeature[] }).features
+      if (!all && named.some(f => !companyOffers.includes(f))) {
+        return refuse('conflict', 'この機能は会社で使っていません。管理者に確かめてください。', { code: 'GOOGLE_FEATURE_COMPANY_OFF' })
+      }
+      // Asking for 受信を読む by name is the member choosing it (an older app's 「受信を読む許可も足す」):
+      // their own 受信を読む turns on. `{ all }` never asks it unless it is on already.
+      if (named.includes('inbox') && !deps.readIncoming.on(member.companyId, member.userId)) deps.readIncoming.choose(member, true)
+      const offered = memberFeaturesOf(member)
+      const requested = all ? offered : named
+      if (requested.length === 0) {
+        return refuse('conflict', 'この機能は会社で使っていません。管理者に確かめてください。', { code: 'GOOGLE_FEATURE_COMPANY_OFF' })
+      }
+      // Ask for what the member already allowed too (incremental: Google merges them), but
+      // nothing the company turned off.
+      // A scope already granted stays asked while the company offers it (受信を読む switched off by
+      // the member keeps its scope: their switch, not Google's, decides).
+      const features = googleFeaturesToAsk(requested, companyOffers, active ? googleFeaturesOf(grant!.scopes) : [])
+      const scopes = googleScopesFor(features)
+      // Shown once: whatever the member allows or declines on Google's page, the screen
+      // does not come back for these (never a loop).
+      if (all) connectors.addSetupSeen('google', member.userId, offered, clock.now())
+      return ok(await memberOAuth.start('google', member, scopes, p => ({
         client_id: client.clientId,
-        redirect_uri: deps.redirectUri(),
+        redirect_uri: p.redirectUri,
         response_type: 'code',
-        scope: scopes.join(' '),
-        state,
-        code_challenge: hexToBase64Url(deps.tokenDigest.digest(verifier)),
+        scope: p.scope,
+        state: p.state,
+        code_challenge: p.codeChallenge,
         code_challenge_method: 'S256',
         access_type: 'offline',
         include_granted_scopes: 'true',
@@ -331,90 +416,50 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         ...(account?.email ? { login_hint: account.email } : {}),
         // A refresh token comes only with a consent: ask for it unless an active grant already holds one.
         ...(active ? {} : { prompt: 'consent' }),
-      }
-      return ok({ authorizeUrl: google.authorizeUrl(params), expiresAt: new Date(now + PENDING_MINUTES * 60_000).toISOString() })
+      })))
     },
 
-    /** DELETE …/me/google: 「許可をやめる」 — revoked at Google too (best effort), then nothing kept. */
-    async disconnect(member: Member): Promise<Outcome<MyGoogle>> {
-      const connectors = connectorsOf(member.companyId)
-      const grant = connectors.grant('google', member.userId)
-      if (grant) {
-        const revoked = grant.status === 'active' ? await google.revokeStored(member.companyId, member.userId) : false
-        connectors.deleteGrant('google', member.userId, change('grant-revoked', member.userId, member.userId, { reason: 'member', revokedAtGoogle: revoked }))
-        google.forget(member.companyId, member.userId)
+    /**
+     * PUT …/me/google/features { feature, on } (any member, their own grant only):
+     * turns one allowed feature off or on again (e.g. 受信を読む). From the next
+     * call the Google client refuses a call of a feature that is off.
+     */
+    async setFeature(member: Member, body: unknown): Promise<Outcome<MyGoogle>> {
+      if (!isObject(body) || !isGoogleFeature(body.feature) || typeof body.on !== 'boolean') {
+        return refuse('bad-request', `feature must be one of: ${GOOGLE_FEATURES.join(', ')}; on must be true or false`)
       }
-      connectors.prunePending(clock.now(), member.userId)
+      const grant = connectorsOf(member.companyId).grant('google', member.userId)
+      if (!grant || grant.status !== 'active') return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
+      if (!googleFeaturesOf(grant.scopes).includes(body.feature)) {
+        return refuse('conflict', 'この機能はまだ許可していません。先に「Google で許可」で足してください。', { code: 'GOOGLE_FEATURE_NOT_GRANTED' })
+      }
+      if (body.feature === 'inbox') {
+        // 受信を読む is the member's own switch (自分の設定), which covers Slack's reading too.
+        if (body.on && !deps.readIncoming.allowed(member.companyId)) {
+          return refuse('conflict', '会社の設定で止まっています。管理者に確かめてください。', { code: 'WORK_SWITCH_COMPANY_OFF' })
+        }
+        deps.readIncoming.choose(member, body.on)
+        return ok(await myView(member))
+      }
+      const r = memberOAuth.setFeatureOff('google', member, body.feature, !body.on)
+      if (!r.ok) return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
       return ok(await myView(member))
     },
 
     /**
-     * GET /api/oauth/google/callback?code&state[&error] (public). Stores the
-     * grant only when everything holds; otherwise nothing at all.
+     * PUT …/me/google/seen (「あとで」 on 「仕事の道具をつなぐ」): the features the company
+     * offers now are marked shown; the screen comes back only for ones added later.
      */
-    async callback(query: { state?: string; code?: string; error?: string }): Promise<CallbackPage> {
-      const refused = (message: string): CallbackPage => ({ granted: false, message })
-      const m = STATE_RE.exec(query.state ?? '')
-      if (!m) return refused(PAGE.expired)
-      const companyId = m[1]
-      // The company comes from the state, and the pending row is looked for inside that company only.
-      const connectors = connectorsOf(companyId)
-      const pending = connectors.takePending(deps.tokenDigest.digest(query.state!), clock.now())
-      if (!pending || pending.provider !== 'google') return refused(PAGE.expired)
-      if (query.error) return refused(PAGE.denied)
-      if (!query.code || query.code.length > 2048) return refused(PAGE.failed)
-      if (await unavailableReason(companyId)) return refused(PAGE.unavailable)
-      if (!deps.isMember(companyId, pending.userId)) return refused(PAGE.unavailable)
-      const client = connectors.client()!
+    async markSeen(member: Member): Promise<Outcome<MyGoogle>> {
+      const connectors = connectorsOf(member.companyId)
+      if (await unavailableReason(member.companyId) === null) connectors.addSetupSeen('google', member.userId, memberFeaturesOf(member), clock.now())
+      return ok(await myView(member))
+    },
 
-      let verifier: string
-      try {
-        verifier = await brokerVault.openConnector({ purpose: 'acb-oauth-pending', companyId, id: pending.stateHash }, pending.verifier)
-      } catch (err) {
-        logError('google', 'a pending start could not be opened', err, { company: companyId })
-        return refused(PAGE.failed)
-      }
-      const exchanged = await google.exchangeCode(companyId, query.code, verifier, deps.redirectUri())
-      if (!exchanged.ok) {
-        log.warn(`[google] code exchange refused: ${exchanged.reason} company=${companyId}`)
-        return refused(PAGE.failed)
-      }
-      const tokens = exchanged.tokens
-      // Whatever is refused below: the tokens Google just issued are revoked, so nothing lingers.
-      const refuseAndRevoke = async (message: string, why: string): Promise<CallbackPage> => {
-        await google.revoke(tokens.refreshToken ?? tokens.accessToken).catch(() => false)
-        log.warn(`[google] permission refused: ${why} company=${companyId} user=${pending.userId}`)
-        return refused(message)
-      }
-      const info = await google.userInfo(tokens.accessToken)
-      if (!info || !info.email) return refuseAndRevoke(PAGE.failed, 'no-userinfo')
-      if (!info.emailVerified) return refuseAndRevoke(PAGE.notVerified, 'email-not-verified')
-      if (!info.hd || info.hd.toLowerCase() !== client.domain || emailDomain(info.email) !== client.domain) return refuseAndRevoke(PAGE.domain(client.domain), 'other-domain')
-      const account = accounts.byIds([pending.userId]).get(pending.userId)
-      if (!account || !sameEmail(account.email, info.email)) return refuseAndRevoke(PAGE.email, 'other-account')
-
-      const scopes = normalizeGrantedScopes(tokens.scopes)
-      const now = clock.now()
-      const existing = connectors.grant('google', pending.userId)
-      if (!tokens.refreshToken) {
-        // Incremental consent may come without a new refresh token: the stored one now covers the merged scopes.
-        if (existing?.status === 'active' && connectors.refreshToken('google', pending.userId)) {
-          connectors.setGrantScopes('google', pending.userId, scopes, now, change('grant', pending.userId, pending.userId, { features: googleFeaturesOf(scopes), consent: 'added' }))
-          google.forget(companyId, pending.userId)
-          return { granted: true, message: PAGE.granted }
-        }
-        return refuseAndRevoke(PAGE.noRefresh, 'no-refresh-token')
-      }
-      // A new consent replaces the old token (deleted here, not revoked at Google: revoking any
-      // token of the app ends the person's whole consent, the new one included — google-connector.md).
-      const grantId = ids.newId()
-      const sealed = await brokerVault.sealConnector({ purpose: 'acb-google-grant', companyId, id: grantId }, tokens.refreshToken)
-      connectors.putGrant({
-        userId: pending.userId, provider: 'google', grantId, accountEmail: info.email.trim().toLowerCase(), scopes,
-        createdAt: now, updatedAt: now,
-      }, sealed, change('grant', pending.userId, pending.userId, { features: googleFeaturesOf(scopes), consent: existing ? 'replaced' : 'new' }))
-      google.forget(companyId, pending.userId)
-      return { granted: true, message: PAGE.granted }
+    /** DELETE …/me/google: 「許可をやめる」 — revoked at Google too (best effort), then nothing kept. */
+    async disconnect(member: Member): Promise<Outcome<MyGoogle>> {
+      await memberOAuth.disconnect('google', member)
+      return ok(await myView(member))
     },
   }
 }

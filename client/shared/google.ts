@@ -24,6 +24,8 @@ export const GOOGLE_OFFLINE_TEXT = 'サーバーに接続できませんでし�
 export const GOOGLE_FEATURE_LABEL: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
   mail: 'メールを送る',
+  drive: 'Drive で選んだものを読む・置く',
+  inbox: '受信を読む',
 }
 
 export const GOOGLE_UNAVAILABLE_TEXT: Record<GoogleUnavailableReason, string> = {
@@ -52,6 +54,7 @@ export function googleErrorText(status: number, body: unknown): string {
       ? GOOGLE_UNAVAILABLE_TEXT[b.reason as GoogleUnavailableReason]
       : 'いまは Google とつなげません。管理者に確かめてください。'
   }
+  if (b.code === 'GOOGLE_FEATURE_COMPANY_OFF') return 'この機能は会社で使っていません。管理者に確かめてください。'
   if (status === 401) return 'サインインし直してから、もう一度お試しください。'
   if (status === 404) return 'このサーバーは Google との連携にまだ対応していません。'
   return `うまくいきませんでした（サーバーの応答 ${status}）。`
@@ -81,19 +84,25 @@ export interface GoogleSectionView {
   connectFeatures: GoogleFeature[] | null
   /** 「メールを送る許可も足す」 when connected without mail. */
   canAddMail: boolean
+  /** 「受信を読む許可も足す」 when connected without 受信を読む (asked only when the member wants it). */
+  canAddInbox: boolean
   canDisconnect: boolean
   domainHint: string | null
 }
+
+/** The company offers the feature (an older server without the list: as before, offered). */
+const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.companyFeatures.includes(f)
 
 export function googleSectionView(my: MyGoogle): GoogleSectionView {
   const unavailable = my.available ? null : GOOGLE_UNAVAILABLE_TEXT[my.reason ?? 'not-configured']
   const ended = !my.connected && my.status ? GOOGLE_GRANT_STATUS_TEXT[my.status] ?? null : null
   return {
     account: my.connected ? my.googleEmail : null,
-    allowed: my.connected ? my.features.map(f => GOOGLE_FEATURE_LABEL[f]) : [],
+    allowed: my.connected ? my.features.map(f => `${GOOGLE_FEATURE_LABEL[f]}${(my.featuresOff ?? []).includes(f) ? '（オフにしています）' : ''}`) : [],
     notice: unavailable ?? ended,
     connectFeatures: my.available && !my.connected ? ['minutes'] : null,
-    canAddMail: my.available && my.connected && !my.features.includes('mail'),
+    canAddMail: my.available && my.connected && !my.features.includes('mail') && offered(my, 'mail'),
+    canAddInbox: my.available && my.connected && !my.features.includes('inbox') && offered(my, 'inbox'),
     canDisconnect: my.connected || my.status !== null,
     domainHint: my.domain ? `会社の Google アカウント（@${my.domain}）で許可してください。` : null,
   }

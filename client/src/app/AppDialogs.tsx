@@ -2,9 +2,11 @@ import type { Dispatch, SetStateAction } from 'react'
 import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
-import { FileSearchModal } from '../features/search/components/FileSearchModal'
+import { FindPalette } from '../features/search/components/FindPalette'
+import type { PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
 import { BackupHistorySlideOver } from '../features/sync/components/BackupHistorySlideOver'
 import { SettingsPanel } from '../features/settings/components/SettingsPanel'
+import { ConnectToolsScreen } from '../features/settings/components/ConnectToolsScreen'
 import { SyncPreviewDialog } from '../features/sync/components/SyncPreviewDialog'
 import { SyncNotification } from '../features/sync/components/SyncNotification'
 import type { useSkillsTab } from '../features/skills/hooks/useSkillsTab'
@@ -12,6 +14,8 @@ import type { useSync } from '../features/sync/hooks/useSync'
 import type { DepartmentConfig } from '../types'
 
 interface Props {
+  /** The open company: 「仕事の道具をつなぐ」 offers itself once per member and company. */
+  companyId: string | undefined
   rootPath: string
   departments: DepartmentConfig[]
   selectedDeptId: string
@@ -23,6 +27,14 @@ interface Props {
   showFileSearch: boolean
   onCloseFileSearch: () => void
   onFileSearchSelect: (filePath: string) => void
+  /** 探す ⌘K: the tabs open in the middle (newest first), and opening a record found. */
+  recentTabs: PaletteRecent[]
+  onOpenRecord: (recordId: string) => void
+  /** 探す ⌘K's skills (already loaded) and 「AIへの相談」 (read when it opens), each opened in its usual place. */
+  paletteSkills: PaletteSkill[]
+  onOpenSkill: (skillId: string) => void
+  loadConsultations?: () => Promise<PaletteConsultation[]>
+  onOpenConsultation: (sessionId: string) => void
   showSettings: boolean
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; at: number } | null
@@ -33,7 +45,7 @@ interface Props {
 
 /** What opens over the main screen: skill dialogs, Cmd+P, settings, backups, a skill's tool, the sync preview and notice. */
 export function AppDialogs(props: Props) {
-  const { rootPath, departments, selectedDeptId, selectedDept, departmentFolder, unsyncedFolders, skillsTab, sync } = props
+  const { companyId, rootPath, departments, selectedDeptId, selectedDept, departmentFolder, unsyncedFolders, skillsTab, sync } = props
   const { showFileSearch, onCloseFileSearch, onFileSearchSelect, showSettings, settingsFocus, onCloseSettings, showBackupHistory, setShowBackupHistory } = props
   return (
     <>
@@ -60,14 +72,25 @@ export function AppDialogs(props: Props) {
           />
         )}
 
-        {/* File Search Modal (Cmd+P) */}
-        <FileSearchModal
-          isOpen={showFileSearch}
-          onClose={onCloseFileSearch}
-          rootPath={rootPath}
-          departmentFolder={departmentFolder}
-          onSelectFile={onFileSearchSelect}
-        />
+        {/* 探す ⌘K / ⌘P: open anything by its name (mounted only while open, so it starts empty) */}
+        {showFileSearch && (
+          <FindPalette
+            onClose={onCloseFileSearch}
+            rootPath={rootPath}
+            companyId={companyId}
+            departmentFolder={departmentFolder}
+            recent={props.recentTabs}
+            onSelectFile={onFileSearchSelect}
+            onOpenRecord={props.onOpenRecord}
+            skills={props.paletteSkills}
+            onOpenSkill={props.onOpenSkill}
+            loadConsultations={props.loadConsultations}
+            onOpenConsultation={props.onOpenConsultation}
+          />
+        )}
+
+        {/* 「仕事の道具をつなぐ」: opens by itself only when something is new (settings has it too) */}
+        {companyId && <ConnectToolsScreen key={companyId} companyId={companyId} firstRun />}
 
         {/* Settings Panel Modal */}
         {showSettings && (

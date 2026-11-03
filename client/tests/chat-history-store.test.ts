@@ -147,7 +147,7 @@ test('reads come from memory: the file is parsed once, and again only after it c
   store.list(company); store.get(company, 'a'); store.summaries(company); store.list(company)
   assert.equal(reads.mock.callCount(), 1)
   // Another process (or an older app version) replaced the file: picked up at the next read.
-  fs.writeFileSync(file, JSON.stringify({ sessions: [session('a'), session('b', { updatedAt: '2021-01-01T00:00:00Z' })] }))
+  fs.writeFileSync(file, JSON.stringify({ sessions: [session('a'), session('b', { updatedAt: '2021-01-01T00:00:00Z', messages: [{ id: 'message-1', role: 'user', content: '相談内容', timestamp: '2021-01-01T00:00:00Z' }] })] }))
   assert.deepEqual(store.list(company).map(s => s.id), ['b', 'a'])
   assert.equal(reads.mock.callCount(), 2)
   // Our own writes do not invalidate the cache.
@@ -255,10 +255,16 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
     { id: 'q', role: 'user', content: 'ＡＰＩの接続', timestamp: '2020-01-01T00:00:00Z' },
     { id: 'r', role: 'assistant', content: long, timestamp: '2020-01-01T00:00:00Z' },
   ] }))
+  // The app's instruction to the AI (app-instruction.ts) is not the member's words: not searched.
+  store.save(company, session('c', { updatedAt: '2019-01-01T00:00:00Z', messages: [
+    { id: 'k', role: 'user', content: 'まず records_get で task-0000aa を読み', timestamp: '2019-01-01T00:00:00Z', appInstruction: { kind: 'task', recordId: 'task-0000aa', title: '見積' } },
+  ] }))
   store.save(company, session('b', { draftInput: '未送信の計画' }))
   store.patch(company, 'b', { pinned: true })
   const summaries = store.summaries(company)
-  assert.deepEqual(summaries.map(s => s.id), ['b', 'a'])
+  // The pinned one first; a and c were both saved just now (the store stamps a new save), so their order is the clock's.
+  assert.equal(summaries[0].id, 'b')
+  assert.deepEqual(summaries.map(s => s.id).sort(), ['a', 'b', 'c'])
   const a = summaries.find(s => s.id === 'a')!
   assert.equal('messages' in a, false)
   assert.equal(a.messageCount, 3)
@@ -269,6 +275,7 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
   assert.deepEqual(store.search(company, '未送信'), ['b'])
   assert.deepEqual(store.search(company, '月次'), ['a'])
   assert.deepEqual(store.search(company, '該当なし'), [])
+  assert.deepEqual(store.search(company, 'records_get'), [])
   assert.deepEqual(store.search(company, '  '), [])
 })
 
@@ -280,4 +287,36 @@ test('returned sessions are never edited in place by later changes', t => {
   assert.equal(held.title, '相談')
   assert.equal(first.title, '相談')
   assert.equal(store.get(company, 'chat')?.title, '新しい名前')
+})
+
+test('a save of the same words in another shape keeps the conversation time and the list order', t => {
+  const { store } = fixture(t)
+  store.save(company, session('old', { updatedAt: '2020-01-01T00:00:00Z' }))
+  store.save(company, session('new', { updatedAt: '2021-01-01T00:00:00Z', messages: [{ id: 'message-1', role: 'user', content: '新しい相談', timestamp: '2021-01-01T00:00:00Z' }] }))
+  const before = store.summaries(company).map(s => [s.id, s.updatedAt])
+  // A newer app restores and saves them again with fields the older one did not store.
+  for (const s of store.list(company)) {
+    store.save(company, { ...s, messages: s.messages.map(m => ({ ...m, appInstruction: undefined, choicePrompts: [] })) })
+  }
+  assert.deepEqual(store.summaries(company).map(s => [s.id, s.updatedAt]), before)
+  // A new message is a change: its time moves.
+  const old = store.get(company, 'old')!
+  store.save(company, { ...old, messages: [...old.messages, { id: 'message-2', role: 'assistant', content: '答え', timestamp: new Date().toISOString() }] })
+  assert.notEqual(store.get(company, 'old')!.updatedAt, '2020-01-01T00:00:00Z')
+})
+
+test('times an earlier version stamped by re-saving are put back to the last message, and stay put after a reopen', async t => {
+  const { file, store, dir } = fixture(t)
+  const stamped = '2026-11-02T07:53:00.000Z'
+  fs.writeFileSync(file, JSON.stringify({ sessions: [
+    session('a', { updatedAt: stamped, messages: [{ id: 'm', role: 'user', content: 'x', timestamp: '2026-10-30T01:00:00.000Z' }] }),
+    session('b', { updatedAt: stamped, messages: [{ id: 'm', role: 'user', content: 'y', timestamp: '2026-10-31T01:00:00.000Z' }] }),
+    session('drafting', { updatedAt: stamped, draftInput: '書きかけ', messages: [{ id: 'm', role: 'user', content: 'z', timestamp: '2026-10-29T01:00:00.000Z' }] }),
+  ] }))
+  assert.deepEqual(store.summaries(company).map(s => [s.id, s.updatedAt]), [
+    ['drafting', stamped], ['b', '2026-10-31T01:00:00.000Z'], ['a', '2026-10-30T01:00:00.000Z'],
+  ])
+  await store.flush()
+  const reopened = new ChatHistoryStore(dir)
+  assert.equal(reopened.get(company, 'b')?.updatedAt, '2026-10-31T01:00:00.000Z')
 })

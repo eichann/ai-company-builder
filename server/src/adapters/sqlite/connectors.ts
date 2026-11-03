@@ -1,5 +1,5 @@
 /**
- * SQLite storage of the Google connection (ports/connectors.ts), limited to
+ * SQLite storage of the connectors (ports/connectors.ts), limited to
  * one company: every statement binds `company_id = ?` with the handle's id.
  * Sealed secrets are stored as their JSON envelope only.
  */
@@ -8,11 +8,11 @@ import type { ConnectorChangeRow, ConnectorGrantRow, ConnectorProvider, Connecto
 import type { SealedSecret } from '../../ports/secret-cipher'
 
 type ClientRow = {
-  client_id: string; secret_last4: string; domain: string; enabled: number
+  client_id: string; secret_last4: string; domain: string; enabled: number; features_off: string; features_on: string
   created_at: string; created_by: string; updated_at: string; updated_by: string
 }
 type GrantRow = {
-  user_id: string; provider: string; grant_id: string; account_email: string; scopes: string; status: string
+  user_id: string; provider: string; grant_id: string; account_email: string; scopes: string; features_off: string; status: string
   status_reason: string | null; created_at: string; updated_at: string; last_used_at: string | null
 }
 type PendingRow = {
@@ -20,12 +20,13 @@ type PendingRow = {
 }
 type HistoryRow = { id: string; provider: string; action: string; user_id: string | null; at: string; by_user: string; change: string }
 
-const GRANT_COLUMNS = 'user_id, provider, grant_id, account_email, scopes, status, status_reason, created_at, updated_at, last_used_at'
+const GRANT_COLUMNS = 'user_id, provider, grant_id, account_email, scopes, features_off, status, status_reason, created_at, updated_at, last_used_at'
 
 const toClient = (r: ClientRow): OAuthClientRow => ({
-  clientId: r.client_id, secretLast4: r.secret_last4, domain: r.domain, enabled: r.enabled === 1,
+  clientId: r.client_id, secretLast4: r.secret_last4, domain: r.domain, enabled: r.enabled === 1, featuresOff: scopesOf(r.features_off), featuresOn: scopesOf(r.features_on),
   createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by,
 })
+/** A stored JSON list of strings (scopes, features); anything unreadable is empty. */
 const scopesOf = (text: string): string[] => {
   try {
     const v = JSON.parse(text) as unknown
@@ -36,7 +37,7 @@ const scopesOf = (text: string): string[] => {
 }
 const toGrant = (r: GrantRow): ConnectorGrantRow => ({
   userId: r.user_id, provider: r.provider as ConnectorProvider, grantId: r.grant_id, accountEmail: r.account_email,
-  scopes: scopesOf(r.scopes), status: r.status as ConnectorGrantRow['status'], statusReason: r.status_reason,
+  scopes: scopesOf(r.scopes), featuresOff: scopesOf(r.features_off), status: r.status as ConnectorGrantRow['status'], statusReason: r.status_reason,
   createdAt: r.created_at, updatedAt: r.updated_at, lastUsedAt: r.last_used_at,
 })
 const sealedOf = (text: string): SealedSecret => JSON.parse(text) as SealedSecret
@@ -54,7 +55,7 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
 
   return {
     client() {
-      const r = conn.prepare(`SELECT client_id, secret_last4, domain, enabled, created_at, created_by, updated_at, updated_by
+      const r = conn.prepare(`SELECT client_id, secret_last4, domain, enabled, features_off, features_on, created_at, created_by, updated_at, updated_by
         FROM google_oauth_clients WHERE company_id = ?`).get(companyId) as ClientRow | undefined
       return r ? toClient(r) : null
     },
@@ -84,6 +85,25 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
     setClientEnabled(enabled, at, by, change) {
       conn.transaction(() => {
         conn.prepare('UPDATE google_oauth_clients SET enabled = ?, updated_at = ?, updated_by = ? WHERE company_id = ?').run(enabled ? 1 : 0, at, by, companyId)
+        addHistory(change)
+      })()
+    },
+    setClientFeatures(switches, at, by, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE google_oauth_clients SET features_off = ?, features_on = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
+          .run(JSON.stringify(switches.featuresOff), JSON.stringify(switches.featuresOn), at, by, companyId)
+        addHistory(change)
+      })()
+    },
+    picker() {
+      const r = conn.prepare('SELECT picker_api_key, picker_app_id FROM google_oauth_clients WHERE company_id = ?').get(companyId) as
+        { picker_api_key: string | null; picker_app_id: string | null } | undefined
+      return r?.picker_api_key && r.picker_app_id ? { apiKey: r.picker_api_key, appId: r.picker_app_id } : null
+    },
+    savePicker(value, at, by, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE google_oauth_clients SET picker_api_key = ?, picker_app_id = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
+          .run(value?.apiKey ?? null, value?.appId ?? null, at, by, companyId)
         addHistory(change)
       })()
     },
@@ -142,6 +162,14 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       conn.prepare('UPDATE connector_grants SET last_used_at = ? WHERE company_id = ? AND provider = ? AND user_id = ?').run(at, companyId, provider, userId)
     },
 
+    setFeaturesOff(provider, userId, featuresOff, at, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE connector_grants SET features_off = ?, updated_at = ? WHERE company_id = ? AND provider = ? AND user_id = ?')
+          .run(JSON.stringify(featuresOff), at, companyId, provider, userId)
+        addHistory(change)
+      })()
+    },
+
     putPending(row) {
       conn.prepare(`INSERT INTO oauth_pending (company_id, state_hash, provider, user_id, scopes, verifier_sealed, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -158,10 +186,44 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       if (userId !== undefined) conn.prepare('DELETE FROM oauth_pending WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
 
+    addHistory(change) {
+      addHistory(change)
+    },
     history(provider, limit) {
       return (conn.prepare('SELECT id, provider, action, user_id, at, by_user, change FROM connector_history WHERE company_id = ? AND provider = ? ORDER BY at DESC, rowid DESC LIMIT ?')
         .all(companyId, provider, limit) as HistoryRow[])
         .map(r => ({ id: r.id, provider: r.provider as ConnectorProvider, action: r.action, userId: r.user_id, at: r.at, by: r.by_user, change: r.change }))
+    },
+
+    setupSeen(provider, userId) {
+      const r = conn.prepare('SELECT seen FROM connector_setup_seen WHERE company_id = ? AND user_id = ? AND provider = ?').get(companyId, userId, provider) as { seen: string } | undefined
+      return r ? scopesOf(r.seen) : []
+    },
+    addSetupSeen(provider, userId, features, at) {
+      conn.transaction(() => {
+        const r = conn.prepare('SELECT seen FROM connector_setup_seen WHERE company_id = ? AND user_id = ? AND provider = ?').get(companyId, userId, provider) as { seen: string } | undefined
+        const seen = [...new Set([...(r ? scopesOf(r.seen) : []), ...features])].sort()
+        conn.prepare(`INSERT INTO connector_setup_seen (company_id, user_id, provider, seen, updated_at) VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT (company_id, user_id, provider) DO UPDATE SET seen = excluded.seen, updated_at = excluded.updated_at`)
+          .run(companyId, userId, provider, JSON.stringify(seen), at)
+      })()
+    },
+
+    roleChoice(role) {
+      const r = conn.prepare('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?').get(companyId, role) as { connector_id: string } | undefined
+      return r?.connector_id ?? null
+    },
+    setRoleChoice(role, connectorId, at, by, historyId) {
+      conn.transaction(() => {
+        if (connectorId === null) conn.prepare('DELETE FROM connector_role_choices WHERE company_id = ? AND role = ?').run(companyId, role)
+        else {
+          conn.prepare(`INSERT INTO connector_role_choices (company_id, role, connector_id, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (company_id, role) DO UPDATE SET connector_id = excluded.connector_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+            .run(companyId, role, connectorId, at, by)
+        }
+        conn.prepare('INSERT INTO connector_history (id, company_id, provider, action, user_id, at, by_user, change) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)')
+          .run(historyId, companyId, 'roles', 'role-choice', at, by, JSON.stringify({ role, connectorId }))
+      })()
     },
   }
 }

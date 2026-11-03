@@ -2,9 +2,11 @@ import { z } from 'zod'
 import type { AskUser } from './connection'
 import type { LoopbackTool } from './loopback-mcp'
 import {
-  CODEX_CHOICE_TOOL, MAX_CHOICE_OPTIONS, MAX_CHOICE_QUESTIONS,
+  CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, MAX_CHOICE_OPTIONS, MAX_CHOICE_QUESTIONS,
   choiceCancelMessage, claudeAnswers, codexAnswerText, parseChoiceQuestions,
 } from '../../shared/choice-prompt'
+import type { ToolDisplay } from '../../shared/tool-display'
+import { fixedToolDisplay } from '../../shared/acb-tool-displays'
 
 type ClaudePermission =
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
@@ -29,6 +31,9 @@ export async function answerAskUserQuestion(askUser: AskUser | undefined, input:
   if ('answers' in result) return { behavior: 'allow', updatedInput: { ...input, answers: claudeAnswers(questions, result.answers) } }
   return { behavior: 'deny', message: choiceCancelMessage(result.cancelled) }
 }
+
+/** How Codex's ask_user reads in the chat (`client/shared/acb-tool-displays.ts`). */
+export const askUserDisplay: ToolDisplay = fixedToolDisplay(`mcp__${CODEX_CHOICE_SERVER}__${CODEX_CHOICE_TOOL}`)
 
 /** The same input shape as AskUserQuestion, so both agents ask alike. */
 export const askUserSchema = {

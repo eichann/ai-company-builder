@@ -26,6 +26,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -562,13 +563,14 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
   })
 
   it('similar deals: only records already imported that the member may read', async () => {
-    const r = await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-sales', 'リーダー研修（例示製作所）')
+    const r = await services.pluginOperations.similarRecords({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-sales', 'create_deal', { title: 'リーダー研修（例示製作所）', meetingId: null })
     expect(r.ok).toBe(true)
-    expect(r.value.similar.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
-    expect(r.value.similar.every((s: Json) => typeof s.title === 'string')).toBe(true)
+    expect(r.value.items.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
+    expect(r.value.items.every((s: Json) => typeof s.title === 'string')).toBe(true)
+    expect(r.value.outside).toBe('checked')
     // Cannot read where deals are: nothing is asked outside.
     const asked = fake.requests.length
-    expect(await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-sales', 'リーダー研修')).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(await services.pluginOperations.similarRecords({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-sales', 'create_deal', { title: 'リーダー研修', meetingId: null })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
     expect(fake.requests.length).toBe(asked)
   })
 
@@ -593,7 +595,7 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
     // A record of the company map: server only (no file), linked like an import; its entry is the requester's, a decision with the approver's reason.
     const recordId = done.value.recordId
     expect(recordId).toBe(recordOf(made[0].id))
-    expect(db.prepare('SELECT path, folder, title FROM records WHERE company_id = ? AND id = ?').get(CO, recordId)).toEqual({ path: null, folder: '営業部', title: NEW_DEAL.title })
+    expect(withRecordText(db, CO, [db.prepare('SELECT id, path, folder, title FROM records WHERE company_id = ? AND id = ?').get(CO, recordId) as Json])[0]).toEqual({ id: recordId, path: null, folder: '営業部', title: NEW_DEAL.title })
     const entry = services.recordEngine.history(member, recordId).value.entries[0]
     expect(entry).toMatchObject({ actorId: 'op-member', actorKind: 'ai', isDecision: true, decision: { reason: '金額と時期を確認した' }, receipt: { kind: 'written', approvedBy: 'op-owner', operationId: done.value.id } })
     // 「作ったものを取り消す」: archived in HubSpot, only that deal.

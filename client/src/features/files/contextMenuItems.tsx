@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next'
-import { Copy, CloudArrowDown, FilePlus, FolderPlus, PencilSimple, Trash } from '@phosphor-icons/react'
+import { Copy, CloudArrowDown, FilePlus, FolderPlus, Link, PencilSimple, PuzzlePiece, Trash } from '@phosphor-icons/react'
 import type { ContextMenuItem } from '../../shared/ui/ContextMenu'
 import type { FileEntry } from './fileTreeModel'
 
@@ -11,7 +11,17 @@ export interface TreeMenuActions {
   askDeleteMany: (paths: string[]) => void
   copyPath: (entry: FileEntry) => void
   download: (entry: FileEntry) => void
+  /** 「やることにつなぐ…」; absent where the company shows no task list (the item is not shown). */
+  linkToTask?: (entry: FileEntry) => void
+  /** Items business plugins declare for this entry (plugin-frame.md "The four slots"); the menu is drawn here. */
+  extraItems?: (entry: FileEntry) => FileMenuExtraItem[]
   closeContextMenu: () => void
+}
+
+/** A menu item another part of the app adds (a plugin's file action): its label and what choosing it does. */
+export interface FileMenuExtraItem {
+  label: string
+  run: () => void
 }
 
 /**
@@ -69,5 +79,14 @@ export function treeMenuItems(
     { label: '', divider: true, onClick: () => {} },
     { label: t('fileTree.copyPath'), icon: <Copy size={16} />, onClick: () => actions.copyPath(entry) },
   )
+  const linkToTask = actions.linkToTask
+  if (linkToTask) {
+    items.push({ label: 'やることにつなぐ…', icon: <Link size={16} />, onClick: () => { actions.closeContextMenu(); linkToTask(entry) } })
+  }
+  const extra = actions.extraItems?.(entry) ?? []
+  if (extra.length > 0) {
+    items.push({ label: '', divider: true, onClick: () => {} })
+    for (const x of extra) items.push({ label: x.label, icon: <PuzzlePiece size={16} />, onClick: () => { actions.closeContextMenu(); x.run() } })
+  }
   return items
 }

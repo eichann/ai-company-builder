@@ -11,6 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { companiesApi } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
+import { NOT_A_MEMBER_YET, offersCompanyCreation } from '@/lib/company-creation'
 import { describeError } from '@/lib/errors'
 
 export default function NewCompanyPage() {
@@ -23,6 +25,7 @@ export default function NewCompanyPage() {
 
 function NewCompanyForm() {
   const router = useRouter()
+  const { user, refresh } = useAuth()
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,11 +37,35 @@ function NewCompanyForm() {
     try {
       // The server derives a unique URL slug from the name.
       const company = await companiesApi.create(name.trim())
+      // The first company of a fresh server: its creator may not make another.
+      await refresh()
       router.push(`/companies/${company.id}`)
     } catch (err) {
       setError(describeError(err))
       setBusy(false)
     }
+  }
+
+  // Reached by URL by someone the server does not let create a company.
+  if (!offersCompanyCreation(user)) {
+    return (
+      <AuthLayout>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">会社の作成はできません</CardTitle>
+            <CardDescription>
+              会社の作成はサービスの運用担当者が行います。{NOT_A_MEMBER_YET}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button type="button" variant="ghost" onClick={() => router.back()}>
+              <ArrowLeft />
+              戻る
+            </Button>
+          </CardContent>
+        </Card>
+      </AuthLayout>
+    )
   }
 
   return (

@@ -24,7 +24,7 @@ void i18n.changeLanguage('ja')
 
 const parts: UIMessage['parts'] = [
   { type: 'text', text: '営業部/提案書/ の資料を確認して、A社向けの提案書の骨子を作ります。' },
-  { type: 'dynamic-tool', toolName: 'Read', toolCallId: 'read-1', state: 'output-available', input: { file_path: '営業部/提案書/2025_実績.md' }, output: '…' } as UIMessage['parts'][number],
+  { type: 'dynamic-tool', toolName: 'Read', toolCallId: 'read-1', state: 'output-available', input: { file_path: '営業部/実績/2025_実績.md' }, output: '…' } as UIMessage['parts'][number],
   { type: STEER_PART_TYPE, id: 'steer-preview', data: { id: 'preview', text: '価格表は10月改定版を使ってください' } } as UIMessage['parts'][number],
   { type: 'dynamic-tool', toolName: 'Read', toolCallId: 'read-2', state: 'output-available', input: { file_path: '営業部/価格表/2026-10.xlsx' }, output: '…' } as UIMessage['parts'][number],
   { type: 'text', text: '承知しました。価格は10月改定版の価格表に合わせました。骨子は次のとおりです。\n\n1. 課題の整理\n2. 導入効果（昨年度実績から）\n3. 価格とスケジュール\n\nこのまま本文まで書き進めますか？' },

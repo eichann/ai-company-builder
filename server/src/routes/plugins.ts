@@ -16,6 +16,14 @@
  *   POST /plugins/:pluginId/import             bring the outside objects into the company map (one run per company)
  *   POST /plugins/:pluginId/connection/renew   the outside account changed on purpose: a new connection
  *
+ * Handing packages to the app (plan C2; any member, services/plugin-distribution.ts):
+ *   GET  /plugins/:pluginId/package/:version   a version the member's agent policy lists now: its files (base64)
+ *
+ * Business roles (plan C3, services/plugin-roles.ts, plugin-roles.md):
+ *   GET  /plugins/:pluginId/roles                              owner/admin: declared roles, the company's assignment, overrides, history
+ *   PUT  /plugins/:pluginId/roles/:role                        owner/admin: { userIds } the company's holders
+ *   PUT  /plugins/:pluginId/roles/:role/bundles/:recordId      owner/admin or the まとまり's department manager: { userIds | null }
+ *
  * Typed operations (P6; any member — the record, the operation's `who` and the
  * field policies decide; the member's AI uses routes/records-ai.ts):
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, basis?, conversationId?, proposedBy? } / {}
@@ -30,31 +38,16 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const pluginsRoute = new Hono()
-const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals } = services
+const { plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution, pluginRoles } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
-
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
 
 function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
@@ -70,102 +63,112 @@ function accepted(c: Context, result: Outcome<unknown>) {
   return c.json({ success: true, data: result.value }, requested ? 202 : 200)
 }
 
-pluginsRoute.get('/plugins', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.get('/plugins', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await plugins.list(member))
 })
 
-pluginsRoute.get('/plugins/:pluginId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.get('/plugins/:pluginId', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await plugins.get(member, c.req.param('pluginId')))
 })
 
-pluginsRoute.put('/plugins/:pluginId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await plugins.install(member, c.req.param('pluginId'), await jsonBody(c)))
+pluginsRoute.put('/plugins/:pluginId', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const result = await plugins.install(member, c.req.param('pluginId'), c.var.body)
+  // Another version changes what the members' apps keep (their agent policy, plan C2).
+  if (result.ok) agentPolicy.announce(member.companyId)
+  return answer(c, result)
 })
 
-pluginsRoute.put('/plugins/:pluginId/enabled', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await plugins.setEnabled(member, c.req.param('pluginId'), await jsonBody(c)))
+pluginsRoute.put('/plugins/:pluginId/enabled', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const result = await plugins.setEnabled(member, c.req.param('pluginId'), c.var.body)
+  if (result.ok) agentPolicy.announce(member.companyId)
+  return answer(c, result)
 })
 
-pluginsRoute.put('/plugins/:pluginId/read-scope', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await plugins.setReadScope(member, c.req.param('pluginId'), await jsonBody(c)))
+pluginsRoute.get('/plugins/:pluginId/roles', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, pluginRoles.roles(member, c.req.param('pluginId')))
 })
 
-pluginsRoute.put('/plugins/:pluginId/mapping', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await plugins.saveMapping(member, c.req.param('pluginId'), await jsonBody(c)))
+pluginsRoute.put('/plugins/:pluginId/roles/:role', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, pluginRoles.assign(member, c.req.param('pluginId'), c.req.param('role'), c.var.body))
 })
 
-pluginsRoute.post('/plugins/:pluginId/mapping/restore', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await plugins.restoreMapping(member, c.req.param('pluginId'), await jsonBody(c)))
+pluginsRoute.put('/plugins/:pluginId/roles/:role/bundles/:recordId', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, pluginRoles.setBundleOverride(member, c.req.param('pluginId'), c.req.param('role'), c.req.param('recordId'), c.var.body))
 })
 
-pluginsRoute.post('/plugins/:pluginId/mapping/check', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await pluginMappingCheck.check(member, c.req.param('pluginId'), await jsonBody(c)))
+// Any member: a package their app keeps (plan C2; only a version their agent policy lists now).
+pluginsRoute.get('/plugins/:pluginId/package/:version', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, await pluginDistribution.packageFor(member, c.req.param('pluginId'), c.req.param('version')))
 })
 
-pluginsRoute.post('/plugins/:pluginId/import', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.put('/plugins/:pluginId/read-scope', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await plugins.setReadScope(member, c.req.param('pluginId'), c.var.body))
+})
+
+pluginsRoute.put('/plugins/:pluginId/mapping', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await plugins.saveMapping(member, c.req.param('pluginId'), c.var.body))
+})
+
+pluginsRoute.post('/plugins/:pluginId/mapping/restore', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await plugins.restoreMapping(member, c.req.param('pluginId'), c.var.body))
+})
+
+pluginsRoute.post('/plugins/:pluginId/mapping/check', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await pluginMappingCheck.check(member, c.req.param('pluginId'), c.var.body))
+})
+
+pluginsRoute.post('/plugins/:pluginId/import', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await pluginImport.run(member, c.req.param('pluginId')))
 })
 
-pluginsRoute.post('/plugins/:pluginId/connection/renew', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.post('/plugins/:pluginId/connection/renew', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, pluginImport.renewConnection(member, c.req.param('pluginId')))
 })
 
-pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  const body = await jsonBody(c)
+pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
   // A field or create that needs approval makes an approval request instead (202; approvals.md).
   return accepted(c, await approvals.runOrRequest(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
 })
 
-pluginsRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  const body = await jsonBody(c)
+pluginsRoute.post('/plugins/:pluginId/create/:operation', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const body = c.var.body
   // Never auto: it becomes an approval request (202; approvals.md).
   return accepted(c, await approvals.createOrRequest(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('operation'), body))
 })
 
-pluginsRoute.post('/plugins/:pluginId/operations/:operationId/recreate', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await pluginOperations.recreate(member, c.req.param('pluginId'), c.req.param('operationId'), await jsonBody(c)))
+pluginsRoute.post('/plugins/:pluginId/operations/:operationId/recreate', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await pluginOperations.recreate(member, c.req.param('pluginId'), c.req.param('operationId'), c.var.body))
 })
 
-pluginsRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.get('/plugins/:pluginId/operations/:operationId', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await pluginOperations.get(member, c.req.param('pluginId'), c.req.param('operationId')))
 })
 
-pluginsRoute.post('/plugins/:pluginId/operations/:operationId/undo', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await pluginOperations.undo(member, c.req.param('pluginId'), c.req.param('operationId'), selfReportedProvenance(await jsonBody(c))))
+pluginsRoute.post('/plugins/:pluginId/operations/:operationId/undo', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await pluginOperations.undo(member, c.req.param('pluginId'), c.req.param('operationId'), selfReportedProvenance(c.var.body)))
 })
 
-pluginsRoute.post('/plugins/:pluginId/operations/:operationId/reconcile', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+pluginsRoute.post('/plugins/:pluginId/operations/:operationId/reconcile', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await pluginOperations.reconcile(member, c.req.param('pluginId'), c.req.param('operationId')))
 })

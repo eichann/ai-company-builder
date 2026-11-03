@@ -31,7 +31,7 @@ member) asked, and the core runs it. Approving is a person's act through their s
 - Table `fixed_payloads` (company handle `fixedPayloads`, `ports/fixed-payloads.ts`,
   `HANDLE_TABLES`): `(company_id, owner_kind 'approval' | 'outbound_message', owner_id, version,
   canonical, hash, created_at, body_deleted_at)`, one row per version. **Never rewritten**
-  (trigger `fixed_payloads_immutable`, `db/index.ts` `migrateFixedPayloads`): no UPDATE of owner,
+  (trigger `fixed_payloads_immutable`, `db/schema/fixed-payloads.ts` `migrateFixedPayloads`): no UPDATE of owner,
   version, hash or time; the text may only be cleared once, together with `body_deleted_at`
   (retention, design §9 q9).
 - One hashing helper: `server/src/lib/content-hash.ts` `hashCanonical(text) → 'sha256:<hex>'`
@@ -53,10 +53,13 @@ member) asked, and the core runs it. Approving is a person's act through their s
 - `prepareApproval` (plugins.md "The approval seam") runs every check and reads HubSpot's raw
   values now; the payload's canonical text is stored as version 1 and the `approval` record created
   by the service writer in **one transaction** (core types ensured first). Fields: requested_by =
-  the member, assignee = next_actor = the approver, `approver_rule`, `operation`
+  the member, assignee = next_actor = the approver, `approver_rule` (+ `approver_role` for a
+  business role, approval version 5: `plugin-roles.md`), `operation`
   (`<plugin>.<operation>`), `payload_hash`, `payload_version`, `reason` = the AI's (or person's)
-  note as the proposed reason; links `about` = the record, `minutes` = the basis (must be a minutes
-  record the requester may read, else 400 `BAD_LINK`); folder = the record's. The ledger actor is
+  note as the proposed reason; links `bundle` = the record **when its type implements `bundle`**
+  (a 案件, a 企画; the core never names a business type — the record itself is always in the fixed
+  payload, `payload.record`), `meeting` = the basis (`basis.meetingId`: must be a meeting record the
+  requester may read, else 400 `BAD_LINK`); folder = the record's. The ledger actor is
   the person or the AI (the credential decides). Title: what changes (「金額の変更」), never a name.
 - **The approver is resolved by the server**: `self` → the requester; `dept_manager` → the
   managers of the department holding the folder, the first by id who can read it (any of them may
@@ -83,13 +86,15 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
   `option_labels`, numbers with their % change), the basis (minutes quote; the minutes' title only
   when the viewer may read it), **precedents**, **materials**, the proposed reason, approver and
   rule, `hash` + `version`, `viewerMayApprove`, `viewerIsRequester`, the outcome (who, when, the
-  note, the operation id). A create of a record also shows `similar` (`similarDeals`, readable
-  records only; design §6-3).
+  note, the operation id). A create of a record, while pending, also shows `similar`
+  (`similarRecords`, plugins.md "Similar records": up to 5 readable records — title, status, assignee,
+  last update, why — the type's label and whether the outside system was asked).
 - **Precedents** (design N8, §3-8): earlier approved / sent-back requests of the same company and
   operation sharing a field, whose folder is in the same department; each must be readable by the
-  viewer, and so must its `about` record — **the count too** (an unreadable one is neither shown
+  viewer, and so must the record it was about (its fixed payload's `record`, whatever its type) —
+  **the count too** (an unreadable one is neither shown
   nor counted). Newest 5: date, before → after, outcome, reason, and the record's value now.
-- **Materials**: the record at the version the request was made on, the minutes — re-checked for
+- **Materials**: the record at the version the request was made on, the meeting (kind `meeting`) — re-checked for
   the viewer every time; an unreadable one is left out (as if it did not exist). Files at a commit
   are not attached yet.
 - No list screen (milestone 5): the chat's 「承認待ちを見せて」 uses the AI tools below.
@@ -100,14 +105,29 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
 POST /api/companies/:id/approvals/:approvalId/approve     { hash, reason }
 POST /api/companies/:id/approvals/:approvalId/send-back   { reason }
 POST /api/companies/:id/approvals/:approvalId/withdraw
+POST /api/companies/:id/approvals/:approvalId/same-as     { recordId, linkMeeting? }
 ```
 
 - **No other credential reaches them**: no record-token route (the AI lists and reads only), no
   admin-API or rule route. Tests: `approvals.test.ts` (an AI token on both route sets), the
   permission matrix rows.
+- **「これと同じ…です（作らない）」** (`same-as`, owner decision 2026-11-02, plugins.md "Similar
+  records"): only a create of a record (else 400 `NOT_A_CREATE`); readable (else 404) → the
+  requester (pending or sent back) or whoever qualifies to approve (pending; else 403
+  `NOT_APPROVER`) → still open (409 `NOT_PENDING`) → `recordId` a live record of the create's type
+  the person may read (else 400 `BAD_LINK`, also for one that does not exist). The request becomes
+  `withdrawn` (action `same_as_existing`, note `SAME_AS_NOTE` — never the record's name), the record
+  kept as its `bundle` link when it is a まとまり; nothing is sent. `linkMeeting: true` also makes the
+  request's meeting belong to it through `minutes.linkBundle` (the meeting's assignee or an admin;
+  answer `meeting: linked | not-linked | not-asked`). Serialised with approving like the others.
+  The card (`ApprovalCard.tsx`) shows 「これと同じ<型の名前>です（作らない）」 on each similar record
+  and 「別の<型の名前>として作る」; the approve button stays disabled until one is chosen.
 - Approve, in order: readable (else 404) → **qualifies** (`mayApprove` with requester / manager of
-  the department holding the request's folder / owner-admin, from the server's data; 403
-  `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
+  the department holding the request's folder / owner-admin, from the server's data — or, as the
+  delegate of an absent member they cover today (`actsFor`, `records.md` "Absence and the
+  delegate"), that member's request (`self`), department (`dept_manager`), a role they hold
+  (`role`, plan C3) or a request asked of them, never their admin role; a `role` request is met by
+  its holders and owners / admins only, not by a department manager as such; 403 `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
   → the hash is the newest version's (409 `CONTENT_CHANGED` 「内容が変わりました。もう一度確かめて
   ください」) → `executeApproved` (plugins.md). **Used once**: approve / send back / withdraw of one
   request are serialised in this server and every state change is a compare-and-set
@@ -115,7 +135,8 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
 - Outcome of `executeApproved`:
   - applied → `approved` (`result_operation_id`, the approver's reason as the decision reason,
     the requester told) and a **「決めたこと」** through the decisions service: important, decided
-    by the approver, links `approval` + `deal`, the department of the request's folder, title
+    by the approver, links `approval` + `bundle` (the record, when it is a まとまり) + `meeting`
+    (when the request had one), the department of the request's folder, title
     「<what changed>を承認」, why = the approver's reason, key `<approval id>:decision`. When the
     decisions service refuses (the place), the approval stands and only the refusal's code is
     logged.
@@ -127,6 +148,9 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   - anything else (the plugin stopped or off, the requester no longer a member or allowed, the AI
     stopped for an AI's request) → the refusal as is; the request **stays pending** and can be
     approved after a resume.
+- A delegate's approve / send back is written with `onBehalfOf` = the absentee (ledger and the
+  view's `outcome.onBehalfOf`; the card: 「Aさん（代わりに承認・本来は Bさん）」). The delegate
+  reads with their own permissions: a request in a folder they cannot read is the same 404.
 - Send back: the approver, a reason required → `sent_back`, `next_actor` = the requester (their
   「あなたの番」; `sent_back` is not final in the type's version 2). Withdraw: the requester only,
   while pending or sent back → `withdrawn`.
@@ -144,7 +168,7 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   (a create), 「AI のまとめ（参考）」, the reason box prefilled with the draft (editable), 「承認」 /
   「差し戻す」 for a viewer who may approve — 「承認」 sends **the hash of the content shown**
   (`approvals:approve`) with 「中身が変わっていないことを確かめて承認します」 — 「取り下げる」 for the
-  requester; state lines 「承認待ち：<name>さんにお願いしました」 / 「承認されました。HubSpot の金額も …
+  requester; state lines 「<name>さんの承認待ち」 (an approval never says 確かめる, owner 2026-11-02) / 「承認されました。HubSpot の金額も …
   になりました」 / 「差し戻されました：理由」 / 「HubSpot 側で変わっています。…」. No jargon (プラグイン /
   型 / オントロジー / ハッシュ).
 - IPC (`client/electron/features/approvals/ipc.ts`, session only): `approvals:get`,
@@ -153,7 +177,7 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   exists): `approvals_list { scope?, state? }` and `approvals_show { id }` (puts the card in the
   reply). An operation tool whose answer is `approval-requested` puts the card in the reply
   instead of an operation card, and tells the AI nothing was written and it cannot approve
-  (`approvalSummaryForAi`). The update and create tools take an optional `basis { minutesId?,
+  (`approvalSummaryForAi`). The update and create tools take an optional `basis { meetingId?,
   quote? }`.
 
 ## Not yet
@@ -168,7 +192,8 @@ version; a create is never re-sent anyway); retention of approval texts (G8 deci
 mutation-checked: no AI route and a token is no session, wrong / old hash, no reason, HubSpot
 changed → stale, not the requester / not another department's manager, used once → one PATCH,
 readers, precedents readable incl. counts (record and request separately), dedupe, AI stop,
-retention clears only the text, CROSS), `server/tests/integration/plugin-operations.test.ts`
+retention clears only the text, CROSS, an absent approver's delegate only during the absence and
+only what they read, recorded 代わりに), `server/tests/integration/plugin-operations.test.ts`
 (prior → 202), permission matrix rows + `CROSS`, `company-scoped-sql.test.ts`,
 `client/tests/approval-tools.test.ts`, `client/tests/ui/approval-card.spec.ts` (the shown hash
 is sent; no approve button for a non-approver).

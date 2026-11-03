@@ -39,3 +39,15 @@ export async function checkRememberedCompany(
     return 'keep'
   }
 }
+
+/** localStorage key prefix of the company remembered per member (App.tsx writes it). */
+export const LAST_COMPANY_KEY_PREFIX = 'lastCompany:'
+
+/** Whether a company is remembered for this member on this computer (unreadable storage → no). */
+export function hasRememberedCompany(userId: string): boolean {
+  try {
+    return !!localStorage.getItem(`${LAST_COMPANY_KEY_PREFIX}${userId}`)
+  } catch {
+    return false
+  }
+}

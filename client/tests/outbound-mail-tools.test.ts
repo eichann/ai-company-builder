@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { createOutboundMailApi } from '../electron/features/outbound-mail/ipc'
-import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../shared/outbound-mail'
+import { MAIL_DRAFT_PART_TYPE, readMailDraft, readMailDraftCard, type MailDraftCard } from '../shared/outbound-mail'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import type { OutboundMailView } from '../../shared/types/outbound-mail'
 import type { TypeDefinition } from '../../shared/core/record-types'
@@ -32,7 +32,7 @@ const draft = (over: Partial<OutboundMailView> = {}): OutboundMailView => ({
   to: [{ ref: REF, email: 'suzuki@a-corp.example', name: '鈴木 一郎', source: 'calendar', firstTime: true }],
   cc: [{ ref: `r${'2'.repeat(24)}`, email: 'tanaka@div.example', name: '田中', source: 'member', firstTime: false }],
   subject: '本日はありがとうございました', body: '本文 https://example.com', bodyDeleted: false, linkCount: 1,
-  minutesId: 'minutes-0123456789abcdef', dealId: null, sentAt: null, providerMessageId: null, lastChangedBy: 'ai', updatedAt: 't',
+  meetingId: 'meeting-0123456789abcdef', bundleId: null, sentAt: null, providerMessageId: null, lastChangedBy: 'ai', updatedAt: 't',
   ...over,
 })
 
@@ -46,6 +46,8 @@ function fakeServer(scope: 'read' | 'act') {
     if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope, expiresAt: 'x' })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [{ definition: { name: 'outbound_message', storage: 'server', actions: {}, fields: {} } as unknown as TypeDefinition }] })
     if (url.endsWith('/api/records-ai/plugins')) return json(200, { plugins: [] })
+    // The same mail of the same meeting made before (minutes.md "Outputs made once"): the server answers that one.
+    if (url.endsWith('/api/records-ai/outbound') && String(init.body).includes('"subject":"again"')) return json(200, { draft: draft(), reused: true })
     if (url.endsWith('/api/records-ai/outbound')) return json(201, { draft: draft() })
     if (url.endsWith(`/api/records-ai/outbound/${draft().id}`) && (init.method ?? 'GET') === 'GET') return json(200, { draft: draft({ state: 'sent', version: 3 }) })
     return json(200, { ok: true })
@@ -72,13 +74,13 @@ test('the AI drafts and looks up recipients; no tool sends; Codex only looks up'
 
 test('a draft carries refs only (an address is refused), goes with the record token, and becomes the card', async () => {
   const { tools, cards, seen } = await turn('act')
-  const withAddress = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: [REF], to: ['evil@attacker.example'], subject: 's', body: 'b' }))
+  const withAddress = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], to: ['evil@attacker.example'], subject: 's', body: 'b' }))
   assert.equal(withAddress.error, '入力が正しくありません。')
-  const rawRef = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: ['evil@attacker.example'], subject: 's', body: 'b' }))
+  const rawRef = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: ['evil@attacker.example'], subject: 's', body: 'b' }))
   assert.equal(rawRef.error, '入力が正しくありません。')
   assert.equal(seen.filter(s => s.url.endsWith('/outbound')).length, 0)
 
-  const told = JSON.parse(await tools.execute('mail_draft_create', { minutesId: 'minutes-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
+  const told = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
   const call = seen.find(s => s.url.endsWith('/api/records-ai/outbound'))!
   assert.equal(call.headers.Authorization, `Bearer ${TOKEN}`)
   assert.equal(call.headers.Cookie, undefined)
@@ -92,6 +94,15 @@ test('a draft carries refs only (an address is refused), goes with the record to
   assert.equal(stored.mailDrafts?.length, 1)
   const back = sessionMessageToUIMessage(stored).parts.find(p => p.type === MAIL_DRAFT_PART_TYPE) as { data: unknown }
   assert.deepEqual(readMailDraftCard(back.data), cards[0])
+})
+
+test('a mail the meeting already has is reused, and the AI is told not to make it again', async () => {
+  const { tools } = await turn('act')
+  const told = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 'again', body: 'b' }))
+  assert.equal(told.reused, true)
+  assert.match(told.note, /Do not create it again/)
+  const fresh = JSON.parse(await tools.execute('mail_draft_create', { meetingId: 'meeting-0123456789abcdef', toRefs: [REF], subject: 's', body: 'b' }))
+  assert.equal(fresh.reused, undefined)
 })
 
 test('showing a draft again only reads it and adds a new card in its current state', async () => {
@@ -125,6 +136,20 @@ test('the card\'s send goes with the session and carries exactly the hash shown;
   for (const bad of ['sha256:abc', '', 'x'.repeat(71)]) assert.equal((await api.send('co', draft().id, bad)).success, false)
   assert.equal((await api.send('co', '../../x', HASH)).success, false)
   assert.equal(seen.length, 1)
+  // 「返事を待つ」: only a day leaves with the hash; anything else stops the send in main.
+  await api.send('co', draft().id, HASH, { until: '2026-11-06' })
+  assert.deepEqual(JSON.parse(seen[1].body!), { hash: HASH, awaitReply: { until: '2026-11-06' } })
+  for (const bad of [{ until: '2026-11-06T09:00' }, { until: '2026-11-06', to: 'x@y' }, { until: 20261106 }, 'yes'] as unknown[]) {
+    assert.equal((await api.send('co', draft().id, HASH, bad as { until: string })).success, false)
+  }
+  assert.equal(seen.length, 2)
+})
+
+test('a stored card keeps 「返事を待つ」 as offered; one stored before (or a reply) offers nothing', () => {
+  const offered = readMailDraft({ ...draft(), awaitReply: { expected: true, defaultUntil: '2026-11-06', chosenUntil: null } })
+  assert.deepEqual(offered?.awaitReply, { expected: true, defaultUntil: '2026-11-06', chosenUntil: null })
+  assert.equal(readMailDraft(draft())?.awaitReply, undefined)
+  assert.equal(readMailDraft({ ...draft(), awaitReply: { expected: true, defaultUntil: 'soon' } })?.awaitReply, undefined)
 })
 
 test('an unreadable stored card is dropped, not drawn', () => {

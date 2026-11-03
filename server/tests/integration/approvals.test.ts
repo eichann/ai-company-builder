@@ -13,7 +13,13 @@
  *   request, not a manager of another department;
  * - used once: two approvals at the same moment → one PATCH;
  * - precedents and their count only from what the viewer may read;
- * - another company's request id is the same 404 and nothing changes (CROSS).
+ * - another company's request id is the same 404 and nothing changes (CROSS);
+ * - an absent approver's delegate approves only during the absence and only
+ *   what they read themselves; the ledger and the card say 代わりに (本来は X);
+ * - before a new deal (plugins.md "Similar records"): the card shows the deals
+ *   of the meeting's 相手 (its record, the same company domain) and HubSpot's
+ *   search by that company, never one the viewer cannot read; 「同じ」 ends the
+ *   request without creating anything, only for the requester or an approver.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -53,6 +59,13 @@ deal:
     next_step:  { from: hs_next_step, write: true }
     amount:     { from: amount, write: true }
     assignee:   { from: hubspot_owner_id, write: false, people: owners }
+  links:
+    customer:   { from_association: companies }
+company:
+  visible_to_folder: 営業部
+  fields:
+    title:  { from: name, write: false }
+    domain: { from: domain, write: false }
 people:
   owners:
     "75123001": ap-member
@@ -279,7 +292,8 @@ describe('approving', () => {
     const [by, actor, body] = decided.mock.calls[0] as Json[]
     expect(actor).toEqual({ kind: 'human' })
     expect(by.userId).toBe(won.operation.approvedBy)
-    expect(body).toMatchObject({ folder: '営業部', important: true, title: '金額の変更を承認', links: { approval: approval.id, deal } })
+    // The deal is a まとまり (implements bundle): the decision links it as one, never by the type's name.
+    expect(body).toMatchObject({ folder: '営業部', important: true, title: '金額の変更を承認', links: { approval: approval.id, bundle: deal } })
     expect(body.title).not.toContain('サンプル')
     decided.mockRestore()
   })
@@ -329,7 +343,7 @@ describe('precedents and materials', () => {
     db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'ap-r5', 'ap-s-secret', 'user', 'ap-member', 0, 0, ?)`).run(CO, ts())
     db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'ap-r6', 'ap-s-secret', 'user', 'ap-boss', 1, 1, ?)`).run(CO, ts())
     const deal7 = recordOf('1000000007')
-    const old7 = (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'about' AND target_id = ?").all(CO, deal7) as Json[]).map(r => r.source_id)
+    const old7 = (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'bundle' AND target_id = ?").all(CO, deal7) as Json[]).map(r => r.source_id)
     const moveTo = (ids: string[], folder: string) => { for (const id of ids) db.prepare('UPDATE records SET folder = ? WHERE company_id = ? AND id = ?').run(folder, CO, id) }
     const seen = async (user: string) => (await person(user, 'GET', `/${approval.id}`)).body.data.approval.precedents
     // Only the deal it was about moves there: the member no longer sees (or counts) that precedent.
@@ -356,5 +370,154 @@ describe('another company (CROSS)', () => {
     expect(await there(`${approval.id}/send-back`, 'POST', { reason: 'x' })).toEqual(missing)
     expect(await there(`${approval.id}/withdraw`, 'POST')).toEqual(missing)
     expect(stateOf(approval.id)).toMatchObject({ state: 'pending', version: 1 })
+  })
+})
+
+describe('the approver is absent (代わりの人, records.md "Absence and the delegate")', () => {
+  it('the delegate approves with their own login only during the absence and only what they read; the ledger says 代わりに', async () => {
+    const today = services.absences.view(owner, 'ap-boss').value.today as string
+    const absent = (delegateId: string) => services.absences.create(owner, { userId: 'ap-boss', from: today, until: today, delegateId }).value.absence.id as string
+    const { approval } = await aiAsksAmount('1000000001', 2100000)
+    const body = { hash: approval.hash, reason: '部長不在のため代わりに確認' }
+    // Not absent: the dev manager has no part in it.
+    expect((await person('ap-boss2', 'POST', `/${approval.id}/approve`, body)).status).toBe(404)
+    // A delegate who cannot read 営業部 still cannot: the same 404.
+    let id = absent('ap-reader')
+    expect((await person('ap-reader', 'POST', `/${approval.id}/approve`, body)).status).toBe(404)
+    expect(services.absences.remove(owner, id).ok).toBe(true)
+
+    id = absent('ap-boss2')
+    try {
+      expect((await person('ap-boss2', 'GET', '?scope=to-me')).body.data.approvals.map((a: Json) => a.id)).toContain(approval.id)
+      const r = await person('ap-boss2', 'POST', `/${approval.id}/approve`, body)
+      expect(r.status).toBe(200)
+      expect(r.body.data.approval).toMatchObject({ state: 'approved', outcome: { by: 'ap-boss2', onBehalfOf: 'ap-boss' } })
+      const entry = services.recordEngine.history(owner, approval.id).value.entries.at(-1)
+      expect(entry).toMatchObject({ action: 'approve', actorId: 'ap-boss2', actorKind: 'human', onBehalfOf: 'ap-boss' })
+    } finally {
+      expect(services.absences.remove(owner, id).ok).toBe(true)
+    }
+    // Over: the dev manager is no part of the next one.
+    const next = await aiAsksAmount('1000000001', 2200000)
+    expect((await person('ap-boss2', 'POST', `/${next.approval.id}/approve`, { hash: next.approval.hash, reason: '確認' })).status).toBe(404)
+  })
+})
+
+describe('similar records before a new deal (plugins.md "Similar records")', () => {
+  const customerOf = (externalId: string) => (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND external_id = ? AND object = 'company'").get(CO, externalId) as Json).record_id as string
+  const dealPosts = () => fake.requests.filter(r => r.method === 'POST' && /\/deals$/.test(r.path)).length
+  const searches = () => fake.requests.filter(r => r.method === 'POST' && /\/deals\/search$/.test(r.path))
+  let writer: Json
+
+  beforeAll(async () => {
+    const { createServiceRecordWriter } = await import('../../src/services/record-engine')
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
+    const { systemClock, randomIds } = await import('../../src/adapters/system')
+    writer = createServiceRecordWriter({
+      companyData: sqliteCompanyData(db), transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds,
+      isMember: () => true, roleOf: () => 'member', notify: () => {},
+    })
+  })
+
+  /** A sales meeting with a 相手 (as the minutes intake makes it), the member its assignee. */
+  function meetingWith(counterpart: string): string {
+    const made = writer.create(CO, {
+      type: 'meeting', title: '初回の打ち合わせ', folder: '営業部', fields: { assignee: 'ap-member', external_count: 1 },
+      links: { counterpart: [counterpart] }, actor: { id: 'ap-member', kind: 'human', source: null },
+    })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    return made.record.id
+  }
+
+  /** The member's AI asks for a new deal from the meeting: an approval request (202). */
+  async function aiAsksNewDeal(meetingId: string, title: string) {
+    const r = await call({
+      token: await tokenFor('ap-member'), method: 'POST', path: '/api/records-ai/plugins/sample-sales/create/create_deal',
+      body: { title, fields: { next_step: '提案書を送る' }, note: '議事録で新しい研修の相談があったため', basis: { meetingId, quote: '新しい研修も相談したい' } },
+    })
+    expect(r.status, JSON.stringify(r.body)).toBe(202)
+    return r.body.data.approval as Json
+  }
+
+  it('the card shows the 相手\'s deals (its record, the same domain, HubSpot\'s search by that company) — never one the viewer cannot read', async () => {
+    const deal1 = recordOf('1000000001'), deal2 = recordOf('1000000002')
+    const sent = searches().length
+    const approval = await aiAsksNewDeal(meetingWith(customerOf('2000000001')), '新規開拓プランZ')
+    // No word of the title matches: these come from the 相手 alone, the same company first, newest first.
+    expect(approval.similar.typeLabel).toBe('案件')
+    expect(approval.similar.outside).toBe('checked')
+    expect(approval.similar.items.map((x: Json) => x.recordId).sort()).toEqual([deal1, deal2].sort())
+    expect(approval.similar.items.find((x: Json) => x.recordId === deal1)).toMatchObject({
+      title: '研修導入（株式会社サンプル）', status: 'proposal', assignee: 'ap-member', matchedBy: 'counterpart', updatedAt: expect.any(String),
+    })
+    // HubSpot was asked (read only), by the company's outside id: a deal ACB holds without its 相手 link is found there.
+    expect(searches().length).toBeGreaterThan(sent)
+    expect(dealPosts()).toBe(0)
+    const unlinked = db.prepare("SELECT * FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'customer'").get(CO, deal2) as Json
+    db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'customer'").run(CO, deal2)
+    try {
+      const v = (await person('ap-member', 'GET', `/${approval.id}`)).body.data.approval
+      expect(v.similar.items.map((x: Json) => [x.recordId, x.matchedBy])).toEqual(expect.arrayContaining([[deal1, 'counterpart'], [deal2, 'outside']]))
+    } finally {
+      const cols = Object.keys(unlinked)
+      db.prepare(`INSERT INTO record_links (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`).run(...cols.map(k => unlinked[k]))
+    }
+
+    // A deal the member cannot read is left out, as if it did not exist.
+    db.prepare('UPDATE records SET personal_owner = ? WHERE company_id = ? AND id = ?').run('ap-boss', CO, deal2)
+    try {
+      const v = (await person('ap-member', 'GET', `/${approval.id}`)).body.data.approval
+      expect(v.similar.items.map((x: Json) => x.recordId)).toEqual([deal1])
+    } finally {
+      db.prepare('UPDATE records SET personal_owner = NULL WHERE company_id = ? AND id = ?').run(CO, deal2)
+    }
+  })
+
+  it('名寄せ: a 相手 record of the same company domain (not imported, no HubSpot id) finds the same deals', async () => {
+    // Another 相手 record with the company's domain, outside any HubSpot link.
+    const typeVersion = (db.prepare("SELECT type_version FROM records WHERE company_id = ? AND type = 'customer' LIMIT 1").get(CO) as Json).type_version
+    const id = 'customer-apsamedomain00001'
+    db.prepare('INSERT INTO records (company_id, id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?, ?, ?, NULL)')
+      .run(CO, id, 'customer', typeVersion, '営業部', 'サンプル社（名刺から）', '', ts(), ts())
+    db.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, 1, ?)')
+      .run(CO, id, 'active', JSON.stringify({ domain: 'a-corp.example', counterpart_kind: 'company' }), ts())
+    const approval = await aiAsksNewDeal(meetingWith(id), '新規開拓プランY')
+    expect(approval.similar.items.map((x: Json) => x.recordId)).toEqual(expect.arrayContaining([recordOf('1000000001'), recordOf('1000000002')]))
+    expect(approval.similar.items.every((x: Json) => x.matchedBy === 'counterpart')).toBe(true)
+  })
+
+  it('「同じ」: the requester ends the request without creating anything; the meeting now belongs to that deal', async () => {
+    const meeting = meetingWith(customerOf('2000000001'))
+    const approval = await aiAsksNewDeal(meeting, '新規開拓プランX')
+    const deal1 = recordOf('1000000001')
+    const n = dealPosts()
+    // Someone who is neither the requester nor an approver: the same 404 as a missing request.
+    expect((await person('ap-boss2', 'POST', `/${approval.id}/same-as`, { recordId: deal1 })).status).toBe(404)
+    // Not a deal (the 相手 itself), or nothing: one answer, nothing changes.
+    expect(await person('ap-member', 'POST', `/${approval.id}/same-as`, { recordId: customerOf('2000000001') })).toMatchObject({ status: 400, body: { code: 'BAD_LINK' } })
+    expect(await person('ap-member', 'POST', `/${approval.id}/same-as`, { recordId: 'deal-nosuch000000000' })).toMatchObject({ status: 400, body: { code: 'BAD_LINK' } })
+    expect(stateOf(approval.id)).toMatchObject({ state: 'pending', version: 1 })
+
+    const r = await person('ap-member', 'POST', `/${approval.id}/same-as`, { recordId: deal1, linkMeeting: true })
+    expect(r.status, JSON.stringify(r.body)).toBe(200)
+    expect(r.body.data).toMatchObject({ meeting: 'linked', approval: { state: 'withdrawn', similar: null } })
+    expect(dealPosts()).toBe(n)
+    const links = (id: string) => db.prepare('SELECT name, target_id FROM record_links WHERE company_id = ? AND source_id = ?').all(CO, id) as Json[]
+    expect(links(approval.id)).toEqual(expect.arrayContaining([{ name: 'bundle', target_id: deal1 }]))
+    expect(links(meeting)).toEqual(expect.arrayContaining([{ name: 'bundle', target_id: deal1 }]))
+    const entry = services.recordEngine.history(owner, approval.id).value.entries.at(-1)
+    expect(entry).toMatchObject({ action: 'same_as_existing', actorId: 'ap-member', note: 'すでにある記録と同じため、作りませんでした' })
+    // Used: approving it now is refused.
+    expect(await person('ap-member', 'POST', `/${approval.id}/same-as`, { recordId: deal1 })).toMatchObject({ status: 409, body: { code: 'NOT_PENDING' } })
+    expect((await person('ap-member', 'POST', `/${approval.id}/approve`, { hash: approval.hash, reason: '別の取引' })).body.code).toBe('NOT_PENDING')
+  })
+
+  it('an approver (here an owner) may say 「同じ」 too; without linkMeeting the meeting is left as it was', async () => {
+    const meeting = meetingWith(customerOf('2000000001'))
+    const approval = await aiAsksNewDeal(meeting, '新規開拓プランW')
+    const r = await person('ap-owner', 'POST', `/${approval.id}/same-as`, { recordId: recordOf('1000000002') })
+    expect(r.body.data).toMatchObject({ meeting: 'not-asked', approval: { state: 'withdrawn' } })
+    expect((db.prepare("SELECT COUNT(*) AS n FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'bundle'").get(CO, meeting) as Json).n).toBe(0)
   })
 })

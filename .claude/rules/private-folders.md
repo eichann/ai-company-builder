@@ -14,6 +14,8 @@ paths:
   - "admin/src/lib/private-folders.ts"
   - "admin/src/lib/private-folder-help.ts"
   - "admin/src/app/**/private*/**"
+  - "admin/src/app/**/folders/**"
+  - "admin/src/components/folders/**"
 ---
 
 # Private folders (server, stage 3a)
@@ -34,6 +36,10 @@ database: paths, company-repository lookups, archive files, pushes in flight, th
 Someone who cannot read a private folder must not learn its name, that it exists as private,
 or who can see it. So:
 
+- Admin console: 「フォルダ」 (`/companies/:id/folders`, 管理画面の見直し 2-3) holds what were the
+  pages 「権限」 (tab 「だれが変えられるか」, `components/folders/permissions-view.tsx`) and
+  「非公開フォルダ」 (`?tab=private`, 「見られる人を決めたフォルダ」, `private-folders-view.tsx`);
+  `/permissions` and `/private-folders` redirect there.
 - Departments, stats and folder sizes read the company repository, which never holds private
   content. `/me/write-access` omits unreadable private folders. `/permissions*`, `/overview`,
   `/push-rejections`, `/private-folders*` are owner/admin/manager-only, and managers see only
@@ -45,12 +51,17 @@ or who can see it. So:
   schema, unused.
 - Company-files views treat an unreadable private folder exactly as a nonexistent path
   (`company-files.md`).
+- 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
+  (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
+  path inside an unreadable folder is answered as if the folder did not exist.
 
 ## Data and permissions
 
 - A private folder = a `scopes` row (`kind 'folder'`) whose `repo_id` points at `scope_repos.id`.
   Rules on it: `everyone: no read, no write` + one user rule per viewer (`read`; `write` for
-  editors). Owners/admins always read and write.
+  editors). Owners/admins always read and write. (Not so for owner-only records, which are not
+  folders: only their owner sees one — owners and admins neither; `records.md` "Owner-only
+  records". A private folder stays readable by owners/admins.)
 - A private scope never inherits (clearing / removing its last rule is refused). Rules deeper
   inside only narrow: in `resolveAccess` (`shared/core/permissions.ts`), read/write inside also
   needs read of the folder itself; a private scope without rules denies. `read: false` is

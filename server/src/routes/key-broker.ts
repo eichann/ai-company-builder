@@ -11,6 +11,7 @@
  *   PUT    /broker/services/:service      { category, rule, ownKeyHosts }
  *   PUT    /broker/services/:service/own-keys { allowed } the one switch 「メンバーが自分の鍵を使ってよい」
  *   PUT    /broker/services/:service/read-only { readOnly } the relay forwards only reads for the service
+ *   PUT    /broker/services/:service/default-key { keyId } which company key the service uses (null: none chosen)
  *   PUT    /broker/relay-services/:service { label, baseUrl, header, format?, category? } a generic service (K9)
  *   DELETE /broker/relay-services/:service once no key exists for it
  *   PUT    /broker/settings               { memberKeysAllowed?, internalHosts? }
@@ -34,28 +35,13 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const keyBrokerRoute = new Hono()
-const { access, keyBroker, brokerTokens, ownBrokerKeys } = services
-
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
+const { keyBroker, brokerTokens, ownBrokerKeys } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
@@ -63,104 +49,92 @@ function answer<T>(c: Context, result: Outcome<T>) {
   return c.json({ success: true, data: result.value })
 }
 
-keyBrokerRoute.get('/broker', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.get('/broker', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, keyBroker.get(member))
 })
 
-keyBrokerRoute.post('/broker/keys', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await keyBroker.create(member, await jsonBody(c)))
+keyBrokerRoute.post('/broker/keys', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await keyBroker.create(member, c.var.body))
 })
 
-keyBrokerRoute.put('/broker/keys/:keyId/secret', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await keyBroker.replaceSecret(member, c.req.param('keyId'), await jsonBody(c)))
+keyBrokerRoute.put('/broker/keys/:keyId/secret', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await keyBroker.replaceSecret(member, c.req.param('keyId'), c.var.body))
 })
 
-keyBrokerRoute.patch('/broker/keys/:keyId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.update(member, c.req.param('keyId'), await jsonBody(c)))
+keyBrokerRoute.patch('/broker/keys/:keyId', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.update(member, c.req.param('keyId'), c.var.body))
 })
 
-keyBrokerRoute.delete('/broker/keys/:keyId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.delete('/broker/keys/:keyId', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, keyBroker.delete(member, c.req.param('keyId')))
 })
 
-keyBrokerRoute.put('/broker/services/:service', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.setService(member, c.req.param('service'), await jsonBody(c)))
+keyBrokerRoute.put('/broker/services/:service', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setService(member, c.req.param('service'), c.var.body))
 })
 
-keyBrokerRoute.put('/broker/services/:service/own-keys', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.setOwnKeys(member, c.req.param('service'), await jsonBody(c)))
+keyBrokerRoute.put('/broker/services/:service/own-keys', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setOwnKeys(member, c.req.param('service'), c.var.body))
 })
 
-keyBrokerRoute.put('/broker/services/:service/read-only', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.setReadOnly(member, c.req.param('service'), await jsonBody(c)))
+keyBrokerRoute.put('/broker/services/:service/read-only', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setReadOnly(member, c.req.param('service'), c.var.body))
 })
 
-keyBrokerRoute.put('/broker/relay-services/:service', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.setRelayService(member, c.req.param('service'), await jsonBody(c)))
+keyBrokerRoute.put('/broker/services/:service/default-key', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setDefaultKey(member, c.req.param('service'), c.var.body))
 })
 
-keyBrokerRoute.delete('/broker/relay-services/:service', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.put('/broker/relay-services/:service', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setRelayService(member, c.req.param('service'), c.var.body))
+})
+
+keyBrokerRoute.delete('/broker/relay-services/:service', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, keyBroker.deleteRelayService(member, c.req.param('service')))
 })
 
-keyBrokerRoute.put('/broker/settings', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, keyBroker.setSettings(member, await jsonBody(c)))
+keyBrokerRoute.put('/broker/settings', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, keyBroker.setSettings(member, c.var.body))
 })
 
-keyBrokerRoute.post('/broker/stop-all', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.post('/broker/stop-all', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, keyBroker.stopAll(member))
 })
 
-keyBrokerRoute.post('/me/broker-tokens', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, brokerTokens.issue(member, await jsonBody(c)))
+keyBrokerRoute.post('/me/broker-tokens', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, brokerTokens.issue(member, c.var.body))
 })
 
-keyBrokerRoute.delete('/me/broker-tokens/:tokenId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.delete('/me/broker-tokens/:tokenId', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, brokerTokens.revoke(member, c.req.param('tokenId')))
 })
 
-keyBrokerRoute.get('/me/broker-keys', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.get('/me/broker-keys', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, ownBrokerKeys.list(member))
 })
 
-keyBrokerRoute.put('/me/broker-keys/:service', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await ownBrokerKeys.save(member, c.req.param('service'), await jsonBody(c)))
+keyBrokerRoute.put('/me/broker-keys/:service', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await ownBrokerKeys.save(member, c.req.param('service'), c.var.body))
 })
 
-keyBrokerRoute.delete('/me/broker-keys/:service', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+keyBrokerRoute.delete('/me/broker-keys/:service', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, ownBrokerKeys.remove(member, c.req.param('service')))
 })

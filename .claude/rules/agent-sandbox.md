@@ -11,7 +11,7 @@ paths:
   - "server/src/ports/agent-sandbox.ts"
   - "server/src/adapters/sqlite/agent-sandbox.ts"
   - "server/tests/integration/agent-sandbox.test.ts"
-  - "admin/src/app/companies/*/agent-sandbox/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/sandbox/**"
   - "admin/src/lib/agent-sandbox.ts"
   - "admin/tests/agent-sandbox.test.tsx"
   - "admin/src/components/agent-sandbox/**"
@@ -98,10 +98,11 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   null = follow the company), `GET /me/agent-policy` (any member) → `{ version, sandbox: {
   ...setting, mode: their override or the company's, source: 'member' | 'company' } }`, ETag =
   version, `If-None-Match` → 304. The emergency stop (M2) adds `stop` to the same answer and
-  version (`services/agent-policy.ts`, `agent-stop.md`) — one policy fetch for the app, not one
+  version (`services/agent-policy.ts`, `agent-stop.md`), and plan C2 the business plugins' packages the
+  app keeps (`plugins`, `plugins.md` "Handing packages to the app"), and whether the other AI may be asked (`secondOpinion`, `chat-and-agents.md` 「もう一方の AI に聞く」) — one policy fetch for the app, not one
   per feature; a sandbox change is announced on the push channel (`/me/events`). Overrides of people who left are not shown and do
   not apply (nobody else asks for their policy).
-- Admin 「AI の囲い」 (`admin/src/app/companies/[id]/agent-sandbox/page.tsx`, nav entry for
+- Admin 「AI の囲い」 (`admin/src/app/companies/[id]/advanced/ai-safety/sandbox/page.tsx`, 「詳しい設定 › AI の安全」 for
   owner/admin): company mode (使わない / 記録だけ / 囲う), what a PC that cannot start the sandbox
   does (記録だけで続ける / AI を使えなくする), the host list and extra denied places as one-per-line
   text (invalid lines shown and saving blocked; 「初期の一覧に戻す」), 「メンバーごとの動作」 (one

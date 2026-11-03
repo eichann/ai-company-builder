@@ -105,6 +105,8 @@ export async function gitlinksUnder(git: SimpleGit, repo: string): Promise<strin
 }
 
 export const NESTED_REPO_OVERWRITE_REASON = 'nested_repo_overwrite'
+/** A large file kept on this computer (sync/local-ignores.ts) that a teammate shared at the same path. */
+export const LARGE_FILE_OVERWRITE_REASON = 'large_file_overwrite'
 
 export interface NestedRepoOverwriteResult {
   /** Paths whose local version was copied to the backup (company-relative for a private folder). */
@@ -112,6 +114,11 @@ export interface NestedRepoOverwriteResult {
   /** The excluded nested repositories they are in (same spelling). */
   repos: string[]
   backupPath: string
+}
+
+/** What the member is told when a large file kept here was backed up (appended to the sync message). */
+export function largeFileOverwriteMessage(result: Pick<NestedRepoOverwriteResult, 'files'>): string {
+  return `このPCだけに置いていた大きなファイルと同じ名前のファイルを、ほかのメンバーが共有したため、このPCにあった版を .backups に保存しました（${result.files.length}件）。`
 }
 
 /** What the member is told (appended to the sync message). */
@@ -137,19 +144,26 @@ export async function backUpBeforeServerOverwrite(options: {
   backupPrefix?: string
   now: Date
   log: Pick<Console, 'log' | 'warn'>
+  /**
+   * `repos` are files kept on this computer (large files), not folders.
+   * Recorded with reason LARGE_FILE_OVERWRITE_REASON instead.
+   */
+  files?: boolean
 }): Promise<NestedRepoOverwriteResult | null> {
   const { git, repoPath, backupPath, log } = options
   const prefix = options.backupPrefix ? `${options.backupPrefix}/` : ''
   const candidates: Array<{ file: string; oid: string; repo: string; link: boolean }> = []
+  const spec = (repo: string) => (options.files ? repo : `${repo}/`)
   for (const repo of options.repos) {
-    const incoming = await git.raw(['ls-tree', '-r', '-z', 'origin/main', '--', `${repo}/`]).catch(() => '')
+    const incoming = await git.raw(['ls-tree', '-r', '-z', 'origin/main', '--', spec(repo)]).catch(() => '')
     if (!incoming) continue
-    const tracked = new Set((await git.raw(['ls-files', '-z', '--', `:(literal)${repo}/`]).catch(() => '')).split('\0').filter(Boolean))
+    const tracked = new Set((await git.raw(['ls-files', '-z', '--', `:(literal)${spec(repo)}`]).catch(() => '')).split('\0').filter(Boolean))
     for (const entry of incoming.split('\0')) {
       const tab = entry.indexOf('\t')
       if (tab === -1) continue
       const [mode, , oid] = entry.slice(0, tab).split(' ')
       const file = entry.slice(tab + 1)
+      if (options.files && file !== repo) continue
       // A tracked path is an ordinary shared file: the rebase handles it.
       if (tracked.has(file) || mode === '160000') continue
       let st: fs.Stats
@@ -175,16 +189,18 @@ export async function backUpBeforeServerOverwrite(options: {
   fs.mkdirSync(backupPath, { recursive: true })
   fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
     timestamp: options.now.toISOString(),
-    reason: NESTED_REPO_OVERWRITE_REASON,
-    repos: repos.map(r => `${prefix}${r}`),
+    reason: options.files ? LARGE_FILE_OVERWRITE_REASON : NESTED_REPO_OVERWRITE_REASON,
+    ...(options.files ? {} : { repos: repos.map(r => `${prefix}${r}`) }),
     files: files.map(f => `${prefix}${f}`),
-    note: 'this computer\'s version of files in a nested repository the member does not share; a teammate shared files at the same paths',
+    note: options.files
+      ? 'this computer\'s version of large files kept on this computer only; a teammate shared files at the same paths'
+      : 'this computer\'s version of files in a nested repository the member does not share; a teammate shared files at the same paths',
   }, null, 2))
   for (const file of files) {
     const dest = path.join(backupPath, prefix, file)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     fs.cpSync(path.join(repoPath, file), dest, { verbatimSymlinks: true })
   }
-  log.log(`Git sync: Backed up ${files.length} file(s) of excluded nested repositories before a teammate's version replaces them: ${backupPath}`)
+  log.log(`Git sync: Backed up ${files.length} ${options.files ? 'large file(s) kept on this computer' : 'file(s) of excluded nested repositories'} before a teammate's version replaces them: ${backupPath}`)
   return { files: files.map(f => `${prefix}${f}`), repos: repos.map(r => `${prefix}${r}`), backupPath }
 }

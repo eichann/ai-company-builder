@@ -30,6 +30,7 @@ import { promisify } from 'util'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { fakeUpstream } from '../helpers/fake-upstream'
 import { PLUGIN_FIXTURES, enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -84,7 +85,7 @@ const commits = async () => {
   const { REPOS_DIR } = await import('../../src/lib/config')
   return (await git('git', ['rev-list', '--all', '--count'], { cwd: join(REPOS_DIR, `${CO}.git`) })).stdout.trim()
 }
-const deals = () => db.prepare("SELECT * FROM records WHERE company_id = ? AND type = 'deal' ORDER BY id").all(CO) as Json[]
+const deals = () => withRecordText(db, CO, db.prepare("SELECT * FROM records WHERE company_id = ? AND type = 'deal' ORDER BY id").all(CO) as Json[])
 const linkOf = (recordId: string) => db.prepare('SELECT * FROM plugin_external_links WHERE company_id = ? AND record_id = ?').get(CO, recordId) as Json
 const recordOf = (externalId: string) => (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND object = 'deal' AND external_id = ? ORDER BY seen_at DESC").get(CO, externalId) as Json)?.record_id
 
@@ -122,7 +123,8 @@ beforeAll(async () => {
   db.prepare('DELETE FROM scope_rules WHERE company_id = ? AND scope_id = ?').run(CO, sales)
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'im-r1', ?, 'everyone', NULL, 0, 0, ?)`).run(CO, sales, ts())
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'im-r2', ?, 'user', 'im-member', 1, 1, ?)`).run(CO, sales, ts())
-  db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(CO, ts(), 'im-owner')
+  // A new company starts with the records feature on (管理画面の見直し 2-4).
+  expect(db.prepare('SELECT enabled FROM record_settings WHERE company_id = ?').get(CO)).toEqual({ enabled: 1 })
 
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
@@ -162,7 +164,7 @@ describe('import from the outside system', () => {
     })
     expect(linkOf(sample.id)).toMatchObject({ account_id: '90000001', object: 'deal', external_id: '1000000001' })
     // The customer: a server-only record linked from the deal (name only).
-    const customer = db.prepare("SELECT r.* FROM record_links l JOIN records r ON r.company_id = l.company_id AND r.id = l.target_id WHERE l.company_id = ? AND l.source_id = ? AND l.name = 'customer'").get(CO, sample.id) as Json
+    const [customer] = withRecordText(db, CO, db.prepare("SELECT r.* FROM record_links l JOIN records r ON r.company_id = l.company_id AND r.id = l.target_id WHERE l.company_id = ? AND l.source_id = ? AND l.name = 'customer'").all(CO, sample.id) as Json[])
     expect(customer).toMatchObject({ type: 'customer', title: '株式会社サンプル', path: null })
   })
 
@@ -298,7 +300,8 @@ describe('runs, stops and connections', () => {
 
     // Another company is not affected: a record with the same id there is neither hidden nor marked.
     const other = (await services.companies.create('im-other-owner', 'Other', 'import-other')).id as string
-    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(other, ts(), 'im-other-owner')
+    // A new company starts with the records feature on (管理画面の見直し 2-4).
+    expect(db.prepare('SELECT enabled FROM record_settings WHERE company_id = ?').get(other)).toEqual({ enabled: 1 })
     db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, ?, 'deal', 'other company', ?, ?)").run(other, oldDeal, ts(), ts())
     const otherOwner = { companyId: other, userId: 'im-other-owner', role: 'owner' }
     const seen = services.records.query(otherOwner, { type: 'deal' }).value
@@ -342,8 +345,8 @@ describe('runs, stops and connections', () => {
       .toMatchObject({ ok: false, body: { code: 'OPERATION_NOT_FOUND' } })
     expect(way.sent.length).toBe(sent)
     // Similar deals for its create: HubSpot answers with sample-sales's deals, which are not this plugin's records.
-    expect(await services.pluginOperations.similarDeals(owner, 'sample-leads', '研修導入（株式会社サンプル）')).toEqual({ ok: true, value: { similar: [] } })
-    expect((await services.pluginOperations.similarDeals(owner, 'sample-sales', '研修導入（株式会社サンプル）')).value.similar.length).toBeGreaterThan(0)
+    expect(await services.pluginOperations.similarRecords(owner, 'sample-leads', 'create_deal', { title: '研修導入（株式会社サンプル）', meetingId: null })).toMatchObject({ ok: true, value: { items: [] } })
+    expect((await services.pluginOperations.similarRecords(owner, 'sample-sales', 'create_deal', { title: '研修導入（株式会社サンプル）', meetingId: null })).value.items.length).toBeGreaterThan(0)
     // Its AI tools: none (its operations do not list ai), while sample-sales's are unchanged.
     const tools = (await services.plugins.aiTools(owner, 'act')).value.plugins
     expect(tools.map((p: Json) => p.id)).toEqual(['sample-sales'])

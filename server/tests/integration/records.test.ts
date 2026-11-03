@@ -173,7 +173,7 @@ describe('the company map, end to end', () => {
     await services.records.refreshIndex(owner)
     expect(titles(await api('u-member', 'POST', '/query', {}))).toEqual(['A社', 'A社 提案'])
     const types = await api('u-member', 'GET', '/types')
-    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'minutes', 'outbound_message', 'task'])
+    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'meeting', 'outbound_message', 'project', 'reply_request', 'task'])
     const detail = await api('u-member', 'GET', '/item/customer-cust0001')
     expect(detail.body.data?.links).toEqual([expect.objectContaining({ name: 'customer', direction: 'in', record: expect.objectContaining({ id: 'deal-deal0001' }) })])
   })
@@ -240,21 +240,24 @@ describe('the company map, end to end', () => {
     expect(created.body.data?.record).toMatchObject({ path: null })
     const tip = git(['-C', bare, 'rev-parse', 'main']).trim()
 
-    expect((await api('u-member', 'POST', `/item/${id}/actions/start`, { expectedVersion: 1 })).status).toBe(200)
+    // Asked of someone in no common department: 引き受け待ち until they accept (records.md "Acceptance").
+    expect(created.body.data?.record).toMatchObject({ state: 'awaiting_acceptance' })
+    expect((await api('u-member', 'POST', `/item/${id}/actions/accept`, { expectedVersion: 1 })).status).toBe(200)
+    expect((await api('u-member', 'POST', `/item/${id}/actions/start`, { expectedVersion: 2 })).status).toBe(200)
     const notPushed = await api('u-member', 'POST', `/item/${id}/actions/request_review`, {
-      expectedVersion: 2, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: 'f'.repeat(40) }],
+      expectedVersion: 3, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: 'f'.repeat(40) }],
     })
     expect(notPushed).toMatchObject({ status: 409, body: { code: 'ATTACHMENT_NOT_SYNCED' } })
     const review = await api('u-member', 'POST', `/item/${id}/actions/request_review`, {
-      expectedVersion: 2, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: tip }],
+      expectedVersion: 3, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: tip }],
     })
     expect(review.status).toBe(200)
     expect((await api('u-owner', 'GET', '/my-turn')).body.data?.records).toEqual([expect.objectContaining({ id, state: 'review' })])
-    expect((await api('u-owner', 'POST', `/item/${id}/actions/complete`, { expectedVersion: 3, note: '問題なし' })).status).toBe(200)
+    expect((await api('u-owner', 'POST', `/item/${id}/actions/complete`, { expectedVersion: 4, note: '問題なし' })).status).toBe(200)
     expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(tip) // a server record: nothing committed
     const history = await api('u-member', 'GET', `/item/${id}/history`)
-    expect((history.body.data?.entries as Array<{ action: string }>).map(e => e.action)).toEqual(['create', 'start', 'request_review', 'complete'])
-    expect((await api('u-member', 'GET', `/item/${id}/versions/2`)).body.data).toMatchObject({ version: 2, state: 'in_progress' })
+    expect((history.body.data?.entries as Array<{ action: string }>).map(e => e.action)).toEqual(['create', 'accept', 'start', 'request_review', 'complete'])
+    expect((await api('u-member', 'GET', `/item/${id}/versions/3`)).body.data).toMatchObject({ version: 3, state: 'in_progress' })
 
     // A company's own file-backed type: its milestone line is the server's own commit.
     resetToRemote()
@@ -279,7 +282,7 @@ describe('the company map, end to end', () => {
     db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('dep-sales', CO, '営業部', '営業部', now, now)
     const before = git(['-C', bare, 'rev-parse', 'main']).trim()
     const made = await api('u-member', 'POST', '/decisions', {
-      folder: '営業部', title: 'A社に窓口を3つ出す', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', links: { deal: 'deal-deal0001' }, key: 'k-1',
+      folder: '営業部', title: 'A社に窓口を3つ出す', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', key: 'k-1',
     })
     expect(made.status).toBe(201)
     const id = (made.body.data?.record as { id: string }).id
@@ -300,5 +303,24 @@ describe('the company map, end to end', () => {
     expect((await api('u-owner', 'GET', '/item/decision-old00001')).status).toBe(404)
     const problems = await api('u-owner', 'GET', '/problems')
     expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '営業部/意思決定/decision-old00001.md', kind: 'server_only_type' }))
+  })
+
+  it('例外（この件だけ）: set at creation, changed by who may confirm, and said in words wherever the record is read', async () => {
+    const made = await api('u-member', 'POST', '/decisions', {
+      folder: '営業部', title: '今回の見積は特別に20%値引きしてよい', why: '初回の大口のため', source: '商談のメモ', exception: true,
+    })
+    expect(made.status).toBe(201)
+    const id = (made.body.data?.record as { id: string }).id
+    // What the AI reads (records_get / records_query answer the same summaries) carries the mark in words.
+    const read = await api('u-owner', 'GET', `/item/${id}`)
+    expect(read.body.data?.record).toMatchObject({ fields: { exception: true }, exceptionNotice: expect.stringContaining('前例にしない') })
+    const listed = await api('u-owner', 'POST', '/query', { type: 'decision' })
+    expect(listed.body.data?.records).toContainEqual(expect.objectContaining({ id, exceptionNotice: expect.stringContaining('例外（この件だけ）') }))
+    // The member who recorded it is its 確かめる人: they may clear the mark; the notice goes with it.
+    const cleared = await api('u-member', 'POST', `/item/${id}/actions/set_exception`, { expectedVersion: 1, args: { exception: false } })
+    expect(cleared.status).toBe(200)
+    const after = (await api('u-owner', 'GET', `/item/${id}`)).body.data?.record as Record<string, unknown>
+    expect(after).toMatchObject({ version: 2, fields: { exception: false } })
+    expect(after.exceptionNotice).toBeUndefined()
   })
 })

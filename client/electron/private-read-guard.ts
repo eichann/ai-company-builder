@@ -18,10 +18,12 @@
  * Pure (no Electron): the hooks in agents/claude.ts and chat-server.ts feed
  * it tool calls and results; tests drive it directly.
  */
-import { repoRelativePath } from '../shared/write-access'
+import { foldAsciiCase, repoRelativePath } from '../shared/write-access'
 import { excludedFolderOf } from '../shared/sparse-paths'
 import { bashWriteTargets } from './write-guard'
 import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
+import { secondOpinionTargetOf } from '../shared/agents/second-opinion'
+import { agentShortLabel } from '../shared/agents/registry'
 
 export interface PrivateReadContext {
   /** The company's checkout root (absolute). */
@@ -41,6 +43,21 @@ export interface PrivateReadState {
   folders: Set<string>
   /** The conversation's earlier tool calls were replayed (seedFromMessages). */
   seeded?: boolean
+  /**
+   * The kinds of question the member already allowed in this conversation
+   * (pressed 許可): that kind is not asked again. Lives as long as the state —
+   * in memory, so a conversation reopened after the app restarted asks once more.
+   */
+  consented?: Set<PrivateAskKind>
+}
+
+/** What a question is about: a write to a public place, or something sent out. Consent is per kind. */
+export type PrivateAskKind = 'write' | 'send'
+
+/** Remember that the member allowed this kind of question for the rest of the conversation. */
+export function recordPrivateConsent(state: PrivateReadState, kind: PrivateAskKind): void {
+  if (!state.consented) state.consented = new Set()
+  state.consented.add(kind)
 }
 
 export const createPrivateReadState = (): PrivateReadState => ({ folders: new Set() })
@@ -204,7 +221,7 @@ export function seedFromMessages(ctx: PrivateReadContext | undefined, state: Pri
 
 export type PrivateWriteDecision =
   | { ask: false }
-  | { ask: true; message: string }
+  | { ask: true; kind: PrivateAskKind; message: string }
 
 const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
@@ -215,11 +232,20 @@ const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_pat
  */
 const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations', 'acb_review']
 
-/** Never shared: the app's scratch area and personal folders (see .claude/rules/sync.md, .gitignore essentials). */
+/**
+ * Never shared: the app's scratch area, and anything inside a `.personal/`
+ * at any depth (sync excludes it, the push checker refuses it as
+ * [PERSONAL_PATH]) — except the `.gitignore` directly inside one, which is
+ * shared. `rel` is already resolved lexically (`..` applied) and NFC; the
+ * folder name is A–Z-folded like the push checker's /\.personal\//i.
+ */
 function isUnsharedPath(rel: string): boolean {
   const segments = rel.normalize('NFC').split('/')
   if (segments[0] === '.workspace' || segments[0] === '.backups') return true
-  return segments.slice(0, -1).some(s => s.toLowerCase() === '.personal')
+  const isPersonal = (s: string) => foldAsciiCase(s) === '.personal'
+  const last = segments.length - 1
+  if (last >= 1 && isPersonal(segments[last - 1]) && foldAsciiCase(segments[last]) === '.gitignore') return false
+  return segments.slice(0, -1).some(isPersonal)
 }
 
 const PREFIX = 'この会話では非公開フォルダの内容を読んでいます。'
@@ -236,8 +262,21 @@ export function webResearchMessage(): string {
   return `${PREFIX}Webで調べるために、AIが書いた質問を外部（検索やWebサイト）に送ろうとしています。質問に非公開の内容が含まれていないか確認してください。`
 }
 
+/** 「もう一方の AI に聞く」: the material goes to another company's AI (second-opinion.ts). */
+export function otherAiMessage(name: string): string {
+  return `${PREFIX}${name}（別の会社の AI）に意見を聞くために、この相談の内容を送ろうとしています。非公開の内容が含まれていないか確認してください。`
+}
+
 export function shellWriteMessage(command: string): string {
   return `${PREFIX}このコマンド（${command}）は、会社フォルダの公開の場所に書き込む可能性があります。全員に共有されてもよい内容か確認してください。`
+}
+
+/** Added to the member's confirm (not to the AI's refusal): allowing once is enough for this kind. */
+export const CONSENT_NOTE = '許可すると、この会話ではこれ以降は確認しません。'
+
+/** The member's confirm for a decision that asks. */
+export function privateConfirmMessage(decision: { message: string }): string {
+  return `${decision.message}${CONSENT_NOTE}`
 }
 
 const short = (command: string) => (command.length > 80 ? `${command.slice(0, 80)}…` : command)
@@ -256,6 +295,35 @@ function publicPlace(ctx: PrivateReadContext, target: string, cwd?: string): str
 const SHELL_WRITES = /(^|[\s;&|(])(cp|mv|rsync|ditto|install|ln|tar|zip|unzip|sed\s+-i|perl\s+-[a-z]*i|git\s+(add|commit|push|mv|apply|am|stash\s+pop)|python3?|node|ruby|osascript)(\s|$)/
 /** Shell commands that can send data off the machine. */
 const SHELL_SENDS = /(^|[\s;&|(])(curl|wget|nc|ncat|scp|sftp|ssh|ftp|telnet|open)(\s|$)/
+/** Commands that run a heredoc's body as code (its body is then commands, not data). */
+const RUNS_BODY = /(^|[\s;&|(])(bash|sh|zsh|dash|ksh|fish|python3?|node|deno|bun|ruby|perl|php|osascript|swift|source|\.|eval|xargs|ssh)(\s|$)/
+
+/**
+ * A command split around its heredoc: `scan` is what may contain commands
+ * (the first line, plus what follows the terminator), `tail` is what follows
+ * the first line that bashWriteTargets does not parse. The body of a single
+ * heredoc fed to a data sink (`cat > .personal/x.md <<'EOF'`) is text, not
+ * commands: words in it must not trigger a question. Anything this cannot
+ * read (two heredocs, no terminator, an interpreter) keeps the body.
+ */
+function splitHeredoc(command: string): { scan: string; tail: string } {
+  const newline = command.indexOf('\n')
+  if (newline < 0) return { scan: command, tail: '' }
+  const first = command.slice(0, newline)
+  const rest = command.slice(newline + 1)
+  const heredocs = first.match(/(?<!<)<<(?!<)/g) ?? []
+  if (heredocs.length === 0) return { scan: command, tail: '' } // bashWriteTargets parses every line
+  const m = /(?<!<)<<(?!<)(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/.exec(first)
+  if (!m || heredocs.length > 1 || RUNS_BODY.test(first)) return { scan: command, tail: rest }
+  const lines = rest.split('\n')
+  const end = lines.findIndex(l => (m[1] ? l.replace(/^\t+/, '') : l) === m[3])
+  if (end < 0) return { scan: command, tail: rest }
+  const after = lines.slice(end + 1).join('\n')
+  return { scan: after ? `${first}\n${after}` : first, tail: after }
+}
+
+/** A redirect to a file, or tee, in shell text (fd duplications and /dev/null aside). */
+const writesSomewhere = (text: string) => />/.test(text.replace(/\d?>&\d|\d?>\s*\/dev\/null/g, '')) || /(^|[\s;&|(])tee(\s|$)/.test(text)
 
 /**
  * After the conversation read private content: ask before a write to a
@@ -263,33 +331,47 @@ const SHELL_SENDS = /(^|[\s;&|(])(curl|wget|nc|ncat|scp|sftp|ssh|ftp|telnet|open
  * Before that (or with no context), never asks.
  */
 export function decidePrivateWrite(ctx: PrivateReadContext | undefined, state: PrivateReadState | undefined, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): PrivateWriteDecision {
-  if (!ctx || !hasReadPrivate(state)) return { ask: false }
+  if (!ctx || !state || !hasReadPrivate(state)) return { ask: false }
+  const decision = askFor(ctx, toolName, toolInput, cwd)
+  // The member already allowed this kind in this conversation.
+  if (decision.ask && state.consented?.has(decision.kind)) return { ask: false }
+  return decision
+}
+
+const askWrite = (message: string): PrivateWriteDecision => ({ ask: true, kind: 'write', message })
+const askSend = (message: string): PrivateWriteDecision => ({ ask: true, kind: 'send', message })
+
+function askFor(ctx: PrivateReadContext, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): PrivateWriteDecision {
   const key = FILE_TOOLS[toolName]
   if (key) {
     const target = toolInput?.[key]
     if (typeof target !== 'string' || !target) return { ask: false }
     const place = publicPlace(ctx, target, cwd)
-    return place === null ? { ask: false } : { ask: true, message: publicWriteMessage(place) }
+    return place === null ? { ask: false } : askWrite(publicWriteMessage(place))
   }
   if (toolName === 'Bash') {
     const command = typeof toolInput?.command === 'string' ? toolInput.command : ''
-    if (SHELL_SENDS.test(command)) return { ask: true, message: sendOutMessage(short(command)) }
+    const { scan, tail } = splitHeredoc(command)
+    if (SHELL_SENDS.test(scan)) return askSend(sendOutMessage(short(command)))
     for (const target of bashWriteTargets(command)) {
       const place = publicPlace(ctx, target, cwd)
-      if (place !== null) return { ask: true, message: publicWriteMessage(place) }
+      if (place !== null) return askWrite(publicWriteMessage(place))
     }
-    // Targets this file cannot see (cp, mv, scripts, a redirect after cd…): may land anywhere in the company.
-    const changesDir = /(^|[\s;&|(])(cd|pushd)(\s|$)/.test(command)
-    const redirects = />/.test(command.replace(/\d?>&\d|\d?>\s*\/dev\/null/g, ''))
-    if (SHELL_WRITES.test(command) || (changesDir && redirects)) return { ask: true, message: shellWriteMessage(short(command)) }
+    // Targets this file cannot see (cp, mv, scripts, a redirect after cd or
+    // after a heredoc…): may land anywhere in the company. Literal targets
+    // that are all inside .personal/ (or another unshared place) ask nothing.
+    const changesDir = /(^|[\s;&|(])(cd|pushd)(\s|$)/.test(scan)
+    if (SHELL_WRITES.test(scan) || (changesDir && writesSomewhere(scan)) || writesSomewhere(tail)) return askWrite(shellWriteMessage(short(command)))
     return { ask: false }
   }
   if (toolName === 'WebFetch' || toolName === 'WebSearch') {
     const what = typeof toolInput?.url === 'string' ? `${toolName}: ${toolInput.url}` : typeof toolInput?.query === 'string' ? `${toolName}: ${toolInput.query}` : toolName
-    return { ask: true, message: sendOutMessage(what) }
+    return askSend(sendOutMessage(what))
   }
-  if (toolName === WEB_RESEARCH_TOOL_ID) return { ask: true, message: webResearchMessage() }
+  if (toolName === WEB_RESEARCH_TOOL_ID) return askSend(webResearchMessage())
+  const otherAi = secondOpinionTargetOf(toolName)
+  if (otherAi) return askSend(otherAiMessage(agentShortLabel(otherAi)))
   const mcp = /^mcp__(.+?)__/.exec(toolName)
-  if (mcp && !APP_MCP_SERVERS.includes(mcp[1])) return { ask: true, message: sendOutMessage(toolName) }
+  if (mcp && !APP_MCP_SERVERS.includes(mcp[1])) return askSend(sendOutMessage(toolName))
   return { ask: false }
 }

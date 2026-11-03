@@ -23,6 +23,10 @@ import type { HandoffMetrics, HandoffRequest } from '../handoff/contract'
 import { runClaudeWebReader } from './claude-web-reader'
 import { runCodexWebReader } from './codex-web-reader'
 import { WEB_READER_TIMEOUT_MS, inEmptyFolder, type WebReaderJob, type WebReaderRequest, type WebReaderResult } from './web-reader'
+import { runClaudeSecondOpinion } from './claude-second-opinion'
+import { runCodexSecondOpinion } from './codex-second-opinion'
+import type { SecondOpinionJob, SecondOpinionRequest, SecondOpinionResult } from './second-opinion-runner'
+import { SECOND_OPINION_LIMITS } from '../../shared/agents/second-opinion'
 
 /** What any connection may need from the app (the chat server's config is one). */
 export interface AgentHost extends ClaudeConnectionConfig {
@@ -98,6 +102,8 @@ export interface AgentFactories {
   writeHandoff?: (request: HandoffRequest, host: { getCli: () => string }) => Promise<HandoffMetrics>
   /** `capabilities.webReader`: the restricted reader (web-reader.ts), in the folder and with the model it is given. */
   runWebReader?: (job: WebReaderJob) => Promise<WebReaderResult>
+  /** `capabilities.secondOpinion`: a one-shot with no tools at all (second-opinion-runner.ts), in the folder and with the model it is given. */
+  runSecondOpinion?: (job: SecondOpinionJob) => Promise<SecondOpinionResult>
 }
 
 const model = (id: AgentId, request: OneShotTextRequest) => request.model ?? AGENTS[id].tasks[request.job]
@@ -118,6 +124,7 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
     },
     writeHandoff: (request, host) => writeClaudeHandoff({ ...request, cli: host.getCli() }),
     runWebReader: job => runClaudeWebReader(job),
+    runSecondOpinion: job => runClaudeSecondOpinion(job),
   },
   codex: {
     createConnection: host => createCodexConnection(host),
@@ -130,6 +137,7 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
     }),
     writeHandoff: request => writeCodexHandoff(request),
     runWebReader: job => runCodexWebReader(job),
+    runSecondOpinion: job => runCodexSecondOpinion(job),
   },
   'api-key': {
     createConnection: host => createApiConnection(host),
@@ -153,6 +161,7 @@ export const CAPABILITY_FACTORIES = {
   oneShotText: 'oneShotText',
   handoff: 'writeHandoff',
   webReader: 'runWebReader',
+  secondOpinion: 'runSecondOpinion',
 } as const satisfies Partial<Record<keyof AgentCapabilities, keyof AgentFactories>>
 
 function assertProfileSupported(id: AgentId, profile: AgentProfile | undefined) {
@@ -198,4 +207,16 @@ export function runWebReader(id: AgentId, request: WebReaderRequest): Promise<We
   const model = AGENTS[id].tasks.webReader ?? ''
   if (!run) return Promise.reject(new Error(`${AGENTS[id].label}: no Web reader`))
   return inEmptyFolder(cwd => run({ ...request, model, cwd, timeoutMs: request.timeoutMs ?? WEB_READER_TIMEOUT_MS }))
+}
+
+/**
+ * Ask an agent that claims `secondOpinion` (「もう一方の AI に聞く」): its own CLI with no tools,
+ * its `tasks.secondOpinion` model (none: the catalog default), in a new empty folder removed
+ * afterwards. Rejects with a `SecondOpinionError` (second-opinion-runner.ts).
+ */
+export function runSecondOpinion(id: AgentId, request: SecondOpinionRequest): Promise<SecondOpinionResult> {
+  const run = AGENTS[id].capabilities.secondOpinion ? AGENT_FACTORIES[id].runSecondOpinion : undefined
+  if (!run) return Promise.reject(new Error(`${AGENTS[id].label}: no second opinion`))
+  const model = AGENTS[id].tasks.secondOpinion ?? ''
+  return inEmptyFolder(cwd => run({ ...request, model, cwd, timeoutMs: request.timeoutMs ?? SECOND_OPINION_LIMITS.timeoutMs }))
 }

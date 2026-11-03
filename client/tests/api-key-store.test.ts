@@ -64,16 +64,31 @@ test('migration: a plain key from an older version is encrypted on first read an
   } finally { w.done() }
 })
 
-test('migration waits while encryption is unavailable: the plain key keeps working, flagged for a warning', () => {
+test('migration fails (no encryption): the plain key is not used, flagged to save again, one warning without the value', () => {
   const w = world({ anthropicApiKey: FAKE_KEY })
   try {
     w.box.on = false
-    assert.equal(w.store.read(), FAKE_KEY)
-    assert.deepEqual(w.store.status(), { set: true, last4: 'ABCD', encryptionAvailable: false, storedInPlainText: true })
+    assert.equal(w.store.read(), undefined, 'a plain key that could not be encrypted is not used')
+    assert.deepEqual(w.store.status(), { set: false, encryptionAvailable: false, storedInPlainText: true })
     assert.equal(JSON.parse(w.disk()).anthropicApiKey, FAKE_KEY, 'not removed without an encrypted copy')
-    w.box.on = true // e.g. after app ready
+    assert.equal(w.logs.length, 1, 'warned once, not on every access')
+    assert.match(w.logs[0], /^\[api-key\] /)
+    assert.ok(w.logs.every(line => !line.includes(FAKE_KEY) && !line.includes('ABCD')))
+    w.box.on = true // e.g. after app ready: the move is retried and the key is used again
     assert.deepEqual(w.store.status(), { set: true, last4: 'ABCD', encryptionAvailable: true })
+    assert.equal(w.store.read(), FAKE_KEY)
     assert.ok(!w.disk().includes(FAKE_KEY))
+  } finally { w.done() }
+})
+
+test('migration fails (encrypting throws): the plain key is not used and the warning carries no part of it', () => {
+  const w = world({ anthropicApiKey: FAKE_KEY })
+  try {
+    w.box.encrypt = () => { throw new Error('keychain locked') }
+    assert.equal(w.store.read(), undefined)
+    assert.deepEqual(w.store.status(), { set: false, encryptionAvailable: true, storedInPlainText: true })
+    assert.equal(w.logs.length, 1)
+    assert.ok(w.logs.every(line => !line.includes(FAKE_KEY) && !line.includes('ABCD')))
   } finally { w.done() }
 })
 

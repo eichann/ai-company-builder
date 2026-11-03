@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import IntegrationsPage from '@/app/companies/[id]/integrations/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
-import type { BrokerKeySummary, BrokerView, Capabilities, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem } from '@/lib/api'
+import type { BrokerKeySummary, BrokerView, Capabilities, CoreConnectorsView, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem, SlackAdminView, SlackGrantSummary } from '@/lib/api'
 import { changeMappingField, mappingRows, mappingToYaml } from '@/lib/integrations'
 import { parseYamlLite } from '../../shared/core/yaml-lite'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -104,7 +104,7 @@ const key: BrokerKeySummary = {
 const broker = (practice: boolean): BrokerView => ({
   status: { enabled: true, reason: null },
   settings: { memberKeysAllowed: true, internalHosts: [], updatedAt: null, updatedBy: null },
-  services: [{ service: 'hubspot', label: 'HubSpot', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 1, userKeys: 0, updatedAt: null, relay: null, readOnly: true, practice }],
+  services: [{ service: 'hubspot', label: 'HubSpot', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 1, userKeys: 0, updatedAt: null, relay: null, readOnly: true, defaultKeyId: null, practice }],
   keys: [key],
   departments: [],
   history: [],
@@ -113,13 +113,50 @@ const broker = (practice: boolean): BrokerView => ({
 const GOOGLE_SECRET = 'fake-google-secret-NOT-REAL-admin-1234'
 const googleGrant: GoogleGrantSummary = {
   userId: 'u_member', memberEmail: 'tanaka@example.com', memberName: '田中 太郎', googleEmail: 'tanaka@example.com',
-  features: ['minutes'], scopes: [], status: 'active', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', lastUsedAt: null,
+  features: ['minutes'], featuresOff: [], scopes: [], status: 'active', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', lastUsedAt: null,
 }
 const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
   vaultEnabled: true, configured: true, clientId: '123-abc.apps.googleusercontent.com', secretLast4: GOOGLE_SECRET.slice(-4), domain: 'example.com',
   enabled: true, redirectUri: 'https://acb.example.com/api/oauth/google/callback', practice: false, operatorStopped: false,
-  updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [], ...over,
+  updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [],
+  picker: { configured: false, appId: null, apiKeyLast4: null, pageUrl: 'https://acb.example.com/api/google-picker' },
+  featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'], ...over,
 })
+
+const SLACK_SECRET = 'fake-slack-secret-NOT-REAL-admin-5678'
+const SLACK_BOT = 'xoxb-fake-NOT-REAL-admin-bot-0000'
+const slackGrant: SlackGrantSummary = {
+  userId: 'u_member', memberEmail: 'tanaka@example.com', slackEmail: 'tanaka@example.com',
+  features: ['read', 'notices'], featuresOff: ['notices'], status: 'active', lastUsedAt: null,
+}
+const slackView = (over: Partial<SlackAdminView> = {}): SlackAdminView => ({
+  vaultEnabled: true, configured: true, teamId: 'T0DIV', clientId: '1111.2222', clientSecretLast4: SLACK_SECRET.slice(-4), hasBotToken: true,
+  enabled: true, operatorStopped: false, practice: false,
+  redirectUri: 'https://acb.example.com/api/oauth/slack/callback', eventsUrl: 'https://acb.example.com/api/slack/events/c1',
+  grants: [slackGrant], history: [], ...over,
+})
+
+const coreView = (over: { enabled?: boolean; candidates?: string[]; choice?: string | null } = {}): CoreConnectorsView => {
+  const enabled = over.enabled ?? true
+  const candidates = over.candidates ?? (enabled ? ['google'] : [])
+  const choiceNeeded = candidates.length > 1 && !over.choice
+  const served = choiceNeeded ? null : over.choice ?? candidates[0] ?? null
+  return {
+    connectors: [{
+      id: 'google', label: 'Google Workspace', summary: 'メンバーが自分で許可すると、予定・メール・Meet の議事録を ACB が読みます。', status: enabled ? 'on' : 'off',
+      configured: true, enabled, operatorStopped: false,
+      roles: [
+        { role: 'calendar', label: '予定を読む', operations: ['read'], capabilities: [] },
+        { role: 'mail', label: 'メールを読む・送る', operations: ['read', 'send'], capabilities: [] },
+      ],
+      capabilities: [{ id: 'drive', label: 'Drive で選んだものを読む・置く' }],
+    }],
+    roles: [
+      { role: 'calendar', label: '予定を読む', candidates, choice: over.choice ?? null, servedBy: served, choiceNeeded },
+      { role: 'chat', label: 'チャットの連絡を受け取る・返す', candidates: [], choice: null, servedBy: null, choiceNeeded: false },
+    ],
+  }
+}
 
 type Reply = { status?: number; body: unknown }
 function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call) => Reply)> = {}, practice = false, plugins: PluginListItem[] = [item]) {
@@ -130,6 +167,8 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
     [`GET ${base}/plugins/corporate-sales`]: { body: ok(salesDetail) },
     [`GET ${base}/broker`]: { body: ok(broker(practice)) },
     [`GET ${base}/google`]: { body: ok(googleView({ configured: false, clientId: null, secretLast4: null, domain: null, enabled: false, grants: [] })) },
+    [`GET ${base}/connectors`]: { body: ok(coreView()) },
+    [`GET ${base}/slack`]: { body: ok(slackView({ configured: false, teamId: null, clientId: null, clientSecretLast4: null, hasBotToken: false, enabled: false, grants: [] })) },
     ...extra,
   } as Record<string, Reply | ((call: Call) => Reply)>
   const calls: Call[] = []
@@ -290,6 +329,33 @@ describe('つなぎ先', () => {
   })
 })
 
+describe('役割 of a business (plan C3)', () => {
+  const roles = (userIds: string[]) => ok({
+    pluginId: 'corporate-sales', label: '法人営業',
+    roles: [{ name: 'sales_manager', label: '営業の責任者', description: '金額の承認をする人', userIds }],
+    overrides: [], history: [],
+  })
+  it('lists each role by its label, says plainly when nobody holds it, and saves exactly the chosen members', async () => {
+    const saves: Call[] = []
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins/corporate-sales/roles`]: { body: roles([]) },
+      [`PUT ${base}/plugins/corporate-sales/roles/sales_manager`]: (call) => {
+        saves.push(call)
+        return { body: roles((call.body as { userIds: string[] }).userIds) }
+      },
+    }, false, [salesItem])
+    renderInCompany(<IntegrationsPage />)
+    const section = await screen.findByRole('region', { name: '役割' })
+    const role = within(section).getByRole('group', { name: '営業の責任者' })
+    expect(within(role).getByText('まだ誰も選ばれていません。')).toBeInTheDocument()
+    await userEvent.click(within(role).getByRole('checkbox', { name: '田中 太郎' }))
+    await userEvent.click(within(role).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ userIds: ['u_member'] })
+    for (const word of ['プラグイン', 'オントロジー', '型']) expect(section.textContent).not.toContain(word)
+  })
+})
+
 describe('つなぎ先 and the business using it, each on its own (owner decision 2026-11-01)', () => {
   it('a connector shows its key, readers and switch, no mapping or import, and names no business', async () => {
     const calls = stubApi(ownerCapabilities)
@@ -380,7 +446,7 @@ describe('つなぎ先 → Google', () => {
     renderInCompany(<IntegrationsPage />)
     expect(await screen.findByTestId('google-redirect-uri')).toHaveTextContent('https://acb.example.com/api/oauth/google/callback')
     expect(screen.getByText(/練習用の Google につながっています/)).toBeInTheDocument()
-    expect(screen.getByText(/予定と議事録を読む/)).toBeInTheDocument()
+    expect(screen.getByTestId('google-grant-u_member')).toHaveTextContent('予定と議事録を読む')
 
     // A typed secret is sent once, in the PUT, and the field is emptied.
     const secret = screen.getByLabelText('クライアント シークレット')
@@ -409,5 +475,126 @@ describe('つなぎ先 → Google', () => {
 
     const text = document.body.textContent ?? ''
     for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', 'オントロジー']) expect(text).not.toContain(word)
+  })
+  it('会社で使うもの: one switch per feature, sent as { feature, on }', async () => {
+    const saves: Call[] = []
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView()) },
+      [`PUT ${base}/google/features`]: (call) => { saves.push(call); return { body: ok(googleView({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })) } },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const list = await screen.findByTestId('google-company-features')
+    expect(list).toHaveTextContent('オン（下の「ファイル選び」を設定すると使えます）')
+    const inbox = within(list).getByText('受信を読む').closest('li')!
+    await userEvent.click(within(inbox).getByRole('button', { name: 'オフにする' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ feature: 'inbox', on: false })
+    expect(await within(inbox).findByRole('button', { name: 'オンにする' })).toBeInTheDocument()
+  })
+  it('Drive の ファイル選び: shows the page to allow, sends the API key once (password field), keeps it when left empty', async () => {
+    const saves: Call[] = []
+    const registered = googleView({ picker: { configured: true, appId: '123456789012', apiKeyLast4: 'wxyz', pageUrl: 'https://acb.example.com/api/google-picker' } })
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView()) },
+      [`PUT ${base}/google/picker`]: (call) => { saves.push(call); return { body: ok(registered) } },
+    })
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByTestId('google-picker-page')).toHaveTextContent('https://acb.example.com/api/google-picker')
+    const key = screen.getByLabelText('API キー')
+    expect(key).toHaveAttribute('type', 'password')
+    const KEY = 'AIzaFAKE-NOT-REAL-picker-key-0000wxyz'
+    await userEvent.type(key, KEY)
+    await userEvent.type(screen.getByLabelText('プロジェクト番号'), '123456789012')
+    await userEvent.click(screen.getByRole('button', { name: 'ファイル選びの設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ appId: '123456789012', apiKey: KEY })
+    await waitFor(() => expect(key).toHaveValue(''))
+    expect(document.body.innerHTML).not.toContain(KEY)
+    expect(key).toHaveAttribute('placeholder', expect.stringContaining('末尾 wxyz'))
+    await userEvent.click(screen.getByRole('button', { name: 'ファイル選びの設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves[1].body).toEqual({ appId: '123456789012' })
+  })
+})
+
+describe('つなぎ先 → Slack', () => {
+  it('shows the two addresses and the rotation rule, sends secrets and the bot key once, keeps them when left empty, stops a member', async () => {
+    const saves: Call[] = []
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/slack`]: { body: ok(slackView({ practice: true })) },
+      [`PUT ${base}/slack/app`]: (call) => { saves.push(call); return { body: ok(slackView({ practice: true })) } },
+      [`DELETE ${base}/slack/grants/u_member`]: { body: ok(slackView({ practice: true, grants: [{ ...slackGrant, status: 'stopped' }] })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByTestId('slack-redirect-uri')).toHaveTextContent('https://acb.example.com/api/oauth/slack/callback')
+    expect(screen.getByTestId('slack-events-url')).toHaveTextContent('https://acb.example.com/api/slack/events/c1')
+    expect(screen.getByTestId('slack-rotation-note')).toHaveTextContent('オフのまま')
+    expect(screen.getByText(/練習用の Slack につながっています/)).toBeInTheDocument()
+    // The member's own switch shows.
+    expect(screen.getByTestId('slack-grant-u_member')).toHaveTextContent('大事な知らせを DM で受け取る（本人がオフ）')
+
+    const secret = screen.getByLabelText('Slack のクライアント シークレット')
+    const bot = screen.getByLabelText(/ボットの鍵/)
+    expect(secret).toHaveAttribute('type', 'password')
+    expect(bot).toHaveAttribute('type', 'password')
+    await userEvent.type(secret, SLACK_SECRET)
+    await userEvent.type(bot, SLACK_BOT)
+    await userEvent.click(screen.getByRole('button', { name: 'Slack の設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ teamId: 'T0DIV', clientId: '1111.2222', clientSecret: SLACK_SECRET, botToken: SLACK_BOT })
+    await waitFor(() => expect(secret).toHaveValue(''))
+    expect(bot).toHaveValue('')
+    expect(document.body.innerHTML).not.toContain(SLACK_SECRET)
+    expect(document.body.innerHTML).not.toContain(SLACK_BOT)
+    // Saving again without typing sends no secret.
+    await userEvent.click(screen.getByRole('button', { name: 'Slack の設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves[1].body).toEqual({ teamId: 'T0DIV', clientId: '1111.2222' })
+
+    const row = screen.getByTestId('slack-grant-u_member')
+    await userEvent.click(within(row).getByRole('button', { name: '止める' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '止める' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === `${base}/slack/grants/u_member`)).toBe(true))
+  })
+})
+
+describe('つなぎ先 → つないでいるサービス', () => {
+  it('shows Google with what it does and its state, switches it with its own switch, and uses no jargon', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/connectors/google/enabled`]: { body: ok(coreView({ enabled: false })) },
+      [`GET ${base}/google`]: { body: ok(googleView({ grants: [{ ...googleGrant, features: ['minutes', 'inbox'], featuresOff: ['inbox'] }] })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const row = await screen.findByTestId('connected-service-google')
+    expect(row).toHaveTextContent('Google Workspace')
+    expect(row).toHaveTextContent('動いています')
+    expect(row).toHaveTextContent('予定を読む・メールを読む・送る・Drive で選んだものを読む・置く')
+    expect(screen.getByTestId('connected-role-calendar')).toHaveTextContent('Google Workspace')
+    expect(screen.getByTestId('connected-role-chat')).toHaveTextContent('つないでいるサービスがありません')
+    // The admin sees which member turned 受信を読む off themselves.
+    expect(await screen.findByTestId('google-grant-u_member')).toHaveTextContent('受信を読む（本人がオフ）')
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Google Workspace をオフにする' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT' && c.url === `${base}/connectors/google/enabled`)).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT' && c.url === `${base}/connectors/google/enabled`)!.body).toEqual({ enabled: false })
+    expect(await within(screen.getByTestId('connected-service-google')).findByText('オフ')).toBeInTheDocument()
+    expect(screen.getByTestId('connected-role-calendar')).toHaveTextContent('つないでいるサービスがありません')
+
+    const text = screen.getByTestId('connected-services').textContent ?? ''
+    for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', '役目', 'ロール', 'connector']) expect(text).not.toContain(word)
+  })
+
+  it('only when two services could do the same job, the admin is asked which one; the choice is sent by id', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/connectors`]: { body: ok(coreView({ candidates: ['google', 'microsoft365'] })) },
+      [`PUT ${base}/connector-roles/calendar`]: { body: ok(coreView({ candidates: ['google', 'microsoft365'], choice: 'google' })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const select = await screen.findByLabelText('予定を読むに使うサービス')
+    expect(select).toHaveValue('')
+    expect(screen.queryByLabelText('チャットの連絡を受け取る・返すに使うサービス')).toBeNull()
+    await userEvent.selectOptions(select, 'google')
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT' && c.url === `${base}/connector-roles/calendar`)).toBe(true))
+    expect(calls.find((c) => c.url === `${base}/connector-roles/calendar`)!.body).toEqual({ connectorId: 'google' })
   })
 })

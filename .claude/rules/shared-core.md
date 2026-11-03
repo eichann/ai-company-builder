@@ -34,24 +34,34 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
 | `yaml-lite.ts` | the strict YAML subset of type definitions and record files (`parseYamlLite`, `splitFrontmatter`) (`records.md`) |
-| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES`; the push checker uses it too |
+| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES` (`request`, `bundle`), the tags kind's value rule (`normalizeTag` / `normalizeTagsValue` / `parseTagsValue`); the push checker uses it too |
 | `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId`, `appendHistoryLine` |
 | `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
 | `core-types.ts` | the core types `task` and `interaction`, in the definition format |
+| `slack.ts` | the Slack connection's member features (`SLACK_FEATURES`), host, callback / events paths, practice values (`isPracticeSlackSecret`) (`slack-connector.md`) |
 | `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 | `fixed-content.ts` | `canonicalJson` (sorted keys, NFC, nothing trimmed): what the server hashes (`sha256:…`) to fix approved / sent content; the app only echoes a hash |
 | `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
 | `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
 | `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
+| `calendar.ts` | 「今日の予定」: the neutral `CalendarEvent`, `CalendarTodayReason`, `dayWindow` (the company's day), `DEFAULT_COMPANY_TIME_ZONE` (`calendar.md`) |
 | `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
-| `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
+| `business-days.ts` | business days: weekends, Japanese public holidays calculated from the law (no network; `LAW_EXCEPTIONS` for year-specific changes), company holidays, `nextBusinessDay` (`tasks.md`) |
+| `viewers.ts` | 見られる人: the phrase for who can see a record or a file (`viewersLabel`, `records.md` "Who can see it") |
+| `task-settings.ts` | the company's task settings (`parseTaskSettings`, defaults, `workSwitchPoliciesOf`) and `replyTarget` (返事の目安, Japan time) (`tasks.md`) |
+| `work-switches.ts` | each member's own 受信を読む / AI が自動で進める within the company's (`workSwitchOn`, `chooseWorkSwitch`; `tasks.md`) |
+| `absences.ts` | absence and the delegate (代わりの人): `delegation(periods, day)` → `actsFor` / `coverOf` (the one resolution, no chains), `parseAbsenceInput` (`records.md` "Absence and the delegate") |
+| `plugins.ts` | connector plugins, the one entry point (re-exports; `plugins.md`): the declaration (`plugin-declaration.ts` shape, `plugin-declaration-rules.ts`, `plugin-manifest.ts` `parsePluginManifest` with `plugin-connector-declaration.ts` / `plugin-business-declaration.ts`), the package (`plugin-package.ts` `validatePluginPackage`, `combineUse`), the mapping (`plugin-mapping.ts` `parsePluginMapping`), field policies (`plugin-policies.ts`: external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways (`plugin-values.ts`), `available_to` |
+| `connector-roles.ts` | the core roles (役目) `calendar` / `mail` / `meetings` / `chat` with their operations and optional capabilities (`CONNECTOR_ROLES`; Drive is not a role), `roleServingProblems`, `resolveRole` (the admin's choice when two could serve), `hasRoleCapability` (`connector-roles.md`) |
+| `identity.ts` | 名寄せ: a 相手's matching keys (`identityKeysOf`, `normalizeDomain`), `FREE_MAIL_DOMAINS` / `isFreeMailDomain` (never a company domain), `autoMatch` (same address, same company domain, same kind, never a held record), `readIdentityProposal` (`identity.md`) |
+| `intake-settings.ts` | 来た連絡: the company's intake settings (`parseIntakeSettings`, defaults), `routeIncoming` (who a new message belongs to: internal / To / CC / shared address / bulk), `companyDomains`, `pollWindow` (7 days read back, the rest a gap) (`inbox.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`records.ts`, `plugins.ts`, `index.ts`).
+`records.ts`, `plugins.ts`, `task-settings.ts`, `index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)

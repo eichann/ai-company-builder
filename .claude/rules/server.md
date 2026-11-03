@@ -14,7 +14,7 @@ access in `company-files.md`. Full text and incidents: `docs/architecture/server
 ## Layers (R5)
 
 ```
-routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service, map the answer
+routes/    HTTP only: a guard (routes/guards.ts), parsed input, call a service, map the answer
   → services/   business rules; authorization through services/access.ts (shared/core roles)
     → ports/    interfaces (CompanyDataSource = company handles, repositories, RepoStore, CompanyLock, Clock/IdGenerator,
                 AccountDirectory, SecretCipher, UpstreamClient, Transactions)
@@ -22,14 +22,15 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
                       company-files.ts, orphaned-scopes.ts (git + orphaned_scopes table),
                       private-folders.ts (scope repositories + their rows),
                       local-secret-cipher.ts, kek-file.ts, upstream-https.ts
-src/composition.ts — the only module that imports adapters; routes take `services` from it
-src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts), each its own composition root
+src/composition.ts — the only module that imports adapters (with its lane parts composition/*.ts); routes take `services` from it
+src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts, erase-content.ts), each its own composition root
 ```
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
   shared/core types), services only ports / services / shared / pure lib, only the composition
   root imports adapters (and `db/index.ts`, whose startup seeding runs
-  `adapters/sqlite/permission-store.ts` on the connection it migrates), no route runs SQL or
+  `adapters/sqlite/permission-store.ts` and the content-store move on the connection it migrates;
+  the `db/schema/*` modules import no adapter), no route runs SQL or
   imports `db` (git-http's push snapshot, private-folder lookups and orphan checks use
   `services.access` / `services.companyScopes` with the Member), and `lib/` does not import the database except the modules listed in
   `LIB_WITH_DATABASE` with their reason (only `lib/auth.ts`: Better Auth's own connection, next
@@ -80,6 +81,60 @@ src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts
   link tokens, the relay, service names that set this company's own row). A new endpoint that
   takes an id gets its `CROSS` row in the same PR.
 
+## Route guards (2026-11-02, required before the next release)
+
+Every endpoint names, as its first handler, a guard from `src/routes/guards.ts`, so a forgotten
+sign-in or membership check cannot be written:
+
+```ts
+route.get('/things', companyMember, (c) => things.list(c.var.member))          // session + member of :companyId
+route.put('/things', companyMember, serviceBody, (c) => things.save(c.var.member, c.var.body))
+route.post('/x', companyMember, body(XInput), (c) => …c.var.body…)            // zod; bad input → 400 fixed text
+route.get('/', signedIn, (c) => …c.var.user…)                                   // session, no company
+route.post('/hook', publicRoute('what proves the caller'), (c) => …)            // + PUBLIC_ENDPOINTS
+```
+
+Also: `companyAdmin(error)` (owner/admin only; members and non-members alike get 403 `{ error }` —
+the endpoints that always answered so: invitations, adding / removing members),
+`companyMemberNotFound(body)` (the endpoint's own 404 body for a non-member: `/api/git`),
+`signedInOr(error)` (the endpoint's own 401 text), `aiReads` / `aiActs` (a record token on
+/api/records-ai, `c.var.holder`; records.md), `ownCredential(reason)` (git-http's Basic auth, the
+key broker's relay token; still 401 without it). Company routes always name the company
+`:companyId` (companies.ts too). Where a role check must answer before the body (403 before 400),
+take `serviceBody` and parse it with a zod schema in the handler after that check.
+
+- `companyMember`: 401 `{ error: 'Unauthorized' }` without a session; 404 `Company not found or
+  access denied` for a non-member (same as a company that does not exist). The handler uses
+  `c.var.member` (company, user, role from the server) and never reads `companyId` from the URL.
+  Role checks stay in the services (their 403 texts are part of the API).
+- `body(schema, error?)` / `query(schema, error?)` (zod): the 400 answer is a fixed text, never
+  the request's values or zod's message. They run before the handler, so use them only where the
+  endpoint answered 400 before any role check; a service that checks the role first and then its
+  own `unknown` input gets `serviceBody` (null when not JSON), keeping who → body → rules.
+- Enforcement: `tests/security/auth-guards.test.ts` fails for an endpoint whose first handler is
+  not a guard, and for `publicRoute` outside `PUBLIC_ENDPOINTS`; `eslint.config.mjs` forbids
+  `getUserFromRequest`, `c.req.json()` and `c.req.param('companyId')` in `src/routes`
+  (`guards.ts` and the app-wide `client-activity-middleware.ts` excepted) — errors, no
+  exceptions list (every route was moved by 2026-11-02).
+- `guard-tags.ts` holds the guard registry and `publicRoute` without the session or composition
+  imports, so a public route factory (`slack.ts`) stays light.
+
+## Lane markers (parallel lanes A connectors, B inbox, C plugins)
+
+Three lanes add server code in parallel; these spots are where they would collide, so each has
+markers `// lane A ▼` … `// lane C ▲` (the ▲ lines keep the blocks apart for git):
+
+- `src/composition/{connectors,inbox,plugins}.ts` — each lane wires its services in its own file;
+  `createServices` calls each once on its own line (between the markers) and spreads the result
+  into `services`. These files may import adapters like `composition.ts` (layering test).
+- `src/app.ts` (route imports and `app.route` lines), `src/db/index.ts` (imports, `SCHEMA`,
+  migration calls), `ports/company-data.ts` and `adapters/sqlite/company-data.ts` (imports and
+  handle fields), `tests/unit/company-scoped-sql.test.ts` (`HANDLE_TABLES`, `HANDLE_FACTORIES`),
+  `tests/integration/permission-matrix.test.ts` (`MATRIX`, `CROSS`, `NOT_OBJECT_IDS`).
+
+A lane adds lines only right under its own `▼`, never moves or removes a marker, and keeps its
+tables in its own `db/schema/<lane file>.ts` (idempotent migrations, no numbers).
+
 ## Company handle (「会社つきの手形」, multi-tenant foundation 案 A, 2026-10-31)
 
 One SQLite database holds every company; cross-company access is made impossible by
@@ -98,12 +153,15 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   company key of the same company) and `connectors` (the Google connection: OAuth client,
   members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`)
   and `outbound` (mail drafts, their recipients per version, typed addresses, send attempts,
-  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`).
+  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
+  department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
+  (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
+  `records.md` "Execution runs").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
 - `scope_rules` / `department_managers` got `company_id` later (2026-10-31,
-  `db/index.ts` `migrateRuleAndManagerCompanies`, every startup, idempotent): added nullable
+  `db/schema/permissions.ts` `migrateRuleAndManagerCompanies`, every startup, idempotent): added nullable
   (additive: an older build still inserts without it) + index; rows still without it get the
   company of their scope / department, rows whose parent is gone are removed (they belong to no
   company; counts are logged, nothing named). Triggers keep it non-null and correct: an INSERT
@@ -149,13 +207,14 @@ GET  /api/config                                  setup state (no auth)
 *    /api/auth/**                                 Better Auth; sign-up after the first user
                                                   needs X-Invitation-Token
 /api/me                       GET                 me.ts (no PATCH: it never saved)
-/api/companies                GET /, GET /:id, POST /, PATCH /:id,
-                              GET /:id/members, POST /:id/members,
-                              PUT /:id/members/:userId/role, DELETE /:id/members/:userId,
-                              GET /:id/client-activity                       companies.ts
+/api/companies                GET /, GET /:companyId, POST /, PATCH /:companyId,
+                              GET /:companyId/members, POST /:companyId/members,
+                              PUT /:companyId/members/:userId/role, DELETE /:companyId/members/:userId,
+                              GET /:companyId/client-activity                companies.ts
 /api/companies/:companyId/departments
                               GET /, GET /:id, POST /, PUT /:id, DELETE /:id, GET /:id/stats,
-                              POST /reorder, POST /sync, GET|PUT /:id/managers  departments.ts
+                              POST /reorder, POST /sync, GET|PUT /:id/managers,
+                              GET|PUT /:id/members (所属する部署: tasks.md)     departments.ts
 /api/companies/:companyId/folder-sizes  GET ?path=&measure=                  folder-sizes.ts
 /api/companies/:companyId/files         GET /tree, /content, /search          company-files.ts
 /api/companies/:companyId     GET /overview, /permissions, /me/capabilities (+ canViewAgentEvents), /me/write-access
@@ -175,18 +234,30 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET|PUT /second-opinion                         second-opinion.ts
+                                                                (もう一方の AI に聞く: chat-and-agents.md)
+                              GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
+                              GET /home, PUT /home/holidays-checked           admin-home.ts
+                                                                (管理画面のホーム: "Admin home" below)
+                              POST /viewers (見られる人)                      viewers.ts
+                                                                (やることの一覧の設定: tasks.md)
                               GET|POST /agent-stops, DELETE /agent-stops/:stopId,
                               GET /me/events (SSE push channel)               agent-stops.ts
                                                                 (緊急停止: agent-stop.md)
+                              GET|POST /absences, DELETE /absences/:absenceId
+                                                                (代わりの人: records.md)   absences.ts
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service (+ /own-keys, /read-only),
+                              PUT /broker/services/:service (+ /own-keys, /read-only, /default-key),
                               PUT|DELETE /broker/relay-services/:service,
                               PUT /broker/settings, POST /broker/stop-all,
                               POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+                              GET /me/notifications, POST /me/notifications/read,
+                              GET|PUT /me/notifications/settings              notifications.ts
+                                                                (知らせ: notifications.md)
                               GET|PUT /records/settings, GET /records/problems,
                               POST /records/reindex, GET /records/types,
                               POST /records/query, GET /records/item/:recordId,
@@ -195,6 +266,10 @@ GET  /api/config                                  setup state (no auth)
                               POST /records/item/:recordId/file-links (+ /remove),
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
+                              GET /ai-runs, POST /ai-run-claims, GET /ai-runs/:runId,
+                              POST /ai-runs/:runId/renew | finish | retry,
+                              POST /ai-runs/:runId/operations/:key/reconcile   ai-runs.ts
+                                                                (実行の管理, S10b: records.md "Execution runs")
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
@@ -208,17 +283,19 @@ GET  /api/config                                  setup state (no auth)
                               POST /outbound-recipients, POST /outbound,
                               GET|PUT /outbound/:messageId, GET|POST …/recipients,
                               POST …/send, POST …/resolve, POST …/discard  outbound-mail.ts
-                                                                (送るメール: outbound-mail.md)
+                                                                (送るもの: outbound-mail.md)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
                               the state finds the company (google-connector.md)  oauth.ts
                               GET|PUT /google/minutes-folder, POST /me/minutes/check,
                               GET /me/minutes/item/:recordId/text,
-                              POST /me/minutes/item/:recordId/deal               minutes.ts
+                              POST /me/minutes/item/:recordId/bundle             minutes.ts
                                                                 (議事録の取り込み: minutes.md)
+                              GET /me/calendar/today                          calendar.ts
+                                                                (今日の予定: calendar.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
                               POST /item/:recordId/file-links (+ /remove),
-                              GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
+                              GET /minutes/:recordId/text, POST /minutes/:recordId/bundle,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId,
                               POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId
@@ -241,14 +318,14 @@ GET  /api/config                                  setup state (no auth)
 `/api/git` has only the repo URL (members of that company; others 404) — no server path, no
 legacy `sshUrl`. Repository administration is not an API: creating a company creates its
 repository, and startup configures every repository and hook. The SSH-key and `/api/sync` routes
-were removed in R1 (the `ssh_keys` table is still created by `db/index.ts` but nothing uses it).
+were removed in R1 (the `ssh_keys` table is still created by `db/schema/company.ts` but nothing uses it).
 The admin console's calls are pinned by `server/tests/integration/admin-contract.test.ts`
 (`shared-core.md`).
 
 ## Accounts and roles
 
-- Only owners grant owner/admin: `PUT /companies/:id/members/:userId/role`,
-  `POST /companies/:id/members` with role owner/admin, and admin invitations are owner-only (an
+- Only owners grant owner/admin: `PUT /companies/:companyId/members/:userId/role`,
+  `POST /companies/:companyId/members` with role owner/admin, and admin invitations are owner-only (an
   admin adding a second account of their own as owner could take the company over).
 - Nobody is put into a company without agreeing (2026-10-31): people join by accepting an
   invitation (existing accounts of other companies too). `POST …/members` adds only an account
@@ -262,11 +339,27 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   address), plus the first account of a fresh server while no company exists; anyone else 403
   `COMPANY_CREATION_RESTRICTED` (Japanese `error`: released apps show it as is). Checked before
   the body. `tests/integration/company-creation.test.ts`, `tests/unit/company-creation-policy.test.ts`.
+  `GET /api/me` answers the same check as `canCreateCompany` (`mayCreate(user.id).ok`, this
+  account only; nothing about who the operators are), and the admin console and desktop app show
+  「会社を作成」 only when it is not `false` (absent from an older server: shown, still refused;
+  owner decision 2026-11-02). A non-operator with no company is told to open their invitation
+  link. Same test file; `admin/tests/company-creation.test.tsx`, `client/tests/ui/company-selector.spec.ts`.
 - Company slugs are unique across the server, so a new one never depends on whether another
   company has a slug (2026-10-31; before, `abe` taken → `abe-2` told the creator so): always the
   sanitized requested slug or name (or `company`) + `-` + the first 8 characters of the new
   company's own id (the whole id in the unlikely case those collide). Existing slugs are never
   changed; nothing routes by slug. `tests/integration/company-slug.test.ts`.
+- Creating a company is all or nothing (2026-11, `services/companies.ts` `tryCreate`): the
+  repository and its seeded department folders first (async), then the company, owner
+  membership, default departments and permission scopes in one `transactions.run`. Any failure
+  rolls the rows back, removes the repository (`RepoStore.removeCompanyRepo`) and answers 503
+  `COMPANY_CREATION_FAILED` (Japanese `error`, shown as is by the admin console). Before, a
+  company without its repository, departments or scopes was created and reported as success.
+  `tests/integration/company-seeding.test.ts`.
+- `GET …/departments` and `GET …/departments/:id/stats` answer 500 when git cannot read them,
+  never `success: true` with `[]` / "0 files, no folder" (a broken company looked like one
+  without departments; a full folder looked empty in the delete warning).
+  `departments-list.test.ts`, `department-stats.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
   (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
@@ -276,6 +369,16 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   records the account (`signup_user_id`); a second sign-up with the link is refused; accepting is
   a compare-and-set on `used_by` and, for a claimed link, only by that account.
   `expiresInDays`: integer 1–30 (default 7).
+- An invitation may carry 所属 (`departmentIds`, 2026-11-02, 管理画面の見直し 2-2): unique ids of
+  the inviting company's departments (owner / admin, as for invitations; another company's id
+  answers 400 like an unknown one, nothing created; `invitations.department_ids`, JSON). Accepting
+  adds those `department_members` rows (created by the inviter) in the accept transaction,
+  skipping a department deleted since; the app's first setup downloads exactly them
+  (`download-choices.md`). The public `GET /invitations/:token` answers `inviterName` and
+  `departmentNames` for the page (「〇〇さんが、（会社名）に招待しています」); `/api/config` answers
+  `appDownloadUrl` (`APP_DOWNLOAD_URL`, https only, `lib/config.ts`). The page's 「アプリを開く」
+  is `ai-company-builder://open?server=<origin>` (`admin/src/lib/app-link.ts`): the origin only,
+  never the token. `account-security.test.ts` 「所属 on the link」, `admin/tests/invite.test.tsx`.
 - Permission model: `resolveAccess` / `writeAccessSummary` / `canReadPrivateScope` live in
   `shared/core/permissions.ts` (moved from `server/src/lib/permissions.ts` in R2); storage in
   `adapters/sqlite/permission-store.ts` behind `ScopeRepository`. Reads: `services/permission-views.ts`
@@ -285,6 +388,11 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   rolled back by throwing, 409 `OUTDATED_CLIENTS`). With the default seed (`everyone: read + write` on the company
   scope) nothing is restricted. Managers (`departments/:id/managers`) may manage their
   departments' private folders and instruction files.
+- Words (owner decision 2026-11-02): a department manager (`department_managers`) is
+  **「部署の管理役」** on every screen, message and server sentence (admin console, app, push-check
+  report, errors). 「責任者」 means only the owner of a 案件・プロジェクト (a type's `owner` field), and a
+  business plugin's own role labels (e.g. 営業の責任者) stay as the plugin declares them. Identifiers
+  (`department_managers`, `dept_manager`, `managerIds`) and wire markers do not change.
 
 ## Departments
 
@@ -322,8 +430,26 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `adapters/git-repo-store.ts`) seeds the default department folders the same way (root commit;
   async, under the lock, before the 201). `gitAsync` with `timeoutMs` (adjustable with
   `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
-  process group, hook included, and fails the change (a seeding failure still creates the
-  company).
+  process group, hook included, and fails the change (a seeding failure fails the whole
+  company creation, below).
+
+## Admin home
+
+`GET /api/companies/:companyId/home` (`routes/admin-home.ts` → `services/admin-home.ts`) is the
+admin console's home (管理画面の見直し 2-1): 「最初にやること」 and 「対応が必要なこと」 in one answer.
+
+- Owner / admin: six steps, each judged from the company's own data — a department exists; two
+  or more members; every department has someone who belongs to it (所属; a 部署の管理役 is only
+  counted as a hint); Google usable (`byOperator`: the operator registers it, owner decision
+  2026-11-02); a minutes folder chosen; 「会社の休みを確かめた」. The last is the one mark set by
+  hand (`PUT /home/holidays-checked { checked: true }`, owner/admin; table `admin_setup_marks`
+  behind the handle's `tasks`; the first time is kept). Attention: the overview's lists
+  (`permission-views.ts`) plus the count of one meeting's outputs made twice and the plugins that
+  are on but cannot run.
+- A department manager who is not an owner / admin: no steps; only the sync and app state of the
+  members who belong to the departments they manage. Blocked syncs and orphaned rules are left
+  out (their paths may name a private folder the manager does not read). Anyone else 403.
+  Test: `tests/integration/admin-home.test.ts`.
 
 ## Request log
 
@@ -347,7 +473,13 @@ line and `X-Request-Id`, carried by `AsyncLocalStorage` in `lib/request-log.ts`)
 code locations — not the message. git-http drains `git http-backend`'s stderr without logging
 it, and no longer logs the member's email or `PATH_INFO`. Services may import `lib/error-log`
 (listed in `layering.test.ts` with that reason). Tests: `tests/unit/error-log.test.ts`, and
-`tests/integration/request-log.test.ts` (a git failure naming a private folder in three routes). Test: `tests/integration/request-log.test.ts` (captures
+`tests/integration/request-log.test.ts` (a git failure naming a private folder in three routes).
+An error no route handled reaches `app.onError` (`app.ts`): it is logged the same way
+(`[http] Unhandled error in a request: <kind> request=<id>`) and answered with the fixed
+500 `{ error: 'サーバーでエラーが起きました', code: 'INTERNAL' }` (no message, no stack; an
+`HTTPException` keeps its own answer); an unknown path answers 404
+`{ error: 'Not found', code: 'NOT_FOUND' }`. Routes still answer their own errors first. Test:
+`tests/integration/unhandled-errors.test.ts`. Test: `tests/integration/request-log.test.ts` (captures
 every console output while sending paths, search terms, a relay `?key=` token and an invitation
 token).
 
@@ -358,12 +490,29 @@ All git in request handlers is async (`execFile`, `lib/git-exec.ts`).
 in `server/src` outside an allow-list (today only startup-time `configureBareRepo` in
 `lib/git-server/index.ts`). Spawned searches are queued and bounded (`company-files.md`).
 
+## Jobs on a timer
+
+Started once per process by `index.ts` (never by `composition.ts`, which tests import), timers
+unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
+**server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
+clock"). A new time-based job goes into the server clock rather than a timer of its own, and
+keeps its rules: never runs the AI, writes records only through the engine's writers, takes
+each company through its own handle with a per-company limit and a yield between companies,
+refuses to overlap itself, and derives everything from stored rows (a restart or a second run
+changes nothing more).
+
 ## Database and data
 
 - SQLite through better-sqlite3 (no ORM): `data/app.sqlite` (app) and `data/auth.sqlite`
   (Better Auth; one WAL connection for the process, `lib/auth.ts` `authDb`, also used by
-  `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
-  columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
+  `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema: one module per area in `server/src/db/schema/` (company, permissions, agents,
+  broker, records, plugins, connectors, fixed-payloads, tasks, content-store, outbound-mail,
+  notifications, ai-runs), each with its tables, indexes and migrations; `server/src/db/index.ts`
+  `initDatabase` is the one ordered entry point: every area's `CREATE TABLE IF NOT EXISTS` in one
+  batch at startup (a new area goes in its `SCHEMA` list), then the migrations in a fixed order,
+  then the permission seeding. Columns added later get an idempotent check-then-`ALTER TABLE`
+  (e.g. `migrateInvitationClaims`). A migration that runs an adapter stays in `db/index.ts`
+  (`migrateRecordContents`); tests import every migration from `src/db`.
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
   `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a

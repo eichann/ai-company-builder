@@ -2,9 +2,12 @@ import type { UIMessage } from 'ai'
 import type { ChatSession } from '../../shared/chat-history'
 import type { HandoffState } from './store'
 import { matches } from './store'
+import { RESTORED_TOOL_PART_TYPE } from '../../shared/tool-display'
 
 export function visibleContent(message: UIMessage): string {
-  return message.parts.map(p => p.type === 'text' ? p.text : p.type === 'dynamic-tool' ? `\n[Tool: ${p.toolName}]` : p.type.startsWith('tool-') ? `\n[Tool: ${p.type.slice(5)}]` : '').join('')
+  return message.parts.map(p => p.type === 'text' ? p.text : p.type === 'dynamic-tool' ? `\n[Tool: ${p.toolName}]` : p.type.startsWith('tool-') ? `\n[Tool: ${p.type.slice(5)}]`
+    // A restored conversation's tool call (chatSessionMessages.ts): the same marker it was stored as.
+    : p.type === RESTORED_TOOL_PART_TYPE ? `\n[Tool: ${String((p as { data?: { toolName?: unknown } }).data?.toolName ?? '')}]` : '').join('')
 }
 const MAX_CONTEXT_BYTES = 32 * 1024
 /** Never omit an unsummarized interval. Stop safely if the saved memo has fallen too far behind. */

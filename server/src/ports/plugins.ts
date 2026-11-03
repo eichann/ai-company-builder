@@ -19,8 +19,16 @@ export interface PluginPackageFiles {
   /** Type name → the text of `types/<name>.md`. */
   types: Record<string, string>
   mapping: string | null
-  /** sha256 over every file of the package (names and contents), hex. */
+  /** Contract 2: `steps/<file>.md` → its text (empty otherwise). */
+  steps: Record<string, string>
+  /** Contract 2: the paths of the files under `ui/` (their bytes count in `fingerprintV2`). */
+  ui: string[]
+  /** The signature slot (`signature.yaml`) as written, or null. Not verified. */
+  signature: string | null
+  /** v1: sha256 over every file of the package (names and contents), hex — the fingerprint of a contract-1 package. */
   fingerprint: string
+  /** v2 (`shared/core/plugin-fingerprint.ts`): the fingerprint of a contract-2 package. */
+  fingerprintV2: string
 }
 
 export interface PluginShelfScan {
@@ -38,6 +46,12 @@ export interface PluginShelfSource {
    * but cannot be read).
    */
   stopped(): Promise<string[]>
+  /**
+   * One package folder's files, read again with the same rules as `scan`
+   * (plan C2: what the app is handed), with the v2 fingerprint of what was
+   * read. Null when the folder is gone or no longer passes those rules.
+   */
+  files(dir: string): Promise<{ files: Array<{ path: string; bytes: Uint8Array }>; fingerprintV2: string } | null>
 }
 
 export interface PluginInstallRow {
@@ -127,6 +141,8 @@ export interface PluginOperationRow {
   actorKind: 'human' | 'ai'
   actorSource: string | null
   conversationId: string | null
+  /** The AI's execution run (S10b) the operation was made in; null otherwise (absent on rows built before). */
+  runId?: string | null
   state: PluginOperationState
   /** JSON: the ACB fields and values asked for. */
   fields: string

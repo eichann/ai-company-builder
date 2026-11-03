@@ -59,14 +59,20 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   checks a key once when it is saved.
   Staging only: `ACB_ALLOW_FAKE_UPSTREAMS=1` + `ACB_FAKE_HUBSPOT_URL` (loopback, `localhost` or
   `host.docker.internal`, port only) send the broker's HubSpot requests to the practice HubSpot,
-  and `ACB_FAKE_GOOGLE_URL` every Google request to the practice Google — per service, each
-  variable redirects only its own (`google-connector.md`);
+  `ACB_FAKE_GOOGLE_URL` every Google request to the practice Google and `ACB_FAKE_SLACK_URL`
+  every Slack request to the practice Slack — per service, each variable redirects only its own
+  (`google-connector.md`, `slack-connector.md`);
   passed through by `docker-compose.yml` only — **never add them to the production compose
   file**. The server ignores them under `NODE_ENV=production` or a non-local `PUBLIC_URL`
   (`lib/config.ts` `practiceUpstreamsFrom`, `key-broker.md`).
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
   never prints a URL or query (`lib/request-log.ts`, `server.md` "Request log"), so no relay
   token in `?key=` either.
+- Plugin packages (`PLUGINS_DIR`, read-only for the api, outside `DATA_DIR`; the compose files do not
+  mount it yet) come from private repositories through `server/src/cli/collect-plugins.ts`, run on
+  the host or the operator's machine with `gh` signed in, against the operator's `plugins.lock`
+  (fingerprint v2 per package; refuses on any mismatch). Then restart the api. Details: `plugins.md`
+  "Where packages come from".
 - `OPERATOR_USER_IDS` (comma-separated user ids; a signed-in operator sees theirs at
   `/api/me`) and `COMPANY_CREATION_POLICY` (`operator`) decide who creates companies after the
   first one (`server.md` "Accounts and roles"); passed through by both compose files.
@@ -122,25 +128,65 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
 - Export while the server runs is consistent for the rows (one read transaction). A push that
   lands between the rows and the bundles is in the bundle but not in the rows' view; for an
   exact copy, export during maintenance.
+- An archive (like any backup) taken before an erasure of content still holds that text: after a
+  restore, re-apply the erasure log (`records.md` "Erasing: the operator's runbook").
 - Deleting a company is designed but not a command (needs the retention promise first); the
   steps are in the CLI's header comment.
 
 ## CI
 
 - `.github/workflows/ci.yml`: job `changes` runs `.github/scripts/changed-areas.sh`, which emits
-  `sync`, `client`, `ui`, `perf`, `universal`, `server`, `admin` = true/false for pull requests
-  (everything true on push to main, nightly at 18:17 UTC, and manual runs). A path in `COMMON`
+  `sync`, `client`, `clientmac`, `ui`, `perf`, `universal`, `server`, `admin` = true/false for
+  pull requests (push to main: the Linux areas only — `client`, `ui`, `server`, `admin` — since its
+  PR ran the macOS ones; nightly at 18:17 UTC and manual runs: everything). A path in `COMMON`
   (manifests, lockfile, `patches/`, the workflow, `.github/actions/`, the script itself) runs
   every job. A job skipped by its `if` reports success, so required checks pass for PRs that do
-  not touch them. When a test starts loading files outside its area's list, extend the list.
-- Jobs: Typecheck (all packages, ubuntu), Lint (changed files, `lint-changed.sh`), Client tests
-  (macOS), Renderer UI tests (macOS), Sync harness 1–4/4 + the aggregate "Sync harness (macOS)",
-  Performance baselines (macOS), Universal bundled git (macOS), Server tests (ubuntu, vitest),
-  Admin tests (ubuntu, vitest + jsdom).
+  not touch them. `check-areas.mjs` (step in "Lint (changed files)") follows each area's test
+  imports with esbuild and fails, naming the files, when a list misses one: extend the list.
+- macOS runners are scarce (all PRs share a few), so only what needs a Mac runs on one. Jobs:
+  Typecheck (all packages, ubuntu), Lint (changed files, `lint-changed.sh`, + `check-areas.mjs`),
+  Client tests 1/2 (Linux) + 2/2 (macOS) + the aggregate required "Client tests (macOS)"
+  (ubuntu; `client-tests.mjs`, `testing.md`), Renderer UI tests (Linux), Renderer bundle size
+  (Linux), Sync harness 1–4/4 (macOS) + the aggregate "Sync harness (macOS)", Performance
+  baselines (macOS), Universal bundled git (macOS), Server tests (ubuntu, vitest), Admin tests
+  (ubuntu, vitest + jsdom). Required: Typecheck, Lint (changed files), Server tests, Client tests
+  (macOS), Sync harness (macOS) — keep those names (branch protection), or change protection with
+  them.
+- Every macOS job's `runs-on` is `needs.changes.outputs.mac-runner`: the repository variable
+  `MAC_RUNNER` (a self-hosted Mac's label) for pushes, nightly/manual runs and PRs from branches of
+  this repository; `macos-latest` when the variable is unset and **always for a fork's PR**. See
+  "Self-hosted Mac runner".
 - `.github/workflows/docker-images.yml` builds and smoke-tests both images on PRs that touch the
-  Dockerfiles, compose files, manifests or lockfile (both Dockerfiles once went unbuildable on
-  main unnoticed). Nothing is pushed.
+  Dockerfiles, compose files, manifests, lockfile, `shared/`, the server's source or the admin's
+  source and build config (`admin/src`, `public`, `next.config.ts`, `tsconfig.json`, …) (both
+  Dockerfiles once went unbuildable on main unnoticed). Nothing is pushed.
 - The token is read-only and fork PRs must work without secrets; keep new jobs that way.
+
+## Self-hosted Mac runner (optional)
+
+A spare Mac can take the macOS jobs: set the repository variable `MAC_RUNNER` (Settings →
+Secrets and variables → Actions → Variables) to its runner label, e.g. `acb-mac`. This repository
+is public, so anyone can open a PR; code from a fork must never run on that Mac.
+
+- Two walls: the workflow sends fork PRs to `macos-latest` (`mac-runner` in job `changes`), but
+  a fork PR runs its own copy of `ci.yml` and could name the label itself, so the runner refuses
+  them too — its job-started hook (`ACTIONS_RUNNER_HOOK_JOB_STARTED`) fails any job that is not a
+  push, schedule, manual run or same-repository PR. Also set Actions → "Approval for running fork
+  pull request workflows" to **all external contributors**, and read a fork's `.github/` diff
+  before approving.
+- The Mac: a dedicated standard (non-admin) macOS user that runs only the runner, with no
+  production keys, SSH keys, cloud credentials, `gh` login, keychain items or personal files;
+  FileVault on; Xcode Command Line Tools, Rosetta and nothing else installed by hand. Register a
+  repository runner with only the custom label (`./config.sh --labels acb-mac`); the owner
+  creates the registration token in the GitHub UI (Settings → Actions → Runners → New), never an
+  agent. Each job starts clean: the job-completed hook deletes `_work`, the runner user's
+  `$TMPDIR` and caches outside the tool cache (or use `--ephemeral` with re-registration).
+- Several runner instances on one Mac let the four sync shards run in parallel; one instance
+  runs them one after another.
+- Stopping: delete the `MAC_RUNNER` variable (new runs go back to `macos-latest` at once; queued
+  jobs keep waiting for the Mac, so re-run them), then `./svc.sh stop` / `./svc.sh uninstall` and
+  remove the runner in Settings → Actions → Runners. If the Mac is offline while the variable is
+  set, macOS jobs wait for it — delete the variable.
 
 ## Desktop app runtime (Electron)
 
@@ -148,6 +194,18 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   team supports the latest three stable majors, so plan the next bump before then) with
   electron-builder 26. Electron 45 runs on **macOS 13 (Ventura) or later** (Electron 44 dropped
   macOS 12); Windows 10+. Voice input additionally needs macOS 26 (`voice-input.ts`).
+- Platforms (`client/package.json` `build`): **macOS** (dmg + zip) is the shipped, CI-verified
+  app — the sync harness, the macOS-dependent client tests (spawn wrappers, FSEvents,
+  case/NFD-insensitive volume, Swift), the perf baselines and universal git run on macOS; the
+  other client tests, the UI tests and the bundle size run on Linux (nothing in them depends on
+  the OS).
+  **Windows** (nsis) is built but not CI-verified: its code paths are deliberate (Claude Code
+  spawn through cmd.exe, `taskkill` trees, `core.longpaths`, sandbox record-only, Codex not
+  offered) and only typecheck covers them; check it by hand before handing a Windows build to
+  anyone. **Linux** has no packaging target: the POSIX spawn wrappers' `exec N>&-` fails under
+  dash (`/bin/sh` on Debian/Ubuntu; see the `test-client-macos` comment in `ci.yml`), so the
+  tests that spawn through them stay on macOS. Code that is already cross-platform (e.g. `sandboxPlatform` naming
+  linux) stays; add a Linux target only together with that fix and a Linux CI job.
 - Since Electron 42 the `electron` package downloads its binary on first use (`npx electron`,
   `require('electron')`, `pnpm dev`), not in `postinstall`; `npx install-electron` fetches it
   ahead of time, and `ELECTRON_SKIP_BINARY_DOWNLOAD` no longer exists. The package wants Node

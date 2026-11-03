@@ -32,21 +32,31 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `backups`, `auth` (auth:*, api:*), `chat-history` (chatHistory:*, handoff:*),
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
   editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
-  (git:preview, diffs, revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
+  (git:preview, diffs, revert, summary, log of a folder or a file, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
   the member's own API keys, and `brokerKeys:moveFromEnv`, which reads a `.env` key in main, sends
   it and removes it locally only after the server kept it: `key-broker.md`), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
-  shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
+  shell:openExternal; running tools stop on quit), `app-link` (appLink:serverOffer / acceptServer /
+  dismissServer: the invitation link's server address, below), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;
   the windows themselves come from `electron-adapter.ts` `createChatWindowHost`),
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
-  (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
-  「議事録が届きました」 checked with the session in main, `minutes.md` "The app"). No `tasks`
-  channels: the file tree's 「やることにつなぐ…」 will come from the task plugin (`records.md`
-  "Linking files later").
+  (minutes:watch / check / notices / skip / linkBundle and the event `minutes:changed`:
+  received minutes checked with the session in main, `minutes.md` "The app"), `record-views`
+  (recordViews:search / find / findHome / card / forFile / topics: ⌘K and 探す hits, the record card, a file's
+  「つながっているもの」 and the やること / 案件 of the member's consultations, read with the session;
+  `records.md` "The app's views"),
+  `notifications` (notifications:watch / state / markRead / settings / setSetting and the event
+  `notifications:changed`: the title bar's 「あなたの番」 and bell, `notifications.md`), `absences`
+  (absences:get / add / remove: the member's own absences and delegate, with the session;
+  `records.md` "Absence and the delegate"), `ai-turns`
+  (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
+  window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
+  (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
+  changed with the session; `tasks-ui.md`).
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features
@@ -64,11 +74,14 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
   `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
   the page and web preferences; `createMainWindowHost`: the main window with its close guard;
-  `createChatWindowHost`) and the `local-file://` protocol registration.
+  `createChatWindowHost`), the `local-file://` protocol registration and `acb-plugin://` (a
+  plugin's screen: `servePluginFiles`, frame navigation; `plugin-frame.md`).
 - `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
-- Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`: the only files
+- Shell layer = `main.ts`, `preload.ts`, `picker-preload.ts` (Google Picker's window only:
+  two calls on that window's own `webContents.ipc`, no global channel; `google-drive.md`),
+  `electron-adapter.ts`, `voice-input.ts`: the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the
@@ -77,8 +90,15 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   data layer, no exceptions: `renderer-structure.md`).
 - **Windows.** Every app window — the main one and the consultation windows — gets the one
   `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
-  `index.html`); consultation windows also deny popups and navigation. Test:
-  `tests/ipc-chat-windows.test.ts`.
+  `index.html`). Every app window also shows only the app's page (`keepAppPageInWindow`): a
+  popup (`target="_blank"` links in chat answers and markdown previews, `window.open`) is denied
+  and a navigation away from the app's page (`isAppPage`) is prevented; either one, when it is
+  `http:` / `https:`, opens in the member's own browser (`webLinkForBrowser`,
+  `electron/external-url.ts`; never `file:`, `javascript:`, `mailto:` or a custom scheme). Owner
+  decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
+  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. The main window alone adds
+  `backgroundThrottling: false` (the automatic 「AI の番」 runs there while it is behind or
+  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
 - **Web permissions are default deny.** Electron grants every Chromium permission request
   (camera / microphone, notifications, clipboard, USB, …) when no handler is set.
   `guardEverySession` (`electron-adapter.ts`, called from `main.ts` before ready) installs a
@@ -127,6 +147,27 @@ How to add a channel:
    moved meanwhile, a rebase normally merges the file by itself (see below); regenerate after
    resolving a conflict in it rather than hand-editing.
 
+## Lane markers (parallel lanes A connectors, B inbox, C plugins)
+
+Three lanes add IPC in parallel (same scheme as `server.md` "Lane markers"); the spots where they
+would collide carry `// lane A ▼` … `// lane C ▲` blocks (the ▲ lines keep the blocks apart for
+git):
+
+- `client/shared/ipc-contract.ts` — the payload-type imports, the end of `IpcInvokeChannels`,
+  `IpcEventChannels` and `ElectronAPI`. Payload types go into the feature's own
+  `client/shared/<feature>.ts`; the contract gets only the channel lines and the import.
+- `client/electron/preload.ts` — the type imports and the end of `api`.
+- `client/electron/main.ts` — the imports and one registration line per feature
+  (`register<Feature>Ipc(ipc, { … })` / `wire<Feature>(ipc, { … })`, after the AI turns' one, so
+  `session`, `recordsApi`, `minutes`, `notices` and `agentControl` exist); the feature's code stays
+  in `electron/features/<feature>/`.
+- `client/tests/ipc-path-guard.test.ts` — `GUARDED` and `EXEMPT`.
+- `client/src/app/recordSource.tsx` — what the task card's source slot shows (`tasks-ui.md`).
+
+A lane adds lines only right under its own `▼`, never moves or removes a marker.
+`ipc-inventory.txt` has no markers: it is sorted, so lanes' lines merge; regenerate it (above),
+never hand-edit.
+
 ## IPC characterization tests
 
 `client/tests/ipc-*.test.ts` load the real `main.ts` under plain Node:
@@ -165,7 +206,7 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 ## Guards on what the renderer hands main (keep them)
 
 - Every renderer path (all `fs:*`, `local-file://`, `editor:backupBeforeOverwrite`, `env:*`,
-  `git:*` incl. sync / log / showCommit / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
+  `git:*` incl. sync / log / commitFileDiff, `backup:*`, `skills:*`, `tools:start`)
   goes through `AllowedRoots.validate` (`client/electron/allowed-roots.ts`): inside a registered
   company root **by name and by real location** — every symlink resolved (`realpathSync.native`;
   for a missing path its deepest existing ancestor, dangling links followed), compared in NFC
@@ -188,6 +229,16 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   Auth's response body carries the session token; who signed in comes from `auth:getSession`,
   the `/api/me` user fields). Test: `ipc-app.test.ts` ("auth:signIn / auth:signUp never hand the
   session token").
+- **The invitation's 「アプリを開く」** (`ai-company-builder://open?server=<origin>`, 2026-11-02,
+  管理画面の見直し 2-2; `build.protocols` in `client/package.json`; `electron-adapter.ts`
+  `receiveAppLinks`: `open-url`, a second instance's and the first launch's arguments) only
+  *offers* a server: `features/app-link/link.ts` passes an https origin alone (http only on
+  loopback; no credentials, path, query or fragment, one `server`), `features/app-link/ipc.ts`
+  holds it only while the app has no server (a link never switches a configured app), and
+  `appLink:acceptServer` takes no argument — it saves the address main holds, after the member
+  saw it on the server screen (`ServerSetupScreen`, host shown large) and pressed 「つなぐ」 and
+  that server answered `/api/config` as ACB. Tests: `tests/app-link.test.ts` (mutation-checked),
+  `ipc-app.test.ts` 「an invitation link (open-url) never points…」.
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);

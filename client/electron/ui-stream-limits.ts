@@ -361,10 +361,12 @@ export function limitToolPayloads(limits: StreamLimits = AGENT_STREAM_LIMITS): T
  */
 export function limitedUIMessageStreamResponse(
   result: { toUIMessageStream(options?: UIMessageStreamOptions<UIMessage>): ReadableStream<UIMessageChunk> },
-  options: { ownsConversation: boolean; onError: (error: unknown) => string; inject?: ChunkInjector },
+  options: { ownsConversation: boolean; onError: (error: unknown) => string; inject?: ChunkInjector; label?: TransformStream<UIMessageChunk, UIMessageChunk> },
 ): Response {
-  const stream = result.toUIMessageStream({ sendReasoning: true, onError: options.onError })
+  const limited = result.toUIMessageStream({ sendReasoning: true, onError: options.onError })
     .pipeThrough(limitToolPayloads(options.ownsConversation ? AGENT_STREAM_LIMITS : API_KEY_STREAM_LIMITS))
+  // After the limits, so a call's plain-Japanese line (tool-display-stream.ts) is never clipped.
+  const stream = options.label ? limited.pipeThrough(options.label) : limited
   return createUIMessageStreamResponse({ stream: options.inject ? stream.pipeThrough(options.inject.transform) : stream })
 }
 

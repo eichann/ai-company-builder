@@ -1,4 +1,7 @@
 import { createRoot } from 'react-dom/client'
+import type { ConsultationTopic } from '../shared/consultation-topics'
+import { useState } from 'react'
+import type { AiTurnItemsView } from '../shared/ai-turns'
 import { markAgentLogNoticeSeen } from '../src/shared/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
@@ -15,8 +18,11 @@ import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { ChatWindowsChange } from '../shared/chat-windows'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { commands, runCommand } from '../src/shared/commands/commands'
-import { MinutesNotices } from '../src/features/minutes/components/MinutesNotices'
+import { TaskListPanel } from '../src/features/tasks/components/TaskListPanel'
+import { useTaskList } from '../src/features/tasks/hooks/useTaskList'
+import { startMinutesReading } from '../src/features/minutes/startReading'
 import type { MinutesNotice } from '../shared/minutes-app'
+import type { TaskListItem } from '../shared/tasks'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -34,8 +40,11 @@ import type { MinutesNotice } from '../shared/minutes-app'
 //   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
 //   ?storage=keep  keep localStorage across reloads (remembered folded groups)
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
-//   ?minutes=1     「議事録が届きました」 above the chat (one received minutes record);
-//                  the deal choice card's links are recorded in __acbChat.minutesLinks
+//   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
+//                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
+//                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
+//   ?minutes=1     the task list beside the chat with one received minutes record in 「AI の番」
+//                  (「自分で読み取る」); the deal choice card's links are recorded in __acbChat.minutesLinks
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -49,6 +58,13 @@ const longHistory = params.get('history') === 'long'
 const editHistory = params.get('history') === 'edit'
 // Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
 const manyHistory = params.get('history') === 'many'
+// history=many: 終わった相談 4 is about a やること (in a 案件), 6 about one the member cannot read, 7 about a 案件.
+const MANY_TOPICS: Record<number, string> = { 3: 'task-0000aa', 5: 'task-0000ff', 6: 'deal-0000bb' }
+const DEAL = { id: 'deal-0000bb', title: '株式会社サンプル', thing: 'bundle' as const, typeLabel: '案件', kindName: '案件' }
+const TOPICS: Record<string, ConsultationTopic> = {
+  'task-0000aa': { own: { id: 'task-0000aa', title: '見積書を作り直す', thing: 'task', typeLabel: null, kindName: 'やること' }, bundle: DEAL },
+  'deal-0000bb': { own: null, bundle: DEAL },
+}
 const signedOut = params.get('auth') === 'none'
 
 const CODE_SAMPLES: Array<[string, string]> = [
@@ -120,8 +136,23 @@ const windowChanges = emitter<ChatWindowsChange>()
 const windowCalls = { opened: [] as string[], focused: [] as string[] }
 const minutesLinks: Array<[string, string, string]> = []
 const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
+const autoTurn = params.get('autoturn')
+const MEETING_ITEM: TaskListItem = {
+  id: MINUTES_NOTICE.id, type: 'meeting', typeLabel: '会議', title: MINUTES_NOTICE.title, state: 'received', stateLabel: '届いた', version: 1,
+  due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
+}
+const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[] }
 installElectronAPI({
-  linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
+  getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
+  claimAiTurn: async (companyId, recordId, version, conversationId) => {
+    aiTurns.claims.push([companyId, recordId, version, conversationId])
+    return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true, version: version + 1 }
+  },
+  settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
+  retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
+  linkMinutesBundle: async (companyId, minutesId, bundleId) => { minutesLinks.push([companyId, minutesId, bundleId]); return { success: true } },
+  // The task list as main answers it: the received meeting waits in 「AI の番」.
+  getTaskList: async () => ({ success: true, data: { available: true, listDepartmentIds: null, items: [MEETING_ITEM] } }),
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
     windowChanges.emit({ windows: [{ companyId: 'preview-company', sessionId, status: { state: 'idle', line: '' } }] })
@@ -137,10 +168,12 @@ installElectronAPI({
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
-  getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
+  getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, ...(MANY_TOPICS[i] ? { topicRecordId: MANY_TOPICS[i] } : {}), messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
     : longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
-    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
+    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', topicRecordId: 'task-0000ed', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
+  // What the company server lets this member read of those topics: task-0000ff is not readable.
+  getConsultationTopics: async (_company, ids) => ({ success: true, topics: Object.fromEntries(ids.map(id => [id, TOPICS[id] ?? null])) }),
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession
     : editHistory && id === 'edit-history' ? editSession() as ChatSession : null,
   getAgentInteractions: async () => [],
@@ -236,8 +269,10 @@ const control = {
   windows: windowCalls,
   /** What main tells the main window about the other windows (statuses, one that closed). */
   windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
-  /** 「どの案件の議事録ですか？」: what the card asked main to link (company, minutes, deal). */
+  /** 「どのまとまりの会議ですか？」: what the card asked main to link (company, meeting, まとまり). */
   minutesLinks,
+  /** 「AI の番」 run automatically: the claims (company, record, version, conversation) and settles. */
+  aiTurns,
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
   answered(id: string, response: AgentInteractionResponse) {
@@ -299,18 +334,34 @@ Object.assign(window, { __acbCommands: { run: runCommand } })
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
+// ?autoturn / ?minutes: the task list with the runner's states, as AppShell composes them:
+// the list fills the left side, the consultation is the pane on its right.
+let showAiTurns: (view: AiTurnItemsView) => void = () => {}
+export function AutoTurnList() {
+  const [view, setView] = useState<AiTurnItemsView | null>(null)
+  showAiTurns = setView
+  const list = useTaskList('preview-company')
+  return (
+    <div className="h-full min-w-0 flex-1 flex">
+      <TaskListPanel
+        companyId="preview-company" rootPath="/tmp/acb-preview" list={list} aiTurns={view} onOpen={() => {}}
+        meetingActions={{ read: () => startMinutesReading(MINUTES_NOTICE), skip: async () => null }}
+      />
+    </div>
+  )
+}
+
 const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
       <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" /></section>
       <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
     </div>
-  : <div className="h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
-      {params.get('minutes') === '1' && <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} />}
-      <div className="min-h-0 flex-1 flex justify-end">
-        <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-          <ChatPanel departmentPath="/tmp/acb-preview" />
-        </div>
+  : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
+      {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
+      <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
+        <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
+          focus={params.get('focus') ? { recordId: params.get('focus')!, title: '見積書を作り直す' } : null} />
       </div>
     </div>,
 )

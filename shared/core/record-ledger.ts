@@ -10,6 +10,9 @@
  * Pure (shared/core): the server answers with it, the app can show it.
  */
 
+import type { AiRunProcedure } from './ai-runs'
+import type { SkillUse } from './skill-uses'
+
 export type LedgerValue = string | number | boolean | null
 
 /** `state` is the record's state; any other name is a server field. */
@@ -81,6 +84,70 @@ export interface LedgerEntry {
    * system, or one the plugin wrote there). Absent / null otherwise.
    */
   receipt?: ExternalReceipt | null
+  /**
+   * 「代わりに（本来は X）」 (absence and the delegate, stage 2 S4): the absent
+   * member the actor stood in for — set only when the actor could do it only
+   * as that member's delegate. Absent / null otherwise.
+   */
+  onBehalfOf?: string | null
+
+  /**
+   * The execution run (S10b, `shared/core/ai-runs.ts`) the AI acted in: set
+   * when the AI's record token was bound to a run — an automated run under the
+   * member's authority, not a consultation the member was typing in. Absent /
+   * null otherwise.
+   */
+  runId?: string | null
+
+  /**
+   * Which procedure the run used (`shared/core/ai-runs.ts` AiRunProcedure):
+   * copied from the run when the entry is written, so a later re-claim under
+   * another app build or plugin version never rewrites it. Only on entries
+   * with a `runId`; absent / null otherwise (a person, a consultation).
+   */
+  procedure?: AiRunProcedure | null
+
+  /**
+   * Which company Skills the consultation had used when the AI wrote this
+   * entry (`shared/core/skill-uses.ts`; records.md "Which Skill"): name, git
+   * tree id of the skill folder, dirty, first use — copied when the entry is
+   * written, so a Skill used later in the consultation never rewrites it. Only
+   * on the AI's entries whose consultation reported one; absent otherwise.
+   */
+  skills?: SkillUse[] | null
+
+  /**
+   * The plugin screen the change came through (plan 4b B6, the bridge;
+   * `.claude/rules/plugin-frame.md`): the business plugin and the package
+   * version whose screen the person used. Set by the server from the bridge
+   * route, never from a request body. Absent / null otherwise (the core's
+   * screens, a consultation, a run).
+   */
+  via?: LedgerVia | null
+}
+
+/** A change made through a plugin's screen (its bridge): which plugin, which version of its package. */
+export interface LedgerVia {
+  plugin: string
+  version: string
+}
+
+/**
+ * Who caused a change (owner decision 2026-11-01): a person's click, the
+ * member's AI in a consultation, an automated run under the person's authority,
+ * a plugin's screen the person used (its bridge, plan 4b B6: the person's own
+ * authority, the plugin's button), the server itself (its clock) or an outside
+ * system (seen there).
+ */
+export type LedgerCause = 'person' | 'ai' | 'run' | 'plugin' | 'system' | 'outside'
+
+/** The server's own actors (the server clock): `acb:` ids never belong to a member or an outside system. */
+export const SYSTEM_ACTOR_PREFIX = 'acb:'
+
+export function ledgerCause(entry: Pick<LedgerEntry, 'actorKind' | 'actorId' | 'runId' | 'via'>): LedgerCause {
+  if (entry.actorKind === 'human') return entry.via ? 'plugin' : 'person'
+  if (entry.actorKind === 'ai') return entry.runId ? 'run' : 'ai'
+  return entry.actorId.startsWith(SYSTEM_ACTOR_PREFIX) ? 'system' : 'outside'
 }
 
 /** Evidence of an exchange with an outside system, kept on the ledger entry it explains. */

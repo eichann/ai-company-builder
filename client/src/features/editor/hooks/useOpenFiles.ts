@@ -153,7 +153,7 @@ export function useOpenFiles(
         return newMap
       })
     } catch {
-      setError('ファイルの読み込み中にエラーが発生しました')
+      setError('ファイルを読み込めませんでした。少し待ってから、開き直してください')
     } finally {
       loadingRef.current.delete(filePath)
     }

@@ -20,11 +20,11 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import type { Member } from '../services/access'
 import { AGENT_STOP_SUPPORT_HEADER, PUSH_HEARTBEAT_MS, type PushEvent } from '../../shared/types/agent-stop'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 import { logError } from '../lib/error-log'
 
 export const agentStopsRoute = new Hono()
@@ -40,20 +40,6 @@ export function setPushTimingsForTests(value?: { heartbeatMs?: number; lifetimeM
   timings.lifetimeMs = value?.lifetimeMs ?? PUSH_LIFETIME_MS
 }
 
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
-
 /** The app build, when this app says it follows the stop (X-ACB-Agent-Stop: 1). */
 export function noteStopSupport(c: Context, member: Member): void {
   if (c.req.header(AGENT_STOP_SUPPORT_HEADER) !== '1') return
@@ -64,25 +50,22 @@ export function noteStopSupport(c: Context, member: Member): void {
   }
 }
 
-agentStopsRoute.get('/agent-stops', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentStopsRoute.get('/agent-stops', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentStops.get(member)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentStopsRoute.post('/agent-stops', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  const result = agentStops.stop(member, await jsonBody(c))
+agentStopsRoute.post('/agent-stops', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const result = agentStops.stop(member, c.var.body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentStopsRoute.delete('/agent-stops/:stopId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentStopsRoute.delete('/agent-stops/:stopId', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentStops.release(member, c.req.param('stopId'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
@@ -90,10 +73,10 @@ agentStopsRoute.delete('/agent-stops/:stopId', async (c) => {
 
 const frame = (event: PushEvent) => `event: ${event.kind}\ndata: ${JSON.stringify({ kind: event.kind, version: event.version })}\n\n`
 
-agentStopsRoute.get('/me/events', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentStopsRoute.get('/me/events', companyMember, async (c) => {
+  const member = c.var.member
   noteStopSupport(c, member)
+  const current = (await agentPolicy.policyFor(member)).version
 
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -132,7 +115,7 @@ agentStopsRoute.get('/me/events', async (c) => {
   })
   // The current version first: an app that missed an announcement while
   // disconnected learns it at once.
-  write(frame({ kind: 'policy', version: agentPolicy.policyFor(member).version }))
+  write(frame({ kind: 'policy', version: current }))
   timers.heartbeat = setInterval(() => {
     // A member removed from the company stops hearing anything.
     if (!access.memberOf(member.companyId, member.userId)) { end(); return }

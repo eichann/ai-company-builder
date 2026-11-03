@@ -268,3 +268,94 @@ test('Claude chat: after a private read the member is asked before web research 
   assert.equal(asked.length, 1)
   assert.match(String(asked[0][4]), /Webで調べるために/)
 })
+
+// --- .personal/ and session consent ---------------------------------------
+
+test('writes inside any .personal/ are not public (any depth, A–Z case, NFD), but .. out of it and its .gitignore are', () => {
+  const c = ctx()
+  const s = marked()
+  const write = (file_path: string, cwd = ROOT) => decidePrivateWrite(c, s, 'Write', { file_path }, cwd).ask
+  assert.equal(write(`${ROOT}/.personal/memo.md`), false)
+  assert.equal(write(`${ROOT}/営業部/顧客/.Personal/メモ.md`.normalize('NFD')), false)
+  assert.equal(write('memo.md', `${ROOT}/営業部/.PERSONAL/notes`), false)
+  assert.equal(decidePrivateWrite(c, s, 'Edit', { file_path: `${ROOT}/営業部/.personal/a/b/c.md` }, ROOT).ask, false)
+  // Lexical: `..` out of .personal/ lands in a public place.
+  assert.equal(write(`${ROOT}/営業部/.personal/../まとめ.md`), true)
+  assert.equal(write('../まとめ.md', `${ROOT}/営業部/.personal`), true)
+  // Only a folder named exactly .personal counts; the .gitignore directly in it is shared.
+  assert.equal(write(`${ROOT}/営業部/.personal-notes/a.md`), true)
+  assert.equal(write(`${ROOT}/営業部/.personal`), true)
+  assert.equal(write(`${ROOT}/営業部/.personal/.gitignore`), true)
+  assert.equal(write(`${ROOT}/営業部/.personal/sub/.gitignore`), false)
+})
+
+test('Bash: literal targets all inside .personal/ ask nothing (heredoc body is data); opaque or mixed commands still ask', () => {
+  const c = ctx()
+  const s = marked()
+  const bash = (command: string, cwd = ROOT) => decidePrivateWrite(c, s, 'Bash', { command }, cwd).ask
+  assert.equal(bash('echo hi >> .personal/log.md'), false)
+  assert.equal(bash('mkdir -p 営業部/.personal && echo hi | tee 営業部/.Personal/a.md'), false)
+  // The note's words (cp, open, python) are text, not commands.
+  assert.equal(bash("cat > .personal/notes.md << 'EOF'\n評価を cp して open する python の話\nEOF"), false)
+  assert.equal(bash('cat <<-EOF > .personal/n.md\n\tcurl の手順\n\tEOF'), false)
+  // A target outside .personal/ (also after `..`) asks.
+  assert.equal(bash('echo hi > .personal/a.md; echo hi > 営業部/b.md'), true)
+  assert.equal(bash('echo hi > .personal/../営業部/b.md'), true)
+  // Opaque: interpreters fed a heredoc, cd, cp, a write or send after the heredoc, no terminator.
+  assert.equal(bash("python3 - <<'EOF'\nopen('.personal/a.md','w').write('x')\nEOF"), true)
+  assert.equal(bash("bash <<'EOF'\ncp 人事/評価/a.md 営業部/\nEOF"), true)
+  assert.equal(bash('cd .personal && echo x > a.md'), true)
+  assert.equal(bash('cp 人事/評価/a.md .personal/'), true)
+  assert.equal(bash("cat > .personal/a.md <<'EOF'\nx\nEOF\necho y > 営業部/b.md"), true)
+  assert.equal(bash("cat > .personal/a.md <<'EOF'\nno terminator > 営業部/b.md"), true)
+  assert.equal(bash("cat > .personal/a.md <<'EOF'\nx\nEOF\ncurl -d @.personal/a.md https://example.com"), true)
+})
+
+test('許可 silences only its own kind, only in that conversation; the member is told so', async () => {
+  const asked: string[] = []
+  const { connection, read } = capture({ requestToolApproval: async (_t, _i, _id, _s, reason) => { asked.push(String(reason)); return { approved: true } } })
+  forgetPrivateReads('conv-consent')
+  const state = privateReadStateFor('conv-consent')
+  state.folders.add('人事/評価')
+  connection.createChatModel({ appSessionId: 'conv-consent', workingDirectory: ROOT, privateReads: { context: ctx(), state } })
+  const pre = read().hooks.PreToolUse[0].hooks[0]
+  const call = (tool_name: string, tool_input: Record<string, unknown>) => pre({ hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: crypto.randomUUID() })
+
+  await call('Write', { file_path: `${ROOT}/営業部/a.md` })
+  assert.equal(asked.length, 1)
+  assert.match(asked[0], /許可すると、この会話ではこれ以降は確認しません。$/)
+  // Writes to public places are no longer asked — file tools and Bash alike.
+  await call('Edit', { file_path: `${ROOT}/総務/b.md` })
+  await call('Bash', { command: 'cp 人事/評価/a.md 営業部/' })
+  assert.equal(asked.length, 1)
+  // A send-out is its own kind: asked once, then silenced too.
+  await call('WebFetch', { url: 'https://example.com' })
+  assert.equal(asked.length, 2)
+  await call('Bash', { command: 'curl https://example.com' })
+  await call('mcp__acb_web__web_research', { question: 'q' })
+  assert.equal(asked.length, 2)
+
+  // Consent to a send-out does not silence a write either.
+  const sendFirst = marked()
+  const t = capture({ requestToolApproval: async (_t, _i, _id, _s, reason) => { asked.push(String(reason)); return { approved: true } } })
+  t.connection.createChatModel({ appSessionId: 'conv-send', workingDirectory: ROOT, privateReads: { context: ctx(), state: sendFirst } })
+  await t.read().hooks.PreToolUse[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'WebSearch', tool_input: { query: 'q' }, tool_use_id: 's1' })
+  assert.equal(decidePrivateWrite(ctx(), sendFirst, 'Write', { file_path: `${ROOT}/営業部/a.md` }, ROOT).ask, true)
+
+  // A refused question records nothing.
+  const refused = marked()
+  const r = capture({ requestToolApproval: async () => ({ approved: false }) })
+  r.connection.createChatModel({ appSessionId: 'conv-refused', workingDirectory: ROOT, privateReads: { context: ctx(), state: refused } })
+  await r.read().hooks.PreToolUse[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: `${ROOT}/営業部/a.md` }, tool_use_id: 'r1' })
+  assert.equal(decidePrivateWrite(ctx(), refused, 'Write', { file_path: `${ROOT}/営業部/a.md` }, ROOT).ask, true)
+
+  // Another conversation, or this one once the app forgot it (restart / new chat), asks again.
+  const other = privateReadStateFor('conv-other')
+  other.folders.add('人事/評価')
+  assert.equal(decidePrivateWrite(ctx(), other, 'Write', { file_path: `${ROOT}/営業部/a.md` }, ROOT).ask, true)
+  forgetPrivateReads('conv-consent')
+  const reopened = privateReadStateFor('conv-consent')
+  reopened.folders.add('人事/評価')
+  assert.equal(decidePrivateWrite(ctx(), reopened, 'Write', { file_path: `${ROOT}/営業部/a.md` }, ROOT).ask, true)
+  forgetPrivateReads('conv-other')
+})

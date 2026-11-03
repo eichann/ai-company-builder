@@ -37,6 +37,12 @@ export interface RecordRow {
   path: string | null
   /** Server-only record: the folder whose readers may see it (null = everyone in the company). */
   folder: string | null
+  /**
+   * Owner-only record (「持ち主だけ」, records.md "Owner-only records"): the one member who
+   * may see it — nobody else, owners and admins included. null = visibility by `folder`.
+   * Written on insert and by `setPlace` only (an upsert of an existing row keeps it).
+   */
+  personalOwner: string | null
   title: string
   summary: string
   createdAt: string
@@ -75,9 +81,19 @@ export interface RecordCandidateFilter {
   states?: string[]
   /** Server field (validated name) → accepted values (JSON scalars). */
   fields?: Array<{ name: string; values: Array<string | number | boolean | null> }>
+  /** Tags field (kind `tags`, validated name) → a tag the stored list must hold (already normalized). */
+  contains?: Array<{ name: string; tag: string }>
   /** Matched against title and summary (substring, A–Z case-insensitive). */
   text?: string
   ids?: string[]
+  /** Server field (validated name; date / datetime / number) → `gte` ≤ value < `lt` (compared as stored). */
+  ranges?: Array<{ name: string; gte?: string | number; lt?: string | number }>
+  /** Order by a server field (validated name), empty values last, then most recently changed. Default: most recently changed. */
+  sort?: { field: string; order: 'asc' | 'desc' }
+  /** In one of these (type, state) pairs, entered (a ledger entry into it from another state) at or after `since`. */
+  finishedSince?: { since: string; finals: Array<{ type: string; state: string }> }
+  /** An outgoing record link `name` holds `id`. */
+  link?: { name: string; id: string }
 }
 
 /** The columns read access is decided from. */
@@ -87,6 +103,7 @@ export interface RecordAccessRow {
   scopeId: string | null
   path: string | null
   folder: string | null
+  personalOwner: string | null
 }
 
 /** The AI's credential for the company map (only the digest of its value). */
@@ -100,6 +117,19 @@ export interface RecordAiTokenRow {
   createdAt: string
   expiresAt: string
   revokedAt: string | null
+  /** The execution run the token is bound to and its claim generation (S10b); absent / null for a consultation's token. */
+  runId?: string | null
+  runGeneration?: number | null
+}
+
+/** The first time a turn's holder (or their delegate) opened a record in the app. */
+export interface RecordTurnOpenRow {
+  recordId: string
+  /** The ledger version that began the turn. */
+  turnVersion: number
+  holderId: string
+  openedBy: string
+  openedAt: string
 }
 
 export interface RecordRepository {
@@ -108,6 +138,12 @@ export interface RecordRepository {
   /** The company's minutes folder (milestone 4, minutes.md): a department folder, or null when not chosen. */
   minutesFolder(): string | null
   setMinutesFolder(folder: string | null, by: string, at: string): void
+  /** Which meetings the intake reads (minutes.md "Which meetings"): the stored value, null = the default. */
+  meetingIntake(): string | null
+  setMeetingIntake(value: string, by: string, at: string): void
+  /** Days 「どのまとまりの会議ですか？」 asks after a meeting is read (minutes.md): the stored value, null = the default. */
+  meetingBundleDays(): number | null
+  setMeetingBundleDays(days: number, by: string, at: string): void
 
   /** Every stored version of every type, oldest first per name. */
   typeVersions(): RecordTypeRow[]
@@ -120,6 +156,8 @@ export interface RecordRepository {
   fileRecordsIn(scopeId: string | null): RecordRow[]
   upsert(row: RecordRow): void
   markRemoved(id: string, at: string): void
+  /** Who may see a server-only record: an owner-only record shared to a folder (records.md "Owner-only records"). */
+  setPlace(id: string, place: { folder: string | null; personalOwner: string | null }, at: string): void
 
   linksFrom(ids: string[]): RecordLinkRow[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */
@@ -145,6 +183,15 @@ export interface RecordRepository {
   /** The record's ledger, oldest first. */
   ledger(recordId: string): LedgerEntry[]
   appendLedger(entry: LedgerEntry): void
+
+  /**
+   * 「番の人が最初に開いた」 (records.md "Whose turn it was"): keep the first
+   * opening of the record's turn that began at `turnVersion`; false when that
+   * turn already has one (nothing changes).
+   */
+  noteTurnOpened(row: RecordTurnOpenRow): boolean
+  /** The record's first openings, one per turn, oldest turn first. */
+  turnOpens(recordId: string): RecordTurnOpenRow[]
 
   /** Live records matching the filter, with only the access columns (bounded by `limit`). */
   candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[]

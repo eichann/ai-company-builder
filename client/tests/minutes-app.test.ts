@@ -10,10 +10,10 @@
  *   the member's received minutes;
  * - a records signal only makes main ask the server again (the signal carries
  *   nothing it acts on), and only for the company being watched;
- * - 「今は読まない」 and the deal choice go with the session;
- * - the first message names the minutes record by id and carries no minutes
- *   text (the app never has it); the deal choice card appears only when no deal
- *   is linked and not exactly one candidate, from the minutes tool's answer.
+ * - 「今は読まない」 and the まとまり choice go with the session;
+ * - the first message names the meeting record by id and carries no minutes
+ *   text (the app never has it); the まとまり choice card appears only when no
+ *   まとまり is linked and not exactly one candidate, from the minutes tool's answer.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -23,15 +23,15 @@ import { createRecordTools } from '../electron/records/tools'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import { PLUGIN_OPERATION_PART_TYPE } from '../shared/plugin-operations'
-import { MINUTES_DEAL_CHOICE_PART_TYPE, dealChoiceFor, minutesConsultationTitle, minutesFirstMessage, minutesNoticeText, type MinutesDealChoiceCard } from '../shared/minutes-app'
+import { MINUTES_BUNDLE_CHOICE_PART_TYPE, bundleChoiceFor, minutesConsultationTitle, minutesFirstMessage, minutesNoticeText, type MinutesBundleChoiceCard } from '../shared/minutes-app'
 
 const SESSION = 'better-auth.session_token=SECRET.sig'
-const MINUTES_ID = 'minutes-0a1b2c3d4e5f60718293a4b5'
+const MINUTES_ID = 'meeting-0a1b2c3d4e5f60718293a4b5'
 
 interface Seen { url: string; method: string; headers: Record<string, string>; body?: string }
 
 const minutesRecord = (over: Record<string, unknown> = {}) => ({
-  id: MINUTES_ID, type: 'minutes', typeVersion: 1, title: 'A社 商談', summary: '', path: null, state: 'received',
+  id: MINUTES_ID, type: 'meeting', typeVersion: 1, title: 'A社 商談', summary: '', path: null, state: 'received',
   fields: { meeting_at: '2026-11-05T06:00:00.000Z', assignee: 'usr-7c1e' }, version: 1, updatedAt: 't', ...over,
 })
 
@@ -102,20 +102,22 @@ test('a records signal only makes main ask again, for the watched company only',
   assert.deepEqual(paths(seen.slice(before)), ['GET /records/ai-turn'])
 })
 
-test('「今は読まない」 runs skip at the notice\'s version, and the deal choice links with the session', async () => {
+test('「今は読まない」 runs skip at the notice\'s version, and the まとまり choice links with the session', async () => {
   const { checker, seen } = fakeServer({ grant: true })
   await checker.watch('co')
   const before = seen.length
   assert.deepEqual(await checker.skip('co', MINUTES_ID), { success: true })
-  assert.deepEqual(await checker.linkDeal('co', MINUTES_ID, 'deal-8f3a2c01'), { success: true })
+  assert.deepEqual(await checker.linkBundle('co', MINUTES_ID, 'deal-8f3a2c01'), { success: true })
+  assert.equal((await checker.noBundle('co', MINUTES_ID)).success, true)
   const sent = seen.slice(before).filter(s => s.method === 'POST')
   assert.deepEqual(sent.map(s => [s.url.replace('https://acb.example.jp/api/companies/co', ''), JSON.parse(s.body!)]), [
     [`/records/item/${MINUTES_ID}/actions/skip`, { expectedVersion: 1 }],
-    [`/me/minutes/item/${MINUTES_ID}/deal`, { dealId: 'deal-8f3a2c01' }],
+    [`/me/minutes/item/${MINUTES_ID}/bundle`, { bundleId: 'deal-8f3a2c01' }],
+    [`/me/minutes/item/${MINUTES_ID}/no-bundle`, {}],
   ])
   assert.ok(sent.every(s => s.headers.Cookie === SESSION && !('Authorization' in s.headers)))
   // An id the server could take as a path is refused before sending.
-  assert.equal((await checker.linkDeal('co', '../x', 'deal-8f3a2c01')).success, false)
+  assert.equal((await checker.linkBundle('co', '../x', 'deal-8f3a2c01')).success, false)
 })
 
 test('the first message names the minutes by id and carries no minutes text; the title and the notice read as designed', () => {
@@ -124,6 +126,8 @@ test('the first message names the minutes by id and carries no minutes text; the
   const message = minutesFirstMessage(held)
   assert.ok(message.includes(MINUTES_ID))
   assert.ok(message.includes('minutes_read'))
+  // Each output names its meeting and item, and a reading run again is told to reuse what it finds (FB 29).
+  assert.ok(message.includes('task:1') && message.includes('decision:1') && message.includes('reused'))
   assert.ok(!message.includes(held.text))
   const day = `${new Date(held.meetingAt).getMonth() + 1}/${new Date(held.meetingAt).getDate()}`
   assert.equal(minutesConsultationTitle(held), `A社 商談 のあと（${day}）`)
@@ -131,14 +135,17 @@ test('the first message names the minutes by id and carries no minutes text; the
   assert.throws(() => minutesFirstMessage({ ...held, id: 'task-0a1b2c3d' }))
 })
 
-test('the deal choice card: only with no linked deal and not exactly one candidate', () => {
+test('the まとまり choice card: only with no linked まとまり and not exactly one candidate', () => {
   const ctx = { id: 'card-1', companyId: 'co' }
-  const base = { recordId: MINUTES_ID, meeting: { title: 'A社 商談' }, deal: null }
-  const two = [{ id: 'deal-aaaaaa01', title: '研修導入' }, { id: 'deal-bbbbbb02', title: '追加導入' }]
-  assert.deepEqual(dealChoiceFor({ ...base, candidates: two }, ctx), { id: 'card-1', companyId: 'co', minutesId: MINUTES_ID, meetingTitle: 'A社 商談', candidates: two })
-  assert.deepEqual(dealChoiceFor({ ...base, candidates: [] }, ctx)?.candidates, [])
-  assert.equal(dealChoiceFor({ ...base, candidates: [two[0]] }, ctx), null)
-  assert.equal(dealChoiceFor({ ...base, deal: { id: 'deal-aaaaaa01' }, candidates: two }, ctx), null)
+  const base = { recordId: MINUTES_ID, meeting: { title: 'A社 商談' }, bundle: null }
+  // A まとまり may be of any type: a 案件 and a 企画 alike.
+  const two = [{ id: 'deal-aaaaaa01', title: '研修導入', typeLabel: '案件' }, { id: 'plan-bbbbbb02', title: '秋の特番', typeLabel: '企画' }]
+  assert.deepEqual(bundleChoiceFor({ ...base, candidates: two }, ctx), { id: 'card-1', companyId: 'co', minutesId: MINUTES_ID, meetingTitle: 'A社 商談', candidates: two })
+  assert.deepEqual(bundleChoiceFor({ ...base, candidates: [] }, ctx)?.candidates, [])
+  assert.equal(bundleChoiceFor({ ...base, candidates: [two[0]] }, ctx), null)
+  assert.equal(bundleChoiceFor({ ...base, bundle: { id: 'deal-aaaaaa01' }, candidates: two }, ctx), null)
+  // 「まとまりはない」 was chosen for this meeting: never asked again.
+  assert.equal(bundleChoiceFor({ ...base, candidates: two, noBundle: true }, ctx), null)
 })
 
 test('reading minutes with two candidates puts the card in the reply (the app\'s, not the AI\'s) and tells the AI to wait', async () => {
@@ -146,24 +153,24 @@ test('reading minutes with two candidates puts the card in the reply (the app\'s
   const fetch = (async (url: string) => {
     const json = (data: unknown, status = 200) => new Response(JSON.stringify({ success: true, data }), { status })
     if (url.endsWith('/me/record-tokens')) return json({ token: TOKEN, tokenId: 'tok-1', scope: 'act', expiresAt: 'x' }, 201)
-    if (url.endsWith('/api/records-ai/types')) return json({ types: coreTypeDefinitions().filter(t => t.name === 'minutes').map(definition => ({ definition })) })
+    if (url.endsWith('/api/records-ai/types')) return json({ types: coreTypeDefinitions().filter(t => t.name === 'meeting').map(definition => ({ definition })) })
     if (url.endsWith('/api/records-ai/plugins')) return json({ plugins: [] })
     if (url.includes(`/api/records-ai/minutes/${MINUTES_ID}/text`)) {
       return json({
         recordId: MINUTES_ID, header: '【ここから】', text: '本文', footer: '【ここまで】', truncated: false, docVersion: 'notes:1',
-        meeting: { title: 'A社 商談', at: null }, attendees: [], externalAttendees: 1, deal: null,
+        meeting: { title: 'A社 商談', at: null }, attendees: [], externalAttendees: 1, bundle: null,
         candidates: [{ id: 'deal-aaaaaa01', title: '研修導入' }, { id: 'deal-bbbbbb02', title: '追加導入' }], instructionLike: [],
       })
     }
     return json({ ok: true })
   }) as unknown as typeof globalThis.fetch
   const access = await createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch }).openTurn('co', { conversationId: 'conv-1', agent: 'claude-code', scope: 'act' })
-  const cards: MinutesDealChoiceCard[] = []
-  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'conv-1', onDealChoice: c => cards.push(c), newId: () => 'card-1' })
+  const cards: MinutesBundleChoiceCard[] = []
+  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'conv-1', onBundleChoice: c => cards.push(c), newId: () => 'card-1' })
   const out = await tools!.execute('minutes_read', { id: MINUTES_ID })
   assert.equal(cards.length, 1)
   assert.deepEqual(cards[0].candidates.map(c => c.id), ['deal-aaaaaa01', 'deal-bbbbbb02'])
-  assert.match(out, /どの案件の議事録ですか/)
+  assert.match(out, /どのまとまりの会議ですか/)
 })
 
 test('the cards come back after a restart in the order the tools produced them', () => {
@@ -174,7 +181,7 @@ test('the cards come back after a restart in the order the tools produced them',
   }
   const stored = uiMessageToSessionMessage({ id: 'm1', role: 'assistant', parts: [
     { type: 'text', text: '読みました。' },
-    { type: MINUTES_DEAL_CHOICE_PART_TYPE, id: 'minutes-deal-card-1', data: choice },
+    { type: MINUTES_BUNDLE_CHOICE_PART_TYPE, id: 'minutes-deal-card-1', data: choice },
     { type: PLUGIN_OPERATION_PART_TYPE, id: 'plugin-op-card-2', data: op },
   ] }, new Date())
   const back = sessionMessageToUIMessage(JSON.parse(JSON.stringify(stored)))

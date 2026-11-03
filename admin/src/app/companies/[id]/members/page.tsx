@@ -230,7 +230,7 @@ export default function MembersPage() {
                 <TableRow className="hover:bg-transparent">
                   <SortableHead label="メンバー" k="name" sort={sort} onSort={toggleSort} className="pl-4" />
                   <SortableHead label="役割" k="role" sort={sort} onSort={toggleSort} />
-                  <TableHead>部署の責任者</TableHead>
+                  <TableHead>部署の管理役</TableHead>
                   {isAdmin && <SortableHead label="アプリ" k="app" sort={sort} onSort={toggleSort} />}
                   {isAdmin && <SortableHead label="最終同期" k="lastSync" sort={sort} onSort={toggleSort} />}
                   {isAdmin && (
@@ -351,7 +351,13 @@ export default function MembersPage() {
       )}
 
       {isAdmin && (
-        <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} companyId={companyId} onCreated={invitations.reload} />
+        <InviteDialog
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          companyId={companyId}
+          departments={(departments.data ?? []).filter((d) => !d.parentId)}
+          onCreated={invitations.reload}
+        />
       )}
 
       {isOwner && (
@@ -473,25 +479,41 @@ function InviteDialog({
   open,
   onOpenChange,
   companyId,
+  departments,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   companyId: string
+  departments: Department[]
   onCreated: () => void
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        {open && <InviteForm companyId={companyId} onCreated={onCreated} onDone={() => onOpenChange(false)} />}
+        {open && <InviteForm companyId={companyId} departments={departments} onCreated={onCreated} onDone={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function InviteForm({ companyId, onCreated, onDone }: { companyId: string; onCreated: () => void; onDone: () => void }) {
+function InviteForm({ companyId, departments, onCreated, onDone }: {
+  companyId: string
+  departments: Department[]
+  onCreated: () => void
+  onDone: () => void
+}) {
   const [role, setRole] = useState<'member' | 'admin'>('member')
   const [days, setDays] = useState('7')
+  // 所属 (管理画面の見直し 2-2): the app downloads these departments the first time, without asking.
+  const [picked, setPicked] = useState<Set<string>>(() => new Set())
+  const toggle = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   const [busy, setBusy] = useState(false)
   const [created, setCreated] = useState<CreatedInvitation | null>(null)
 
@@ -499,7 +521,8 @@ function InviteForm({ companyId, onCreated, onDone }: { companyId: string; onCre
     e.preventDefault()
     setBusy(true)
     try {
-      const inv = await invitationsApi.create(companyId, role, Number(days))
+      const departmentIds = departments.filter((d) => picked.has(d.id)).map((d) => d.id)
+      const inv = await invitationsApi.create(companyId, role, Number(days), departmentIds)
       setCreated(inv)
       onCreated()
     } catch (err) {
@@ -573,6 +596,28 @@ function InviteForm({ companyId, onCreated, onDone }: { companyId: string; onCre
           </Select>
         </div>
       </div>
+      {departments.length > 0 && (
+        <fieldset className="grid gap-2">
+          <legend className="mb-2 text-sm font-medium">所属する部署</legend>
+          <div className="flex flex-wrap gap-2">
+            {departments.map((d) => (
+              <Button
+                key={d.id}
+                type="button"
+                size="sm"
+                variant={picked.has(d.id) ? 'default' : 'outline'}
+                aria-pressed={picked.has(d.id)}
+                onClick={() => toggle(d.id)}
+              >
+                {d.name}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            参加すると、選んだ部署に所属します。アプリは最初に、所属する部署のファイルだけを自動で入れます（ほかの部署はあとから設定で入れられます）。選ばないときは、アプリで本人が選びます。
+          </p>
+        </fieldset>
+      )}
       <p className="text-xs text-muted-foreground">
         {role === 'admin'
           ? '管理者は、メンバーの招待・削除や部署の設定など、この管理画面のほぼすべての操作ができます。'

@@ -18,8 +18,10 @@ export interface GoogleGrantSummary {
   memberName: string | null
   /** The Google account that was allowed (the member's own ACB email by rule). */
   googleEmail: string
-  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る. */
+  /** What is allowed: minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く, inbox = 受信を読む. */
   features: GoogleFeature[]
+  /** Allowed features the member turned off themselves (not used until they turn them on again). */
+  featuresOff: GoogleFeature[]
   scopes: string[]
   status: GoogleGrantStatus
   createdAt: string
@@ -27,7 +29,7 @@ export interface GoogleGrantSummary {
   lastUsedAt: string | null
 }
 
-export type GoogleChangeAction = 'client' | 'enabled' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'stop-all'
+export type GoogleChangeAction = 'client' | 'enabled' | 'features' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -64,6 +66,32 @@ export interface GoogleAdminView {
   grants: GoogleGrantSummary[]
   /** Latest 50. */
   history: GoogleChange[]
+  /** Google Picker (Drive: 選んだファイルを読む・置く, google-drive.md): the API key's last 4 and the project number. */
+  picker: GooglePickerView
+  /** Features off for the whole company (受信を読む until the admin turns it on): never asked of members, refused from the next call. */
+  featuresOff: GoogleFeature[]
+  /** What members are asked for in one consent (on, and Drive only with the Picker registered). */
+  companyFeatures: GoogleFeature[]
+}
+
+/** PUT /api/companies/:id/google/features — the admin turns one feature off / on for the company. */
+export interface GoogleCompanyFeatureSwitch {
+  feature: GoogleFeature
+  on: boolean
+}
+
+export interface GooglePickerView {
+  configured: boolean
+  appId: string | null
+  apiKeyLast4: string | null
+  /** The page to allow in the API key's website restrictions (`<PUBLIC_URL>/api/google-picker`). */
+  pageUrl: string
+}
+
+/** PUT /api/companies/:id/google/picker. `apiKey` may be left out to keep the stored one; `null` both = remove. */
+export interface GooglePickerSave {
+  apiKey?: string
+  appId: string | null
 }
 
 /** PUT /api/companies/:id/google/client. `clientSecret` may be left out to keep the stored one. */
@@ -90,16 +118,31 @@ export interface MyGoogle {
   connected: boolean
   status: GoogleGrantStatus | null
   googleEmail: string | null
+  /** The features allowed in the grant (on or off). */
   features: GoogleFeature[]
+  /** Of those, the ones the member turned off (e.g. 受信を読む): ACB does not use them until turned on. */
+  featuresOff: GoogleFeature[]
   /** The domain the account must belong to (shown so the member picks the right account). */
   domain: string | null
   practice: boolean
+  /** What the company offers (asked together by 「Google でつなぐ」); empty while unavailable. */
+  companyFeatures: GoogleFeature[]
+  /** Features already shown to the member on 「仕事の道具をつなぐ」 (connected, declined or 「あとで」). */
+  seen: GoogleFeature[]
 }
 
-/** POST /api/companies/:id/me/google/connect */
-export interface GoogleConnectRequest {
-  features: GoogleFeature[]
+/** PUT /api/companies/:id/me/google/features — the member turns one allowed feature on or off. */
+export interface GoogleFeatureSwitch {
+  feature: GoogleFeature
+  on: boolean
 }
+
+/**
+ * POST /api/companies/:id/me/google/connect: some features (asked when first
+ * used), or `all` — every feature the company offers, in one consent
+ * (「仕事の道具をつなぐ」; also marks them seen).
+ */
+export type GoogleConnectRequest = { features: GoogleFeature[] } | { all: true }
 
 export interface GoogleConnectStart {
   /** Open in the system browser. Valid for 10 minutes, once. */

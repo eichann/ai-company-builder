@@ -458,7 +458,7 @@ describe('two roles: a connector is a shared part, a business plugin uses it (ow
   const third = { companyId: THIRD, userId: 'pl-third-owner', role: 'owner' }
   let key: string
   const rows = () => db.prepare('SELECT plugin_id, version, enabled FROM plugin_installs WHERE company_id = ? ORDER BY plugin_id').all(THIRD)
-  const types = () => db.prepare('SELECT name, source FROM record_types WHERE company_id = ? ORDER BY name').all(THIRD)
+  const types = () => db.prepare("SELECT name, source FROM record_types WHERE company_id = ? AND source = 'plugin' ORDER BY name").all(THIRD)
 
   beforeAll(async () => {
     db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(THIRD, THIRD, THIRD, 'x', ts(), ts())
@@ -494,11 +494,13 @@ describe('two roles: a connector is a shared part, a business plugin uses it (ow
     expect(rows().map((r: Json) => r.plugin_id)).toEqual(['crm-hub', 'crm-sales'])
     expect(await services.plugins.setReadScope(third, 'crm-sales', { userIds: [third.userId] })).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'NOT_A_CONNECTOR' } })
     expect(services.pluginImport.renewConnection(third, 'crm-sales')).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'NOT_A_CONNECTOR' } })
-    expect(await services.plugins.active(THIRD, 'crm-sales')).toEqual({ ok: false, problem: 'off' })
+    // 「使い始める」 is 「オン」 too (管理画面の見直し 2-4): the first install turned it on and stored its types.
+    expect(rows().find((r: Json) => r.plugin_id === 'crm-sales')).toMatchObject({ enabled: 1 })
+    expect(await services.plugins.active(THIRD, 'crm-sales')).toEqual({ ok: false, problem: 'mapping-invalid' })
   })
 
   it('turning the business plugin on stores its types at once; its connector-backed parts follow the connector', async () => {
-    expect(types()).toEqual([])
+    expect(types()).toEqual([{ name: 'customer', source: 'plugin' }, { name: 'deal', source: 'plugin' }])
     expect((await services.plugins.setEnabled(third, 'crm-sales', { enabled: true })).value.plugin.install).toMatchObject({ enabled: true, managedSince: null })
     expect(types()).toEqual([{ name: 'customer', source: 'plugin' }, { name: 'deal', source: 'plugin' }])
     // The recommended mapping names members of another company: the use does not run until it is fixed.
@@ -531,7 +533,7 @@ describe('two roles: a connector is a shared part, a business plugin uses it (ow
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-pl-fourth', fourth.userId, FOURTH, 'owner', ts(), ts())
     expect((await services.plugins.install(fourth, 'crm-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
     expect((await services.plugins.setEnabled(fourth, 'crm-sales', { enabled: true })).value.plugin.install).toMatchObject({ enabled: true, problem: 'connector-missing' })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM record_types WHERE company_id = ?').get(FOURTH).n).toBe(2)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM record_types WHERE company_id = ? AND source = 'plugin'").get(FOURTH).n).toBe(2)
     expect(await services.plugins.active(FOURTH, 'crm-sales')).toEqual({ ok: false, problem: 'connector-missing' })
     expect(await services.pluginImport.run(fourth, 'crm-sales')).toMatchObject({ ok: false, body: { code: 'PLUGIN_NOT_ACTIVE', problem: 'connector-missing' } })
     expect(await services.plugins.saveMapping(fourth, 'crm-sales', { text: MAPPING(fourth.userId) })).toMatchObject({ ok: false, body: { code: 'CONNECTOR_REQUIRED' } })
@@ -546,5 +548,41 @@ describe('two roles: a connector is a shared part, a business plugin uses it (ow
     expect(detail.plugin.versions.map((v: Json) => v.version)).toEqual(['0.0.5', '0.1.0', '0.2.0'])
     expect((await services.plugins.install(third, 'crm-hub', { version: '0.2.0', keyId: key })).ok).toBe(true)
     expect((await services.plugins.active(THIRD, 'crm-sales')).ok).toBe(true)
+  })
+})
+
+describe('starting values (管理画面の見直し 2-4): the departments the business is used in read the connector; nothing set is changed', () => {
+  const dept = (co: string, id: string, folder: string) => db.prepare(`INSERT INTO departments (id, company_id, name, folder, icon, color, sort_order, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'Folder', '#000000', 0, 1, ?, ?)`).run(id, co, folder, folder, ts(), ts())
+  async function company(co: string) {
+    const who = { companyId: co, userId: `${co}-owner`, role: 'owner' }
+    db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(co, co, co, 'x', ts(), ts())
+    db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${co}`, who.userId, co, 'owner', ts(), ts())
+    // The fixture's recommended mapping puts deals under 営業.
+    dept(co, `${co}-sales`, '営業')
+    dept(co, `${co}-hr`, '人事')
+    const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
+    const key = (await services.keyBroker.create(who, { service: 'hubspot', displayName: 'HubSpot', secret: `${SECRET}-${co}`, audience })).value.keys[0].id
+    return { who, key }
+  }
+
+  it('a connector with no read scope gets the business plugin\'s departments, whichever is installed first', async () => {
+    const a = await company('pl-sv-a')
+    expect((await services.plugins.install(a.who, 'crm-hub', { version: '0.2.0', keyId: a.key })).ok).toBe(true)
+    expect((await services.plugins.install(a.who, 'crm-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    expect((await services.plugins.get(a.who, 'crm-hub')).value.readScope).toEqual({ departmentIds: ['pl-sv-a-sales'], userIds: [] })
+
+    const b = await company('pl-sv-b')
+    expect((await services.plugins.install(b.who, 'crm-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    expect((await services.plugins.install(b.who, 'crm-hub', { version: '0.2.0', keyId: b.key })).ok).toBe(true)
+    expect((await services.plugins.get(b.who, 'crm-hub')).value.readScope).toEqual({ departmentIds: ['pl-sv-b-sales'], userIds: [] })
+  })
+
+  it('a read scope the company chose is kept', async () => {
+    const c = await company('pl-sv-c')
+    expect((await services.plugins.install(c.who, 'crm-hub', { version: '0.2.0', keyId: c.key })).ok).toBe(true)
+    expect((await services.plugins.setReadScope(c.who, 'crm-hub', { departmentIds: ['pl-sv-c-hr'] })).ok).toBe(true)
+    expect((await services.plugins.install(c.who, 'crm-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    expect((await services.plugins.get(c.who, 'crm-hub')).value.readScope).toEqual({ departmentIds: ['pl-sv-c-hr'], userIds: [] })
   })
 })

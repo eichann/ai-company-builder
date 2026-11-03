@@ -90,13 +90,13 @@ test('tools come from the type definitions; a read token gets no state-changing 
 test('service-owned types: records_create never offers them, approvals / messages get no action tool, decisions go through decisions_record', async () => {
   const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
   const create = act!.specs.find(s => s.name === 'records_create')!
-  for (const type of ['minutes', 'approval', 'outbound_message', 'decision']) {
+  for (const type of ['meeting', 'approval', 'outbound_message', 'decision']) {
     assert.equal(create.schema.safeParse({ type, title: 'x' }).success, false, type)
   }
   assert.equal(create.schema.safeParse({ type: 'task', title: 'x' }).success, true)
   const names = act!.specs.map(s => s.name)
   assert.ok(!names.some(n => n.startsWith('approval__') || n.startsWith('outbound_message__')), names.join())
-  assert.ok(names.includes('minutes__start_reading') && names.includes('records_ai_turn') && names.includes('decisions_record'))
+  assert.ok(names.includes('meeting__start_reading') && names.includes('records_ai_turn') && names.includes('decisions_record'))
   const decision = act!.specs.find(s => s.name === 'decisions_record')!
   assert.deepEqual(decision.request({ folder: '営業部', title: 't', why: 'w', source: 's' }), { method: 'POST', path: '/decisions', body: { folder: '営業部', title: 't', why: 'w', source: 's' } })
   const read = await createRecordTools((await fakeServer('read').api.openTurn('co', { conversationId: 'c', agent: 'codex', scope: 'read' }))!)
@@ -161,9 +161,11 @@ test('a record file\'s frontmatter cannot get state & co., nor an existing recor
 
 test('screens are offered only the actions that can start from the record\'s state', () => {
   const titles = (state: string) => recordActionChoices(TASK, state).map(c => c.action).sort()
-  assert.deepEqual(titles('done'), ['reopen', 'set_due'])
+  assert.deepEqual(titles('done'), ['reopen', 'set_bundle', 'set_due', 'set_tags', 'set_wait_until'])
   assert.ok(titles('review').includes('complete'))
-  assert.ok(!titles('todo').includes('complete'))
+  // Task version 9: 完了 from 未着手 too, never from 準備中 (the AI's turn).
+  assert.ok(titles('todo').includes('complete'))
+  assert.ok(!titles('preparing').includes('complete'))
   assert.equal(recordActionChoices(TASK, 'review').find(c => c.action === 'send_back')!.noteRequired, true)
 })
 
@@ -173,6 +175,21 @@ test('task completion: the AI may suggest it to the member, never do it, and can
   assert.match(complete.description, /OK/)
   assert.match(complete.description, /suggest it, never do it/)
   assert.equal(complete.schema.safeParse({ id: 'task-abcdef12', expectedVersion: 3, ok: { by: 'u-carol' } }).success, false)
+})
+
+test('task__wait (task version 12): the AI is told to give the 見込み; left out, the request carries none and the server sets 3 business days', () => {
+  const wait = actionToolSpecs(TYPES).find(s => s.name === 'task__wait')!
+  assert.match(wait.description, /wait_until/)
+  assert.match(wait.description, /Give wait_until too/)
+  const given = { id: 'task-abcdef12', expectedVersion: 3, waiting_on: '先方の返事', wait_until: '2026-11-06' }
+  assert.equal(wait.schema.safeParse(given).success, true)
+  assert.deepEqual((wait.request(given) as { body: { args: unknown } }).body.args, { waiting_on: '先方の返事', wait_until: '2026-11-06' })
+  const none = { id: 'task-abcdef12', expectedVersion: 3, waiting_on: '先方の返事' }
+  assert.equal(wait.schema.safeParse(none).success, true)
+  assert.deepEqual((wait.request(none) as { body: { args: unknown } }).body.args, { waiting_on: '先方の返事' })
+  assert.equal(wait.schema.safeParse({ ...given, wait_until: 'あした' }).success, false)
+  // Only defaulted arguments are optional: set_wait_until still requires its date.
+  assert.equal(actionToolSpecs(TYPES).find(s => s.name === 'task__set_wait_until')!.schema.safeParse({ id: 'task-abcdef12', expectedVersion: 3 }).success, false)
 })
 
 test('minutes_read hands the minutes over as outside text: the header above, the footer below, the flags and parts after', async () => {
@@ -195,7 +212,7 @@ test('minutes_read hands the minutes over as outside text: the header above, the
   const access = await api.openTurn('co', { conversationId: 'c1', agent: 'codex', scope: 'read' })
   const tools = await createRecordTools(access!)
   assert.ok(tools!.specs.some(s => s.name === 'minutes_read'))
-  assert.ok(!tools!.specs.some(s => s.name === 'minutes_link_deal'))
+  assert.ok(!tools!.specs.some(s => s.name === 'minutes_link_bundle'))
   const out = await tools!.execute('minutes_read', { id: 'minutes-abcdef123456' })
   assert.ok(out.startsWith(`${MINUTES_TEXT_HEADER}\n会議メモ`), out.slice(0, 80))
   const footerAt = out.indexOf(MINUTES_TEXT_FOOTER)

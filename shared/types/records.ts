@@ -15,6 +15,10 @@
  *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
  *   POST /records/item/:recordId/file-links        FileLinkRequest → FileLinkResult (link a file later)
  *   POST /records/item/:recordId/file-links/remove FileLinkRequest → FileLinkResult (remove that link)
+ *   POST /records/item/:recordId/record-links        RecordLinkRequest → RecordLinkResult (link a record later)
+ *   POST /records/item/:recordId/record-links/remove RecordLinkRequest → RecordLinkResult (remove that link;
+ *                                                  取り消す = POST …/undo { version: entry.version, expectedVersion })
+ *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only → a folder; session only)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState
  *
@@ -23,12 +27,14 @@
  * NOTE_REQUIRED / ARG_REQUIRED / BAD_VALUE / BAD_ATTACHMENT / BAD_MATERIAL
  * (400), ATTACHMENT_NOT_SYNCED (409: push the file first), CHANGED_SINCE (409, undo),
  * FILE_NOT_LINKABLE (400: a file the caller cannot read, or one the record may
- * not reach — never says which or where), LINK_NOT_FOUND (404, removing).
+ * not reach — never says which or where), LINK_NOT_FOUND (404, removing), LINK_IS_ORIGIN
+ * (400: an origin link — where the record came from — is never linked or removed by hand).
  *
  * While the feature is off for the company, every route but the settings
  * answers 404 `RECORDS_DISABLED`. Answers, counts and link lists hold only
- * records the caller may read: a record in a private folder they cannot read
- * is exactly a record that does not exist.
+ * records the caller may read: a record in a private folder they cannot read,
+ * and another member's owner-only record (owners and admins included), is
+ * exactly a record that does not exist.
  */
 import type { TypeDefinition } from '../core/record-types'
 import type { DecisionMaterial, LedgerEntry } from '../core/record-ledger'
@@ -63,10 +69,29 @@ export interface RecordQuery {
   /** Records of every type implementing this interface (e.g. `request`). */
   implements?: string
   state?: string[]
-  /** Server-sourced field → one value or several (`{ in: [...] }`). */
-  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] }>
+  /**
+   * Server-sourced field → one value or several (`{ in: [...] }`); a field of
+   * kind `tags` → `{ contains: tag }` (records whose tags hold it, normalized
+   * as stored; only types where that field holds tags are searched); a field
+   * of kind date / datetime / number → `{ gte?, lt? }` (gte ≤ value < lt,
+   * compared as stored: `{ lt: '2026-11-06' }` = due by the end of 11/5, with
+   * or without a time; only types where that field has such a kind).
+   */
+  fields?: Record<string, RecordFieldValue | { in: RecordFieldValue[] } | { contains: string } | { gte?: string | number; lt?: string | number }>
+  /** Order by a date / datetime / number server field (empty values last); default most recently changed first. */
+  sort?: { field: string; order?: 'asc' | 'desc' }
+  /** Only records now in a final state of their type that they entered at or after this time (「今日終わったこと」). */
+  finishedSince?: string
+  /** Only records whose outgoing link `name` points at `id` (a bundle's tasks); `id` must be readable (else 404). */
+  link?: { name: string; id: string }
   /** Records linked to this one (either direction), up to `hops` (1 or 2, default 1). */
   linkedTo?: { id: string; hops?: 1 | 2 }
+  /**
+   * Records with a file link to exactly this company path (「つながっているもの」 of
+   * a file). Empty when the caller cannot read the file; a record outside a
+   * private folder never counts for a path inside one. Not with `linkedTo`.
+   */
+  linkedToFile?: string
   /** Substring of the title or summary (0.23-1: not the full text). */
   text?: string
   /** 1–200, default 50. */
@@ -85,6 +110,13 @@ export interface RecordQuery {
 /** What a record imported through an earlier connection is called on screen and for the AI. */
 export const OLD_CONNECTION_LABEL = '前のつなぎ先から取り込んだもの（いまは使われていません）'
 
+/**
+ * A 「決めたこと」 marked 例外（この件だけ） (its `exception` field): a judgement
+ * for its linked thing only, never a precedent for another case. Carried as
+ * `exceptionNotice` so the AI reading past decisions sees it in words.
+ */
+export const DECISION_EXCEPTION_NOTICE = '例外（この件だけ）：つながった件だけの判断です。ほかの件の前例にしないでください。'
+
 export interface RecordSummary {
   id: string
   type: string
@@ -94,7 +126,11 @@ export interface RecordSummary {
   /** Company path of the record's file; null = it lives on the server only. */
   path: string | null
   state: string | null
-  /** Server-sourced field values. */
+  /**
+   * Server-sourced field values. A field of kind `tags` holds the JSON text
+   * of its list (`["急ぎ","見積"]`, null = none): `parseTagsValue` in
+   * `shared/core/record-types.ts` reads it.
+   */
   fields: Record<string, RecordFieldValue>
   /** Changes made through the state engine (0 = none yet). */
   version: number
@@ -108,12 +144,85 @@ export interface RecordSummary {
   fromOldConnection?: true
   /** With `fromOldConnection`: `OLD_CONNECTION_LABEL`, to show as is. */
   notice?: string
+  /**
+   * A decision marked 例外（この件だけ） (`fields.exception: true`):
+   * `DECISION_EXCEPTION_NOTICE`. Absent for every other record.
+   */
+  exceptionNotice?: string
+  /**
+   * Owner-only (「持ち主だけ」, records.md "Owner-only records"): only the member
+   * reading it sees it — it reaches nobody else, owners and admins included.
+   * Absent for every other record.
+   */
+  personal?: true
+  /**
+   * 「あなたの番」 and 「AI の番」 only: the absent member this item waits for,
+   * when it is in the caller's list as their delegate (代わりの人,
+   * records.md "Absence and the delegate"). Absent otherwise.
+   */
+  actingFor?: string
+  /**
+   * 「AI の番」 only: the server clock's 「見込みの日時が過ぎた」 put it in this state
+   * (`enteredByWaitOver`, shared/core/core-types.ts) — what the PC's wait-over step runs.
+   * Absent otherwise.
+   */
+  waitOver?: true
+  /**
+   * 「あなたの番」 only: the server clock gave it back because its 見込み (`wait_until`) passed and
+   * it is still the person's (`waitCameBack`, shared/core/core-types.ts; task version 12) — when
+   * the wait began (`waitedSince`, ISO; null when not known) and when it came back. Absent
+   * otherwise (an older server never sends it).
+   */
+  waitCameBack?: { waitedSince: string | null; overAt: string }
 }
 
 export interface RecordQueryResult {
   /** Every match the caller may read (not only this page). */
   total: number
   records: RecordSummary[]
+}
+
+/**
+ * One record 探す found (`POST /records/find`, records.md "探す"): the summary plus what the
+ * left tab narrows and labels by, all decided on the server from what the caller reads.
+ */
+export interface RecordFindHit {
+  record: RecordSummary
+  /** The department folder it lives in (its path's or folder's first part); null = the whole company. */
+  department: string | null
+  /** The caller is in it: its owner (owner-only), a person field of its type, or a meeting's attendee. */
+  mine: boolean
+  /** Its 案件・プロジェクト (outgoing `bundle` link), when the caller reads it. */
+  bundle?: { id: string; title: string }
+}
+
+/** A 相手 / 案件 at a glance (探す's summary card, 「進行中の案件」): counts of what the caller reads. */
+export interface RecordFindHub {
+  id: string
+  counts: { bundles: number; openTasks: number; meetings: number; decisions: number; files: number }
+  /** The first meeting on or after `today` (its `meeting_at`), else null. */
+  nextMeetingAt: string | null
+  /** The newest change among it and what is linked to it. */
+  lastMovedAt: string
+  /** Readable やること and 案件 linked to it: the app matches this PC's consultations about them. */
+  memberIds: string[]
+}
+
+/** `POST /records/find { text, today }`. */
+export interface RecordFindResult {
+  /** Every readable match (hits holds the newest 200). */
+  total: number
+  hits: RecordFindHit[]
+  /** Hits that are a 相手 or a 案件 whose name holds the words (at most 5). */
+  hubs: RecordFindHub[]
+}
+
+/** `POST /records/find-home { today, from, to }`: 探す with nothing typed. */
+export interface RecordFindHome {
+  /** The caller's unfinished 案件・プロジェクト, newest first (at most 5). */
+  bundles: Array<RecordFindHit & { hub: RecordFindHub }>
+  /** The caller's meetings with `meeting_at` in [from, to), earliest first (at most 5). */
+  meetings: RecordFindHit[]
 }
 
 export interface RecordLinkView {
@@ -129,6 +238,34 @@ export interface RecordLinkView {
    * when the server could not tell.
    */
   broken?: boolean
+  /**
+   * The link cannot be removed by hand (no 「…」→「つながりを外す」): it says where the record came
+   * from (an `origin` link: もとの会議・もとの連絡・AI が用意したもの), or the record's links change only
+   * through its service or its file. Absent = it can be removed (`record-links/remove`,
+   * `file-links/remove`).
+   */
+  fixed?: true
+}
+
+/**
+ * A kind of 束ねるもの as the screen names it (records.md "Bundle kinds"): the type to create
+ * (`POST /records/item { type }`) and its name — a business plugin's kind keeps its own label
+ * (案件・番組), the core's `project` takes the company's name (初期値「プロジェクト」). Never 「まとまり」.
+ */
+export interface BundleKind {
+  type: string
+  name: string
+  source: 'core' | 'plugin'
+}
+
+/** GET /records/bundle-kinds. */
+export interface BundleKindsResult {
+  /** The core's ordinary kind, under the company's name. */
+  core: BundleKind
+  /** What each department makes: its business plugin's kind if one lives there, else `core`. */
+  departments: Array<{ departmentId: string; folder: string; kind: BundleKind }>
+  /** Every kind in use in the company (where kinds mix: 「案件・プロジェクトごと」, searching across departments). */
+  kinds: BundleKind[]
 }
 
 export interface RecordDetail {
@@ -158,9 +295,17 @@ export interface CreateRecordRequest {
   summary?: string
   /** The folder whose readers may see it (none = everyone in the company); not inside a private folder. */
   folder?: string
+  /**
+   * Owner-only (「持ち主だけ」: 自分用のやること): only the creator sees it — not owners or admins
+   * either. Never with `folder` (400 PERSONAL_WITH_FOLDER); an assignee other than the creator
+   * cannot read it (400 ASSIGNEE_CANNOT_READ). Shown to a folder later with ShareRecordRequest.
+   */
+  personal?: boolean
   /** Server-field values (requested_by defaults to the creator for request types). */
   fields?: Record<string, RecordFieldValue>
   links?: Record<string, string | string[]>
+  /** The state to start in instead of the type's `initial`: one of its `create_states` (task: `preparing`). */
+  state?: string
   actor?: RecordActor
 }
 
@@ -170,6 +315,8 @@ export interface ActionRequest {
   note?: string
   /** The action's arguments: each sets the server field of the same name. */
   args?: Record<string, RecordFieldValue>
+  /** Record links the action sets (its definition's `links`): ids, null / [] = none; a link left out stays. */
+  links?: Record<string, string | string[] | null>
   /** Files (of the action's `attach` links) handed over, at the commit that was pushed. */
   attachments?: Array<{ link: string; path: string; commit: string }>
   /**
@@ -205,6 +352,42 @@ export interface FileLinkRequest {
   note?: string
   proposedBy?: 'ai'
   conversationId?: string
+}
+
+/**
+ * 「部署に出す／案件につなぐ」: the owner makes their owner-only record visible to
+ * the readers of `folder` (a folder they read, not a private one; for a deal,
+ * the deal's folder). Ledger action `share` (`place.personal_owner`,
+ * `place.folder`), never undone. Not personal any more → 409 NOT_PERSONAL;
+ * anyone but the owner cannot find the record (404 RECORD_NOT_FOUND).
+ */
+export interface ShareRecordRequest {
+  folder: string
+  expectedVersion: number
+  note?: string
+  proposedBy?: 'ai'
+  conversationId?: string
+}
+
+/**
+ * Linking a record to another later, or removing that link (records.md "Linking records later"):
+ * `link` is a record link of the source's type that is not an origin one (task: bundle,
+ * counterpart, related); `target` the other record's id. A `one` link (bundle) is replaced.
+ */
+export interface RecordLinkRequest {
+  link: string
+  target: string
+  expectedVersion: number
+  note?: string
+  proposedBy?: 'ai'
+  conversationId?: string
+}
+
+/** The answer: the record after the change and its ledger entry (`link_record` / `unlink_record`; null when nothing changed). */
+export interface RecordLinkResult {
+  record: RecordSummary
+  entry: LedgerEntry | null
+  changed: boolean
 }
 
 export interface FileLinkResult {

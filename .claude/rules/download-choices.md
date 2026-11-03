@@ -38,6 +38,19 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 
 ## First setup (`sync/first-setup.ts`, `features/company-setup/ipc.ts`)
 
+- **A member's first time asks nothing when it can** (2026-11-02, 管理画面の見直し 2-2):
+  the departments they belong to (所属: `department_members`, set by the invitation or the
+  admin; `companySetup:myDepartments` reads each department's members with the session, any
+  unreadable one → "unknown") are downloaded without the picker (`membershipFolders`,
+  `folderSetup.ts` `kind: 'mine'`); unknown or none → the picker as below, never "everything".
+  Only on this first-setup path: an existing clone's exclusions are never changed, so no sync
+  behaviour changes. A member with exactly one company and no remembered company
+  (`companyToOpenWithoutChoosing`, `hasRememberedCompany`) gets it opened by itself in
+  `~/AI Company Builder/<会社名>` (`companySetup:defaultParentFolder`: created, registered like
+  a picked folder); that folder still goes through `git:inspectCompanyFolder`, and a refusal
+  (the member's own files there) lands on the folder choice with the reason. Tests:
+  `src/features/company/model.test.ts`, `tests/ui/company-selector.spec.ts` 「one company…」,
+  `tests/ipc-app.test.ts` 「first setup without choices…」.
 - In a **fresh folder** the member picks departments first (`CompanySelector`:
   「所属する部署を選んでください。他の部署はあとから設定でダウンロードできます」). Then
   `git:setupCompanyRemote` → `checkoutSelectedDepartments`: `fetch --filter=blob:none` → persist
@@ -131,7 +144,12 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   one indigo accent, light and dark). The panel reaches the main process only through
   `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
   (uncommitted changes, progress), and separate ports for the company `.env` (status only),
-  `.gitignore`, the AI's environment-variable list and the git binary status. The 同期 group
+  `.gitignore`, the AI's environment-variable list and the git binary status. 「同期しないファイル」
+  (the company's root `.gitignore`) is editable only for owners / admins (`canEditCompanyGitignore`,
+  role from `getCompanies`; unknown role → read-only); everyone else reads it with
+  「会社全体に効くので、変えられるのは管理者だけです。」 and no 保存 — the server does not check this
+  yet (`sync-guards.md` "Shared files"). Test: `tests/ui/download-folders.spec.ts`
+  「同期しないファイル: …」. The 同期 group
   also holds 「自動同期」 (`src/features/settings/components/AutoSyncSettings.tsx`; behaviour in
   `sync.md` "Automatic sync").
 - File tree: a not-downloaded folder stays visible as a muted placeholder (dashed icon,

@@ -43,11 +43,13 @@ import {
   gitlinksUnder,
   legacySharedExclusions,
   nestedRepoOverwriteMessage,
+  largeFileOverwriteMessage,
   readNestedRepoExcludes,
   writeNestedRepoExcludes,
   type NestedRepoOverwriteResult,
 } from './nested-repos'
-import { findLargeFiles, largeFilePattern } from './large-files'
+import { findLargeFiles, LARGE_FILE_THRESHOLD } from './large-files'
+import { moveOwnLinesToLocal, readLocalLargeFiles, writeLocalLargeFiles } from './local-ignores'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { ensurePromisorConfig, setRemoteUrl } from './remote'
 import { appliedExclusions, applySparseSelection, readSparseConfig, sparseConfigPath, staleExclusions, writeSparseConfig } from './sparse'
@@ -112,6 +114,7 @@ interface SyncSideEffects {
   reserved: ReservedHoldBack | null
   /** This computer's versions of files in excluded nested repositories, backed up before a teammate's same-path files replaced them. */
   nestedRepoOverwrite?: NestedRepoOverwriteResult | null
+  largeFileOverwrite?: NestedRepoOverwriteResult | null
 }
 
 /**
@@ -448,14 +451,29 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       log.warn('Git sync: Nested repo detection failed:', nestedRepoError)
     }
 
-    // Detect large files (>100MB) and add to .gitignore: only the files git
-    // lists (index entries + untracked files no rule ignores) are stat'ed,
-    // never the whole folder, and "already ignored" is git's answer, not a
-    // substring of the file. A private folder's clone is its own repository:
-    // a large file there must not be named in the company's shared
-    // .gitignore. See ./large-files.ts. Runs after the nested-repository
-    // step: a repository kept on this computer is ignored by then (so a large
-    // file in it is never named in the shared .gitignore), and one whose .git
+    // Lines older apps wrote into the shared .gitignore for this member (their
+    // large files, their private skills) move to .git/info/exclude before the
+    // scan and before anything is staged. See ./local-ignores.ts.
+    try {
+      const moved = await moveOwnLinesToLocal(git, repoPath, {
+        threshold: deps.largeFileThreshold ?? LARGE_FILE_THRESHOLD,
+        skills: !isScope,
+      })
+      if (moved.largeFiles.length + moved.skills.length > 0) {
+        log.log(`Git sync: Moved ${moved.largeFiles.length} large-file and ${moved.skills.length} private-skill line(s) from .gitignore to .git/info/exclude`)
+      }
+    } catch (moveError) {
+      log.warn('Git sync: Could not move own .gitignore lines to .git/info/exclude:', moveError)
+    }
+
+    // Detect large files (>100MB) and keep them on this computer: only the
+    // files git lists (index entries + untracked files no rule ignores) are
+    // stat'ed, never the whole folder, and "already ignored" is git's answer.
+    // The lines go to this computer's .git/info/exclude, never the shared
+    // .gitignore (a teammate's file at the same path would stop syncing).
+    // A private folder's clone is its own repository with its own exclude
+    // file. See ./large-files.ts. Runs after the nested-repository step: a
+    // repository kept on this computer is ignored by then, and one whose .git
     // the member removed is scanned as the plain files it now is.
     let ignoredLargeFiles: string[] = []
     try {
@@ -467,12 +485,19 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       log.warn('Git sync: Large file scan failed:', scanError)
     }
 
-    // Add large files to .gitignore
-    if (ignoredLargeFiles.length > 0) {
-      const largeFilesSection = '\n# Auto-ignored: Large files (>100MB)\n' +
-        ignoredLargeFiles.map(largeFilePattern).join('\n') + '\n'
-      await fs.promises.appendFile(gitignorePath, largeFilesSection)
-      log.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
+    // Keep large files ignored on this computer; lines of files that are gone are dropped.
+    try {
+      const kept = readLocalLargeFiles(repoPath).filter(rel => { try { fs.lstatSync(path.join(repoPath, rel)); return true } catch { return false } })
+      writeLocalLargeFiles(repoPath, [...kept, ...ignoredLargeFiles])
+      if (ignoredLargeFiles.length > 0) log.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s) on this computer:`, ignoredLargeFiles)
+    } catch (excludeError) {
+      // Not ignored after all: the untracked ones are unstaged after the add
+      // like .backups/ (a tracked one stays tracked, as it always did).
+      log.warn('Git sync: Could not write .git/info/exclude (large files):', excludeError)
+      for (const rel of ignoredLargeFiles) {
+        const tracked = (await git.raw(['ls-files', '--', `:(literal)${rel}`]).catch(() => 'unknown')).trim() !== ''
+        if (!tracked) localOnly.push(rel)
+      }
     }
 
     // 1. Fetch from origin
@@ -653,6 +678,26 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           success: false,
           error: `共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
         }
+      }
+    }
+
+    //      The same for large files kept on this computer (.git/info/exclude):
+    //      a teammate may share a file at the same path now that no shared
+    //      line ignores it for everyone.
+    try {
+      const keptLarge = readLocalLargeFiles(repoPath)
+      if (keptLarge.length > 0) {
+        effects.largeFileOverwrite = await backUpBeforeServerOverwrite({
+          git, repoPath, repos: keptLarge, files: true, backupPath: `${backupPath}_large_file`,
+          backupPrefix: opts.backupPrefix, now: deps.now(), log,
+        })
+      }
+    } catch (backupError) {
+      log.error('Git sync: Could not back up large files kept on this computer:', backupError)
+      const msg = backupError instanceof Error ? backupError.message : String(backupError)
+      return {
+        success: false,
+        error: `このPCだけに置いている大きなファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
       }
     }
 
@@ -917,6 +962,21 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       await tidyMergedGitignores({ git, repoPath, localHash, log })
     } catch (tidyError) {
       log.warn('Git sync: Could not tidy merged .gitignore files:', tidyError)
+    }
+
+    // 4.42. A line this member moved to .git/info/exclude can come back with
+    //       the pull (two removals of neighbouring lines meet in the union
+    //       merge, which keeps both). Move it again now, in one commit, so the
+    //       shared file converges instead of trading lines sync after sync.
+    try {
+      const again = await moveOwnLinesToLocal(git, repoPath, { threshold: deps.largeFileThreshold ?? LARGE_FILE_THRESHOLD, skills: !isScope })
+      if (again.largeFiles.length + again.skills.length > 0) {
+        await git.raw(['add', '--sparse', '--', '.gitignore'])
+        await git.commit('Move ignore lines kept on this computer out of .gitignore after merging')
+        log.log('Git sync: Moved own .gitignore lines again after merging:', again.largeFiles.length + again.skills.length)
+      }
+    } catch (moveError) {
+      log.warn('Git sync: Could not move own .gitignore lines after merging:', moveError)
     }
 
     // 4.45. Never let a gitlink of an excluded nested repository through
@@ -1594,6 +1654,8 @@ function withSideEffects(result: RunResult, effects: SyncSideEffects): GitSyncRe
     notes.push(nestedRepoOverwriteMessage(overwritten))
     Object.assign(fields, { nestedRepoBackupFiles: overwritten.files, nestedRepoBackupPath: overwritten.backupPath })
   }
+  const largeOverwritten = effects.largeFileOverwrite
+  if (largeOverwritten) notes.push(largeFileOverwriteMessage(largeOverwritten))
   const reserved = effects.reserved
   if (reserved && reserved.files.length > 0) {
     notes.push(reservedPathNote(reserved))

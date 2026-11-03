@@ -18,6 +18,10 @@ import {
   privateRepoPath,
 } from '../lib/private-folders'
 import { logError } from '../lib/error-log'
+import { ownCredential } from './guard-tags'
+
+/** git sends the member's session token as the Basic-auth password (accounts.bySessionToken), not a cookie. */
+const SMART_HTTP_AUTH = 'Basic auth carrying the member\'s session token'
 
 export const gitHttpRoute = new Hono()
 
@@ -496,7 +500,7 @@ function trackActivity(
 }
 
 // GET /:repo/info/refs
-gitHttpRoute.get('/:repo/info/refs', async (c) => {
+gitHttpRoute.get('/:repo/info/refs', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
   const { user, companyId, role } = result
@@ -513,7 +517,7 @@ gitHttpRoute.get('/:repo/info/refs', async (c) => {
 })
 
 // POST /:repo/git-upload-pack
-gitHttpRoute.post('/:repo/git-upload-pack', async (c) => {
+gitHttpRoute.post('/:repo/git-upload-pack', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
   const { user, companyId, role } = result
@@ -523,7 +527,7 @@ gitHttpRoute.post('/:repo/git-upload-pack', async (c) => {
 })
 
 // POST /:repo/git-receive-pack
-gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
+gitHttpRoute.post('/:repo/git-receive-pack', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
   const { user, companyId, role } = result
@@ -549,7 +553,7 @@ gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
 })
 
 // GET /:repo/HEAD
-gitHttpRoute.get('/:repo/HEAD', async (c) => {
+gitHttpRoute.get('/:repo/HEAD', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
   const { user, companyId, role } = result
@@ -614,7 +618,7 @@ function authAndAuthorizeScope(c: { req: { raw: Request; header: (name: string) 
   return { user, companyId, role, scope, scopes, repoPathInfo: `/${companyId}.scopes/${scope.repoId}.git` }
 }
 
-gitHttpRoute.get('/:company/scopes/:repo/info/refs', async (c) => {
+gitHttpRoute.get('/:company/scopes/:repo/info/refs', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const service = c.req.query('service')
   if (!service || !['git-upload-pack', 'git-receive-pack'].includes(service)) {
     return c.text('Invalid service', 400)
@@ -625,14 +629,14 @@ gitHttpRoute.get('/:company/scopes/:repo/info/refs', async (c) => {
   return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/info/refs`, 'GET', observer)
 })
 
-gitHttpRoute.post('/:company/scopes/:repo/git-upload-pack', async (c) => {
+gitHttpRoute.post('/:company/scopes/:repo/git-upload-pack', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const r = authAndAuthorizeScope(c, 'read')
   if (r instanceof Response) return r
   const observer = trackActivity(c, r.user.id, r.companyId, 'fetch')
   return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/git-upload-pack`, 'POST', observer)
 })
 
-gitHttpRoute.post('/:company/scopes/:repo/git-receive-pack', async (c) => {
+gitHttpRoute.post('/:company/scopes/:repo/git-receive-pack', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const r = authAndAuthorizeScope(c, 'write')
   if (r instanceof Response) return r
   // Being made public (lib/private-folders.ts): its contents are moving into
@@ -656,7 +660,7 @@ gitHttpRoute.post('/:company/scopes/:repo/git-receive-pack', async (c) => {
   return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/git-receive-pack`, 'POST', observer, pushCheck)
 })
 
-gitHttpRoute.get('/:company/scopes/:repo/HEAD', async (c) => {
+gitHttpRoute.get('/:company/scopes/:repo/HEAD', ownCredential(SMART_HTTP_AUTH), async (c) => {
   const r = authAndAuthorizeScope(c, 'read')
   if (r instanceof Response) return r
   return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/HEAD`, 'GET')

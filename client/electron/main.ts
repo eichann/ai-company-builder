@@ -6,6 +6,7 @@ import { registerVoiceInput } from './voice-input'
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import path from 'path'
 import os from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'url'
 
 import { startChatServer } from './chat-server'
@@ -21,7 +22,7 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createAppPages, createBroadcastPort, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createAppPages, createBroadcastPort, createDrivePickerWindow, createChatWindowHost, createMainWindowHost, createMessageBoxHost, desktopShell, guardEverySession, receiveAppLinks, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { diskFiles, registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
@@ -30,6 +31,8 @@ import { createToolApprovals, registerAgentInteractionsIpc } from './features/ag
 import { requestFromOwner } from './features/agent-interactions/owner'
 import { wireAgentControl } from './features/agent-control/wire'
 import { registerSettingsIpc } from './features/settings/ipc'
+import { registerAppLinkIpc } from './features/app-link/ipc'
+import { APP_LINK_SCHEME, appLinkInArgs } from './features/app-link/link'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
@@ -42,14 +45,43 @@ import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
+import { createDrivePicking } from './features/google/drive'
+import { registerCalendarIpc } from './features/calendar/ipc'
+import { registerTasksIpc } from './features/tasks/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
+import { registerRecordViewsIpc } from './features/record-views/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
+import { registerAbsencesIpc } from './features/absences/ipc'
+import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
+import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createAiTurnClaims } from './features/ai-turns/claims'
+import { createRunRegistry } from './records/runs'
+import { registerAiTurnsIpc } from './features/ai-turns/ipc'
+import { createNotificationsWatcher } from './features/notifications/watcher'
+import { registerNotificationsIpc } from './features/notifications/ipc'
+import { fileShownStore } from './features/notifications/shown-store'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
+import { createSkillUseReporter } from './services/skill-use-reporter'
 import type { StoppableTurns } from './services/agent-stop'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+import { registerSlackIpc } from './features/slack/ipc'
+import { registerThreadsIpc } from './features/threads/ipc'
+import { registerPluginBridgeIpc } from './features/plugins/bridge-ipc'
+import { createPluginFileServer } from './features/plugins/protocol'
+import { registerPluginScreensIpc } from './features/plugins/screens'
+import { servePluginFiles } from './electron-adapter'
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+import { createProcedureReader } from './features/ai-turns/procedures'
+import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
+// lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -88,6 +120,7 @@ let closeChatWindowsWithMain = () => {}
 // The main window; closing it first lets the renderer save every open tab.
 const mainWindowHost = createMainWindowHost({
   webPreferences: appPages.webPreferences,
+  page: appPages.page,
   load: win => appPages.load(win),
   askClose: window => window.send('app:closeRequested'),
   docbaseCookie: () => config.load().docbaseCookie,
@@ -98,6 +131,18 @@ const appWindow = mainWindowHost.port
 const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) app.quit()
 app.on('second-instance', () => { mainWindowHost.focus() })
+// The server address from an invitation's 「アプリを開く」 (features/app-link): offered only,
+// the member confirms it on the server screen. Focus the window on every link.
+const appLinks = registerAppLinkIpc(ipc, {
+  currentServer: () => config.serverUrl(),
+  saveServer: origin => {
+    const current = config.load()
+    current.serverUrl = origin
+    config.save(current)
+  },
+  log: message => console.warn(message),
+})
+receiveAppLinks(APP_LINK_SCHEME, raw => { appLinks.offer(raw); mainWindowHost.focus() }, appLinkInArgs)
 
 // Chat server info (shared between app.whenReady and IPC handler)
 let chatServerInfo: { port: number; authToken: string } | null = null
@@ -129,6 +174,7 @@ app.on('activate', () => {
 // 「別ウィンドウで開く」: consultations in windows of their own (features/chat-windows).
 const chatWindowShell = createChatWindowHost({
   webPreferences: appPages.webPreferences,
+  page: appPages.page,
   load: win => appPages.load(win, { window: 'chat' }),
   bounds: {
     load: () => config.load().chatWindowBounds,
@@ -189,7 +235,13 @@ const session = createSession()
 // The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
 // Set once 「議事録が届きました」 exists (below): a records signal only makes it ask the server again.
 let recordsSignal: (companyId: string) => void = () => {}
-const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle, onRecords: companyId => recordsSignal(companyId) })
+let noticesSignal: (companyId: string) => void = () => {}
+const agentControl = wireAgentControl({
+  serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle,
+  onRecords: companyId => recordsSignal(companyId),
+  onNotifications: companyId => noticesSignal(companyId),
+  onPluginsChanged: companyId => appWindow.send('plugins:changed', { companyId }),
+})
 // 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
 const minutes = createMinutesChecker({
   baseUrl: getServerApiUrl,
@@ -197,9 +249,26 @@ const minutes = createMinutesChecker({
   onChanged: companyId => appWindow.send('minutes:changed', { companyId }),
   watchSignals: companyId => agentControl.watchSignals(companyId),
 })
-recordsSignal = companyId => minutes.recordsSignal(companyId)
 lifecycle.beforeQuit(() => minutes.stop())
 registerMinutesIpc(ipc, minutes)
+// The title bar's 「あなたの番」 and bell (features/notifications): read with the session here; a Mac
+// notification only for an approval request, a new item in あなたの番 or a fresh notice the server marks (E-27).
+const notices = createNotificationsWatcher({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  onChanged: companyId => appWindow.send('notifications:changed', { companyId }),
+  watchSignals: companyId => agentControl.watchSignals(companyId),
+  // A click brings the window forward; the morning's 「今日のあなたの番」 also opens the task list.
+  desktopNotify: (title, body, click) => desktopShell.notify(title, body, () => {
+    mainWindowHost.focus()
+    if (click.target === 'tasks') appWindow.send('notifications:openTasks', { companyId: click.companyId })
+  }),
+  shownNotices: fileShownStore(path.join(userDataDir(), 'notices-shown.json')),
+})
+recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId) }
+noticesSignal = companyId => notices.signal(companyId)
+lifecycle.beforeQuit(() => notices.stop())
+registerNotificationsIpc(ipc, notices)
 
 // Local chat history and hand-off memos (features/chat-history).
 const chatHistory = wireChatHistory(ipc, {
@@ -223,17 +292,98 @@ const writeAccessStore = createWriteAccessStore({
 // The key broker's tokens, the member's own keys and skills' tools (features/broker).
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
 // 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
-registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+const googleApi = registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+// Google Drive (google-drive.md): the person picks in Google Picker's own window; the session stays here.
+const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: session.cookies, window: createDrivePickerWindow(__dirname), google: googleApi })
+// 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
+registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The task list (features/tasks): read and changed with the session here; the server decides who may.
+registerTasksIpc(ipc, {
+  baseUrl: getServerApiUrl, cookies: session.cookies,
+  // Tag suggestions: a Haiku model through the company's key (the broker's relay), text only.
+  tagSuggest: { brokerEnv: request => brokerTokens.envFor(request), aiAllowed: () => agentControl.stop.oneShotAiAllowed() },
+})
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Search hits, the record card and a file's 「つながっているもの」 (features/record-views).
+registerRecordViewsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// Settings → 「不在と代わりの人」 (features/absences): the member's own absences, with the session.
+registerAbsencesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// 自分の設定 → 「受信を読む」「AI が自動で進める」 (features/work-switches): the member's own, with the session.
+registerWorkSwitchesIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// 見られる人 for the lists (features/viewers): with the session.
+registerViewersIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).
 registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
-const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
+// Execution runs (S10b): which consultation runs which claimed 「AI の番」; its record tokens are bound to the run.
+const aiRunRegistry = createRunRegistry()
+// The app's git (binary, credentials, guarded configuration: services/app-git.ts).
+const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') })
+// Which Skill a consultation used (records.md "Which Skill"): folder name + git tree id, read-only git, never a blob fetched.
+const skillUses = createSkillUseReporter({
+  baseUrl: getServerApiUrl, cookies: session.cookies, home: os.homedir(), log: console,
+  git: (root, args) => appGit.create(root, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
+})
+const recordsApi = createRecordsApi({
+  baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf,
+  beforeWrite: conversationId => skillUses.settled(conversationId),
+})
+// 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
+// window; main claims the server's execution run and the record by its version, and settles it afterwards.
+// A business plugin's step's pinned procedure (plugin-steps.md): the package C2 keeps, or the company Skill's tree.
+const readPluginProcedure = createProcedureReader({
+  folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
+  git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
+})
+const aiTurnClaims = createAiTurnClaims({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  records: recordsApi,
+  agent: () => config.authMode(),
+  windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
+  aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+  runs: aiRunRegistry,
+  // This app instance (per launch): the server's claim holder.
+  deviceId: `app-${randomUUID()}`,
+  // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
+  recordMovedOn: companyId => minutes.recordsSignal(companyId),
+  readProcedure: readPluginProcedure,
+})
+registerAiTurnsIpc(ipc, {
+  claims: aiTurnClaims,
+  isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+  paths: allowedRoots,
+})
+// Lanes (ipc-and-main-process.md "Lane markers"): one line per feature, `register<Feature>Ipc(ipc, { … })`
+// or `wire<Feature>(ipc, { … })` from features/<feature>/, right under your lane's ▼.
+// lane A ▼
+registerSlackIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+registerThreadsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// A plugin's screen (plugin-frame.md): acb-plugin:// from the verified packages only, and its bridge.
+const pluginFiles = createPluginFileServer({ packages: { keptPackage: (id, version, companyId) => agentControl.pluginPackages.keptPackage(id, version, companyId) } })
+servePluginFiles(pluginFiles)
+registerPluginBridgeIpc(ipc, {
+  baseUrl: getServerApiUrl, cookies: session.cookies, isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+  keeps: (id, version, companyId) => agentControl.pluginPackages.keptPackage(id, version, companyId) !== null,
+})
+// The four slots' screens (A6): only verified packages the company lists now.
+registerPluginScreensIpc(ipc, {
+  listed: async companyId => (agentControl.policy.get(companyId) ?? await agentControl.policy.refresh(companyId, { timeoutMs: 5_000 }))?.plugins ?? null,
+  settled: () => agentControl.pluginPackages.idle(),
+  declaration: (companyId, ref) => pluginFiles.declaration(companyId, ref),
+  isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+})
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots })
+// lane C ▲
 
 registerAuthIpc(ipc, {
   session,
@@ -244,14 +394,12 @@ registerAuthIpc(ipc, {
     brokerTokens.clear()
     companyFilesApi.clear()
     minutes.stop()
+    notices.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },
   onSignedIn: () => agentControl.eventSender.sessionStarted(),
 })
-
-// The app's git (binary, credentials, guarded configuration: services/app-git.ts).
-const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') })
 
 // Skills (features/skills).
 const skills = registerSkillsIpc(ipc, {
@@ -294,7 +442,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 
 // Setting a company folder up, and what this computer downloads
 // (features/company-setup, features/download-choices).
-registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir })
+registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home') })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath) })
@@ -321,6 +469,7 @@ app.whenReady().then(async () => {
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
       records: recordsApi,
+      skillUses,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,
@@ -328,10 +477,18 @@ app.whenReady().then(async () => {
       agentStop: agentControl.stop,
       serverUrl: getServerApiUrl,
       brokerTokens,
+      drivePicking,
+      paths: allowedRoots,
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
     })
-    const result = await startChatServer(serverConfig)
+    // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
+    const result = await startChatServer({
+      ...serverConfig,
+      pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step),
+      // A person step's consultation: its AI's plugin power is that step's (plugin-steps.md).
+      bindPluginStep: createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies }),
+    })
     chatServerInfo = { port: result.port, authToken: result.authToken }
     chatTurns = result.turns
   } catch (err) {

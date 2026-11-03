@@ -226,7 +226,15 @@ export class ChatHistoryStore {
       sequence: cached?.sequence ?? 0, committed: cached?.committed ?? 0,
       writing: null, timer: null, writeError: null,
     }
+    // Times an earlier version stamped by re-saving are put back once, and written with the next save.
+    const repaired = repairedUpdateTimes(data.sessions)
+    for (const s of repaired) {
+      const index = data.sessions.findIndex(x => x.id === s.id)
+      data.sessions[index] = s
+      entry.byId.set(s.id, s)
+    }
     this.entries.set(companyId, entry)
+    if (repaired.length > 0) this.schedule(companyId, entry)
     return entry
   }
 
@@ -377,7 +385,8 @@ export class ChatHistoryStore {
     return this.list(companyId).filter(session => {
       let text = sessionSearchText.get(session)
       if (text === undefined) {
-        text = normalizeSearchText([session.title, session.draftInput ?? '', ...session.messages.map(m => m.content)].join('\u0000'))
+        // The app's instruction to the AI is not the member's words (app-instruction.ts): not searched.
+        text = normalizeSearchText([session.title, session.draftInput ?? '', ...session.messages.map(m => m.appInstruction ? '' : m.content)].join('\u0000'))
         sessionSearchText.set(session, text)
       }
       return text.includes(needle)
@@ -421,8 +430,10 @@ export class ChatHistoryStore {
         agentSession: existing.agentSession !== undefined ? existing.agentSession : incoming.agentSession,
       } : {}),
       revision: (existing?.revision ?? 0) + 1,
+      // 「更新」 is when the conversation itself changed (a message or the draft): a save of the same
+      // words in another shape (a newer app's fields, a restore) keeps the time and the list's order.
       updatedAt: existing && (existing.draftInput ?? '') === (incoming.draftInput ?? '') &&
-        sameMessages(existing.messages, incoming.messages)
+        sameConversation(existing.messages, incoming.messages)
         ? existing.updatedAt : new Date().toISOString(),
     }
     this.replace(entry, session)
@@ -473,11 +484,32 @@ export class ChatHistoryStore {
 }
 
 /** Same messages as before (the autosave sends the whole conversation each time). */
-function sameMessages(a: ChatSession['messages'], b: ChatSession['messages']): boolean {
+/** The same messages, by what was said (id, who, words), whatever other fields a version stores with them. */
+function sameConversation(a: ChatSession['messages'], b: ChatSession['messages']): boolean {
   if (a === b) return true
   if (a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
-    if (a[i].content !== b[i].content || a[i].id !== b[i].id) return false
+    if (a[i].content !== b[i].content || a[i].id !== b[i].id || a[i].role !== b[i].role) return false
   }
-  return JSON.stringify(a) === JSON.stringify(b)
+  return true
+}
+
+/** How far after its last message a conversation without a draft may have been saved (a long reply). */
+const REPAIR_SLACK_MS = 15 * 60_000
+
+/**
+ * The time an earlier version stamped on conversations it only re-saved (2026-11-02: every
+ * conversation showed the time the new app first opened). With no draft, a conversation changes only
+ * by its messages, so a time well after its last message is put back to that message's time.
+ * Answers the sessions to replace (none when nothing needs it).
+ */
+export function repairedUpdateTimes(sessions: readonly ChatSession[]): ChatSession[] {
+  const out: ChatSession[] = []
+  for (const s of sessions) {
+    if (s.draftInput?.trim()) continue
+    const last = s.messages.reduce((t, m) => Math.max(t, Date.parse(m.timestamp) || 0), Date.parse(s.createdAt) || 0)
+    const at = Date.parse(s.updatedAt)
+    if (last > 0 && at - last > REPAIR_SLACK_MS) out.push({ ...s, updatedAt: new Date(last).toISOString() })
+  }
+  return out
 }

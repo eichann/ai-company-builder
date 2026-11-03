@@ -243,3 +243,32 @@ describe('company handle: connector plugins', () => {
     expect(source.forCompany('b').plugins.linkOfRecord('deal-a00001')).toBeNull()
   })
 })
+
+describe('company handle: task settings and department membership', () => {
+  it('settings are per company', () => {
+    source.forCompany('a').tasks.save({ settings: '{"a":1}', updatedAt: TS, updatedBy: 'u' })
+    expect(source.forCompany('b').tasks.get()).toBeNull()
+    expect(source.forCompany('a').tasks.get()).toMatchObject({ settings: '{"a":1}' })
+  })
+
+  it('cannot read, fill, empty or remove members of another company’s department', () => {
+    const b = source.forCompany('b').tasks
+    b.replaceDepartmentMembers('b-hr', ['u1', 'u2'], 'u', TS)
+    const a = source.forCompany('a').tasks
+    expect(a.departmentMemberIds('b-hr')).toEqual([])
+    a.replaceDepartmentMembers('b-hr', [], 'u', TS)
+    a.replaceDepartmentMembers('b-hr', ['intruder'], 'u', TS)
+    a.removeMember('u1', 'u', TS)
+    expect(a.departmentIdsOf('u1')).toEqual([])
+    expect(b.departmentMemberIds('b-hr')).toEqual(['u1', 'u2'])
+    expect(b.departmentIdsOf('u1')).toEqual(['b-hr'])
+  })
+
+  it('replacing keeps who stays (with when they joined) and removes who is left out', () => {
+    const a = source.forCompany('a').tasks
+    a.replaceDepartmentMembers('a-sales', ['u1', 'u2'], 'u', TS)
+    a.replaceDepartmentMembers('a-sales', ['u2', 'u3'], 'v', '2026-11-01T00:00:00.000Z')
+    expect(a.departmentMemberIds('a-sales')).toEqual(['u2', 'u3'])
+    expect(conn.prepare(`SELECT created_at, created_by FROM department_members WHERE user_id = 'u2'`).get()).toEqual({ created_at: TS, created_by: 'u' })
+  })
+})

@@ -1,15 +1,12 @@
 import { Hono } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
+import { services } from '../composition'
+import { signedIn } from './guards'
 
 export const meRoute = new Hono()
 
 // Get current user info
-meRoute.get('/', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
+meRoute.get('/', signedIn, (c) => {
+  const { user } = c.var
 
   return c.json({
     success: true,
@@ -19,6 +16,9 @@ meRoute.get('/', async (c) => {
       name: user.name,
       image: user.image,
       emailVerified: user.emailVerified,
+      // Whether 「会社を作成」 is offered: the same check POST /api/companies
+      // makes (services/companies.ts mayCreate). Only this account's own answer.
+      canCreateCompany: services.companies.mayCreate(user.id).ok,
     },
   })
 })

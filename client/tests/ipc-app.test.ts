@@ -318,12 +318,21 @@ test('skills: the scan (company-wide vs department, nested groups, private, nurt
   assert.equal((await list('営業', '営業部')).length, 2)
   assert.equal((await list('営業', '営業部', true)).length, 3)
 
+  // A new skill is kept private on this computer (.git/info/exclude), never in the
+  // shared .gitignore; a line an older app wrote there (beta) still counts and
+  // goes when the skill is published.
   const gitignore = () => fs.readFileSync(path.join(root, '.gitignore'), 'utf-8')
+  const exclude = () => fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf-8')
+  assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/delta/'), { success: false, error: 'Not a company folder' }, 'no repository, nowhere to keep it')
+  git(h.base, root, ['init', '-q', '-b', 'main'])
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/delta/'), { success: true })
-  assert.equal(gitignore(), 'node_modules/\n\n# Private skills\n営業/.claude/skills/delta/\n営業/.claude/skills/beta/\n')
+  assert.equal(gitignore(), 'node_modules/\n\n# Private skills\n営業/.claude/skills/beta/\n', 'the shared file is untouched')
+  assert.match(exclude(), /# >>> ACB private skills \(managed by the app, local only\) >>>\n営業\/\.claude\/skills\/delta\/\n# <<< ACB private skills <<<\n$/)
+  assert.deepEqual((await list('営業', '営業部')).map(s => [s.name, s.isPrivate]), [['ベータ', true], ['デルタ', true], ['gamma', false]])
   assert.deepEqual(await h.invoke('skills:publish', root, '営業/.claude/skills/beta/'), { success: true })
   assert.deepEqual(await h.invoke('skills:publish', root, '営業/.claude/skills/delta/'), { success: true })
-  assert.equal(gitignore(), 'node_modules/\n\n') // the header goes with its last entry
+  assert.equal(gitignore(), 'node_modules/\n') // the header goes with its last entry
+  assert.doesNotMatch(exclude(), /delta|ACB private skills/)
   assert.deepEqual((await list('営業', '営業部')).map(s => s.isPrivate), [false, false, false]) // edits invalidate the cache
 
   const md = path.join(root, '営業', '.claude', 'skills', 'delta', 'SKILL.md')
@@ -363,9 +372,17 @@ test('skills: the scan (company-wide vs department, nested groups, private, nurt
   }
   fs.renameSync(path.join(root, '.gitignore'), path.join(outside, '.gitignore'))
   fs.symlinkSync(path.join(outside, '.gitignore'), path.join(root, '.gitignore'))
+  const linkedPublish = await h.invoke<{ success: boolean; error: string }>('skills:publish', root, '営業/.claude/skills/x/')
+  assert.deepEqual(linkedPublish, { success: false, error: LINK_ESCAPE })
+  assert.equal(fs.readFileSync(path.join(outside, '.gitignore'), 'utf-8'), 'node_modules/\n')
+  // An exclude file that links out of the company is never written either.
+  fs.writeFileSync(path.join(outside, 'exclude'), 'x\n')
+  fs.rmSync(path.join(root, '.git', 'info', 'exclude'), { force: true })
+  fs.mkdirSync(path.join(root, '.git', 'info'), { recursive: true })
+  fs.symlinkSync(path.join(outside, 'exclude'), path.join(root, '.git', 'info', 'exclude'))
   const linked = await h.invoke<{ success: boolean; error: string }>('skills:makePrivate', root, '営業/.claude/skills/x/')
   assert.deepEqual(linked, { success: false, error: LINK_ESCAPE })
-  assert.equal(fs.readFileSync(path.join(outside, '.gitignore'), 'utf-8'), 'node_modules/\n\n')
+  assert.equal(fs.readFileSync(path.join(outside, 'exclude'), 'utf-8'), 'x\n')
   assert.equal(fs.readFileSync(path.join(outside, 'SKILL.md'), 'utf-8'), skill('外'))
 })
 
@@ -445,12 +462,62 @@ test('skills:makePrivate never marks a skill the company already has: shared her
   commitRepo(h.base, root, { '営業/.claude/skills/theirs/SKILL.md': 'x' }, 'theirs')
   git(h.base, root, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
   git(h.base, root, ['reset', '-q', '--hard', 'HEAD~1'])
-  const before = fs.readFileSync(path.join(root, '.gitignore'), 'utf-8')
+  const exclude = () => { try { return fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf-8') } catch { return '' } }
+  const before = exclude()
   const refused = { success: false, error: 'このスキルはすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' }
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/shared/'), refused)
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/theirs/'), refused)
-  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), before)
+  assert.equal(exclude(), before)
   // A new skill nobody has is still made private.
   assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/mine/'), { success: true })
-  assert.match(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), /# Private skills\n営業\/\.claude\/skills\/mine\/$/)
+  assert.match(exclude(), /\n営業\/\.claude\/skills\/mine\/\n# <<< ACB private skills <<<\n$/)
+  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), 'node_modules/\n')
+})
+
+test('an invitation link (open-url) never points an app that has a server at another one', async () => {
+  const { app } = await import('./ipc-harness/fake-electron.ts')
+  let prevented = false
+  app.emit('open-url', { preventDefault: () => { prevented = true } }, 'ai-company-builder://open?server=https%3A%2F%2Fother.example.com')
+  assert.equal(prevented, true)
+  assert.equal(await h.invoke('appLink:serverOffer'), null)
+  assert.equal((await h.invoke<{ success: boolean }>('appLink:acceptServer')).success, false)
+  assert.equal(await h.invoke('config:getServerUrl'), SERVER_URL)
+})
+
+test('first setup without choices: 所属 is the signed-in member\'s own, and anything unreadable means "ask"', async () => {
+  // Signed out: nothing is asked, nothing is chosen for anyone.
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+
+  const user = { id: 'u-me', email: 'me@example.com', name: 'Me' }
+  h.server.on('POST', '/api/auth/sign-in/email', { json: { user }, headers: { 'Set-Cookie': 'better-auth.session_token=tok.me; Path=/; HttpOnly' } })
+  h.server.on('GET', '/api/me', { json: { success: true, data: user } })
+  await h.invoke('auth:signIn', 'me@example.com', 'pw')
+  await h.invoke('auth:getSession')
+
+  const members = (ids: string[]) => ({ json: { success: true, data: { canEdit: false, members: ids.map(userId => ({ userId, name: null, email: null })) } } })
+  h.server.on('GET', '/api/companies/co-m/departments', { json: { success: true, data: [{ id: 'd-sales' }, { id: 'd-dev' }, { id: 'd-support' }] } })
+  h.server.on('GET', '/api/companies/co-m/departments/d-sales/members', members(['u-other', 'u-me']))
+  h.server.on('GET', '/api/companies/co-m/departments/d-dev/members', members(['u-other']))
+  h.server.on('GET', '/api/companies/co-m/departments/d-support/members', members(['u-me']))
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: true, departmentIds: ['d-sales', 'd-support'] })
+
+  // One department unreadable: not a partial answer (which would leave a department out silently).
+  h.server.on('GET', '/api/companies/co-m/departments/d-dev/members', { status: 500, json: {} })
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+  h.server.offline = true
+  assert.deepEqual(await h.invoke('companySetup:myDepartments', 'co-m'), { success: false })
+  h.server.offline = false
+  await h.invoke('auth:signOut')
+})
+
+test('the default company folder goes under the home folder\'s 「AI Company Builder」 and becomes reachable', async () => {
+  const home = path.join(h.base, 'home')
+  fs.mkdirSync(home, { recursive: true })
+  h.fake.paths.home = home
+  const parent = path.join(home, 'AI Company Builder')
+  assert.deepEqual(await h.invoke('companySetup:defaultParentFolder'), { success: true, folder: parent })
+  assert.ok(fs.statSync(parent).isDirectory())
+  // reachable like a folder picked in the dialog: a company folder inside it can be inspected
+  const inspected = await h.invoke<{ success: boolean; error?: string }>('git:inspectCompanyFolder', path.join(parent, 'サンプル商事'), 'co-x')
+  assert.doesNotMatch(inspected.error ?? '', /outside allowed directories/)
 })

@@ -326,7 +326,7 @@ export function ScopeEditor({
                         <Icon size={14} className="text-muted-foreground" aria-hidden="true" />
                         <span className="max-w-48 truncate">{label}</span>
                         {e.subjectType === 'user' && managerIds.includes(e.subjectId) && (
-                          <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">責任者</span>
+                          <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">管理役</span>
                         )}
                         <button
                           type="button"

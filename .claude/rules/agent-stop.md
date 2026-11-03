@@ -14,7 +14,7 @@ paths:
   - "client/electron/services/agent-push-channel.ts"
   - "client/electron/services/agent-policy-store.ts"
   - "client/tests/agent-stop.test.ts"
-  - "admin/src/app/companies/*/agent-stop/**"
+  - "admin/src/app/companies/*/advanced/ai-safety/stop/**"
   - "admin/src/components/agent-stop/**"
   - "admin/src/lib/agent-stop.ts"
   - "admin/tests/agent-stop.test.tsx"
@@ -32,7 +32,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 
 ## Server
 
-- Tables (`db/index.ts`, additive): `agent_stops` (id, company, `user_id` NULL = everyone,
+- Tables (`db/schema/agents.ts`, additive): `agent_stops` (id, company, `user_id` NULL = everyone,
   `tool` NULL = the whole AI, reason ≤ 500, stopped at/by, released at/by; never deleted — the
   released rows are the history) and `agent_stop_clients` (company, member → the build of the
   app that last said it follows the stop, when).
@@ -43,7 +43,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   releasing a released stop changes nothing). Every stop / release announces on the push channel.
 - `GET /me/agent-policy` (`routes/agent-sandbox.ts`, `services/agent-policy.ts`) now carries
   `stop: { all, tools }`, merged for the caller (everyone's stops and their own); the version
-  (ETag) hashes sandbox + stop, so a stop changes it. Sandbox changes announce too.
+  (ETag) hashes sandbox + stop (+ `plugins`, plan C2), so a stop changes it. Sandbox and plugin changes announce too.
 - **The key broker** (owner decision 2026-10-31): while a company-wide stop of the whole AI is
   in force (`user_id` NULL, `tool` NULL; `agentStops.companyStopped`), the relay refuses every
   call of that company server-side — so old or modified apps cannot get around it — with 403
@@ -69,7 +69,9 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   `server/tests/unit/push-channel.test.ts`). Released apps drop it (unknown kind); the app only
   refetches the policy on `policy` (`client/tests/agent-stop.test.ts`) and, on `records`, asks the
   server again for the member's received minutes (`minutes.md` "The app",
-  `client/tests/minutes-app.test.ts`). Nothing else.
+  `client/tests/minutes-app.test.ts`) and 「あなたの番」. Since the notices (`notifications.md`):
+  `event: notifications` + `{"kind":"notifications","version":"<fresh 32 hex>"}` to a member whose
+  notices or read state changed; the app only asks `/me/notifications` again. Nothing else.
 - **No content in an event**: kind + version only — never a reason, name or folder
   (`parsePushEvent` in `shared/types/agent-stop.ts` is the one shape; test "sends only kind +
   version, never the reason or a name").
@@ -157,7 +159,7 @@ turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop
   外部の MCP), 理由 (optional, ≤ 500, admins only), a sentence of what will happen, 止める. The
   bar and the page share one query (`agent-stop-context.tsx`, `AgentStopProvider` in
   `AppShell`), so a stop shows on both at once. Members and managers never load it.
-- **Page** `admin/src/app/companies/[id]/agent-stop/page.tsx` (nav `agent-stop`, owner/admin):
+- **Page** `admin/src/app/companies/[id]/advanced/ai-safety/stop/page.tsx` (「詳しい設定 › AI の安全 › AI を止める」, owner/admin; the old `/agent-stop` redirects; the only place with 「すべての鍵を止める」):
   いま止めているもの with 解除 (asks first, `ConfirmDialog`), 「停止に対応していないアプリ: N 人」 (names
   and builds behind 「一覧を表示」, 「版は不明」), API キー (counts, 「すべての鍵を止める」 →
   `POST /broker/stop-all` with a confirmation, a link to 「API キー」; shown only while the broker

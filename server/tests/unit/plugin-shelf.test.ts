@@ -11,7 +11,8 @@
  * with `maps_to`) are refused with the reason.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
+import { createHash } from 'crypto'
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { diskPluginShelf } from '../../src/adapters/plugin-shelf'
@@ -145,5 +146,99 @@ describe('plugin shelf', () => {
       chmodSync(join(root, 'stopped'), 0o000)
       expect(await shelf.isStopped('other', '1.0.0')).toBe(true)
     }
+  })
+})
+
+describe('plugin shelf: contract 2 (plan C1)', () => {
+  /** Fingerprint v1 as the shelf has always computed it (path \0 text \0 of plugin.yaml, mapping.yaml, types/ in sorted order). */
+  function legacyFingerprint(dir: string): string {
+    const hash = createHash('sha256')
+    for (const name of readdirSync(dir).sort()) {
+      if (name === 'types') for (const t of readdirSync(join(dir, 'types')).sort()) hash.update(`types/${t}`).update('\0').update(readFileSync(join(dir, 'types', t), 'utf8')).update('\0')
+      else hash.update(name).update('\0').update(readFileSync(join(dir, name), 'utf8')).update('\0')
+    }
+    return hash.digest('hex')
+  }
+  const renameTo = (dir: string) => {
+    const file = join(root, dir, 'plugin.yaml')
+    writeFileSync(file, readFileSync(file, 'utf8').replace(/^id: .*$/m, `id: ${dir.split('@')[0]}`))
+  }
+
+  it("keeps a contract-1 package's fingerprint exactly as before, so its installs keep matching", async () => {
+    put('sample-crm-sales', 'sample-crm-sales@0.1.0')
+    put('sample-hub', 'sample-hub@0.1.0')
+    const shelf = createPluginShelf(diskPluginShelf(root))
+    await shelf.load()
+    expect(shelf.find('c', 'sample-crm-sales', '0.1.0')!.fingerprint).toBe(legacyFingerprint(join(root, 'sample-crm-sales@0.1.0')))
+    expect(shelf.find('c', 'sample-hub', '0.1.0')!.fingerprint).toBe(legacyFingerprint(join(root, 'sample-hub@0.1.0')))
+  })
+
+  it('uses a contract-2 package with steps/ and ui/, fingerprinted v2 over every file: one byte changes it, the signature slot does not', async () => {
+    put('sample-flow', 'sample-flow@0.2.0')
+    const shelf = createPluginShelf(diskPluginShelf(root))
+    expect((await shelf.load()).loaded).toEqual(['sample-flow@0.2.0'])
+    const p = shelf.find('c', 'sample-flow', '0.2.0')!
+    expect(Object.keys(p.steps).sort()).toEqual(['steps/proposal.md', 'steps/read-minutes.md'])
+    expect(p.ui).toEqual(['ui/assets/app.js', 'ui/deal.html', 'ui/index.html'])
+    expect(p.signature).toBeNull()
+    const base = p.fingerprint
+    expect(base).toMatch(/^[0-9a-f]{64}$/)
+    // One byte in a frame's script, a file added: each changes it.
+    const app = join(root, 'sample-flow@0.2.0/ui/assets/app.js')
+    const original = readFileSync(app)
+    writeFileSync(app, Buffer.concat([original, Buffer.from(' ')]))
+    await shelf.load()
+    expect(shelf.find('c', 'sample-flow', '0.2.0')!.fingerprint).not.toBe(base)
+    writeFileSync(app, original)
+    await shelf.load()
+    expect(shelf.find('c', 'sample-flow', '0.2.0')!.fingerprint).toBe(base)
+    const step = join(root, 'sample-flow@0.2.0/steps/proposal.md')
+    writeFileSync(step, `${readFileSync(step, 'utf8')}.`)
+    await shelf.load()
+    expect(shelf.find('c', 'sample-flow', '0.2.0')!.fingerprint).not.toBe(base)
+    writeFileSync(step, readFileSync(step, 'utf8').slice(0, -1))
+    writeFileSync(join(root, 'sample-flow@0.2.0/ui/extra.css'), '')
+    await shelf.load()
+    expect(shelf.find('c', 'sample-flow', '0.2.0')!.fingerprint).not.toBe(base)
+    rmSync(join(root, 'sample-flow@0.2.0/ui/extra.css'))
+    // The signature slot: read for shape, never part of the fingerprint, never verified.
+    writeFileSync(join(root, 'sample-flow@0.2.0/signature.yaml'), `signer: div\nalgorithm: ed25519\nkey_id: div-2026\nvalue: ${'A'.repeat(86)}==\n`)
+    await shelf.load()
+    const signed = shelf.find('c', 'sample-flow', '0.2.0')!
+    expect(signed.fingerprint).toBe(base)
+    expect(signed.signature).toMatchObject({ signer: 'div', keyId: 'div-2026' })
+  })
+
+  it('refuses scripts/, other files in ui/ and steps/, and the v2 folders or a signature on a contract-1 package', async () => {
+    const variants: Record<string, (dir: string) => void> = {
+      'with-scripts@0.2.0': d => { mkdirSync(join(d, 'scripts')); writeFileSync(join(d, 'scripts/rank.js'), 'x') },
+      'ui-exe@0.2.0': d => writeFileSync(join(d, 'ui/tool.sh'), 'echo'),
+      'ui-link@0.2.0': d => symlinkSync(join(d, 'plugin.yaml'), join(d, 'ui/link.html')),
+      'steps-deep@0.2.0': d => { mkdirSync(join(d, 'steps/more')) },
+      'bad-signature@0.2.0': d => writeFileSync(join(d, 'signature.yaml'), 'signer: anyone\n'),
+    }
+    for (const [dir, change] of Object.entries(variants)) {
+      put('sample-flow', dir)
+      renameTo(dir)
+      change(join(root, dir))
+    }
+    put('sample-sales', 'old-steps@0.1.0')
+    renameTo('old-steps@0.1.0')
+    mkdirSync(join(root, 'old-steps@0.1.0/steps'))
+    writeFileSync(join(root, 'old-steps@0.1.0/steps/a.md'), '# a')
+    put('sample-sales', 'old-signed@0.1.0')
+    renameTo('old-signed@0.1.0')
+    writeFileSync(join(root, 'old-signed@0.1.0/signature.yaml'), `signer: div\nalgorithm: ed25519\nkey_id: k\nvalue: ${'A'.repeat(86)}==\n`)
+
+    const result = await createPluginShelf(diskPluginShelf(root)).load()
+    expect(result.loaded).toEqual([])
+    const refused = Object.fromEntries(result.refused.map(r => [r.dir, r.reason]))
+    expect(refused['with-scripts@0.2.0']).toMatch(/scripts\/ is not allowed/)
+    expect(refused['ui-exe@0.2.0']).toMatch(/ui\/ holds only/)
+    expect(refused['ui-link@0.2.0']).toMatch(/only plain files/)
+    expect(refused['steps-deep@0.2.0']).toMatch(/plain files|steps\/ holds only/)
+    expect(refused['bad-signature@0.2.0']).toMatch(/signer は div か/)
+    expect(refused['old-steps@0.1.0']).toMatch(/手順書（steps\/）は置けません/)
+    expect(refused['old-signed@0.1.0']).toMatch(/contract: 2 の包みだけ/)
   })
 })

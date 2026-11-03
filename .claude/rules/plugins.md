@@ -1,17 +1,27 @@
 ---
 paths:
   - "shared/core/plugins.ts"
+  - "shared/core/plugin-*.ts"
   - "shared/core/upstream-path.ts"
   - "server/tests/unit/plugins.test.ts"
   - "server/tests/fixtures/plugins/**"
   - "shared/types/plugins.ts"
   - "server/src/ports/plugins.ts"
   - "server/src/adapters/plugin-shelf.ts"
+  - "server/src/adapters/plugin-collect.ts"
+  - "server/src/cli/collect-plugins.ts"
+  - "server/tests/unit/plugin-collect.test.ts"
   - "server/src/adapters/sqlite/plugins.ts"
   - "server/src/services/plugin-shelf.ts"
   - "server/src/services/plugins.ts"
+  - "server/src/services/plugin-service-common.ts"
+  - "server/src/services/plugin-evaluation.ts"
+  - "server/src/services/plugin-views.ts"
+  - "server/src/services/plugin-relay-scope.ts"
+  - "server/src/services/plugin-ai-tools.ts"
   - "server/src/routes/plugins.ts"
   - "server/tests/unit/plugin-shelf.test.ts"
+  - "server/tests/unit/plugin-contract-v2.test.ts"
   - "server/tests/integration/plugins.test.ts"
   - "server/src/adapters/upstream-practice.ts"
   - "server/src/services/plugin-connector.ts"
@@ -24,16 +34,24 @@ paths:
   - "server/tests/fakes/hubspot/**"
   - "server/tests/fakes/google/**"
   - "server/src/services/plugin-operations.ts"
+  - "server/src/services/plugin-operation-*.ts"
   - "server/src/services/plugin-mapping-check.ts"
   - "server/tests/integration/plugin-mapping-check.test.ts"
   - "admin/src/app/companies/*/integrations/**"
   - "admin/src/lib/integrations.ts"
   - "admin/tests/integrations.test.tsx"
   - "server/tests/integration/plugin-operations.test.ts"
+  - "server/tests/integration/plugin-run-gate.test.ts"
   - "client/shared/plugin-operations.ts"
   - "client/electron/features/plugin-operations/**"
   - "client/src/features/chat/components/PluginOperationCard.tsx"
   - "client/tests/plugin-tools.test.ts"
+  - "server/src/services/plugin-distribution.ts"
+  - "server/src/composition/plugins.ts"
+  - "server/tests/integration/plugin-distribution.test.ts"
+  - "client/electron/features/plugins/**"
+  - "client/shared/plugin-packages.ts"
+  - "client/tests/plugin-packages.test.ts"
 ---
 
 # Connector and business plugins (milestone 3): declaration, mapping, field policies
@@ -92,7 +110,7 @@ The dependency points one way: **business → connector**. (#372's first cut had
   operation): the mapping, acknowledgements, import, links (`plugin_external_links.plugin_id`),
   operation records, the ledger's `source` / `action`, routes `/plugins/<business>/…` and the AI's
   tools (`corporate-sales__update_deal`). The import skips an outside object another business plugin
-  brought in (problem 「ほかの業務の記録」), and refresh / operations / similar deals only use the
+  brought in (problem 「ほかの業務の記録」), and refresh / operations / similar records only use the
   plugin's own links (`NOT_LINKED`, nothing asked outside).
 - **Turning a business plugin on stores its types at once** (`storeBusinessTypes`, source
   `plugin`), connector or not. Without its connector (not installed, off, stopped, too old, no
@@ -120,7 +138,11 @@ The dependency points one way: **business → connector**. (#372's first cut had
   people's code off the server (0.15) and the line between the AGPL core and paid plugins clear
   (0.17).
 - Shape and rules: `shared/core/plugins.ts` (`parsePluginManifest`, `validatePluginPackage`,
-  `parsePluginMapping`, `combineUse`). YAML is the strict `yaml-lite` subset. Keys English,
+  `parsePluginMapping`, `combineUse`) — the one entry point every package imports; the rules live
+  in one module each (`plugin-declaration.ts` the parsed shape, `plugin-declaration-rules.ts`
+  forbidden keys / type names / path templates, `plugin-manifest.ts` with
+  `plugin-connector-declaration.ts` / `plugin-business-declaration.ts`, `plugin-package.ts`,
+  `plugin-mapping.ts`, `plugin-policies.ts`, `plugin-values.ts`). YAML is the strict `yaml-lite` subset. Keys English,
   `label`s Japanese.
 - **Unknown keys make the whole package unusable**, anywhere (top level, object, endpoint,
   operation, mapping). Keys someone might reach for get a specific reason
@@ -128,7 +150,8 @@ The dependency points one way: **business → connector**. (#372's first cut had
   `tools`, `hooks`), a condition or expression (`when`, `if`, `expression`, `formula`), another
   destination (`url`, `host`, `hosts`, `redirect`), a key value (`key`, `api_key`, `token`,
   `secret`), approval rights (`approve`, `approver`).
-- `contract` must be `PLUGIN_CONTRACT` (1); another value → not used (0.17's plugin contract).
+- `contract` must be one of `PLUGIN_CONTRACTS` (1, or 2 — "Contract 2" below); another value →
+  not used (0.17's plugin contract). A contract-1 package is read exactly as before.
 - **One destination**: `base_url` through `parseRelayBaseUrl` (https, port 443, exact public host,
   no user / query / fragment). When `service` is a built-in broker service, the host must be one
   of its hosts. The key comes from the key broker's `service` (company key, P4/P5); the
@@ -148,7 +171,9 @@ The dependency points one way: **business → connector**. (#372's first cut had
   is part of the ledger entry and **the AI must give one** — a note drafted from the
   consultation, citing its basis; optional for people. `update_deal` is a decision,
   `refresh_deal` is not). An update
-  writes only the mapping's `write: true` fields.
+  writes only the mapping's `write: true` fields. A field of kind `tags` cannot be mapped at all
+  (its stored JSON text would be written outside as is; `records.md` "Tags"), test
+  `tests/unit/plugins.test.ts` "a tags field cannot be mapped".
 - **Creates** (milestone 4, design §3-6): every create names `correlation_property` (a unique-value
   custom property the company makes in the outside system, e.g. `acb_operation_id`; the core writes
   the operation id there so a lost answer is looked up, never re-sent). Two shapes: **attached**
@@ -161,6 +186,188 @@ The dependency points one way: **business → connector**. (#372's first cut had
   company overrides it in the mapping's `policy` by operation name (`log_meeting: auto`,
   `effectiveOperationPolicy(manifest, op, mapping)`). **Creating a record is never `auto`**
   (declaration, mapping, run time), like an external operation.
+
+## Contract 2: steps, roles, settings, screens (plan C1, stages 4a / 4b)
+
+The syntax of 4a and 4b is fixed here once (`shared/core/plugin-flow-declaration.ts`,
+`plugin-settings.ts`, `plugin-fingerprint.ts`); later items add behaviour, **not keys**. Only a
+business plugin saying `contract: 2` may write the flow keys; on contract 1 they are refused
+(「contract: 2 の包みだけ」), on a connector always (「業務のプラグインだけ」), so contract-1 packages
+keep working unchanged.
+
+```yaml
+contract: 2
+types: [deal, customer]
+connector: hubspot >= 0.3.0
+operations:
+  update_deal: { who: [assignee, role:sales_manager, ai], decision: true }   # amount: money (types/deal.md)
+  issue_invoice: { who: [role:sales_manager], decision: true, moves_money: true } # moves money, writes no money field
+field_policy_defaults: { confidence: auto, next_step: auto }   # 確度・次のアクションは自動、金額は承認
+roles:                                   # the business declares; who fills it is the company's (C3)
+  sales_manager: { label: 営業の責任者 }
+settings:                                # rung ① below: typed parameters, never branches
+  approval_amount: { label: 承認が要る金額, kind: number, default: 1000000, min: 0 }
+  reply_within:    { label: 返事の目安, kind: duration, default: 1d, min: 1h, max: 14d }
+  amount_approver: { label: 金額を承認する人, kind: role, default: sales_manager }
+  mail_service:    { label: メールを送るサービス, kind: connector, connector_role: mail.send }
+steps:
+  prepare_proposal:
+    label: 提案書を用意する
+    for: { type: deal, state: open }     # the plugin's or a core type, a non-final state
+    start: person                        # person: opens a consultation; ai_turn: automatic (C5)
+    procedure: { default: steps/proposal.md, overridable: true }
+    tools: [records, plugin_operations, files_read, files_write]
+    connector_roles: [mail.read]
+ui:                                      # shown by the app's four slots (4b A6, plugin-frame.md)
+  bridge: 1
+  tab: { label: 案件, icon: Briefcase, entry: ui/index.html }
+  peek: { implements: request, state_group: mine }
+  record_sections: [{ type: deal, label: 提案の材料, entry: ui/deal.html }]
+  file_actions: [{ label: 案件の資料にする, entry: ui/attach.html, kinds: [pdf, document] }]
+upgrade:                                 # where work pinned to an older version may move here
+  from: 0.1.0
+  at: [{ type: deal, state: open }]
+```
+
+- **Steps** run on the member's PC, always: there is no key that places anything on the server
+  (`runs_on`, `server`, `runtime`… are refused with that reason) and the trigger is the record's
+  state (`for`) only (`cron`, `schedule`, `when`, `if` refused). `tools` is a fixed list
+  (`PLUGIN_STEP_TOOLS`: records, plugin_operations — only with a connector —, approvals,
+  outbound_draft, web_research, files_read, files_write); `connector_roles` are role names
+  (`mail.send`) resolved against the core's list of connector roles when the step runs (that list
+  is lane B's `connector-roles.ts`, not this file). **No scripts in 4a** (§5-11): `scripts` in a
+  step or at the top and a `scripts/` folder are refused.
+- **Procedure** (coordinator, 2026-11-02): `default` is a file under `steps/`, always present;
+  `overridable: true` lets a company map the step to one of its Skills (`.claude/skills/<name>/`;
+  div's `sales-proposal-v1` for 「提案書を用意する」) — the company setting is `PUT
+  /plugins/:pluginId/step-skills/:step` (C5, `plugin-steps.md`), checked with
+  `companySkillOverrideProblem`. The declaration never names a company Skill. **The
+  step's `tools` and `connector_roles` stay the ceiling** whichever procedure runs
+  (`stepToolsFor`: what a Skill asks for is cut to the step's list).
+- **Pinned per work** (owner decision 2026-11-01 night): a work's step runs with what was pinned at
+  its first run — the plugin procedure at version + fingerprint, or the company Skill by its
+  content fingerprint (the one #403 records in consultations): `PluginStepProcedurePin`, stored by
+  C5 (`plugin_step_pins`, `plugin-steps.md`). Work moves to a newer version only at `upgrade.at` points, from `upgrade.from` on. An
+  emergency stop of a version stops pinned work too.
+- **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
+  or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
+  C3's (`plugin-roles.md`): the engine's `who`, the approvers and an operation's `who` resolve them.
+- **Money, per field** (`money: true` on a type's field — kind `number`, `source: server`; e.g.
+  `amount: { label: 金額, kind: number, source: server, money: true }` in `types/deal.md`): any
+  write of that field asks first, whichever operation writes it, in any step, through any
+  mapping; the operation's other fields keep their own policy (one `update_deal`: 確度・次のアクション
+  `auto`, 金額 an approval request). `auto` for it is refused where it is written — the plugin's
+  `field_policy_defaults` (`validatePluginPackage`) and the company mapping's `policy`
+  (`parsePluginMapping`) — and held to `prior` at run time (`effectiveFieldPolicy`, also for a
+  field read from the same outside property). A type's action may not name it in `args` (so no
+  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`). **Not
+  blocked: the external writer** (`createExternalRecordWriter`, imports and confirmed writes):
+  the outside system is the source of truth for money, so a mirrored amount is created and
+  updated freely — never extend the money block to it (`record-money-field.test.ts` fails).
+  **One place** (`plugin-declaration.ts`): `moneyField` (the field) and `asksFirst` /
+  `priorFieldWriters` (the operation), joined by `writeAsksFirst`, which `effectiveFieldPolicy`
+  uses. Tests: `tests/unit/plugin-contract-v2.test.ts` "a field that holds money",
+  `record-types.test.ts`, `record-money-field.test.ts` (mutation-checked). Fixture: `sample-flow`.
+- **Money, per operation** (`moves_money: true` on a business operation that writes; contract 2
+  only, refused on a connector — the business says what its use of an operation means; for an
+  operation that moves money without writing a money field, e.g. issuing an invoice): the operation asks first
+  exactly like one with `reaches: external` (`asksFirst` in `plugin-declaration.ts`): its fields
+  and its create policy are never `auto`: written that way it is refused (owner: make the mistake
+  impossible to write) — a field it writes as `auto` in `field_policy_defaults` (`combineUse`) or
+  in the mapping's `policy` (`parsePluginMapping`, via `priorFieldWriters`), a declared create
+  `policy: auto`; a create's default is `prior`; and `effectiveFieldPolicy` /
+  `effectiveOperationPolicy` still hold them to `prior` at run time. In a step's run it is only an approval
+  request. The connector's `reaches` stays the one place for "outside"; money is the business's.
+- **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
+  no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
+  `preload` refused (the frame has no network and is given nothing). `file_actions` (added with
+  A6, owner decision 節目5 §40: 「やることにつなぐ…」 is the task plugin's): at most
+  `MAX_PLUGIN_FILE_ACTIONS` (3) right-click items, each `{ label (≤ 30), entry, kinds }`; `kinds`
+  are the core's file kinds (`shared/core/plugin-file-kinds.ts`: `file`, `folder`, `markdown`,
+  `text`, `pdf`, `image`, `spreadsheet`, `document`, `slides`), never extensions or paths; the
+  menu, its icon and which file is which kind are the core's (`fileActionApplies`).
+- **Where an operation may be called from** (`via: [screen, plugin, run]` on a business
+  operation use, contract 2 only; absent = `[screen, run]`; copied by `combineUse`; plan 4b B6):
+  the operation checks refuse another caller with 403 `NOT_VIA`; from a plugin's screen (the
+  bridge) an operation is only ever an approval request. Details: `plugin-frame.md`.
+- **Settings** are parameters only: `number` / `duration` (`30m`, `2h`, `3d`) with `min` / `max`,
+  `choice` (`options`, `option_labels`), `boolean`, `role` (a declared role or `dept_manager` /
+  `admin`), `connector` (which connected service serves a connector role; no default — the
+  company chooses). Every one but `connector` has a default within its bounds. Keys that would
+  branch the flow (`when`, `if`, `then`, `states`, `actions`, `steps`, `next`, `goto`, `selects`,
+  `enables`…) are refused: a different flow is a different plugin. A company's value is checked
+  with `settingValueProblem`; steps and approval rules read them (later items).
+- **Package folders**: `steps/<name>.md` (flat; exactly the files the steps name), `ui/…` (html,
+  js, mjs, css, json, svg, png, jpg, gif, webp, woff, woff2; at most three folders deep, 200 files,
+  2 MB each, 10 MB in all), `signature.yaml`. Contract 1 and connectors may have none of them.
+- **Fingerprint v2** (contract 2): each file's sha256 over its bytes, listed `<sha256>  <path>\n` in
+  name order after `acb-plugin-fingerprint-v2\n`; the fingerprint is that listing's sha256
+  (`pluginFingerprintV2`, hash injected — the app computes the same in C2). `signature.yaml` is not
+  part of it. Contract 1 keeps v1 byte for byte (installs keep matching).
+- **Signature slot** (§5-12): `signature.yaml` = `signer` (`div`, or `company:<id>` — that
+  company's own key, only for `kind: company` with `available_to: [<that id>]`), `algorithm:
+  ed25519`, `key_id`, `value` (base64) over `pluginSignedMessage(id, version, fingerprint)`.
+  Shape-checked on the shelf and kept as `ShelfPackage.signature`; **not verified and not
+  trusted** — verification (a public key the app carries) comes before packages go to outside
+  companies.
+
+### Fitting a company the plugin does not quite fit (owner's ladder)
+
+① **settings** (above) → ② **role assignment** (C3) → ③ **a company Skill as a step's
+procedure** (`overridable`) → ④ **a company extension of a plugin type** (`.acb/types/<name>.md`,
+higher version, additive — `records.md`) → ⑤ **a separate business plugin** (copy, never inherit).
+Try them in that order; a declaration key that would let a company change the flow is never the
+answer.
+
+④ and plugin upgrades (C2): a company's extension of a plugin type survives a newer plugin version.
+`businessTypePlan` (`services/plugin-service-common.ts`) never stores a plugin type over one whose
+definition in force is the company's (`record_types.source = 'file'`); it compares them with
+`companyExtensionConflicts` (`shared/core/plugin-type-upgrade.ts`): the company's version no longer
+higher, or the company's definition lacking / changing something the new plugin type has
+(`compareTypeDefinitions` breaking, field / link / state / action / shared type / storage). Installing
+another version while on, or turning on, with a conflict → 409 `TYPE_EXTENSION_CONFLICT` +
+`conflicts` (Japanese sentences naming the type), nothing changed; the company (div's FDE) updates
+its `.acb/types/<name>.md` first. The import's `storeBusinessTypes` skips such a type the same way.
+Company fields are never dropped. Test: `tests/integration/plugin-distribution.test.ts` (mutation-checked).
+
+## Handing packages to the app (plan C2 「配る道」)
+
+- **The policy lists them**: `GET /me/agent-policy` (`services/agent-policy.ts`) carries `plugins:
+  [{ id, version, fingerprint, use }]` (`DistributedPlugin`, `shared/types/plugins.ts`) from
+  `services/plugin-distribution.ts` `pluginsFor`: every **contract-2 business plugin the company
+  turned on** whose package may be used now — on the shelf for this company, not stopped by the
+  operator, the fingerprint (v2) the company chose — as `current`, plus older versions some work is
+  pinned to as `pinned` (§5-9; the `pinnedVersions` dependency, bound to C5's stored pins of open work, `plugin-steps.md`:
+  listed only while on the shelf with the pinned fingerprint). **The operator's stop overrides
+  pins** and turning the plugin off lists nothing. Contract-1 packages and connectors have nothing
+  for the app. The list is in the policy's version (ETag), so a change reaches the apps by the push
+  channel: `routes/plugins.ts` announces after an install / version change and on / off; the
+  operator's stop file is read on every answer (an app sees it at its next refresh, ≤ 60 s).
+  `agentPolicy.usePlugins` is bound once in `composition/plugins.ts`; `policyFor` is async.
+- **The package route**: `GET /api/companies/:companyId/plugins/:pluginId/package/:version` — any
+  member, only a version `pluginsFor` lists now (else the same 404 `PLUGIN_NOT_FOUND` as nothing;
+  another company's package never); the files are read from disk again (`PluginShelfSource.files`,
+  the shelf's own rules) and handed out only when their v2 fingerprint is still the listed one (else
+  409 `PACKAGE_CHANGED`). Answer `PluginPackageDownload`: every file as base64, `signature.yaml`
+  too (not verified yet).
+- **The app** (main only; no renderer channel until the stage-2 IPC files are free):
+  `features/plugins/fetch.ts` fetches with the member's session and keeps a package only when
+  every path is a package path (`isPluginPackagePath`, `shared/core/plugin-package-paths.ts`) and
+  the files' v2 fingerprint (`pluginFingerprintV2`, the server's computation) equals the one **the
+  policy** listed — never the answer's own. `features/plugins/store.ts` writes it to
+  `<userData>/plugins/.incoming-…` and moves it to `<userData>/plugins/<id>@<version>/`; it removes
+  a folder no company of any account on the computer lists any more, and a kept folder whose
+  listed fingerprint changed and could not be fetched again. `index.json` there: what each account ×
+  company listed, and the fingerprint each folder was verified against. Wired in
+  `features/agent-control/wire.ts` on the policy store's `onPolicy` (each answer, 304 included);
+  an answer without `plugins` (an older server) or with a malformed one changes nothing
+  (`client/shared/plugin-packages.ts`). `pluginPackages.folderOf(company, id, version)` is what C5
+  runs steps from.
+- Tests: `server/tests/integration/plugin-distribution.test.ts` (what is listed and to whom, the
+  files and their fingerprint, 404 for anything not listed, the stop, a replaced package, pins, the
+  type-extension conflict), `client/tests/plugin-packages.test.ts` (strict parse, paths and the
+  policy's fingerprint, the session header, keep / remove across companies, nothing unverified
+  kept), permission matrix row + `CROSS` — each guard mutation-checked.
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 
@@ -266,13 +473,15 @@ The dependency points one way: **business → connector**. (#372's first cut had
 ## The shelf (P4, `adapters/plugin-shelf.ts`, `services/plugin-shelf.ts`)
 
 - `PLUGINS_DIR` (`lib/config.ts`; outside `DATA_DIR`; unset = empty shelf), put there by the
-  operator (div): one folder per package named `<id>@<version>` of its declaration, holding
-  exactly `plugin.yaml`, optional `mapping.yaml`, `types/<name>.md`. Read at startup
+  operator (div) with `cli/collect-plugins.ts` ("Where packages come from"): one folder per package named `<id>@<version>` of its declaration, holding
+  exactly `plugin.yaml`, optional `mapping.yaml`, `types/<name>.md` (contract 2 also `steps/`,
+  `ui/`, `signature.yaml`; `scripts/` refused by name). Read at startup
   (`index.ts` logs what was loaded and, per refused folder, its name and the rule's sentence —
   never a file's content). **Not used**: any other file or folder (a program has no place), a
   symbolic link, a file over 256 KB, a folder name that does not match, anything
   `validatePluginPackage` refuses. Never read from a company repository; never synced.
-- **Fingerprint**: sha256 over every file's path and content. The company's install records the
+- **Fingerprint**: v1 (contract 1) sha256 over every file's path and content; v2 (contract 2,
+  "Contract 2") over each file's hash in name order. The company's install records the
   fingerprint of the version an owner/admin chose; a package changed under the same version is
   not used for that company (`package-changed`) until they choose it again. The hash fixes the
   content; it does not prove who made it — where packages come from is guaranteed by who may
@@ -290,7 +499,48 @@ The dependency points one way: **business → connector**. (#372's first cut had
   plugin whose connector is not on the shelf is still used (inside ACB); its combination is
   checked when it runs. Old connector shapes are refused with the reason ("Two roles").
 
+## Where packages come from (owner, 2026-11-02)
+
+The real packages are not in this public repository. Each lives in a **private repository per
+visibility boundary** (who may read it), one folder per version `<id>@<version>/` (exactly what the
+shelf holds) and a tag `<id>@<version>` per published version:
+
+- `eichann/acb-connectors` — connectors (`hubspot@*`), shared by every business plugin;
+- `eichann/acb-plugin-corporate-sales` — 「法人営業」 (`corporate-sales@*`);
+- `eichann/acb-plugin-program-planning` — 「番組企画」 (`program-planning@*`).
+
+A new business plugin gets its own `acb-plugin-<id>` (owner approves merges there). `eichann/acb-plugins`
+(the first, shared one) is archived. A published version's folder never changes; a fix is a new
+version.
+
+The operator fills `PLUGINS_DIR` with `server/src/cli/collect-plugins.ts`
+(`adapters/plugin-collect.ts`), run where `git` and `gh` can read those repositories (not in the api
+container), then restarts the api:
+
+```bash
+cd server && node --import tsx src/cli/collect-plugins.ts --lock <plugins.lock> --dir <PLUGINS_DIR> [--prune]
+cd server && node --import tsx src/cli/collect-plugins.ts --fingerprint <package folder>   # for a new lock line
+```
+
+- `plugins.lock` (the operator's file, not in this repository): `<repo> <id>@<version> <fingerprint v2>`
+  per line, `#` comments; `<repo>` is `owner/name` on GitHub (cloned with `gh auth git-credential`)
+  or a git URL / path.
+- All or nothing: every package is fetched at its tag and its fingerprint v2 (the shelf's,
+  `pluginFingerprintV2` over every file) compared with the lock before anything is written; a
+  mismatch, a missing folder or a version already on the shelf with other content refuses the
+  whole run. Written through a dot folder in the shelf (skipped by the shelf) and renamed into place.
+- Other folders stay; `--prune` removes only `<id>@<version>` folders the lock does not list (never
+  `stopped` or anything else). Output is names and fingerprints only.
+- Test: `server/tests/unit/plugin-collect.test.ts` (tag content byte for byte and the shelf's own
+  fingerprint, refusal on a differing fingerprint with nothing written, no replacing a version,
+  prune only unlisted packages, strict lock).
+
 ## A company's install, mapping and history (P4, `services/plugins.ts`)
+
+Code: `services/plugins.ts` (install, on / off, read scope, mappings; composes the rest),
+`plugin-evaluation.ts` (`active()`'s checks, an install's `problem`), `plugin-views.ts` (the
+admin page's answers), `plugin-relay-scope.ts` (`relayPolicy`, the read scope), `plugin-ai-tools.ts`
+(P7), `plugin-service-common.ts` (words, `ActivePlugin`, `storeBusinessTypes`).
 
 Owner/admin only (others 403, non-members 404); routes (`routes/plugins.ts`, contract
 `shared/types/plugins.ts`) under `/api/companies/:companyId`:
@@ -307,10 +557,20 @@ POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved ag
 POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確かめる」 (P8, below)
 ```
 
+- **Starting values** (管理画面の見直し 2-4, owner decision 2026-11-02; set once, never over what a
+  company chose): a business plugin's **first install turns it on** at once when it can run (as
+  `PUT …/enabled` would, history `enable` with `from: install`; one that cannot stays off), and
+  turns the records feature on. The departments it is used in = the departments whose folders hold
+  its mapping's `visible_to_folder`s (the recommended mapping at install, or the first saved
+  mapping). With them, on a business plugin's first install / first mapping and on a connector's
+  first install: the connector's relay **read scope, while empty**, becomes those departments
+  (history `read-scope`, `from: starting-values`), and each role the business plugin declares,
+  **while never assigned**, goes to those departments' 部署の管理役 (`plugin-roles.md`). Tests:
+  `tests/integration/plugins.test.ts` 「starting values」, `plugin-roles.test.ts`.
 - Tables (company handle `plugins`, `adapters/sqlite/plugins.ts`): `plugin_installs` (version,
   fingerprint, enabled, `key_id`, mapping version in force), `plugin_mappings` (every version's
   YAML), `plugin_history` (install / change / enable / disable / mapping / restore; JSON without
-  any secret). Triggers (`db/index.ts` `migratePluginTables`): `key_id` must be a **company key
+  any secret). Triggers (`db/schema/plugins.ts` `migratePluginTables`): `key_id` must be a **company key
   of the same company** (another company's key or a member's own key throws), a mapping only
   under its own company's install, no row moves to another company
   (`tests/unit/company-data.test.ts`).
@@ -482,6 +742,12 @@ plugin's switch:
 
 ## Typed operations (P6, `services/plugin-operations.ts`)
 
+Code: `services/plugin-operations.ts` composes the service (run, create, similar records, reconcile,
+recreate) from `plugin-operation-checks.ts` (the checks and the precheck before every send),
+`-inputs.ts` (bodies), `-records.ts` (the operation record and its view), `-sending.ts` (send,
+settle, reconcile — never re-sent), `-undo.ts`, `-approvals.ts` (the approval seam), `-similar.ts` and
+`-common.ts` (words, refusals, the one per-object serialiser every part shares).
+
 ```
 POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation   a person (session)
 POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation             their AI (record token)
@@ -600,15 +866,68 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   connection and account, as a new operation (`undo`, `undoOf`); the record's ledger notes it.
   `CREATE_UNDO_NOTICE`: what HubSpot did after the create is not undone. An archive whose answer
   was lost: reconcile reads the object (`observed` when gone, who removed it not known).
-- **Similar deals** (`similarDeals(member, pluginId, title)`, design §6-3; for the approval card,
-  no route yet): the declared `search` on the create-of-a-record's object, the title's words as
-  `CONTAINS_TOKEN` filters (OR, ≤ 3 words) on the title property; only records already imported
-  through the current connection **that the member may read** come back (an outside hit without
-  such a record is dropped); someone who cannot read the folder gets 403 with nothing asked.
+- **Similar records** ("Similar records" below; `similarRecords(member, pluginId, operation, {
+  title, meetingId })`, for the approval card, no route of its own).
+
+## Similar records (owner decision 2026-11-02; `services/plugin-operation-similar.ts`)
+
+Before a create of a record (`create_deal`) is approved, the approval card shows existing records
+that may be the same, so duplicates are not made (div's anken-sync rule). Generic: the core names no
+business type.
+
+```yaml
+# connector (hubspot): a read-only search — not an operation, never run directly
+operations:
+  search_deals:
+    label: 似ている取引を探す
+    kind: search
+    object: deal                                                   # needs the object's `search` call
+    counterpart: { object: company, property: associations.company } # optional: filter by the 相手's outside id
+# business plugin (corporate-sales): on its create of a record
+operations:
+  create_deal:
+    who: [viewer, ai]
+    similar: { by: [counterpart, name], search: search_deals, status: stage }
+```
+
+- Declaration (any contract; contract 1 and 2 packages without it read as before):
+  `similar.by` ⊆ `counterpart` / `name` (one or more, no repeats); `search` names a connector
+  search (`kind: search`) on the **same object**; `status` a `choice` field of the record's type
+  (its `option_labels` shown; absent → the record's state). Refused (`combineUse`): `similar` on
+  anything but a create of a record, an unknown search, a search of another object, `by:
+  [counterpart]` with a search that has no `counterpart`, a `counterpart.object` the business
+  plugin did not make one of its types, a search listed in the business plugin's `operations`.
+  A connector search takes only `label` / `kind` / `object` / `counterpart` (`object` / `property`;
+  the property is an outside name — HubSpot's `associations.company`). Parsed into the connector's
+  `searches` (not `operations`), resolved into the combined operation's `similar`.
+- Without `similar`: `by: [name]` through the object's `search` call when it has one (milestone 4's
+  behaviour) plus the title's words in ACB.
+- Found, in this order, at most `SIMILAR_MAX` (5), each a live record of the create's type the
+  member may read (an unreadable one does not exist — no count), not from an old connection:
+  1. `counterpart`: records of that type linking to the request's 相手 — the 相手 of its meeting
+     (`basis.meetingId`), every record of that 相手's 名寄せ identity (`identity.md`) and the 相手
+     records with the same company domain (`identityKeysOf`, never a free-mail domain) — only 相手
+     the member may read;
+  2. the connector's search (read only, the member's key and checks as any read; nothing written):
+     `counterpart.property EQ <outside id>` for up to 2 of those 相手 that this plugin imported
+     through the current connection, and `CONTAINS_TOKEN` on the mapping's title property for up to
+     3 words of the title (≤ 5 filter groups); only hits already imported as this plugin's records
+     come back (`matchedBy: outside`). The account is checked first; a search that cannot be asked
+     leaves ACB's own records (`outside: unavailable`), never a refusal;
+  3. `name`: records of that type whose title holds one of those words.
+  Each: title, status, `assignee` (when the type has that person field), last update, `matchedBy`.
+- Someone who cannot run the create (cannot read its folder, `who`) gets its refusal with nothing
+  asked outside. The card and 「同じ」: `approvals.md` (`same-as`).
+- Tests: `tests/unit/plugins.test.ts` 「similar records before a create of a record」 (the syntax and
+  each refusal), `tests/integration/approvals.test.ts` 「similar records before a new deal」 (the
+  meeting's 相手, the same domain, HubSpot's search by the company, an unreadable deal left out,
+  「同じ」 by requester and approver, meeting linked, nothing created — mutation-checked),
+  `tests/integration/plugin-operations.test.ts` (title search, a reader of no folder asks nothing),
+  `client/tests/ui/approval-card.spec.ts` (approve disabled until chosen; 「同じ」 sends the record).
 
 ## The approval seam (milestone 4 G5; the approvals service builds on it)
 
-`services/plugin-operations.ts` exports, for `services/approvals.ts` (G6) only — no route here:
+`services/plugin-operations.ts` exports (built in `plugin-operation-approvals.ts`), for `services/approvals.ts` (G6) only — no route here:
 
 - `prepareApproval(member, actor, pluginId, recordId | null, operation, input) → Outcome<{ payload:
   PluginApprovalPayload; approver: ApproverRule; folder }>`: every check of a direct run (record
@@ -634,8 +953,60 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   A remapping after approval makes the request stale (the mapping version is part of the fixed
   content), so "raw, not re-translated" is tested by the payload's own raw value.
 - Approving itself (who may, the hash, once only) is the approvals service's (G6, `approvals.md`).
-- `similarDeals(member, pluginId, title)`: shown on a create-of-a-record approval card (only
-  records the viewer may read).
+- `similarRecords(member, pluginId, operation, { title, meetingId })`: shown on a
+  create-of-a-record approval card (only records the viewer may read).
+
+## The gate of a step's run (plan C4 「業務×操作の関所」)
+
+The server gate is the pair business plugin × operation, and inside a step's run also the step.
+
+- An execution run (`ai-turns.md`, S10b) of a business plugin's step is named
+  `<pluginId>__<step>` (`parsePluginRunStep`, `plugin-operation-checks.ts`; a plugin id has no `_`).
+  Any other run step (minutes reading) and a consultation's token keep what they had.
+- **Operations** (`stepRefusal`, first in `recordChecks` / `newRecordChecks`, so it also covers
+  approval requests through `prepareApproval`): an AI whose token is bound to such a run may call
+  only **its own plugin's** declared operations (`plugins.active` — so the company switch, the
+  operator stop, the package and the connector apply), only when the step's `tools` include
+  `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external`,
+  `moves_money` or creates a record — never `auto`, never `ok_from`, never direct) only when they also include
+  `approvals`: it can only become an approval request (202), never be sent.
+- **Approval requests, per field** (`approvalStepRefusal`, coordinator decision 2026-11-02): an
+  operation that does not ask first may still write something whose policy is `prior` — a money
+  field (`money: true`), any field or create the declaration or the company keeps `prior`. Inside
+  a step's run that write becomes an approval request only when the step's `tools` include
+  `approvals`; otherwise the direct call and the request (`prepareApproval`, checked first) both
+  get the same `NOT_IN_STEP`, nothing asked or sent. A consultation or a core step: the direct
+  call answers `APPROVAL_REQUIRED` and the request is made, as before.
+- **Connector roles** (`createPluginRunGate` in `plugin-ai-tools.ts`, wired in
+  `composition/plugins.ts`; routes call `connectorRoleRefusal(c, h, role)` from
+  `routes/record-ai-auth.ts` before using a role): only the roles the step's `connector_roles`
+  declare (`mail.read` as is, or a bare `mail` for all its operations), while the plugin is
+  installed here, on, on the shelf and not stopped by the operator. No AI route uses a role yet —
+  lanes A / B call it when they add theirs.
+- **A core step's run** (minutes reading…, plan C5): a business plugin's reads only — any other
+  operation is refused (`NOT_IN_STEP`) and the tool list shows reads only; what a まとまり gets
+  from a meeting is the business plugin's own step (`plugin-steps.md` "After a meeting is read").
+- Every refusal is one answer, 403 `NOT_IN_STEP` 「この手順では使えない操作です」, checked before
+  anything else: it does not tell another plugin, another company's, a stopped one or an
+  undeclared operation apart, and nothing is asked outside.
+- **The AI's tool list** (`GET /api/records-ai/plugins`, `aiTools(member, scope, runId)`): a token
+  bound to such a run lists only its plugin's operations its step allows (`stepAllowsOperation`,
+  the gate's own rule; a run that cannot be read lists none; a core step's run, reads only); a consultation as
+  before. The gate still decides each call.
+- **Roles in an operation's `who`** (`mayRunAt(…, { pluginId, recordId })`): `role:<name>` is the
+  plugin's role held on the operation's record (its まとまり's override, else the company's; a
+  create of a record not made yet: the company's), through `pluginRoles.holdsForPlugin`, bound
+  with `pluginOperations.useRoles` in `composition/plugins.ts`; a delegate (`actsFor`) stands in
+  for an absent holder. Unbound or unassigned: nobody.
+- The step is the installed version's, narrowed by the run's pinned version (C5, `plugin-steps.md`:
+  `usePinnedSteps` / `runStepOf`); a stopped or missing pinned version refuses every call.
+- Test: `tests/integration/plugin-run-gate.test.ts` (a step without `plugin_operations`, another
+  plugin's / not installed here, asks first without `approvals` then only a request, money
+  (`moves_money`) never direct and only a request in a step, a `prior` write of an operation that
+  does not ask first only with the step's `approvals`, the tool list per step, `role:` in an
+  operation's `who` (company / まとまり / delegate), the step's
+  roles only, the switch and the operator stop, a consultation unchanged, a core step reads only) —
+  mutation-checked.
 
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
 
@@ -703,7 +1074,7 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   request (`approval-requested`: nothing made until a person approves; the AI cannot); `create_deal`'s tells the AI to look for similar records first.
 - The update tool's `note` is required for a `decision` operation; its description tells the AI to
   draft the reason from the consultation and cite the message it rests on (optional `basis {
-  minutesId, quote }` for the approval card), that one approval field makes the whole request an
+  meetingId, quote }` for the approval card), that one approval field makes the whole request an
   approval request, and **never to claim success unless the outcome is
   `applied`** (an `unknown` result is not re-sent; the member checks).
 - The outcome becomes a card in the reply (`client/shared/plugin-operations.ts`, data part
@@ -742,9 +1113,9 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 
 P9
 staging (compose wiring of `PLUGINS_DIR`). Milestone 4: approval requests and their card (G6, on
-the seam above), the 「もう一度作る」 button and similar deals on a screen. `add_note` runs like
-`log_meeting` (an attached create) but div does not use it. The real packages live in the
-private `acb-plugins` repository (§6-6): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
+the seam above), the 「もう一度作る」 button and similar records on a screen. `add_note` runs like
+`log_meeting` (an attached create) but div does not use it. The real packages live in
+private repositories ("Where packages come from"): `hubspot@0.3.0` (the connector) and `corporate-sales@0.2.0`
 (「法人営業」: deal / customer, `connector: hubspot >= 0.3.0`, its recommended mapping). Its flows
 (screens, actions) come with milestone 5. A business plugin uses one connector; a second one (Google
 for 法人営業) would need `connector` to become a list — not before it is needed.
@@ -775,7 +1146,7 @@ undone through; milestone 4: log_meeting `prior` by default, `auto` only acknowl
 meeting on the deal with the correlation value and its archive, a lost create never re-sent and not
 searched before 60 s then found by its value, not found stays unknown also while off, 「もう一度作る」
 only after that and confirmed, create_deal never without approval (route, AI, read token, forged
-policy), similar deals only readable, prepareApproval / executeApproved for create_deal and stage
+policy), similar records only readable, prepareApproval / executeApproved for create_deal and stage
 (changed outside, mapping version, connection, field off, raw values sent, requester as actor), no
 key in operation records or ledger), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
@@ -788,9 +1159,17 @@ own, old shapes refused, `available_to` each on its own), `tests/integration/plu
 stopped / too old → `connector-*` while the business stays on, `PLUGIN_WOULD_STOP` dependents,
 `TYPE_OWNED_ELSEWHERE`, `NOT_A_CONNECTOR` / `NOT_A_BUSINESS`, `CONNECTOR_REQUIRED`, the old version's
 way out), `tests/integration/plugin-import.test.ts` 「two business plugins on one connector…」 (import,
-refresh, operations, undeclared operation, similar deals) — mutation-checked; integration tests key
+refresh, operations, undeclared operation, similar records) — mutation-checked; integration tests key
 the mapping / import / operations by `sample-sales` and the key / read scope / switch by `sample-hub`
 (`tests/helpers/plugin-packages.ts`).
+Contract 2: `server/tests/unit/plugin-contract-v2.test.ts` with `fixtures/plugins/sample-flow`
+(roles, settings, both step starts, an overridable procedure, ui, upgrade; contract-1 fixtures read
+as before and every flow key / folder / `role:` refused on them and on connectors; unknown keys at
+every level; conditions, cron, `runs_on`, scripts, outside entries; settings that branch or break
+their bounds; types / states / files of steps, frames and upgrade points; the Skill override and
+the tool ceiling; fingerprint v2 and the signature slot), `tests/unit/plugin-shelf.test.ts`
+「contract 2」 (v1 unchanged for contract 1, v2 changes with one byte and ignores the signature,
+`scripts/` and other files refused, the v2 folders and a signature refused on contract 1).
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (connectors `sample-hub`
 — the fake HubSpot's —, `sample-crm` — a HubSpot-shaped fictional CRM — and `sample-desk` — a
 read-only company connector of another shape; the business plugins using them `sample-sales`,

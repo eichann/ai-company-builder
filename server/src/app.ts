@@ -5,6 +5,7 @@
  */
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { HTTPException } from 'hono/http-exception'
 import { auth, authDb } from './lib/auth'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
@@ -20,8 +21,16 @@ import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
+import { secondOpinionRoute } from './routes/second-opinion'
+import { taskSettingsRoute } from './routes/task-settings'
+import { adminHomeRoute } from './routes/admin-home'
+import { absencesRoute } from './routes/absences'
+import { viewersRoute } from './routes/viewers'
 import { recordsRoute } from './routes/records'
+import { aiRunsRoute } from './routes/ai-runs'
+import { skillUsesRoute } from './routes/skill-uses'
 import { recordsAiRoute } from './routes/records-ai'
+import { googleDriveAiRoute, googleDriveRoute, googlePickerPageRoute } from './routes/google-drive'
 import { outboundMailRoute } from './routes/outbound-mail'
 import { pluginsRoute } from './routes/plugins'
 import { approvalsRoute } from './routes/approvals'
@@ -30,8 +39,28 @@ import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
 import { googleRoute } from './routes/google'
 import { minutesRoute } from './routes/minutes'
+import { notificationsRoute } from './routes/notifications'
+import { calendarRoute } from './routes/calendar'
 import { oauthRoute } from './routes/oauth'
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+import { coreConnectorsRoute } from './routes/core-connectors'
+import { slackEventsRoute, slackRoute } from './routes/slack-connection'
+import { recordsAiThreadsRoute, threadsRoute } from './routes/threads'
+// lane A ▲
+// lane B ▼
+import { identitiesRoute } from './routes/identities'
+import { recordsAiIdentitiesRoute } from './routes/records-ai-identities'
+import { inboxRoute } from './routes/inbox'
+import { recordsAiInboxRoute } from './routes/records-ai-inbox'
+import { pluginBridgeRoute } from './routes/plugin-bridge'
+// lane B ▲
+// lane C ▼
+import { pluginStepsRoute } from './routes/plugin-steps'
+// lane C ▲
 import { requestLog } from './lib/request-log'
+import { appDownloadUrl } from './lib/config'
+import { logError } from './lib/error-log'
 import { services } from './composition'
 
 export const app = new Hono()
@@ -54,6 +83,22 @@ app.use('*', cors({
 // Record the desktop-app build (X-ACB-Client-Version) per member and company.
 app.use('/api/*', clientActivityMiddleware)
 
+// What no route handled. A handler that throws gets one fixed answer: an error's message can hold
+// a git command line, a path, a private folder's name or what the member sent, so neither the
+// answer nor the log line carries it (logError prints the kind, the request id — which ties it to
+// the request line — and code locations). Routes keep answering their own errors as before; this
+// replaces Hono's default (plain "Internal Server Error" and console.error of the whole error).
+// An HTTPException keeps the answer it carries, as with the default handler.
+export const INTERNAL_ERROR = { error: 'サーバーでエラーが起きました', code: 'INTERNAL' } as const
+export const NOT_FOUND = { error: 'Not found', code: 'NOT_FOUND' } as const
+
+app.onError((err, c) => {
+  if (err instanceof HTTPException) return err.getResponse()
+  logError('http', 'Unhandled error in a request', err)
+  return c.json(INTERNAL_ERROR, 500)
+})
+app.notFound((c) => c.json(NOT_FOUND, 404))
+
 // Health check
 app.get('/', (c) => {
   return c.json({ status: 'ok', name: 'AI Company Builder API' })
@@ -69,6 +114,8 @@ app.get('/api/config', (c) => {
       name: 'AI Company Builder',
       version: '1.0.0',
       setupComplete: result.count > 0,
+      // The invitation page's 「アプリをダウンロード（Mac）」 (null: the page says to get the app from the admin).
+      appDownloadUrl: appDownloadUrl(),
     },
   })
 })
@@ -105,19 +152,58 @@ app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
+app.route('/api/companies/:companyId', secondOpinionRoute)
+app.route('/api/companies/:companyId', taskSettingsRoute)
+app.route('/api/companies/:companyId', adminHomeRoute)
+app.route('/api/companies/:companyId', absencesRoute)
+app.route('/api/companies/:companyId', viewersRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
+app.route('/api/companies/:companyId', aiRunsRoute)
+app.route('/api/companies/:companyId', skillUsesRoute)
 app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)
+// Google Drive through the Google connection (google-drive.md).
+app.route('/api/companies/:companyId', googleDriveRoute)
 app.route('/api/companies/:companyId', minutesRoute)
+// The member's notices (知らせ, notifications.md).
+app.route('/api/companies/:companyId', notificationsRoute)
+app.route('/api/companies/:companyId', calendarRoute)
 // Google sends the browser back here (public: the state finds the company; google-connector.md).
 app.route('/api/oauth', oauthRoute)
 // Approval requests: a person's session only (no AI or admin-API route; approvals.md).
 app.route('/api/companies/:companyId', approvalsRoute)
+app.route('/api/records-ai/google/drive', googleDriveAiRoute)
 app.route('/api/records-ai', recordsAiRoute)
+app.route('/api/google-picker', googlePickerPageRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// 「つないでいるサービス」: the core connectors and the roles they serve (connector-roles.md).
+app.route('/api/companies/:companyId', coreConnectorsRoute)
+// The Slack connection (slack-connector.md): the company's app, a member's own permission.
+app.route('/api/companies/:companyId', slackRoute)
+// Slack's events (public: the company's own signing secret is the proof; the URL never changes).
+app.route('/api/slack', slackEventsRoute)
+// The card's 元のスレッド (outbound-mail.md "Replies"): read now with the caller's own permission, never stored.
+app.route('/api/companies/:companyId', threadsRoute)
+app.route('/api/records-ai/threads', recordsAiThreadsRoute)
+// lane A ▲
+// lane B ▼
+// Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.
+app.route('/api/companies/:companyId', identitiesRoute)
+app.route('/api/records-ai/identities', recordsAiIdentitiesRoute)
+// Messages that came in (来た連絡, inbox.md): a member's own; the AI judges by its record token.
+app.route('/api/companies/:companyId', inboxRoute)
+app.route('/api/records-ai/inbox', recordsAiInboxRoute)
+// A plugin screen's bridge (plugin-frame.md): the member's session, the overlap of their rights, the company's grant and the op's scope.
+app.route('/api/companies/:companyId', pluginBridgeRoute)
+// lane B ▲
+// lane C ▼
+app.route('/api/companies/:companyId', pluginStepsRoute)
+// lane C ▲

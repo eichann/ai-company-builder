@@ -13,13 +13,19 @@ import { AgentLogNotice } from './AgentLogNotice'
 import { useChatServer } from '../hooks/useChatServer'
 import { useChatTabs } from '../hooks/useChatTabs'
 import { useAgentAuth } from '../hooks/useAgentAuth'
-import { getChatSession } from '../api'
+import { getChatSession, getChatSessionSummaries } from '../api'
 import { useChatWindows } from '../hooks/useChatWindows'
 import { useMoveToWindow } from '../hooks/useMoveToWindow'
 import { consultationStatusOf } from '../consultationStatusStore'
 import { publishChatPane, showInOtherChatPane } from '../chatPanes'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
+import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
+import type { AiTurnItemsView } from '../../../../shared/ai-turns'
+import { consultationAbout, taskConsultFirstMessage, taskConsultPurposeTitle, taskConsultTitle } from '../../../../shared/task-consult'
+import { agentCan } from '../../../../shared/agents/registry'
+import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
+import { AiTurnNotice } from './AiTurnNotice'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
 // active one visible), the conversation list, and the agent settings overlay.
@@ -31,7 +37,18 @@ interface ChatPanelProps {
   slashCommands?: SlashCommandItem[]
   /** This pane's id (the layout tree's leaf): what chat commands name in `pane`. */
   paneId?: string
+  /**
+   * 「AI の番」 waiting for the member's AI (received minutes). Given to the main window's main
+   * pane only: its runner starts them automatically in hidden consultations (ai-turns.md).
+   */
+  aiTurnQueue?: readonly AiTurnCandidate[]
+  /** Each waiting record's state and the member's 「もう一度」 / 「人に渡す」 (shown by the screens that list them). */
+  onAiTurnItems?: (view: AiTurnItemsView) => void
+  /** The record open in the middle: the list narrows to consultations about it (「すべて表示」 lifts it). */
+  focus?: { recordId: string; title: string } | null
 }
+
+const NO_AI_TURNS: readonly AiTurnCandidate[] = []
 
 export function ChatPanel(props: ChatPanelProps) {
   const userId = useAuthStore(s => s.user?.id)
@@ -40,7 +57,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat' }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, focus }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -52,7 +69,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const auth = useAgentAuth()
   const { isReady, isChecking, authMode, codexStatus } = auth
 
-  const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id ?? '', paneId, t('chat.newChat'))
+  const { tabs, activeTabId, setActiveTabId, createNewTab, openBackgroundTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id ?? '', paneId, t('chat.newChat'))
 
   // 「別ウィンドウで開く」: consultations other windows show, and moving one there.
   // One that comes back (its window closed) is listed here again as an open tab.
@@ -87,9 +104,42 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
-  useCommandHandler('chat.newConsultation', ({ message, title, minutesId }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId }), { target: paneId })
+  // A person step's procedure is the app's instruction to the AI: sent, shown only as a chip (app-instruction.ts).
+  useCommandHandler('chat.newConsultation', ({ message, title, minutesId, pluginStep }) => setInputRequest({
+    kind: 'newConsultation', message, title, minutesId, pluginStep,
+    ...(pluginStep && message ? { instruction: { kind: 'step', recordId: pluginStep.recordId, title: title ?? '' } } : {}),
+  }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
+  // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
+  useCommandHandler('chat.consultAbout', async ({ recordId, title, fresh, purpose }) => {
+    // A purpose (［催促の下書きを作る］) always starts its own consultation.
+    const existing = fresh || purpose ? null : consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
+    if (existing) { openOrFocus(existing); return }
+    setInputRequest({
+      kind: 'newConsultation', title: purpose ? taskConsultPurposeTitle(title, purpose) : taskConsultTitle(title), topicRecordId: recordId,
+      message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp'), purpose),
+      instruction: { kind: 'task', recordId, title },
+    })
+  }, { target: paneId })
+  useCommandHandler('chat.openConsultation', ({ sessionId }) => openOrFocus(sessionId), { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
+
+  // 「AI の番」: a hidden consultation (a tab behind the shown one) per record, one at a time.
+  const [aiTurnRequest, setAiTurnRequest] = useState<{ tabId: string; request: ChatInputRequest } | null>(null)
+  const consumeAiTurnRequest = useCallback(() => setAiTurnRequest(null), [])
+  const aiTurns = useAiTurnRunner({
+    companyId: currentCompany?.id ?? '',
+    companyRoot: currentCompany?.rootPath,
+    userId,
+    queue: aiTurnQueue,
+    authMode,
+    agentReady: isReady,
+    openBackgroundTab,
+    closeTab,
+    deliver: (tabId, request) => setAiTurnRequest({ tabId, request }),
+    onItems: onAiTurnItems,
+  })
+  const aiTurnNotice = aiTurns.notice && <AiTurnNotice text={aiTurns.notice} canResume={aiTurns.canResume} onResume={aiTurns.resume} />
 
   const openSettings = useCallback(() => setShowSettings(true), [])
   const openInWindow = useCallback((sessionId: string) => { void moveToWindow(sessionId) }, [moveToWindow])
@@ -121,8 +171,9 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
 
   if (!isReady) {
     return (
-      <div className="h-full relative">
-        <div className={showSettings ? 'h-full invisible' : 'h-full'}>
+      <div className="h-full relative flex flex-col">
+        {aiTurnNotice}
+        <div className={showSettings ? 'min-h-0 flex-1 invisible' : 'min-h-0 flex-1'}>
           <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
         </div>
         {settingsOverlay}
@@ -142,7 +193,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       {sidebarOpen && <>
         {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
         <div className={compact ? 'absolute inset-y-0 left-0 z-30 shadow-xl' : 'shrink-0'}>
-          <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId}
+          <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId} focus={focus}
             windows={chatWindows} onOpenInWindow={id => void moveToWindow(id)}
             onSelectTab={id => { setActiveTabId(id); if (compact) setSidebarOpen(false) }}
             onOpenSession={id => { openOrFocus(id); if (compact) setSidebarOpen(false) }}
@@ -152,6 +203,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       </>}
 
       {/* Chat instances (all mounted, only active visible) */}
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col">
+      {aiTurnNotice}
       <div className="flex-1 min-h-0 min-w-0 relative">
         {tabs.map((tab) => (
           <div
@@ -179,13 +232,14 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 initialSessionId={tab.sessionId}
                 onSessionIdChange={tabCallbacks(tab.id).sessionId}
                 onLeftBlank={tabCallbacks(tab.id).close}
-                inputRequest={tab.id === activeTabId ? inputRequest : null}
-                onInputRequestConsumed={consumeInputRequest}
+                inputRequest={aiTurnRequest?.tabId === tab.id ? aiTurnRequest.request : tab.id === activeTabId ? inputRequest : null}
+                onInputRequestConsumed={aiTurnRequest?.tabId === tab.id ? consumeAiTurnRequest : consumeInputRequest}
                 onOpenInWindow={openInWindow}
               />
             </div>
           </div>
         ))}
+      </div>
       </div>
 
       {settingsOverlay}

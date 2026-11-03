@@ -1,22 +1,33 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, GitCommit, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
-import { CommitHistoryPanel, invalidateCommitCache, prefetchCommits } from '../features/history/components/CommitHistoryPanel'
+import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
+import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
+import { getChatSessionSummaries } from '../features/chat/api'
+import { paletteConsultations } from '../features/chat/conversationRows'
+import { refreshFileVersions } from '../features/history/refresh'
+import { RecordCard } from '../features/records/components/RecordCard'
+import { usePlaceHistory } from '../features/editor/hooks/usePlaceHistory'
+import { PlaceNavigation } from '../features/editor/components/PlaceNavigation'
+import { FileSidePanel } from './FileSidePanel'
 import { SearchPanel } from '../features/search/components/SearchPanel'
+import type { PaletteRecent } from '../features/search/model'
 import { useAppStore } from '../stores/appStore'
 import { useSkills } from '../features/skills/hooks/useSkills'
 import { useSparseCheckout } from '../shared/hooks/useSparseCheckout'
 import { useDepartments } from '../shared/hooks/useDepartments'
+import { useWriteAccess } from '../shared/hooks/useWriteAccess'
 import { usePrivateFolderStore } from '../features/files/hooks/usePrivateFolders'
 import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
-import { tabDepartmentLabels } from '../features/editor/editorTabs'
+import { recordIdOfTab, recordTabKey, tabDepartmentLabels, type RecordTabLook } from '../features/editor/editorTabs'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
-import { FilesPanel } from './FilesPanel'
+import { FileTreePanel } from '../features/files/components/FileTreePanel'
+import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { AppDialogs } from './AppDialogs'
 import { LeftPanelTabs } from '../features/workspace/components/LeftPanelTabs'
-import type { LeftPanel } from '../features/workspace/leftPanels'
+import { resolveLeftPanel, type LeftPanel } from '../features/workspace/leftPanels'
 import { SkillsPanel } from '../features/skills/components/SkillsPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
 import { DepartmentBar } from '../features/workspace/components/DepartmentBar'
@@ -34,14 +45,41 @@ import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownl
 import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
-import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
 import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
-import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
+import { startMinutesReading } from '../features/minutes/startReading'
+import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
+import { MeetingBundleBar } from '../features/minutes/components/MeetingBundleBar'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
+import type { AiTurnItemsView } from '../../shared/ai-turns'
+import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
+import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
+import { meetingTurns } from '../../shared/notifications-app'
+import { useTaskList } from '../features/tasks/hooks/useTaskList'
+import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
+import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
+import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
+import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { renderRecordBundleField } from './recordBundleField'
+import { renderRecordSource } from './recordSource'
+import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
+import { companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
+import { meetingBundleWords } from '../../shared/tasks'
+import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
+import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
+import { BundleChooser } from '../features/tasks/components/BundleChooser'
+import { TaskCard } from '../features/tasks/components/TaskCard'
+import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
+import { ApprovalCard } from '../features/chat/components/ApprovalCard'
+import { RecordRow } from '../features/records/components/RecordRows'
+import type { RecordViewSummary } from '../../shared/record-views'
+import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
+import { LazyPluginFileActionDialog as PluginFileActionDialog } from '../features/plugins/components/LazyPluginSlots'
+import { pluginSlots, type FileActionOpen } from './pluginSlots'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -49,6 +87,8 @@ import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckB
 const PANE_CLASSES: Record<string, string> = {
   side: 'relative flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900',
   fileTree: 'overflow-hidden',
+  // Nothing of the consultation is drawn outside its pane (over the middle's tabs).
+  chat: 'min-w-0 overflow-hidden',
 }
 const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
 const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
@@ -62,8 +102,32 @@ export function AppShell() {
   const rootPath = currentCompany?.rootPath
 
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
-  // 「議事録が届きました」: main checks while Google may read the member's minutes (features/minutes).
+  // Received minutes: main checks while Google may read the member's minutes (features/minutes); the
+  // AI turn runner reads them, the task list shows them in 「AI の番」.
   const minutes = useMinutesNotices(currentCompany?.id)
+  // Where each of them stands with the automatic 「AI の番」 (the chat's runner reports it).
+  const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
+  // 「あなたの番」 and the bell (features/notifications): main reads them with the session.
+  const notices = useNotices(currentCompany?.id)
+  // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
+  const taskList = useTaskList(currentCompany?.id)
+  // The やること tab's dot: something of あなたの番 came that the member has not seen in the tab.
+  const seenTasks = useSeenTasks(currentCompany?.id)
+  // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
+  // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
+  const pluginTurns = usePluginStepTurns(currentCompany?.id)
+  const aiTurns = useMemo(
+    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns }),
+    [minutes.available, minutes.notices, taskList.data, pluginTurns],
+  )
+  const { isReadOnly } = useWriteAccess()
+  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or a meeting's card.
+  const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
+  // Bumped when a まとまり is chosen, so an open meeting card asks the server again.
+  const [bundleRev, setBundleRev] = useState(0)
+  // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
+  const [linkingFile, setLinkingFile] = useState<string | null>(null)
+  const [fileAction, setFileAction] = useState<FileActionOpen | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -75,9 +139,17 @@ export function AppShell() {
   const { unsyncedFolders, isSelectedDeptUnsynced, markDownloaded } =
     useDepartmentAvailability(rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
 
-  // Open file tabs, the active one and the left tab, saved per company.
-  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab } =
+  // Open tabs (files and records side by side), the active one and the left tab, saved per company.
+  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks } =
     useEditorPersistence(currentCompany?.id, DEFAULT_LEFT_PANEL)
+  // A record's card tells its title and kind once read: its tab shows them (and after a restart).
+  const noteRecordLook = useCallback((id: string, look: RecordTabLook) => {
+    setRecordLooks(prev => {
+      const old = prev[id]
+      if (old && old.title === look.title && old.state === look.state && old.typeLabel === look.typeLabel) return prev
+      return { ...prev, [id]: look }
+    })
+  }, [setRecordLooks])
   const { previewFilePath, openFile: handleOpenFile, pinFile: handlePinFile, selectFile: handleSelectOpenFile, closeFile: handleCloseFile } =
     useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActiveFilePath })
   const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
@@ -97,9 +169,16 @@ export function AppShell() {
   const [settingsFocus, setSettingsFocus] = useState<{ service?: string; at: number } | null>(null)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
-  // The history panel follows the department only while shown (it runs git log).
-  const [historyDeptFolder, setHistoryDeptFolder] = useState(effectiveDeptFolder)
-  if (leftTab === 'history' && historyDeptFolder !== effectiveDeptFolder) setHistoryDeptFolder(effectiveDeptFolder)
+  // ← → over the files and records the middle showed (design §7-4): both are tabs.
+  const showFileAgain = useCallback((path: string) => {
+    if (openFiles.includes(path)) handleSelectOpenFile(path)
+    else { handleOpenFile(path); handlePinFile(path) }
+  }, [openFiles, handleSelectOpenFile, handleOpenFile, handlePinFile])
+  const places = usePlaceHistory({ companyId: currentCompany?.id, activeFilePath, showFile: showFileAgain })
+  const { visitFile } = places
+  const activeRecordId = recordIdOfTab(activeFilePath)
+  const openFileFromTree = useCallback((path: string) => { visitFile(path); handleOpenFile(path) }, [visitFile, handleOpenFile])
+  const selectOpenFile = useCallback((path: string) => { visitFile(path); handleSelectOpenFile(path) }, [visitFile, handleSelectOpenFile])
 
   // The shown department's skills (none while it is not downloaded), and the company-wide ones for slash commands.
   const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
@@ -144,7 +223,7 @@ export function AppShell() {
     await refreshDepartments()
     void refreshSkills()
     if (!isCompanyWide) void refreshCompanySkills()
-    invalidateCommitCache()
+    refreshFileVersions()
   }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
   const sync = useSync({ rootPath, companyId: currentCompany?.id, onSynced: handleSynced })
 
@@ -178,6 +257,7 @@ export function AppShell() {
     requestAnimationFrame(() => searchInputRef.current?.focus())
   })
   useCommandHandler('file.search', () => setShowFileSearch(true))
+  useCommandHandler('find.byName', () => setShowFileSearch(true))
   // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
   useCommandHandler('settings.openOwnKey', ({ service }) => {
@@ -189,27 +269,146 @@ export function AppShell() {
     selectDepartment(id)
     skillsTab.selectSkill(null)
     // Open file tabs stay: one strip for the whole company, labelled with their department.
-    const dept = departments.find(d => d.id === id)
-    if (dept && rootPath) prefetchCommits(rootPath, dept.folder)
   }
 
+  // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
+  const middleHidden = useRef(false)
+  const showMiddle = useCallback(() => { if (middleHidden.current) setLeftTab('files') }, [setLeftTab])
   const handleEditFile = (filePath: string) => {
     setLeftTab('files')
-    handleOpenFile(filePath)
+    openFileFromTree(filePath)
   }
-  const handleFileSearchSelect = useCallback((filePath: string) => {
-    setLeftTab('files')
-    handleOpenFile(filePath)
-    handlePinFile(filePath)
-  }, [handleOpenFile, handlePinFile, setLeftTab])
-  useCommandHandler('file.open', ({ path }) => handleFileSearchSelect(path))
+  // Opens a tab for good (not the preview tab the next single click replaces).
+  const openTab = useCallback((key: string) => {
+    showMiddle()
+    visitFile(key)
+    handleOpenFile(key)
+    handlePinFile(key)
+  }, [showMiddle, visitFile, handleOpenFile, handlePinFile])
+  const handleFileSearchSelect = openTab
+  // A file opened from 探す shows the line that was found (its editor tab only).
+  const [gotoLine, setGotoLine] = useState<{ path: string; line: number } | null>(null)
+  useCommandHandler('file.open', ({ path }) => openTab(path))
+  // A record (search, 「つながっているもの」, a notice) opens in a tab in the middle, next to the files.
+  useCommandHandler('record.open', ({ recordId }) => openTab(recordTabKey(recordId)))
+  // A task list row opens its item as the preview tab, like a single click in the file tree.
+  const openListItem = useCallback((item: { id: string; title: string; type: string; typeLabel: string; state: string | null; implements?: string[] }) => {
+    noteRecordLook(item.id, { title: item.title, type: item.type, typeLabel: item.typeLabel, state: item.state, ...(item.implements ? { implements: item.implements } : {}) })
+    const key = recordTabKey(item.id)
+    visitFile(key)
+    handleOpenFile(key)
+  }, [noteRecordLook, visitFile, handleOpenFile])
   // A file link in a consultation's own window opens here (that window has no editor).
   useFilesFromChatWindows()
 
+  const approvalCard = (approvalId: string, at: string) => currentCompany
+    ? <ApprovalCard key={approvalId} card={{ id: `card-${approvalId}`, companyId: currentCompany.id, conversationId: null, approvalId, origin: 'shown', at }} />
+    : null
+  // What the AI prepared for a task: the same mail and approval cards as in the consultation (the person sends / approves).
+  const renderPrepared = (record: RecordViewSummary) => {
+    if (!currentCompany) return null
+    if (record.type === 'outbound_message') return <PreparedMailCard key={record.id} companyId={currentCompany.id} messageId={record.id} />
+    if (record.type === 'approval') return approvalCard(record.id, record.updatedAt)
+    return <RecordRow record={record} />
+  }
+
+  // 「部署に出す」 offers the departments the member can write to (the server checks again).
+  const shareFolders = rootPath ? departments.filter(d => d.folder && !isReadOnly(`${rootPath}/${d.folder}`)).map(d => ({ folder: d.folder, name: d.name })) : []
+  // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
+  const consultAbout = (task: { id: string; title: string }, fresh = false) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, ...(fresh ? { fresh } : {}) }).catch(() => {}) }
+  // ［催促の下書きを作る］ on a task whose 返事の見込み passed: a new consultation that drafts the nudge (the member sends it).
+  const draftNudge = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'nudge' }).catch(() => {}) }
+  // A record's 「つながっているもの」 lists the consultations about it (this PC's history).
+  const recordConsultations = useLinkedConsultations(currentCompany?.id)
+  // 探す finds a consultation through the やること / 案件 it is about (the answers 「AIへの相談」 reads too).
+  const topicIds = useMemo(() => [...recordConsultations.keys()], [recordConsultations])
+  const consultationTopics = useConsultationTopics(currentCompany?.id ?? '', topicIds)
+  // Business plugins' four slots (plugin-frame.md "The four slots"): only verified packages the company lists now.
+  const pluginScreens = usePluginScreens(currentCompany?.id)
+  const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
+  const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
+  // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
+  const bundleKinds = taskList.data?.bundleKinds
+  const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
+  const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
+  const meetingWords = meetingBundleWords(bundleWord)
+  // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
+  const recordCard = (recordId: string) => {
+    if (!currentCompany || !rootPath) return null
+    if (recordId.startsWith('task-')) {
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} />
+    }
+    // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
+    const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
+      ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} word={bundleWord} onChoose={setChoosingBundle} onChanged={taskList.reload} />
+      : null
+    // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+    // An approval request also gets its own card on top: approving or sending back is the person's press.
+    if (recordId.startsWith('approval-')) {
+      return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
+    }
+    return readOnly
+  }
+  // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
+  const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? [], bundleWord).map(m => {
+    const actions: MeetingTurnRow['actions'] = []
+    if (m.kind === 'bundle') {
+      const s = m.suggestedBundle
+      if (s) actions.push({ label: 'はい', run: () => void linkMeetingBundle(currentCompany.id, m.id, s.id).then(() => taskList.reload()) })
+      actions.push({ label: s ? 'ちがう／選ぶ' : meetingWords.choose, run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+      actions.push({ label: meetingWords.none, run: () => void declineMeetingBundle(currentCompany.id, m.id).then(() => taskList.reload()) })
+    }
+    if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available && taskList.data?.items.find(i => i.id === m.id)?.state === 'received') {
+      actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
+      actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
+    }
+    if (m.ai?.canRetry) actions.push({ label: 'もう一度', run: () => aiTurnItems?.retry(m.id) })
+    if (m.ai?.canHand) actions.push({ label: '人に渡す', run: () => aiTurnItems?.handOver(m.id) })
+    return { ...m, actions }
+  })
+  // 探す ⌘K's 「最近開いたもの」: the tabs open in the middle, newest first.
+  const recentTabs: PaletteRecent[] = [...openFiles].reverse().flatMap((key): PaletteRecent[] => {
+    const id = recordIdOfTab(key)
+    if (id) return recordLooks[id] ? [{ key, recordId: id, record: recordLooks[id] }] : []
+    const path = rootPath ? companyPathOf(key, rootPath) : null
+    return path ? [{ key, path }] : []
+  })
+  // 探す ⌘K's skills: the ones the スキル tab shows, then the company-wide ones (both already loaded).
+  const paletteSkills = useMemo(() => [...skills, ...(isCompanyWide ? [] : companySkills)]
+    .map(s => ({ id: s.id, name: s.name, command: s.skillPath?.split('/').pop() ?? '', group: s.group })), [skills, companySkills, isCompanyWide])
+  const companyId = currentCompany?.id
+  const loadPaletteConsultations = useMemo(() => companyId ? () => getChatSessionSummaries(companyId).then(paletteConsultations) : undefined, [companyId])
+  // 探す's consultations: this PC's history with the record each was started from (shown ones only).
+  const loadFindConsultations = useMemo(() => companyId ? () => getChatSessionSummaries(companyId).then(all => {
+    const listed = new Set(paletteConsultations(all).map(c => c.id))
+    return all.filter(s => listed.has(s.id)).map(s => ({ id: s.id, title: s.title, updatedAt: s.updatedAt, ...(s.topicRecordId ? { topicRecordId: s.topicRecordId } : {}) }))
+  }) : undefined, [companyId])
+  const openConsultation = (sessionId: string) => {
+    if (collapsedPane === 'chat') toggleChat()
+    void runCommand('chat.openConsultation', { sessionId }).catch(() => {})
+  }
+  const departmentNames = useMemo(() => Object.fromEntries(departments.map(d => [d.folder, d.name])), [departments])
+  const myTurnIds = (taskList.data?.items ?? []).filter(i => i.turn === 'mine' || i.turn === 'acceptance').map(i => i.id)
+  // Opening the やること tab, or leaving it, means the member has seen what is in it.
+  const selectLeftTab = (id: string) => {
+    if (id === 'tasks' || leftTab === 'tasks') seenTasks.markSeen(myTurnIds)
+    setLeftTab(id)
+  }
+  // The morning's 「今日のあなたの番」 (its Mac notification or its bell line) opens the task list.
+  const openTasks = () => { if (tasksShown) selectLeftTab('tasks') }
+  useOpenTasksRequest(currentCompany?.id, openTasks)
+  // A skill opens where a click in the スキル tab opens it; a company-wide one under 全社.
+  const openSkillFromPalette = (id: string) => {
+    if (!skills.some(s => s.id === id)) handleSelectDept(COMPANY_TAB_ID)
+    skillsTab.selectSkill(id)
+    selectLeftTab('skills')
+  }
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
     {
-      id: 'skills', title: t('tabs.skills'), icon: Lightning, mount: 'once-opened', className: 'flex',
+      id: 'skills', title: t('tabs.skills'), icon: Lightning, mount: 'once-opened', className: 'flex', wide: true,
       render: () => (
         <SkillsPanel
           skills={skills}
@@ -233,37 +432,56 @@ export function AppShell() {
       // Always mounted: the file tree and the open files keep their state.
       id: 'files', title: t('tabs.files'), icon: FolderSimple, mount: 'always',
       render: () => (
-        <FilesPanel
-          split={layout.files}
-          paneClassName={paneClassName}
-          dividerLabel={dividerLabel}
-          onResizeStart={startResize}
-          onResize={resize}
+        <FileTreePanel
           rootPath={rootPath || ''}
           departmentFolder={effectiveDeptFolder}
-          openFiles={openFiles}
-          activeFilePath={activeFilePath}
-          previewFilePath={previewFilePath}
-          tabLabels={tabLabels}
-          onOpenFile={handleOpenFile}
-          onPinFile={handlePinFile}
-          onSelectOpenFile={handleSelectOpenFile}
-          onCloseFile={handleCloseFile}
+          selectedFilePath={activeFilePath}
+          onSelectFile={openFileFromTree}
+          onDoubleClickFile={handlePinFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
+          onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
+          extraMenuItems={plugins.fileMenuItems}
         />
       ),
     },
     {
-      id: 'search', title: '検索', icon: MagnifyingGlass, mount: 'once-opened',
-      onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
-      render: () => <SearchPanel rootPath={rootPath || ''} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef} />,
+      // Shown for the departments the company setting names (tasks-ui.md); records off → no tab.
+      id: 'tasks', title: 'やること', icon: ListChecks, mount: 'once-opened', className: 'flex',
+      visible: tasksShown,
+      // No count here: the count of あなたの番 is the title bar's alone (owner 2026-11-02); a dot for what is new.
+      dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
+      render: () => currentCompany && rootPath ? (
+        <TaskListPanel
+          companyId={currentCompany.id}
+          rootPath={rootPath}
+          list={taskList}
+          aiTurns={aiTurnItems}
+          activeRecordId={activeRecordId}
+          onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
+          onConsult={consultAbout}
+          askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
+          meetingActions={minutes.available ? {
+            read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
+            skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
+          } : undefined}
+        />
+      ) : null,
     },
     {
-      // Follows the department only while shown: it runs git log.
-      id: 'history', title: '履歴', icon: GitCommit, mount: 'once-opened',
-      render: () => <CommitHistoryPanel rootPath={rootPath || ''} departmentFolder={historyDeptFolder} />,
+      // 探す (never 「検索」): the narrow column; what is found opens in a tab in the middle.
+      id: 'search', title: '探す', icon: MagnifyingGlass, mount: 'once-opened',
+      onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
+      render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef}
+        departmentNames={departmentNames} recent={recentTabs} bundleWord={bundleWord} bundleKinds={bundleKinds} activeRecordId={activeRecordId}
+        loadConsultations={loadFindConsultations} consultationTopics={consultationTopics} onOpenConsultation={openConsultation}
+        notDownloaded={sparseCheckout.enabled ? sparseCheckout.excludedPaths : undefined}
+        onOpenFile={(path, line) => { if (line !== undefined) setGotoLine({ path, line }); openTab(path) }} />,
     },
+    // A business plugin's screen takes the whole left side, like スキル.
+    ...plugins.tabs.map(tab => ({ ...tab, wide: true })),
   ]
+  const shownLeft = leftPanels.find(p => p.id === resolveLeftPanel(leftTab, leftPanels))
+  middleHidden.current = !!shownLeft?.wide
 
   return (
     <div className="h-screen flex flex-col bg-gray-100 dark:bg-zinc-950">
@@ -278,6 +496,15 @@ export function AppShell() {
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
         extra={minutes.available && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
+        notices={currentCompany ? (
+          <TitleBarNotices
+            companyId={currentCompany.id}
+            state={notices}
+            meetings={titleBarMeetings}
+            onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
+            onOpenTasks={openTasks}
+          />
+        ) : undefined}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       <DepartmentBar
@@ -289,7 +516,6 @@ export function AppShell() {
         showNotDownloadedNote={isCompanyWide && sparseCheckout.enabled && !!unsyncedFolders && unsyncedFolders.size > 0}
         onOpenSettings={() => setShowSettings(true)}
       />
-      {minutes.available && currentCompany && <MinutesNotices companyId={currentCompany.id} notices={minutes.notices} />}
 
       {/* Main Content: the split tree (features/workspace/layoutTree.ts); the chat is one pane */}
       <SplitView
@@ -318,6 +544,9 @@ export function AppShell() {
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
             paneId={paneId}
+            aiTurnQueue={aiTurns}
+            onAiTurnItems={setAiTurnItems}
+            focus={activeRecordId ? { recordId: activeRecordId, title: recordLooks[activeRecordId]?.title ?? '' } : null}
           />
         ) : (
         <>
@@ -328,7 +557,32 @@ export function AppShell() {
             className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
             aria-hidden={isSelectedDeptUnsynced || undefined}
           >
-            <LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={setLeftTab} />
+            {/* The left tab beside the middle (open files and records, plan A); a wide tab covers the middle, which stays mounted. */}
+            <SplitView
+              split={layout.files} limits={PANE_LIMITS} className="h-full min-w-0"
+              collapsed={shownLeft?.wide ? 'editor' : null}
+              paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
+              renderPane={id => id === 'fileTree' ? (
+                <div className="h-full flex flex-col min-w-0"><LeftPanelTabs panels={leftPanels} selectedId={leftTab} onSelect={selectLeftTab} /></div>
+              ) : (
+                <TabbedEditorPanel
+                  openFiles={openFiles}
+                  activeFilePath={activeFilePath}
+                  previewFilePath={previewFilePath}
+                  tabLabels={tabLabels}
+                  recordLooks={recordLooks}
+                  onSelectFile={selectOpenFile}
+                  onCloseFile={handleCloseFile}
+                  onPinFile={handlePinFile}
+                  navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
+                  renderRecord={recordCard}
+                  gotoLine={gotoLine?.path === activeFilePath ? gotoLine.line : null}
+                  aside={activeFilePath && !activeRecordId && rootPath
+                    ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
+                    : undefined}
+                />
+              )}
+            />
           </div>
           {isSelectedDeptUnsynced && (
             <DepartmentDownloadPrompt
@@ -343,7 +597,52 @@ export function AppShell() {
         )}
       />
 
+      {choosingBundle && currentCompany && (
+        <BundleChooser
+          companyId={currentCompany.id} meetingTitle={choosingBundle.title} word={bundleWord}
+          onChoose={async b => {
+            const r = await linkMeetingBundle(currentCompany.id, choosingBundle.id, b.id)
+            taskList.reload()
+            setBundleRev(n => n + 1)
+            return r?.success ? null : (r?.error ?? 'できませんでした。')
+          }}
+          onNoBundle={async () => {
+            const r = await declineMeetingBundle(currentCompany.id, choosingBundle.id)
+            taskList.reload()
+            setBundleRev(n => n + 1)
+            return r.success ? null : r.error
+          }}
+          onClose={() => setChoosingBundle(null)}
+        />
+      )}
+      {linkingFile && currentCompany && (
+        <LinkToTaskDialog
+          key={linkingFile}
+          companyPath={linkingFile}
+          items={taskList.data?.items ?? []}
+          onLink={async task => {
+            const r = await linkFileToTask(currentCompany.id, task.id, linkingFile, task.version)
+            taskList.reload()
+            return r.success ? null : r.error
+          }}
+          onClose={() => setLinkingFile(null)}
+        />
+      )}
+      {/* Hidden as soon as its plugin is no longer listed (turned off, stopped). */}
+      {fileAction && currentCompany && pluginScreens.screens.some(s => s.plugin.id === fileAction.action.plugin.id && s.plugin.version === fileAction.action.plugin.version) && (
+        <Suspense fallback={null}>
+          <PluginFileActionDialog
+            companyId={currentCompany.id}
+            action={fileAction.action}
+            companyPath={fileAction.companyPath}
+            isFolder={fileAction.isFolder}
+            onOpen={target => { setFileAction(null); return plugins.openFromPlugin(target) }}
+            onClose={() => setFileAction(null)}
+          />
+        </Suspense>
+      )}
       <AppDialogs
+        companyId={currentCompany?.id}
         rootPath={rootPath || ''}
         departments={departments}
         selectedDeptId={selectedDeptId}
@@ -355,6 +654,12 @@ export function AppShell() {
         showFileSearch={showFileSearch}
         onCloseFileSearch={() => setShowFileSearch(false)}
         onFileSearchSelect={handleFileSearchSelect}
+        recentTabs={recentTabs}
+        onOpenRecord={id => openTab(recordTabKey(id))}
+        paletteSkills={paletteSkills}
+        onOpenSkill={openSkillFromPalette}
+        loadConsultations={loadPaletteConsultations}
+        onOpenConsultation={openConsultation}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}

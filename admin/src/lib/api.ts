@@ -4,17 +4,73 @@
 // server, and without a reverse proxy the admin's own /api/* proxy
 // (src/proxy.ts) forwards them. Either way the session cookie is first-party.
 
+import type { ZodMiniType } from 'zod/mini'
+
 import type { ClientBuild } from '../../../shared/core/client-version'
+import {
+  absenceCreatedSchema,
+  absenceRemovedSchema,
+  agentEventPageSchema,
+  agentEventRetentionPreviewSchema,
+  agentEventSettingsSchema,
+  agentEventSummarySchema,
+  agentEventViewersSchema,
+  agentSandboxSchema,
+  agentStopSchema,
+  secondOpinionSchema,
+  brokerSchema,
+  capabilitiesSchema,
+  clientActivitiesSchema,
+  companiesSchema,
+  companySchema,
+  configSchema,
+  connectionRenewSchema,
+  coreConnectorsSchema,
+  createdInvitationSchema,
+  deletePrivateFolderSchema,
+  departmentMembersSchema,
+  departmentSchema,
+  departmentsSchema,
+  departmentStatsSchema,
+  effectiveAccessSchema,
+  googleSchema,
+  importReportSchema,
+  inboxSettingsSchema,
+  invitationAcceptSchema,
+  invitationsSchema,
+  invitationValidateSchema,
+  makePublicSchema,
+  managersSchema,
+  memberAbsencesSchema,
+  memberRoleSchema,
+  membersSchema,
+  minutesFolderSchema,
+  meetingDuplicatesSchema,
+  meetingDuplicatesMergedSchema,
+  overviewSchema,
+  adminHomeSchema,
+  permissionsSchema,
+  pluginListSchema,
+  pluginMappingCheckSchema,
+  pluginRolesSchema,
+  pluginSchema,
+  pluginStepSkillsSchema,
+  privateFolderSchema,
+  privateFoldersSchema,
+  pushRejectionPageSchema,
+  repoFoldersSchema,
+  sandboxImpactSchema,
+  scopeMoveSchema,
+  scopeResetSchema,
+  scopeRulesResultSchema,
+  slackSchema,
+  taskSettingsSchema,
+  userSchema,
+} from './api-schemas'
 import type {
-  AgentEventPage,
   AgentEventQuery,
-  AgentEventRetentionPreview,
-  AgentEventSettings,
   AgentEventSettingsUpdate,
-  AgentEventSummary,
   AgentEventViewerMode,
-  AgentEventViewers,
-  SandboxImpact,
 } from '../../../shared/types/agent-events'
 
 const API_BASE = ''
@@ -33,6 +89,14 @@ export class ApiError extends Error {
     this.body = body
     this.code = typeof body?.code === 'string' ? body.code : undefined
   }
+}
+
+/** `ApiError.code` of an answer that is not JSON or not the shape the page expects (describeError). */
+export const INVALID_RESPONSE = 'INVALID_RESPONSE'
+
+function invalidResponse(status: number, issues: string[] = []): ApiError {
+  // Only where the shape broke (field paths), never the values.
+  return new ApiError(status, 'Invalid response from the server', { code: INVALID_RESPONSE, issues })
 }
 
 type RequestOptions = {
@@ -79,7 +143,7 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
       const message = typeof error?.error === 'string' ? error.error : typeof error?.message === 'string' ? error.message : ''
       throw new ApiError(res.status, message || `Request failed (${res.status})`, error)
     }
-    if (raw === undefined) throw new ApiError(res.status, 'Invalid response from the server')
+    if (raw === undefined) throw invalidResponse(res.status)
     return raw as T
   } catch (err) {
     if (controller.signal.aborted) throw new ApiTimeoutError()
@@ -89,12 +153,17 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
   }
 }
 
-/** `{ success, data }` envelope used by every company-scoped endpoint. */
-type Envelope<T> = { success: boolean; data: T }
-
-async function getData<T>(endpoint: string, options?: RequestOptions): Promise<T> {
-  const res = await apiClient<Envelope<T> | null>(endpoint, options)
-  return res?.data as T
+/**
+ * The `data` of a `{ success, data }` envelope, checked against `schema` (api-schemas.ts): an
+ * answer of another shape is refused with INVALID_RESPONSE instead of being rendered. There is
+ * no unchecked variant; a new call adds its schema there.
+ */
+async function getData<T>(endpoint: string, schema: ZodMiniType<T>, options?: RequestOptions): Promise<T> {
+  const res = await apiClient<unknown>(endpoint, options)
+  const data = res !== null && typeof res === 'object' && !Array.isArray(res) ? (res as { data?: unknown }).data : undefined
+  const parsed = schema.safeParse(data)
+  if (!parsed.success) throw invalidResponse(200, parsed.error.issues.slice(0, 10).map(i => ['data', ...i.path.map(String)].join('.')))
+  return parsed.data
 }
 
 const enc = encodeURIComponent
@@ -108,6 +177,12 @@ export interface User {
   email: string
   name: string | null
   createdAt?: string
+  /**
+   * May this account create a company (GET /api/me; the same check POST
+   * /api/companies makes)? Absent from an older server: offer it, the server
+   * still refuses. Read through lib/company-creation.ts.
+   */
+  canCreateCompany?: boolean
 }
 
 export const authApi = {
@@ -132,11 +207,11 @@ export const authApi = {
 }
 
 export const meApi = {
-  getMe: () => getData<User>('/api/me'),
+  getMe: () => getData('/api/me', userSchema),
 }
 
 export const configApi = {
-  get: () => getData<{ name: string; version: string; setupComplete: boolean }>('/api/config'),
+  get: () => getData('/api/config', configSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -167,23 +242,23 @@ export interface Member {
 }
 
 export const companiesApi = {
-  list: () => getData<Company[]>('/api/companies'),
+  list: () => getData('/api/companies', companiesSchema),
 
   create: (name: string, slug?: string) =>
-    getData<Company>('/api/companies', { method: 'POST', body: { name, slug } }),
+    getData('/api/companies', companySchema, { method: 'POST', body: { name, slug } }),
 
-  get: (id: string) => getData<Company>(`/api/companies/${enc(id)}`),
+  get: (id: string) => getData(`/api/companies/${enc(id)}`, companySchema),
 
-  getMembers: (id: string) => getData<Member[]>(`/api/companies/${enc(id)}/members`),
+  getMembers: (id: string) => getData(`/api/companies/${enc(id)}/members`, membersSchema),
 
   /** owner / admin. Only the display name changes. */
   rename: (id: string, name: string) =>
-    getData<Company>(`/api/companies/${enc(id)}`, { method: 'PATCH', body: { name } }),
+    getData(`/api/companies/${enc(id)}`, companySchema, { method: 'PATCH', body: { name } }),
 
   /** owner only; the last owner cannot be demoted. */
   setMemberRole: (companyId: string, userId: string, role: Role) =>
-    getData<{ userId: string; companyId: string; role: Role }>(
-      `/api/companies/${enc(companyId)}/members/${enc(userId)}/role`,
+    getData(
+      `/api/companies/${enc(companyId)}/members/${enc(userId)}/role`, memberRoleSchema,
       { method: 'PUT', body: { role } }
     ),
 
@@ -205,7 +280,7 @@ export interface Capabilities {
 }
 
 export const capabilitiesApi = {
-  get: (companyId: string) => getData<Capabilities>(`/api/companies/${enc(companyId)}/me/capabilities`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/me/capabilities`, capabilitiesSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +332,40 @@ export interface OrphanedScopeSummary {
 }
 
 export const overviewApi = {
-  get: (companyId: string) => getData<Overview>(`/api/companies/${enc(companyId)}/overview`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/overview`, overviewSchema),
+}
+
+/** The six 「最初にやること」 (管理画面の見直し 2-1), judged by the server (server.md "Admin home"). */
+export type SetupStepId = 'departments' | 'members' | 'department-members' | 'google' | 'minutes-folder' | 'holidays'
+
+export interface SetupStep {
+  id: SetupStepId
+  done: boolean
+  /** The operator registers it (owner decision 2026-11-02): the home shows 「運用担当者に頼む」. */
+  byOperator?: boolean
+  departmentsWithoutMembers?: number
+  departmentsWithoutManager?: number
+}
+
+/** GET …/home: owner/admin get the steps and the whole company; a department manager their departments' members only. */
+export interface AdminHome {
+  view: 'admin' | 'manager'
+  setup: { steps: SetupStep[]; done: number; total: number } | null
+  /** Manager: the departments they manage. */
+  departments: Array<{ id: string; name: string }>
+  attention: Overview['attention'] & {
+    orphanedScopes: OrphanedScopeSummary[]
+    meetingDuplicates: number
+    stoppedPlugins: Array<{ id: string; label: string; problem: string }>
+  }
+  counts: { members: number; departments: number }
+}
+
+export const homeApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/home`, adminHomeSchema),
+  /** 「会社の休みを確かめた」 (owner/admin). */
+  checkHolidays: (companyId: string) =>
+    getData(`/api/companies/${enc(companyId)}/home/holidays-checked`, adminHomeSchema, { method: 'PUT', body: { checked: true } }),
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +390,7 @@ export interface ClientActivity {
 }
 
 export const clientActivityApi = {
-  list: (companyId: string) => getData<ClientActivity[]>(`/api/companies/${enc(companyId)}/client-activity`),
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/client-activity`, clientActivitiesSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -412,47 +520,47 @@ const permBase = (companyId: string) => `/api/companies/${enc(companyId)}/permis
 
 export const permissionsApi = {
   get: (companyId: string) =>
-    getData<{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }>(permBase(companyId)),
+    getData(permBase(companyId), permissionsSchema),
 
   /**
    * Replace a place's whole rule set in one step (what the 権限 screen saves).
    * [] = 上の階層と同じ (not allowed for the company root).
    */
   replaceScope: (companyId: string, path: string, rules: RuleInput[], { force = false }: ForceOption = {}) =>
-    getData<ScopeRulesResult>(`${permBase(companyId)}/scopes/by-path`, {
+    getData(`${permBase(companyId)}/scopes/by-path`, scopeRulesResultSchema, {
       method: 'PUT',
       body: force ? { path, rules, force } : { path, rules },
     }),
 
   /** Move the rules of a place (and of the places inside it) to another existing folder. */
   moveScope: (companyId: string, scopeId: string, toPath: string, { force = false }: ForceOption = {}) =>
-    getData<{ moved: number; toPath: string; scopeId: string | null }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/move`, {
+    getData(`${permBase(companyId)}/scopes/${enc(scopeId)}/move`, scopeMoveSchema, {
       method: 'POST',
       body: force ? { toPath, force } : { toPath },
     }),
 
   /** Set (create or update) a subject's rule on a folder; the folder stops inheriting. */
   setRule: (companyId: string, path: string, subject: RuleSubject, canWrite: boolean) =>
-    getData<ScopeRulesResult>(`${permBase(companyId)}/rules`, {
+    getData(`${permBase(companyId)}/rules`, scopeRulesResultSchema, {
       method: 'POST',
       body: { path, ...subject, canWrite },
     }),
 
   updateRule: (companyId: string, ruleId: string, canWrite: boolean) =>
-    getData<ScopeRulesResult>(`${permBase(companyId)}/rules/${enc(ruleId)}`, { method: 'PATCH', body: { canWrite } }),
+    getData(`${permBase(companyId)}/rules/${enc(ruleId)}`, scopeRulesResultSchema, { method: 'PATCH', body: { canWrite } }),
 
   deleteRule: (companyId: string, ruleId: string) =>
-    getData<ScopeRulesResult>(`${permBase(companyId)}/rules/${enc(ruleId)}`, { method: 'DELETE' }),
+    getData(`${permBase(companyId)}/rules/${enc(ruleId)}`, scopeRulesResultSchema, { method: 'DELETE' }),
 
   /** Remove every rule of the scope so it inherits from its parent again. */
   resetScope: (companyId: string, scopeId: string, { force = false }: ForceOption = {}) =>
-    getData<{ removed: number }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/rules${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+    getData(`${permBase(companyId)}/scopes/${enc(scopeId)}/rules${force ? '?force=true' : ''}`, scopeResetSchema, { method: 'DELETE' }),
 
   effective: (companyId: string, path: string) =>
-    getData<EffectiveAccess>(`${permBase(companyId)}/effective?path=${enc(path)}`),
+    getData(`${permBase(companyId)}/effective?path=${enc(path)}`, effectiveAccessSchema),
 
   folders: (companyId: string, path: string) =>
-    getData<{ path: string; folders: RepoFolder[] }>(`${permBase(companyId)}/folders?path=${enc(path)}`),
+    getData(`${permBase(companyId)}/folders?path=${enc(path)}`, repoFoldersSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -501,23 +609,23 @@ const privBase = (companyId: string) => `/api/companies/${enc(companyId)}/privat
 
 export const privateFoldersApi = {
   /** owner/admin: all; managers: their departments'. */
-  list: (companyId: string) => getData<PrivateFolderSummary[]>(privBase(companyId)),
+  list: (companyId: string) => getData(privBase(companyId), privateFoldersSchema),
 
-  get: (companyId: string, scopeId: string) => getData<PrivateFolderDetail>(`${privBase(companyId)}/${enc(scopeId)}`),
+  get: (companyId: string, scopeId: string) => getData(`${privBase(companyId)}/${enc(scopeId)}`, privateFolderSchema),
 
   /** 409 FOLDER_NAME_UNAVAILABLE / OUTDATED_CLIENTS, 400 PARENT_NOT_FOUND / ALREADY_PRIVATE / INVALID_MEMBERS. */
   create: (companyId: string, input: CreatePrivateFolderInput, { force = false }: ForceOption = {}) =>
-    getData<PrivateFolderDetail>(privBase(companyId), { method: 'POST', body: force ? { ...input, force } : input }),
+    getData(privBase(companyId), privateFolderSchema, { method: 'POST', body: force ? { ...input, force } : input }),
 
   updateMembers: (companyId: string, scopeId: string, viewers: string[], editors?: string[]) =>
-    getData<PrivateFolderDetail>(`${privBase(companyId)}/${enc(scopeId)}/members`, {
+    getData(`${privBase(companyId)}/${enc(scopeId)}/members`, privateFolderSchema, {
       method: 'PUT',
       body: editors ? { viewers, editors } : { viewers },
     }),
 
   /** 公開に戻す (owner/admin): the contents go to everyone. */
   makePublic: (companyId: string, scopeId: string) =>
-    getData<{ path: string; commit: string }>(`${privBase(companyId)}/${enc(scopeId)}/make-public`, { method: 'POST', body: {} }),
+    getData(`${privBase(companyId)}/${enc(scopeId)}/make-public`, makePublicSchema, { method: 'POST', body: {} }),
 
   /**
    * 削除 (owner/admin): the folder disappears from its viewers' PCs at their
@@ -525,7 +633,7 @@ export const privateFoldersApi = {
    * `confirm` is the folder's name as typed (400 CONFIRMATION_REQUIRED otherwise).
    */
   remove: (companyId: string, scopeId: string, confirm: string) =>
-    getData<DeletePrivateFolderResult>(`${privBase(companyId)}/${enc(scopeId)}?confirm=${enc(confirm)}`, { method: 'DELETE' }),
+    getData(`${privBase(companyId)}/${enc(scopeId)}?confirm=${enc(confirm)}`, deletePrivateFolderSchema, { method: 'DELETE' }),
 }
 
 /** DELETE /private-folders/:scopeId?confirm=<name> (shared/types/private-folders.ts). */
@@ -563,7 +671,7 @@ export const pushRejectionsApi = {
     if (q.limit !== undefined) params.set('limit', String(q.limit))
     if (q.offset) params.set('offset', String(q.offset))
     const qs = params.toString()
-    return getData<PushRejectionPage>(`/api/companies/${enc(companyId)}/push-rejections${qs ? `?${qs}` : ''}`)
+    return getData(`/api/companies/${enc(companyId)}/push-rejections${qs ? `?${qs}` : ''}`, pushRejectionPageSchema)
   },
 }
 
@@ -608,7 +716,7 @@ export const agentEventsApi = {
       if (value !== undefined && value !== '') params.set(key, String(value))
     }
     const qs = params.toString()
-    return getData<AgentEventPage>(`/api/companies/${enc(companyId)}/agent-events${qs ? `?${qs}` : ''}`)
+    return getData(`/api/companies/${enc(companyId)}/agent-events${qs ? `?${qs}` : ''}`, agentEventPageSchema)
   },
   /** Counts per member and day; `tzOffsetMinutes` = minutes east of UTC (540 for Japan). */
   summary: (companyId: string, q: { from?: string; to?: string; tzOffsetMinutes?: number } = {}) => {
@@ -617,26 +725,26 @@ export const agentEventsApi = {
     if (q.to) params.set('to', q.to)
     if (q.tzOffsetMinutes !== undefined) params.set('tzOffsetMinutes', String(q.tzOffsetMinutes))
     const qs = params.toString()
-    return getData<AgentEventSummary>(`/api/companies/${enc(companyId)}/agent-events/summary${qs ? `?${qs}` : ''}`)
+    return getData(`/api/companies/${enc(companyId)}/agent-events/summary${qs ? `?${qs}` : ''}`, agentEventSummarySchema)
   },
   settings: (companyId: string) =>
-    getData<AgentEventSettings>(`/api/companies/${enc(companyId)}/agent-events/settings`),
+    getData(`/api/companies/${enc(companyId)}/agent-events/settings`, agentEventSettingsSchema),
   updateSettings: (companyId: string, update: AgentEventSettingsUpdate) =>
-    getData<AgentEventSettings>(`/api/companies/${enc(companyId)}/agent-events/settings`, { method: 'PUT', body: update }),
+    getData(`/api/companies/${enc(companyId)}/agent-events/settings`, agentEventSettingsSchema, { method: 'PUT', body: update }),
   /** How many events a retention of `days` would delete (confirm before shortening). */
   retentionPreview: (companyId: string, days: number) =>
-    getData<AgentEventRetentionPreview>(`/api/companies/${enc(companyId)}/agent-events/settings/retention-preview?days=${days}`),
+    getData(`/api/companies/${enc(companyId)}/agent-events/settings/retention-preview?days=${days}`, agentEventRetentionPreviewSchema),
   /** What the AI sandbox blocks / would block, by host, skill and secret place (「AI の囲い」). */
   sandboxImpact: (companyId: string, q: { from?: string; to?: string } = {}) => {
     const params = new URLSearchParams()
     if (q.from) params.set('from', q.from)
     if (q.to) params.set('to', q.to)
     const qs = params.toString()
-    return getData<SandboxImpact>(`/api/companies/${enc(companyId)}/agent-events/sandbox${qs ? `?${qs}` : ''}`)
+    return getData(`/api/companies/${enc(companyId)}/agent-events/sandbox${qs ? `?${qs}` : ''}`, sandboxImpactSchema)
   },
   /** Who would see the log under `mode`, with their scope (the settings card's live list). */
   viewers: (companyId: string, mode: AgentEventViewerMode) =>
-    getData<AgentEventViewers>(`/api/companies/${enc(companyId)}/agent-events/viewers?mode=${enc(mode)}`),
+    getData(`/api/companies/${enc(companyId)}/agent-events/viewers?mode=${enc(mode)}`, agentEventViewersSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -650,16 +758,28 @@ export type {
 } from '../../../shared/types/agent-sandbox'
 export type { AgentSandboxMode, AgentSandboxSettings, AgentSandboxUnavailable } from '../../../shared/core/agent-sandbox'
 
-import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentSandboxMode, AgentSandboxSettings } from '../../../shared/core/agent-sandbox'
 
 export const agentSandboxApi = {
-  get: (companyId: string) => getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/agent-sandbox`, agentSandboxSchema),
   update: (companyId: string, settings: AgentSandboxSettings) =>
-    getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox`, { method: 'PUT', body: settings }),
+    getData(`/api/companies/${enc(companyId)}/agent-sandbox`, agentSandboxSchema, { method: 'PUT', body: settings }),
   /** A member's own mode (staged rollout); null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: AgentSandboxMode | null) =>
-    getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, { method: 'PUT', body: { mode } }),
+    getData(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, agentSandboxSchema, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「もう一方の AI に聞く」 (chat-and-agents.md "Asking the other AI"): shapes from
+// shared/types/second-opinion.ts. Owners/admins; the apps enforce it.
+// ---------------------------------------------------------------------------
+
+export type { SecondOpinionView } from '../../../shared/types/second-opinion'
+
+export const secondOpinionApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema),
+  update: (companyId: string, allowed: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema, { method: 'PUT', body: { allowed } }),
 }
 
 // ---------------------------------------------------------------------------
@@ -674,14 +794,14 @@ export type {
   AgentStopView,
 } from '../../../shared/types/agent-stop'
 
-import type { AgentStopRequest, AgentStopView } from '../../../shared/types/agent-stop'
+import type { AgentStopRequest } from '../../../shared/types/agent-stop'
 
 export const agentStopApi = {
-  get: (companyId: string) => getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/agent-stops`, agentStopSchema),
   stop: (companyId: string, request: AgentStopRequest) =>
-    getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops`, { method: 'POST', body: request }),
+    getData(`/api/companies/${enc(companyId)}/agent-stops`, agentStopSchema, { method: 'POST', body: request }),
   release: (companyId: string, stopId: string) =>
-    getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops/${enc(stopId)}`, { method: 'DELETE' }),
+    getData(`/api/companies/${enc(companyId)}/agent-stops/${enc(stopId)}`, agentStopSchema, { method: 'DELETE' }),
 }
 
 // ---------------------------------------------------------------------------
@@ -705,18 +825,31 @@ export interface Invitation {
   createdAt: string
   isExpired: boolean
   isUsed: boolean
+  /** The departments the invitee will belong to (所属) once they accept; [] = none chosen. */
+  departmentIds: string[]
 }
 
 /** POST /companies/:id/invitations (201): the new link only — no creator/use details yet. */
-export type CreatedInvitation = Pick<Invitation, 'id' | 'token' | 'companyId' | 'companyName' | 'role' | 'expiresAt' | 'createdAt'>
+export type CreatedInvitation = Pick<Invitation, 'id' | 'token' | 'companyId' | 'companyName' | 'role' | 'expiresAt' | 'createdAt' | 'departmentIds'>
+
+/** GET /invitations/:token (public): what the invitation page shows before an account exists. */
+export interface InvitationPreview {
+  companyName: string
+  role: Role
+  expiresAt: string
+  /** Who created the link (name, else email); null when that account is gone. */
+  inviterName: string | null
+  /** The 所属 departments' names. */
+  departmentNames: string[]
+}
 
 export const invitationsApi = {
-  list: (companyId: string) => getData<Invitation[]>(`/api/companies/${enc(companyId)}/invitations`),
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/invitations`, invitationsSchema),
 
-  create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7) =>
-    getData<CreatedInvitation>(`/api/companies/${enc(companyId)}/invitations`, {
+  create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7, departmentIds: string[] = []) =>
+    getData(`/api/companies/${enc(companyId)}/invitations`, createdInvitationSchema, {
       method: 'POST',
-      body: { role, expiresInDays },
+      body: { role, expiresInDays, departmentIds },
     }),
 
   delete: (companyId: string, invitationId: string) =>
@@ -725,10 +858,10 @@ export const invitationsApi = {
     }),
 
   validate: (token: string) =>
-    getData<{ companyName: string; role: Role; expiresAt: string }>(`/api/invitations/${enc(token)}`),
+    getData(`/api/invitations/${enc(token)}`, invitationValidateSchema),
 
   accept: (token: string) =>
-    getData<{ companyId: string; companyName: string; role: Role }>(`/api/invitations/${enc(token)}/accept`, {
+    getData(`/api/invitations/${enc(token)}/accept`, invitationAcceptSchema, {
       method: 'POST',
     }),
 }
@@ -781,13 +914,13 @@ export interface DepartmentManager {
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`
 
 export const departmentsApi = {
-  list: (companyId: string) => getData<Department[]>(`${deptBase(companyId)}?flat=true`),
+  list: (companyId: string) => getData(`${deptBase(companyId)}?flat=true`, departmentsSchema),
 
   create: (companyId: string, data: CreateDepartmentInput) =>
-    getData<Department>(deptBase(companyId), { method: 'POST', body: data }),
+    getData(deptBase(companyId), departmentSchema, { method: 'POST', body: data }),
 
   update: (companyId: string, departmentId: string, data: UpdateDepartmentInput) =>
-    getData<Department>(`${deptBase(companyId)}/${enc(departmentId)}`, { method: 'PUT', body: data }),
+    getData(`${deptBase(companyId)}/${enc(departmentId)}`, departmentSchema, { method: 'PUT', body: data }),
 
   delete: (companyId: string, departmentId: string) =>
     apiClient<{ success: boolean; deletedFiles?: number; deletedFolders?: number }>(
@@ -799,8 +932,8 @@ export const departmentsApi = {
     apiClient<{ success: boolean }>(`${deptBase(companyId)}/reorder`, { method: 'POST', body: { items } }),
 
   stats: (companyId: string, departmentId: string) =>
-    getData<{ files: number; folders: number; exists: boolean }>(
-      `${deptBase(companyId)}/${enc(departmentId)}/stats`
+    getData(
+      `${deptBase(companyId)}/${enc(departmentId)}/stats`, departmentStatsSchema
     ),
 
   /** Register top-level folders that exist in the repository but not as departments. */
@@ -810,13 +943,88 @@ export const departmentsApi = {
     }),
 
   getManagers: (companyId: string, departmentId: string) =>
-    getData<{ managers: DepartmentManager[] }>(`${deptBase(companyId)}/${enc(departmentId)}/managers`),
+    getData(`${deptBase(companyId)}/${enc(departmentId)}/managers`, managersSchema),
 
   setManagers: (companyId: string, departmentId: string, userIds: string[]) =>
-    getData<{ managers: DepartmentManager[] }>(`${deptBase(companyId)}/${enc(departmentId)}/managers`, {
+    getData(`${deptBase(companyId)}/${enc(departmentId)}/managers`, managersSchema, {
       method: 'PUT',
       body: { userIds },
     }),
+
+  /** Who belongs to the department (所属する部署); changes nobody's folder access. */
+  getMembers: (companyId: string, departmentId: string) =>
+    getData(`${deptBase(companyId)}/${enc(departmentId)}/members`, departmentMembersSchema),
+
+  /** Owner/admin, or a manager of this department; replaces the set. */
+  setMembers: (companyId: string, departmentId: string, userIds: string[]) =>
+    getData(`${deptBase(companyId)}/${enc(departmentId)}/members`, departmentMembersSchema, {
+      method: 'PUT',
+      body: { userIds },
+    }),
+}
+
+// ---------------------------------------------------------------------------
+// Task settings (やることの一覧の設定) and department membership: shapes from
+// shared/types/task-settings.ts, rules in shared/core/task-settings.ts.
+// ---------------------------------------------------------------------------
+
+export type { DepartmentMember, DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
+export type { CompanyHoliday, ReplyRule, TaskSettings } from '../../../shared/core/task-settings'
+
+import type { TaskSettings } from '../../../shared/core/task-settings'
+
+export const taskSettingsApi = {
+  /** Every member reads; canEdit says whether the caller may change them. */
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/task-settings`, taskSettingsSchema),
+  /** Owner/admin: the whole document. */
+  update: (companyId: string, settings: TaskSettings) =>
+    getData(`/api/companies/${enc(companyId)}/task-settings`, taskSettingsSchema, { method: 'PUT', body: settings }),
+}
+
+// The intake settings (来た連絡の細かい決まり, inbox.md): shapes from shared/types/inbox.ts,
+// rules in shared/core/intake-settings.ts.
+export type { InboxSettingsView } from '../../../shared/types/inbox'
+export type { IntakeSettings, SharedAddress } from '../../../shared/core/intake-settings'
+
+import type { IntakeSettings } from '../../../shared/core/intake-settings'
+
+// What one meeting's reading made twice (minutes.md "Outputs made once"): owner/admin list them and
+// merge (each duplicate cancelled / retracted with a note naming the kept one; nothing is deleted).
+export type { MeetingDuplicateGroup, MeetingDuplicates, MeetingDuplicatesMerged } from '../../../shared/types/meeting-outputs'
+
+export const meetingDuplicatesApi = {
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/records/meeting-duplicates`, meetingDuplicatesSchema),
+  merge: (companyId: string, keepId: string, duplicateIds: string[]) =>
+    getData(`/api/companies/${enc(companyId)}/records/meeting-duplicates/merge`, meetingDuplicatesMergedSchema, { method: 'POST', body: { keepId, duplicateIds } }),
+}
+
+export const inboxSettingsApi = {
+  /** Every member reads; canEdit says whether the caller may change them. */
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/inbox-settings`, inboxSettingsSchema),
+  /** Owner/admin: the whole document. */
+  update: (companyId: string, settings: IntakeSettings) =>
+    getData(`/api/companies/${enc(companyId)}/inbox-settings`, inboxSettingsSchema, { method: 'PUT', body: settings }),
+}
+
+// ---------------------------------------------------------------------------
+// Absence and the delegate (不在・代わりの人): shapes from shared/types/absences.ts,
+// rules in shared/core/absences.ts. The member, owner/admin, or a manager of a
+// department the member belongs to.
+// ---------------------------------------------------------------------------
+
+export type { AbsenceCreated, AbsenceCreateRequest, AbsenceView, CoveringView, MemberAbsencesView } from '../../../shared/types/absences'
+
+import type { AbsenceCreateRequest } from '../../../shared/types/absences'
+
+export const absencesApi = {
+  /** Absences of `userId` that have not ended yet, soonest first. */
+  list: (companyId: string, userId: string) =>
+    getData(`/api/companies/${enc(companyId)}/absences?userId=${enc(userId)}`, memberAbsencesSchema),
+  /** 400 / 409 carry a Japanese `error` meant to be shown as is. */
+  create: (companyId: string, body: AbsenceCreateRequest & { userId: string }) =>
+    getData(`/api/companies/${enc(companyId)}/absences`, absenceCreatedSchema, { method: 'POST', body }),
+  remove: (companyId: string, absenceId: string) =>
+    getData(`/api/companies/${enc(companyId)}/absences/${enc(absenceId)}`, absenceRemovedSchema, { method: 'DELETE' }),
 }
 
 // ---------------------------------------------------------------------------
@@ -851,35 +1059,38 @@ export type {
   BrokerStatusReason,
 } from '../../../shared/core/key-broker'
 
-import type { BrokerKeyCreate, BrokerKeyUpdate, BrokerOwnKeysSwitch, BrokerRelayServiceSave, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
+import type { BrokerDefaultKeyChoice, BrokerKeyCreate, BrokerKeyUpdate, BrokerOwnKeysSwitch, BrokerRelayServiceSave, BrokerServiceSetting } from '../../../shared/types/key-broker'
 
 export const keyBrokerApi = {
-  get: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/broker`, brokerSchema),
   create: (companyId: string, key: BrokerKeyCreate) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys`, { method: 'POST', body: key }),
+    getData(`/api/companies/${enc(companyId)}/broker/keys`, brokerSchema, { method: 'POST', body: key }),
   replaceSecret: (companyId: string, keyId: string, secret: string) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}/secret`, { method: 'PUT', body: { secret } }),
+    getData(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}/secret`, brokerSchema, { method: 'PUT', body: { secret } }),
   update: (companyId: string, keyId: string, update: BrokerKeyUpdate) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, { method: 'PATCH', body: update }),
+    getData(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, brokerSchema, { method: 'PATCH', body: update }),
   remove: (companyId: string, keyId: string) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, { method: 'DELETE' }),
+    getData(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, brokerSchema, { method: 'DELETE' }),
   setService: (companyId: string, service: string, setting: BrokerServiceSetting) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, { method: 'PUT', body: setting }),
+    getData(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, brokerSchema, { method: 'PUT', body: setting }),
   /** The one switch 「メンバーが自分の鍵を使ってよい」 for a service whose destination is known (the server sets rule and hosts). */
   setOwnKeys: (companyId: string, service: string, allowed: boolean) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}/own-keys`, { method: 'PUT', body: { allowed } satisfies BrokerOwnKeysSwitch }),
+    getData(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}/own-keys`, brokerSchema, { method: 'PUT', body: { allowed } satisfies BrokerOwnKeysSwitch }),
+  /** 「このサービスは、この鍵を使う」: which company key the service uses when several exist (null: none chosen). */
+  setDefaultKey: (companyId: string, service: string, keyId: string | null) =>
+    getData(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}/default-key`, brokerSchema, { method: 'PUT', body: { keyId } satisfies BrokerDefaultKeyChoice }),
   /** A generic service (K9): register or change its destination and how the key travels. */
   saveRelayService: (companyId: string, service: string, definition: BrokerRelayServiceSave) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, { method: 'PUT', body: definition }),
+    getData(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, brokerSchema, { method: 'PUT', body: definition }),
   removeRelayService: (companyId: string, service: string) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, { method: 'DELETE' }),
+    getData(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, brokerSchema, { method: 'DELETE' }),
   setMemberKeysAllowed: (companyId: string, memberKeysAllowed: boolean) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { memberKeysAllowed } }),
+    getData(`/api/companies/${enc(companyId)}/broker/settings`, brokerSchema, { method: 'PUT', body: { memberKeysAllowed } }),
   /** Emergency stop: every key disabled and every live token revoked, now. */
-  stopAll: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/stop-all`, { method: 'POST' }),
+  stopAll: (companyId: string) => getData(`/api/companies/${enc(companyId)}/broker/stop-all`, brokerSchema, { method: 'POST' }),
   /** The relay's exception: hosts allowed to resolve to an internal address. */
   setInternalHosts: (companyId: string, internalHosts: string[]) =>
-    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { internalHosts } }),
+    getData(`/api/companies/${enc(companyId)}/broker/settings`, brokerSchema, { method: 'PUT', body: { internalHosts } }),
 }
 
 // ---------------------------------------------------------------------------
@@ -901,37 +1112,49 @@ export type {
   PluginPackageView,
   PluginProblem,
   PluginReadScopeView,
+  PluginRolesView,
+  PluginStepSkillsView,
 } from '../../../shared/types/plugins'
 export type { FieldPolicy } from '../../../shared/core/plugins'
 
-import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView } from '../../../shared/types/plugins'
+import type { PluginReadScopeView } from '../../../shared/types/plugins'
 
 const pluginPath = (companyId: string, pluginId: string) => `/api/companies/${enc(companyId)}/plugins/${enc(pluginId)}`
 
 export const pluginsApi = {
-  list: (companyId: string) => getData<{ plugins: PluginListItem[] }>(`/api/companies/${enc(companyId)}/plugins`),
-  get: (companyId: string, pluginId: string) => getData<PluginDetail>(pluginPath(companyId, pluginId)),
+  list: (companyId: string) => getData(`/api/companies/${enc(companyId)}/plugins`, pluginListSchema),
+  get: (companyId: string, pluginId: string) => getData(pluginPath(companyId, pluginId), pluginSchema),
   /** Install (first time) or choose another version / key. */
   install: (companyId: string, pluginId: string, version: string, keyId: string | null) =>
-    getData<PluginDetail>(pluginPath(companyId, pluginId), { method: 'PUT', body: { version, keyId } }),
+    getData(pluginPath(companyId, pluginId), pluginSchema, { method: 'PUT', body: { version, keyId } }),
   setEnabled: (companyId: string, pluginId: string, enabled: boolean) =>
-    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/enabled`, { method: 'PUT', body: { enabled } }),
+    getData(`${pluginPath(companyId, pluginId)}/enabled`, pluginSchema, { method: 'PUT', body: { enabled } }),
   /** Who may read the outside system through the relay (departments / members; empty = nobody). */
   setReadScope: (companyId: string, pluginId: string, scope: PluginReadScopeView) =>
-    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/read-scope`, { method: 'PUT', body: scope }),
+    getData(`${pluginPath(companyId, pluginId)}/read-scope`, pluginSchema, { method: 'PUT', body: scope }),
   /** A new mapping version; `acknowledgeAuto` = the fields the admin confirmed trigger no HubSpot workflow. */
   saveMapping: (companyId: string, pluginId: string, text: string, acknowledgeAuto: string[] = []) =>
-    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/mapping`, { method: 'PUT', body: { text, acknowledgeAuto } }),
+    getData(`${pluginPath(companyId, pluginId)}/mapping`, pluginSchema, { method: 'PUT', body: { text, acknowledgeAuto } }),
   restoreMapping: (companyId: string, pluginId: string, version: number, acknowledgeAuto: string[] = []) =>
-    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/mapping/restore`, { method: 'POST', body: { version, acknowledgeAuto } }),
+    getData(`${pluginPath(companyId, pluginId)}/mapping/restore`, pluginSchema, { method: 'POST', body: { version, acknowledgeAuto } }),
   /** 「HubSpot に聞いて確かめる」: the text being edited (or the mapping in force) against the outside property list. */
   checkMapping: (companyId: string, pluginId: string, text?: string) =>
-    getData<PluginMappingCheck>(`${pluginPath(companyId, pluginId)}/mapping/check`, { method: 'POST', body: text === undefined ? {} : { text } }),
+    getData(`${pluginPath(companyId, pluginId)}/mapping/check`, pluginMappingCheckSchema, { method: 'POST', body: text === undefined ? {} : { text } }),
   import: (companyId: string, pluginId: string) =>
-    getData<ImportReport>(`${pluginPath(companyId, pluginId)}/import`, { method: 'POST', body: {} }),
+    getData(`${pluginPath(companyId, pluginId)}/import`, importReportSchema, { method: 'POST', body: {} }),
   /** The outside account changed on purpose: start a new connection. */
   renewConnection: (companyId: string, pluginId: string) =>
-    getData<{ connectionId: string }>(`${pluginPath(companyId, pluginId)}/connection/renew`, { method: 'POST', body: {} }),
+    getData(`${pluginPath(companyId, pluginId)}/connection/renew`, connectionRenewSchema, { method: 'POST', body: {} }),
+  /** A business plugin's roles (役割, plan C3): declared roles, the company's holders, まとまり overrides, history. */
+  roles: (companyId: string, pluginId: string) => getData(`${pluginPath(companyId, pluginId)}/roles`, pluginRolesSchema),
+  /** The company's holders of one role (empty = nobody; an approval then goes to an owner / admin). */
+  assignRole: (companyId: string, pluginId: string, role: string, userIds: string[]) =>
+    getData(`${pluginPath(companyId, pluginId)}/roles/${enc(role)}`, pluginRolesSchema, { method: 'PUT', body: { userIds } }),
+  /** A business plugin's steps a company may run with one of its Skills (plan C5): each step and the company's Skill. */
+  stepSkills: (companyId: string, pluginId: string) => getData(`${pluginPath(companyId, pluginId)}/step-skills`, pluginStepSkillsSchema),
+  /** The company's Skill for an overridable step (null = the business's own procedure). */
+  setStepSkill: (companyId: string, pluginId: string, step: string, skill: string | null) =>
+    getData(`${pluginPath(companyId, pluginId)}/step-skills/${enc(step)}`, pluginStepSkillsSchema, { method: 'PUT', body: { skill } }),
 }
 
 // The Google connection (「つなぎ先」→「Google」, milestone 4 G3): shapes from shared/types/google.ts.
@@ -944,31 +1167,92 @@ export type {
   GoogleFeature,
   GoogleGrantStatus,
   GoogleGrantSummary,
+  GooglePickerSave,
+  GooglePickerView,
 } from '../../../shared/types/google'
 
-import type { GoogleAdminView, GoogleClientSave } from '../../../shared/types/google'
+import type { GoogleClientSave, GoogleFeature, GooglePickerSave } from '../../../shared/types/google'
 
 export const googleApi = {
-  get: (companyId: string) => getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google`),
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/google`, googleSchema),
   /** `clientSecret` only when the admin typed one (left out = keep the stored one). */
   saveClient: (companyId: string, save: GoogleClientSave) =>
-    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/client`, { method: 'PUT', body: save }),
+    getData(`/api/companies/${enc(companyId)}/google/client`, googleSchema, { method: 'PUT', body: save }),
   setEnabled: (companyId: string, enabled: boolean) =>
-    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/enabled`, { method: 'PUT', body: { enabled } }),
+    getData(`/api/companies/${enc(companyId)}/google/enabled`, googleSchema, { method: 'PUT', body: { enabled } }),
+  /** A feature on / off for the whole company (never asked of members while off). */
+  setFeature: (companyId: string, feature: GoogleFeature, on: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/google/features`, googleSchema, { method: 'PUT', body: { feature, on } }),
+  /** Google Picker (Drive, google-drive.md): the API key (left out = keep) and the project number; `appId: null` removes it. */
+  savePicker: (companyId: string, save: GooglePickerSave) =>
+    getData(`/api/companies/${enc(companyId)}/google/picker`, googleSchema, { method: 'PUT', body: save }),
   /** 「止める」: stops a member's permission (revoked at Google too). */
   stopGrant: (companyId: string, userId: string) =>
-    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),
+    getData(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, googleSchema, { method: 'DELETE' }),
+}
+
+// The Slack connection (「つなぎ先」→「Slack」, stage 3 A3, slack-connector.md): shapes from shared/types/slack.ts.
+// The secrets and the bot token are sent once in `saveApp` and never answered (last 4 / "registered" only).
+export type {
+  MySlack,
+  SlackAdminView,
+  SlackAppSave,
+  SlackFeature,
+  SlackGrantStatus,
+  SlackGrantSummary,
+} from '../../../shared/types/slack'
+
+import type { SlackAppSave } from '../../../shared/types/slack'
+
+export const slackApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/slack`, slackSchema),
+  /** Secrets and the bot token only when the admin typed them (left out = keep the stored ones). */
+  saveApp: (companyId: string, save: SlackAppSave) =>
+    getData(`/api/companies/${enc(companyId)}/slack/app`, slackSchema, { method: 'PUT', body: save }),
+  setEnabled: (companyId: string, enabled: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/slack/enabled`, slackSchema, { method: 'PUT', body: { enabled } }),
+  /** 「止める」: stops a member's permission (revoked at Slack too). */
+  stopGrant: (companyId: string, userId: string) =>
+    getData(`/api/companies/${enc(companyId)}/slack/grants/${enc(userId)}`, slackSchema, { method: 'DELETE' }),
+}
+
+// 「つないでいるサービス」 (stage 3, connector-roles.md): the core connectors built into ACB (Google),
+// the roles they serve and the admin's choice when two could serve one. Shapes from shared/types/core-connectors.ts.
+export type {
+  CoreConnectorStatus,
+  CoreConnectorView,
+  CoreConnectorsView,
+  CoreRoleView,
+} from '../../../shared/types/core-connectors'
+
+
+export const coreConnectorsApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/connectors`, coreConnectorsSchema),
+  /** The connector's own on / off (Google: the same switch as 「Google」's 「オンにする / オフにする」). */
+  setEnabled: (companyId: string, connectorId: string, enabled: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/connectors/${enc(connectorId)}/enabled`, coreConnectorsSchema, { method: 'PUT', body: { enabled } }),
+  /** Which connector serves a role when two could (null clears the choice). */
+  chooseRole: (companyId: string, role: string, connectorId: string | null) =>
+    getData(`/api/companies/${enc(companyId)}/connector-roles/${enc(role)}`, coreConnectorsSchema, { method: 'PUT', body: { connectorId } }),
 }
 
 // The minutes folder (「つなぎ先」→「Google」, milestone 4 G7, minutes.md): the department folder
-// minutes records go to; never a private folder. Shape from shared/types/minutes.ts.
+// meeting records go to (never a private folder), and which meetings are read. Shapes from
+// shared/types/minutes.ts and shared/core/minutes.ts.
 export type { MinutesFolderSetting } from '../../../shared/types/minutes'
+export type { MeetingIntake } from '../../../shared/core/minutes'
 
-import type { MinutesFolderSetting } from '../../../shared/types/minutes'
+import type { MeetingIntake } from '../../../shared/core/minutes'
 
 export const minutesApi = {
-  folder: (companyId: string) => getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`),
+  folder: (companyId: string) => getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema),
   /** `null`: no folder (nothing is read until one is chosen). */
   setFolder: (companyId: string, folder: string | null) =>
-    getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`, { method: 'PUT', body: { folder } }),
+    getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { folder } }),
+  /** Which meetings are read: `external` (only with someone from outside; the default) or `all`. */
+  setMeetings: (companyId: string, meetings: MeetingIntake) =>
+    getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { meetings } }),
+  /** Days 「どのまとまりの会議ですか？」 stays in a member's あなたの番 after a meeting is read (1–30). */
+  setBundleQuestionDays: (companyId: string, bundleQuestionDays: number) =>
+    getData(`/api/companies/${enc(companyId)}/google/minutes-folder`, minutesFolderSchema, { method: 'PUT', body: { bundleQuestionDays } }),
 }

@@ -33,11 +33,14 @@ export function SplitView(props: SplitViewProps) {
         const sizing = isCollapsed ? 'hidden' : fills ? 'flex-1' : 'flex-shrink-0'
         // A pane taking the remaining space stops at its limit, never at its content's width
         // (wide tabs or lines would push it past the window: flex items default to min-width auto).
+        // A fixed pane never takes the room its siblings keep (a window made smaller after the
+        // width was chosen squeezed the chat to nothing): CSS min against the split's width.
+        const keep = limits[child.id]?.keepForSiblings
         const style = isCollapsed
           ? undefined
           : fills
             ? (row ? { minWidth: min ?? 0 } : { minHeight: min ?? 0 })
-            : (row ? { width: size! } : { height: size! })
+            : (row ? { width: keep && !anyCollapsed ? `min(${size}px, calc(100% - ${keep}px))` : size! } : { height: size! })
         const next = split.children[i + 1]
         const nextIsCollapsed = next != null && next.id === collapsed
         return (

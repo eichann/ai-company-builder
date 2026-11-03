@@ -13,3 +13,20 @@ export function isExternalUrlAllowed(url: unknown): boolean {
     return false
   }
 }
+
+/**
+ * A link the page tried to open in a new window (`target="_blank"`, window.open)
+ * or to navigate the window to: the URL to hand the member's browser, or null to
+ * only refuse it. Web pages only — never `file:`, `javascript:`, `mailto:` or a
+ * custom scheme (the OS would open a local file or launch another app from a
+ * link in an AI answer or a markdown file).
+ */
+export function webLinkForBrowser(url: unknown): string | null {
+  if (typeof url !== 'string') return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : null
+  } catch {
+    return null
+  }
+}

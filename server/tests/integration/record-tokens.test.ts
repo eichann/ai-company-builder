@@ -78,6 +78,8 @@ beforeAll(async () => {
   }
   const made = await session('u-owner', 'POST', '/records/item', { type: 'task', title: '見積を作る', fields: { assignee: 'u-bob' } })
   taskId = (made.body.data?.record as { id: string }).id
+  // Asked across departments: bob accepts first (records.md "Acceptance"); the tests below start at version 2.
+  expect((await session('u-bob', 'POST', `/records/item/${taskId}/actions/accept`, { expectedVersion: 1 })).status).toBe(200)
 })
 
 const ledger = async (user: string) => ((await session(user, 'GET', `/records/item/${taskId}/history`)).body.data?.entries ?? []) as Array<{ action: string; actorKind: string; actorSource: string | null }>
@@ -85,7 +87,7 @@ const ledger = async (user: string) => ((await session(user, 'GET', `/records/it
 describe('who is acting comes from the credential', () => {
   it('a record-token call is the AI: recorded as ai even when the body says human', async () => {
     const { token } = await tokenFor('u-bob', 'act')
-    const r = await ai(token, 'POST', `/item/${taskId}/actions/start`, { expectedVersion: 1, actor: { kind: 'human' } })
+    const r = await ai(token, 'POST', `/item/${taskId}/actions/start`, { expectedVersion: 2, actor: { kind: 'human' } })
     expect(r.status).toBe(200)
     expect((await ledger('u-bob')).at(-1)).toMatchObject({ action: 'start', actorKind: 'ai', actorSource: 'claude-code' })
   })
@@ -93,13 +95,13 @@ describe('who is acting comes from the credential', () => {
   it('a record-token call cannot run an action whose `who` excludes ai, whatever the body claims', async () => {
     // complete: who = requested_by (u-owner), reviewer — not ai.
     const { token } = await tokenFor('u-owner', 'act')
-    const r = await ai(token, 'POST', `/item/${taskId}/actions/complete`, { expectedVersion: 2, actor: { kind: 'human' } })
+    const r = await ai(token, 'POST', `/item/${taskId}/actions/complete`, { expectedVersion: 3, actor: { kind: 'human' } })
     expect(r).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
-    expect((await ledger('u-owner')).map(e => e.action)).toEqual(['create', 'start'])
+    expect((await ledger('u-owner')).map(e => e.action)).toEqual(['create', 'accept', 'start'])
   })
 
   it('a session call is the member: recorded as human even when the body says ai', async () => {
-    const r = await session('u-owner', 'POST', `/records/item/${taskId}/actions/complete`, { expectedVersion: 2, actor: { kind: 'ai', source: 'claude' } })
+    const r = await session('u-owner', 'POST', `/records/item/${taskId}/actions/complete`, { expectedVersion: 3, actor: { kind: 'ai', source: 'claude' } })
     expect(r.status).toBe(200)
     expect((await ledger('u-owner')).at(-1)).toMatchObject({ action: 'complete', actorKind: 'human', actorSource: null })
   })
@@ -115,7 +117,7 @@ describe('what a record token can reach', () => {
 
   it('the AI cannot make an approval or any service-owned record through the generic create; a read token records no decision', async () => {
     const { token } = await tokenFor('u-bob', 'act')
-    for (const type of ['approval', 'outbound_message', 'minutes']) {
+    for (const type of ['approval', 'outbound_message', 'meeting']) {
       const r = await ai(token, 'POST', '/item', { type, title: '自分で承認のお願いを作る', fields: { assignee: 'u-bob' } })
       expect(r).toMatchObject({ status: 400, body: { code: 'TYPE_CREATED_BY_SERVICE' } })
     }

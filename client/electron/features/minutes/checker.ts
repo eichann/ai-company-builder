@@ -3,12 +3,13 @@
 // names the company once signed in), every 10 minutes while the app is open,
 // and on 「議事録を確かめる」 — only while the member has allowed Google to read
 // minutes (no grant: nothing is asked and nothing is shown). Records stuck in
-// 「読んでいる」 come back with `retry` (design §1-8). The session stays here.
+// 「読んでいる」 come back to 「届いた」 (design §1-8): the server puts them back itself during the
+// check (as its clock); `putBack` here only covers an older server. The session stays here.
 //
 // The push channel's `records` signal carries no content: it only makes this
 // module ask the server again for the member's received minutes.
 
-import type { MinutesActionResult, MinutesNotice, MinutesNoticesResult } from '../../../shared/minutes-app'
+import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNotice, MinutesNoticesResult } from '../../../shared/minutes-app'
 import { MINUTES_OFFLINE_TEXT } from '../../../shared/minutes-app'
 
 export interface MinutesCheckerDeps {
@@ -30,8 +31,10 @@ export interface MinutesCheckerDeps {
 export const MINUTES_CHECK_INTERVAL_MS = 10 * 60_000
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
-const MINUTES = /^minutes-[0-9a-z]{6,32}$/
-const DEAL = /^deal-[0-9a-z]{6,32}$/
+/** A meeting record (`minutes-…` for one made before the type was renamed `meeting`). */
+const MINUTES = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
+/** A まとまり may be of any type (a 案件, a 企画…): any record id. */
+const RECORD = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 
 type Answer = { status: number; body: { data?: unknown; error?: unknown; code?: unknown } | null }
 
@@ -43,7 +46,7 @@ function memberText(body: Answer['body'], fallback: string): string {
 
 function noticeOf(r: unknown): MinutesNotice | null {
   const x = r as { id?: unknown; type?: unknown; title?: unknown; state?: unknown; version?: unknown; fields?: Record<string, unknown> } | null
-  if (!x || x.type !== 'minutes' || x.state !== 'received' || typeof x.id !== 'string' || !MINUTES.test(x.id)) return null
+  if (!x || x.type !== 'meeting' || x.state !== 'received' || typeof x.id !== 'string' || !MINUTES.test(x.id)) return null
   if (typeof x.title !== 'string' || typeof x.version !== 'number') return null
   const at = x.fields?.meeting_at
   return { id: x.id, title: x.title.slice(0, 200), meetingAt: typeof at === 'string' ? at : null, version: x.version }
@@ -91,7 +94,7 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
   }
 
-  /** Ask the server for the member's received minutes (「AI の番」 of type minutes). */
+  /** Ask the server for the member's received minutes (「AI の番」 of type meeting). */
   async function refresh(companyId: string): Promise<void> {
     const running = refreshing.get(companyId)
     if (running) { running.again = true; return }
@@ -115,7 +118,7 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     }
   }
 
-  /** `retry` on a record stuck in 「読んでいる」 (design §1-8), with its current version. */
+  /** `retry` on a record stuck in 「読んでいる」 that an older server reported but did not put back. */
   async function putBack(companyId: string, recordId: string): Promise<void> {
     if (!MINUTES.test(recordId)) return
     const item = await call(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}`)
@@ -206,16 +209,40 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
       return { success: true }
     },
 
-    /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
-    async linkDeal(companyId: string, minutesId: string, dealId: string): Promise<MinutesActionResult> {
-      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId) || !DEAL.test(dealId)) return { success: false, error: '入力が正しくありません。' }
-      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/deal`, { dealId })
+    /** 「どのまとまりの会議ですか？」: link the chosen まとまり (nothing is written to the outside system). */
+    async linkBundle(companyId: string, minutesId: string, bundleId: string): Promise<MinutesActionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId) || !RECORD.test(bundleId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/bundle`, { bundleId })
       if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
       if (r.status >= 300) {
-        log.warn(`[minutes] deal: answered ${r.status}`)
-        return { success: false, error: memberText(r.body, `案件につなげませんでした（サーバーの応答 ${r.status}）。`) }
+        log.warn(`[minutes] bundle: answered ${r.status}`)
+        return { success: false, error: memberText(r.body, `つなげませんでした（サーバーの応答 ${r.status}）。`) }
       }
       return { success: true }
+    },
+
+    /** 「まとまりはない（社内の会議など）」: the server records the person's choice; nothing is asked again. */
+    async noBundle(companyId: string, minutesId: string): Promise<MinutesActionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/no-bundle`, {})
+      if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      if (r.status >= 300) {
+        log.warn(`[minutes] no bundle: answered ${r.status}`)
+        return { success: false, error: memberText(r.body, `できませんでした（サーバーの応答 ${r.status}）。`) }
+      }
+      return { success: true }
+    },
+
+    /** The meeting card's question (the server decides whether a まとまり may be chosen). */
+    async bundleQuestion(companyId: string, minutesId: string): Promise<MeetingBundleQuestionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'GET', `/me/minutes/item/${encodeURIComponent(minutesId)}/bundle-question`)
+      if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
+      const d = r.body?.data as { title?: unknown; canChoose?: unknown; noBundle?: unknown; suggested?: { id?: unknown; title?: unknown } | null } | undefined
+      if (r.status !== 200 || typeof d?.canChoose !== 'boolean') return { success: false, error: memberText(r.body, `読めませんでした（サーバーの応答 ${r.status}）。`) }
+      const s = d.suggested
+      const suggested = s && typeof s.id === 'string' && RECORD.test(s.id) ? { id: s.id, title: typeof s.title === 'string' && s.title ? s.title.slice(0, 200) : '（名前なし）' } : null
+      return { success: true, title: typeof d.title === 'string' && d.title ? d.title.slice(0, 200) : '会議', canChoose: d.canChoose, noBundle: d.noBundle === true, suggested }
     },
 
     /** Sign-out / quit: forget everything and stop the loop. */

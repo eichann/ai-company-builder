@@ -11,18 +11,22 @@ import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import type { RecordsApi } from '../../records/api'
 import { createRecordTools } from '../../records/tools'
+import { recordToolProviders } from '../../records/tool-providers'
+import type { DrivePicking } from '../google/drive'
+import type { PathGuard } from '../ports'
 import { companyFilesInstructions, createCompanyFileTools } from '../../company-files/tools'
 import { createWebResearchBudget, createWebResearchTools } from '../../web-research/tools'
 import { WEB_RESEARCH_INSTRUCTIONS } from '../../../shared/web-research'
-import { runWebReader } from '../../agents/registry'
+import { runSecondOpinion, runWebReader } from '../../agents/registry'
 import { ConsultationReferences } from '../../consultations/service'
 import type { HandoffService } from '../../handoff/service'
 import type { HandoffStore } from '../../handoff/store'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
-import type { AgentPolicyStore } from '../../services/agent-policy-store'
+import { secondOpinionAllowed, type AgentPolicyStore } from '../../services/agent-policy-store'
 import type { AgentStop } from '../../services/agent-stop'
+import type { SkillUseReporter } from '../../services/skill-use-reporter'
 import type { BrokerTokenStore } from '../../services/broker-token-store'
 import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
@@ -63,6 +67,12 @@ export interface ChatServerConfigDeps {
   serverUrl: () => string
   /** The key broker's tokens (services/broker-token-store.ts). */
   brokerTokens?: BrokerTokenStore
+  /** Google Drive (features/google/drive.ts): the person's Picker; absent = no Drive tools. */
+  drivePicking?: Pick<DrivePicking, 'pick'>
+  /** The allowed-roots check (a Drive put reads a local file). */
+  paths?: PathGuard
+  /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */
+  skillUses?: Pick<SkillUseReporter, 'observe'>
 }
 
 function hostOf(url: string): string | undefined {
@@ -105,6 +115,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     },
     getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>
       deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
+    // 「もう一方の AI に聞く」: the company's setting from the policy (unknown = not allowed).
+    secondOpinionAllowed: async companyId => secondOpinionAllowed(await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })),
     getAgentSandbox: async (companyId, root) => {
       const policy = await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })
       if (!policy) return undefined
@@ -130,9 +142,11 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, onOperationCard, onApprovalCard, onDealChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
-      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onDealChoice, onMailDraft }) : null
+      // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
+      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
+      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({
@@ -141,6 +155,10 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         run: (input, readerSignal) => runWebReader(agent, { input, signal: readerSignal, host: { getCli: deps.claudeCli.path, env: deps.shellEnv.env() } }),
       }),
       instructions: WEB_RESEARCH_INSTRUCTIONS,
+    }),
+    // 「もう一方の AI に聞く」: the other agent's own CLI and login on this computer, read when asked.
+    runSecondOpinion: (target, request) => runSecondOpinion(target, {
+      ...request, host: { getCli: deps.claudeCli.path, env: deps.shellEnv.env(), claudeReady: deps.claudeCli.isAuthenticated },
     }),
     createReferences: (company, id, signal) => new ConsultationReferences(deps.history, deps.handoffStore).forTurn(company, id, signal),
     prepareRecovery: (company, id, messages) => recoveryContext(deps.history.get(company, id), deps.handoffStore.read(company, id), messages),
@@ -159,5 +177,6 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     oneShotAiAllowed: deps.agentStop ? () => deps.agentStop!.oneShotAiAllowed() : undefined,
     onToolEvent: event => deps.agentEvents.record(event),
     toolEventPaths: () => deps.agentEvents.paths(),
+    onSkillUsed: deps.skillUses ? sighting => deps.skillUses?.observe(sighting) : undefined,
 }
 }

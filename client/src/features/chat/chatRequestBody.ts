@@ -1,5 +1,7 @@
 import type { AgentSession, AuthMode } from '../../../shared/agent'
 import type { ChatRequestOptions } from '../../../shared/chat-server-api'
+import type { PluginPersonStep, PluginRunStep } from '../../../shared/ai-turn-steps/plugin'
+import type { AiTurnStep } from '../../../shared/ai-turn-steps/registry'
 
 type Ref<T> = { current: T }
 
@@ -20,6 +22,10 @@ export interface ChatRequestSources {
   /** Consumed by the request that carries them. */
   pendingImages: Ref<Array<{ mediaType: string; data: string }>>
   pendingFilePaths: Ref<string[]>
+  /** An unattended 「AI の番」 step: consumed by the one automatic request (ai-turns.md). */
+  aiTurnStep?: Ref<AiTurnStep | PluginRunStep | null>
+  /** A business plugin's person step the consultation was started from: consumed by its first request (plugin-steps.md). */
+  pluginStep?: Ref<PluginPersonStep | null>
   /** Which conversation the hand-off memo of this turn belongs to (read in onFinish). */
   handoffRequest: Ref<{ companyId: string; sessionId: string; provider: AuthMode } | null>
 }
@@ -58,6 +64,14 @@ export function buildChatRequestBody(s: ChatRequestSources): ChatRequestOptions 
   if (s.pendingFilePaths.current.length > 0) {
     body.referenceFiles = s.pendingFilePaths.current
     s.pendingFilePaths.current = []
+  }
+  if (s.aiTurnStep?.current) {
+    body.aiTurnStep = s.aiTurnStep.current
+    s.aiTurnStep.current = null
+  }
+  if (s.pluginStep?.current) {
+    body.pluginStep = s.pluginStep.current
+    s.pluginStep.current = null
   }
   s.handoffRequest.current = s.companyId.current && s.appSessionId.current ? { companyId: s.companyId.current, sessionId: s.appSessionId.current, provider: s.authMode.current } : null
   return body

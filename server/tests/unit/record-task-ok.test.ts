@@ -28,6 +28,7 @@ import { createRecordEngine, type RecordEngine } from '../../src/services/record
 import type { Member } from '../../src/services/access'
 import { CORE_TYPE_FILES } from '../../../shared/core/core-types'
 import { compareTypeDefinitions, parseTypeFile, type TypeDefinition } from '../../../shared/core/record-types'
+import { TASK_V4_TEXT } from '../helpers/task-v4'
 
 const TS = '2026-11-01T00:00:00.000Z'
 const MEMBERS: Record<string, string[]> = {
@@ -57,9 +58,13 @@ function company(id: string) {
   ensureCoreTypes(records, TS)
 }
 
-/** A task requested by alice, assigned to bob, in progress (version 2), in `folder`. */
+/**
+ * A task requested by alice, assigned to bob, to be checked first (終わったら：確かめてから — since
+ * task version 9 the OK path is that case's: 知らせるだけ lets bob finish without one), in progress
+ * (version 2), in `folder`.
+ */
 async function startedTask(folder?: string) {
-  const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '提案書を作る', ...(folder ? { folder } : {}), fields: { assignee: 'u-bob' } })).record
+  const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '提案書を作る', ...(folder ? { folder } : {}), fields: { assignee: 'u-bob', when_done: 'check' } })).record
   ok(await engine.act(m('u-bob'), HUMAN, t.id, 'start', { expectedVersion: 1 }))
   notified = []
   return t
@@ -179,10 +184,10 @@ describe('the OK-giver can take it back (reopen)', () => {
 })
 
 describe('the definition', () => {
-  const v4 = () => (parseTypeFile('task', CORE_TYPE_FILES.task) as { ok: true; definition: TypeDefinition }).definition
+  const v4 = () => (parseTypeFile('task', TASK_V4_TEXT) as { ok: true; definition: TypeDefinition }).definition
 
   it('task version 4 only adds to version 3 (existing tasks stay valid)', () => {
-    const v3text = CORE_TYPE_FILES.task
+    const v3text = TASK_V4_TEXT
       .replace('version: 4', 'version: 3')
       .replace(/^ {2}ok_(by|note): .*\n/gm, '')
       .replace(' ok_from: [assignee], notify: [requested_by, ok_by],', ' notify: requested_by,')
@@ -192,6 +197,9 @@ describe('the definition', () => {
     expect(v3.definition.actions.complete.okFrom).toBeUndefined()
     expect(compareTypeDefinitions(v3.definition, v4())).toMatchObject({ breaking: [], versionProblem: null, changed: true })
     expect(v4().actions.complete.okFrom).toEqual(['assignee'])
+    // …and the core definition in force keeps it.
+    const current = (parseTypeFile('task', CORE_TYPE_FILES.task) as { ok: true; definition: TypeDefinition }).definition
+    expect(current.actions.complete.okFrom).toEqual(['assignee'])
   })
 
   it('ok_from names person fields and needs the ok_by / ok_note fields', () => {

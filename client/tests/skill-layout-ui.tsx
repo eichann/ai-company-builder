@@ -9,6 +9,8 @@
 //   keep      1 = keep what the previous load saved (an app restart); otherwise storage starts empty
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
+//   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
+//   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //
 // Departments: 営業部 (downloaded), 開発部 (not downloaded on this computer),
 // 総務 (read-only for this member). window.__acbLayout lets the Playwright UI
@@ -104,6 +106,9 @@ const COMMITS = [
   { hash: 'c1'.padEnd(40, '0'), hashShort: 'c1000000', message: '顧客一覧を追加', author: '山田 花子', date: '2026-10-21T09:00:00+09:00' },
 ]
 
+const RECORD_TASK = { id: 'task-aaaaaa1', type: 'task', typeLabel: 'タスク', kind: 'task' as const, thing: 'task' as const, title: 'A社 提案書を仕上げる', summary: '', stateLabel: '進めている', updatedAt: '2026-10-30T10:00:00Z' }
+const RECORD_DECISION = { id: 'decision-bbbbbb1', type: 'decision', typeLabel: '決めたこと', kind: 'decision' as const, thing: 'decision' as const, title: 'A社には150万円で出す', summary: '', stateLabel: '確かめた', updatedAt: '2026-10-30T10:00:00Z' }
+
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
 // A file link clicked in a consultation's own window, after main checked it.
 const fileRequests = emitter<{ path: string }>()
@@ -132,6 +137,8 @@ const api: Partial<ElectronAPI> = {
   readDirectoryTree: async (dir: string, max?: number) => { record('readDirectoryTree', [dir]); return tree(dir, 0, max ?? 2) },
   readDirectory: async (dir: string) => { record('readDirectory', [dir]); return listDir(dir) },
   readFile: async (path: string) => FILES[path] ?? null,
+  // 探す ⌘K lists the company's files by name (company paths under the folder).
+  gitListFiles: async (_root: string, folder: string) => ({ success: true, files: Object.keys(FILES).filter(p => p.startsWith(`${ROOT}/`)).map(p => p.slice(ROOT.length + 1)).filter(p => !folder || p.startsWith(`${folder}/`)) }),
   readFileBinary: async () => null,
   watchCompany: async () => ({ success: true }),
   unwatchCompany: async () => ({ success: true }),
@@ -162,7 +169,48 @@ const api: Partial<ElectronAPI> = {
     return { success: true, results: [] }
   },
   gitLog: async (_root: string, folder: string) => { record('gitLog', [folder]); return { success: true, commits: [...COMMITS] } },
-  gitShowCommit: async () => ({ success: true, files: [] }) as never,
+  gitCommitFileDiff: async () => ({ success: true, diff: '@@ -1 +1 @@\n-# 提案\n+# A社 提案\n' }),
+  // Records (search, the record card, a file's 「つながっているもの」): what the server would answer.
+  searchRecords: async (companyId: string, text: string) => {
+    record('searchRecords', [companyId, text])
+    return text === '提案'
+      ? { success: true, available: true, total: 2, records: [RECORD_TASK, RECORD_DECISION] }
+      : { success: true, available: true, total: 0, records: [] }
+  },
+  // The 探す tab's records: the same two, each with its department.
+  findRecords: async (companyId: string, text: string) => {
+    record('findRecords', [companyId, text])
+    return text === '提案'
+      ? { success: true, available: true, total: 2, hubs: [], hits: [
+        { record: RECORD_TASK, department: '営業部', mine: true },
+        { record: { ...RECORD_DECISION, summary: '提案の金額は150万円' }, department: '営業部', mine: false },
+      ] }
+      : { success: true, available: true, total: 0, hits: [], hubs: [] }
+  },
+  getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+    ? { success: true, card: {
+      record: RECORD_TASK,
+      fields: [{ label: '担当', value: '田中 太郎' }, { label: '期限', value: '2026-11-05' }],
+      history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
+      links: [{ label: '関係するファイル', path: '営業部/提案書/A社_提案.md' }, { label: '決めたこと', record: RECORD_DECISION }],
+    } }
+    : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
+  // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
+  getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+    ? { success: true, card: {
+      record: { ...RECORD_TASK, state: 'in_progress', version: 2 }, due: null, tags: [], purpose: null,
+      fields: [{ label: '担当', value: '田中 太郎' }],
+      roles: { assignee: false, requester: false, okGiver: false, reviewer: false }, names: { assignee: '田中 太郎', requester: null, reviewer: null }, reviewerId: null, whenDone: null, bundle: null, canSetBundle: false, teamMode: false, origin: null, review: null, actions: [], canSetTags: false, okLine: null, prepSummary: null, prepared: [],
+      files: [{ path: '営業部/提案書/A社_提案.md' }],
+      links: [{ label: '決めたこと', record: RECORD_DECISION }],
+      history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
+      runs: [], people: [], wait: null, holidays: [], fromIncoming: false,
+    } }
+    : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
+  getRecordsForFile: async (_companyId: string, companyPath: string) => {
+    record('getRecordsForFile', [companyPath])
+    return { success: true, available: true, total: companyPath === '営業部/提案書/A社_提案.md' ? 1 : 0, records: companyPath === '営業部/提案書/A社_提案.md' ? [RECORD_TASK] : [] }
+  },
   gitSync: async () => {
     record('gitSync', [])
     await sleep(150)
@@ -173,9 +221,28 @@ const api: Partial<ElectronAPI> = {
   getChatServerInfo: async () => null,
   getClaudeCodeStatus: async () => ({ available: true, authenticated: true, cliPath: null, version: null, error: null, checkedAt: 0 }),
   getAuthMode: async () => 'claude-code',
-  getChatSessionSummaries: async () => [],
+  // ?consultations=1: one stored consultation in 「AIへの相談」 (探す ⌘K finds it by its title).
+  getChatSessionSummaries: async () => params.get('consultations') === '1'
+    ? [{ id: 's_estimate', companyId: COMPANY, title: '見積の相談', createdAt: '2026-11-01T09:00:00Z', updatedAt: '2026-11-01T09:30:00Z', messageCount: 2, sent: true, preview: '' }]
+    : [],
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
+  // ?tasks=1: the やること tab (features/tasks) with a few rows; otherwise records give no list.
+  getTaskList: async () => params.get('tasks') === '1'
+    ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
+      id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: 1, due: null,
+      tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
+    })) } }
+    : { success: true, data: { available: false, listDepartmentIds: null, items: [] } },
+  // ?plugin=1: one plugin's left tab (its screen is not loaded here; only the tab strip is looked at).
+  getPluginScreens: async () => ({ success: true, screens: params.get('plugin') === '1' ? [{
+    plugin: { id: 'tv-program', version: '1.0.0' }, label: '番組づくり',
+    tab: { label: '番組', icon: 'FilmSlate', entry: 'index.html' }, peek: null, recordSections: [], fileActions: [],
+  }] : [] }) as never,
+  onPluginsChanged: () => () => {},
+  onNotificationsChanged: () => () => {},
+  onNotificationsOpenTasks: () => () => {},
+  getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
 }
 installElectronAPI(api)
 
