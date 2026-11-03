@@ -35,8 +35,10 @@ import { WaitBand } from './WaitParts'
 interface Props {
   companyId: string
   rootPath: string
-  /** The caller keys this component by it. */
+  /** The caller keys this component by it (never by version: a new version updates the card in place). */
   recordId: string
+  /** The version the list knows: newer than the card shows → the card reads again (a press in the list). */
+  knownVersion?: number
   /** One thing the AI prepared (a mail draft, an approval request), drawn by the screen with its own card. */
   renderPrepared: (record: RecordViewSummary) => ReactNode
   /** The task's source (the original mail or Slack thread), drawn by the screen (`app/recordSource.tsx`). */
@@ -85,8 +87,8 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
-  const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath)
+export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
+  const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).

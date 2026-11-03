@@ -27,7 +27,9 @@ let data: TaskListData = {
     it({ id: 'task-mine02', title: '見積書を作り直す', turn: 'mine', due: day(1), tags: ['営業', '見積'], own: true, personal: true, check: { action: 'complete' } }),
     // Asked with 確かめてから: the ☑ shows it to the checker instead of completing.
     it({ id: 'task-chk001', title: '提案書の数字を直す', turn: 'mine', state: 'in_progress', check: { action: 'request_review', reviewer: 'u-abe' } }),
-    it({ id: 'task-far001', title: '来期の研修メニューを見直す', turn: 'mine', due: day(40), tags: ['社内'] }),
+    // Not started, nothing to press (main's `resting`): due far → 先のこと, no due → いつか (both folded, not counted).
+    it({ id: 'task-far001', title: '来期の研修メニューを見直す', turn: 'mine', due: day(40), tags: ['社内'], resting: true }),
+    it({ id: 'task-some01', title: '業界の本を読む', turn: 'mine', resting: true, own: true, personal: true }),
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
     // Asked of someone else: no box, the 「人に頼んだもの」 mark.

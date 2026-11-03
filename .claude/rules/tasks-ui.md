@@ -33,6 +33,7 @@ paths:
   - "client/src/shared/ui/LinkDropNotice.tsx"
   - "client/tests/link-drop.test.ts"
   - "client/tests/ui/fixtures/link-drop.ts"
+  - "shared/core/turn-timing.ts"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -91,8 +92,14 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   in a tab in the middle, next to the open files (`onOpen`; `files-and-editor.md` "Files and
   records share the middle's tabs"), and switching the left tab keeps it; the row of the active
   tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
-  the card by the version the list knows, so a change made from the list shows on the card.
-  Test: `tests/ui/tasks-layout.spec.ts`.
+  the card **by record id only** and passes the version the list knows (`knownVersion`): a newer one
+  makes the card read again (`useTaskCard`; a change made from the list shows on the card), and a
+  re-read never blanks the card or closes its folds — the shown card stays until the new one comes, and
+  an answer older than the version shown never replaces it (`nextCard`: two reads can race)
+  (owner 2026-11-03, 使い心地のメモ #3: keying by version remounted the card on every change the
+  consultation's AI made, and the whole screen flickered). The list keeps its last answer while it
+  reads again too (`useTaskList`). Test: `tests/ui/tasks-layout.spec.ts` (「the AI changing the task
+  updates its open card in place」: same node, 経緯 still open, no 「読み込んでいます」).
 - `useTaskList` (in AppShell): read at mount, on `notifications:changed` and `records:changed` for
   the company (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the
   member's own change. `records:changed` (no content) is sent by main **at once when the member's
@@ -109,8 +116,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   at mount and every 10 minutes.
 - `model.ts` (pure, `model.test.ts`): "today" is the company's day (`companyNow`, Japan time until a
   setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),
-  AI の番, ほかの人の番・返事待ち, 先のこと (only the member's own items due after this week — folded
-  until opened), 今日終わったこと (today's meetings that are over too; 「あしたの朝に空になります」).
+  AI の番, ほかの人の番・返事待ち, 先のこと (a task resting in the member's turn due after this week —
+  folded until opened), **いつか** (a resting task with no due — folded), 今日終わったこと (today's meetings that are over too; 「あしたの朝に空になります」).
   **By date**: 期限切れ, 今日 (meetings to come), 明日, 今週, あとで (folded), 期限なし, 今日終わったこと.
   **By bundle** (「〇〇ごと」): each bundle with open items (its name opens it), then 「〇〇なし」, then
   今日終わったこと; 〇〇 is the kinds actually in the list (`bundleListWord`: 「案件」, 「案件・プロジェクト」),
@@ -122,6 +129,17 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   offers only bundles of that type (全社: every kind). An AI proposal put away (`dismissed`) and an
   archived task (`cancelled`, "The archive" below) are never in 今日終わったこと.
   In every view the folded **「アーカイブ」** closes the list ("The archive").
+- **This week's turn** (owner decision 2026-11-03, 使い心地のメモ #2: 「足しただけであなたの番になるのか？」):
+  one rule, `turnTiming` in `shared/core/turn-timing.ts`, for the list, the title bar's count and the
+  server's morning summary. A record of 「あなたの番」 is **resting** (`restingTask`; the list item's
+  `resting`) when it is a task in 未着手 (`todo`) with nothing to press — not given back by the clock
+  (`waitCameBack`), not a minutes check (`task_kind`), nothing the AI prepared (`prep_summary`);
+  whoever asked it. A resting task with no due → 「いつか」, due after this week (`weekEndOf`) →
+  「先のこと」; neither is counted. Everything else is this week's turn and counted: due this week or
+  overdue, started (進めている, 返事待ち…), and whatever waits for a press (引き受け待ち, 確かめる,
+  承認・返事のお願い, 議事録の確認, 受けられないと返された). Tests: `model.test.ts` (いつか, a started
+  far-future task stays), `tasks-list.test.ts` (the list's あなたの番 is exactly the title bar's items),
+  `notifications.test.ts` (client and server).
   "This week" ends on Sunday; on a Saturday or Sunday it runs to next Sunday, so tomorrow never
   folds. A due with a time today that has passed is 期限切れ. Meetings are read, never made into
   tasks (`calendar.md`); a tag filter hides them.
@@ -281,15 +299,19 @@ Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
   is read while folded; opening it reads the first page (each opening starts again), 20 archived
   tasks newest first (`ARCHIVE_PAGE`), and 「さらに読み込む」 reads 20 more until none are left. A row
   (archive icon, title, 「11/3 アーカイブ」, 「あなただけ」) opens its card, where ［戻す］ brings it back.
+- **Only the last 30 days** (`ARCHIVE_SHOWN_DAYS`, owner 2026-11-03, 使い心地のメモ #1: 「残り続けるのが
+  嫌」): a task archived longer ago is left out of the fold — never deleted; it stays findable in 探す
+  and its 経緯. The end of the section says so: 「30日より前のものは、探すタブから見つかります」.
 - `tasks:archived(companyId, cursor)` (main): two `POST /records/query` — `{ type: 'task', state:
-  ['cancelled'], fields: { assignee | requested_by: me }, limit: 20, offset }` — merged by
+  ['cancelled'], fields: { assignee | requested_by: me }, finishedSince: now − 30 days, limit: 20,
+  offset }` (`finishedSince`: entered 「アーカイブ」 since then, `records.md` "Reading") — merged by
   `archivePage` (`client/shared/tasks.ts`): the server's order (most recently changed first, then
   the id; `records.md` "Reading"), a task in both (one's own) once, never past a window whose query
   has more; the cursor `{ assignee, requester }` is each query's offset (`isArchiveCursor`: integers
   0–10000, else nothing is sent); `next: null` when both are read. The server answers only what the
   member reads (someone's own task to its owner alone).
 - Tests: `client/tests/tasks-archive.test.ts` (pages of 20 in order, each once, the end; only
-  archived tasks of the member are asked; a bad cursor; not in 今日終わったこと),
+  archived tasks of the member are asked; only the last 30 days; a bad cursor; not in 今日終わったこと),
   `server/tests/unit/record-query-order.test.ts` (an action's time orders the query; offsets page;
   someone's own archived task in nobody else's answer), `src/features/tasks/cardActions.test.ts`
   (labels, ［戻す］, 経緯, 要らない only on a proposal, 「終わったら」 as one item, 「自分が担当する」),

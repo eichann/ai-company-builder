@@ -13,7 +13,9 @@
 
 import { RECORDLESS_NOTIFICATION_KINDS, type NotificationItem, type NotificationList } from '../../../../shared/types/notifications'
 import type { DesktopTarget, NoticesActionResult, NoticesState, TurnItem } from '../../../shared/notifications-app'
-import { desktopNoticesOf, NO_NOTICES, NOTICES_OFFLINE_TEXT, turnItemKey } from '../../../shared/notifications-app'
+import { desktopNoticesOf, NO_NOTICES, NOTICES_OFFLINE_TEXT, thisWeeksTurn, turnItemKey } from '../../../shared/notifications-app'
+import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
+import { turnTiming } from '../../../../shared/core/turn-timing'
 
 export interface NotificationsWatcherDeps {
   baseUrl: () => string
@@ -27,6 +29,8 @@ export interface NotificationsWatcherDeps {
   /** The notice ids already shown as a Mac notification on this PC (kept across restarts). */
   shownNotices?: { load(): string[]; save(ids: string[]): void }
   fetch?: typeof fetch
+  /** The clock (tests): the company's today decides which of the turn is this week's. */
+  now?: () => number
   log?: Pick<Console, 'warn'>
   setInterval?: (fn: () => void, ms: number) => unknown
   clearInterval?: (handle: unknown) => void
@@ -42,13 +46,18 @@ const NOTICE_ID = /^[A-Za-z0-9-]{1,100}$/
 
 type Answer = { status: number; body: { data?: unknown; error?: unknown } | null }
 
-function turnItemOf(r: unknown): TurnItem | null {
+function turnItemOf(r: unknown, today: string): TurnItem | null {
   const x = r as { id?: unknown; type?: unknown; title?: unknown; state?: unknown; fields?: Record<string, unknown>; waitCameBack?: unknown } | null
   if (!x || typeof x.id !== 'string' || !RECORD.test(x.id) || typeof x.type !== 'string' || typeof x.title !== 'string') return null
   const due = x.fields?.due
+  const state = typeof x.state === 'string' ? x.state : null
+  const cameBack = !!x.waitCameBack && typeof x.waitCameBack === 'object'
+  // Which of the turn is this week's: the server's morning summary counts with the same rule.
+  const timing = turnTiming({ type: x.type, state, fields: x.fields && typeof x.fields === 'object' ? x.fields : {}, waitCameBack: cameBack }, today)
   return {
-    id: x.id, type: x.type, title: x.title.slice(0, 200), state: typeof x.state === 'string' ? x.state : null, due: typeof due === 'string' ? due : null,
-    ...(x.waitCameBack && typeof x.waitCameBack === 'object' ? { waitCameBack: true as const } : {}),
+    id: x.id, type: x.type, title: x.title.slice(0, 200), state, due: typeof due === 'string' ? due : null,
+    ...(cameBack ? { waitCameBack: true as const } : {}),
+    ...(timing !== 'now' ? { timing } : {}),
   }
 }
 
@@ -148,13 +157,14 @@ export function createNotificationsWatcher(deps: NotificationsWatcherDeps) {
           return
         }
         const data = turn.body?.data as { total?: unknown; records?: unknown[] } | undefined
-        const items = (data?.records ?? []).map(turnItemOf).filter((i): i is TurnItem => i !== null)
+        const today = dayWindow((deps.now ?? Date.now)(), DEFAULT_COMPANY_TIME_ZONE).date
+        const items = (data?.records ?? []).map(r => turnItemOf(r, today)).filter((i): i is TurnItem => i !== null)
         const list = noticeListOf(notices.body?.data)
         if (!list) return
         if (companyId === current) notifyDesktop(companyId, items, list.items)
         publish(companyId, {
           available: list.available,
-          myTurn: { total: typeof data?.total === 'number' ? data.total : items.length, items },
+          myTurn: thisWeeksTurn(items, typeof data?.total === 'number' ? data.total : items.length),
           notices: list,
         })
       } while (state.again)

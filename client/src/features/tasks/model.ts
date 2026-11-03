@@ -3,7 +3,9 @@
 // company's day (Japan time until a company setting exists, calendar.md).
 import type { CalendarEvent } from '../../../shared/calendar'
 import type { TaskListItem } from '../../../shared/tasks'
+import type { TaskCardResult } from '../../../shared/task-card'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
+import { weekEndOf } from '../../../../shared/core/turn-timing'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
@@ -28,6 +30,17 @@ export function companyNow(ms: number, timeZone = DEFAULT_COMPANY_TIME_ZONE): Co
   return { date: `${p('year')}-${p('month')}-${p('day')}`, time: `${p('hour')}:${p('minute')}`, weekday, ms }
 }
 
+/**
+ * What the card shows after a read answered (`useTaskCard`): two reads may race and the older
+ * answer land last, so an answer with an older version than the one shown is ignored; a failed
+ * re-read keeps a shown card (unless the task is gone).
+ */
+export function nextCard(prev: TaskCardResult | null, next: TaskCardResult): TaskCardResult {
+  if (!prev?.success) return next
+  if (!next.success) return next.notFound ? next : prev
+  return next.card.record.version < prev.card.record.version ? prev : next
+}
+
 /** `YYYY-MM-DD` plus `days`. */
 export function addDays(date: string, days: number): string {
   const [y, m, d] = date.split('-').map(Number)
@@ -40,8 +53,7 @@ export function addDays(date: string, days: number): string {
  * Sunday it is next week's Sunday, so tomorrow's work never folds away.
  */
 export function weekEnd(now: CompanyNow): string {
-  const toSunday = (7 - now.weekday) % 7
-  return addDays(now.date, toSunday < 2 ? toSunday + 7 : toSunday)
+  return weekEndOf(now.date)
 }
 
 export type DueWhen = 'overdue' | 'today' | 'week' | 'later' | 'none'
@@ -113,7 +125,8 @@ export interface ListSection {
 
 /**
  * The sections of the list. By turn: 引き受け待ち, あなたの番 (today's meetings to come mixed
- * in), AI の番, ほかの人の番・返事待ち, 先のこと (the member's own far-future items, folded),
+ * in), AI の番, ほかの人の番・返事待ち, 先のこと (tasks not started due after this week, folded),
+ * いつか (tasks not started with no due, folded),
  * 今日終わったこと (with today's meetings that are over). By date: 期限切れ, 今日,
  * 明日, 今週, あとで (folded), 期限なし, 今日終わったこと. By bundle: each one with its open items,
  * then 「〇〇なし」. Empty sections are left out.
@@ -127,14 +140,19 @@ export function listSections(items: readonly TaskListItem[], events: readonly Li
   const sorted = (list: TaskListItem[]) => [...list].sort(byDue)
   const sections: ListSection[] = []
   if (mode === 'turn') {
+    // Only a task resting in the member's turn (not started, nothing to press) leaves 「あなたの番」:
+    // due after this week → 先のこと, no due → いつか (shared/core/turn-timing.ts; the title bar's
+    // count and the morning summary leave out the same ones).
     const mine = open.filter(i => i.turn === 'mine')
-    const later = mine.filter(i => dueWhen(i.due, now) === 'later')
+    const later = mine.filter(i => i.resting && dueWhen(i.due, now) === 'later')
+    const someday = mine.filter(i => i.resting && i.due === null)
     sections.push(
       { key: 'acceptance', title: '引き受け待ち', items: sorted(open.filter(i => i.turn === 'acceptance')), events: [], foldable: false, note: '引き受けるか、受けられないかを決めてください' },
-      { key: 'mine', title: 'あなたの番', items: sorted(mine.filter(i => !later.includes(i))), events: coming, foldable: false },
+      { key: 'mine', title: 'あなたの番', items: sorted(mine.filter(i => !later.includes(i) && !someday.includes(i))), events: coming, foldable: false },
       { key: 'ai', title: 'AI の番', items: sorted(open.filter(i => i.turn === 'ai')), events: [], foldable: false },
       { key: 'others', title: 'ほかの人の番・返事待ち', items: sorted(open.filter(i => i.turn === 'others')), events: [], foldable: false },
       { key: 'later', title: '先のこと', items: sorted(later), events: [], foldable: true, note: `${dueText(addDays(weekEnd(now), 1), now)}から` },
+      { key: 'someday', title: 'いつか', items: sorted(someday), events: [], foldable: true, note: '期限のない、まだ始めていないもの' },
     )
   } else if (mode === 'bundle') {
     // Each bundle with open items, in the order of its earliest due; then those in none.

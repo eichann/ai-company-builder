@@ -5,7 +5,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates } from './model'
+import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard } from './model'
+import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
+
+// The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
+// landing last must never replace a newer card; a failed re-read keeps the card unless it is gone.
+test('a card read that lands late with an older version never replaces the newer card shown', () => {
+  const at = (version: number): TaskCardResult => ({ success: true, card: { record: { version } } as unknown as TaskCardData })
+  const shown = at(5)
+  assert.equal(nextCard(shown, at(4)), shown)
+  const newer = at(6)
+  assert.equal(nextCard(shown, newer), newer)
+  assert.equal(nextCard(null, at(4)).success, true)
+  const offline: TaskCardResult = { success: false, offline: true, error: 'x' }
+  assert.equal(nextCard(shown, offline), shown)
+  const gone: TaskCardResult = { success: false, offline: false, notFound: true, error: '見つかりません' }
+  assert.equal(nextCard(shown, gone), gone)
+})
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
@@ -40,12 +56,19 @@ test('by turn: only the member\'s own far future folds; meetings to come join th
     { id: 'e2', title: 'B社', start: '2026-11-05T08:00:00.000Z', end: '2026-11-05T08:30:00.000Z', allDay: false, online: true, attendeeCount: 3, hasExternalAttendees: true },
   ], NOW)
   const sections = listSections([
-    item('soon', 'mine', '2026-11-06'), item('far', 'mine', '2026-12-10'), item('far-other', 'others', '2026-12-10'),
+    item('soon', 'mine', '2026-11-06'), { ...item('far', 'mine', '2026-12-10'), resting: true }, item('far-other', 'others', '2026-12-10'),
+    // Started (not resting): stays in あなたの番 whatever its due — it is counted as this week's turn.
+    { ...item('far-started', 'mine', '2026-12-11'), state: 'in_progress' },
+    { ...item('someday', 'mine', null), resting: true }, item('no-due-asked', 'mine', null),
     item('acc', 'acceptance', null), item('done', 'done', null),
   ], events, 'turn', NOW)
   const by = Object.fromEntries(sections.map(s => [s.key, s]))
-  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'done'])
-  assert.deepEqual(by.mine.items.map(i => i.id), ['soon'])
+  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'someday', 'done'])
+  assert.deepEqual(by.mine.items.map(i => i.id), ['soon', 'far-started', 'no-due-asked'])
+  // A task not started with no due waits in 「いつか」, folded (owner 2026-11-03).
+  assert.deepEqual(by.someday.items.map(i => i.id), ['someday'])
+  assert.equal(by.someday.foldable, true)
+  assert.equal(by.someday.title, 'いつか')
   assert.deepEqual(by.mine.events.map(e => e.event.id), ['e2'])
   assert.equal(by.mine.events[0].start, '17:00')
   assert.deepEqual(by.later.items.map(i => i.id), ['far'])
