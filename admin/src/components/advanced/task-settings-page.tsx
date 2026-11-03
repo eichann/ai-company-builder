@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, CheckCircle, ChatCircleText, EnvelopeSimple, Handshake, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, CheckCircle, ChatCircleText, Database, EnvelopeSimple, Handshake, Info, ListChecks, LockSimple, Robot, Target, Trash, UsersThree } from '@phosphor-icons/react'
 
+import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { DepartmentMembersDialog, MemberAbsenceDialog } from '@/components/departments/department-members-dialog'
@@ -15,11 +16,13 @@ import {
   companiesApi,
   departmentsApi,
   homeApi,
+  recordSettingsApi,
   taskSettingsApi,
   type Department,
   type DepartmentMember,
   type DepartmentMembersView,
   type Member,
+  type RecordSettings,
   type TaskSettings,
   type TaskSettingsView,
 } from '@/lib/api'
@@ -55,10 +58,13 @@ const INTROS: Record<TaskSettingsPart, string> = {
  * and 「詳しい設定 › 会社の暦」 (`calendar`, the company's holidays); both save the one document.
  * Who belongs to a department moved to 「部署」 (MembershipCard), 来た連絡の決まり to its own
  * heading, the same meeting's duplicates to their own page.
+ * 仕事の進め方 opens with the records switch (RecordsSwitchCard); while it is off, every card below
+ * says 「記録をオンにすると使えます」 (NeedsRecordsNote) and stays editable.
  */
 export function TaskSettingsPage({ part }: { part: TaskSettingsPart }) {
   const { companyId, isAdmin, role } = useCompany()
   const settings = useQuery(isAdmin ? `task-settings:${companyId}` : null, () => taskSettingsApi.get(companyId))
+  const records = useQuery(isAdmin && part === 'work' ? `records-settings:${companyId}` : null, () => recordSettingsApi.get(companyId))
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
   const title = TITLES[part]
 
@@ -80,6 +86,16 @@ export function TaskSettingsPage({ part }: { part: TaskSettingsPart }) {
         <p>{INTROS[part]}</p>
       </div>
       <div className="space-y-6 pb-4">
+        {part === 'work' && (
+          <RecordsSwitchCard
+            settings={records.data}
+            loading={records.loading}
+            error={records.error}
+            onRetry={records.reload}
+            onChanged={(next) => records.setData(() => next)}
+          />
+        )}
+        <RecordsOff.Provider value={part === 'work' && records.data?.enabled === false}>
         {settings.loading || departments.loading ? (
           <ListSkeleton rows={4} />
         ) : settings.error && !settings.data ? (
@@ -96,8 +112,112 @@ export function TaskSettingsPage({ part }: { part: TaskSettingsPart }) {
             />
           </>
         ) : null}
+        </RecordsOff.Provider>
       </div>
     </>
+  )
+}
+
+/** True while the company's records are off (仕事の進め方 only): the cards below say so. */
+const RecordsOff = createContext(false)
+
+/**
+ * Every card of 仕事の進め方 works on records (やること, 来た連絡, 議事録, 案件 are records; the AI
+ * makes and moves them), so while records are off each says so. They stay editable: the answers
+ * are saved apart from the switch and apply once it is on, so an admin can prepare them first.
+ */
+function NeedsRecordsNote() {
+  if (!useContext(RecordsOff)) return null
+  return (
+    <p className="mt-1 flex items-center gap-1.5 text-xs font-medium text-warning">
+      <Info size={14} />
+      記録をオンにすると使えます
+    </p>
+  )
+}
+
+/**
+ * 「記録とやることの一覧を使う」 (records.md "Off per company"): the per-company switch, saved at once.
+ * Turning it off asks first; the server keeps every record (it only stops reading and answering),
+ * so turning it on again brings everything back.
+ */
+function RecordsSwitchCard({
+  settings,
+  loading,
+  error,
+  onRetry,
+  onChanged,
+}: {
+  settings: RecordSettings | undefined
+  loading: boolean
+  error: unknown
+  onRetry: () => void
+  onChanged: (next: RecordSettings) => void
+}) {
+  const { companyId } = useCompany()
+  const [busy, setBusy] = useState(false)
+  const [confirmOff, setConfirmOff] = useState(false)
+  const on = settings?.enabled === true
+
+  const update = async (enabled: boolean) => {
+    setBusy(true)
+    try {
+      onChanged(await recordSettingsApi.update(companyId, enabled))
+      toast.success(enabled ? '記録とやることの一覧をオンにしました' : '記録とやることの一覧をオフにしました')
+    } catch (err) {
+      toast.error('変えられませんでした', { description: describeError(err) })
+      throw err
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <Database size={16} />
+          記録とやることの一覧を使う
+        </CardTitle>
+        <CardDescription>
+          オンにすると、やることの一覧・来た連絡・議事録の読み取り・案件の画面が使えます。メンバーのアプリが新しい版である必要があります。
+        </CardDescription>
+      </CardHeader>
+      <div className="border-t px-5 py-4">
+        {loading ? (
+          <ListSkeleton rows={1} />
+        ) : !settings ? (
+          <ErrorState error={error} onRetry={onRetry} />
+        ) : (
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={on}
+              aria-label="記録とやることの一覧を使う"
+              disabled={busy}
+              onClick={() => (on ? setConfirmOff(true) : void update(true).catch(() => {}))}
+              className={cn(
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-50',
+                on ? 'bg-primary' : 'bg-input'
+              )}
+            >
+              <span className={cn('block size-5 rounded-full bg-background shadow transition-transform', on ? 'translate-x-5' : 'translate-x-0')} />
+            </button>
+            <span className="font-medium">{on ? 'オン（使っています）' : 'オフ（使っていません）'}</span>
+            {settings.updatedAt && <span className="text-xs text-muted-foreground">最後に変えた日時: {formatDateTime(settings.updatedAt)}</span>}
+          </div>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirmOff}
+        onOpenChange={setConfirmOff}
+        title="記録とやることの一覧をオフにしますか？"
+        description={<p>オフにすると、アプリからやることなどが見えなくなります。記録は消えません。</p>}
+        confirmLabel="オフにする"
+        onConfirm={() => update(false)}
+      />
+    </Card>
   )
 }
 
@@ -240,6 +360,7 @@ function MeetingTasksCard({ draft, change }: CardProps) {
         <CardDescription>
           AI が議事録を読んで見つけた宿題を、どう届けるかです。「案として出す」なら、会議の担当の「議事録を確認する」に案として並び、人が「足す」まではだれのやることにもなりません。
         </CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="会議から AI が作るやること" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard
@@ -276,6 +397,7 @@ function ReplyCard({ draft, change }: CardProps) {
           届いた連絡に締め切りが書いていないとき、いつまでに返しますか？
         </CardTitle>
         <CardDescription>AI がやることを作るときの、返事の目安になります。土日・祝日・会社の休みは数えません。</CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="返事の目安" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard
@@ -325,6 +447,7 @@ function AutoRunCard({ draft, change }: CardProps) {
           AI に、押さなくても仕事を進めさせますか？
         </CardTitle>
         <CardDescription>送ることと承認は、いつも人が押します。AI が進めるのは、アプリを開いているあいだだけです。</CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="AI に押さなくても仕事を進めさせるか" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard
@@ -404,6 +527,7 @@ function BundleNameCard({ draft, change }: CardProps) {
         <CardDescription>
           業務の種類（案件・番組など）がない部署で、やることや会議の記録を束ねるものの名前です。会社で1つ決めます。業務の種類がある部署では、その種類の名前を使います。
         </CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div className="flex flex-wrap items-center gap-2 border-t px-5 py-4 text-sm">
         <Label htmlFor="bundle-name">呼び名:</Label>
@@ -432,6 +556,7 @@ function TeamModeCard({ draft, change }: CardProps) {
         <CardDescription>
           使うと、やることに「引き受け待ち」「確かめる人（見てもらって完了・差し戻し）」「受けられない」「返事待ち」「代わりの人」が出ます。使わないときは、自分のやることを進めて完了にする形と、人に頼むことだけです。
         </CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="チームの進め方" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard
@@ -462,6 +587,7 @@ function ReadIncomingCard({ draft, change }: CardProps) {
         <CardDescription>
           本人のメール・Slack に来た連絡を AI が読み、返事が要るものを「返事のお願い」にします。本文は ACB に残しません。使ってよいときは、各自が自分の設定でオン・オフできます。
         </CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="受信を読む 使ってよいか" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard
@@ -514,6 +640,7 @@ function AcceptanceCard({ draft, change }: CardProps) {
         <CardDescription>
           チェックしたときは、頼んだ時点で引き受けたことにします。それ以外（ほかの部署の人に頼んだときなど）は「引き受け待ち」になり、相手が引き受けると相手の番になります。1 営業日たっても引き受けられていなければ、頼んだ人に知らせます。自分だけのやることは、いつも待ちません。
         </CardDescription>
+        <NeedsRecordsNote />
       </CardHeader>
       <fieldset className="border-t px-5 py-4">
         <legend className="sr-only">頼んだ時点で引き受けたことにするとき</legend>
@@ -546,6 +673,7 @@ function DepartmentsCard({ draft, change, departments }: CardProps & { departmen
           <ListChecks size={16} />
           どの部署で、やることの一覧を使いますか？
         </CardTitle>
+        <NeedsRecordsNote />
       </CardHeader>
       <div role="radiogroup" aria-label="やることの一覧を使う部署" className="grid gap-3 border-t px-5 py-4 md:grid-cols-2">
         <RadioCard

@@ -30,6 +30,14 @@ describe('「初期値のまま」 or 「変えています」', () => {
     expect(workChanged({ ...s, readIncoming: { allowed: true, memberDefault: true } })).toBe(true)
   })
 
+  it('仕事の進め方: records off is a change (a new company starts with them on); not known judges by the task settings', () => {
+    const s = defaultTaskSettings()
+    expect(workChanged(s, true)).toBe(false)
+    expect(workChanged(s, false)).toBe(true)
+    expect(workChanged(s, null)).toBe(false)
+    expect(workChanged({ ...s, teamMode: true }, true)).toBe(true)
+  })
+
   it('来た連絡の決まり', () => {
     expect(inboxChanged(defaultIntakeSettings())).toBe(false)
     expect(inboxChanged({ ...defaultIntakeSettings(), ccOnly: 'unsure' })).toBe(true)
