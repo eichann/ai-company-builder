@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { boundaryCrossing, crossingMessage } from '../../../../shared/private-folder-ui'
 import { droppedFilePath, getStats, moveFromExternal, moveItem, startDrag } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
-import { FILE_PATHS_DRAG_TYPE } from '../../../shared/lib/dragTypes'
+import { FILE_PATHS_DRAG_TYPE, FILE_TREE_EFFECT_ALLOWED } from '../../../shared/lib/dragTypes'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
 
@@ -147,7 +147,7 @@ export function useTreeDragDrop({ model, privateFolders, selectedPathsRef, setSe
       const paths = selected.has(entry.path) && selected.size > 1 ? [...selected] : [entry.path]
       setDragSourcePaths(new Set(paths))
       e.dataTransfer.setData(INTERNAL_PATHS, JSON.stringify(paths))
-      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.effectAllowed = FILE_TREE_EFFECT_ALLOWED
     },
     dragEnd: () => {
       setDragSourcePaths(new Set())
