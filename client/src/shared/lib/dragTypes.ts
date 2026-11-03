@@ -1,3 +1,5 @@
+import { thingName } from '../../../shared/thing-words'
+
 /** The drag data the file tree puts on its rows: a JSON array of the dragged absolute paths. */
 export const FILE_PATHS_DRAG_TYPE = 'application/x-file-paths'
 
@@ -40,14 +42,26 @@ const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
 const RECORD_ID_RE = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 const titleOf = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 200) : '')
 
-export interface DraggedRecord { id: string; title: string }
+export interface DraggedRecord {
+  id: string
+  title: string
+  /** The kind in members' words (やること, 案件, 会議の記録…; thing-words.ts), shown while dragging. */
+  word?: string
+}
 /** `topicRecordId`: the record it is about now (取り消す puts it back). */
 export interface DraggedConsultation { sessionId: string; title: string; topicRecordId?: string }
 type DragStart = Pick<DataTransfer, 'setData' | 'effectAllowed'>
 
+/** `application/x-acb-record-word.<UTF-8 hex>`: hex because browsers lower-case drag types. */
+const RECORD_WORD_TYPE_PREFIX = 'application/x-acb-record-word.'
+const hexOf = (s: string): string => Array.from(new TextEncoder().encode(s), b => b.toString(16).padStart(2, '0')).join('')
+
 /** Puts a record on a drag (its row's `onDragStart`). */
 export function startRecordDrag(data: DragStart, record: DraggedRecord): void {
   data.setData(RECORD_DRAG_TYPE, JSON.stringify({ id: record.id, title: record.title }))
+  // Only the types are readable while dragging: the kind's word rides in one (the chat's drop frame says it).
+  const word = record.word?.trim() || thingName({ type: record.id.split('-')[0] ?? '' })
+  data.setData(`${RECORD_WORD_TYPE_PREFIX}${hexOf(word.slice(0, 20))}`, '')
   data.setData('text/plain', record.title)
   data.effectAllowed = LINK_EFFECT_ALLOWED
 }
@@ -57,6 +71,18 @@ export function startConsultationDrag(data: DragStart, c: DraggedConsultation): 
   data.setData(CONSULTATION_DRAG_TYPE, JSON.stringify({ sessionId: c.sessionId, title: c.title, ...(c.topicRecordId ? { topicRecordId: c.topicRecordId } : {}) }))
   data.setData('text/plain', c.title)
   data.effectAllowed = LINK_EFFECT_ALLOWED
+}
+
+/** The kind's word a record drag carries, readable while dragging (null: not a record drag, or none). */
+export function draggedRecordWord(data: Pick<DataTransfer, 'types'>): string | null {
+  const type = Array.from(data.types).find(t => t.startsWith(RECORD_WORD_TYPE_PREFIX))
+  const hex = type?.slice(RECORD_WORD_TYPE_PREFIX.length) ?? ''
+  if (!hex || hex.length % 2 || !/^[0-9a-f]+$/.test(hex)) return null
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(hex.match(/../g)!, h => parseInt(h, 16))) || null
+  } catch {
+    return null
+  }
 }
 
 function parsed(data: Pick<DataTransfer, 'getData'>, type: string): Record<string, unknown> | null {

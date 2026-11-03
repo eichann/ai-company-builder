@@ -12,6 +12,7 @@ import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
 import { toolRowOf } from './toolRows'
 import { appInstructionOf, readAppInstruction } from '../../../shared/app-instruction'
+import { droppedRecordsOf, readDroppedRecords } from '../../../shared/record-drop'
 import { SECOND_OPINION_PART_TYPE, readSecondOpinionRecord, type SecondOpinionRecord } from '../../../shared/agents/second-opinion'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
@@ -40,6 +41,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const secondOpinions: SecondOpinionRecord[] = []
   const toolLines: Record<string, StoredToolLine> = {}
   const appInstruction = appInstructionOf(msg)
+  const droppedRecords = droppedRecordsOf(msg)
   for (const part of msg.parts) {
     if (part.type === APPROVAL_PART_TYPE) {
       const ref = readApprovalCardRef((part as { data?: unknown }).data)
@@ -114,6 +116,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(secondOpinions.length ? { secondOpinions } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
     ...(appInstruction ? { appInstruction } : {}),
+    ...(droppedRecords.length ? { droppedRecords } : {}),
   }
 }
 
@@ -182,10 +185,11 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })
   }
   const appInstruction = readAppInstruction(msg.appInstruction)
+  const droppedRecords = readDroppedRecords(msg.droppedRecords)
   return {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
-    ...(appInstruction ? { metadata: { appInstruction } } : {}),
+    ...(appInstruction || droppedRecords.length ? { metadata: { ...(appInstruction ? { appInstruction } : {}), ...(droppedRecords.length ? { droppedRecords } : {}) } } : {}),
     parts,
   }
 }

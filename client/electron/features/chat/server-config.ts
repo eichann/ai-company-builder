@@ -161,6 +161,10 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       const session = deps.history.get(companyId, conversationId)
       return session ? { topicRecordId: session.topicRecordId, topicDetached: session.topicDetached } : null
     },
+    consultationsAbout: (companyId, recordId, exceptConversationId) => deps.history.summaries(companyId)
+      .filter(s => s.topicRecordId === recordId && s.id !== exceptConversationId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map(s => s.title),
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({
         budget: webResearchBudget, conversationId, signal,

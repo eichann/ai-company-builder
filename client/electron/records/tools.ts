@@ -26,7 +26,8 @@ import { z, type ZodTypeAny } from 'zod'
 import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { DATE_VALUE_RE, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
-import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
+import { OLD_CONNECTION_LABEL, type RecordDetail } from '../../../shared/types/records'
+import { droppedRecordSummary } from '../../shared/record-drop'
 import { CREATE_CONTENT_LABELS, aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
 import { approvalSummaryForAi, type ApprovalCardRef } from '../../shared/approvals'
 import type { ApprovalRequested, ApprovalView } from '../../../shared/types/approvals'
@@ -636,7 +637,7 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
   },
 ]
 
-export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
+export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。記録（タスク・決めたことなど）はサーバーだけが持ちます。記録のファイルは作らず、作る・状態を変えるときは必ずこの道具を使ってください。見積・計画などの中身はふつうのファイルに書き、記録から links でつなぎます（作ったあとは records_link_file）。タスクの相談では、まず records_get でつながったファイル（links の path）を確かめ、必要なものを読んでください（メンバーが記録を入力欄に落として、その要約が渡されたときは、まずその要約で答え、足りないときだけ読みます）。期限は日付（YYYY-MM-DD）か、時刻つき（YYYY-MM-DDTHH:MM）です。担当などの人の欄は id で指定します。` +
   `記録の答えの people は、答えに出てくる人の id と名前の対応です（会社のメンバーだけ）。メンバーへの返事では人を名前で呼び（「佐藤さんの番です」）、id は見せないでください。people に無い id は、名前の分からない人です（会社のメンバーではないなど）。名前を推測せず、そう伝えてください。道具に人を渡すときは id を使います。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
@@ -660,6 +661,11 @@ export interface RecordTools {
    * refusal or failure — never thrown: the chat goes on (consultation-task.ts).
    */
   linkNewFile(recordId: string, companyPath: string): Promise<boolean>
+  /**
+   * A record the member dropped on the input, as the AI's one-time summary (record-drop.ts), read
+   * with the turn's token (the member's permissions). Null: not readable, offline, malformed.
+   */
+  readDroppedRecord(recordId: string, consultations?: readonly string[]): Promise<string | null>
 }
 
 /**
@@ -735,6 +741,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     close: () => access.close(),
     readTask,
     linkNewFile,
+    readDroppedRecord,
     async execute(name, input) {
       const extra = owner.get(name)
       if (extra) return extra.execute(name, input)
@@ -786,6 +793,17 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       const detail = await access.call('GET', `/item/${enc(recordId)}`, undefined, signal) as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown } } | undefined
       const r = detail?.record
       return r && r.type === 'task' && typeof r.title === 'string' ? { id: recordId, title: r.title, personal: r.personal === true } : null
+    } catch {
+      return null
+    }
+  }
+
+  async function readDroppedRecord(recordId: string, consultations: readonly string[] = []): Promise<string | null> {
+    if (!RECORD_ID_RE.test(recordId)) return null
+    try {
+      const detail = await access.call('GET', `/item/${enc(recordId)}`, undefined, signal) as (RecordDetail & { people?: Record<string, string> }) | undefined
+      if (!detail?.record || typeof detail.record.id !== 'string' || !Array.isArray(detail.links)) return null
+      return droppedRecordSummary(detail, new Map(types.map(t => [t.name, t])), consultations)
     } catch {
       return null
     }

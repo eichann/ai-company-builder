@@ -381,7 +381,8 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   history (`topicAfterTaskMade`, `client/shared/consultation-task.ts`) and tells the chat
   (`chatHistory:changed` `patch`). The card's 「AIへの相談」 lists it, the conversation list shows
   its やること, and the chat shows **the topic chip** under the header (`TopicChip.tsx`:
-  「このやることについての相談：<title>」, opens the card; it replaces the task instruction chip for
+  「このやることについての相談：<title>」 — the topic's own kind word for a 案件, 会議… dropped on the
+  input, `chat-ui-and-history.md` "A record dropped on the input" —, opens the card; it replaces the task instruction chip for
   the same task). A record the member cannot read shows no chip.
 - **Taking it off**: the chip's × or the card's consultation row 「…」→「このやることから外す」
   (`consultationLinks(…, onDetach)`, composed by AppShell) → `patchChatSession { topicRecordId: null }`
@@ -557,7 +558,11 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
 - **Drag sources** (`src/shared/lib/dragTypes.ts`): the file tree (files and folders,
   `application/x-file-paths`, `linkMove`; a folder not downloaded drags for linking only, `link`),
   a task row of the list, a 探す row (a record, a file, a consultation), a tab in the middle (its
-  record, or its file) — records as `application/x-acb-record` `{ id, title }` — and a row of
+  record, or its file) — records as `application/x-acb-record` `{ id, title }`, plus the kind's
+  word (やること, 案件…: `word`, else from the id's type) in a type of its own
+  (`application/x-acb-record-word.<UTF-8 hex>`, `draggedRecordWord`: only types are readable while
+  dragging, and the chat's drop frame says it, `chat-ui-and-history.md` "A record dropped on the
+  input") — and a row of
   「AIへの相談」 or a consultation under a 探す row as `application/x-acb-consultation`
   `{ sessionId, title, topicRecordId? }`. Record and consultation drags allow `link` only, so they
   never move anything in the tree. Malformed ids are not a drag (`draggedRecord`,

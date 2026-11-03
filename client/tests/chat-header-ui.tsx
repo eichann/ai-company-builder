@@ -23,6 +23,8 @@ import { useTaskList } from '../src/features/tasks/hooks/useTaskList'
 import { startMinutesReading } from '../src/features/minutes/startReading'
 import type { MinutesNotice } from '../shared/minutes-app'
 import type { TaskListItem } from '../shared/tasks'
+import { EditorTabBar } from '../src/features/editor/components/EditorTabBar'
+import { recordTabKey } from '../src/features/editor/editorTabs'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -45,6 +47,8 @@ import type { TaskListItem } from '../shared/tasks'
 //                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
 //   ?topic=1       with ?history=edit: the restored conversation is about a readable やること (the topic chip
 //                  with ×; taking it off is recorded in __acbChat.patches)
+//   ?tabs=1        the middle's tab bar beside the chat: a やること, a 案件 and a file tab, to drag onto the
+//                  consultation's input (a record becomes its topic; a file is read)
 //   ?minutes=1     the task list beside the chat with one received minutes record in 「AI の番」
 //                  (「自分で読み取る」); the deal choice card's links are recorded in __acbChat.minutesLinks
 
@@ -357,6 +361,23 @@ export function AutoTurnList() {
   )
 }
 
+// ?tabs=1: the middle's open tabs, as AppShell shows them (drag sources only here).
+const RECORD_TAB = recordTabKey('task-0000aa')
+const DEAL_TAB = recordTabKey('deal-0000bb')
+const FILE_TAB = '/tmp/acb-preview/営業部/価格表.pdf'
+function MiddleTabs() {
+  return (
+    <div className="h-full min-w-0 flex-1" data-middle-tabs>
+      <EditorTabBar openFiles={[RECORD_TAB, DEAL_TAB, FILE_TAB]} fileContents={new Map()} activeFilePath={RECORD_TAB}
+        recordLooks={{
+          'task-0000aa': { title: '見積書を作り直す', type: 'task', state: 'in_progress' },
+          'deal-0000bb': { title: '株式会社サンプル', type: 'deal', typeLabel: '案件', implements: ['bundle'], state: 'open' },
+        }}
+        onSelect={() => {}} onClose={() => {}} />
+    </div>
+  )
+}
+
 const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
   ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
@@ -365,6 +386,7 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
     </div>
   : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
       {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
+      {params.get('tabs') === '1' && <MiddleTabs />}
       <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
         <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined}
           focus={params.get('focus') ? { recordId: params.get('focus')!, title: '見積書を作り直す' } : null} />

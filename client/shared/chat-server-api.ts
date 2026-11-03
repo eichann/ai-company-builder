@@ -41,6 +41,11 @@ export interface ChatRequestOptions {
   activeDepartment?: { name: string; folder: string }
   /** The member's 今日のフォルダ now (today-folder.ts; only an app-built path is used): where a task only they see keeps new files. */
   todayFolder?: string
+  /**
+   * Records the member dropped on the input since the last message (record-drop.ts): main reads each
+   * once, with the member's record token, and gives the AI their summary with this message only.
+   */
+  droppedRecordIds?: string[]
   modelId?: string
   effort?: string
   /** The member's setting (Settings → 入力候補); absent = on. */

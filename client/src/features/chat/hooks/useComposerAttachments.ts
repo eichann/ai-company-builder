@@ -1,5 +1,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import { draggedRecord, draggedRecordWord, dropEffectAllowed, type DraggedRecord } from '../../../shared/lib/dragTypes'
+import { composerDragOf, type ComposerDrag } from '../recordDrop'
 
 const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const MAX_IMAGES = 4
@@ -12,16 +14,19 @@ interface Attachments {
 
 /**
  * Images and file references dropped on the composer, sent with the next
- * message. Every change tells `onAttachmentsChange` the count right away
+ * message; a dropped record goes to `onDropRecord` (the conversation's topic and summary). Every change tells `onAttachmentsChange` the count right away
  * (the conversation reads it when the member leaves, to keep a tab with
  * attachments).
  */
 export function useComposerAttachments(
   onSend: (text: string, files?: File[], filePaths?: string[]) => void,
   onAttachmentsChange?: (count: number) => void,
+  onDropRecord?: (record: DraggedRecord & { word: string }) => void,
 ) {
   const [attached, setAttached] = useState<Attachments>({ images: [], filePaths: [] })
-  const [isDragOver, setIsDragOver] = useState(false)
+  // What is dragged over the input (the drop frame says what dropping it does: recordDrop.ts).
+  const [drag, setDrag] = useState<ComposerDrag>(null)
+  const onDropRecordRef = useLatestRef(onDropRecord)
   const [imageWarning, setImageWarning] = useState('')
   const dragCounterRef = useRef(0)
   const currentRef = useRef(attached)
@@ -39,29 +44,40 @@ export function useComposerAttachments(
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current++
-    if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/x-file-paths')) {
-      setIsDragOver(true)
-    }
-  }, [])
+    const over = composerDragOf(e.dataTransfer)
+    // A record is taken only where the conversation handles it (not the composer preview without it).
+    if (over && (over.kind === 'file' || onDropRecordRef.current)) setDrag(over)
+  }, [onDropRecordRef])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current--
-    if (dragCounterRef.current === 0) setIsDragOver(false)
+    if (dragCounterRef.current === 0) setDrag(null)
   }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    // An effect the source allows, or the browser fires no drop (a tab or a record allows only link).
+    const allowed = e.dataTransfer.effectAllowed
+    const effect = (['copy', 'link', 'move'] as const).find(d => dropEffectAllowed(allowed, d))
+    if (effect) e.dataTransfer.dropEffect = effect
   }, [])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    setIsDragOver(false)
+    setDrag(null)
     dragCounterRef.current = 0
     const current = currentRef.current
+
+    // A record (やること, 案件…): the consultation becomes one about it (ChatConversation decides).
+    const record = draggedRecord(e.dataTransfer)
+    if (record) {
+      onDropRecordRef.current?.({ ...record, word: draggedRecordWord(e.dataTransfer) ?? '記録' })
+      return
+    }
 
     // File paths from the file tree
     const rawPaths = e.dataTransfer.getData('application/x-file-paths')
@@ -90,7 +106,7 @@ export function useComposerAttachments(
       setImageWarning(warnings.join('、'))
       setTimeout(() => setImageWarning(''), 4000)
     }
-  }, [update])
+  }, [update, onDropRecordRef])
 
   const removeImage = useCallback((index: number) => {
     const current = currentRef.current
@@ -111,7 +127,7 @@ export function useComposerAttachments(
   return {
     images: attached.images,
     filePaths: attached.filePaths,
-    isDragOver,
+    drag,
     imageWarning,
     dropHandlers: { onDragEnter: handleDragEnter, onDragLeave: handleDragLeave, onDragOver: handleDragOver, onDrop: handleDrop },
     removeImage,

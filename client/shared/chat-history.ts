@@ -1,3 +1,4 @@
+import type { DroppedRecordRef } from './record-drop'
 import type { AgentSession } from './agent'
 import type { ChoicePromptRecord } from './choice-prompt'
 import type { SteerRecord } from './steer'
@@ -47,6 +48,8 @@ export interface ChatSession {
     toolLines?: Record<string, StoredToolLine>
     /** The app composed this message for the AI (app-instruction.ts): sent, never shown or previewed as the member's words. */
     appInstruction?: AppInstruction
+    /** Records the member dropped on the input that went to the AI with this message (record-drop.ts): a line in its bubble. */
+    droppedRecords?: DroppedRecordRef[]
   }>
   createdAt: string
   updatedAt: string
