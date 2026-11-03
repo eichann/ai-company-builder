@@ -54,7 +54,16 @@ export interface RecordToolDescriptor {
   readOnly: boolean
   /** How a call reads in the chat, in plain Japanese (`client/shared/tool-display.ts`). Every ACB tool has one. */
   display: ToolDisplay
+  /**
+   * Loaded only when the AI asks for it (Claude Code's tool search): a state change of a type
+   * other than the task. Every other app tool is always in front of the AI (records.md "Tool
+   * search"): a hidden records_create once made the AI tell the member it could not add a task.
+   */
+  onDemand?: boolean
 }
+
+/** Types whose actions are always loaded (the rest are on demand): what members ask the AI for most. */
+const ALWAYS_LOADED_ACTION_TYPES: readonly string[] = ['task']
 
 /**
  * Tools of a connector that ride on the record token (Google Drive, `features/google/drive.ts`):
@@ -403,6 +412,7 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         : ''
       specs.push({
         name: tool, readOnly: false, schema: z.object(shape).strict(),
+        ...(ALWAYS_LOADED_ACTION_TYPES.includes(t.name) ? {} : { onDemand: true }),
         display: actionToolDisplay(a.label),
         description: `「${t.label}」の「${a.label}」（${from} → ${a.to ?? '状態はそのまま'}）。${a.note === 'required' ? 'note（ひとことの理由）が必須。' : ''}${defaultNote}${aiNote}\n` +
           `${t.name}.${name}: from ${a.from ? a.from.join('/') : 'any state'} to ${a.to ?? 'the same state'}.${a.note === 'required' ? ' `note` is required.' : ''}${defaulted.length > 0 ? ` Give ${defaulted.join(', ')} too (when it passes, the task returns to its assignee for a follow-up).` : ''}`,

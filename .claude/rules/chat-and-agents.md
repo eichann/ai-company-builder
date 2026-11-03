@@ -194,6 +194,13 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   Codex keeps its own default effort.
 - Settings sources are `['user', 'project']`; that is why shared agent config is protected at
   push (`push-check.md`).
+- **The app's MCP servers are never hidden by tool search.** With many MCP tools (the member's
+  claude.ai connectors and `.mcp.json` load too) Claude Code defers them behind ToolSearch, whose
+  keyword search returns only a few matches — the AI once said `records_create` did not exist.
+  Every in-process app server (`acb_consultations`, company files, `acb_review`, `acb_web`,
+  `acb_second_opinion`) is created with `alwaysLoad: true`; `acb_records` per tool (all but
+  other types' actions, which its instructions name for `select:`; `records.md` "Tool search").
+  Third-party MCP servers stay as the CLI decides. Test: `tests/claude-tool-search.test.ts`.
 - 「Web で調べる」 (`web-research.md`): agents with `webReader` get the app tool `web_research`
   (`acb_web`) and lose their own web tools — Claude through flag `settings: { permissions: {
   deny: ['WebFetch', 'WebSearch'] } }` (whole session, subagents too), Codex through
