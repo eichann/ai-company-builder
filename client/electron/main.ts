@@ -265,7 +265,10 @@ const notices = createNotificationsWatcher({
   }),
   shownNotices: fileShownStore(path.join(userDataDir(), 'notices-shown.json')),
 })
-recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId) }
+// The task list re-reads on any records signal (others' changes reaching this member), and at once
+// when the member's own AI wrote a record here (recordsChangedHere, given to the chat below).
+recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId); appWindow.send('records:changed', { companyId }) }
+const recordsChangedHere = (companyId: string) => { notices.signal(companyId); appWindow.send('records:changed', { companyId }) }
 noticesSignal = companyId => notices.signal(companyId)
 lifecycle.beforeQuit(() => notices.stop())
 registerNotificationsIpc(ipc, notices)
@@ -469,6 +472,7 @@ app.whenReady().then(async () => {
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
       records: recordsApi,
+      recordsChanged: recordsChangedHere,
       skillUses,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),

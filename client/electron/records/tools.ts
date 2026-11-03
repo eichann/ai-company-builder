@@ -347,8 +347,34 @@ function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
   ]
 }
 
+/**
+ * Where a request the AI makes goes (owner decision 2026-11-03; the server applies it,
+ * `createByAi`): about the member alone → only they see it, assigned to them; another person or
+ * a department asked for → the department the consultation was in. The AI tells the member where.
+ */
+const PLACEMENT_WORDS = 'やること（依頼）の置き場所：メンバー本人だけのこと（ほかの人の名前が出ない、部署に置くよう言われていない）なら、personal も assignee も folder も省く（本人だけに見える自分用になり、担当は本人）。' +
+  'ほかの人に頼む・担当にするときは assignee にその人の id（部署は相談を始めた部署になる）。「部署のやることにして」と言われたら personal: false（担当を言われなければ本人）。ほかの部署を名指しされたときだけ folder。' +
+  '作ったあとは、どこに入れたかを必ずメンバーに伝える（答えの placed と tellMember）。\n'
+const PLACEMENT_WORDS_EN = ' Placement of a request (task): about the member alone (no other person named, no department asked for) → leave personal, assignee and folder out (it becomes owner-only, assigned to the member). ' +
+  'Someone else as assignee → their id in fields.assignee (it goes to the department the consultation is in). "Make it the department\'s" → personal: false. folder only when the member names another department. ' +
+  'Afterwards always tell the member where it went (the answer\'s placed / tellMember).'
+
+/** records_create's answer, with the sentence that tells the member where it went. */
+function createdAnswer(answer: unknown): string {
+  const a = answer as { placed?: { personal?: unknown; folder?: unknown }; record?: { fields?: Record<string, unknown> } } | undefined
+  const placed = a?.placed
+  const f = a?.record?.fields ?? {}
+  const whose = f.assignee !== undefined && f.assignee !== null && f.assignee === f.requested_by ? 'あなたの担当で' : '<担当の名前>さんの担当で'
+  const where = !placed ? null
+    : placed.personal === true ? 'あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）'
+      : `${typeof placed.folder === 'string' ? `「${placed.folder}」` : '会社全体'}のやることに、${whose}入れました`
+  const tellMember = where && where.includes('<担当の名前>') ? `${where}（<担当の名前> は担当にした人の名前に置き換える）` : where
+  const out = JSON.stringify(tellMember ? { ...(answer as object), tellMember } : answer)
+  return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
+}
+
 /** The state-changing tools for these types (one per action, and creating server-only records). */
-export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
+export function actionToolSpecs(types: TypeDefinition[], place: { department?: string | null } = {}): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
   // Service-owned types (議事録・承認のお願い・送るメール・決めたこと) are made by the server's own steps only.
   const creatable = types.filter(t => t.storage !== 'file' && !SERVICE_OWNED_TYPES.includes(t.name)).map(t => t.name)
@@ -363,16 +389,19 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
         type: z.enum(creatable as [string, ...string[]]), title: z.string().min(1).max(200), summary: z.string().max(300).optional(),
         fields: z.record(z.string(), z.union([scalar, z.array(z.string().min(1).max(TAG_MAX_LENGTH)).max(TAGS_MAX_COUNT)])).optional()
           .describe('サーバーの欄。タグの欄は文字の並び / server fields; a tags field takes a list of strings'), links: z.record(z.string(), z.union([z.string(), z.array(z.string()).max(50)])).optional(),
-        personal: z.boolean().optional().describe('true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ） / owner-only: only the member sees it, admins included; no other assignee'),
+        personal: z.boolean().optional().describe('省く＝おまかせ（ほかの人が出てこなければ自分用）。true = 自分用（メンバー本人だけが見る。管理者にも見えない。担当は本人だけ）。false = 部署のやること / leave out = decided for you (owner-only unless someone else is involved); true = owner-only; false = a department\'s'),
+        folder: z.string().min(1).max(200).optional().describe('置く部署のフォルダ（メンバーがほかの部署を名指ししたときだけ。省くと相談を始めた部署） / the department folder, only when the member names another department (default: the consultation\'s)'),
         key: z.string().min(1).max(MEETING_OUTPUT_KEY_MAX).optional().describe('会議から作るときの項目の目印（例「task:3」。links.meeting と一緒に）。同じ会議・同じ目印・同じ件名なら2回目は作られず、前のものが返る / an item key for an output of a meeting (with links.meeting): the same meeting and key or title returns the earlier record'),
         state: z.string().max(40).optional().describe('始める状態（型の create_states のどれか。例 task の preparing＝AI が下ごしらえしてから担当に渡す）。ふつうは省く / the state to start in (one of the type\'s create_states, e.g. task preparing: the AI prepares first, then hands it over); normally leave out'),
       }).strict(),
       description: `サーバーだけに置く記録（${creatable.join(', ')}）を作る。依頼した人は自分になる。人や顧客の名前ではなく id を使う。` +
         `links に使えるつながりは型ごとに決まっている（${linkNames}）。ほかの名前は断られる。` +
-        'メンバーが「自分用に」「自分だけのメモとして」と言ったときは personal: true（本人だけが見る。部署に出すのは本人が画面で行う）。\n' +
+        PLACEMENT_WORDS +
         `Create a server-only record (${creatable.join(', ')}). Name people and customers by id. \`links\` takes only the type's own link names (${linkNames}); any other is refused. ` +
-        'When the member asks for something just for themselves, set personal: true (only they see it; sharing it to a department is their own step on screen).',
-      request: input => ({ method: 'POST', path: '/item', body: input }),
+        PLACEMENT_WORDS_EN,
+      // The consultation's department goes along as the server's default place (records.md "Where the AI puts a request").
+      request: input => ({ method: 'POST', path: '/item', body: place.department ? { ...input, defaultFolder: place.department } : input }),
+      format: createdAnswer,
     })
   }
   for (const t of types) {
@@ -640,6 +669,13 @@ export interface RecordToolsOptions {
   onMailDraft?: (card: MailDraftCard) => void
   /** Connectors' tools on the same token (`tool-providers.ts`); each one's null / failure = none of its tools this turn. */
   toolProviders?: readonly RecordToolProvider[]
+  /** The department folder the consultation is in (null / absent = 全社): where a request for someone else goes by default. */
+  department?: string | null
+  /**
+   * A record write of this turn succeeded (the server answered): the app's task list and
+   * 「あなたの番」 read again at once instead of waiting for their next look (tasks-ui.md).
+   */
+  onRecordChanged?: () => void
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -662,7 +698,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   } catch { /* no plugin tools this turn */ }
   // Mail tools exist where outbound_message does; drafting needs an act token (Codex reads only).
   const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, MAIL_SHOW_TOOL, ...(access.scope === 'act' ? MAIL_ACTION_TOOLS : [])] : []
-  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...mail]
+  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'meeting') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types, { department: options.department }) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...mail]
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
@@ -695,6 +731,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.approvalCard) return showApproval(req)
       try {
         const answer = await access.call(req.method, req.path, req.body, signal)
+        if (!spec.readOnly) changed()
         if (spec.mailCard) {
           const draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
           if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
@@ -719,6 +756,10 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     },
   }
 
+  function changed() {
+    try { options.onRecordChanged?.() } catch { /* the list's own looks catch up */ }
+  }
+
   /** A connector's update or create: the server's answer becomes a card, and the AI is told only what is known. */
   async function runUpdate(card: NonNullable<RecordToolSpec['card']>, input: Record<string, unknown>, req: ReturnType<RecordToolSpec['request']>): Promise<string> {
     type Value = CardContext['asked'][string]
@@ -735,6 +776,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     let result: PluginOperationCard
     try {
       const answer = await access.call(req.method, req.path, req.body, signal)
+      changed()
       // Needing approval: the request was made; the card is the app's approval card, not an operation's.
       if ((answer as Partial<ApprovalRequested> | undefined)?.outcome === 'approval-requested') {
         const requested = answer as ApprovalRequested

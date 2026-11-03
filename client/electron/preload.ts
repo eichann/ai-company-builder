@@ -194,6 +194,7 @@ const api: ElectronAPI = {
   setNotificationSetting: (companyId: string, kind: string, on: boolean) => invoke('notifications:setSetting', companyId, kind, on),
   onNotificationsChanged: callback => subscribe('notifications:changed', callback),
   onNotificationsOpenTasks: callback => subscribe('notifications:openTasks', callback),
+  onRecordsChanged: callback => subscribe('records:changed', callback),
   searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
   findRecords: (companyId: string, text: string, today: string) => invoke('recordViews:find', companyId, text, today),
   findRecordsHome: (companyId: string, today: string, from: string, to: string) => invoke('recordViews:findHome', companyId, today, from, to),
