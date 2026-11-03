@@ -11,6 +11,7 @@
  * what the caller could not open.
  */
 import { foldAsciiCase } from '../../shared/core/paths'
+import { fileLinkShown } from '../../shared/core/records'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import type { RecordFindHit, RecordFindHome, RecordFindHub, RecordFindResult, RecordSummary } from '../../shared/types/records'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -92,7 +93,7 @@ export function createRecordFind(deps: RecordFindDeps) {
   }
 
   /** A 相手's or 案件's summary over what the caller reads (a 相手: its 案件 and what is in them too). */
-  function hubOf(records: RecordRepository, reader: RecordReader, defs: Defs, hub: RecordAccessRow, today: string): RecordFindHub {
+  function hubOf(records: RecordRepository, reader: RecordReader, defs: Defs, hub: RecordAccessRow, today: string, viewerId: string): RecordFindHub {
     const def = defs.get(hub.type)?.definition
     const hop1 = neighbours(records, reader, [hub])
     const bundles = hop1.filter(r => defs.get(r.type)?.definition.implements.includes('bundle'))
@@ -104,7 +105,9 @@ export function createRecordFind(deps: RecordFindDeps) {
     const finalOf = (s: RecordSummary) => (s.state !== null && defs.get(s.type)?.definition.final.includes(s.state)) ?? false
     const meetings = list.filter(s => s.type === 'meeting')
     const next = meetings.map(meetingAt).filter((at): at is string => !!at && at.slice(0, 10) >= today).sort()[0] ?? null
-    const fileLinks = records.linksFrom([hub.id, ...bundles.map(b => b.id)]).filter(l => l.targetPath !== null && reader.file(l.targetPath))
+    const sources = new Map([hub, ...bundles].map(r => [r.id, r]))
+    const fileLinks = records.linksFrom([hub.id, ...bundles.map(b => b.id)])
+      .filter(l => l.targetPath !== null && reader.file(l.targetPath) && fileLinkShown(viewerId, sources.get(l.sourceId) ?? { personalOwner: null }, l))
     const moved = [sums.get(hub.id)?.updatedAt ?? '', ...list.map(s => s.updatedAt)].sort()
     return {
       id: hub.id,
@@ -147,7 +150,7 @@ export function createRecordFind(deps: RecordFindDeps) {
       const hubs = hits
         .filter(h => isHubType(c.defs.get(h.record.type)?.definition) && foldAsciiCase(h.record.title.normalize('NFC')).includes(words))
         .slice(0, FIND_MAX_HUBS)
-        .map(h => hubOf(c.records, c.reader, c.defs, visible.find(r => r.id === h.record.id)!, b.today as string))
+        .map(h => hubOf(c.records, c.reader, c.defs, visible.find(r => r.id === h.record.id)!, b.today as string, member.userId))
       return ok({ total: visible.length, hits, hubs })
     },
 
@@ -165,7 +168,7 @@ export function createRecordFind(deps: RecordFindDeps) {
         for (const h of hitsOf(c.records, c.reader, c.defs, member, candidates.slice(i, i + 50), c.old)) {
           const def = c.defs.get(h.record.type)?.definition
           if (bundles.length >= HOME_MAX || !h.mine || (h.record.state !== null && def?.final.includes(h.record.state))) continue
-          bundles.push({ ...h, hub: hubOf(c.records, c.reader, c.defs, candidates.find(r => r.id === h.record.id)!, b.today as string) })
+          bundles.push({ ...h, hub: hubOf(c.records, c.reader, c.defs, candidates.find(r => r.id === h.record.id)!, b.today as string, member.userId) })
         }
       }
       const meetingRows = readable(c.records.candidates({ types: ['meeting'], ranges: [{ name: 'meeting_at', gte: b.from as string, lt: b.to as string }] }, MAX_CANDIDATES))

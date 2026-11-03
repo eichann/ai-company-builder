@@ -65,9 +65,19 @@ export function linkTargetsOf(target: string, value: LedgerValue): string[] | nu
   }
 }
 
-/** Every link row of a record with `name` replaced by these targets (positions renumbered). */
-export function withLinkTargets(sourceId: string, current: RecordLinkRow[], name: string, target: string, targets: string[]): RecordLinkRow[] {
+/**
+ * Every link row of a record with `name` replaced by these targets (positions renumbered). A target
+ * already linked keeps who made it; a new file target is made by `createdBy` (records.md "Links into
+ * .personal/").
+ */
+export function withLinkTargets(sourceId: string, current: RecordLinkRow[], name: string, target: string, targets: string[], createdBy?: string): RecordLinkRow[] {
   const others = current.filter(l => l.name !== name)
-  const mine = targets.map(t => ({ sourceId, name, position: 0, targetId: target === 'file' ? null : t, targetPath: target === 'file' ? t : null }))
+  const pool = current.filter(l => l.name === name)
+  const mine = targets.map(t => {
+    const i = pool.findIndex(l => (target === 'file' ? l.targetPath : l.targetId) === t)
+    const kept = i >= 0 ? pool.splice(i, 1)[0].createdBy ?? null : null
+    const by = i >= 0 ? kept : target === 'file' ? createdBy ?? null : null
+    return { sourceId, name, position: 0, targetId: target === 'file' ? null : t, targetPath: target === 'file' ? t : null, createdBy: by }
+  })
   return [...others, ...mine].map((l, i) => ({ ...l, position: i }))
 }

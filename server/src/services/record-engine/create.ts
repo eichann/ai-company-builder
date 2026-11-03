@@ -150,7 +150,7 @@ export function creating(ctx: EngineContext) {
             if (!reader.file(p) || findPrivateScope(companyData.forCompany(member.companyId).scopes.listWithRules(), p)) {
               return bad(FILE_NOT_LINKABLE.error, FILE_NOT_LINKABLE.code)
             }
-            links.push({ sourceId: id, name, position: links.length, targetId: null, targetPath: p })
+            links.push({ sourceId: id, name, position: links.length, targetId: null, targetPath: p, createdBy: member.userId })
           } else {
             if (typeof t !== 'string' || !RECORD_ID_RE.test(t)) return bad(`${name}: a record id`)
             // A live record the member reads: someone else's owner-only record, a private one and a

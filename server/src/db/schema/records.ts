@@ -199,6 +199,15 @@ export function migrateRecordPersonalOwner(conn: Database.Database): void {
 }
 
 /**
+ * Who made a file link (records.md "Links into .personal/", owner decision 2026-11-03): a link into
+ * a `.personal/` folder is shown to that member alone. Additive and nullable: older rows stay unknown.
+ */
+export function migrateRecordLinkCreator(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(record_links)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('created_by')) conn.exec(`ALTER TABLE record_links ADD COLUMN created_by TEXT`)
+}
+
+/**
  * record_types.source may be 'plugin' (milestone 3: a connector plugin's
  * types). SQLite cannot change a CHECK, so a table created before is rebuilt
  * once with the same rows (inside one transaction). Idempotent.

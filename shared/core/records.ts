@@ -138,6 +138,26 @@ export function fileLinkPath(target: string): string | null {
   return p
 }
 
+/**
+ * A company path inside a `.personal/` folder at any depth (A–Z folded, as the push check reads it):
+ * on one member's Mac only, never synced. A link to one is that member's alone (records.md
+ * "Links into .personal/").
+ */
+export function isPersonalPath(companyPath: string): boolean {
+  const segments = companyPath.normalize('NFC').replace(/\\/g, '/').split('/')
+  return segments.slice(0, -1).some(s => s.replace(/[A-Z]/g, c => c.toLowerCase()) === '.personal')
+}
+
+/**
+ * Whether `viewerId` may see a file link of a record (records.md "Links into .personal/"): any
+ * path but a `.personal/` one; that one only by the member who made the link — a link from before
+ * the maker was kept (`createdBy` null) only by the owner of an owner-only record.
+ */
+export function fileLinkShown(viewerId: string, source: { personalOwner: string | null }, link: { targetPath: string | null; createdBy?: string | null }): boolean {
+  if (link.targetPath === null || !isPersonalPath(link.targetPath)) return true
+  return link.createdBy ? link.createdBy === viewerId : source.personalOwner === viewerId
+}
+
 /** A new record id for a type: `<type>-<random>` (`random`: 6–32 of [0-9a-z], e.g. from crypto). */
 export function newRecordId(type: string, random: string): string {
   const id = `${type.slice(0, 40)}-${random.toLowerCase().replace(/[^0-9a-z]/g, '').slice(0, 32)}`
