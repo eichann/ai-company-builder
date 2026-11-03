@@ -2,6 +2,7 @@
 // session (it stays here):
 //   tasks:list    what waits for the member, the AI, others, and today's done — sorted by
 //                 client/shared/tasks.ts from the server's answers (nothing filtered here)
+//   tasks:archived  the folded 「アーカイブ」: archived tasks, newest first, 20 at a time (two queries merged)
 //   tasks:create  the list's one line: a task of the member's own (owner-only)
 //   tasks:act     an action on a record (引き受ける, 完了…): the server's engine decides who may
 //   tasks:card    one task's card (what the AI prepared, actions, 経緯, its runs waiting for a person);
@@ -40,8 +41,8 @@ import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
-  type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
+  ARCHIVE_PAGE, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
+  type ArchivedTasksResult, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
@@ -353,6 +354,29 @@ export function createTasksApi(deps: TasksDeps) {
       }
     },
 
+    /**
+     * The folded 「アーカイブ」 at the bottom of the list: archived tasks assigned to the member or asked
+     * by them, newest first, `ARCHIVE_PAGE` at a time from `cursor` (`archivePage`). The server
+     * answers only what the member reads (someone's own task to its owner alone).
+     */
+    async archived(companyId: string, cursor: unknown): Promise<ArchivedTasksResult> {
+      if (!COMPANY.test(companyId) || !isArchiveCursor(cursor)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      const id = await myId()
+      if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
+      const query = (field: 'assignee' | 'requested_by', offset: number) =>
+        call(companyId, 'POST', '/records/query', { type: 'task', state: ['cancelled'], fields: { [field]: id }, limit: ARCHIVE_PAGE, offset })
+      const [assigned, asked] = await Promise.all([query('assignee', cursor.assignee), query('requested_by', cursor.requester)])
+      const page = (a: Answer) => (a?.status === 200 ? a.json?.data as RecordQueryResult | undefined : undefined)
+      const a = page(assigned)
+      const r = page(asked)
+      if (!a || !r) {
+        const f = failure('archived', !a ? assigned : asked)
+        return { success: false, offline: f.offline, error: f.error }
+      }
+      const { records: shown, next } = archivePage(a, r, cursor)
+      return { success: true, items: archivedTasks(shown), next }
+    },
+
     async createBundle(companyId: string, input: BundleCreateInput): Promise<TaskWriteResult> {
       const title = typeof input?.title === 'string' ? input.title.normalize('NFC').trim() : ''
       if (!COMPANY.test(companyId) || !title || title.length > 200 || typeof input.type !== 'string' || !ACTION.test(input.type)) return BAD_INPUT
@@ -427,6 +451,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   const tags = createTagSuggester(deps.tagSuggest ?? { brokerEnv: async () => ({}) })
   ipc.handle('tasks:suggestTags', (_event, companyId, title, inUse) => tags.suggest(typeof companyId === 'string' ? companyId : '', title, inUse))
   ipc.handle('tasks:list', (_event, companyId) => api.list(typeof companyId === 'string' ? companyId : ''))
+  ipc.handle('tasks:archived', (_event, companyId, cursor) => api.archived(typeof companyId === 'string' ? companyId : '', cursor))
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))
   ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))

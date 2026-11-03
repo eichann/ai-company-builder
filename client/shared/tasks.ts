@@ -390,10 +390,84 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
   }
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))
-  // An AI proposal put away (「要らない」, `dismissed`) was never done: it stays out of 今日終わったこと.
-  for (const r of src.doneToday) if (r.state !== 'dismissed') add(r, 'done', null, r.updatedAt)
+  // An AI proposal put away (「要らない」, `dismissed`) was never done, and an archived task (アーカイブ,
+  // `cancelled`) left the list: neither is in 今日終わったこと (the archive is at the bottom).
+  for (const r of src.doneToday) if (r.state !== 'dismissed' && r.state !== 'cancelled') add(r, 'done', null, r.updatedAt)
   return out
 }
 
 /** The states a task can wait in (not final), for the query of what the member asked. */
 export const OPEN_TASK_STATES = ['todo', 'in_progress', 'review', 'waiting', 'preparing', 'declined', 'awaiting_acceptance'] as const
+
+// --- The archive (アーカイブ, owner decision 2026-11-03) -------------------------------------
+
+/** How many archived tasks one press shows (the first opening, then each 「さらに読み込む」). */
+export const ARCHIVE_PAGE = 20
+
+/**
+ * Where the next page starts in each of the two queries main merges: archived tasks assigned to
+ * the member and those they asked (`requested_by`). Both come in the server's order (most
+ * recently changed first), so the merge is by `updatedAt`.
+ */
+export interface ArchiveCursor { assignee: number; requester: number }
+
+/** One archived task in the folded 「アーカイブ」 section (it opens its card, where ［戻す］ is). */
+export interface ArchivedTask {
+  id: string
+  title: string
+  /** When it was archived as far as the list knows (its last change, ISO). */
+  archivedAt: string
+  personal: boolean
+}
+
+export type ArchivedTasksResult =
+  | { success: true; items: ArchivedTask[]; next: ArchiveCursor | null }
+  | { success: false; offline: boolean; error: string }
+
+export function isArchiveCursor(c: unknown): c is ArchiveCursor {
+  const o = c as ArchiveCursor | null
+  return typeof o === 'object' && o !== null && [o.assignee, o.requester].every(n => Number.isInteger(n) && n >= 0 && n <= 10_000)
+}
+
+/** The server's order: most recently changed first, then the id (`adapters/sqlite/records.ts`). */
+const newerFirst = (a: RecordSummary, b: RecordSummary) =>
+  (a.updatedAt === b.updatedAt ? (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) : a.updatedAt > b.updatedAt ? -1 : 1)
+
+/**
+ * One page of the archive from the two queries (each asked for `size` from its cursor): taken in
+ * the server's order, a task in both counted once (one's own task is in both), never past the end
+ * of a window whose query has more (what follows it is not known yet). Each query's cursor moves
+ * by what was taken from it; `next` is null once both are read to the end.
+ */
+export function archivePage(
+  assigned: { records: RecordSummary[]; total: number },
+  asked: { records: RecordSummary[]; total: number },
+  cursor: ArchiveCursor,
+  size = ARCHIVE_PAGE,
+): { records: RecordSummary[]; next: ArchiveCursor | null } {
+  let i = 0
+  let j = 0
+  const out: RecordSummary[] = []
+  const taken = new Set<string>()
+  const moreA = cursor.assignee + assigned.records.length < assigned.total
+  const moreR = cursor.requester + asked.records.length < asked.total
+  while (out.length < size) {
+    const a = assigned.records[i]
+    const r = asked.records[j]
+    // A window read to its end whose query has more: stop; the next page asks again from there.
+    if ((!a && moreA) || (!r && moreR) || (!a && !r)) break
+    const pick = !r || (a && newerFirst(a, r) <= 0) ? a! : r
+    if (a?.id === pick.id) i++
+    if (r?.id === pick.id) j++
+    if (!taken.has(pick.id)) { taken.add(pick.id); out.push(pick) }
+  }
+  const next = { assignee: cursor.assignee + i, requester: cursor.requester + j }
+  return { records: out, next: next.assignee < assigned.total || next.requester < asked.total ? next : null }
+}
+
+/** The archive's rows (only archived tasks: a record answered in another state is left out). */
+export function archivedTasks(records: RecordSummary[]): ArchivedTask[] {
+  return records.filter(r => r.type === 'task' && r.state === 'cancelled').map(r => ({
+    id: r.id, title: r.title || '（名前なし）', archivedAt: r.updatedAt, personal: r.personal === true,
+  }))
+}

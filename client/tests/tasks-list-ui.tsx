@@ -40,11 +40,22 @@ let data: TaskListData = {
     it({ id: 'meeting-00bb22', type: 'meeting', typeLabel: '会議', title: 'D社 定例 第2回', turn: 'mine', state: 'read', waitingFor: 'どの案件・プロジェクトの会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-d', label: 'D社 定例' } }),
   ],
 }
+// 45 archived tasks, newest first: the folded 「アーカイブ」 shows 20, then 20, then 5.
+const archived = Array.from({ length: 45 }, (_, n) => ({
+  id: `task-arc${String(n).padStart(3, '0')}`, title: `アーカイブした ${n + 1}`, archivedAt: new Date(Date.now() - n * 3600_000).toISOString(), personal: n % 3 === 0,
+}))
 const changed = emitter<{ companyId: string }>()
 const acted: string[] = []
 
 installElectronAPI({
   getTaskList: async () => ({ success: true, data }),
+  getArchivedTasks: async (_companyId, cursor) => {
+    acted.push(`archived ${cursor.assignee}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
+    const at = cursor.assignee
+    const end = Math.min(at + 20, archived.length)
+    return { success: true, items: archived.slice(at, end), next: end < archived.length ? { assignee: end, requester: end } : null }
+  },
   onNotificationsChanged: changed.subscribe,
   getCalendarToday: async () => ({
     success: true,

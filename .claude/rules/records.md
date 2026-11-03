@@ -721,6 +721,10 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 - Records imported through an earlier connection of an outside system are marked
   (`fromOldConnection`, `notice`) and left out of the query unless `includeOldConnection: true`
   and out of 「あなたの番」 (`plugins.md` "Connections").
+- **Order**: most recently changed first — the later of the record's own time and its state's
+  (an action changes only the state; a task archived today sorts first, the app's 「アーカイブ」
+  pages by it: `tasks-ui.md` "The archive") — then the id; each answer's `updatedAt` is that time.
+  Test: `tests/unit/record-query-order.test.ts`.
 - Fixed shape only — no free SQL (0.23-1): type or interface, states, server-field equality (`{
   in: [...] }`), a tag (`{ contains }`, "Tags"), links up to 2 hops (traversal passes only through readable records), substring of
   title / summary. With `type`, field names must be server fields of it.
