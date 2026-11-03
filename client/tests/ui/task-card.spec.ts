@@ -428,3 +428,42 @@ test('an archived task: 「アーカイブ済み」, ［戻す］ brings it back
   await expect(page.getByRole('status').filter({ hasText: '一覧に戻しました' })).toBeVisible()
   expectNoPageErrors(state)
 })
+
+// ［＋ 新しいファイル］ (owner decision 2026-11-03, tasks-ui.md "A new file on a task only the member sees"):
+// only on an owner-only task; the name window offers the title; the file is made in today's folder by the
+// screen, linked at the version shown and opened (`file.open` = the active tab). A `.personal/` link row says
+// 「あなたの Mac だけにあるファイル」 instead of 「つながりが切れています」. SCREENSHOTS=<dir> writes the card and the window.
+test('［＋ 新しいファイル］ only on an owner-only task: named, made in today\'s folder, linked, opened; .personal rows say so', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const card = page.getByTestId('task-card')
+  const links = card.getByRole('complementary', { name: 'つながっているもの' })
+  await expect(links).toContainText('打ち合わせメモ.md')
+  await expect(links).toContainText('あなたの Mac だけにあるファイル')
+  await expect(links).not.toContainText('つながりが切れています')
+  if (shots) await card.screenshot({ path: `${shots}/task-card-new-file.png` })
+
+  await links.getByRole('button', { name: '新しいファイル' }).click()
+  await expect(page.getByRole('heading', { name: '新しいファイル（今日のフォルダ・あなたの Mac だけ）' })).toBeVisible()
+  const input = page.getByPlaceholder('メモ.md')
+  const create = page.getByRole('button', { name: '作成', exact: true })
+  await expect(input).toHaveValue('A社 見積書を 150万円 で作り直す.md')
+  if (shots) await page.screenshot({ path: `${shots}/task-card-new-file-dialog.png` })
+  // A taken name keeps the window open with the reason; nothing is linked or opened.
+  await input.fill('既存.md')
+  await create.click()
+  await expect(page.getByRole('alert')).toContainText('同じ名前のファイルまたはフォルダがすでにあります')
+  await expect(page.locator('#acted')).toHaveText('today 既存.md')
+  await input.fill('見積メモ.md')
+  await create.click()
+  await expect(page.locator('#acted')).toHaveText('today 既存.md,today 見積メモ.md,link 営業/.personal/inbox/日付別/2026/20261103/見積メモ.md@3,open /Users/me/company/営業/.personal/inbox/日付別/2026/20261103/見積メモ.md')
+  await expect(input).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a task shown to a department keeps only ［ファイルをつなぐ］', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { shared: '1' })
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await expect(links.getByRole('button', { name: 'ファイルをつなぐ' })).toBeVisible()
+  await expect(links.getByRole('button', { name: '新しいファイル' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

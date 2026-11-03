@@ -19,6 +19,11 @@ paths:
   - "client/tests/tasks-*.test.ts"
   - "client/tests/tasks-*-ui.*"
   - "client/tests/ui/tasks-*.spec.ts"
+  - "client/shared/today-folder.ts"
+  - "client/tests/today-folder.test.ts"
+  - "client/src/shared/lib/todayFolderSetting.ts"
+  - "client/src/features/workspace/hooks/useTodayFolder.ts"
+  - "client/src/features/settings/components/TodayFolderSetting.tsx"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -408,6 +413,45 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   relay, the registry's model; only tags in use; every fallback; nothing sent without tags),
   `task-card.test.ts` (`canSetTags`), `tasks-list.spec.ts` (a variant suggested, added only when
   picked), `task-card.spec.ts` (asked on the press inside the tag editor, `set_tags` with the existing tags).
+
+## 今日のフォルダ (owner decision 2026-11-03, the Obsidian daily-note idea)
+
+- **Where**: `<department>/.personal/inbox/日付別/YYYY/YYYYMMDD/` (`todayFolderPath`,
+  `client/shared/today-folder.ts`) — on the member's Mac only (`.personal/` is never synced; push
+  checker `[PERSONAL_PATH]`). The date is **the company's day** (`dayWindow`, Japan time until a
+  company setting exists), the same "today" as the task list, so a note written at 00:30 lands in
+  the day the list calls today.
+- **Which department** (`todayFolderDepartment`): the member's choice in 設定 → 自分の設定 「今日のフォルダ」
+  (`TodayFolderSetting.tsx`, per company on this PC: localStorage `acb.todayFolder:<company id>`,
+  `src/shared/lib/todayFolderSetting.ts`) while that department is downloaded here; otherwise
+  おまかせ = the first department the member belongs to (所属, `getMyDepartments`, in the tabs' order)
+  that is downloaded, else the first downloaded one (所属 unknown offline). A choice not downloaded
+  now is said in the row and おまかせ is used meanwhile. `useTodayFolder` (`features/workspace`)
+  composes it for AppShell; the settings row is AppShell's (`SettingsPanel` `todayFolder` slot).
+- **「今日のフォルダを開く」**: the file panel header's calendar button and the command
+  `files.openToday` (⌘⇧T, `commands.md`), from any department: makes the folder when missing
+  (`ensureTodayFolder`, `fs:createDirectory` = `mkdir -p`; main refuses a folder not downloaded),
+  switches to that department's files and reveals it in the tree (parents opened, selected,
+  dot files shown: `FileTreePanel` `controls.reveal`). None downloaded → a notice.
+- Tests: `client/tests/today-folder.test.ts` (path and company day, default department, the
+  choice, made only when missing, what main accepts), `tests/ui/skill-layout.spec.ts`
+  (「今日のフォルダを開く」 from another department: made once, selected; the settings row;
+  `SCREENSHOTS=<dir>`).
+
+## A new file on a task only the member sees (owner decision 2026-11-03)
+
+- **［＋ 新しいファイル］** next to ［ファイルをつなぐ］ on an owner-only task's card (`record.personal`);
+  department / company tasks keep only ［ファイルをつなぐ］. The name window is the file tree's
+  (`InputDialog`, `fileNameProblem`, main's `wx` create: a taken name keeps it open with
+  `NAME_TAKEN_MESSAGE`), offering the task's title (`fileNameFromTitle`, `.md`). The screen's
+  `createTodayFile` (AppShell) makes the empty file in today's folder; the card links it
+  (`tasks:linkFile` at the version shown) and opens it with `file.open` (the active tab).
+- **A linked file inside a `.personal/` folder** (`isPersonalPath`, any depth): the server never
+  has it, so its `broken` is ignored; the row says 「あなたの Mac だけにあるファイル」 when the file is
+  on this computer (`useTaskCard` checks with `exists`), else 「作った人の Mac だけにあるファイルです
+  （同期されません）」 and does not open (`fileRow`, `PERSONAL_FILE_WORDS`) — e.g. after 部署に出す.
+- Tests: `tests/ui/task-card.spec.ts` (only on an owner-only task; the name offered; a taken name;
+  made, linked at the version, opened; the `.personal` row words; `SCREENSHOTS=<dir>`).
 
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 

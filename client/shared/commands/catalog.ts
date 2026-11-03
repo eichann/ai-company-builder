@@ -131,6 +131,12 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
   },
   {
+    // 今日のフォルダ (<department>/.personal/inbox/日付別/YYYY/YYYYMMDD): its department's files, the folder
+    // shown in the tree; made when missing. Only this computer is touched (never synced), hence local.
+    id: 'files.openToday', title: '今日のフォルダを開く', class: 'local',
+    args: z.object({}), keybinding: { key: 'mod+shift+t', area: 'app' },
+  },
+  {
     // The left panel's 探す tab, with the cursor in its box.
     id: 'search.show', title: '探すを開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },

@@ -94,6 +94,7 @@ export const TreeRow = memo(function TreeRow({
     <div
       role="button"
       tabIndex={0}
+      data-tree-path={entry.path}
       draggable
       onDragStart={e => actions.current.dragStart(entry, e)}
       onDragEnd={() => actions.current.dragEnd()}
