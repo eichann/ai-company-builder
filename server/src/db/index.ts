@@ -16,7 +16,7 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
+import { migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
@@ -107,6 +107,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateInvitationClaims(conn)
   migrateRecordLedgerProvenance(conn)
   migrateRecordPersonalOwner(conn)
+  migrateRecordLinkCreator(conn)
   migrateAgentEventSandbox(conn)
   // 「もう一方の AI に聞く」: made once, on for the companies that exist then (agents.ts).
   migrateSecondOpinionSetting(conn)

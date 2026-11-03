@@ -17,11 +17,8 @@ export function todayFolderPath(departmentFolder: string, nowMs: number, timeZon
   return `${departmentFolder}/${TODAY_FOLDER_BASE}/${y}/${y}${m}${d}`
 }
 
-/** A company path inside a `.personal/` folder at any depth (A–Z folded, as the push check reads it). */
-export function isPersonalPath(companyPath: string): boolean {
-  const segments = companyPath.normalize('NFC').replace(/\\/g, '/').split('/')
-  return segments.slice(0, -1).some(s => s.replace(/[A-Z]/g, c => c.toLowerCase()) === '.personal')
-}
+/** A company path inside a `.personal/` folder at any depth (one copy, in the core). */
+export { isPersonalPath } from '../../shared/core/records'
 
 /**
  * A today folder as the app builds it (`todayFolderPath`): what main accepts from the screen for
@@ -88,8 +85,12 @@ export function fileNameFromTitle(title: string): string {
   return `${base || 'メモ'}.md`
 }
 
-/** A linked file inside a `.personal/` folder, on a link row (owner decision 2026-11-03). */
+/**
+ * A linked file inside a `.personal/` folder, on a link row (owner decision 2026-11-03). Only the
+ * member who linked it ever gets the row (the server leaves it out for everyone else), so
+ * `elsewhere` is that member on another Mac of theirs.
+ */
 export const PERSONAL_FILE_WORDS = {
   here: 'あなたの Mac だけにあるファイル',
-  elsewhere: '作った人の Mac だけにあるファイルです（同期されません）',
+  elsewhere: 'ほかの Mac で作ったファイルです（この Mac にはありません）',
 } as const

@@ -266,7 +266,7 @@ export function acting(ctx: EngineContext) {
         for (const lc of linkChanges) {
           const target = def.links[lc.name].target
           const before = linkLedgerValue(target, currentLinks.filter(x => x.name === lc.name))
-          nextLinks = withLinkTargets(row.id, nextLinks, lc.name, target, lc.targets)
+          nextLinks = withLinkTargets(row.id, nextLinks, lc.name, target, lc.targets, member.userId)
           const after = linkLedgerValue(target, nextLinks.filter(x => x.name === lc.name))
           if (before !== after) changes.push({ field: `links.${lc.name}`, before, after })
         }

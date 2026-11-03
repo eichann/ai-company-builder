@@ -281,6 +281,31 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
 
+### Links into .personal/ (owner decision 2026-11-03)
+
+A file or folder inside any `.personal/` folder (`isPersonalPath`, `shared/core/records.ts`; any
+depth, A–Z folded) is on one member's Mac only, never synced, and its name can itself be private. A
+link to one is **its maker's alone**: everyone else — owners and admins included — gets no trace of it.
+
+- `record_links.created_by` (nullable, `migrateRecordLinkCreator`) keeps who made a file link: the
+  member of a `file-links` link or a create's file link — their AI counts as them (the consultation
+  AI's `linkNewFile` links as the member) — and an undo that brings a link back gives it to the
+  entry's actor (only its maker could see it to take it off). Rewrites of a record's links keep it
+  (`withLinkTargets` matches each target to the row it had). A row with no maker (a record file's
+  link, a link made before the column): shown only to the owner of an owner-only record, else to
+  nobody.
+- `fileLinkShown(viewer, source, link)` decides, in every answer: the detail (`GET /records/item/:id`,
+  the AI's `records_get`), `linkedToFile` (a record counts only where the caller made the link), 探す's
+  file counts (`record-find.ts`), 経緯 and a replay (`record-engine/personal-links.ts`: someone else's
+  `.personal/` paths are dropped from `links.*` before / after, and an entry left saying nothing is
+  left out; the paths a member linked themselves stay visible to them).
+- Another member's `.personal/` link is not there for `file-links`: removing it answers 404
+  `LINK_NOT_FOUND` as for any link that is not there, and linking the same path (two members' 今日のフォルダ
+  can hold the same name) makes a link of their own.
+- Test: `server/tests/unit/record-personal-links.test.ts` (detail, linkedToFile, 経緯, replay, 探す;
+  unlink / link by another; kept through others' changes and undo; links without a maker) —
+  mutation-checked.
+
 ### Task version 12: 返事待ち says until when (owner decision 2026-11-03 「②」)
 
 - `wait` (返事待ちにする) gains the arg `wait_until` (kind `date`): the 見込み is set with the wait, in

@@ -485,10 +485,14 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   `NAME_TAKEN_MESSAGE`), offering the task's title (`fileNameFromTitle`, `.md`). The screen's
   `createTodayFile` (AppShell) makes the empty file in today's folder; the card links it
   (`tasks:linkFile` at the version shown) and opens it with `file.open` (the active tab).
-- **A linked file inside a `.personal/` folder** (`isPersonalPath`, any depth): the server never
-  has it, so its `broken` is ignored; the row says 「あなたの Mac だけにあるファイル」 when the file is
-  on this computer (`useTaskCard` checks with `exists`), else 「作った人の Mac だけにあるファイルです
-  （同期されません）」 and does not open (`fileRow`, `PERSONAL_FILE_WORDS`) — e.g. after 部署に出す.
+- **A linked file inside a `.personal/` folder** (`isPersonalPath`, any depth, one copy in
+  `shared/core/records.ts`): **only the member who linked it ever gets the row** — the server leaves
+  the link out of every answer to anyone else, file name included (owner decision 2026-11-03;
+  `records.md` "Links into .personal/"), so nobody else sees a line about it, even after 部署に出す.
+  The server never has the file, so its `broken` is ignored; the row says 「あなたの Mac だけにあるファイル」
+  when the file is on this computer (`useTaskCard` checks with `exists`), else — the same member on
+  another Mac of theirs — 「ほかの Mac で作ったファイルです（この Mac にはありません）」 and does not
+  open (`fileRow`, `PERSONAL_FILE_WORDS`).
 - Tests: `tests/ui/task-card.spec.ts` (only on an owner-only task; the name offered; a taken name;
   made, linked at the version, opened; the `.personal` row words; `SCREENSHOTS=<dir>`).
 
