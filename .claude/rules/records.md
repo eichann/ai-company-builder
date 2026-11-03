@@ -1247,6 +1247,18 @@ complete and idempotent; the immutability trigger — mutation-checked).
   person fields take member ids, while replies to the member call a record by its title and
   distinguishing details (担当, 金額, dates) and show internal ids (record ids, outside ids,
   operation ids) only when asked — the tools keep the ids (`RECORDS_INSTRUCTIONS`).
+- **Tool search** (incident 2026-11-03: asked to add a やること, the AI searched with ToolSearch,
+  got five read look-ups and told the member `records_create` was not provided). Claude Code
+  defers MCP tools behind ToolSearch when there are many (the member's claude.ai connectors and
+  `.mcp.json` count too), and a keyword search returns only the first few matches. So Claude gets
+  every record tool with the SDK's per-tool `alwaysLoad` (`_meta['anthropic/alwaysLoad']`) except
+  `onDemand` ones — the actions of types other than `task` (`ALWAYS_LOADED_ACTION_TYPES` in
+  `tools.ts`; ~half the tool text on a company with the business types). The `acb_records`
+  server's MCP instructions (`recordsToolSearchInstructions`, `agents/claude.ts`) name each
+  on-demand tool exactly for `ToolSearch` `select:` and tell the AI never to say a record tool
+  is missing before trying it. A tool without `onDemand` (connectors', plugin operations) is
+  always loaded. Codex is unchanged (loopback server as before; read look-ups only). Test:
+  `client/tests/claude-tool-search.test.ts` (mutation-checked).
 - **Names next to person ids** (staging FB 9, 2026-11-02): the AI's look-ups (`GET /my-turn`,
   `/ai-turn`, `POST /query`, `GET /item/:id`, `/item/:id/history` on `/api/records-ai`, and the
   inbox's `GET /items/:id`) add `people` (id → display name, first key so the app's output cut
