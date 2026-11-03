@@ -6,7 +6,7 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -47,6 +47,13 @@ export function getCalendarToday(companyId: string, reads: CalendarReads = windo
 
 export function getTaskList(companyId: string, reads: TaskReads = window.electronAPI): Promise<TaskListResult> {
   return reads.getTaskList(companyId)
+}
+
+/** The folded 「アーカイブ」: archived tasks, newest first, one page (20) from `cursor`. */
+export type ArchiveReads = ElectronPort<'getArchivedTasks'>
+
+export function getArchivedTasks(companyId: string, cursor: ArchiveCursor, reads: ArchiveReads = window.electronAPI): Promise<ArchivedTasksResult> {
+  return reads.getArchivedTasks(companyId, cursor)
 }
 
 /**

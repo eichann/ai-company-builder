@@ -16,6 +16,19 @@ const ASKED_ACTIONS = new Set(['decline'])
 export const LEAVING_ACTIONS = new Set(['decline', 'wait', 'assign', 'cancel', 'request_review'])
 /** Shown elsewhere on the card (the due's 「延ばす」). */
 const ELSEWHERE = new Set(['set_due'])
+/** 確かめる人を決める and 終わったらを決める are one item, 「終わったら」 (owner decision 2026-11-03). */
+const WHEN_DONE_PARTS = new Set(['set_when_done', 'set_reviewer'])
+
+/**
+ * Menu items the card makes of the type's actions (never sent under these names):
+ * - 「自分が担当する」: `assign` to the member with a short note (the type requires one), at the top
+ *   while nobody holds the task;
+ * - 「終わったら」: `set_reviewer` and `set_when_done` in one chooser (知らせるだけ / 〇〇さんに確かめてもらう).
+ */
+export const SELF_ASSIGN = 'self_assign'
+export const WHEN_DONE = 'when_done'
+/** The note 「自分が担当する」 sends (`assign` requires one; it reads well in 経緯). */
+export const SELF_ASSIGN_NOTE = '自分が担当します'
 
 export interface ActionPlacement {
   main: TaskCardAction | null
@@ -25,16 +38,18 @@ export interface ActionPlacement {
 }
 
 /** The order members meet them in the 「…」 menu. */
-const ORDER = ['complete', 'start', 'reopen', 'request_review', 'wait', 'assign', 'send_back', 'decline', 'cancel']
+const ORDER = [SELF_ASSIGN, 'complete', 'start', 'reopen', 'request_review', 'wait', 'assign', WHEN_DONE, 'send_back', 'decline', 'cancel']
 
 const rank = (action: string) => (ORDER.indexOf(action) + 1 || 99)
 
 export function placeActions(card: TaskCardData, team: boolean): ActionPlacement {
   const withSomeone = !!card.names.requester && !(card.roles.assignee && card.roles.requester)
-  const offered = card.actions.filter(a => !ELSEWHERE.has(a.action))
-    .filter(a => (!TEAM_ACTIONS.has(a.action) || (team && withSomeone) || isHandToChecker(card, a)) && (!ASKED_ACTIONS.has(a.action) || withSomeone))
-  const find = (name: string, pred: (a: TaskCardAction) => boolean = () => true) => offered.find(a => a.action === name && pred(a)) ?? null
   const state = card.record.state
+  const offered = card.actions.filter(a => !ELSEWHERE.has(a.action) && !WHEN_DONE_PARTS.has(a.action))
+    .filter(a => (!TEAM_ACTIONS.has(a.action) || (team && withSomeone) || isHandToChecker(card, a)) && (!ASKED_ACTIONS.has(a.action) || withSomeone))
+    // 「要らない（AI の案を外す）」 only on an AI proposal (the type also allows it from 未着手; the card does not offer it there).
+    .filter(a => a.action !== 'dismiss' || state === 'proposed')
+  const find = (name: string, pred: (a: TaskCardAction) => boolean = () => true) => offered.find(a => a.action === name && pred(a)) ?? null
 
   let main: TaskCardAction | null = null
   let status: string | null = null
@@ -46,6 +61,8 @@ export function placeActions(card: TaskCardData, team: boolean): ActionPlacement
     // Returned to the requester: who does it next is the question, not finishing it.
     main = find('assign')
   }
+  // Archived: ［戻す］ is the one thing to do.
+  if (!status && state === 'cancelled') main = find('reopen')
   if (!status && !main) {
     main = find('adopt')
       ?? find('take_over')
@@ -54,8 +71,26 @@ export function placeActions(card: TaskCardData, team: boolean): ActionPlacement
       ?? find('complete', a => !a.needsOk)
       ?? find('complete')
   }
-  const more = offered.filter(a => a !== main).sort((a, b) => rank(a.action) - rank(b.action))
+  const extra: TaskCardAction[] = []
+  const assign = find('assign')
+  if (assign && !card.assigneeId) extra.push({ ...assign, action: SELF_ASSIGN, title: '自分が担当する', args: [], noteRequired: false })
+  const whenDone = card.actions.find(a => a.action === 'set_when_done')
+  if (whenDone) extra.push({ ...whenDone, action: WHEN_DONE, title: '終わったら', args: [], noteRequired: false })
+  const more = [...offered.filter(a => a !== main), ...extra].sort((a, b) => rank(a.action) - rank(b.action))
   return { main, status, more }
+}
+
+/**
+ * 「終わったら」's chooser: the steps that make it 知らせるだけ, or 確かめてから with `reviewer` as the
+ * 確かめる人 (set_reviewer first, then set_when_done; only what changes). Empty = nothing to change.
+ */
+export function whenDoneSteps(card: TaskCardData, choice: 'notify' | 'check', reviewer: string | null): Array<{ action: string; args: Record<string, string> }> {
+  if (choice === 'notify') return card.whenDone === 'check' ? [{ action: 'set_when_done', args: { when_done: 'notify' } }] : []
+  if (!reviewer) return []
+  const steps: Array<{ action: string; args: Record<string, string> }> = []
+  if (reviewer !== card.reviewerId) steps.push({ action: 'set_reviewer', args: { reviewer } })
+  if (card.whenDone !== 'check') steps.push({ action: 'set_when_done', args: { when_done: 'check' } })
+  return steps
 }
 
 /** 確かめてから: 「終わったので見てもらう」 is how the assignee finishes, not a team extra. */
@@ -67,7 +102,7 @@ function isHandToChecker(card: TaskCardData, a: TaskCardAction): boolean {
 export function actionText(a: TaskCardAction, card?: Partial<Pick<TaskCardData, 'review' | 'record'>>): string {
   const declined = card?.record?.state === 'declined'
   switch (a.action) {
-    case 'reopen': return declined ? 'やり直す（同じ人にもう一度）' : a.title
+    case 'reopen': return declined ? 'やり直す（同じ人にもう一度）' : card?.record?.state === 'cancelled' ? '戻す' : a.title
     case 'complete': return a.needsOk ? '完了にする（OK をもらった）' : card?.review ? '確認を終える' : '完了にする'
     case 'adopt': return '足す'
     case 'dismiss': return '要らない（AI の案を外す）'
@@ -76,9 +111,20 @@ export function actionText(a: TaskCardAction, card?: Partial<Pick<TaskCardData, 
     case 'start': return '進めている印をつける'
     case 'assign': return '人に頼む（担当を替える）'
     case 'decline': return '受けられない（頼んだ人に返す）'
-    case 'cancel': return declined ? '中止する' : 'やめる（しまう）'
+    // アーカイブ (owner decision 2026-11-03): the type's 中止する in the app's words, in every state.
+    case 'cancel': return 'アーカイブ'
     default: return a.title
   }
+}
+
+/** アーカイブ's line (menu and window): what it does and how it comes back. */
+export const ARCHIVE_HINT = '一覧から外します。消しません。［戻す］で元に戻せます'
+
+/** 「終わったら」's line in the menu: how it is now. */
+function whenDoneHint(card: TaskCardData): string {
+  if (card.whenDone !== 'check') return 'いまは「知らせるだけ」。確かめてもらう人も決められます'
+  const who = card.reviewerId === card.self.id ? '自分' : card.names.reviewer ? `${card.names.reviewer}さん` : '確かめる人'
+  return `いまは「${who}に確かめてもらう」`
 }
 
 /** One line on what the action does (the 「…」 menu). */
@@ -87,13 +133,15 @@ export function actionHint(a: TaskCardAction, card: TaskCardData): string | unde
   switch (a.action) {
     case 'complete': return a.needsOk ? '確かめる人が ACB の外で OK をくれたとき。誰の OK かを書きます' : undefined
     case 'start': return '手を付けたことを見せます（付けなくても完了にできます）'
-    case 'reopen': return card.record.state === 'declined' ? '同じ人に、もう一度頼みます' : '完了を取り消して、担当の番に戻します'
+    case 'reopen': return card.record.state === 'declined' ? '同じ人に、もう一度頼みます' : card.record.state === 'cancelled' ? '一覧に戻して、担当の番にします' : '完了を取り消して、担当の番に戻します'
     case 'request_review': return '確かめる人の番になります。その人の OK で完了です'
     case 'wait': return '相手の返事を待つ間、あなたの番から外れます'
     case 'assign': return '頼んだ相手の番になります。あなたの一覧では「ほかの人の番」に残ります'
     case 'send_back': return '理由を添えて、担当に戻します'
     case 'decline': return `わけを添えて、${requester}に返します`
-    case 'cancel': return '消しません。「やり直す」で戻せます'
+    case 'cancel': return ARCHIVE_HINT
+    case SELF_ASSIGN: return 'あなたが担当になり、あなたの番になります'
+    case WHEN_DONE: return whenDoneHint(card)
     case 'adopt': return 'AI の案を、ふつうのやることにします'
     case 'dismiss': return '消しません。「案に戻す」で戻せます'
     case 'propose_again': return 'しまった案を、もう一度案にします'
@@ -111,7 +159,7 @@ export function leavingWords(a: TaskCardAction, card: TaskCardData, chosen: stri
     case 'wait': return { title: '返事待ちにしますか？', what: 'あなたの番から外れ、「ほかの人の番・返事待ち」に移ります', tell: 'だれにも知らせません', done: '返事待ちにしました' }
     case 'assign': return { title: '人に頼みますか？', what: `${who ?? '選んだ人'}の番になります。あなたの一覧では「ほかの人の番」に残ります`, tell: who ?? '選んだ人', done: `${who ?? '選んだ人'}に頼みました` }
     case 'request_review': return { title: '見てもらいますか？', what: `${who ?? '確かめる人'}の番になります。その人の OK で完了です`, tell: who ?? '確かめる人', done: `${who ?? '確かめる人'}に見てもらいます` }
-    case 'cancel': return { title: 'このやることをしまいますか？', what: '一覧から外れます（消しません。「やり直す」で戻せます）', tell: card.roles.assignee ? 'だれにも知らせません' : assignee, done: 'しまいました' }
+    case 'cancel': return { title: 'アーカイブしますか？', what: ARCHIVE_HINT, tell: card.roles.assignee ? 'だれにも知らせません' : assignee, done: 'アーカイブしました' }
     default: return { title: actionText(a), what: '', tell: '', done: `${actionText(a)}にしました` }
   }
 }
@@ -134,7 +182,8 @@ export function doneWords(a: TaskCardAction, card: TaskCardData): string {
     case 'accept': return requester ? `引き受けました。${requester}に知らせました` : '引き受けました'
     case 'take_over': return 'AI から引き取りました'
     case 'start': return '進めている印をつけました'
-    case 'reopen': return 'やり直しにしました'
+    case 'reopen': return card.record.state === 'cancelled' ? '一覧に戻しました' : 'やり直しにしました'
+    case SELF_ASSIGN: return '自分が担当になりました'
     case 'adopt': return 'やることに足しました'
     case 'dismiss': return 'しまいました（「案に戻す」で戻せます）'
     case 'propose_again': return '案に戻しました'

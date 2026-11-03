@@ -4,7 +4,7 @@ import { coreTypeDefinitions } from '../../../../shared/core/core-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import type { RecordDetail, RecordSummary } from '../../../../shared/types/records'
 import { taskCardOf } from '../../../shared/task-card'
-import { actionText, placeActions, whenDoneLine } from './cardActions'
+import { actionHint, actionText, doneWords, leavingWords, placeActions, SELF_ASSIGN, WHEN_DONE, whenDoneLine, whenDoneSteps } from './cardActions'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
@@ -77,17 +77,87 @@ test('an AI proposal opened on its own: 「足す」 is the main action, 「要�
   const p = placeActions(proposal, false)
   assert.equal(p.main?.action, 'adopt')
   assert.ok(p.more.some(a => a.action === 'dismiss'))
-  const aiMade = placeActions(card(task('todo', { assignee: 'u-tanaka', requested_by: ME })), false)
-  assert.equal(actionText(aiMade.more.find(a => a.action === 'dismiss')!), '要らない（AI の案を外す）')
+  assert.equal(actionText(p.more.find(a => a.action === 'dismiss')!), '要らない（AI の案を外す）')
   const review = card(task('todo', { assignee: ME, requested_by: ME, task_kind: 'minutes_review' }))
   assert.equal(actionText(placeActions(review, false).main!, { review: { meetingId: 'm', meetingTitle: 'm', summary: null, decisions: [] } }), '確認を終える')
 })
 
-test('受けられないと返した: the requester main action is 担当を替える; やり直す（同じ人にもう一度）and 中止する are in 「…」, 完了 never first', () => {
+test('受けられないと返した: the requester main action is 担当を替える; やり直す（同じ人にもう一度）and アーカイブ are in 「…」, 完了 never first', () => {
   const returned = card(task('declined', { assignee: 'u-tanaka', requested_by: ME }))
   const p = placeActions(returned, false)
   assert.equal(p.main?.action, 'assign')
   const more = Object.fromEntries(p.more.map(a => [a.action, actionText(a, returned)]))
   assert.equal(more.reopen, 'やり直す（同じ人にもう一度）')
-  assert.equal(more.cancel, '中止する')
+  assert.equal(more.cancel, 'アーカイブ')
+})
+
+test('「要らない（AI の案を外す）」 only while the task is an AI proposal (owner decision 2026-11-03), though the type allows it from 未着手 too', () => {
+  for (const state of ['todo', 'awaiting_acceptance']) {
+    for (const fields of [{ assignee: 'u-tanaka', requested_by: ME }, { assignee: ME, requested_by: ME }] as Array<Record<string, string>>) {
+      const c = card(task(state, fields))
+      assert.ok(c.actions.some(a => a.action === 'dismiss'), `the type offers it (${state})`)
+      assert.ok(!placeActions(c, true).more.some(a => a.action === 'dismiss'), `not in 「…」 (${state})`)
+    }
+  }
+  assert.ok(placeActions(card(task('proposed', { assignee: ME, requested_by: ME })), false).more.some(a => a.action === 'dismiss'))
+})
+
+test('アーカイブ: the label, its line and window in plain words (normal colour); archived, ［戻す］ is the main button; やり直す stays for a done task', () => {
+  const asked = card(task('todo', { assignee: 'u-tanaka', requested_by: ME }))
+  const archive = placeActions(asked, false).more.find(a => a.action === 'cancel')!
+  assert.equal(actionText(archive, asked), 'アーカイブ')
+  assert.equal(actionHint(archive, asked), '一覧から外します。消しません。［戻す］で元に戻せます')
+  const words = leavingWords(archive, asked, null)
+  assert.deepEqual([words.title, words.what, words.tell, words.done], ['アーカイブしますか？', '一覧から外します。消しません。［戻す］で元に戻せます', '田中さん', 'アーカイブしました'])
+
+  const archived = card(task('cancelled', { assignee: 'u-tanaka', requested_by: ME }))
+  assert.equal(archived.record.stateLabel, 'アーカイブ済み')
+  const p = placeActions(archived, false)
+  assert.equal(p.main?.action, 'reopen')
+  assert.equal(actionText(p.main!, archived), '戻す')
+  assert.equal(doneWords(p.main!, archived), '一覧に戻しました')
+
+  const done = card(task('done', { assignee: 'u-tanaka', requested_by: ME }))
+  const reopen = placeActions(done, false).more.find(a => a.action === 'reopen')!
+  assert.equal(actionText(reopen, done), 'やり直す')
+})
+
+test('アーカイブ in 経緯: 「〇〇さんがアーカイブしました」 and 「…アーカイブから戻しました」', () => {
+  const entries = [
+    { version: 5, action: 'cancel', actorId: ME, actorKind: 'human', at: '2026-11-05T02:00:00.000Z', note: 'もう要らない', fromState: 'todo', toState: 'cancelled', changes: [] },
+    { version: 6, action: 'reopen', actorId: ME, actorKind: 'human', at: '2026-11-05T03:00:00.000Z', note: '', fromState: 'cancelled', toState: 'in_progress', changes: [] },
+  ] as unknown as LedgerEntry[]
+  const c = card(task('in_progress', { assignee: 'u-tanaka', requested_by: ME }), [], entries)
+  assert.deepEqual(c.history.map(h => h.text), ['佐藤さんがアーカイブから戻しました', '佐藤さんがアーカイブしました（もう要らない）'])
+})
+
+test('「終わったら」 is one item instead of 確かめる人を決める and 終わったらを決める; its chooser sets the person and 確かめてから together', () => {
+  const c = card(task('todo', { assignee: 'u-tanaka', requested_by: ME, when_done: 'notify' }))
+  const more = placeActions(c, false).more.map(a => a.action)
+  assert.ok(more.includes(WHEN_DONE))
+  assert.ok(!more.includes('set_when_done') && !more.includes('set_reviewer'))
+  assert.equal(actionText(placeActions(c, false).more.find(a => a.action === WHEN_DONE)!, c), '終わったら')
+  // 〇〇さんに確かめてもらう: the person first, then 確かめてから — both in one press.
+  assert.deepEqual(whenDoneSteps(c, 'check', BOSS), [
+    { action: 'set_reviewer', args: { reviewer: BOSS } },
+    { action: 'set_when_done', args: { when_done: 'check' } },
+  ])
+  assert.deepEqual(whenDoneSteps(c, 'check', null), [])
+  assert.deepEqual(whenDoneSteps(c, 'notify', null), [])
+  // Already 確かめてから with 阿部さん: another person only changes the person; 知らせるだけ only 終わったら.
+  const checked = card(task('todo', { assignee: 'u-tanaka', requested_by: ME, when_done: 'check', reviewer: BOSS }))
+  assert.deepEqual(whenDoneSteps(checked, 'check', ME), [{ action: 'set_reviewer', args: { reviewer: ME } }])
+  assert.deepEqual(whenDoneSteps(checked, 'check', BOSS), [])
+  assert.deepEqual(whenDoneSteps(checked, 'notify', null), [{ action: 'set_when_done', args: { when_done: 'notify' } }])
+  // Not for whom the type does not allow it (the assignee).
+  assert.ok(!placeActions(card(task('todo', { assignee: ME, requested_by: BOSS })), false).more.some(a => a.action === WHEN_DONE))
+})
+
+test('nobody holds it: 「自分が担当する」 heads the 「…」; with an assignee it is not offered', () => {
+  const unassigned = card(task('todo', { requested_by: ME }))
+  const p = placeActions(unassigned, false)
+  assert.equal(p.more[0]?.action, SELF_ASSIGN)
+  assert.equal(actionText(p.more[0], unassigned), '自分が担当する')
+  assert.equal(unassigned.self.id, ME)
+  assert.ok(!placeActions(card(task('todo', { assignee: 'u-tanaka', requested_by: ME })), false).more.some(a => a.action === SELF_ASSIGN))
 })

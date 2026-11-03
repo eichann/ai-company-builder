@@ -206,3 +206,29 @@ test('a task row\'s 「相談する」 asks for a consultation about that task, 
   await expect(page.getByTestId('card')).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// The folded 「アーカイブ」 (owner decision 2026-11-03): read only when opened, 20 at a time, newest
+// first, 「さらに読み込む」 until the end; a row opens its card. SCREENSHOTS=<dir> writes the section.
+test('「アーカイブ」 at the bottom: folded until opened, 20 newest first, then 20 more, then the rest', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  // Screenshots: the narrow column the list lives in, tall enough for a whole page of 20.
+  if (process.env.SCREENSHOTS) await page.setViewportSize({ width: 360, height: 2400 })
+  const archive = page.getByTestId('archive')
+  await expect(archive.getByRole('button', { name: /アーカイブ/ })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('#acted')).not.toContainText('archived')
+  await archive.getByRole('button', { name: /アーカイブ/ }).click()
+  const rows = archive.locator('[data-record-id]')
+  await expect(rows).toHaveCount(20)
+  await expect(rows.first()).toContainText('アーカイブした 1')
+  if (process.env.SCREENSHOTS) await archive.screenshot({ path: `${process.env.SCREENSHOTS}/archive-section.png` })
+  await archive.getByRole('button', { name: 'さらに読み込む' }).click()
+  await expect(rows).toHaveCount(40)
+  await archive.getByRole('button', { name: 'さらに読み込む' }).click()
+  await expect(rows).toHaveCount(45)
+  await expect(archive.getByRole('button', { name: 'さらに読み込む' })).toHaveCount(0)
+  if (process.env.SCREENSHOTS) await archive.screenshot({ path: `${process.env.SCREENSHOTS}/archive-section-end.png` })
+  await expect(page.locator('#acted')).toHaveText('archived 0,archived 20,archived 40')
+  await rows.nth(44).click()
+  await expect(page.getByTestId('card')).toHaveText('カード：task-arc044')
+  expectNoPageErrors(state)
+})

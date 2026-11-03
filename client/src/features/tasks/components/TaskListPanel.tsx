@@ -8,6 +8,7 @@ import { useCalendarToday } from '../hooks/useCalendarToday'
 import { bundleListWord, companyNow, departmentBundleKind,companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
 import { CALM } from '../../../../shared/thing-words'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
+import { ArchiveSection } from './ArchiveSection'
 import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
@@ -246,6 +247,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             </p>
           )}
           {sections.map(section)}
+          {list.data?.available && <ArchiveSection companyId={companyId} activeRecordId={activeRecordId} onOpen={onOpen} />}
           {calendar?.reason === 'not-connected' && shownTag === null && (
             <p className="px-2.5 text-[10.5px] text-gray-400">設定で Google の予定を読む許可をすると、今日の予定もここに並びます。</p>
           )}
