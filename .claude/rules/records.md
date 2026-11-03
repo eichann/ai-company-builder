@@ -1294,7 +1294,8 @@ complete and idempotent; the immutability trigger — mutation-checked).
 ## The app's views (milestone 5 U8, design §7)
 
 Read only, with the member's session in main (`client/electron/features/record-views/ipc.ts`:
-`recordViews:search` / `card` / `forFile`; shapes and wording in `client/shared/record-views.ts`).
+`recordViews:search` / `card` / `forFile` / `topics`; shapes and wording in `client/shared/record-views.ts`,
+`topics` in `client/shared/consultation-topics.ts`).
 Main only reshapes the server's answers — nothing is filtered or added on the app's side.
 
 - **Kinds** people see (`recordKindOf`): まとまり (any type implementing `bundle`: a 案件, a 企画),

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, CircleNotch, Eye, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, CircleNotch, Eye, LinkSimple, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
 import type { ChatSessionSummary } from '../../../../shared/chat-history'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { ThingIcon } from '../../../shared/ui/ThingIcon'
 
-import { paginateConversationRows, buildConversationRows, focusConversationRows, isEmptyConversation, type ConversationTab } from '../conversationRows'
+import { paginateConversationRows, buildConversationRows, focusConversationRows, isEmptyConversation, markMatches, type ConversationTab } from '../conversationRows'
+import { useConsultationTopics } from '../consultationTopicsStore'
 import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../consultationStatus'
 import { useConsultationStatuses } from '../consultationStatusStore'
 import { useCollapsedGroups } from '../hooks/useCollapsedGroups'
@@ -30,6 +32,14 @@ interface Props {
 }
 
 const NO_WINDOWS: ReadonlyMap<string, ChatWindowStatus> = new Map()
+const SEARCH_DELAY_MS = 200
+
+/** The parts of `text` the search matched, marked. */
+function Marked({ text, query }: { text: string; query: string }) {
+  return <>{markMatches(text, query).map((part, i) => part.hit
+    ? <mark key={i} className="bg-amber-200/70 dark:bg-amber-400/25 text-inherit rounded-sm">{part.text}</mark>
+    : <span key={i}>{part.text}</span>)}</>
+}
 
 /** The row's state at a glance: amber when it is the member's turn (shield: a permission, eye: a review, bubble: a question). */
 function StatusIcon({ status }: { status?: ConsultationStatus }) {
@@ -78,10 +88,23 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
 
 export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenSession, onCloseTab, onNew, onHide, windows = NO_WINDOWS, onOpenInWindow, focus }: Props) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
+  // What the box shows, and what the list is narrowed by: typing settles first, and an IME's
+  // unconfirmed text never narrows (the list would jump at every kana).
+  const [text, setText] = useState('')
   const [query, setQueryState] = useState('')
   const [historyLimit, setHistoryLimit] = useState(20)
+  const composing = useRef(false)
+  const searchTimer = useRef<number | undefined>(undefined)
   // A new search starts from the first page again (the panel is keyed by company).
-  const setQuery = (next: string) => { setQueryState(next); setHistoryLimit(20) }
+  const setQuery = (next: string) => { window.clearTimeout(searchTimer.current); setQueryState(next); setHistoryLimit(20) }
+  const typed = (next: string) => {
+    setText(next)
+    window.clearTimeout(searchTimer.current)
+    if (composing.current) return
+    if (!next.trim()) { setQuery(next); return }
+    searchTimer.current = window.setTimeout(() => setQuery(next), SEARCH_DELAY_MS)
+  }
+  const clearSearch = () => { setText(''); setQuery('') }
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)
@@ -133,11 +156,14 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
   // 「すべて表示」 lifts the narrowing for the record it was pressed on; opening another record narrows again.
   const [showAllFor, setShowAllFor] = useState<string | null>(null)
   const focused = focus && showAllFor !== focus.recordId && !query.trim() ? focus : null
+  // The やること / 案件 each consultation is about, as far as the server lets this member read them.
+  const topicIds = useMemo(() => sessions.flatMap(s => (s.topicRecordId ? [s.topicRecordId] : [])), [sessions])
+  const topics = useConsultationTopics(companyId, topicIds)
   // Consultations other windows show are listed as open, with those windows' statuses.
   const rows = useMemo(() => {
-    const all = buildConversationRows(sessions, [...tabs, ...windowTabs(windows, tabs)], query, contentMatches ?? undefined)
+    const all = buildConversationRows(sessions, [...tabs, ...windowTabs(windows, tabs)], query, contentMatches ?? undefined, topics)
     return focused ? focusConversationRows(all, focused.recordId, activeTabId) : all
-  }, [sessions, tabs, windows, query, contentMatches, focused, activeTabId])
+  }, [sessions, tabs, windows, query, contentMatches, topics, focused, activeTabId])
 
   // Each open tab's live status (consultationStatusStore, or the other window's); history rows are done.
   const localStatuses = useConsultationStatuses()
@@ -179,8 +205,13 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
       <button onClick={onNew} className="w-full flex items-center justify-center gap-2 bg-accent text-white rounded-lg py-2 text-sm"><Plus size={16} />AIに相談する</button>
       <label className="flex items-center gap-2 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 py-2">
         <MagnifyingGlass size={16} className="shrink-0 text-gray-400" />
-        <input aria-label="相談を検索" placeholder="タイトル・本文を検索" value={query} onChange={e => setQuery(e.target.value)} className="w-full min-w-0 bg-transparent text-xs outline-none" />
-        {query && <button onClick={() => setQuery('')} aria-label="検索をクリア"><X size={12} /></button>}
+        <input aria-label="相談を検索" placeholder="相談の名前や、やること・案件の名前で探す" value={text}
+          onChange={e => typed(e.target.value)}
+          onCompositionStart={() => { composing.current = true; window.clearTimeout(searchTimer.current) }}
+          onCompositionEnd={e => { composing.current = false; typed(e.currentTarget.value) }}
+          onKeyDown={e => { if (e.key === 'Escape' && text && !e.nativeEvent.isComposing) { e.preventDefault(); e.stopPropagation(); clearSearch() } }}
+          className="w-full min-w-0 bg-transparent text-xs outline-none" />
+        {text && <button type="button" onClick={clearSearch} aria-label="検索をクリア"><X size={12} /></button>}
       </label>
       {focused
         ? <p className="flex flex-wrap items-center gap-x-2 text-xs text-gray-500" aria-live="polite">
@@ -188,7 +219,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
           <button type="button" onClick={() => setShowAllFor(focused.recordId)} className="shrink-0 text-accent hover:underline">すべて表示</button>
         </p>
         : <p className="flex items-center gap-2 text-xs text-gray-500" aria-live="polite">
-          {loading ? '読み込んでいます' : `${rows.length}件${query.trim() ? 'の検索結果' : 'の相談'}`}
+          {loading ? '読み込んでいます' : query.trim() ? `${rows.length}件` : `${rows.length}件の相談`}
           {focus && showAllFor === focus.recordId && !query.trim() && <button type="button" onClick={() => setShowAllFor(null)} className="text-accent hover:underline">「{focus.title}」の相談だけにする</button>}
         </p>}
     </div>
@@ -217,7 +248,11 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
               <input autoFocus aria-label="相談名" value={title} onChange={e => setTitle(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditing(null) }} className="w-full rounded border border-accent p-1 text-sm bg-white dark:bg-zinc-800" />
               <div className="flex gap-3 mt-2 text-xs"><button type="submit" disabled={!title.trim()} className="text-accent">保存</button><button type="button" onClick={() => setEditing(null)}>キャンセル</button></div>
             </form> : <button onClick={() => elsewhere ? onOpenInWindow?.(elsewhere) : tab ? onSelectTab(tab.id) : session && onOpenSession(session.id)} aria-current={active ? 'page' : undefined} className="block w-full text-left p-2 focus-visible:outline-accent rounded-lg">
-              <div className="text-sm font-medium flex items-center gap-1.5" title={row.title}>{(live || session) && <StatusIcon status={live} />}<span className="truncate">{row.title}</span>{live?.state === 'unseen' && <span className="ml-auto shrink-0 rounded-full bg-emerald-600 px-1.5 py-px text-[10px] font-semibold text-white">新着</span>}</div>
+              <div className="text-sm font-medium flex items-center gap-1.5" title={row.title}>{(live || session) && <StatusIcon status={live} />}<span className="truncate"><Marked text={row.title} query={query} /></span>{live?.state === 'unseen' && <span className="ml-auto shrink-0 rounded-full bg-emerald-600 px-1.5 py-px text-[10px] font-semibold text-white">新着</span>}</div>
+              {row.linked && <p className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400" data-linked-record={row.linked.id}>
+                <LinkSimple size={10} className="shrink-0 text-gray-400" aria-hidden /><ThingIcon kind={row.linked.thing} typeLabel={row.linked.typeLabel} label={row.linked.kindName} size={11} />
+                <span className="truncate"><Marked text={row.linked.title} query={query} /></span>
+              </p>}
               <p className={`text-xs truncate mt-1 ${live ? LINE_TONE[live.state] ?? 'text-gray-500 dark:text-zinc-400' : 'text-gray-500 dark:text-zinc-400'}`}>{line}</p>
               <div className="flex gap-2 mt-1 text-[10px] text-gray-500"><span>{session ? new Date(session.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '未送信'}</span>{elsewhere ? <span className="inline-flex items-center gap-0.5 text-accent"><AppWindow size={11} aria-hidden />別ウィンドウで表示中</span> : active ? <span className="text-accent">表示中</span> : tab ? <span>開いています</span> : null}</div>
             </button>}

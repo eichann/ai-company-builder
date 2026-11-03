@@ -5,6 +5,8 @@ import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 
 /** Reading the chat history on this computer: summaries, one conversation, body search, changes. */
 export type ChatHistoryReads = ElectronPort<'getChatSessionSummaries' | 'getChatSession' | 'searchChatSessions' | 'onChatHistoryChanged'>
+/** Reading from the company server the やること / 案件 consultations are about (only what the member may read). */
+export type ConsultationTopicReads = ElectronPort<'getConsultationTopics'>
 /** Writing the chat history on this computer: save, rename / pin, delete. */
 export type ChatHistoryWrites = ElectronPort<'saveChatSession' | 'flushChatSession' | 'patchChatSession' | 'deleteChatSession'>
 /** Reading a conversation's hand-off memo (this computer). */
@@ -49,6 +51,10 @@ export function getChatSession(companyId: string, sessionId: string, reads: Chat
 /** Ids of the conversations whose messages match (searched in the main process). */
 export function searchChatSessions(companyId: string, query: string, reads: ChatHistoryReads = window.electronAPI) {
   return reads.searchChatSessions(companyId, query)
+}
+
+export function getConsultationTopics(companyId: string, recordIds: string[], reads: ConsultationTopicReads = window.electronAPI) {
+  return reads.getConsultationTopics(companyId, recordIds)
 }
 
 /** Saves, patches and deletes from any tab; returns the unsubscribe. */

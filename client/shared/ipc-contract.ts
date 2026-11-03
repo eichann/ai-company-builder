@@ -42,6 +42,7 @@ import type { ViewersQuery, ViewersResult } from './viewers'
 import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
+import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
 import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
 import type { TagSuggestions } from './tag-suggest'
@@ -573,6 +574,8 @@ export interface IpcInvokeChannels {
   'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
   /** companyPath: the file's path inside the company folder (`営業部/見積.md`), not a local path. */
   'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
+  /** The やること / 案件 of the member's AI consultations (topic record ids); unreadable → null. */
+  'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -976,6 +979,7 @@ export interface ElectronAPI {
   searchRecords: Invoke<'recordViews:search'>
   getRecordCard: Invoke<'recordViews:card'>
   getRecordsForFile: Invoke<'recordViews:forFile'>
+  getConsultationTopics: Invoke<'recordViews:topics'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>

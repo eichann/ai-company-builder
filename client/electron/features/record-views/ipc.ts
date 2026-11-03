@@ -6,6 +6,8 @@
 //                        opening of the turn when the record waits for this member (records.md
 //                        "Whose turn it was") — nothing is shown or kept here
 //   recordViews:forFile  「つながっているもの」 of an open file
+//   recordViews:topics   the やること / 案件 the member's AI consultations are about (title and kind
+//                        only, for 「AIへの相談」); a plain read — never tells the server it was opened
 // The server answers only what the member may read (counts included); nothing is added here.
 
 import type { TypeDefinition } from '../../../../shared/core/record-types'
@@ -20,6 +22,7 @@ import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/r
 import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { ViewersAnswer, ViewersLabel } from '../../../../shared/types/viewers'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import { consultationTopicOf, MAX_TOPIC_IDS, type ConsultationTopic, type ConsultationTopicsResult } from '../../../shared/consultation-topics'
 
 export interface RecordViewsDeps {
   baseUrl: () => string
@@ -87,6 +90,27 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const p = typeof companyPath === 'string' ? fileLinkPath(companyPath) : null
       if (!COMPANY.test(companyId) || !p) return BAD_INPUT
       return list(companyId, { linkedToFile: p })
+    },
+
+    async topics(companyId: string, recordIds: string[]): Promise<ConsultationTopicsResult> {
+      if (!COMPANY.test(companyId) || !Array.isArray(recordIds)) return BAD_INPUT
+      const ids = [...new Set(recordIds.filter(id => typeof id === 'string' && RECORD_ID_RE.test(id)))].slice(0, MAX_TOPIC_IDS)
+      if (ids.length === 0) return { success: true, topics: {} }
+      const defs = await types(companyId)
+      const topics: Record<string, ConsultationTopic | null> = {}
+      let unreachable: Answer | undefined
+      // A few at a time: a member's history can name many records.
+      for (let i = 0; i < ids.length; i += 6) {
+        await Promise.all(ids.slice(i, i + 6).map(async id => {
+          const a = await call(companyId, 'GET', `/records/item/${encodeURIComponent(id)}`)
+          if (a?.status === 200) topics[id] = consultationTopicOf(a.json?.data as RecordDetail, defs)
+          // Not found, not allowed and records turned off are the same to the member: nothing to show.
+          else if (a && (a.status === 404 || a.status === 403)) topics[id] = null
+          else unreachable = a
+        }))
+      }
+      if (unreachable !== undefined && Object.keys(topics).length === 0) return failure(unreachable)
+      return { success: true, topics }
     },
 
     async card(companyId: string, recordId: string): Promise<RecordCardResult> {
@@ -204,4 +228,5 @@ export function registerRecordViewsIpc(ipc: IpcRegistrar, deps: RecordViewsDeps)
   ipc.handle('recordViews:search', (_event, companyId, text) => api.search(companyId, text))
   ipc.handle('recordViews:card', (_event, companyId, recordId) => api.card(companyId, recordId))
   ipc.handle('recordViews:forFile', (_event, companyId, companyPath) => api.forFile(companyId, companyPath))
+  ipc.handle('recordViews:topics', (_event, companyId, recordIds) => api.topics(companyId, recordIds))
 }

@@ -716,3 +716,45 @@ test('the list narrows to consultations about the record open in the middle; 「
   await list.getByRole('button', { name: '「見積書を作り直す」の相談だけにする' }).click()
   await expect(list.getByText('終わった相談 1', { exact: true })).toHaveCount(0)
 })
+
+test('the search box finds consultations by the やること / 案件 they are about, live, never mid-IME, and Esc restores the list', async ({ page }) => {
+  await page.goto('/tests/chat-header-ui.html?history=many')
+  const list = page.getByRole('complementary', { name: 'AIへの相談' })
+  const box = list.getByRole('textbox', { name: '相談を検索' })
+  const count = list.locator('p[aria-live]')
+  const row = (n: number) => list.locator(`[data-conversation-id="closed-${n - 1}"]`)
+  // Each row shows the record it is about; one the member cannot read shows nothing.
+  await expect(row(4).locator('[data-linked-record="task-0000aa"]')).toContainText('見積書を作り直す')
+  await expect(row(7).locator('[data-linked-record="deal-0000bb"]')).toContainText('株式会社サンプル')
+  await expect(row(6).locator('[data-linked-record]')).toHaveCount(0)
+
+  // Typed without Enter: the やること's name finds its consultation, with the match marked.
+  await box.fill('見積書')
+  await expect(count).toHaveText('1件')
+  await expect(row(4).locator('mark')).toHaveText('見積書')
+  await expect(row(1)).toHaveCount(0)
+  // A task consultation is not found by its task's 案件; the 案件's own consultation is.
+  await box.fill('サンプル')
+  await expect(count).toHaveText('1件')
+  await expect(row(7)).toBeVisible()
+  await expect(row(4)).toHaveCount(0)
+
+  // Esc empties the box and the whole list is back.
+  await box.press('Escape')
+  await expect(box).toHaveValue('')
+  await expect(row(1)).toBeVisible()
+  await expect(row(4)).toBeVisible()
+
+  // While an IME is composing, the unconfirmed text does not narrow the list; confirming does.
+  await box.dispatchEvent('compositionstart')
+  await box.fill('みつもり')
+  await page.waitForTimeout(500)
+  await expect(row(1)).toBeVisible()
+  await box.fill('見積書')
+  await box.dispatchEvent('compositionend')
+  await expect(row(1)).toHaveCount(0)
+  await expect(row(4)).toBeVisible()
+  // × clears it as well.
+  await list.getByRole('button', { name: '検索をクリア' }).click()
+  await expect(row(1)).toBeVisible()
+})

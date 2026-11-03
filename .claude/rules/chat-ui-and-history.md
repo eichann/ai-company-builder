@@ -123,6 +123,21 @@ one place an added agent brings its own controls; everything else asks the regis
   (`focusConversationRows`). 「すべて表示」 lifts it for that record (「「…」の相談だけにする」 brings
   it back; opening another record narrows again); a search always looks at every consultation.
   Tests: `src/features/chat/conversation-rows.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- **Searching the list** (owner, 2026-11-03). The box at the top of 「AIへの相談」 narrows as the
+  member types (no Enter; 200 ms after the last key; an IME's unconfirmed text never narrows,
+  confirming does; Esc or × empties it, and empty is the normal list, the narrowing to the record
+  open in the middle included). It matches the consultation's title, its draft, its body (main's
+  `searchChatSessions`) and the title of the record it is about: its own やること (the topic
+  record), else its 案件 (the topic when that is a 案件) — `consultationLinkedRecord` in
+  `client/shared/consultation-topics.ts`, the same rule 探す uses; a task consultation is not found
+  by its task's 案件. Each row shows that record under its title (link mark, `ThingIcon`, title),
+  with the matched part marked (`markMatches`, NFKC + case-folded as the search), and 「N件」 under
+  the box. Records come from the company server through main (`recordViews:topics`: a plain
+  `GET /records/item/:id` per topic id, never the card's 「開いた」 signal; not found / not allowed →
+  null, never shown or matched; unreachable → left out and asked again), cached per company in
+  `features/chat/consultationTopicsStore.ts` (all asked again when the list shows after a minute).
+  Order and states stay as without a search. Tests: `src/features/chat/conversation-rows.test.ts`,
+  `tests/consultation-topics.test.ts`, `tests/ui/chat-panel.spec.ts` 「the search box finds …」.
 - Group headings are sticky within their section (owner, 2026-10-30): while a group's rows scroll,
   its heading stays at the top of the list until the next group's heading takes over. The sticky
   wrapper has the sidebar's opaque background so rows never show through. Test: the

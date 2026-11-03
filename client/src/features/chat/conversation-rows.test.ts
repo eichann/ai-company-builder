@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, focusConversationRows, paginateConversationRows, paletteConsultations } from './conversationRows'
+import { buildConversationRows, focusConversationRows, markMatches, paginateConversationRows, paletteConsultations } from './conversationRows'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -53,4 +53,39 @@ test('探す ⌘K lists the consultations the list keeps (blank leftovers never)
     session('draft', { sent: false, draftInput: '下書き', updatedAt: '2026-01-02' }),
   ]
   assert.deepEqual(paletteConsultations(sessions).map(c => c.id), ['pin', 'new', 'draft', 'old'])
+})
+
+const look = (id: string, title: string, thing: 'task' | 'bundle') => ({ id, title, thing, typeLabel: thing === 'bundle' ? '案件' : null, kindName: thing === 'bundle' ? '案件' : 'やること' })
+test('search finds a consultation by the title of its やること, else its 案件, never by a record the member cannot read', () => {
+  const topics = new Map([
+    ['task-0000aa', { own: look('task-0000aa', '見積書を作り直す', 'task'), bundle: look('deal-0000bb', '株式会社サンプル', 'bundle') }],
+    ['deal-0000bb', { own: null, bundle: look('deal-0000bb', '株式会社サンプル', 'bundle') }],
+    ['task-0000cc', null],
+  ])
+  const sessions = [
+    session('about-task', { title: '値引きなしで収める案', topicRecordId: 'task-0000aa', updatedAt: '2026-01-03' }),
+    session('about-deal', { title: '定例で聞くこと', topicRecordId: 'deal-0000bb', updatedAt: '2026-01-02' }),
+    session('hidden', { title: '別の相談', topicRecordId: 'task-0000cc', updatedAt: '2026-01-01' }),
+    session('plain', { title: '見積書の書き方', updatedAt: '2025-12-01' }),
+  ]
+  const search = (query: string) => buildConversationRows(sessions, [], query, undefined, topics).map(r => r.session?.id)
+  assert.deepEqual(search('見積書'), ['about-task', 'plain'])
+  // A task consultation is not found by its task's 案件; a 案件 consultation is.
+  assert.deepEqual(search('サンプル'), ['about-deal'])
+  assert.deepEqual(search('別の'), ['hidden'])
+  const rows = buildConversationRows(sessions, [], '', undefined, topics)
+  assert.deepEqual(rows.map(r => r.linked?.id ?? null), ['task-0000aa', 'deal-0000bb', null, null])
+  // Before the server answers nothing is linked, and the list is the same.
+  const before = buildConversationRows(sessions, [], '')
+  assert.deepEqual(before.map(r => r.session?.id), rows.map(r => r.session?.id))
+  assert.ok(before.every(r => r.linked === null))
+})
+
+test('the matched part is marked the way the search matches it (width and case folded)', () => {
+  const marked = (text: string, query: string) => markMatches(text, query).map(p => (p.hit ? `[${p.text}]` : p.text)).join('')
+  assert.equal(marked('見積書を作り直す', '見積'), '[見積]書を作り直す')
+  assert.equal(marked('ＭＴＧの準備とmtg', 'mtg'), '[ＭＴＧ]の準備と[mtg]')
+  assert.equal(marked('㍻の資料', '平'), '[㍻]の資料')
+  assert.equal(marked('見積書', 'なし'), '見積書')
+  assert.equal(marked('見積書', '  '), '見積書')
 })
