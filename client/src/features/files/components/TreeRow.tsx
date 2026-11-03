@@ -5,6 +5,7 @@ import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { ReadOnlyBadge } from '../../../shared/ui/ReadOnlyBadge'
 import { viewersLabel, type MyPrivateFolder } from '../../../../shared/private-folder-ui'
 import type { FileEntry } from '../fileTreeModel'
+import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED } from '../../../shared/lib/dragTypes'
 
 export type ReviewBadge = 'request' | 'unseen' | 'seen' | null
 
@@ -58,6 +59,9 @@ export const TreeRow = memo(function TreeRow({
         onClick={() => actions.current.clearSelection()}
         onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !downloading) { e.preventDefault(); actions.current.download(entry) } }}
         onContextMenu={e => actions.current.contextMenu(entry, e)}
+        // Never moved (it is not here), but it can be dropped on a record to link it.
+        draggable
+        onDragStart={e => { e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([entry.path])); e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED }}
         className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus:ring-1 focus:ring-accent/50 text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
         style={{ paddingLeft: `${8 + depth * 12}px` }}
       >

@@ -27,6 +27,12 @@ paths:
   - "client/shared/consultation-task.ts"
   - "client/tests/consultation-task.test.ts"
   - "client/src/features/chat/components/TopicChip.tsx"
+  - "client/shared/link-drop.ts"
+  - "client/src/shared/hooks/useLinkDrop.ts"
+  - "client/src/shared/ipc/link-drop.ts"
+  - "client/src/shared/ui/LinkDropNotice.tsx"
+  - "client/tests/link-drop.test.ts"
+  - "client/tests/ui/fixtures/link-drop.ts"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -494,13 +500,13 @@ The list and the card are complete without Gmail / Slack; following mail and cha
 
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 
-Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /
+Three entrances (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /
 `…/file-links/remove`, the version the screen shows): the file tree's right-click
-「やることにつなぐ…」 (shown only while the task list shows for the department on screen; the
-chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file dragged from the tree
-onto a task row or onto the card's 「つながっているもの」 (its drop zone 「ここにファイルをドロップしてつなぐ」;
-`src/shared/lib/dragTypes.ts`; the first dragged path inside the company folder), and the card's
-「＋ファイルをつなぐ」 (the company's file names on this computer, `git:listFiles`). Each linked file's
+「やることにつなぐ…」 (shown only while the task list shows for the department on screen, also on a
+folder not downloaded; the chooser `LinkToTaskDialog` lists the member's open tasks from the list), a
+file or folder dropped on a task row or a card's 「つながっているもの」 ("Dropping links" below), and the
+card's 「＋ファイル・フォルダをつなぐ」 (the company's file names on this computer, `git:listFiles`, and
+every folder above them: `linkCandidates`, `model.ts`). Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row
@@ -537,6 +543,58 @@ as its `bundle` at its version. Tests: `client/tests/bundle-create.test.ts`,
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
+
+## Dropping links (owner decision 2026-11-03: 「ドラッグ＆ドロップで全部つなげる」)
+
+One rule: **something dropped on a record's 「つながっているもの」 (`LinkedColumn`, every card: the task
+card, the record card, a 案件's page) or on a task row of the list links it.** Without a drag every
+link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇につなぐ］, ［相談する］).
+
+- **Drag sources** (`src/shared/lib/dragTypes.ts`): the file tree (files and folders,
+  `application/x-file-paths`, `linkMove`; a folder not downloaded drags for linking only, `link`),
+  a task row of the list, a 探す row (a record, a file, a consultation), a tab in the middle (its
+  record, or its file) — records as `application/x-acb-record` `{ id, title }` — and a row of
+  「AIへの相談」 or a consultation under a 探す row as `application/x-acb-consultation`
+  `{ sessionId, title, topicRecordId? }`. Record and consultation drags allow `link` only, so they
+  never move anything in the tree. Malformed ids are not a drag (`draggedRecord`,
+  `draggedConsultation`).
+- **What the drop becomes** (`useLinkDrop`, `src/shared/hooks/`): a file or folder (the first
+  dragged path inside the company folder) or a record goes to main's **`tasks:dropLink(companyId,
+  targetId, dropped, link?)`**, which reads both records and the types now and decides with the pure
+  `dropLinkPlan` (`client/shared/link-drop.ts`): a link of the record dropped on whose target is the
+  dropped type or an interface it implements, else a link of the dropped record back to it (a やること
+  dropped on a 案件 becomes that やること's `bundle`; the link is held, and undone, there). Never an
+  `origin` link, never on a `SERVICE_STATE_TYPES` record. Several fit → a tiny chooser
+  (「…を、どのつながりにしますか？」 + the links' names, 「まとまり」 never shown: an interface link says
+  the kind it reaches); none → one line, 「やることには決めたことはつなげません」 (`typeWord` names
+  both). A file needs a non-origin `file` link (「決めたことにはファイルやフォルダはつなげません」). The
+  link is made at the version just read; the answer's entry gives 「…をつなぎました［取り消す］」
+  (`tasks:undo` of that entry on the record holding it); already linked → 「…はもうつながっています」.
+- **A consultation dropped on a record** becomes one about it (its topic, as 「相談する」 and the
+  AI's task do: `patchChatSession { topicRecordId }`) — 「「見積の相談」をこのやることについての相談に
+  しました［取り消す］」, 取り消す putting the earlier topic back (none → taken off). Setting a topic
+  clears `topicDetached`, so the next save keeps it (`chat-history-store.ts` `patch`).
+- **Wording**: the card's zone says what happens — 「ここに落とすと、つながります」 with what may be
+  dropped under it; the chat input's drop keeps its own 「ファイルをドロップして参照」 (the AI reads it).
+- **Folders** (server `records.md` "Links to files": the detail's `folder: true`, links follow a
+  member's folder move): a folder row (`fileRow` with `PathFacts`, `linkRows.tsx`; group 「フォルダ」,
+  `ThingKind` `folder`) opens the folder in the file tree (command `folder.reveal`, AppShell: its
+  department, the ファイル tab, `reveal`). A folder left out on this computer stays linkable and says
+  「この Mac には未ダウンロード」 (the screen's `notDownloadedFolderOf`; a link to the left-out folder
+  itself is a folder before the server says); a file inside one says the same and does not open.
+- **Who cannot open it**: the cards ask `POST /viewers { linked: { record, paths } }` with the file
+  links shown and draw `cannotOpen` as 「2人はこのファイルを開けません」 / 「…このフォルダを…」
+  (`linkedPathOf`: only a positive count from the server — never who, never a private folder's name).
+- Tests: `client/tests/link-drop.test.ts` (per type: related / bundle both ways / refusal text /
+  origin never / service types / files; main links at the version read, on the holder, refused drops
+  never reach the server; the count), `src/shared/lib/dragTypes.test.ts` (drag data read back,
+  malformed ids refused), `consultation-task.test.ts` (a dropped topic survives a save),
+  `src/features/tasks/model.test.ts` (`linkCandidates`); UI `tests/ui/task-card.spec.ts` (a record
+  dropped with ［取り消す］, the refusal, a consultation and its 取り消す, a folder dropped, folder rows:
+  count, not downloaded, opens in the tree — `?folders=1`, `SCREENSHOTS=<dir>`), `record-card.spec.ts`
+  (a やること dropped on a 案件), `tasks-list.spec.ts` (a file, a record, a consultation on a row; a row
+  drags as its record). Preview pages answer drops with the real `dropLinkPlan`
+  (`tests/ui/fixtures/link-drop.ts`).
 
 ## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
 

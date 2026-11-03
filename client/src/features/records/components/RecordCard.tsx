@@ -3,13 +3,15 @@ import { CircleNotch } from '@phosphor-icons/react'
 import type { RecordCardView, RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import { CALM } from '../../../../shared/thing-words'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
-import { LinkedColumn } from '../../../shared/ui/LinkedColumn'
+import { LinkedColumn, type LinkedDrop } from '../../../shared/ui/LinkedColumn'
+import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
+import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
-import { linkRows } from './linkRows'
+import { linkRows, type NotDownloadedFolderOf } from './linkRows'
 import { IncomingBody, IncomingLine, MeetingBody, MeetingLine, OpenButton } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
 
@@ -32,6 +34,8 @@ interface Props {
   onConsult?: (record: { id: string; title: string }, fresh: boolean) => void
   /** A meeting's or a 来た連絡's 案件・プロジェクト field (［変える］［外す］［〇〇につなぐ］), drawn by the screen. */
   renderBundleField?: (field: BundleFieldContext) => ReactNode
+  /** The not-downloaded folder holding a path (a linked folder left out on this computer is marked). */
+  notDownloadedFolderOf?: NotDownloadedFolderOf
 }
 
 /** What the screen's 案件・プロジェクト field gets: the record, its current one, and how to say what changed. */
@@ -54,10 +58,12 @@ export interface BundleFieldContext {
  * 来た連絡's and a 案件・プロジェクト's own parts: what it is, its body, fields and 経緯 folded, the AI
  * working on it, and 「つながっているもの」.
  */
-export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField }: Props) {
+export function RecordCard({ companyId, rootPath, recordId, renderSections, renderSource, onLoaded, renderApproval, consultations = [], onConsult, renderBundleField, notDownloadedFolderOf }: Props) {
   const { result, reload } = useRecordCard(companyId, recordId, onLoaded)
   const [notice, setNotice] = useState<{ text: string; undo: { recordId: string; version: number } | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
+  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: result?.success ? result.card.record.typeLabel : '記録', onChanged: reload })
   if (result === null) {
     return <div className="h-full flex items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   }
@@ -85,6 +91,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     })
     : null
   const notes = <>
+    <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} />
     {error && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
     {notice && (
       <p role="status" className="flex flex-wrap items-center gap-2 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">
@@ -94,11 +101,13 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     )}
   </>
   return <CardBody card={card} rootPath={rootPath} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
-    field={field} notes={notes} onUnlink={(link, label) => void unlink(link, label)}
+    field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) } }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
 
-function CardBody({ card, rootPath, sections, source, renderApproval, consult, field, notes, onUnlink }: {
+function CardBody({ card, rootPath, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
+  drop: LinkedDrop
+  notDownloadedFolderOf?: NotDownloadedFolderOf
   card: RecordCardView; rootPath: string; sections?: ReactNode; source?: ReactNode; renderApproval?: (approvalId: string) => ReactNode
   consult: ReturnType<typeof consultationLinks>; field: ReactNode; notes: ReactNode; onUnlink: (link: RemovableLink, label: string) => void
 }) {
@@ -128,7 +137,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
   // The 案件 shown at the head is not repeated on the right; where it came from (fixed) has no 「…」.
   const removable = new Map(card.links.flatMap(l => (l.record && l.removable ? [[l.record.id, l.removable] as const] : [])))
   const shownAtHead = field ? new Set(card.links.filter(l => l.bundle && l.record).map(l => l.record!.id)) : new Set<string>()
-  const rows = [...linkRows(card.links, rootPath).filter(r => !shownAtHead.has(r.key)).map(r => ({
+  const rows = [...linkRows(card.links, rootPath, notDownloadedFolderOf).filter(r => !shownAtHead.has(r.key)).map(r => ({
     ...(turns.has(r.key) ? { ...r, sub: turns.get(r.key) ?? undefined } : r),
     ...(removable.has(r.key) ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => onUnlink(removable.get(r.key)!, r.label) }] } : {}),
   })), ...consult.rows]
@@ -137,7 +146,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
       seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
       top={card.ai && <AiBand ai={card.ai} onShowHistory={() => setHistoryOpen(true)} />}
       bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
-      links={<LinkedColumn rows={rows} notice={notes} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
+      links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
       {field}
       {body}
       {source}

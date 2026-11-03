@@ -23,6 +23,8 @@
 //   tasks:linkRecord / tasks:unlinkRecord   a link between two records set or taken off later
 //                 (POST …/record-links[/remove]; a `one` link such as bundle is replaced; the server
 //                 refuses an origin link, a record the member cannot read, or one of another type)
+//   tasks:dropLink  something dropped on a record (a record, a file, a folder): the link its type
+//                 allows (client/shared/link-drop.ts), made at the versions read now, or the choices
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
@@ -39,6 +41,8 @@ import type { MyWorkSwitches } from '../../../../shared/types/work-switches'
 import type { ViewersAnswer } from '../../../../shared/types/viewers'
 import type { MeetingBundleQuestions } from '../../../../shared/types/minutes'
 import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
+import { linkedPaths } from '../../../shared/record-views'
+import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   ARCHIVE_PAGE, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
@@ -195,7 +199,11 @@ export function createTasksApi(deps: TasksDeps) {
       const meeting = meetingAnswer?.status === 200 ? meetingAnswer.json?.data as RecordDetail : undefined
       // 見られる人: only the server's answer for this task (one left out shows nothing).
       const seen = viewers?.status === 200 ? (viewers.json?.data as ViewersAnswer | undefined)?.records?.[recordId] : undefined
-      const card = taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, holidays: holidaysOf(settings), ...(meeting ? { meeting } : {}) })
+      // 「〇人はこのファイルを開けません」: a count per linked path (never who), when the server says.
+      const paths = linkedPaths(detail.links)
+      const gaps = paths.length > 0 ? await call(companyId, 'POST', '/viewers', { linked: { record: recordId, paths } }) : null
+      const cannotOpen = gaps?.status === 200 ? (gaps.json?.data as { cannotOpen?: unknown } | undefined)?.cannotOpen : undefined
+      const card = taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList, teamMode, holidays: holidaysOf(settings), cannotOpen, ...(meeting ? { meeting } : {}) })
       return { success: true, card: seen && typeof seen.text === 'string' ? { ...card, viewers: seen } : card }
     },
 
@@ -278,6 +286,56 @@ export function createTasksApi(deps: TasksDeps) {
       if (a?.status !== 200 && a?.status !== 201) return failure(remove ? 'unlink record' : 'link record', a)
       const entry = (a.json?.data as { entry?: { version?: unknown } | null } | undefined)?.entry
       return { success: true, recordId, ...(typeof entry?.version === 'number' ? { entryVersion: entry.version } : {}) }
+    },
+
+    /**
+     * Something dropped on a record (its 「つながっているもの」 or its list row): which link it becomes
+     * comes from the two types (`dropLinkPlan`); several → the member picks (`link` sent again).
+     * Each record is read now, so the link is made at the version the server has.
+     */
+    async dropLink(companyId: string, targetId: string, dropped: DroppedThing, link?: string): Promise<DropLinkResult> {
+      const bad = { success: false as const, offline: false, error: '入力が正しくありません。' }
+      if (!COMPANY.test(companyId) || typeof targetId !== 'string' || !RECORD_ID_RE.test(targetId)) return bad
+      if (link !== undefined && (typeof link !== 'string' || !ACTION.test(link))) return bad
+      const path = dropped?.kind === 'path' && typeof dropped.path === 'string' ? fileLinkPath(dropped.path.normalize('NFC')) : null
+      const otherId = dropped?.kind === 'record' && typeof dropped.id === 'string' && RECORD_ID_RE.test(dropped.id) ? dropped.id : null
+      if (!path && !otherId) return bad
+      if (otherId === targetId) return { success: false, offline: false, error: '同じものどうしはつなげません。' }
+      const [defs, targetAnswer, otherAnswer] = await Promise.all([
+        typeDefs(companyId),
+        call(companyId, 'GET', `/records/item/${encodeURIComponent(targetId)}`),
+        otherId ? call(companyId, 'GET', `/records/item/${encodeURIComponent(otherId)}`) : Promise.resolve(null),
+      ])
+      const read = (a: Answer, what: string) => {
+        if (a?.status === 200) return (a.json?.data as RecordDetail).record
+        const f = failure(`drop link: ${what}`, a)
+        return { success: false as const, offline: f.offline, error: a?.status === 404 ? '見つかりません。消されたか、見られないものです。' : f.error }
+      }
+      const target = read(targetAnswer, 'target')
+      if ('success' in target) return target
+      const other = otherId ? read(otherAnswer, 'dropped') : null
+      if (other && 'success' in other) return other
+      const plan = dropLinkPlan({ type: target.type, def: defs.get(target.type) }, other ? { type: other.type, def: defs.get(other.type) } : 'file')
+      if ('refused' in plan) return { success: false, offline: false, error: plan.refused }
+      const name = other ? other.title || '（名前なし）' : (path as string).split('/').pop() ?? (path as string)
+      const pick = link !== undefined ? plan.choices.find(c => c.link === link) : plan.choices.length === 1 ? plan.choices[0] : undefined
+      if (!pick) {
+        if (link !== undefined) return bad
+        return { success: true, choose: plan.choices, question: `「${name}」を、どのつながりにしますか？` }
+      }
+      const source = pick.source === 'target' ? target : other!
+      const a = path
+        ? await call(companyId, 'POST', `/records/item/${encodeURIComponent(targetId)}/file-links`, { path, link: pick.link, expectedVersion: target.version })
+        : await call(companyId, 'POST', `/records/item/${encodeURIComponent(source.id)}/record-links`,
+          { link: pick.link, target: pick.source === 'target' ? other!.id : target.id, expectedVersion: source.version })
+      if (a?.status !== 200 && a?.status !== 201) {
+        const f = failure('drop link', a)
+        return { success: false, offline: f.offline, error: f.error }
+      }
+      const data = a.json?.data as { entry?: { version?: unknown } | null; changed?: unknown } | undefined
+      if (data?.changed === false) return { success: true, done: { text: `「${name}」はもうつながっています`, undo: null } }
+      const version = data?.entry?.version
+      return { success: true, done: { text: `「${name}」をつなぎました`, undo: typeof version === 'number' ? { recordId: source.id, version } : null } }
     },
 
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
@@ -468,6 +526,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:createBundle', (_event, companyId, input) => api.createBundle(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))
   ipc.handle('tasks:unlinkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, true))
+  ipc.handle('tasks:dropLink', (_event, companyId, targetId, dropped, link) => api.dropLink(typeof companyId === 'string' ? companyId : '', targetId, dropped, link))
   ipc.handle('tasks:undo', (_event, companyId, recordId, version, expectedVersion) => api.undo(typeof companyId === 'string' ? companyId : '', recordId, version, expectedVersion))
   ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

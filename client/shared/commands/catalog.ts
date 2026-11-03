@@ -15,6 +15,11 @@ export const COMMANDS = defineCommands([
     args: z.object({ path: z.string().min(1).describe('The file\'s absolute path inside the company folder') }),
   },
   {
+    // Shows a folder in the file tree (its department, the ファイル tab), e.g. a folder linked to a record.
+    id: 'folder.reveal', title: 'フォルダをファイルの一覧で開く', class: 'view',
+    args: z.object({ path: z.string().min(1).describe('The folder\'s absolute path inside the company folder') }),
+  },
+  {
     // Sending the message starts the AI on it, hence outbound.
     id: 'chat.newConsultation', title: '新しい相談を始める', class: 'outbound',
     args: z.object({

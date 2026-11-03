@@ -17,7 +17,7 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordFindHome, RecordFindResult, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, findHitView, historyEntries, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
+  cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
@@ -158,13 +158,17 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const detail = item.json?.data as RecordDetail
       const def = defs.get(detail.record.type)
       const entries = history?.status === 200 ? (history.json?.data as { entries?: LedgerEntry[] } | undefined)?.entries ?? [] : []
+      // 「〇人はこのファイルを開けません」: a count per linked path (never who), when the server says.
+      const paths = linkedPaths(detail.links)
+      const gaps = paths.length > 0 ? await call(companyId, 'POST', '/viewers', { linked: { record: recordId, paths } }) : null
+      const cannotOpen = gaps?.status === 200 ? (gaps.json?.data as { cannotOpen?: unknown } | undefined)?.cannotOpen : undefined
       const links: RecordCardLink[] = detail.links.map(l => {
         // Only this record's own link names say something; another record's link to it says nothing more than its kind.
         const label = l.direction === 'out' ? def?.links[l.name]?.label ?? l.name : ''
         const removable = removableOf(detail.record, l)
         return l.record
           ? { label, record: summaryView(l.record, defs.get(l.record.type)), ...(l.direction === 'out' && l.name === 'bundle' ? { bundle: true as const } : {}), ...(l.direction === 'out' && l.name === 'counterpart' ? { counterpart: true as const } : {}), recordVersion: l.record.version, ...(removable ? { removable } : {}) }
-          : { label, path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) }
+          : { label, ...linkedPathOf({ ...l, path: l.path as string }, cannotOpen) }
       })
       const isBundle = def?.implements.includes('bundle') ?? false
       const view = isBundle

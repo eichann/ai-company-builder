@@ -3,9 +3,11 @@ import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask, declineMeetingBundle, linkFileToTask, linkMeetingBundle } from '../api'
+import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle } from '../api'
+import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
+import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { bundleListWord, companyNow, departmentBundleKind,companyPathOf, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
+import { bundleListWord, companyNow, departmentBundleKind, filterByTag, listEvents, listRows, listSections, tagCounts, type ListMode, type ListRow, type ListSection } from '../model'
 import { CALM } from '../../../../shared/thing-words'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { ArchiveSection } from './ArchiveSection'
@@ -86,20 +88,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
     else void run(item, [{ action: c.action }])
   }
-  // A file from the file tree dropped on a task row is linked to it (the first one the server may take).
-  const dropFiles = async (item: TaskListItem, paths: string[]) => {
-    const path = paths.map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
-    if (!path) return
-    setBusy(item.id)
-    setMessage(null)
-    try {
-      const r = await linkFileToTask(companyId, item.id, path, item.version)
-      setMessage(r.success ? `「${path.split('/').pop()}」を「${item.title}」につなぎました（経緯に残り、カードから外せます）` : r.error)
-    } finally {
-      setBusy(null)
-      list.reload()
-    }
-  }
+  // A file, folder, record or consultation dropped on a task row is linked to it (owner decision 2026-11-03).
+  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', onChanged: list.reload })
   const yesBundle = async (item: TaskListItem, bundleId: string) => {
     setBusy(item.id)
     setMessage(null)
@@ -152,7 +142,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
         onHand={ai?.canHand ? () => aiTurns?.handOver(i.id) : null}
-        onDropFiles={i.type === 'task' && i.turn !== 'done' ? paths => void dropFiles(i, paths) : null}
+        onDrop={i.type === 'task' && i.turn !== 'done' ? e => { setMessage(null); return linkDrop.drop(i.id, e) } : null}
         onConsult={i.type === 'task' && onConsult ? () => onConsult({ id: i.id, title: i.title }) : null}
         extra={extra}
       />
@@ -238,6 +228,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
             ))}
           </div>
         )}
+        {linkDrop.notice && <div className="mx-3 my-1"><LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /></div>}
         {(message || list.error) && <p role="alert" className="mx-3 my-1 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">{message ?? list.error}</p>}
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-1.5 pb-2 pt-1">
           {list.data === null && !list.error && <p className="px-2.5 py-2 text-[12px] text-gray-400">{CALM.loading}</p>}

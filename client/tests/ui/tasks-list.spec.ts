@@ -128,7 +128,7 @@ test('a tag suggested for the title (a reading variant) is added to the line onl
   expectNoPageErrors(state)
 })
 
-test('a file dragged from the file tree onto a task row is linked to it, named inside the company folder', async ({ page }) => {
+test('a file dragged from the file tree onto a task row is linked to it, named inside the company folder; a record or consultation too; a row drags as its record', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const target = page.getByTestId('task-row').filter({ hasText: '見積書を作り直す' })
   const data = await page.evaluateHandle(() => {
@@ -138,8 +138,26 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
   })
   await target.dispatchEvent('dragover', { dataTransfer: data })
   await target.dispatchEvent('drop', { dataTransfer: data })
-  await expect(page.locator('#acted')).toHaveText('task-mine02:link 営業/見積書_v2.xlsx@2')
-  await expect(page.getByRole('alert')).toContainText('「見積書_v2.xlsx」を「見積書を作り直す」につなぎました')
+  await expect(page.locator('#acted')).toHaveText('drop task-mine02 営業/見積書_v2.xlsx target:files')
+  await expect(page.getByRole('status').filter({ hasText: '「見積書_v2.xlsx」をつなぎました' })).toBeVisible()
+
+  // A row is a drag source: what it puts on the drag is its record (tasks-ui.md "Dropping links").
+  const other = page.getByTestId('task-row').nth(0)
+  const carried = await page.evaluateHandle(() => new DataTransfer())
+  await other.dispatchEvent('dragstart', { dataTransfer: carried })
+  const record = await carried.evaluate(dt => JSON.parse(dt.getData('application/x-acb-record')) as { id: string })
+  expect(record.id).toMatch(/^[a-z_]+-[0-9a-z]{6,}$/)
+
+  const fromRow = await page.evaluateHandle(() => { const dt = new DataTransfer(); dt.setData('application/x-acb-record', JSON.stringify({ id: 'task-0000zz', title: '会場を押さえる' })); return dt })
+  await target.dispatchEvent('dragover', { dataTransfer: fromRow })
+  await target.dispatchEvent('drop', { dataTransfer: fromRow })
+  await expect(page.locator('#acted')).toContainText('drop task-mine02 task-0000zz target:related')
+
+  const consultation = await page.evaluateHandle(() => { const dt = new DataTransfer(); dt.setData('application/x-acb-consultation', JSON.stringify({ sessionId: 's-7', title: '見積の相談' })); return dt })
+  await target.dispatchEvent('dragover', { dataTransfer: consultation })
+  await target.dispatchEvent('drop', { dataTransfer: consultation })
+  await expect(page.locator('#acted')).toContainText('topic s-7=task-mine02')
+  await expect(page.getByRole('status').filter({ hasText: '「見積の相談」をこのやることについての相談にしました' })).toBeVisible()
   expectNoPageErrors(state)
 })
 

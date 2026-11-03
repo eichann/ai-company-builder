@@ -121,6 +121,16 @@ test('taken off, the topic stays off through the renderer\'s saves and no task b
   assert.throws(() => store.patch('co', 'chat-1', { topicRecordId: '../../x' }))
 })
 
+// tasks-ui.md "Dropping links": a consultation dropped on a やること after its topic was taken off.
+test('a topic the member sets again by dropping the consultation survives the next save', t => {
+  const store = history(t)
+  store.save('co', session())
+  store.patch('co', 'chat-1', { topicRecordId: null })
+  store.patch('co', 'chat-1', { topicRecordId: 'task-0003ef' })
+  store.save('co', session({ writeSequence: 2 }))
+  assert.equal(store.get('co', 'chat-1')?.topicRecordId, 'task-0003ef')
+})
+
 const TYPES = coreTypeDefinitions()
 function server(scope: 'read' | 'act', answers: { item?: Array<{ status: number; body: unknown }>; link?: Array<{ status: number; body: unknown }> } = {}) {
   const seen: Array<{ method: string; url: string; body?: unknown }> = []

@@ -89,9 +89,13 @@ export interface RecordCardLink {
   /** The link's label in the record's type (or the other side's inverse name). */
   label: string
   record?: RecordViewSummary
-  /** A file of the company folder (company path). */
+  /** A file or folder of the company folder (company path). */
   path?: string
   broken?: boolean
+  /** With `path`: a folder (its row opens it in the file tree). */
+  folder?: true
+  /** With `path`: how many who can see the record cannot open it (a count, never who or where). */
+  cannotOpen?: number
   /**
    * A link between records that can be taken off by hand (not where it came from, not a service's):
    * the record holding it (`id`, its `version` now) and the link's name there. Absent = no 「…」.
@@ -103,6 +107,28 @@ export interface RecordCardLink {
   counterpart?: true
   /** The linked record's version now (to change it, e.g. put a meeting's 宿題 into a new 案件). */
   recordVersion?: number
+}
+
+/** A file link as the card shows it: the server's `broken` and `folder`, and who cannot open it. */
+export interface LinkedPath { path: string; broken?: boolean; folder?: true; cannotOpen?: number }
+
+/**
+ * A file link of `GET /records/item/:id` with `cannotOpen` from `POST /viewers { linked }` (a
+ * server without them answers neither: the row is a plain file, nobody counted).
+ */
+export function linkedPathOf(l: { path: string; broken?: boolean; folder?: unknown }, cannotOpen: unknown): LinkedPath {
+  const n = cannotOpen && typeof cannotOpen === 'object' ? (cannotOpen as Record<string, unknown>)[l.path] : undefined
+  return {
+    path: l.path,
+    ...(l.broken !== undefined ? { broken: l.broken } : {}),
+    ...(l.folder === true ? { folder: true as const } : {}),
+    ...(typeof n === 'number' && Number.isInteger(n) && n > 0 ? { cannotOpen: n } : {}),
+  }
+}
+
+/** The file links' paths a record answer shows (what `POST /viewers { linked }` asks about). */
+export function linkedPaths(links: ReadonlyArray<{ path?: string; direction?: string }>): string[] {
+  return [...new Set(links.flatMap(l => (l.path !== undefined && l.direction !== 'in' ? [l.path] : [])))].slice(0, 200)
 }
 
 /** What `recordLinks:remove` needs to take one link off (and `tasks:undo` to put it back). */

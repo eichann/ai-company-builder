@@ -475,6 +475,8 @@ export class ChatHistoryStore {
     } else if (patch.topicRecordId !== undefined) {
       if (typeof patch.topicRecordId !== 'string' || !TOPIC_RECORD_RE.test(patch.topicRecordId)) throw new Error('不正な記録です。')
       session.topicRecordId = patch.topicRecordId
+      // Set by the member (a consultation dropped on a やること): a later save must keep it.
+      delete session.topicDetached
     }
     this.replace(entry, session)
     this.schedule(companyId, entry)

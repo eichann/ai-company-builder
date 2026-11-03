@@ -11,6 +11,7 @@ import { useTaskList } from '../src/features/tasks/hooks/useTaskList'
 import { addDays, companyNow } from '../src/features/tasks/model'
 import type { TaskListData, TaskListItem } from '../shared/tasks'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
+import { fakeDropLink } from './ui/fixtures/link-drop'
 
 const now = companyNow(Date.now())
 const day = (n: number) => addDays(now.date, n)
@@ -49,6 +50,9 @@ const acted: string[] = []
 
 installElectronAPI({
   getTaskList: async () => ({ success: true, data }),
+  // Something dropped on a row (a file, folder, record or consultation) links it (tasks-ui.md "Dropping links").
+  dropLinkOnRecord: fakeDropLink(line => { acted.push(line); document.getElementById('acted')!.textContent = acted.join(',') }),
+  patchChatSession: async (_c, sessionId, patch) => { acted.push(`topic ${sessionId}=${String(patch.topicRecordId)}`); document.getElementById('acted')!.textContent = acted.join(','); return {} as never },
   getArchivedTasks: async (_companyId, cursor) => {
     acted.push(`archived ${cursor.assignee}`)
     document.getElementById('acted')!.textContent = acted.join(',')

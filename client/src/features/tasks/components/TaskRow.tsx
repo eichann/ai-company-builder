@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useState, type DragEvent } from 'react'
 import { ArrowBendUpRight, ChatCircleDots, Check, CircleNotch, Clock, Eye, Robot, User, VideoCamera, Warning } from '@phosphor-icons/react'
 import { NEXT_STEP, ONLY_YOU, thingKindOf, type ThingKind } from '../../../../shared/thing-words'
 import { SeenBy, ThingIcon } from '../../../shared/ui/ThingIcon'
 import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
 import type { TaskListItem } from '../../../../shared/tasks'
 import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
-import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
+import { isFileTreeDrag, isLinkableDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
 
 const CHIP = 'shrink-0 rounded px-1 text-[10px]'
 /** Where the automatic 「AI の番」 stands (ai-turns.md "Never silent"), before its reason. */
@@ -30,8 +30,11 @@ interface RowProps {
   onAccept: (() => void) | null
   onRetry: (() => void) | null
   onHand: (() => void) | null
-  /** A file dragged from the file tree onto it (absolute paths); null: it takes no files. */
-  onDropFiles: ((paths: string[]) => void) | null
+  /**
+   * Something dropped on it — a file or folder from the tree, a record, a consultation — to link
+   * (`useLinkDrop`); true when taken. null: it takes no drops.
+   */
+  onDrop: ((e: DragEvent) => boolean) | null
   /** 「相談する」 about this task (null: not offered). */
   onConsult?: (() => void) | null
   /** More buttons for this item (「まとまりを選ぶ」, a meeting's 「自分で読み取る」 / 「今は読まない」). */
@@ -48,7 +51,7 @@ const ROW_STEP: Partial<Record<ThingKind, string>> = {
  * the due, which 案件 / プロジェクト it belongs to (context, not a state). State words stay on the
  * opened record; a finished one is struck through.
  */
-export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand, onDropFiles, onConsult = null, extra = [] }: RowProps) {
+export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand, onDrop, onConsult = null, extra = [] }: RowProps) {
   const [over, setOver] = useState(false)
   const done = item.turn === 'done'
   const when = dueWhen(item.due, now)
@@ -64,9 +67,18 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
     <div
       data-testid="task-row"
       className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${over ? 'outline-dashed outline-2 outline-accent' : ''} ${active ? 'bg-accent/10 dark:bg-accent/20' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
-      onDragOver={onDropFiles ? e => { if (isFileTreeDrag(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(true) } } : undefined}
-      onDragLeave={onDropFiles ? () => setOver(false) : undefined}
-      onDrop={onDropFiles ? e => { setOver(false); const paths = draggedFilePaths(e.dataTransfer); if (paths.length > 0) { e.preventDefault(); onDropFiles(paths) } } : undefined}
+      // The row itself can be dragged onto a record's 「つながっているもの」 (or another row) to link it.
+      draggable
+      onDragStart={e => startRecordDrag(e.dataTransfer, { id: item.id, title: item.title })}
+      onDragOver={onDrop ? e => {
+        if (!isLinkableDrag(e.dataTransfer)) return
+        e.preventDefault()
+        // The file tree allows link and move; a record or consultation only link.
+        e.dataTransfer.dropEffect = isFileTreeDrag(e.dataTransfer) ? 'move' : 'link'
+        setOver(true)
+      } : undefined}
+      onDragLeave={onDrop ? () => setOver(false) : undefined}
+      onDrop={onDrop ? e => { setOver(false); if (onDrop(e)) e.preventDefault() } : undefined}
     >
       <span className="mt-[2px] shrink-0">
         {item.turn === 'ai' && !done ? (ai?.state === 'running' ? <CircleNotch size={15} className="animate-spin text-accent" aria-label="AI が進めています" />
