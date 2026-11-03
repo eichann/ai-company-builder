@@ -29,8 +29,10 @@
  * or moved (git's rename detection) takes every link to it along, unless that
  * would put a path inside a private folder into a record outside that folder,
  * or carry a link across a private folder's edge — then the link stays on
- * the old path and reads as broken (`followRename`). A deleted file's links
- * stay (services/records.ts says they are broken).
+ * the old path and reads as broken (`followRename`). A folder moved or
+ * renamed as a whole comes as a rename of its own (lib/record-files.ts
+ * `folderMoves`), so links to a folder follow it by the same rules. A deleted
+ * file's links stay (services/records.ts says they are broken).
  */
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { isSameOrAncestorPath } from '../../shared/core/paths'

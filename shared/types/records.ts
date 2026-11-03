@@ -239,6 +239,12 @@ export interface RecordLinkView {
    */
   broken?: boolean
   /**
+   * With `path`: a folder (not a file) is at that path on the shared branch now —
+   * the app shows a folder row that opens it in the file tree. Absent for a
+   * file, a broken link, or when the server could not tell.
+   */
+  folder?: true
+  /**
    * The link cannot be removed by hand (no 「…」→「つながりを外す」): it says where the record came
    * from (an `origin` link: もとの会議・もとの連絡・AI が用意したもの), or the record's links change only
    * through its service or its file. Absent = it can be removed (`record-links/remove`,

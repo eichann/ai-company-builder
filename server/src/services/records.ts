@@ -54,11 +54,12 @@ export interface RecordServiceDeps {
 }
 
 /**
- * Which of these company paths exist now: each read from the repository
- * holding it (a private folder's own, else the company's). Paths in a
- * repository that cannot be read are left out of both answers.
+ * Which of these company paths exist now, and which are folders: each read
+ * from the repository holding it (a private folder's own, else the
+ * company's). Paths in a repository that cannot be read are left out of
+ * every answer.
  */
-async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId: string, paths: string[], scopes: ScopeWithRules[]): Promise<{ missing: Set<string>; known: Set<string> }> {
+async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId: string, paths: string[], scopes: ScopeWithRules[]): Promise<{ missing: Set<string>; known: Set<string>; folders: Set<string> }> {
   const groups = new Map<string, { repo: RecordFileRepo; prefix: string; paths: string[] }>()
   for (const p of paths) {
     const s = findPrivateScope(scopes, p)
@@ -69,9 +70,10 @@ async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId
   }
   const missing = new Set<string>()
   const known = new Set<string>()
+  const folders = new Set<string>()
   for (const g of groups.values()) {
     const inside = (p: string) => (g.prefix === '' ? p : p.slice(g.prefix.length + 1))
-    let found: Set<string> | null = null
+    let found: Map<string, 'file' | 'folder'> | null = null
     try {
       found = await files.existing(companyId, g.repo, g.paths.filter(p => p !== g.prefix).map(inside))
     } catch (err) {
@@ -81,9 +83,10 @@ async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId
     for (const p of g.paths) {
       known.add(p)
       if (p !== g.prefix && !found.has(inside(p))) missing.add(p)
+      if (p !== g.prefix && found.get(inside(p)) === 'folder') folders.add(p)
     }
   }
-  return { missing, known }
+  return { missing, known, folders }
 }
 
 type Scalar = RecordFieldValue
@@ -613,7 +616,7 @@ export function createRecordService(deps: RecordServiceDeps) {
         links: links.map((l): RecordLinkView => ({
           ...(l.id
             ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
-            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}) }),
+            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}), ...(files?.folders.has(l.path!) ? { folder: true as const } : {}) }),
           ...(l.fixed ? { fixed: true as const } : {}),
         })),
       })

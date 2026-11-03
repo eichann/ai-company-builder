@@ -8,6 +8,8 @@
  * No leaks (owner decision B, records.md "No leaks"):
  * - a record the caller cannot read is left out of the answer (as if it did
  *   not exist), so a private folder's name only ever reaches its readers;
+ * - `cannotOpen` (who reads a record but not a file linked to it) is a count
+ *   only, for a record and paths the caller reads;
  * - files are judged over the folders the caller can see: a private folder
  *   they cannot read is treated as not there (as company-files does), so a
  *   path inside one is answered exactly like a path that does not exist —
@@ -49,12 +51,22 @@ export function createViewersService(deps: ViewersDeps) {
      * id and per file path the caller can see; anything else is left out.
      */
     labels(member: Member, body: unknown): Outcome<ViewersAnswer> {
-      if (!isObject(body)) return refuse('bad-request', 'Body must be { records?: string[], files?: string[] }')
+      if (!isObject(body)) return refuse('bad-request', 'Body must be { records?: string[], files?: string[], linked?: { record, paths } }')
       const recordIds = stringList(body.records, VIEWERS_LIMITS.records)
       const files = stringList(body.files, VIEWERS_LIMITS.files)
       if (recordIds === null || files === null) return refuse('bad-request', 'records and files must be lists of strings')
       if (recordIds === 'too-many' || files === 'too-many') {
         return refuse('bad-request', `At most ${VIEWERS_LIMITS.records} records and ${VIEWERS_LIMITS.files} files at once`)
+      }
+      let linked: { record: string; paths: string[] } | null = null
+      if (body.linked !== undefined) {
+        const l = body.linked
+        const paths = isObject(l) ? stringList(l.paths, VIEWERS_LIMITS.files) : null
+        if (!isObject(l) || typeof l.record !== 'string' || l.record.length === 0 || l.record.length > 200 || paths === null) {
+          return refuse('bad-request', 'linked must be { record: string, paths: string[] }')
+        }
+        if (paths === 'too-many') return refuse('bad-request', `At most ${VIEWERS_LIMITS.files} linked paths at once`)
+        linked = { record: l.record, paths }
       }
       const handle = deps.companyData.forCompany(member.companyId)
       const all = handle.scopes.listWithRules()
@@ -127,6 +139,21 @@ export function createViewersService(deps: ViewersDeps) {
       for (const path of files) {
         if (!caller.file(path)) continue
         out.files[path] = label(`file|${placeOf(path)}`, path, findPrivateScope(scopes, path), r => r.file(path))
+      }
+      // 「〇人はこのファイルを開けません」: who reads the record but not a path linked to it — a number only,
+      // for a record the caller reads and paths the caller reads (anything else is left out).
+      if (linked) {
+        const row = handle.records.byIds([linked.record])[0]
+        if (row && caller.record(row)) {
+          const recordReaders = row.personalOwner !== null ? [] : readers.filter(r => r.reader.record(row))
+          const cannotOpen: Record<string, number> = {}
+          for (const path of linked.paths) {
+            if (!caller.file(path)) continue
+            const n = recordReaders.filter(r => !r.reader.file(path)).length
+            if (n > 0) cannotOpen[path] = n
+          }
+          out.cannotOpen = cannotOpen
+        }
       }
       return ok(out)
     },
