@@ -17,7 +17,7 @@ interface Props {
 
 /**
  * 「部署に出す」 on an owner-only task (records.md "Owner-only records"): the member picks a
- * department and the task becomes visible to its readers. It cannot be made 「自分だけ」 again,
+ * department and the task becomes visible to its readers. It cannot be made 「あなただけ」 again,
  * so the member confirms with the department named.
  */
 export function ShareToDepartment({ folders, busy, onShare }: Props) {
@@ -52,7 +52,7 @@ export function ShareToDepartment({ folders, busy, onShare }: Props) {
       </label>
       <p className="text-[11.5px] text-gray-500 dark:text-zinc-400">
         {chosen ? `「${chosen.name}」を見られる人みんなに見えるようになります。` : '出すと、その部署を見られる人みんなに見えるようになります。'}
-        あとから「自分だけ」には戻せません。
+        あとから「あなただけ」には戻せません。
       </p>
       {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex gap-2">

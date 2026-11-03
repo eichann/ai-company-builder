@@ -186,7 +186,7 @@ function OverviewTab({
             <div className="flex items-center gap-2 mb-2">
               <EyeSlash size={16} className="text-gray-500 dark:text-zinc-400" />
               <span className="text-sm font-medium text-gray-700 dark:text-zinc-300">非公開</span>
-              <span className="text-xs text-gray-500 dark:text-zinc-500">— 自分だけ</span>
+              <span className="text-xs text-gray-500 dark:text-zinc-500">— あなただけ</span>
             </div>
             {!showPublishConfirm ? (
               <button

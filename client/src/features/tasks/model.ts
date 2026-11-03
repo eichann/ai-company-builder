@@ -6,6 +6,7 @@ import type { TaskListItem } from '../../../shared/tasks'
 import type { TaskCardResult } from '../../../shared/task-card'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { weekEndOf } from '../../../../shared/core/turn-timing'
+import { isBusinessDay, nextBusinessDay } from '../../../../shared/core/business-days'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
@@ -216,15 +217,41 @@ export function listShownFor(departmentId: string | null, listDepartmentIds: rea
   return departmentId === null ? listDepartmentIds.length > 0 : listDepartmentIds.includes(departmentId)
 }
 
-/** 「延ばす」's quick choices from now, in company time (a passed one is left out). */
-export function postponeChoices(now: CompanyNow): Array<{ label: string; due: string }> {
+/**
+ * 「延ばす」's choices from now, in company time (owner 2026-11-03, 使い心地のメモ #7: more of them, no
+ * date picker): 1時間あと, 今日の夕方, あしたの朝, あさって, 今週の金曜, 来週の月曜, 来週の金曜, 2週間後,
+ * 来月のはじめ. A day that is a weekend or a holiday (Japan's and the company's, `holidays`) moves to
+ * the next business day; one already past (today or before) or on the same day as an earlier
+ * choice is left out, so each row is a different day.
+ */
+export function postponeChoices(now: CompanyNow, holidays: readonly string[] = []): Array<{ label: string; due: string }> {
   const [h, m] = now.time.split(':').map(Number)
   const nextHour = h + (m > 0 ? 2 : 1)
   const out: Array<{ label: string; due: string }> = []
   if (nextHour <= 23) out.push({ label: '1時間あと', due: `${now.date}T${String(nextHour).padStart(2, '0')}:00` })
-  if (now.time < '17:00') out.push({ label: '今日の夕方', due: `${now.date}T17:00` })
-  out.push({ label: 'あしたの朝', due: `${addDays(now.date, 1)}T09:00` })
-  out.push({ label: '来週の月曜', due: `${addDays(now.date, ((8 - now.weekday) % 7) || 7)}T09:00` })
+  // 今日の夕方 only while it is later than 1時間あと (never the same time twice).
+  if (nextHour < 17) out.push({ label: '今日の夕方', due: `${now.date}T17:00` })
+  const business = (day: string) => (isBusinessDay(day, holidays) ? day : nextBusinessDay(day, holidays))
+  const nextMonday = addDays(now.date, ((8 - now.weekday) % 7) || 7)
+  const [y, mo] = now.date.split('-').map(Number)
+  const nextMonth = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, '0')}-01`
+  const days: Array<{ label: string; day: string; time?: string }> = [
+    { label: 'あしたの朝', day: addDays(now.date, 1), time: '09:00' },
+    { label: 'あさって', day: addDays(now.date, 2) },
+    // The week runs Monday to Sunday: on a Saturday or Sunday this week's Friday is past.
+    { label: '今週の金曜', day: addDays(now.date, now.weekday === 0 ? -2 : 5 - now.weekday) },
+    { label: '来週の月曜', day: nextMonday, time: '09:00' },
+    { label: '来週の金曜', day: addDays(nextMonday, 4) },
+    { label: '2週間後', day: addDays(now.date, 14) },
+    { label: '来月のはじめ', day: nextMonth },
+  ]
+  const taken = new Set<string>()
+  for (const c of days) {
+    const day = business(c.day)
+    if (day <= now.date || taken.has(day)) continue
+    taken.add(day)
+    out.push({ label: c.label, due: c.time ? `${day}T${c.time}` : day })
+  }
   return out
 }
 

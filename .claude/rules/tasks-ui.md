@@ -34,6 +34,7 @@ paths:
   - "client/tests/link-drop.test.ts"
   - "client/tests/ui/fixtures/link-drop.ts"
   - "shared/core/turn-timing.ts"
+  - "client/src/shared/hooks/useDismiss.ts"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -180,12 +181,14 @@ the person's press). Main: `tasks:card` reads the record, its 経緯, the type d
 members and the member's open execution runs, and tells the server it was opened (`POST …/opened`,
 not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談をさかのぼらずに届く):
 
-1. Header: state, 「自分だけ」, tags, due (期限切れ in red), 目的; a task done on someone's OK says
+1. Header: state, tags, due (期限切れ in red), 目的 — **「あなただけ」 is said once, top right** (見られる人,
+   `SeenBy`; `ONLY_YOU` when the server gave no viewers), never also as a chip beside the state
+   (owner 2026-11-03, 使い心地のメモ #9; `RecordMarks personal={false}` on both cards' heads); a task done on someone's OK says
    so — 「佐藤さんが阿部さんの了承を得たとして完了にしました（電話で）」 (`okWords`: an OK is never
    called an approval), in the header and in 経緯. An owner-only task offers **「部署に出す」**
    (`ShareToDepartment.tsx`): the member picks one of the departments they can write to
    (`shareFolders`, composed by AppShell from the departments and `useWriteAccess`), is told it
-   cannot be made 「自分だけ」 again, and `tasks:share` → `POST …/share { folder, expectedVersion }`
+   cannot be made 「あなただけ」 again, and `tasks:share` → `POST …/share { folder, expectedVersion }`
    (`records.md` "Owner-only records"; main sends only a `fileLinkPath`-checked company folder; the
    server checks the owner and the folder). A task already shared offers nothing.
 2. **AI が用意したもの**: `prep_summary` and each `prepared` link drawn by the screen with the
@@ -236,8 +239,12 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    version 9 完了 starts from every state but 準備中; a company's own type that still completes only
    what was started runs 着手 first (`startFirst`), each step at the version the previous one moved
    to (no 取り消す for such a two-step press). **延ばす** sits on the
-   due (1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜, `postponeChoices`); the server tells the
-   requester. **Someone changed it first** (`VERSION_CONFLICT`, plan H): the card reads the latest
+   due (owner 2026-11-03, 使い心地のメモ #7: more choices, no date picker; `postponeChoices`, `model.ts`):
+   1時間あと / 今日の夕方 / あしたの朝 / あさって / 今週の金曜 / 来週の月曜 / 来週の金曜 / 2週間後 /
+   来月のはじめ — a weekend or holiday (Japan's and the company's, `card.holidays`) moves to the next
+   business day, one already past or on the same day (time) as an earlier one is left out. It closes
+   on Esc and a press outside (`useDismiss`, `src/shared/hooks/`; so does ［＋ファイル・フォルダをつなぐ］'s
+   picker). The server tells the requester. Tests: `model.test.ts`, `task-card.spec.ts` (「延ばす」). **Someone changed it first** (`VERSION_CONFLICT`, plan H): the card reads the latest
    and says 「〇〇さんが先に変えました。最新を読み込みました。もう一度押してください」 with each change
    since the version shown (経緯's lines, `RecordCardHistoryLine.version` / `who`) and that the press
    did not happen. Under the title: where it came from (`origin`: 「会議『…』（11/5）から AI が作りました」
@@ -252,7 +259,10 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …": shown only with the 来た連絡 linked).
 6. Fields and 経緯 folded at the bottom (`FieldsFold`, `HistoryFold`), and 「つながっているもの」 on
    the right with the record card's rows (`records/components/linkRows.tsx`, registered import):
-   decisions marked 例外（この件だけ） and owner-only records marked 自分だけ (`RecordMarks`).
+   decisions marked 例外（この件だけ） and owner-only records marked あなただけ (`RecordMarks`).
+   **One word for "only you can see it": 「あなただけ」** (`ONLY_YOU`, `thing-words.ts`) — rows, cards,
+   linked rows, the archive, 部署に出す, a private skill; 「自分」 stays where it names the member as a
+   person (担当 自分, 「自分が担当する」), never for who can see.
 
 Every record opens in one layout (`src/shared/ui/RecordPage.tsx`: the kind's icon and name, short
 chips, the big title with the actions beside it, where it came from, the body, folded fields and
@@ -433,35 +443,40 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   (「このやることから外す」). Real-agent check: Claude through the app's connection and record tools
   against local staging (the PR says what ran).
 
-## Tags on the card (owner 2026-11-02: あとから足す・外す)
+## Tags on the card (owner 2026-11-02: あとから足す・外す; 2026-11-03 redesign, 使い心地のメモ #6)
 
-- The card's 「タグ」 field (`TagField.tsx`, pure rules `tagEditor.ts` + `tagEditor.test.ts`): read
-  only, or — when `canSetTags` (the type's `set_tags` allows the member: requester, assignee; not
-  a finished task) — pressing it opens an inline editor: the tags as chips with × (removes one),
-  an input offering the tags in use that contain what is typed (most used first, loosely spelled:
-  `tagKey`; the task's own left out). **Picking a tag in use is the main path** (no 「営業」 next to
-  「営業部」): Enter takes the highlighted candidate; a new word is offered as 「「〇〇」を新しいタグにする」
-  and Enter adds it only when nothing in use matches. A word spelled like a tag in use is added as
-  that tag. Checked like the server (`normalizeTag`, 40 characters, 20 tags) before sending; the
-  server's refusal shows in its words. Each change is one `set_tags` with the whole list.
+- The card's 「タグ」 field (`TagField.tsx`, pure rules `tagEditor.ts` + `tagEditor.test.ts`), in the
+  same look as the due beside it: the tags as **pills** in the field, × on each (for who may set
+  tags: `canSetTags` — the type's `set_tags` allows the member: requester, assignee; not a finished
+  task; otherwise read only). Pressing the field or its ＋ pill opens a **popover combobox** anchored
+  to it (like Linear / Notion): a search box on top (「タグを探す・作る」), then the task's tags (✓) and
+  the tags in use, most used first, filtered loosely (`tagOptions`: `tagKey`, the exact spelling
+  first); ↑↓ Enter picks — a ✓ one is taken off — and 「『〇〇』を作る」 is the last row only when no
+  row is that word (`newTagOffer`). A word spelled like a tag in use is added as that tag
+  (`tagToAdd`). Esc or a press outside closes it (`useDismiss`; Esc during IME conversion only ends the
+  conversion); Backspace in an empty box takes the last tag off. Checked like the server
+  (`normalizeTag`, 40 characters, 20 tags) before sending; the server's refusal shows inside the
+  popover in its words. Each change is one `set_tags` with the whole list.
 - When the typed word is the whole name of a 案件・プロジェクト the member reads (`tasks:bundles`, of
-  the department's kind; not the one linked), a line says 「『〇〇』は案件の名前です。案件につなぎますか？」 with
-  ［案件につなぐ］ — the same `bundle` link as ［〇〇につなぐ］ (offered only while `canSetBundle`);
+  the department's kind; not the one linked), a quiet line inside the popover says 「『〇〇』は案件の名前です。」
+  with ［案件につなぐ］ — the same `bundle` link as ［〇〇につなぐ］ (offered only while `canSetBundle`);
   adding it as a tag stays possible.
 - **Tag changes are not in 経緯** (they organise, they are not work): `labelOnlyEntry` /
   `historyEntries` (`client/shared/record-views.ts`) leave out an entry of an action that only sets
   `tags` fields (no state, no link) from the card's and the record card's 経緯 and from 「AI が反映
   しました」. The ledger keeps the entry (undo, audit, replay; `records.md` "Tags"). Test:
   `task-card.test.ts`.
-- Tests: `task-card.spec.ts` (「タグ」: ×, picking from tags in use, a new word, the refusal, AI
-  suggestions inside, read only when done; the 案件 hint).
+- Tests: `task-card.spec.ts` (「タグ」: × on a pill, the popover's ✓ rows, ↑↓ Enter, 作る, the refusal,
+  the AI row, Esc / a press outside, read only when done; the 案件 hint; `SCREENSHOTS=<dir>` writes
+  the popover), `tagEditor.test.ts` (rows, the exact spelling first, 作る only when nothing is that word).
 
 ## Tag suggestions (owner 2026-11-02: 「haikuとか使って」)
 
 - Where: the one line (`QuickAdd`, `useTagSuggestions`: asked 0.7 s after typing pauses, only the
-  newest answer kept, typing never waits) and inside the card's tag editor (`TagField.tsx`: 「AI に
-  タグの候補を出してもらう」 on the member's press, while some tag in use is not on the task; a picked
-  tag runs `set_tags` with the task's tags plus it). Tags in use =
+  newest answer kept, typing never waits) and inside the card's tag popover (`TagField.tsx`: asked
+  when the member opens the popover — once per card — while some tag in use is not on the task;
+  shown as one quiet row 「✨ 合いそうなタグ：#見積 #A社」; a picked tag runs `set_tags` with the task's
+  tags plus it). Tags in use =
   the member's list (`tagCounts`). **Only suggestions**: nothing is added until the member picks.
 - `tasks:suggestTags(companyId, title, tagsInUse)` → `{ source: 'ai' | 'local', tags }` (main,
   `electron/features/tasks/tag-suggest.ts`; pure parts `client/shared/tag-suggest.ts`). Asked
@@ -480,7 +495,7 @@ The list and the card are complete without Gmail / Slack; following mail and cha
 - Tests: `client/tests/tag-suggest.test.ts` (only the title and tags, the company token and
   relay, the registry's model; only tags in use; every fallback; nothing sent without tags),
   `task-card.test.ts` (`canSetTags`), `tasks-list.spec.ts` (a variant suggested, added only when
-  picked), `task-card.spec.ts` (asked on the press inside the tag editor, `set_tags` with the existing tags).
+  picked), `task-card.spec.ts` (asked when the popover opens, `set_tags` with the existing tags).
 
 ## 今日のフォルダ (owner decision 2026-11-03, the Obsidian daily-note idea)
 
@@ -602,11 +617,21 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
   link is made at the version just read; the answer's entry gives 「…をつなぎました［取り消す］」
   (`tasks:undo` of that entry on the record holding it); already linked → 「…はもうつながっています」.
 - **A consultation dropped on a record** becomes one about it (its topic, as 「相談する」 and the
-  AI's task do: `patchChatSession { topicRecordId }`) — 「「見積の相談」をこのやることについての相談に
+  AI's task do: `patchChatSession { topicRecordId }`, through the one wrapper `setConsultationTopic`,
+  `src/shared/ipc/link-drop.ts`). **A consultation already about another record asks first** (owner
+  decision 2026-11-03, the chat's own rule and words: `topicOnDrop` / `switchTopicQuestion`,
+  `client/shared/consultation-topics.ts`): 「『A』の相談を『B』の相談に切り替えますか？」 ［切り替える］
+  ［このまま］ at the drop zone (titles via `recordViews:topics`); no topic yet → at once — 「「見積の相談」をこのやることについての相談に
   しました［取り消す］」, 取り消す putting the earlier topic back (none → taken off). Setting a topic
   clears `topicDetached`, so the next save keeps it (`chat-history-store.ts` `patch`).
 - **Wording**: the card's zone says what happens — 「ここに落とすと、つながります」 with what may be
   dropped under it; the chat input's drop keeps its own 「ファイルをドロップして参照」 (the AI reads it).
+- **Where the drop answers** (owner 2026-11-03, 使い心地のメモ #4): at the place dropped on — on a card
+  inside the zone's frame, above 「ここに落とすと、つながります」 (`LinkedDrop.notice`); on the list right
+  under the row (`useLinkDrop` `target`). A refusal (「同じものどうしはつなげません。」, 「やることには決めた
+  ことはつなげません」) fades after `DROP_REFUSAL_MS` (5 s); 「…をつなぎました［取り消す］」 and a question stay
+  until the next drop. Tests: `task-card.spec.ts`, `tasks-list.spec.ts` (refused at the zone / under
+  the row, then gone).
 - **Folders** (server `records.md` "Links to files": the detail's `folder: true`, links follow a
   member's folder move): a folder row (`fileRow` with `PathFacts`, `linkRows.tsx`; group 「フォルダ」,
   `ThingKind` `folder`) opens the folder in the file tree (command `folder.reveal`, AppShell: its

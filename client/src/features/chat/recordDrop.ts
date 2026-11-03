@@ -20,16 +20,8 @@ export function dropFrameText(drag: Exclude<ComposerDrag, null>): string {
   return drag.kind === 'record' ? `ここに落とすと、この${drag.word}の相談になります` : 'ここに落とすと、AI が読みます'
 }
 
-/** A record dropped on a consultation: what happens to its topic. */
-export function topicOnDrop(currentTopic: string | null, dropped: string): 'set' | 'same' | 'ask' {
-  if (!currentTopic) return 'set'
-  return currentTopic === dropped ? 'same' : 'ask'
-}
-
-/** 「『A』の相談を『B』の相談に切り替えますか？」 */
-export function switchTopicQuestion(fromTitle: string, toTitle: string): string {
-  return `『${fromTitle}』の相談を『${toTitle}』の相談に切り替えますか？`
-}
+// The topic rule and its question are shared with a consultation dropped on a record's card.
+export { switchTopicQuestion, topicOnDrop } from '../../../shared/consultation-topics'
 
 /** Adds a dropped record to those waiting for the next message (once each; at most five, as main reads at most five). */
 export function withPendingRecord(list: readonly DroppedRecordRef[], record: DroppedRecordRef): DroppedRecordRef[] {

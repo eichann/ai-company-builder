@@ -4,15 +4,26 @@
 // the hint names a bundle only when the typed word is its whole name.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bundleNamed, tagCandidates, tagToAdd } from './tagEditor'
+import { bundleNamed, newTagOffer, tagOptions, tagToAdd } from './tagEditor'
 
 const inUse = ['営業', '営業部', '見積', 'エイギョウ']
+const rows = (o: ReturnType<typeof tagOptions>) => o.map(x => `${x.selected ? '✓' : ''}${x.tag}`)
 
-test('typing offers the tags in use that contain it (loosely spelled), most used first, never one the task has', () => {
-  assert.deepEqual(tagCandidates('営業', [], inUse), ['営業', '営業部'])
-  assert.deepEqual(tagCandidates('営業', ['営業'], inUse), ['営業部'])
-  assert.deepEqual(tagCandidates('ｴｲｷﾞｮｳ', [], inUse), ['エイギョウ'])
-  assert.deepEqual(tagCandidates('', ['見積'], inUse), ['営業', '営業部', 'エイギョウ'])
+test('the popover lists the task\'s tags (checked) and the tags in use containing what is typed, each once, the exact spelling first', () => {
+  assert.deepEqual(rows(tagOptions('', ['見積'], inUse)), ['✓見積', '営業', '営業部', 'エイギョウ'])
+  assert.deepEqual(rows(tagOptions('営業', ['営業'], inUse)), ['✓営業', '営業部'])
+  // Loosely spelled: 「ｴｲｷﾞｮｳ」 finds エイギョウ; 「部」 only 営業部.
+  assert.deepEqual(rows(tagOptions('ｴｲｷﾞｮｳ', [], inUse)), ['エイギョウ'])
+  assert.deepEqual(rows(tagOptions('部', [], inUse)), ['営業部'])
+  // The exact word first, so Enter picks it rather than a longer tag.
+  assert.deepEqual(rows(tagOptions('営業', [], ['営業部', '営業'])), ['営業', '営業部'])
+})
+
+test('「『〇〇』を作る」 only when no row is that word already (loosely)', () => {
+  assert.equal(newTagOffer('急ぎ', tagOptions('急ぎ', [], inUse)), '急ぎ')
+  assert.equal(newTagOffer('えいぎょう', tagOptions('えいぎょう', [], inUse)), null)
+  assert.equal(newTagOffer('営', tagOptions('営', [], inUse)), '営')
+  assert.equal(newTagOffer('  ', tagOptions('', [], inUse)), null)
 })
 
 test('a word spelled like a tag in use is added as that tag; a new word only as typed, normalized', () => {

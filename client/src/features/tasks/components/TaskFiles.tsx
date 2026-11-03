@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { FileText, FolderSimple, MagnifyingGlass, Plus } from '@phosphor-icons/react'
+import { useDismiss } from '../../../shared/hooks/useDismiss'
 import { listCompanyFiles } from '../api'
 import { linkCandidates } from '../model'
 
@@ -17,6 +18,9 @@ export function TaskFiles({ rootPath, linked, busy, onLink }: Props) {
   const [all, setAll] = useState<Array<{ path: string; folder: boolean }> | null>(null)
   const [q, setQ] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [box, setBox] = useState<HTMLDivElement | null>(null)
+  // A press outside the picker or Esc closes it, like the card's other small popovers.
+  useDismiss(box, picking, () => setPicking(false))
   const open = () => {
     setPicking(p => !p)
     setError(null)
@@ -31,7 +35,7 @@ export function TaskFiles({ rootPath, linked, busy, onLink }: Props) {
   const query = q.trim().normalize('NFC')
   const matches = (all ?? []).filter(c => !query || c.path.normalize('NFC').includes(query)).slice(0, 50)
   return (
-    <div>
+    <div ref={setBox}>
       <button type="button" onClick={open} aria-expanded={picking} className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline">
         <Plus size={10} />ファイル・フォルダをつなぐ
       </button>

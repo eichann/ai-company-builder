@@ -62,3 +62,18 @@ export function consultationTopicOf(detail: RecordDetail, defs: Defs): Consultat
 export function consultationLinkedRecord(topic: ConsultationTopic | null | undefined): TopicRecordLook | null {
   return topic ? topic.own ?? topic.bundle : null
 }
+
+/**
+ * A record dropped on a consultation, or a consultation dropped on a record (owner 2026-11-03): what
+ * happens to the consultation's topic — none yet → set it; the same → nothing; another → ask first
+ * (`switchTopicQuestion`, ［切り替える］［このまま］).
+ */
+export function topicOnDrop(currentTopic: string | null | undefined, dropped: string): 'set' | 'same' | 'ask' {
+  if (!currentTopic) return 'set'
+  return currentTopic === dropped ? 'same' : 'ask'
+}
+
+/** 「『A』の相談を『B』の相談に切り替えますか？」 */
+export function switchTopicQuestion(fromTitle: string, toTitle: string): string {
+  return `『${fromTitle}』の相談を『${toTitle}』の相談に切り替えますか？`
+}

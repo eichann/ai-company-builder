@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard } from './model'
+import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -143,4 +143,33 @@ test('the link chooser offers every folder above the files once, then the files'
     { path: '営業部', folder: true }, { path: '営業部/見積', folder: true },
     { path: '営業部/見積/A社.md', folder: false }, { path: '営業部/見積/B社.md', folder: false }, { path: 'メモ.md', folder: false },
   ])
+})
+
+// 「延ばす」 (owner 2026-11-03, 使い心地のメモ #7): more choices, each a different day, never past, a
+// weekend or holiday moved to the next business day.
+test('延ばす offers more days, each different, past ones left out, holidays and weekends moved to a business day', () => {
+  const at = (c: Array<{ label: string; due: string }>) => c.map(x => `${x.label} ${x.due}`)
+  // Thursday 2026-11-05 15:45: 1時間あと = 17:00 (今日の夕方 the same: left out); あさって = Sat → Mon 11/9
+  // (来週の月曜 the same day: left out); 今週の金曜 = tomorrow (あしたの朝's day: left out).
+  assert.deepEqual(at(postponeChoices(NOW)), [
+    '1時間あと 2026-11-05T17:00', 'あしたの朝 2026-11-06T09:00', 'あさって 2026-11-09',
+    '来週の金曜 2026-11-13', '2週間後 2026-11-19', '来月のはじめ 2026-12-01',
+  ])
+  // A company holiday on Monday 11/9 moves あさって on to Tuesday.
+  assert.ok(at(postponeChoices(NOW, ['2026-11-09'])).includes('あさって 2026-11-10'))
+  // Monday 2026-11-02 08:10: 今日の夕方 and 今週の金曜 offered; 文化の日 (Tue 11/3) moves あしたの朝 to Wednesday.
+  const mon = at(postponeChoices(companyNow(Date.parse('2026-11-01T23:10:00.000Z'))))
+  assert.ok(mon.includes('今日の夕方 2026-11-02T17:00'), mon.join())
+  assert.ok(mon.includes('あしたの朝 2026-11-04T09:00'), mon.join())
+  assert.ok(mon.includes('今週の金曜 2026-11-06'), mon.join())
+  // Late on a Saturday: nothing today, no 今週の金曜 (past); 来月のはじめ (12/1) is a Tuesday.
+  const saturday = companyNow(Date.parse('2026-11-07T14:30:00.000Z'))
+  const sat = postponeChoices(saturday)
+  assert.ok(sat.every(c => c.due.slice(0, 10) > saturday.date))
+  assert.ok(!sat.some(c => c.label === '今週の金曜'))
+  // Never two choices on one day after today, never the same time today.
+  for (const list of [postponeChoices(NOW), sat]) {
+    const dues = list.map(c => (c.due.slice(0, 10) === NOW.date ? c.due : c.due.slice(0, 10)))
+    assert.equal(new Set(dues).size, dues.length)
+  }
 })
