@@ -196,6 +196,7 @@ const api: ElectronAPI = {
   onNotificationsOpenTasks: callback => subscribe('notifications:openTasks', callback),
   searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
   getRecordCard: (companyId: string, recordId: string) => invoke('recordViews:card', companyId, recordId),
+  getConsultationTopics: (companyId: string, recordIds: string[]) => invoke('recordViews:topics', companyId, recordIds),
   getRecordsForFile: (companyId: string, companyPath: string) => invoke('recordViews:forFile', companyId, companyPath),
   getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),

@@ -1,5 +1,6 @@
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 import { normalizeSearchText } from '../../../shared/chat-history-summary'
+import { consultationLinkedRecord, type ConsultationTopic } from '../../../shared/consultation-topics'
 
 export interface ConversationTab { id: string; title: string; sessionId: string | null }
 
@@ -18,18 +19,59 @@ export function isEmptyConversation(session: ChatSessionSummary | undefined): bo
  * a search over message bodies runs in the main process
  * (`searchChatSessions`) and arrives as `contentMatches`. Titles and drafts
  * are matched here, so a blank tab or a just-renamed one is found at once.
+ * A row also carries, and is found by, the やること / 案件 it is about (`topics`, by topic record
+ * id, from the company server: a record the member cannot read is null and never shown or matched).
  */
-export function buildConversationRows(sessions: ChatSessionSummary[], tabs: ConversationTab[], query: string, contentMatches?: ReadonlySet<string>) {
+export function buildConversationRows(sessions: ChatSessionSummary[], tabs: ConversationTab[], query: string, contentMatches?: ReadonlySet<string>, topics?: ReadonlyMap<string, ConsultationTopic | null>) {
     const byId = new Map(sessions.map(s => [s.id, s]))
     const openIds = new Set(tabs.map(t => t.sessionId))
-    const open = tabs.map(tab => ({ key: tab.id, tab, session: byId.get(tab.sessionId ?? ''), title: byId.get(tab.sessionId ?? '')?.title ?? tab.title }))
-    const past = sessions.filter(s => !openIds.has(s.id) && !isEmptyConversation(s)).map(session => ({ key: session.id, tab: undefined, session, title: session.title }))
+    const linkedOf = (session: ChatSessionSummary | undefined) => consultationLinkedRecord(session?.topicRecordId ? topics?.get(session.topicRecordId) : null)
+    const open = tabs.map(tab => {
+      const session = byId.get(tab.sessionId ?? '')
+      return { key: tab.id, tab, session, title: session?.title ?? tab.title, linked: linkedOf(session) }
+    })
+    const past = sessions.filter(s => !openIds.has(s.id) && !isEmptyConversation(s)).map(session => ({ key: session.id, tab: undefined, session, title: session.title, linked: linkedOf(session) }))
     const needle = normalizeSearchText(query.trim())
     return [...open, ...past].filter(row => !needle || (row.session && contentMatches?.has(row.session.id)) ||
-      [row.title, row.session?.draftInput ?? ''].some(text => normalizeSearchText(text).includes(needle)))
+      [row.title, row.session?.draftInput ?? '', row.linked?.title ?? ''].some(text => normalizeSearchText(text).includes(needle)))
       .sort((a, b) => Number(!!b.tab) - Number(!!a.tab) || Number(!!b.session?.pinned) - Number(!!a.session?.pinned) ||
         // A tab with nothing stored yet is the newest (a just-started conversation on top).
         (b.session?.updatedAt ?? '\uffff').localeCompare(a.session?.updatedAt ?? '\uffff'))
+}
+
+/**
+ * `text` cut into the parts that match `query` the way the search does (NFKC, case-insensitive:
+ * 「ｍｔｇ」 marks 「MTG」) and the rest, in order; no match → one plain part.
+ */
+export function markMatches(text: string, query: string): { text: string; hit: boolean }[] {
+  const needle = normalizeSearchText(query.trim())
+  if (!needle) return [{ text, hit: false }]
+  // The normalized text with, for each of its code units, where its character starts in `text`.
+  let folded = ''
+  const from: number[] = []
+  for (let i = 0; i < text.length;) {
+    const char = String.fromCodePoint(text.codePointAt(i)!)
+    const part = normalizeSearchText(char)
+    for (let k = 0; k < part.length; k++) from.push(i)
+    folded += part
+    i += char.length
+  }
+  from.push(text.length)
+  const parts: { text: string; hit: boolean }[] = []
+  let done = 0
+  for (let at = folded.indexOf(needle); at !== -1; at = folded.indexOf(needle, at + needle.length)) {
+    const start = from[at]
+    // A match ending inside one character's expansion (㍻ → 平成) marks that whole character.
+    let j = at + needle.length
+    while (j < folded.length && from[j] === from[j - 1]) j++
+    const end = from[j]
+    if (start < done) continue
+    if (start > done) parts.push({ text: text.slice(done, start), hit: false })
+    if (end > start) parts.push({ text: text.slice(start, end), hit: true })
+    done = Math.max(done, end)
+  }
+  if (done < text.length) parts.push({ text: text.slice(done), hit: false })
+  return parts.length ? parts : [{ text, hit: false }]
 }
 
 /**

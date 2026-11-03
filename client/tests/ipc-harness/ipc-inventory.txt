@@ -160,6 +160,7 @@ contract.invoke privateFolders:reservedPathRefusal
 contract.invoke recordViews:card
 contract.invoke recordViews:forFile
 contract.invoke recordViews:search
+contract.invoke recordViews:topics
 contract.invoke shell:openExternal
 contract.invoke skills:list
 contract.invoke skills:makePrivate
@@ -352,6 +353,7 @@ contract.type ElectronAPI.getChatWindowContext = getChatWindowContext: Invoke<'c
 contract.type ElectronAPI.getClaudeCodeStatus = getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'>
 contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'>
 contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
+contract.type ElectronAPI.getConsultationTopics = getConsultationTopics: Invoke<'recordViews:topics'>
 contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
@@ -750,6 +752,7 @@ contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateF
 contract.type IpcInvokeChannels.'recordViews:card' = 'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
 contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
+contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
@@ -1009,6 +1012,7 @@ main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts
 main.handle recordViews:card @ features/record-views/ipc.ts (companyId, recordId)
 main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, companyPath)
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
+main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
 main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
 main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
@@ -1181,6 +1185,8 @@ preload getCodexStatus -> invoke codex:status()
 preload getCodexStatus : () => Promise<CodexStatus>
 preload getCompanies -> invoke api:getCompanies()
 preload getCompanies : () => Promise<CompaniesResult>
+preload getConsultationTopics -> invoke recordViews:topics($0, $1)
+preload getConsultationTopics : (companyId: string, recordIds: string[]) => Promise<ConsultationTopicsResult>
 preload getDefaultParentFolder -> invoke companySetup:defaultParentFolder()
 preload getDefaultParentFolder : () => Promise<{ success: boolean; folder?: string | undefined; }>
 preload getDepartments -> invoke api:getDepartments($0)
