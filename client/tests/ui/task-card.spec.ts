@@ -571,10 +571,21 @@ test('a record dropped on the card links it with ［取り消す］; one no link
   expectNoPageErrors(state)
 })
 
-test('a consultation dropped on the card becomes one about this やること, and ［取り消す］ puts its topic back', async ({ page }) => {
+// A consultation already about another record asks first (owner 2026-11-03, the chat's own question);
+// one with no topic yet becomes one about this やること at once (tasks-list.spec.ts drops one).
+test('a consultation about another やること dropped on the card asks before switching; ［このまま］ changes nothing; ［切り替える］ with ［取り消す］', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
   const { links, drop } = await dropOnLinks(page, 'application/x-acb-consultation', { sessionId: 's-9', title: '会場の相談', topicRecordId: 'task-0000bb' })
   await drop()
+  const ask = links.locator('[data-link-drop-zone]').getByRole('group', { name: '相談の主題' })
+  await expect(ask).toContainText('『会場を押さえる』の相談を『A社 見積書を 150万円 で作り直す』の相談に切り替えますか？')
+  await expect(page.locator('#acted')).not.toContainText('topic s-9')
+  await ask.getByRole('button', { name: 'このまま' }).click()
+  await expect(ask).toHaveCount(0)
+  await expect(page.locator('#acted')).not.toContainText('topic s-9')
+
+  await (await dropOnLinks(page, 'application/x-acb-consultation', { sessionId: 's-9', title: '会場の相談', topicRecordId: 'task-0000bb' })).drop()
+  await links.getByRole('group', { name: '相談の主題' }).getByRole('button', { name: '切り替える' }).click()
   await expect(page.locator('#acted')).toHaveText('topic s-9=task-0000aa')
   const done = links.getByRole('status').filter({ hasText: '「会場の相談」をこのやることについての相談にしました' })
   if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/drop-consultation.png` })

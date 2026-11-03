@@ -617,7 +617,11 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
   link is made at the version just read; the answer's entry gives 「…をつなぎました［取り消す］」
   (`tasks:undo` of that entry on the record holding it); already linked → 「…はもうつながっています」.
 - **A consultation dropped on a record** becomes one about it (its topic, as 「相談する」 and the
-  AI's task do: `patchChatSession { topicRecordId }`) — 「「見積の相談」をこのやることについての相談に
+  AI's task do: `patchChatSession { topicRecordId }`, through the one wrapper `setConsultationTopic`,
+  `src/shared/ipc/link-drop.ts`). **A consultation already about another record asks first** (owner
+  decision 2026-11-03, the chat's own rule and words: `topicOnDrop` / `switchTopicQuestion`,
+  `client/shared/consultation-topics.ts`): 「『A』の相談を『B』の相談に切り替えますか？」 ［切り替える］
+  ［このまま］ at the drop zone (titles via `recordViews:topics`); no topic yet → at once — 「「見積の相談」をこのやることについての相談に
   しました［取り消す］」, 取り消す putting the earlier topic back (none → taken off). Setting a topic
   clears `topicDetached`, so the next save keeps it (`chat-history-store.ts` `patch`).
 - **Wording**: the card's zone says what happens — 「ここに落とすと、つながります」 with what may be

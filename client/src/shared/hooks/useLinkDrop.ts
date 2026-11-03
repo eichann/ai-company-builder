@@ -5,12 +5,15 @@ import { useInterval } from './useInterval'
 import { isPathWithin, normalizePathSeparators } from '../lib/path'
 import type { DropLinkChoice, DroppedThing } from '../../../shared/link-drop'
 import { draggedConsultation, draggedFilePaths, draggedRecord, isLinkableDrag } from '../lib/dragTypes'
-import { dropLinkOnRecord, setConsultationTopic, undoDropLink, type ConsultationTopics, type LinkDrops } from '../ipc/link-drop'
+import { dropLinkOnRecord, setConsultationTopic, topicTitles, undoDropLink, type ConsultationTopics, type LinkDrops } from '../ipc/link-drop'
+import { switchTopicQuestion, topicOnDrop } from '../../../shared/consultation-topics'
 
 /** What the last drop left: what happened with ［取り消す］, a question with its choices, or why not. */
 export type LinkDropNotice =
   | { kind: 'done'; text: string; undo: (() => Promise<void>) | null }
   | { kind: 'choose'; question: string; choices: DropLinkChoice[]; pick: (link: string) => Promise<void>; cancel: () => void }
+  /** A consultation about another record: 「『A』の相談を『B』の相談に切り替えますか？」［切り替える］［このまま］. */
+  | { kind: 'switch'; question: string; confirm: () => Promise<void>; keep: () => void }
   | { kind: 'error'; text: string }
 
 export interface LinkDropOptions {
@@ -75,8 +78,7 @@ export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports 
     }
   }
 
-  const topic = async (targetId: string, sessionId: string, title: string, before: string | undefined): Promise<void> => {
-    if (before === targetId) { setNotice(targetId, { kind: 'done', text: `「${title}」はもうこの${targetWord}についての相談です`, undo: null }); return }
+  const switchTo = async (targetId: string, sessionId: string, title: string, before: string | undefined): Promise<void> => {
     const set = async (to: string | null) => (await setConsultationTopic(companyId, sessionId, to, ports.topics).catch(() => null)) !== null
     if (!await set(targetId)) { setNotice(targetId, { kind: 'error', text: '相談が見つかりませんでした。消されたかもしれません。' }); return }
     setNotice(targetId, {
@@ -87,6 +89,21 @@ export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports 
       },
     })
     onChanged?.()
+  }
+
+  const topic = async (targetId: string, sessionId: string, title: string, before: string | undefined): Promise<void> => {
+    const decision = topicOnDrop(before, targetId)
+    if (decision === 'same') { setNotice(targetId, { kind: 'done', text: `「${title}」はもうこの${targetWord}についての相談です`, undo: null }); return }
+    // About another record already: ask first (owner 2026-11-03, the same question as the chat's drop).
+    if (decision === 'ask' && before) {
+      const titles = await topicTitles(companyId, [before, targetId], ports.topics)
+      setNotice(targetId, {
+        kind: 'switch', question: switchTopicQuestion(titles[before] ?? 'いまの主題', titles[targetId] ?? `この${targetWord}`),
+        confirm: () => switchTo(targetId, sessionId, title, before), keep: () => setNotice(targetId, null),
+      })
+      return
+    }
+    await switchTo(targetId, sessionId, title, before)
   }
 
   /** Drop handler for `targetId`: true when it took the drop. */
