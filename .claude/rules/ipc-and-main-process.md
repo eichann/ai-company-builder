@@ -46,7 +46,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
   (minutes:watch / check / notices / skip / linkBundle and the event `minutes:changed`:
   received minutes checked with the session in main, `minutes.md` "The app"), `record-views`
-  (recordViews:search / card / forFile / topics: search hits, the record card, a file's
+  (recordViews:search / find / findHome / card / forFile / topics: ⌘K and 探す hits, the record card, a file's
   「つながっているもの」 and the やること / 案件 of the member's consultations, read with the session;
   `records.md` "The app's views"),
   `notifications` (notifications:watch / state / markRead / settings / setSetting and the event

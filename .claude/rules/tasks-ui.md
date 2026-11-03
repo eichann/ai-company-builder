@@ -274,7 +274,7 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   「Gmail・Slack をつなぐと、返事の追いかけを AI がします」 (the one entry; the Google / Slack sections
   stay). The task screens carry no mail / chat parts of their own to hide: the card's もとの連絡 shows
   only on a task linking a 来た連絡 (above), 「返事を待つ」 only on a mail draft being sent
-  (`outbound-mail.md`), and 探す's kind chips only for kinds found (`search/model.ts`).
+  (`outbound-mail.md`), and 探す's kind chips only for kinds found (`search/find.ts`).
 - **Records are never hidden**: a 返事のお願い or a 来た連絡 to confirm in someone's turn stays in the
   list (and the title bar) after a disconnect until it is finished — the list never asks about
   connections (`tasks-list.test.ts` "a 返事のお願い or a 来た連絡 to confirm …").

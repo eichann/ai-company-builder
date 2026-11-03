@@ -68,6 +68,7 @@ import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/bro
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
 import { createBundleKinds } from './services/bundle-kinds'
+import { createRecordFind } from './services/record-find'
 import { createPeopleNames } from './services/people-names'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { companyNow, createNotificationService } from './services/notifications'
@@ -697,6 +698,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // 束ねる種類 (records.md "Bundle kinds"): what each department makes, and the core kind's name.
     bundleKinds: createBundleKinds({ companyData: shared.companyData, shelf: pluginShelf, settingsOf: companyId => taskSettings.settingsOf(companyId) }),
     // The names behind person ids in the AI's record answers (records.md "Typed tools in the app").
+    // 探す (records.md "探す"): records found by words, with department, mine, 案件 and summaries.
+    recordFind: createRecordFind({ companyData: shared.companyData }),
     peopleNames: createPeopleNames({ memberships: repos.memberships, accounts: shared.accounts }),
     absences,
     aiRuns,

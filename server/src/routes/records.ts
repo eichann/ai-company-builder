@@ -9,6 +9,8 @@
  *   GET     /records/types        any member: type definitions in force
  *   GET     /records/bundle-kinds any member: the 束ねる種類 each department makes, and their names
  *   POST    /records/query        any member: the fixed-shape query
+ *   POST    /records/find         any member: 探す — records found by words, with department, mine, 案件, summaries
+ *   POST    /records/find-home    any member: 探す with nothing typed — their unfinished 案件, this week's meetings
  *   GET     /records/item/:recordId  any member: one record and its links
  *   GET     /records/my-turn      any member: 「あなたの番」 across types implementing request
  *   GET     /records/ai-turn      any member: 「AI の番」 — their records waiting for an AI-only action
@@ -50,7 +52,7 @@ export const recordsRoute = new Hono()
 const HUMAN = { kind: 'human' } as const
 /** A person's action, with the provenance their app reports (informational only, never authorizes: record-engine.ts). */
 const humanWith = (body: unknown) => ({ ...HUMAN, ...selfReportedProvenance(body) })
-const { records, recordEngine, recordAiTokens, decisions, meetingOutputs, bundleKinds } = services
+const { records, recordEngine, recordAiTokens, decisions, meetingOutputs, bundleKinds, recordFind } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
@@ -90,6 +92,14 @@ recordsRoute.get('/records/bundle-kinds', companyMember, async (c) => {
 recordsRoute.post('/records/query', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   return answer(c, records.query(member, c.var.body))
+})
+
+recordsRoute.post('/records/find', companyMember, serviceBody, async (c) => {
+  return answer(c, recordFind.find(c.var.member, c.var.body))
+})
+
+recordsRoute.post('/records/find-home', companyMember, serviceBody, async (c) => {
+  return answer(c, recordFind.home(c.var.member, c.var.body))
 })
 
 recordsRoute.get('/records/item/:recordId', companyMember, async (c) => {

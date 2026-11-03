@@ -11,7 +11,7 @@ type Layout = { calls: Array<{ name: string; args: unknown[] }>; editorWasEmpty(
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 const editorWasEmpty = async (page: Page) => (await layout(page)).evaluate(l => l.editorWasEmpty())
 const switchCompany = async (page: Page, id: string) => (await layout(page)).evaluate((l, to) => l.switchCompany(to), id)
-const searchBox = (page: Page) => page.getByPlaceholder('探す（言葉を入れて Enter）')
+const searchBox = (page: Page) => page.getByPlaceholder('覚えている言葉で探す')
 
 const ROOT = '/Users/demo/会社'
 const OTHER_ROOT = '/Users/demo/別会社'

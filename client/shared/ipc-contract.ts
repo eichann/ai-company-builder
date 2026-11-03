@@ -41,7 +41,7 @@ import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
 import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
-import type { RecordCardResult, RecordListResult } from './record-views'
+import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
 import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
@@ -571,6 +571,8 @@ export interface IpcInvokeChannels {
   'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
   // What the app shows of records (record-views.ts), read with the session in main.
   'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
+  'recordViews:find': { args: [companyId: string, text: string, today: string]; result: FindResult }
+  'recordViews:findHome': { args: [companyId: string, today: string, from: string, to: string]; result: FindHomeResult }
   'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
   /** companyPath: the file's path inside the company folder (`営業部/見積.md`), not a local path. */
   'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
@@ -977,6 +979,8 @@ export interface ElectronAPI {
   onNotificationsChanged: Subscribe<'notifications:changed'>
   onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
   searchRecords: Invoke<'recordViews:search'>
+  findRecords: Invoke<'recordViews:find'>
+  findRecordsHome: Invoke<'recordViews:findHome'>
   getRecordCard: Invoke<'recordViews:card'>
   getRecordsForFile: Invoke<'recordViews:forFile'>
   getConsultationTopics: Invoke<'recordViews:topics'>

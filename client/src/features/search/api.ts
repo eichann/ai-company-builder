@@ -25,3 +25,29 @@ export type RecordSearchOutbound = ElectronPort<'searchRecords'>
 export function searchRecords(companyId: string, text: string, outbound: RecordSearchOutbound = window.electronAPI) {
   return outbound.searchRecords(companyId, text)
 }
+
+/** When a found file last changed, for 探す's period (fs:stat; an unreadable one has no time). */
+export type FileTimeReads = ElectronPort<'getStats'>
+
+export async function fileTimes(rootPath: string, paths: readonly string[], reads: FileTimeReads = window.electronAPI): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  await Promise.all(paths.map(async p => {
+    const r = await reads.getStats(`${rootPath}/${p}`).catch(() => null)
+    if (r?.success && r.data?.mtime) out[p] = r.data.mtime
+  }))
+  return out
+}
+
+/**
+ * 探す's records, asked of the company server: those holding the words (with department, 「自分」,
+ * 案件 and the summaries of matching 相手 / 案件), and with nothing typed the member's own.
+ */
+export type RecordFindOutbound = ElectronPort<'findRecords' | 'findRecordsHome'>
+
+export function findRecords(companyId: string, text: string, today: string, outbound: RecordFindOutbound = window.electronAPI) {
+  return outbound.findRecords(companyId, text, today)
+}
+
+export function findRecordsHome(companyId: string, today: string, from: string, to: string, outbound: RecordFindOutbound = window.electronAPI) {
+  return outbound.findRecordsHome(companyId, today, from, to)
+}

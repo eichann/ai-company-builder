@@ -20,7 +20,9 @@ paths:
   - "client/shared/record-views.ts"
   - "client/electron/features/record-views/**"
   - "client/src/features/records/**"
-  - "client/src/features/search/components/RecordHits.tsx"
+  - "client/src/features/search/**"
+  - "server/src/services/record-find.ts"
+  - "server/tests/unit/record-find.test.ts"
   - "server/tests/unit/record-linked-to-file.test.ts"
   - "client/tests/records-tools.test.ts"
   - "server/tests/integration/record-tokens.test.ts"
@@ -695,6 +697,8 @@ POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Lin
 POST    /records/item/:recordId/record-links (+ /remove) link a record later ("Linking records later")
 POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
 POST    /records/item/:recordId/opened         the app opened it: the turn-holder's first opening kept ("Whose turn it was")
+POST    /records/find              any member: 探す { text, today } → hits with department / mine / 案件, hub summaries ("探す" below)
+POST    /records/find-home         any member: 探す with nothing typed { today, from, to }
 POST    /records/query             any member: { type?, implements?, state?, fields? (value | { in } | { contains } | { gte?, lt? }), linkedTo?: { id, hops: 1|2 },
                                    link?: { name, id }, linkedToFile?, sort?: { field, order? }, finishedSince?,
                                    text?, limit ≤ 200, offset ≤ 10000, countOnly? } → { total, records }
@@ -1312,11 +1316,33 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   carry these words; machinery fields (hashes, outside ids,
   pointers, `next_actor`) are not on the card; person fields show the member's name
   (`GET /companies/:id/members`).
-- **探す** (the left tab; never 「検索」 on screen): `POST /records/query { text, limit: 100 }` next to
-  the file search; a chip per kind found (`src/features/search/model.ts` `findChips`: only kinds
-  with something, bundles of mixed kinds as 「案件・プロジェクト」) narrows the rows,
-  `total` as the server counts it (only readable records). Records off for the company: nothing
-  shown.
+- **探す** (the left tab; never 「検索」 on screen; owner-approved redesign 2026-11-03). ⌘K opens what
+  the member can name; this tab is for what they half remember. Server: `POST /records/find
+  { text (1–100), today }` (`services/record-find.ts`) → `{ total, hits (newest 200), hubs (≤ 5) }`:
+  each hit is a readable record with its **department** (first part of its path, or of a server-only
+  record's folder; null = the whole company), **mine** (owner-only for them, a `person` field of its
+  type holds them, or a meeting's `attendees`) and its **案件** (outgoing `bundle` link, only when
+  readable and followable, `linkAllowed`); a **hub** is a hit implementing `bundle` / `counterpart`
+  whose title holds the words, summarised over what the caller reads: open やること, meetings,
+  decisions, readable file links, 案件 (for a 相手, also what is in its 案件), the next `meeting_at`
+  ≥ `today`, the newest change, and the ids of its readable やること / 案件 (`memberIds`, ≤ 300). `POST
+  /records/find-home { today, from, to }` → the caller's unfinished 案件 (≤ 5, with their hub) and
+  their meetings with `meeting_at` in [from, to) (≤ 5). Everything goes through the reader: an
+  owner-only record, a private folder's record or file is never a hit, never counted in `total` or a
+  hub (`server/tests/unit/record-find.test.ts`). Main: `recordViews:find` / `recordViews:findHome`
+  (reshaped by `findHitView`, nothing filtered or added). Renderer (`src/features/search/`):
+  `find.ts` (pure: one row per thing — record, file, consultation —, cards for the hubs, then
+  名前で見つかったもの, then 中身で見つかったもの; best sentence; kinds and chips named like everywhere,
+  bundles by `GET /records/bundle-kinds`' names; scope = the department on screen with things of no
+  department kept, other departments counted for 「ほかの部署にも N件」; period 1週間 / 1か月 by the
+  record's last change or a file's mtime; 「自分が関わった」 keeps `mine` only, so files and other
+  people's records drop out), `findRunner.ts` (one search at a time: records, `git:grep` in the
+  scope's folder, file names, consultations; an older search's answers are dropped), `hooks/` (the
+  runner, the empty tab), `components/` (SearchPanel, FoundRows, FindEmpty). Consultations come from
+  this PC's history and are matched through `consultationLinkedRecord`
+  (`client/shared/consultation-topics.ts`, `recordViews:topics`, the same answers 「AIへの相談」 reads).
+  Tests: `src/features/search/find.test.ts`, `findRunner.test.ts`, `client/tests/ui/search-panel.spec.ts`
+  (preview `client/tests/search-panel-ui.html`). Records off for the company: no records shown.
 - **The card** (`src/features/records/components/RecordCard.tsx`): kind, state, title, summary,
   fields, 経緯 (the ledger, newest first: who・what・note) and 「つながっているもの」 (records by kind,
   files; a file link marked `broken` says 「つながりが切れています」). Following a link runs

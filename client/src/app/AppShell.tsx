@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
+import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
 import { getChatSessionSummaries } from '../features/chat/api'
 import { paletteConsultations } from '../features/chat/conversationRows'
 import { refreshFileVersions } from '../features/history/refresh'
@@ -319,6 +320,9 @@ export function AppShell() {
   const draftNudge = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title, purpose: 'nudge' }).catch(() => {}) }
   // A record's 「つながっているもの」 lists the consultations about it (this PC's history).
   const recordConsultations = useLinkedConsultations(currentCompany?.id)
+  // 探す finds a consultation through the やること / 案件 it is about (the answers 「AIへの相談」 reads too).
+  const topicIds = useMemo(() => [...recordConsultations.keys()], [recordConsultations])
+  const consultationTopics = useConsultationTopics(currentCompany?.id ?? '', topicIds)
   // Business plugins' four slots (plugin-frame.md "The four slots"): only verified packages the company lists now.
   const pluginScreens = usePluginScreens(currentCompany?.id)
   const plugins = pluginSlots({ companyId: currentCompany?.id, rootPath, plugins: pluginScreens, taskItems: taskList.data?.items ?? [], onFileAction: setFileAction })
@@ -376,6 +380,16 @@ export function AppShell() {
     .map(s => ({ id: s.id, name: s.name, command: s.skillPath?.split('/').pop() ?? '', group: s.group })), [skills, companySkills, isCompanyWide])
   const companyId = currentCompany?.id
   const loadPaletteConsultations = useMemo(() => companyId ? () => getChatSessionSummaries(companyId).then(paletteConsultations) : undefined, [companyId])
+  // 探す's consultations: this PC's history with the record each was started from (shown ones only).
+  const loadFindConsultations = useMemo(() => companyId ? () => getChatSessionSummaries(companyId).then(all => {
+    const listed = new Set(paletteConsultations(all).map(c => c.id))
+    return all.filter(s => listed.has(s.id)).map(s => ({ id: s.id, title: s.title, updatedAt: s.updatedAt, ...(s.topicRecordId ? { topicRecordId: s.topicRecordId } : {}) }))
+  }) : undefined, [companyId])
+  const openConsultation = (sessionId: string) => {
+    if (collapsedPane === 'chat') toggleChat()
+    void runCommand('chat.openConsultation', { sessionId }).catch(() => {})
+  }
+  const departmentNames = useMemo(() => Object.fromEntries(departments.map(d => [d.folder, d.name])), [departments])
   const myTurnIds = (taskList.data?.items ?? []).filter(i => i.turn === 'mine' || i.turn === 'acceptance').map(i => i.id)
   // Opening the やること tab, or leaving it, means the member has seen what is in it.
   const selectLeftTab = (id: string) => {
@@ -458,7 +472,10 @@ export function AppShell() {
       id: 'search', title: '探す', icon: MagnifyingGlass, mount: 'once-opened',
       onOpen: () => requestAnimationFrame(() => searchInputRef.current?.focus()),
       render: () => <SearchPanel rootPath={rootPath || ''} companyId={currentCompany?.id} departmentFolder={effectiveDeptFolder} inputRef={searchInputRef}
-        onOpenFile={(path, line) => { setGotoLine({ path, line }); openTab(path) }} />,
+        departmentNames={departmentNames} recent={recentTabs} bundleWord={bundleWord} bundleKinds={bundleKinds} activeRecordId={activeRecordId}
+        loadConsultations={loadFindConsultations} consultationTopics={consultationTopics} onOpenConsultation={openConsultation}
+        notDownloaded={sparseCheckout.enabled ? sparseCheckout.excludedPaths : undefined}
+        onOpenFile={(path, line) => { if (line !== undefined) setGotoLine({ path, line }); openTab(path) }} />,
     },
     // A business plugin's screen takes the whole left side, like スキル.
     ...plugins.tabs.map(tab => ({ ...tab, wide: true })),
@@ -642,10 +659,7 @@ export function AppShell() {
         paletteSkills={paletteSkills}
         onOpenSkill={openSkillFromPalette}
         loadConsultations={loadPaletteConsultations}
-        onOpenConsultation={sessionId => {
-          if (collapsedPane === 'chat') toggleChat()
-          void runCommand('chat.openConsultation', { sessionId }).catch(() => {})
-        }}
+        onOpenConsultation={openConsultation}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}

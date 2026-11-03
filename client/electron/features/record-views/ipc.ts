@@ -8,15 +8,17 @@
 //   recordViews:forFile  「つながっているもの」 of an open file
 //   recordViews:topics   the やること / 案件 the member's AI consultations are about (title and kind
 //                        only, for 「AIへの相談」); a plain read — never tells the server it was opened
+//   recordViews:find     探す: records found by words, with department, mine, 案件 and summaries
+//   recordViews:findHome 探す with nothing typed: the member's unfinished 案件, this week's meetings
 // The server answers only what the member may read (counts included); nothing is added here.
 
 import type { TypeDefinition } from '../../../../shared/core/record-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
-import type { RecordDetail, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
+import type { RecordDetail, RecordFindHome, RecordFindResult, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, historyEntries, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
-  type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
+  cardFields, findHitView, historyEntries, historyLines, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
+  type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
@@ -33,6 +35,7 @@ export interface RecordViewsDeps {
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
+const DAY = /^\d{4}-\d{2}-\d{2}$/
 const BAD_INPUT = { success: false as const, offline: false, error: '入力が正しくありません。' }
 
 type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: unknown } | null } | null
@@ -84,6 +87,29 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const t = typeof text === 'string' ? text.normalize('NFC').trim() : ''
       if (!COMPANY.test(companyId) || t.length === 0 || t.length > 100) return BAD_INPUT
       return list(companyId, { text: t })
+    },
+
+    async find(companyId: string, text: string, today: string): Promise<FindResult> {
+      const t = typeof text === 'string' ? text.normalize('NFC').trim() : ''
+      if (!COMPANY.test(companyId) || t.length === 0 || t.length > 100 || typeof today !== 'string' || !DAY.test(today)) return BAD_INPUT
+      const [a, defs] = await Promise.all([call(companyId, 'POST', '/records/find', { text: t, today }), types(companyId)])
+      if (a && disabled(a)) return { success: true, available: false, total: 0, hits: [], hubs: [] }
+      if (a?.status !== 200) return failure(a)
+      const r = a.json?.data as RecordFindResult
+      return { success: true, available: true, total: r.total, hits: r.hits.map(h => findHitView(h, defs.get(h.record.type))), hubs: r.hubs }
+    },
+
+    async findHome(companyId: string, today: string, from: string, to: string): Promise<FindHomeResult> {
+      if (!COMPANY.test(companyId) || ![today, from, to].every(d => typeof d === 'string' && DAY.test(d))) return BAD_INPUT
+      const [a, defs] = await Promise.all([call(companyId, 'POST', '/records/find-home', { today, from, to }), types(companyId)])
+      if (a && disabled(a)) return { success: true, available: false, bundles: [], meetings: [] }
+      if (a?.status !== 200) return failure(a)
+      const r = a.json?.data as RecordFindHome
+      return {
+        success: true, available: true,
+        bundles: r.bundles.map(b => ({ ...findHitView(b, defs.get(b.record.type)), hub: b.hub })),
+        meetings: r.meetings.map(h => findHitView(h, defs.get(h.record.type))),
+      }
     },
 
     forFile(companyId: string, companyPath: string): Promise<RecordListResult> | RecordListResult {
@@ -227,6 +253,8 @@ export function registerRecordViewsIpc(ipc: IpcRegistrar, deps: RecordViewsDeps)
   const api = createRecordViewsApi(deps)
   ipc.handle('recordViews:search', (_event, companyId, text) => api.search(companyId, text))
   ipc.handle('recordViews:card', (_event, companyId, recordId) => api.card(companyId, recordId))
+  ipc.handle('recordViews:find', (_event, companyId, text, today) => api.find(companyId, text, today))
+  ipc.handle('recordViews:findHome', (_event, companyId, today, from, to) => api.findHome(companyId, today, from, to))
   ipc.handle('recordViews:forFile', (_event, companyId, companyPath) => api.forFile(companyId, companyPath))
   ipc.handle('recordViews:topics', (_event, companyId, recordIds) => api.topics(companyId, recordIds))
 }

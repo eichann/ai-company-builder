@@ -235,7 +235,7 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
 }
 
 /** Readable records linked to `from` (either direction), the link allowed for anyone. */
-function neighbours(records: RecordRepository, reader: RecordReader, from: RecordAccessRow[]): RecordAccessRow[] {
+export function neighbours(records: RecordRepository, reader: RecordReader, from: RecordAccessRow[]): RecordAccessRow[] {
   const ids = from.map(r => r.id)
   const byId = new Map(from.map(r => [r.id, r]))
   const out = records.linksFrom(ids).filter(l => l.targetId !== null)

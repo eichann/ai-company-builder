@@ -182,6 +182,49 @@ export interface RecordQueryResult {
   records: RecordSummary[]
 }
 
+/**
+ * One record 探す found (`POST /records/find`, records.md "探す"): the summary plus what the
+ * left tab narrows and labels by, all decided on the server from what the caller reads.
+ */
+export interface RecordFindHit {
+  record: RecordSummary
+  /** The department folder it lives in (its path's or folder's first part); null = the whole company. */
+  department: string | null
+  /** The caller is in it: its owner (owner-only), a person field of its type, or a meeting's attendee. */
+  mine: boolean
+  /** Its 案件・プロジェクト (outgoing `bundle` link), when the caller reads it. */
+  bundle?: { id: string; title: string }
+}
+
+/** A 相手 / 案件 at a glance (探す's summary card, 「進行中の案件」): counts of what the caller reads. */
+export interface RecordFindHub {
+  id: string
+  counts: { bundles: number; openTasks: number; meetings: number; decisions: number; files: number }
+  /** The first meeting on or after `today` (its `meeting_at`), else null. */
+  nextMeetingAt: string | null
+  /** The newest change among it and what is linked to it. */
+  lastMovedAt: string
+  /** Readable やること and 案件 linked to it: the app matches this PC's consultations about them. */
+  memberIds: string[]
+}
+
+/** `POST /records/find { text, today }`. */
+export interface RecordFindResult {
+  /** Every readable match (hits holds the newest 200). */
+  total: number
+  hits: RecordFindHit[]
+  /** Hits that are a 相手 or a 案件 whose name holds the words (at most 5). */
+  hubs: RecordFindHub[]
+}
+
+/** `POST /records/find-home { today, from, to }`: 探す with nothing typed. */
+export interface RecordFindHome {
+  /** The caller's unfinished 案件・プロジェクト, newest first (at most 5). */
+  bundles: Array<RecordFindHit & { hub: RecordFindHub }>
+  /** The caller's meetings with `meeting_at` in [from, to), earliest first (at most 5). */
+  meetings: RecordFindHit[]
+}
+
 export interface RecordLinkView {
   name: string
   /** out = written in this record; in = another record names this one. */

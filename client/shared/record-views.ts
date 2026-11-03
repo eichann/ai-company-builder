@@ -6,7 +6,7 @@ import type { TypeDefinition } from '../../shared/core/record-types'
 import { parseTagsValue } from '../../shared/core/record-types'
 import { BUNDLE_PART_ENDED_ACTION, OUTSIDE_TIME_ACTION, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
-import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
+import type { RecordFieldValue, RecordFindHit, RecordFindHub, RecordSummary } from '../../shared/types/records'
 import type { RecordDetailView } from './record-details'
 import type { ViewersLabel } from '../../shared/types/viewers'
 import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
@@ -45,6 +45,36 @@ export interface RecordViewSummary {
 export type RecordListResult =
   | { success: true; available: boolean; total: number; records: RecordViewSummary[] }
   | { success: false; offline: boolean; error: string }
+
+/** One record 探す found (`recordViews:find`): its row and what the tab narrows and labels by. */
+export interface FindHitView {
+  record: RecordViewSummary
+  /** Its department folder; null = the whole company. */
+  department: string | null
+  /** The member is in it (owner-only for them, a person field, a meeting's attendee). */
+  mine: boolean
+  bundle?: { id: string; title: string }
+  /** A meeting's own date and time (`meeting_at`), for 「この1週間の会議」. */
+  meetingAt?: string
+}
+
+export type FindResult =
+  | { success: true; available: boolean; total: number; hits: FindHitView[]; hubs: RecordFindHub[] }
+  | { success: false; offline: boolean; error: string }
+
+export type FindHomeResult =
+  | { success: true; available: boolean; bundles: Array<FindHitView & { hub: RecordFindHub }>; meetings: FindHitView[] }
+  | { success: false; offline: boolean; error: string }
+
+/** A server hit as the app shows it (`summaryView` with the type's definition). */
+export function findHitView(h: RecordFindHit, def: TypeDefinition | undefined): FindHitView {
+  const at = h.record.fields.meeting_at ?? h.record.fields.occurred_at
+  return {
+    record: summaryView(h.record, def), department: h.department, mine: h.mine,
+    ...(h.bundle ? { bundle: h.bundle } : {}),
+    ...(h.record.type === 'meeting' && typeof at === 'string' && at ? { meetingAt: at } : {}),
+  }
+}
 
 export interface RecordCardField { label: string; value: string }
 export interface RecordCardHistoryLine {
