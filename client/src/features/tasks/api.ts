@@ -6,12 +6,12 @@ import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
 import type { TagSuggestions } from '../../../shared/tag-suggest'
-import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
-/** Reading the list, and hearing that the member's turn or notices may have changed. */
-export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
+/** Reading the list, and hearing that the member's turn, notices or records may have changed. */
+export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged' | 'onRecordsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** Setting or taking off a link between two records (the server decides which links may change). */
@@ -49,12 +49,22 @@ export function getTaskList(companyId: string, reads: TaskReads = window.electro
   return reads.getTaskList(companyId)
 }
 
+/** The folded 「アーカイブ」: archived tasks, newest first, one page (20) from `cursor`. */
+export type ArchiveReads = ElectronPort<'getArchivedTasks'>
+
+export function getArchivedTasks(companyId: string, cursor: ArchiveCursor, reads: ArchiveReads = window.electronAPI): Promise<ArchivedTasksResult> {
+  return reads.getArchivedTasks(companyId, cursor)
+}
+
 /**
- * `listener` hears that this company's 「あなたの番」 or notices may have changed
- * (the title bar keeps main watching; this only listens).
+ * `listener` hears that this company's 「あなたの番」, notices or records may have changed (the
+ * title bar keeps main watching; `records:changed` comes at once when the member's own AI wrote a
+ * record, and on every records signal of the push channel). This only listens.
  */
 export function onTasksMayHaveChanged(companyId: string, listener: () => void, reads: TaskReads = window.electronAPI): () => void {
-  return reads.onNotificationsChanged(change => { if (change.companyId === companyId) listener() }) ?? (() => {})
+  const mine = (change: { companyId: string }) => { if (change.companyId === companyId) listener() }
+  const stops = [reads.onNotificationsChanged(mine), reads.onRecordsChanged?.(mine)]
+  return () => { for (const stop of stops) stop?.() }
 }
 
 export function createTask(companyId: string, input: TaskCreateInput, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {

@@ -447,7 +447,9 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
           OR (r.summary NOT LIKE '${CONTENT_REF_PREFIX}%' AND r.summary LIKE ? ESCAPE '\\'))`)
         params.push(likeAnywhere(filter.text), likeAnywhere(filter.text), likeAnywhere(filter.text))
       }
-      let order = 'r.updated_at DESC, r.id'
+      // Most recently changed first: an action moves only record_state, so its time counts too
+      // (the summary's updatedAt is the later of the two; an archived task sorts by when it was archived).
+      let order = 'max(r.updated_at, coalesce(s.updated_at, r.updated_at)) DESC, r.id'
       if (filter.sort) {
         // The field name is bound; only the direction is spliced, from a closed set. Empty values last.
         const dir = filter.sort.order === 'desc' ? 'DESC' : 'ASC'

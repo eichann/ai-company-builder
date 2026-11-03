@@ -11,6 +11,7 @@ contract.events minutes:changed
 contract.events notifications:changed
 contract.events notifications:openTasks
 contract.events plugins:changed
+contract.events records:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
@@ -174,6 +175,7 @@ contract.invoke slack:markSeen
 contract.invoke slack:setFeature
 contract.invoke slack:status
 contract.invoke tasks:act
+contract.invoke tasks:archived
 contract.invoke tasks:bundleKinds
 contract.invoke tasks:bundles
 contract.invoke tasks:card
@@ -345,6 +347,7 @@ contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'a
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
 contract.type ElectronAPI.getAppLinkServerOffer = getAppLinkServerOffer: Invoke<'appLink:serverOffer'>
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
+contract.type ElectronAPI.getArchivedTasks = getArchivedTasks: Invoke<'tasks:archived'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
 contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
@@ -432,6 +435,7 @@ contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minute
 contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
 contract.type ElectronAPI.onNotificationsOpenTasks = onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
 contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
+contract.type ElectronAPI.onRecordsChanged = onRecordsChanged: Subscribe<'records:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -606,6 +610,7 @@ contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { c
 contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'notifications:openTasks' = 'notifications:openTasks': [data: { companyId: string }]
 contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
+contract.type IpcEventChannels.'records:changed' = 'records:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
@@ -770,6 +775,7 @@ contract.type IpcInvokeChannels.'slack:markSeen' = 'slack:markSeen': { args: [co
 contract.type IpcInvokeChannels.'slack:setFeature' = 'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'slack:status' = 'slack:status': { args: [companyId: string]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:archived' = 'tasks:archived': { args: [companyId: string, cursor: ArchiveCursor]; result: ArchivedTasksResult }
 contract.type IpcInvokeChannels.'tasks:bundleKinds' = 'tasks:bundleKinds': { args: [companyId: string]; result: BundleKindsAnswer }
 contract.type IpcInvokeChannels.'tasks:bundles' = 'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
 contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
@@ -1032,6 +1038,7 @@ main.handle slack:markSeen @ features/slack/ipc.ts (companyId: string)
 main.handle slack:setFeature @ features/slack/ipc.ts (companyId: string, feature: SlackFeature, on: boolean)
 main.handle slack:status @ features/slack/ipc.ts (companyId: string)
 main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:archived @ features/tasks/ipc.ts (companyId, cursor)
 main.handle tasks:bundleKinds @ features/tasks/ipc.ts (companyId)
 main.handle tasks:bundles @ features/tasks/ipc.ts (companyId)
 main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
@@ -1078,6 +1085,7 @@ main.send minutes:changed @ main.ts
 main.send notifications:changed @ main.ts
 main.send notifications:openTasks @ main.ts
 main.send plugins:changed @ main.ts
+main.send records:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
@@ -1173,6 +1181,8 @@ preload getAppLinkServerOffer -> invoke appLink:serverOffer()
 preload getAppLinkServerOffer : () => Promise<{ server: string; } | null>
 preload getApproval -> invoke approvals:get($0, $1)
 preload getApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
+preload getArchivedTasks -> invoke tasks:archived($0, $1)
+preload getArchivedTasks : (companyId: string, cursor: ArchiveCursor) => Promise<ArchivedTasksResult>
 preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
 preload getAutoTurnSettings -> invoke aiTurns:settings($0)
@@ -1347,6 +1357,8 @@ preload onNotificationsOpenTasks -> on notifications:openTasks(<fn>) ; removeLis
 preload onNotificationsOpenTasks : (callback: (data: { companyId: string; }) => void) => () => void
 preload onPluginsChanged -> on plugins:changed(<fn>) ; removeListener plugins:changed(<fn>)
 preload onPluginsChanged : (callback: (change: { companyId: string; }) => void) => () => void
+preload onRecordsChanged -> on records:changed(<fn>) ; removeListener records:changed(<fn>)
+preload onRecordsChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)

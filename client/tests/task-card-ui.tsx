@@ -6,6 +6,8 @@
 // changed the due. Actions sent show in `#acted`, run answers in `#runs`. `?task=waiting`: 返事待ち with its 見込み
 // (task version 12); `?task=back`: the clock gave it back (見込み 11/6 passed); `?task=todo-team`: a plain task with
 // チームの進め方 on; `?task=todo-own`: the member's own task with チームの進め方 off (返事待ちにする still in 「…」). The wait tests install the page clock (Mon 11-02 or Sat 11-07).
+// `?task=unassigned`: a task the member asked with nobody holding it (「自分が担当する」 heads the 「…」, 「終わったら」, アーカイブ);
+// `?task=archived`: the same task archived (［戻す］, 経緯 「佐藤さんがアーカイブしました」).
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -32,6 +34,7 @@ const noBundle = params.get('bundle') === 'none'
 // 返事待ち (task version 12): waiting, given back by the clock, or a plain task to make wait.
 const waitMode = ['waiting', 'back', 'todo-team', 'todo-own'].includes(params.get('task') ?? '') ? params.get('task') : null
 const plainTodo = waitMode === 'todo-team' || waitMode === 'todo-own'
+const menuMode = ['unassigned', 'archived'].includes(params.get('task') ?? '') ? params.get('task') : null
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -65,7 +68,16 @@ const waitCard = waitMode ? taskCardOf({
     ...(plainTodo ? {} : { waiting_on: '先方からの返事', wait_until: '2026-11-06' }),
   }), links: [] },
 }) : null
-const shownCard = waitCard ?? (reviewing ? reviewCard : taskCardOf({
+// The menu decisions of 2026-11-03: a task the member asked, nobody holding it yet; or archived.
+const menuCard = menuMode ? taskCardOf({
+  me: ME, defs, def: defs.get('task'), people, runs: [], teamMode: false, holidays: [],
+  entries: (menuMode === 'archived' ? [
+    { version: 1, action: 'create', actorId: ME, actorKind: 'human', at: '2026-11-02T00:00:00.000Z', note: '', fromState: null, toState: 'todo', changes: [] },
+    { version: 2, action: 'cancel', actorId: ME, actorKind: 'human', at: '2026-11-03T00:00:00.000Z', note: '先方の都合で見送り', fromState: 'todo', toState: 'cancelled', changes: [] },
+  ] : []) as unknown as LedgerEntry[],
+  detail: { record: rec('task-0000un', 'task', '展示会の備品をそろえる', menuMode === 'archived' ? 'cancelled' : 'todo', { requested_by: ME, when_done: 'notify', due: '2026-11-13' }), links: [] },
+}) : null
+const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
   detail: {
     record: task,
@@ -80,7 +92,7 @@ const shownCard = waitCard ?? (reviewing ? reviewCard : taskCardOf({
     ],
   },
 }))
-const card = reviewing || waitCard ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
+const card = reviewing || waitCard || menuCard ? shownCard : { ...shownCard, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } }
 const acted: string[] = []
 const show = (id: string, line: string) => { acted.push(line); document.getElementById(id)!.textContent = acted.join(',') }
 
@@ -99,7 +111,7 @@ installElectronAPI({
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     // A tag the server refuses: the card shows its words.
     if ((input.args?.tags as string[] | undefined)?.includes('禁止')) return { success: false, offline: false, code: 'BAD_VALUE', error: 'このタグは付けられません。' }
-    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}`)
+    show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}${input.args && 'waiting_on' in input.args ? `:on=${String(input.args.waiting_on)}` : ''}${input.args && 'wait_until' in input.args ? `:until=${String(input.args.wait_until)}` : ''}${input.args?.tags ? `:tags=${(input.args.tags as string[]).join('|')}` : ''}${['assignee', 'reviewer', 'when_done'].filter(k => input.args?.[k]).map(k => `:${k}=${String(input.args![k])}`).join('')}`)
     return { success: true, recordId }
   },
   undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },

@@ -4,7 +4,8 @@
 // run with an unknown outside result is settled by the member; the completed card states the OK
 // in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
 // owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
-// only on a task linking the 来た連絡 it came from; 返事待ちにする is in 「…」 without チームの進め方.
+// only on a task linking the 来た連絡 it came from; 返事待ちにする is in 「…」 without チームの進め方; the 「…」 of
+// 2026-11-03 (アーカイブ and ［戻す］, 「終わったら」 as one item, 「自分が担当する」 on top, 要らない only on a proposal).
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -369,5 +370,61 @@ test('given back by the clock: 「先方からの返事が来ていません（3
   await expect(page.locator('#acted')).toHaveText('nudge task-0000ww,wait@3:on=先方からの返事:until=2026-11-11')
   await band.getByRole('button', { name: '完了にする' }).click()
   await expect(page.locator('#acted')).toContainText('complete@3')
+  expectNoPageErrors(state)
+})
+
+// The 「…」 decisions of 2026-11-03 (tasks-ui.md "The card" 4.). SCREENSHOTS=<dir> writes the menu, the
+// 「終わったら」 chooser and the archived card.
+test('「…」 on a task nobody holds: 自分が担当する first; 終わったら is one item; アーカイブ in normal colour; no 要らない', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { task: 'unassigned' })
+  const card = page.getByTestId('task-card')
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  const items = page.getByRole('menuitem')
+  await expect(items.first()).toContainText('自分が担当する')
+  await expect(page.getByRole('menuitem', { name: /^終わったら/ })).toContainText('いまは「知らせるだけ」')
+  await expect(page.getByRole('menuitem', { name: /確かめる人を決める|終わったらを決める|要らない|やめる/ })).toHaveCount(0)
+  const archive = page.getByRole('menuitem', { name: /アーカイブ/ })
+  await expect(archive).toContainText('一覧から外します。消しません。［戻す］で元に戻せます')
+  await expect(archive.locator('.text-rose-600')).toHaveCount(0)
+  if (shots) await page.screenshot({ path: `${shots}/task-menu.png` })
+
+  // 自分が担当する: one press, assigned to the member with the note the type requires.
+  await items.first().click()
+  await expect(page.locator('#acted')).toHaveText('assign@3:自分が担当します:assignee=u-sato')
+  await expect(page.getByRole('status').filter({ hasText: '自分が担当になりました' })).toBeVisible()
+
+  // 終わったら → 〇〇さんに確かめてもらう: the person and 確かめてから in one go, each at the next version.
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /^終わったら/ }).click()
+  const chooser = page.getByRole('dialog', { name: '終わったら' })
+  await expect(chooser.getByRole('button', { name: '決める' })).toBeDisabled()
+  await chooser.getByLabel('確かめる人').selectOption({ label: '阿部さん' })
+  await expect(chooser).toContainText('阿部さんに確かめてもらう')
+  if (shots) await chooser.screenshot({ path: `${shots}/when-done-chooser.png` })
+  await chooser.getByRole('button', { name: '決める' }).click()
+  await expect(page.locator('#acted')).toHaveText('assign@3:自分が担当します:assignee=u-sato,set_reviewer@3:reviewer=u-abe,set_when_done@4:when_done=check')
+
+  // アーカイブ: what happens and who is told first; the type asks a reason.
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /アーカイブ/ }).click()
+  const confirm = page.getByRole('dialog', { name: 'アーカイブしますか？' })
+  await expect(confirm).toContainText('一覧から外します。消しません。［戻す］で元に戻せます')
+  await confirm.getByLabel('理由').fill('今回は見送り')
+  await confirm.getByRole('button', { name: 'アーカイブ' }).click()
+  await expect(page.locator('#acted')).toContainText(',cancel@3:今回は見送り')
+  await expect(page.getByRole('status').filter({ hasText: 'アーカイブしました' })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+test('an archived task: 「アーカイブ済み」, ［戻す］ brings it back, 経緯 says 「佐藤さんがアーカイブしました」', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { task: 'archived' })
+  const card = page.getByTestId('task-card')
+  await expect(card).toContainText('アーカイブ済み')
+  await card.getByRole('button', { name: /経緯/ }).click()
+  await expect(card.getByRole('region', { name: '経緯' })).toContainText('佐藤さんがアーカイブしました（先方の都合で見送り）')
+  if (shots) await page.screenshot({ path: `${shots}/task-archived.png`, fullPage: true })
+  await card.getByRole('button', { name: '戻す' }).click()
+  await expect(page.locator('#acted')).toHaveText('reopen@3')
+  await expect(page.getByRole('status').filter({ hasText: '一覧に戻しました' })).toBeVisible()
   expectNoPageErrors(state)
 })

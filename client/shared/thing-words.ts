@@ -97,7 +97,7 @@ export function bundleWords(typeLabels: ReadonlyArray<string | null | undefined>
 const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   task: {
     todo: '未着手', in_progress: '進めている', review: '確かめてもらっている', waiting: '返事待ち', done: '完了',
-    awaiting_acceptance: '引き受け待ち', declined: '受けられないと返した', preparing: 'AI が用意している', cancelled: 'やめた（しまった）',
+    awaiting_acceptance: '引き受け待ち', declined: '受けられないと返した', preparing: 'AI が用意している', cancelled: 'アーカイブ済み',
   },
   meeting: { received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
   decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },
@@ -115,7 +115,8 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
 /** Any type's states the core's types share, for a type without its own words above. */
 const COMMON_STATE_WORDS: Readonly<Record<string, string>> = {
   ...STATE_WORDS.task, ...STATE_WORDS.meeting, ...STATE_WORDS.decision, ...STATE_WORDS.outbound_message, ...STATE_WORDS.approval,
-  handled: '対応済み', bundle_waiting: 'まとまりの分を待っている', bundle_working: 'まとまりの分を進めている',
+  // Archiving (アーカイブ) is the task's word; another type's 中止 stays 「やめた」.
+  cancelled: 'やめた（しまった）', handled: '対応済み', bundle_waiting: 'まとまりの分を待っている', bundle_working: 'まとまりの分を進めている',
 }
 
 /** A state in members' words; a state no table knows is shown as it is (a company's own word). */

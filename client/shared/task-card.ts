@@ -73,6 +73,10 @@ export interface TaskCardData {
   names: { assignee: string | null; requester: string | null; reviewer: string | null }
   /** The checker's member id (「終わったので見てもらう」 hands it to them). */
   reviewerId: string | null
+  /** The assignee's member id; null = nobody holds it (「自分が担当する」 heads the 「…」). */
+  assigneeId: string | null
+  /** The member themselves (「自分が担当する」, 「終わったら」's 確かめる人 may be them). */
+  self: { id: string; name: string | null }
   /** 終わったら (task version 9): 知らせるだけ or 確かめてから; null before version 9 or unset. */
   whenDone: 'notify' | 'check' | null
   /** The task's 案件 / プロジェクト (its `bundle` link), shown at its head rather than in 「つながっているもの」. */
@@ -145,6 +149,18 @@ export function okWords(actor: string, okBy: string | null, okNote: string | nul
   return `${actor}さんが${whose}完了にしました${okNote ? `（${okNote}）` : ''}`
 }
 
+/**
+ * 経緯's line for archiving a task and bringing it back: 「佐藤さんがアーカイブしました（理由）」,
+ * 「佐藤さんがアーカイブから戻しました」. The type still calls the action 中止する (`cancel`); the
+ * words are the app's, so released apps and the type's version are untouched.
+ */
+export function archiveLine(e: Pick<LedgerEntry, 'action' | 'note' | 'fromState'>, who: string | undefined): string | null {
+  const person = !who ? 'メンバーが' : who === 'AI' ? 'AI が' : `${who}さんが`
+  if (e.action === 'cancel') return `${person}アーカイブしました${e.note ? `（${e.note}）` : ''}`
+  if (e.action === 'reopen' && e.fromState === 'cancelled') return `${person}アーカイブから戻しました${e.note ? `（${e.note}）` : ''}`
+  return null
+}
+
 /** 「議事録を確認する」's own parts (task version 11): the meeting, its summary and the decisions the AI left. */
 export interface MinutesReviewView {
   meetingId: string
@@ -213,6 +229,9 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
 
   const lines = historyLines(src.entries, def, people)
   const history = historyEntries(src.entries, def).map((e, i) => {
+    // アーカイブ (owner decision 2026-11-03): the app's word for `cancel`, and 戻す for bringing it back.
+    const archive = archiveLine(e, lines[i].who)
+    if (archive) return { ...lines[i], text: archive }
     const by = e.changes.find(c => c.field === 'ok_by')?.after
     const note = e.changes.find(c => c.field === 'ok_note')?.after
     if (e.action !== 'complete' || (!str(by) && !str(note))) return lines[i]
@@ -274,7 +293,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
     review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me) : null,
     teamMode: src.teamMode === true,
-    roles, names, reviewerId: str(r.fields.reviewer), whenDone, bundle, origin, fromIncoming,
+    roles, names, reviewerId: str(r.fields.reviewer), assigneeId: str(r.fields.assignee), self: { id: me, name: people[me] ?? null }, whenDone, bundle, origin, fromIncoming,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,

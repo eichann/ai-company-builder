@@ -19,7 +19,7 @@ import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
-import type { BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
+import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
@@ -159,6 +159,7 @@ const api: ElectronAPI = {
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
   getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),
   getTaskList: (companyId: string) => invoke('tasks:list', companyId),
+  getArchivedTasks: (companyId: string, cursor: ArchiveCursor) => invoke('tasks:archived', companyId, cursor),
   createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),
   actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),
   getTaskCard: (companyId: string, recordId: string) => invoke('tasks:card', companyId, recordId),
@@ -194,6 +195,7 @@ const api: ElectronAPI = {
   setNotificationSetting: (companyId: string, kind: string, on: boolean) => invoke('notifications:setSetting', companyId, kind, on),
   onNotificationsChanged: callback => subscribe('notifications:changed', callback),
   onNotificationsOpenTasks: callback => subscribe('notifications:openTasks', callback),
+  onRecordsChanged: callback => subscribe('records:changed', callback),
   searchRecords: (companyId: string, text: string) => invoke('recordViews:search', companyId, text),
   findRecords: (companyId: string, text: string, today: string) => invoke('recordViews:find', companyId, text, today),
   findRecordsHome: (companyId: string, today: string, from: string, to: string) => invoke('recordViews:findHome', companyId, today, from, to),

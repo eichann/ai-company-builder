@@ -79,8 +79,19 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
   the card by the version the list knows, so a change made from the list shows on the card.
   Test: `tests/ui/tasks-layout.spec.ts`.
-- `useTaskList` (in AppShell): read at mount, on `notifications:changed` for the company (the title
-  bar keeps main watching), every 2 minutes and after the member's own change. `useCalendarToday`:
+- `useTaskList` (in AppShell): read at mount, on `notifications:changed` and `records:changed` for
+  the company (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the
+  member's own change. `records:changed` (no content) is sent by main **at once when the member's
+  own consultation AI wrote a record** in this app (a record tool's write the server accepted:
+  `RecordToolsOptions.onRecordChanged` → `server-config.ts` `recordsChanged` → main, which also
+  asks the title bar's 「あなたの番」 again) and on every `records` push signal (others' changes that
+  reach this member; 「かもしれない運転」). Tests: `client/tests/records-tools.test.ts` (a write tells,
+  a look-up or refusal does not), `src/features/tasks/api.test.ts`.
+- **A task only the member sees shows whatever department is on screen**: the list is read per
+  company (no folder in any of its requests) and owner-only tasks come in 「あなたの番」 like any
+  other; a department tab never narrows it (`tests/tasks-list.test.ts`). Where the company hides
+  the tab for that department (`taskListDepartmentIds`), the title bar's 「あなたの番」 still
+  counts it. `useCalendarToday`:
   at mount and every 10 minutes.
 - `model.ts` (pure, `model.test.ts`): "today" is the company's day (`companyNow`, Japan time until a
   setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),
@@ -94,8 +105,9 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   from `GET /records/bundle-kinds` (read with the list: `TaskListData.bundleKinds`, and
   `bundleKindNames` for each row's chip — the core's kind under the company's name); an older
   server → the types' own labels. The one line's ［〇〇］ is the department on screen's kind and
-  offers only bundles of that type (全社: every kind). An AI proposal put away (`dismissed`) is
-  never in 今日終わったこと.
+  offers only bundles of that type (全社: every kind). An AI proposal put away (`dismissed`) and an
+  archived task (`cancelled`, "The archive" below) are never in 今日終わったこと.
+  In every view the folded **「アーカイブ」** closes the list ("The archive").
   "This week" ends on Sunday; on a Saturday or Sunday it runs to next Sunday, so tomorrow never
   folds. A due with a time today that has passed is 期限切れ. Meetings are read, never made into
   tasks (`calendar.md`); a tag filter hides them.
@@ -163,15 +175,29 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    the title (新しい画面のデモ C, J; `placeActions`): 自分で進める (AI が用意している) → 引き受ける →
    終わったので見てもらう (確かめてから, the assignee) → 完了にする — but on a task returned to its requester
    (受けられないと返した) the requester's main action is 担当を替える, with 「やり直す（同じ人にもう一度）」 and
-   「中止する」 in 「…」; while someone else checks it, a word
+   「アーカイブ」 in 「…」; while someone else checks it, a word
    instead (「田中さんが確かめています」), done = 「完了」. Everything else is behind **「…」**, each with
    one line on what it does (`actionHint`). **チームの進め方** (the company's `teamMode`, off by default: `tasks:card` reads `GET /me/work-switches` `teamMode.on`, unreadable = off; `card.teamMode`):
    off, or a task nobody else is in (no requester, or one's own), drops 進めている印をつける,
    見てもらう and 差し戻す — how the card looks, not a permission (the server allows them either way);
    **返事待ちにする is always in 「…」** (owner decision 2026-11-03), never the main button, for whom
    the type's `wait` allows (assignee, AI) in its states;
-   引き受ける and 受けられない stay on any task someone asked of the member. Actions that take the task off the member's turn (受けられない,
-   返事待ち, 人に頼む, やめる（しまう）, 見てもらう) open a window that says **何が起きるか** and **知らせる人**
+   引き受ける and 受けられない stay on any task someone asked of the member. **The 「…」 of owner decision
+   2026-11-03** (`placeActions`, `cardActions.ts`; labels are the app's, the type's actions and
+   version are unchanged): `cancel` reads **「アーカイブ」** in every state, normal colour, line
+   「一覧から外します。消しません。［戻す］で元に戻せます」; an archived task's chip is 「アーカイブ済み」
+   (`stateWord`, task only — another type's `cancelled` stays 「やめた（しまった）」), its main button
+   **［戻す］** (`reopen`; 「やり直す」 stays for a done task) and 経緯 says 「佐藤さんがアーカイブしました
+   （理由）」 / 「…アーカイブから戻しました」 (`archiveLine`, `task-card.ts`). 「要らない（AI の案を外す）」
+   only on `proposed` (the type also allows `dismiss` from 未着手 / 引き受け待ち; the card hides it there).
+   確かめる人を決める and 終わったらを決める are one item **「終わったら」** (its line says how it is now):
+   a window with 「知らせるだけ」 / 「〇〇さんに確かめてもらう」 + a person (the member too, 「自分」);
+   `whenDoneSteps` sends `set_reviewer` then `set_when_done` (only what changes) in one press.
+   With **no assignee** (`card.assigneeId` null) and `assign` allowed, **「自分が担当する」** heads the
+   「…」: one press, `assign` to the member with the note 「自分が担当します」 (the type requires a
+   note on `assign`; a type change was not worth it — it reads well in 経緯) and ［取り消す］.
+   Actions that take the task off the member's turn (受けられない,
+   返事待ち, 人に頼む, アーカイブ, 見てもらう) open a window that says **何が起きるか** and **知らせる人**
    first (`leavingWords`); a reason where the type requires one. After a press the card says what
    happened with **［取り消す］** (`tasks:undo` → `POST …/undo { version, expectedVersion }` of that
    one entry; the server allows only its actor and refuses when something changed since). Since task
@@ -234,6 +260,28 @@ open → 「AI が反映しています…（あと少し）」; otherwise, when
 and passes only what the server answered for that record (`viewers`); a record left out shows
 nothing (`client/tests/record-card-viewers.test.ts`).
 Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
+
+## The archive (アーカイブ, owner decision 2026-11-03)
+
+- The bottom of the list, in every view: a folded section 「アーカイブ」 (`ArchiveSection.tsx`). Nothing
+  is read while folded; opening it reads the first page (each opening starts again), 20 archived
+  tasks newest first (`ARCHIVE_PAGE`), and 「さらに読み込む」 reads 20 more until none are left. A row
+  (archive icon, title, 「11/3 アーカイブ」, 「あなただけ」) opens its card, where ［戻す］ brings it back.
+- `tasks:archived(companyId, cursor)` (main): two `POST /records/query` — `{ type: 'task', state:
+  ['cancelled'], fields: { assignee | requested_by: me }, limit: 20, offset }` — merged by
+  `archivePage` (`client/shared/tasks.ts`): the server's order (most recently changed first, then
+  the id; `records.md` "Reading"), a task in both (one's own) once, never past a window whose query
+  has more; the cursor `{ assignee, requester }` is each query's offset (`isArchiveCursor`: integers
+  0–10000, else nothing is sent); `next: null` when both are read. The server answers only what the
+  member reads (someone's own task to its owner alone).
+- Tests: `client/tests/tasks-archive.test.ts` (pages of 20 in order, each once, the end; only
+  archived tasks of the member are asked; a bad cursor; not in 今日終わったこと),
+  `server/tests/unit/record-query-order.test.ts` (an action's time orders the query; offsets page;
+  someone's own archived task in nobody else's answer), `src/features/tasks/cardActions.test.ts`
+  (labels, ［戻す］, 経緯, 要らない only on a proposal, 「終わったら」 as one item, 「自分が担当する」),
+  `tests/ui/task-card.spec.ts` (`?task=unassigned|archived`), `tests/ui/tasks-list.spec.ts`
+  (「アーカイブ」: folded, 20 / 40 / 45, a row opens). `SCREENSHOTS=<dir>` writes the menu, the
+  「終わったら」 window, the archived card and the section.
 
 ## 返事待ち and its 見込み (task version 12, owner decision 2026-11-03 「②」; server `records.md` "Task version 12")
 

@@ -184,7 +184,9 @@ carry on. The app never acts on the signal itself: it only asks the server again
   Cookie header — at `notifications:watch`, every 5 minutes, and on a `records` or `notifications`
   signal for that company (`agent-push-channel.ts` `onNotifications`, wired in `main.ts`). IPC
   (`features/notifications/ipc.ts`): `notifications:watch` / `state` / `markRead` / `settings` /
-  `setSetting`, event `notifications:changed`. Sign-out and quit forget everything.
+  `setSetting`, event `notifications:changed`. A `records` signal also sends `records:changed`
+  (the task list re-reads, `tasks-ui.md`); so does the member's own AI writing a record in this
+  app, which also asks this watcher again at once. Sign-out and quit forget everything.
 - **Mac notifications (E-27)** only for an approval request, an item new in 「あなたの番」, or a
   notice the server marks fresh (`desktop`, above) — `desktopNoticesOf` in
   `client/shared/notifications-app.ts`: a fresh notice is shown **also on the first look** (the

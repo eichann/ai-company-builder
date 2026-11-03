@@ -44,7 +44,7 @@ import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
-import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
+import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
@@ -512,6 +512,8 @@ export interface IpcInvokeChannels {
   'calendar:today': { args: [companyId: string]; result: CalendarTodayResult }
   // The task list (tasks.ts): read and changed with the member's session in main; the server decides who may.
   'tasks:list': { args: [companyId: string]; result: TaskListResult }
+  /** The folded 「アーカイブ」: archived tasks, newest first, 20 per call from `cursor` (start: 0 / 0). */
+  'tasks:archived': { args: [companyId: string, cursor: ArchiveCursor]; result: ArchivedTasksResult }
   /** The list's one line: a task of the member's own (only they see it). */
   'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
   'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
@@ -733,6 +735,12 @@ export interface IpcEventChannels {
   'minutes:changed': [data: { companyId: string }]
   /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
   'notifications:changed': [data: { companyId: string }]
+  /**
+   * A record this member may see may have changed in this company — their own AI wrote one
+   * (instant, in this app) or the push channel's `records` signal came: re-read the task list.
+   * No content: the list asks the server again (tasks-ui.md).
+   */
+  'records:changed': [data: { companyId: string }]
   /** The morning's 「今日のあなたの番」 Mac notification was clicked: show the task list. */
   'notifications:openTasks': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
@@ -941,6 +949,7 @@ export interface ElectronAPI {
   getCalendarToday: Invoke<'calendar:today'>
   // The task list (やることの一覧).
   getTaskList: Invoke<'tasks:list'>
+  getArchivedTasks: Invoke<'tasks:archived'>
   createTask: Invoke<'tasks:create'>
   actOnTask: Invoke<'tasks:act'>
   getTaskCard: Invoke<'tasks:card'>
@@ -978,6 +987,7 @@ export interface ElectronAPI {
   setNotificationSetting: Invoke<'notifications:setSetting'>
   onNotificationsChanged: Subscribe<'notifications:changed'>
   onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
+  onRecordsChanged: Subscribe<'records:changed'>
   searchRecords: Invoke<'recordViews:search'>
   findRecords: Invoke<'recordViews:find'>
   findRecordsHome: Invoke<'recordViews:findHome'>

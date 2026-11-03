@@ -9,7 +9,7 @@
  *   GET  /types   GET /my-turn   GET /ai-turn   POST /query   GET /item/:recordId
  *   GET  /item/:recordId/history
  *   (these look-ups add `people`: id → display name of the company members they name, services/people-names.ts)
- *   POST /item                                  (act)
+ *   POST /item                                  (act) — with the AI's defaults (`createByAi`); `defaultFolder` = the consultation's department
  *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
  *   POST /item/:recordId/file-links (+ /remove)  (act) link a file later / remove it (types letting the AI act)
@@ -125,7 +125,8 @@ recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
   return keyedWrite(c, h, 'record-create', body, async () => {
-    const result = recordEngine.create(h.member, aiActor(h), body)
+    // The AI's defaults (personal for the member alone, else the consultation's department): records.md.
+    const result = recordEngine.createByAi(h.member, aiActor(h), body)
     return answer(c, result, result.ok && result.value.reused ? 200 : 201)
   })
 })

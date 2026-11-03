@@ -52,6 +52,8 @@ export interface ChatServerConfigDeps {
   companyFiles: CompanyFilesApi
   /** The company map for the AI: a record token per turn (records/api.ts). */
   records: RecordsApi
+  /** The member's own AI changed a record in this company: the task list and 「あなたの番」 read again now (tasks-ui.md). */
+  recordsChanged?: (companyId: string) => void
   toolApprovals: ToolApprovals
   /** A choice prompt in the window that owns the chat (closed with it). */
   requestInteraction: ChatServerConfig['requestInteraction']
@@ -142,11 +144,12 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, department, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
-      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
+      const onRecordChanged = deps.recordsChanged ? () => deps.recordsChanged?.(companyId) : undefined
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, onRecordChanged, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({

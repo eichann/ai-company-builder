@@ -22,12 +22,49 @@ import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
 
 export function creating(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, placeFolder, tell, summaryOf } = ctx
-  return {
+  /**
+   * What the member's AI makes, placed as the member would expect (records.md "Where the AI puts
+   * a request", owner decision 2026-11-03): a request about the member alone → owner-only with
+   * the member as assignee; another person named, or a department asked for → the department of
+   * the consultation (`defaultFolder`, sent by the app; none = the whole company), assignee as said
+   * or the member. A meeting's outputs keep their own place (minutes.md).
+   */
+  function aiPlacement(member: Member, body: unknown): unknown {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
+    const { defaultFolder, ...rest } = body as Record<string, unknown>
+    const opened = open(member)
+    const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
+    if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
+    const links = rest.links
+    if (typeof links === 'object' && links !== null && (links as Record<string, unknown>).meeting !== undefined) return rest
+    if (rest.fields !== undefined && (typeof rest.fields !== 'object' || rest.fields === null || Array.isArray(rest.fields))) return rest
+    const fields = { ...(rest.fields as Record<string, unknown> | undefined) }
+    const said = fields.assignee
+    const noAssignee = said === undefined || said === null
+    const someoneElse = typeof said === 'string' && said !== member.userId
+    const folderSaid = rest.folder !== undefined && rest.folder !== null
+    const personalAllowed = !opened.records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')
+    if (noAssignee) fields.assignee = member.userId
+    if (rest.personal === true) return { ...rest, fields }
+    if (rest.personal === undefined && !folderSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
+    const folder = folderSaid ? rest.folder : typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : undefined
+    return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
+  }
+
+  const api = {
+    /**
+     * The member's AI (`POST /api/records-ai/item`, tool records_create): `create` after the
+     * AI's defaults (`aiPlacement`). The answer says where it went (`placed`), for the AI to tell.
+     */
+    createByAi(member: Member, actor: ActorInput, body: unknown) {
+      return api.create(member, actor, aiPlacement(member, body))
+    },
+
     /**
      * A record that lives on the server (types with storage `server` or
      * `either`; a company's own file-backed type is created by writing its file).
      */
-    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; placed?: { personal: boolean; folder: string | null } }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -181,7 +218,8 @@ export function creating(ctx: EngineContext) {
       })
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
       if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
-      return ok({ record: summaryOf(records, id), entry })
+      return ok({ record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder } })
     },
   }
+  return api
 }
