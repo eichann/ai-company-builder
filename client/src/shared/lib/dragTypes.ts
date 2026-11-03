@@ -1,5 +1,3 @@
-import { RECORD_ID_RE } from '../../../../shared/core/records'
-
 /** The drag data the file tree puts on its rows: a JSON array of the dragged absolute paths. */
 export const FILE_PATHS_DRAG_TYPE = 'application/x-file-paths'
 
@@ -38,6 +36,8 @@ export const CONSULTATION_DRAG_TYPE = 'application/x-acb-consultation'
 export const LINK_EFFECT_ALLOWED = 'link'
 
 const SESSION_ID = /^[A-Za-z0-9_-]{1,128}$/
+/** `RECORD_ID_RE` of shared/core/records.ts, kept here so the renderer does not bundle the record-file parser. */
+const RECORD_ID_RE = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 const titleOf = (v: unknown): string => (typeof v === 'string' ? v.slice(0, 200) : '')
 
 export interface DraggedRecord { id: string; title: string }
