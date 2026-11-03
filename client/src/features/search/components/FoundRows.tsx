@@ -3,6 +3,7 @@
 // under it. Props in, JSX out; opening goes through the callbacks.
 import { useState, type DragEvent, type ReactNode } from 'react'
 import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED, startConsultationDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
+import { THING_NAMES } from '../../../../shared/thing-words'
 import { ArrowsOutSimple, CaretDown, CaretRight, LinkSimple } from '@phosphor-icons/react'
 import { foldAsciiCase } from '../../../../../shared/core/paths'
 import type { RecordFindHub } from '../../../../../shared/types/records'
@@ -57,7 +58,7 @@ export interface FoundRowActions {
 
 /** A found thing dragged onto a record's 「つながっているもの」 links it (owner decision 2026-11-03). */
 function startDrag(t: FoundThing, a: FoundRowActions, e: DragEvent): void {
-  if (t.recordId) startRecordDrag(e.dataTransfer, { id: t.recordId, title: t.title })
+  if (t.recordId) startRecordDrag(e.dataTransfer, { id: t.recordId, title: t.title, word: t.typeLabel || (t.kind in THING_NAMES ? THING_NAMES[t.kind as keyof typeof THING_NAMES] : '') })
   else if (t.sessionId) startConsultationDrag(e.dataTransfer, { sessionId: t.sessionId, title: t.title, ...(t.topicRecordId ? { topicRecordId: t.topicRecordId } : {}) })
   else if (t.path) {
     e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([`${a.rootPath}/${t.path}`]))

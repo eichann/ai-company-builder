@@ -278,7 +278,9 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   `file-links` with the turn's act token at the version read, note 「AI が相談の中で作ったファイル」,
   once more on `VERSION_CONFLICT`; a read token links nothing). `records_get` returns the file links (`path`,
   `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked
-  files there and read the ones it needs with its normal file tools — names only, never contents,
+  files there (except when a record the member dropped on the input came with its one-time summary:
+  answer from that first, `RecordTools.readDroppedRecord`, `chat-ui-and-history.md` "A record dropped
+  on the input") and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
 
 ### Links into .personal/ (owner decision 2026-11-03)

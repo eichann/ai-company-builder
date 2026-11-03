@@ -24,6 +24,8 @@ export interface ChatRequestSources {
   /** Consumed by the request that carries them. */
   pendingImages: Ref<Array<{ mediaType: string; data: string }>>
   pendingFilePaths: Ref<string[]>
+  /** Records dropped on the input (record-drop.ts): main reads each once for this request's message. */
+  pendingRecordIds?: Ref<string[]>
   /** An unattended 「AI の番」 step: consumed by the one automatic request (ai-turns.md). */
   aiTurnStep?: Ref<AiTurnStep | PluginRunStep | null>
   /** A business plugin's person step the consultation was started from: consumed by its first request (plugin-steps.md). */
@@ -35,7 +37,7 @@ export interface ChatRequestSources {
 /**
  * The body DefaultChatTransport sends next to `messages`. Side effects, in
  * this order and exactly once per request: creates the app session id if
- * there is none yet, consumes the pending images and reference files, and
+ * there is none yet, consumes the pending images, reference files and dropped records, and
  * records which conversation the turn's hand-off belongs to.
  */
 export function buildChatRequestBody(s: ChatRequestSources): ChatRequestOptions {
@@ -68,6 +70,10 @@ export function buildChatRequestBody(s: ChatRequestSources): ChatRequestOptions 
   if (s.pendingFilePaths.current.length > 0) {
     body.referenceFiles = s.pendingFilePaths.current
     s.pendingFilePaths.current = []
+  }
+  if (s.pendingRecordIds && s.pendingRecordIds.current.length > 0) {
+    body.droppedRecordIds = s.pendingRecordIds.current
+    s.pendingRecordIds.current = []
   }
   if (s.aiTurnStep?.current) {
     body.aiTurnStep = s.aiTurnStep.current

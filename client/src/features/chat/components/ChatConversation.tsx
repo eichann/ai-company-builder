@@ -5,7 +5,11 @@ import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
 import { agentCan } from '../../../../shared/agents/registry'
 import { promptSuggestionSetting } from '../../../shared/lib/promptSuggestionSetting'
-import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
+import { useEffect, useCallback, useMemo, useRef, useState, memo } from 'react'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import type { DroppedRecordRef } from '../../../../shared/record-drop'
+import { topicOnDrop, withPendingRecord } from '../recordDrop'
+import { TopicSwitchAsk } from './TopicSwitchAsk'
 import { REVIEW_CONFIRM_MESSAGE } from '../../../../shared/review-request'
 import { MINUTES_NEEDS_CLAUDE_TEXT } from '../../../../shared/minutes-app'
 import { pendingReviewOf } from '../reviewRequest'
@@ -134,6 +138,10 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const aiTurnStepRef = useRef<AiTurnStep | PluginRunStep | null>(null)
   // A business plugin's person step this consultation was started from: its first request binds it (plugin-steps.md).
   const pluginStepRef = useRef<PluginPersonStep | null>(null)
+  // Records dropped on the input (recordDrop.ts): shown in the composer until sent; the request takes their ids once.
+  const [pendingRecords, setPendingRecords] = useState<DroppedRecordRef[]>([])
+  const pendingRecordsRef = useLatestRef(pendingRecords)
+  const pendingRecordIdsRef = useRef<string[]>([])
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
     agentSession: agentSessionRef,
@@ -149,6 +157,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     claudeSessionId: claudeSessionIdRef,
     pendingImages: pendingImagesRef,
     pendingFilePaths: pendingFilePathsRef,
+    pendingRecordIds: pendingRecordIdsRef,
     handoffRequest: handoffRequestRef,
     aiTurnStep: aiTurnStepRef,
     pluginStep: pluginStepRef,
@@ -270,10 +279,17 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       }
     }
     if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
+    // Dropped records go with this message once (main reads them now); its bubble says so.
+    const dropped = editing || instruction ? [] : pendingRecordsRef.current
+    if (dropped.length > 0) {
+      pendingRecordIdsRef.current = dropped.map(r => r.id)
+      setPendingRecords([])
+    }
 
+    const metadata = { ...(instruction ? { appInstruction: instruction } : {}), ...(dropped.length > 0 ? { droppedRecords: dropped } : {}) }
     const message: UIMessage = {
       id: crypto.randomUUID(), role: 'user',
-      ...(instruction ? { metadata: { appInstruction: instruction } } : {}),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       parts: [{ type: 'text', text: text || '画像を確認してください' }],
     }
     timestampsRef.current.set(message.id, new Date())
@@ -281,13 +297,34 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     // then keeps the conversation as it was and nothing is sent.
     if (!await saveRef.current([...base, message], true, !editing)) {
       if (!editing) chatInputApiRef.current?.setValue(text)
+      if (dropped.length > 0) { pendingRecordIdsRef.current = []; setPendingRecords(dropped) }
       return
     }
     if (editing) setMessages(base)
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, setMessages, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef])
+  }, [status, sendMessage, setMessages, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef, pendingRecordsRef])
   const handleSend = useCallback((text: string, files?: File[], filePaths?: string[]) => sendTurn(text, files, filePaths), [sendTurn])
+
+  // A record dropped on the input (owner 2026-11-03 #5): the consultation becomes one about it — asked
+  // first when it is about something else — and the record waits to go to the AI with the next message.
+  const [topicSwitch, setTopicSwitch] = useState<DroppedRecordRef | null>(null)
+  const topicShownRef = useLatestRef(topicShown)
+  const applyTopic = useCallback((recordId: string) => {
+    setTopic(recordId)
+    setTopicSwitch(null)
+    const sessionId = appSessionIdRef.current
+    // A conversation not saved yet takes the topic with its first save (useChatHistory).
+    if (currentCompany?.id && sessionId) void patchChatSession(currentCompany.id, sessionId, { topicRecordId: recordId }).catch(() => {})
+  }, [setTopic, appSessionIdRef, currentCompany?.id])
+  const handleDropRecord = useCallback((record: DroppedRecordRef) => {
+    setPendingRecords(list => withPendingRecord(list, { id: record.id, title: record.title, word: record.word }))
+    const decision = topicOnDrop(topicShownRef.current, record.id)
+    if (decision === 'set') applyTopic(record.id)
+    else if (decision === 'ask') setTopicSwitch(record)
+    chatInputApiRef.current?.focus()
+  }, [applyTopic, topicShownRef, chatInputApiRef])
+  const removePendingRecord = useCallback((id: string) => setPendingRecords(list => list.filter(r => r.id !== id)), [])
 
   // The turn ended: waiting sends go out together (or back into the input).
   useQueuedSendFlush(steering, status, handleSend, setMessages, chatInputApiRef)
@@ -360,6 +397,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       }
       if (minutesId) minutesIdRef.current = minutesId
       if (topicRecordId) setTopic(topicRecordId)
+      setPendingRecords([])
+      setTopicSwitch(null)
       if (pluginStep) pluginStepRef.current = pluginStep
       if (message) void sendTurn(message, undefined, undefined, undefined, instruction)
     })
@@ -492,6 +531,12 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
             suggestion={offeredSuggestion}
             onSuggestionCleared={suggestions.clearPromptSuggestion}
             onAttachmentsChange={handleAttachmentsChange}
+            onDropRecord={currentCompany?.id ? handleDropRecord : undefined}
+            pendingRecords={pendingRecords}
+            onRemoveRecord={removePendingRecord}
+            above={topicSwitch && topicShown && currentCompany?.id
+              ? <TopicSwitchAsk companyId={currentCompany.id} fromRecordId={topicShown} to={topicSwitch} onSwitch={() => applyTopic(topicSwitch.id)} onKeep={() => setTopicSwitch(null)} />
+              : null}
           />
         </div>
       </div>
