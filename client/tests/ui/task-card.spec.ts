@@ -467,3 +467,14 @@ test('a task shown to a department keeps only ［ファイルをつなぐ］', a
   await expect(links.getByRole('button', { name: '新しいファイル' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+// A consultation about the task can be taken off it from the card (「…」 on its row): the screen takes
+// the topic off in the chat history, so the AI's new files are no longer linked to this task.
+test('「このやることから外す」 on a consultation row of 「AIへの相談」', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
+  await links.getByRole('button', { name: '「見積の相談」の操作' }).click()
+  await page.getByRole('menuitem', { name: /このやることから外す/ }).click()
+  await expect(page.locator('#acted')).toHaveText('detach s-1')
+  expectNoPageErrors(state)
+})

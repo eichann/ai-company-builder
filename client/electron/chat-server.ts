@@ -42,6 +42,8 @@ import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-li
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
+import { FILE_LINKED_PART_TYPE, taskTopicInstructions, taskTopicOf } from '../shared/consultation-task'
+import { isTodayFolderPath } from '../shared/today-folder'
 import { skillLoadedBy, type AgentToolEvent, type SkillUseSighting } from '../shared/agent-events'
 import type { ToolStopCheck } from '../shared/agent-stop'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
@@ -69,6 +71,11 @@ export interface ChatServerConfig extends AgentHost {
   bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
   pluginStepTools?: (conversationId: string, step: string) => { allowsRecordTool(name: string): boolean; builtinTools: string[] } | null
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  /**
+   * The consultation's topic as stored (chat history): the task its new files are linked to
+   * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
+   */
+  consultationTopic?: (companyId: string, conversationId: string) => { topicRecordId?: string; topicDetached?: boolean } | null
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -279,6 +286,7 @@ export async function startChatServer(config: ChatServerConfig) {
       promptSuggestions,
       aiTurnStep: requestedStep,
       pluginStep: requestedPluginStep,
+      todayFolder: requestedTodayFolder,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -429,6 +437,25 @@ export async function startChatServer(config: ChatServerConfig) {
         ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具は使えません。'),
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
+    // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the
+    // member sees keeps them in the member's 今日のフォルダ. Unattended steps are left as they are.
+    const topicOf = () => {
+      try { return companyId && appSessionId && config.consultationTopic ? taskTopicOf(config.consultationTopic(companyId, appSessionId)) : null } catch { return null }
+    }
+    const topicAtStart = records && !aiTurnStep ? topicOf() : null
+    const topicTask = topicAtStart ? await records!.readTask(topicAtStart) : null
+    if (topicTask) finalSystemPrompt = (finalSystemPrompt || '') + taskTopicInstructions(topicTask, isTodayFolderPath(requestedTodayFolder) ? requestedTodayFolder : null)
+    const onFileCreated = records && !aiTurnStep && companyId && appSessionId
+      ? (companyPath: string) => {
+        const task = topicOf()
+        if (!task) return
+        void records.linkNewFile(task, companyPath).then(async linked => {
+          if (!linked) return
+          const title = (task === topicTask?.id ? topicTask.title : (await records.readTask(task))?.title) ?? 'やること'
+          injector.push({ type: FILE_LINKED_PART_TYPE, id: `file-linked-${crypto.randomUUID()}`, data: { path: companyPath, title } })
+        }, () => {})
+      }
+      : undefined
     const askUser = !aiTurnStep && connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
@@ -449,7 +476,7 @@ export async function startChatServer(config: ChatServerConfig) {
         }
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
-    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder }
+    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder, onFileCreated }
     // 「AI の囲い」: the member's sandbox for this turn (agent-sandbox.md).
     const sandboxInput = connection.ownsConversation && companyId && companyRootPath
       ? await Promise.resolve(config.getAgentSandbox?.(companyId, companyRootPath)).catch(() => undefined) : undefined

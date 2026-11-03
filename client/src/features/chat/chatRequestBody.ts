@@ -13,6 +13,8 @@ export interface ChatRequestSources {
   companyId: Ref<string | undefined>
   companyRootPath: Ref<string | undefined>
   activeDepartment: Ref<{ name: string; folder: string } | undefined>
+  /** The member's 今日のフォルダ, asked at request time (main uses it only in a consultation about a task only they see). */
+  todayFolder?: Ref<(() => string | null) | undefined>
   modelId: Ref<string | undefined>
   effort: Ref<string>
   /** Settings → 入力候補; off → the CLI is not asked for a suggestion. */
@@ -48,6 +50,8 @@ export function buildChatRequestBody(s: ChatRequestSources): ChatRequestOptions 
     effort: s.effort.current,
     promptSuggestions: s.promptSuggestions(),
   }
+  const todayFolder = s.todayFolder?.current?.()
+  if (todayFolder) body.todayFolder = todayFolder
   // Ensure app session ID exists (eagerly create on first request)
   if (!s.appSessionId.current) {
     s.appSessionId.current = crypto.randomUUID()

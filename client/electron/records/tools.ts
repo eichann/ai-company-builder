@@ -39,6 +39,7 @@ import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
 import { RecordsApiError, type RecordTurnAccess } from './api'
+import { RECORD_ID_RE } from '../../../shared/core/records'
 
 export const RECORDS_SERVER = 'acb_records'
 export const recordToolId = (name: string) => `mcp__${RECORDS_SERVER}__${name}`
@@ -648,6 +649,17 @@ export interface RecordTools {
   execute(name: string, input: unknown): Promise<string>
   close(): Promise<void>
   instructions: string
+  /**
+   * A task's title and whether only the member sees it, read with the turn's token (null: not
+   * readable, not a task, offline) — what the consultation about it tells the AI.
+   */
+  readTask(recordId: string): Promise<{ id: string; title: string; personal: boolean } | null>
+  /**
+   * Links a file the AI just created to the consultation's task, as the AI (`file-links` with the
+   * turn's act token, at the version read now; once more on a version conflict). False on any
+   * refusal or failure — never thrown: the chat goes on (consultation-task.ts).
+   */
+  linkNewFile(recordId: string, companyPath: string): Promise<boolean>
 }
 
 /**
@@ -676,6 +688,8 @@ export interface RecordToolsOptions {
    * 「あなたの番」 read again at once instead of waiting for their next look (tasks-ui.md).
    */
   onRecordChanged?: () => void
+  /** `records_create` made a record (the server answered it): its id and type (a task becomes the consultation's topic). */
+  onRecordCreated?: (record: { id: unknown; type: unknown }) => void
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -719,6 +733,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     specs: [...specs, ...extraSpecs],
     instructions: RECORDS_INSTRUCTIONS + extraInstructions,
     close: () => access.close(),
+    readTask,
+    linkNewFile,
     async execute(name, input) {
       const extra = owner.get(name)
       if (extra) return extra.execute(name, input)
@@ -732,6 +748,10 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       try {
         const answer = await access.call(req.method, req.path, req.body, signal)
         if (!spec.readOnly) changed()
+        if (spec.name === 'records_create') {
+          const made = (answer as { record?: { id?: unknown; type?: unknown } } | undefined)?.record
+          if (made) try { options.onRecordCreated?.({ id: made.id, type: made.type }) } catch { /* the topic is a nicety */ }
+        }
         if (spec.mailCard) {
           const draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
           if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
@@ -758,6 +778,34 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
 
   function changed() {
     try { options.onRecordChanged?.() } catch { /* the list's own looks catch up */ }
+  }
+
+  async function readTask(recordId: string) {
+    if (!recordId.startsWith('task-') || !RECORD_ID_RE.test(recordId)) return null
+    try {
+      const detail = await access.call('GET', `/item/${enc(recordId)}`, undefined, signal) as { record?: { id?: unknown; type?: unknown; title?: unknown; personal?: unknown } } | undefined
+      const r = detail?.record
+      return r && r.type === 'task' && typeof r.title === 'string' ? { id: recordId, title: r.title, personal: r.personal === true } : null
+    } catch {
+      return null
+    }
+  }
+
+  async function linkNewFile(recordId: string, companyPath: string): Promise<boolean> {
+    if (access.scope !== 'act' || !recordId.startsWith('task-') || !RECORD_ID_RE.test(recordId)) return false
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const detail = await access.call('GET', `/item/${enc(recordId)}`, undefined, signal) as { record?: { version?: unknown } } | undefined
+        const version = detail?.record?.version
+        if (typeof version !== 'number') return false
+        await access.call('POST', `/item/${enc(recordId)}/file-links`, { path: companyPath, expectedVersion: version, note: 'AI が相談の中で作ったファイル' }, signal)
+        changed()
+        return true
+      } catch (error) {
+        if (!(error instanceof RecordsApiError) || error.code !== 'VERSION_CONFLICT') return false
+      }
+    }
+    return false
   }
 
   /** A connector's update or create: the server's answer becomes a card, and the AI is told only what is known. */

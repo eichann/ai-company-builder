@@ -38,6 +38,8 @@ import { ToolApprovalBanner } from './ToolApprovalBanner'
 import { ChatInput } from './ChatComposer'
 import { QueuedSendList } from './QueuedSendList'
 import { AppInstructionChip } from './AppInstructionChip'
+import { TopicChip } from './TopicChip'
+import { patchChatSession } from '../api'
 import { appInstructionOf, type AppInstruction } from '../../../../shared/app-instruction'
 
 // One chat tab: a conversation with the agent. A composition of hooks
@@ -81,6 +83,8 @@ export interface ChatPanelChatProps {
   onOpenInWindow?: (sessionId: string) => void
   /** Shown alone in a window of its own: no new-chat or list buttons (that window shows this one conversation). */
   standalone?: boolean
+  /** The member's 今日のフォルダ now (company path), sent with each request; absent = none. */
+  todayFolder?: () => string | null
 }
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
@@ -96,7 +100,7 @@ export type ChatInputRequest =
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat' }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat', todayFolder }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const models = useAgentModelSelection(authMode, codexStatus)
@@ -112,7 +116,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   const { currentInteraction, respondToInteraction } = useAgentInteractions(appSessionIdRef)
 
   // What each request carries (refs: the transport reads them per request).
-  const { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef: aiModelRef, effortRef: aiEffortRef, companyIdRef, companyRootRef } = useChatRequestContext({
+  const { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef: aiModelRef, effortRef: aiEffortRef, companyIdRef, companyRootRef, todayFolderRef } = useChatRequestContext({
     authMode,
     workingDirectory: departmentPath || currentCompany?.rootPath,
     activeDepartment,
@@ -120,6 +124,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     companyRootPath: currentCompany?.rootPath,
     modelId: models.selectedModel,
     effort: models.selectedEffort,
+    todayFolder,
   })
 
   const attachments = useMessageAttachments()
@@ -136,6 +141,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     companyId: companyIdRef,
     companyRootPath: companyRootRef,
     activeDepartment: activeDepartmentRef,
+    todayFolder: todayFolderRef,
     modelId: aiModelRef,
     effort: aiEffortRef,
     promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
@@ -175,7 +181,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordIdRef, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordId: topicShown, setTopic, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     companyId: currentCompany?.id,
@@ -353,7 +359,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         onTitleChange?.(title)
       }
       if (minutesId) minutesIdRef.current = minutesId
-      if (topicRecordId) topicRecordIdRef.current = topicRecordId
+      if (topicRecordId) setTopic(topicRecordId)
       if (pluginStep) pluginStepRef.current = pluginStep
       if (message) void sendTurn(message, undefined, undefined, undefined, instruction)
     })
@@ -405,7 +411,15 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
 
-      {instructionShown && <AppInstructionChip instruction={instructionShown} />}
+      {/* The topic chip says the same as a task's instruction chip, with × (consultation-task.ts). */}
+      {topicShown && currentCompany?.id
+        ? <TopicChip companyId={currentCompany.id} recordId={topicShown} fallbackTitle={instructionShown?.recordId === topicShown ? instructionShown.title : undefined} onRemove={() => {
+          const sessionId = appSessionIdRef.current
+          setTopic(null)
+          if (sessionId) void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {})
+        }} />
+        : null}
+      {instructionShown && !(topicShown && instructionShown.kind === 'task' && instructionShown.recordId === topicShown) && <AppInstructionChip instruction={instructionShown} />}
 
       {historyError && (
         <div role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10">

@@ -39,6 +39,8 @@ export interface ChatRequestOptions {
   /** The company checkout root: the chat's write guard judges paths relative to it. */
   companyRootPath?: string
   activeDepartment?: { name: string; folder: string }
+  /** The member's 今日のフォルダ now (today-folder.ts; only an app-built path is used): where a task only they see keeps new files. */
+  todayFolder?: string
   modelId?: string
   effort?: string
   /** The member's setting (Settings → 入力候補); absent = on. */

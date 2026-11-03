@@ -46,6 +46,8 @@ interface ChatPanelProps {
   onAiTurnItems?: (view: AiTurnItemsView) => void
   /** The record open in the middle: the list narrows to consultations about it (「すべて表示」 lifts it). */
   focus?: { recordId: string; title: string } | null
+  /** The member's 今日のフォルダ now (company path; today-folder.ts), sent with each request. */
+  todayFolder?: () => string | null
 }
 
 const NO_AI_TURNS: readonly AiTurnCandidate[] = []
@@ -57,7 +59,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, focus }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat', aiTurnQueue = NO_AI_TURNS, onAiTurnItems, focus, todayFolder }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -220,6 +222,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 paneId={paneId}
                 departmentPath={departmentPath}
                 activeDepartment={stableDepartment}
+                todayFolder={todayFolder}
                 chatServer={chatServer}
                 authMode={authMode}
                 codexStatus={codexStatus}

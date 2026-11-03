@@ -24,6 +24,9 @@ paths:
   - "client/src/shared/lib/todayFolderSetting.ts"
   - "client/src/features/workspace/hooks/useTodayFolder.ts"
   - "client/src/features/settings/components/TodayFolderSetting.tsx"
+  - "client/shared/consultation-task.ts"
+  - "client/tests/consultation-task.test.ts"
+  - "client/src/features/chat/components/TopicChip.tsx"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -364,6 +367,42 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   restart; the first message names the id, never the contents), `tests/ui/chat-panel.spec.ts`
   (「相談する」 starts one with the topic, then opens it instead), `task-card.spec.ts`,
   `tasks-list.spec.ts` (the buttons).
+
+## Consultations centre on the task (owner decision 2026-11-03)
+
+- **The task the AI makes becomes the topic** of a consultation that has none: `records_create`
+  answers a task → `RecordToolsOptions.onRecordCreated` → main (`server-config.ts`) patches the
+  history (`topicAfterTaskMade`, `client/shared/consultation-task.ts`) and tells the chat
+  (`chatHistory:changed` `patch`). The card's 「AIへの相談」 lists it, the conversation list shows
+  its やること, and the chat shows **the topic chip** under the header (`TopicChip.tsx`:
+  「このやることについての相談：<title>」, opens the card; it replaces the task instruction chip for
+  the same task). A record the member cannot read shows no chip.
+- **Taking it off**: the chip's × or the card's consultation row 「…」→「このやることから外す」
+  (`consultationLinks(…, onDetach)`, composed by AppShell) → `patchChatSession { topicRecordId: null }`
+  → `topicDetached`: no topic is set by itself again, no more automatic links (`chat-ui-and-history.md`
+  "History store"). The consultation and the links already made stay.
+- **New files are linked** (`chat-server.ts`, a consultation whose topic is a `task-` record; not an
+  unattended step): each file the AI **newly creates** in the company folder in a turn
+  (`toolEventContext.onFileCreated`, `chat-and-agents.md` "AI action log") is linked with
+  `RecordTools.linkNewFile` (the turn's act token, as the AI; `records.md` "Linking files later":
+  a private folder's file for a task outside it is refused, `.personal/` files link and read as
+  「あなたの Mac だけにあるファイル」). The topic is read at each file, so a task the AI made earlier in
+  the turn counts. Never linked: edits of a file that exists, files outside the company folder,
+  `.workspace/` / `.backups/` / `.git`, temporary save files, what a script / `cp` / a shell variable
+  writes, files the member makes by hand. A failure says nothing and never stops the chat; a link
+  shows one line in the reply, 「『見積メモ.md』をやること「…」につなぎました」 (`data-file-linked`,
+  stored as the message's `linkedFiles`). Codex (read token) links nothing.
+- **What the AI is told** (`taskTopicInstructions`, read at the turn's start with `RecordTools.readTask`):
+  new files are linked by the app, to create them with the Write tool; for a task only the member
+  sees, new files go to the member's 今日のフォルダ unless told where (the chat request's
+  `todayFolder`, from AppShell's `useTodayFolder`; main accepts only an app-built path,
+  `isTodayFolderPath`).
+- Tests: `client/tests/consultation-task.test.ts` (topic only without one and never after taking it
+  off, kept through saves; only created files, after an ok finish; the link as the AI at the version,
+  retried once, never thrown, none with a read token; the instructions), `tests/ui/chat-panel.spec.ts`
+  (「the topic chip」: the line, ×; `SCREENSHOTS=<dir>`), `tests/ui/task-card.spec.ts`
+  (「このやることから外す」). Real-agent check: Claude through the app's connection and record tools
+  against local staging (the PR says what ran).
 
 ## Tags on the card (owner 2026-11-02: あとから足す・外す)
 

@@ -4,7 +4,7 @@ import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListCh
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
 import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
-import { getChatSessionSummaries } from '../features/chat/api'
+import { getChatSessionSummaries, patchChatSession } from '../features/chat/api'
 import { paletteConsultations } from '../features/chat/conversationRows'
 import { refreshFileVersions } from '../features/history/refresh'
 import { RecordCard } from '../features/records/components/RecordCard'
@@ -366,7 +366,8 @@ export function AppShell() {
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile} />
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile}
+        onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} />
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
     const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
@@ -579,6 +580,7 @@ export function AppShell() {
             aiTurnQueue={aiTurns}
             onAiTurnItems={setAiTurnItems}
             focus={activeRecordId ? { recordId: activeRecordId, title: recordLooks[activeRecordId]?.title ?? '' } : null}
+            todayFolder={today.folderNow}
           />
         ) : (
         <>

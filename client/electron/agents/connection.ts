@@ -131,6 +131,11 @@ export interface ToolEventContextInput {
   turnId?: string
   /** The conversation's working department folder (the chat's activeDepartment). */
   department?: string
+  /**
+   * A company file the AI created in this turn (a write to a path where nothing was, finished
+   * ok; consultation-task.ts `newFilesOfCall`): company path. Must not throw or block.
+   */
+  onFileCreated?: (companyPath: string) => void
 }
 
 export interface AgentHostConfig {
