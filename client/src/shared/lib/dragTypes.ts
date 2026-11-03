@@ -15,3 +15,15 @@ export function draggedFilePaths(data: Pick<DataTransfer, 'getData'>): string[] 
 export function isFileTreeDrag(data: Pick<DataTransfer, 'types'>): boolean {
   return Array.from(data.types).includes(FILE_PATHS_DRAG_TYPE)
 }
+
+/**
+ * What a drag from the file tree allows: moving onto a folder, linking onto a record (its card's
+ * 「つながっているもの」 uses `link`). A drop whose dropEffect the source does not allow never fires.
+ */
+export const FILE_TREE_EFFECT_ALLOWED = 'linkMove'
+
+/** Whether a drop target's `dropEffect` is one the drag source allows (the browser drops nothing otherwise). */
+export function dropEffectAllowed(effectAllowed: string, dropEffect: 'copy' | 'move' | 'link'): boolean {
+  if (effectAllowed === 'all' || effectAllowed === 'uninitialized') return true
+  return effectAllowed.toLowerCase().includes(dropEffect)
+}
