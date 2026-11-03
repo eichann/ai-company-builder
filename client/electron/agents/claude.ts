@@ -47,6 +47,23 @@ export const CLAUDE_UNATTENDED_DENIED_TOOLS: readonly string[] = [
 ]
 const UNATTENDED_REFUSAL = 'この自動の作業では、この道具は使えません。決められた道具だけで進め、できないことは最後にまとめて伝えてください。'
 
+/**
+ * The record server's MCP instructions (records.md "Tool search"): the on-demand tools by their
+ * exact names, loaded with `select:`. A keyword search returns only the first few matches — the
+ * read look-ups once filled them and the AI told the member that records_create did not exist.
+ */
+export function recordsToolSearchInstructions(specs: readonly { name: string; onDemand?: boolean }[]): string {
+  const onDemand = specs.filter(s => s.onDemand).map(s => recordToolId(s.name))
+  return `会社の記録の道具（${recordToolId('*')}）。` +
+    (onDemand.length > 0
+      ? `次の道具は、使うときに読み込みます。使う前に ToolSearch を query "select:<名前>"（カンマ区切りで複数可）で呼んで読み込んでください：${onDemand.join(', ')}。`
+      : '') +
+    '言葉での検索は最初の数件しか返さないので、名前の分かっている道具は select: で読み込みます。' +
+    `記録の道具が見当たらないときも「用意されていない」と答える前に、必ず ToolSearch の select:${recordToolId('<名前>')} で読み込んでみてください。\n` +
+    `Some record tools load on demand: call ToolSearch with "select:<names>" before using them${onDemand.length > 0 ? ` (${onDemand.join(', ')})` : ''}. ` +
+    'A keyword search returns only the first few matches. Never tell the member a record tool is missing before trying select: with its exact name.'
+}
+
 const DANGEROUS_PATTERNS: RegExp[] = [
   // Direct deletion commands
   /\brm\s/,                          // rm (file deletion)
@@ -411,16 +428,17 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
 
       const createNative = (mode: PermissionMode, sandboxed = !!enforced) => {
         // One MCP server instance per query: a fallback re-run must not reuse the first one.
-        const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
+        const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', alwaysLoad: true, tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
         // App-provided (not the company repository's .mcp.json, which is protected config).
-        const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
-        const reviewServer = review ? createSdkMcpServer({ name: REVIEW_SERVER, tools: [tool(REVIEW_TOOL, reviewDescription, reviewSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await review.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })] }) : undefined
+        const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, alwaysLoad: true, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
+        const reviewServer = review ? createSdkMcpServer({ name: REVIEW_SERVER, alwaysLoad: true, tools: [tool(REVIEW_TOOL, reviewDescription, reviewSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await review.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })] }) : undefined
         // The company map's typed tools (records/tools.ts): the server records them as the AI's.
-        const recordsServer = records ? createSdkMcpServer({ name: RECORDS_SERVER, tools: records.specs.map(s => tool(s.name, s.description, s.schema.shape, async args => ({ content: [{ type: 'text' as const, text: await records.execute(s.name, args) }] }), { annotations: { readOnlyHint: s.readOnly, destructiveHint: false, openWorldHint: false } })) }) : undefined
+        // Always loaded except the on-demand ones, which the server's instructions name for ToolSearch.
+        const recordsServer = records ? createSdkMcpServer({ name: RECORDS_SERVER, instructions: recordsToolSearchInstructions(records.specs), tools: records.specs.map(s => tool(s.name, s.description, s.schema.shape, async args => ({ content: [{ type: 'text' as const, text: await records.execute(s.name, args) }] }), { annotations: { readOnlyHint: s.readOnly, destructiveHint: false, openWorldHint: false }, alwaysLoad: !s.onDemand })) }) : undefined
         // 「Web で調べる」: a separate reader reads the web (web-research/tools.ts).
-        const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
+        const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, alwaysLoad: true, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
         // 「もう一方の AI に聞く」 (second-opinion.ts): only the agents the member named this turn.
-        const secondOpinionServer = secondOpinion ? createSdkMcpServer({ name: SECOND_OPINION_SERVER, tools: secondOpinion.tools.map(t => tool(t.name, t.description, secondOpinionSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await secondOpinion.execute(t.name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })) }) : undefined
+        const secondOpinionServer = secondOpinion ? createSdkMcpServer({ name: SECOND_OPINION_SERVER, alwaysLoad: true, tools: secondOpinion.tools.map(t => tool(t.name, t.description, secondOpinionSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await secondOpinion.execute(t.name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })) }) : undefined
         const mcpServers = {
           ...(referenceServer ? { acb_consultations: referenceServer } : {}),
           ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
