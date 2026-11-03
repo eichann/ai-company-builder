@@ -36,6 +36,7 @@ import type {
   PluginRolesView,
   PluginStepSkillsView,
 } from '../../../shared/types/plugins'
+import type { RecordSettings } from '../../../shared/types/records'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 import type { SlackAdminView } from '../../../shared/types/slack'
 import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
@@ -307,6 +308,9 @@ export const agentStopSchema = topLevel<AgentStopView>({ active: list, history: 
 
 // 「もう一方の AI に聞く」 (shared/types/second-opinion.ts)
 export const secondOpinionSchema = topLevel<SecondOpinionView>({ allowed: bool, updatedAt: nullableStr, updatedByName: nullableStr })
+
+// 「記録とやることの一覧を使う」 (shared/types/records.ts)
+export const recordSettingsSchema = topLevel<RecordSettings>({ enabled: bool, updatedAt: nullableStr })
 
 // Tasks, inbox and absences
 export const taskSettingsSchema = topLevel<TaskSettingsView>({

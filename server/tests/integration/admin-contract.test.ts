@@ -78,6 +78,7 @@ const TYPES: Record<string, string> = {
   AgentSandbox: 'AgentSandboxView',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
+  RecordSettings: 'RecordSettings',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
@@ -264,6 +265,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', coreConnectorsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/slack-connection')).slackRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -394,6 +396,11 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   it('「もう一方の AI に聞く」', async () => {
     await expectShape('SecondOpinion', USERS.owner, 'GET', `${base}/second-opinion`)
     await expectShape('SecondOpinion', USERS.admin, 'PUT', `${base}/second-opinion`, { allowed: true })
+  })
+
+  it('「記録とやることの一覧を使う」 (the records switch)', async () => {
+    await expectShape('RecordSettings', USERS.owner, 'GET', `${base}/records/settings`)
+    await expectShape('RecordSettings', USERS.admin, 'PUT', `${base}/records/settings`, { enabled: false })
   })
 
   it('emergency stop (「AI の緊急停止」)', async () => {
@@ -532,6 +539,14 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT role FROM memberships WHERE company_id = ? AND user_id = ?', CO, USERS.member).role).toBe('admin')
     await A.companiesApi.setMemberRole(CO, USERS.member, 'member')
     expect(row('SELECT role FROM memberships WHERE company_id = ? AND user_id = ?', CO, USERS.member).role).toBe('member')
+  })
+
+  it('the records switch reaches the server as chosen', async () => {
+    const before = (await A.recordSettingsApi.get(CO)).enabled
+    expect((await A.recordSettingsApi.update(CO, !before)).enabled).toBe(!before)
+    expect(row('SELECT enabled FROM record_settings WHERE company_id = ?', CO).enabled).toBe(before ? 0 : 1)
+    expect((await A.recordSettingsApi.update(CO, before)).enabled).toBe(before)
+    expect(row('SELECT enabled FROM record_settings WHERE company_id = ?', CO).enabled).toBe(before ? 1 : 0)
   })
 
   it('department order and managers', async () => {

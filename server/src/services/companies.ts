@@ -194,8 +194,9 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         // Company-wide `everyone: read + write` and one inheriting scope per department
         scopesOf(id).ensureCompanyScope(ownerId)
         scopesOf(id).syncCompanyScopes()
-        // The records feature starts on for a new company (管理画面の見直し 2-4: there is no screen
-        // for it, and business plugins, minutes and tasks need it). Existing companies keep theirs.
+        // The records feature starts on for a new company (管理画面の見直し 2-4: business plugins,
+        // minutes and tasks need it). Existing companies keep theirs; the admin console's
+        // 「仕事の進め方」 has the switch (records.md "Off per company").
         companyData.forCompany(id).records.setEnabled(true, ownerId, timestamp)
       })
     } catch (e) {
