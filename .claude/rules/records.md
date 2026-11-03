@@ -211,8 +211,14 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   new path (`followRename` / `retargetFileLinks`) — after the record files of the same push, so a
   record file re-read there (its own text may still name the old path) ends on the new one; the
   next edit of that file restores what its text says (file records are a company's own types
-  only). Exact path matches only: a link to a folder follows a department rename (below), not
-  a member's folder move.
+  only). Exact path matches only — and **a folder moved or renamed by a member** comes as a rename
+  of its own (owner decision 2026-11-03, 「フォルダもつなげる」): `folderMoves` (`lib/record-files.ts`,
+  pure) finds, for each folder above a renamed file, the one new folder every rename `P/x → Q/x`
+  under it agrees on (renames that do not keep their place below P say nothing; two different Qs
+  → none; at most 5000 candidates), and `readRecordFiles` keeps the ones gone at the tip, so a
+  link to P (or to a folder inside it) follows to Q by the same `followRename` rules. A folder
+  that still exists (only some files moved out) keeps its links. A department renamed by the
+  server follows through `moveFolder` (below).
 - Never across a private folder's edge (`followRename`): both paths in the same place (company
   repository or one private folder), and the new path one the source may link to at all
   (`linkAllowed`) — a record outside a private folder never gets a path inside it (a rename
@@ -228,7 +234,9 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   marks each file link it shows `broken: true | false` — whether a file or folder is at that path
   on the shared branch now (`RecordFileSource.existing`, `lib/repo-paths.ts`; the private folder's own repository for a
   path inside one; only paths already shown to the reader are looked up; absent when git could not
-  tell). The app says 「つながりが切れています」.
+  tell). The app says 「つながりが切れています」. A path where a **folder** is now also says
+  `folder: true` (the object's type: `existing` answers file or folder); the app shows it as a
+  folder row.
 - Tests: `tests/unit/record-file-links.test.ts` (linking later, below), `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
   folder for an outside record nor across its edge, department move with `_` in names,
   cross-company), `tests/integration/record-links.test.ts` (real git rename detection, broken
@@ -841,6 +849,11 @@ own place). A person's create (session) gets no defaults.
   path inside it is answered exactly like a path that does not exist (asking cannot tell it is
   private or name it). Test: `server/tests/unit/viewers.test.ts` (mutation-checked: dropping the
   record check or the unreadable-folder filter fails it).
+- **Who cannot open a linked file** (owner decision 2026-11-03: 「〇人はこのファイルを開けません」):
+  the body may add `linked: { record, paths }` (≤ 200 paths); the answer then has
+  `cannotOpen: { <path>: n }` — for a record the caller reads and only paths the caller reads
+  (anything else left out, as above), the number of members who read the record but not the path
+  (counts > 0 only; an owner-only record → none). A number, never names or places. Same test.
 - App: IPC `viewers:get(companyId, { records?, files? })` → `ViewersResult`
   (`client/electron/features/viewers/ipc.ts`, `client/shared/viewers.ts`;
   `client/tests/viewers-ipc.test.ts`).

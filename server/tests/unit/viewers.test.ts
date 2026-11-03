@@ -8,7 +8,9 @@
  * - an owner-only record is 「あなただけ」 for its owner and absent for everyone else, owners and
  *   admins included;
  * - the phrase follows who really reads it (readers counted with owners and admins);
- * - a whole list is answered at once, within the limits.
+ * - a whole list is answered at once, within the limits;
+ * - `cannotOpen` counts who reads a record but not a linked path, a number only, never for a
+ *   record or a path the caller cannot read.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -112,6 +114,50 @@ describe('見られる人', () => {
     expect(viewers.labels(m('sato'), { records: [...ids, 'task-x'] })).toMatchObject({ ok: false, kind: 'bad-request' })
     expect(viewers.labels(m('sato'), { records: 'task-1' })).toMatchObject({ ok: false, kind: 'bad-request' })
     expect(viewers.labels(m('sato'), null)).toMatchObject({ ok: false, kind: 'bad-request' })
+  })
+})
+
+describe('「〇人はこのファイルを開けません」 (linked → cannotOpen)', () => {
+  /** 人事 readable only by abe (and owners / admins): a department rule, not a private folder. */
+  function restrictHr() {
+    const scope = conn.prepare("SELECT id FROM scopes WHERE company_id = ? AND path = '人事'").get(CO) as { id: string } | undefined
+    let id = scope?.id
+    if (!id) {
+      id = 's-hr'
+      conn.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, '人事', 'folder', NULL, ?)").run(id, CO, TS)
+    }
+    conn.prepare('DELETE FROM scope_rules WHERE scope_id = ?').run(id)
+    conn.prepare("INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'hr-all', ?, 'everyone', NULL, 0, 0, ?)").run(CO, id, TS)
+    conn.prepare("INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'hr-abe', ?, 'user', 'abe', 1, 1, ?)").run(CO, id, TS)
+  }
+
+  it('counts who reads the record but cannot open the path, as a number only', () => {
+    restrictHr()
+    record('task-company', { folder: '' })
+    const answer = ask('abe', { linked: { record: 'task-company', paths: ['人事/規程.md', '営業部/提案.md'] } })
+    // sato, tanaka and suzuki read the company's record but not 人事; abe and the owner do.
+    expect(answer.cannotOpen).toEqual({ '人事/規程.md': 3 })
+    expect(JSON.stringify(answer)).not.toMatch(/佐藤|田中|鈴木|sato|tanaka|suzuki/)
+  })
+
+  it('leaves out a path the caller cannot open, and a record the caller cannot read', () => {
+    restrictHr()
+    record('task-company', { folder: '' })
+    record('task-mine', { personalOwner: 'abe' })
+    // tanaka reads neither 人事 nor 顧客A: nothing about them comes back (顧客A answers like any 営業部 path).
+    expect(ask('tanaka', { linked: { record: 'task-company', paths: ['人事/規程.md', '営業部/顧客A/見積.md'] } }).cannotOpen).toEqual({})
+    expect(ask('sato', { linked: { record: 'task-mine', paths: ['営業部/提案.md'] } }).cannotOpen).toBeUndefined()
+  })
+
+  it('an owner-only record counts nobody (only its owner sees it)', () => {
+    restrictHr()
+    record('task-mine2', { personalOwner: 'abe' })
+    expect(ask('abe', { linked: { record: 'task-mine2', paths: ['人事/規程.md'] } }).cannotOpen).toEqual({})
+  })
+
+  it('refuses a malformed linked', () => {
+    expect(viewers.labels(m('sato'), { linked: { record: 'task-1', paths: 'x' } })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect(viewers.labels(m('sato'), { linked: { paths: [] } })).toMatchObject({ ok: false, kind: 'bad-request' })
   })
 })
 
