@@ -224,3 +224,64 @@ test('minutes_read hands the minutes over as outside text: the header above, the
   assert.equal(JSON.parse(after.slice(after.indexOf('{'))).externalAttendees, 2)
   await tools!.close()
 })
+
+test('records_create: the consultation\'s department goes along as the server\'s default place; the answer tells the AI what to say', async () => {
+  const { api, seen } = fakeServer('act')
+  const access = (await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!
+  const tools = await createRecordTools(access, undefined, { department: 'コンテンツ' })
+  const create = tools!.specs.find(s => s.name === 'records_create')!
+  // Nothing about personal / assignee / folder is required: the server decides the defaults.
+  assert.equal(create.schema.safeParse({ type: 'task', title: 'テスト自分用' }).success, true)
+  assert.match(create.description, /ほかの人の名前が出ない/)
+  assert.match(create.description, /どこに入れたかを必ずメンバーに伝える/)
+  await tools!.execute('records_create', { type: 'task', title: 'テスト自分用' })
+  const sent = seen.find(s => s.url.endsWith('/api/records-ai/item'))!
+  assert.deepEqual(JSON.parse(sent.body!), { type: 'task', title: 'テスト自分用', defaultFolder: 'コンテンツ' })
+  // 全社 (no department): nothing is added.
+  const { api: api2, seen: seen2 } = fakeServer('act')
+  const company = await createRecordTools((await api2.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { department: null })
+  await company!.execute('records_create', { type: 'task', title: 'x' })
+  assert.deepEqual(JSON.parse(seen2.find(s => s.url.endsWith('/api/records-ai/item'))!.body!), { type: 'task', title: 'x' })
+})
+
+test('records_create\'s answer: where it went, in the member\'s words', async () => {
+  const answered = (placed: unknown, fields: Record<string, string>) => {
+    const fetch = (async (url: string) => {
+      const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+      if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+      if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+      if (url.endsWith('/api/records-ai/item')) return json(201, { record: { id: 'task-abcdef12', fields }, placed })
+      return json(200, {})
+    }) as unknown as typeof globalThis.fetch
+    return createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  }
+  const say = async (placed: unknown, fields: Record<string, string>) => {
+    const tools = await createRecordTools((await answered(placed, fields).openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+    return JSON.parse(await tools!.execute('records_create', { type: 'task', title: 'x' })).tellMember as string
+  }
+  assert.equal(await say({ personal: true, folder: null }, { assignee: 'u-me', requested_by: 'u-me' }), 'あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）')
+  assert.match(await say({ personal: false, folder: 'コンテンツ' }, { assignee: 'u-tanaka', requested_by: 'u-me' }), /^「コンテンツ」のやることに、<担当の名前>さんの担当で入れました/)
+  assert.equal(await say({ personal: false, folder: 'コンテンツ' }, { assignee: 'u-me', requested_by: 'u-me' }), '「コンテンツ」のやることに、あなたの担当で入れました')
+  assert.match(await say({ personal: false, folder: null }, { assignee: 'u-tanaka', requested_by: 'u-me' }), /^会社全体のやることに/)
+})
+
+test('a record written by the member\'s own AI tells the app at once (the task list re-reads); a look-up or a refusal does not', async () => {
+  let refuse = false
+  const fetch = (async (url: string) => {
+    const json = (status: number, data: unknown) => new Response(JSON.stringify(status < 400 ? { success: true, data } : { error: 'だめ', code: 'BAD' }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+    if (url.endsWith('/api/records-ai/item')) return refuse ? json(400, null) : json(201, { record: { id: 'task-abcdef12', fields: {} }, placed: { personal: true, folder: null } })
+    return json(200, { records: [] })
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  let changed = 0
+  const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!, undefined, { onRecordChanged: () => { changed++ } })
+  await tools!.execute('records_my_turn', {})
+  assert.equal(changed, 0)
+  await tools!.execute('records_create', { type: 'task', title: 'テスト自分用' })
+  assert.equal(changed, 1)
+  refuse = true
+  await tools!.execute('records_create', { type: 'task', title: 'x' })
+  assert.equal(changed, 1)
+})

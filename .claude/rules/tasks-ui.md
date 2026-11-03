@@ -79,8 +79,19 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
   the card by the version the list knows, so a change made from the list shows on the card.
   Test: `tests/ui/tasks-layout.spec.ts`.
-- `useTaskList` (in AppShell): read at mount, on `notifications:changed` for the company (the title
-  bar keeps main watching), every 2 minutes and after the member's own change. `useCalendarToday`:
+- `useTaskList` (in AppShell): read at mount, on `notifications:changed` and `records:changed` for
+  the company (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the
+  member's own change. `records:changed` (no content) is sent by main **at once when the member's
+  own consultation AI wrote a record** in this app (a record tool's write the server accepted:
+  `RecordToolsOptions.onRecordChanged` → `server-config.ts` `recordsChanged` → main, which also
+  asks the title bar's 「あなたの番」 again) and on every `records` push signal (others' changes that
+  reach this member; 「かもしれない運転」). Tests: `client/tests/records-tools.test.ts` (a write tells,
+  a look-up or refusal does not), `src/features/tasks/api.test.ts`.
+- **A task only the member sees shows whatever department is on screen**: the list is read per
+  company (no folder in any of its requests) and owner-only tasks come in 「あなたの番」 like any
+  other; a department tab never narrows it (`tests/tasks-list.test.ts`). Where the company hides
+  the tab for that department (`taskListDepartmentIds`), the title bar's 「あなたの番」 still
+  counts it. `useCalendarToday`:
   at mount and every 10 minutes.
 - `model.ts` (pure, `model.test.ts`): "today" is the company's day (`companyNow`, Japan time until a
   setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),

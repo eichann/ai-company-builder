@@ -316,3 +316,29 @@ test('bundle kinds: what the server names each department\'s kind, as it answere
   const r = await old.api.bundleKinds('co1')
   assert.equal(r.success, false)
 })
+
+test('a task only the member sees (their AI made it for them) is in their list whatever department is on screen: the list is read per company, never per department', async () => {
+  const empty = { status: 200, body: { data: { total: 0, records: [] } } }
+  const mine = rec('task-self01', 'todo', {}, { personal: true })
+  const asked: string[] = []
+  const routes: Record<string, { status: number; body: unknown }> = {
+    '/api/me': { status: 200, body: { data: { id: ME } } },
+    'GET /api/companies/co1/records/my-turn': { status: 200, body: { data: { total: 1, records: [mine] } } },
+    'GET /api/companies/co1/records/ai-turn': empty,
+  }
+  const api = createTasksApi({
+    baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, now: () => Date.parse('2026-11-05T06:00:00.000Z'),
+    fetch: (async (url: string, init: RequestInit) => {
+      const path = url.replace('https://acb.test', '')
+      asked.push(`${init.method} ${path} ${typeof init.body === 'string' ? init.body : ''}`)
+      if (path.endsWith('/records/query')) return new Response(JSON.stringify(empty.body), { status: 200 })
+      const a = routes[`${init.method} ${path}`] ?? routes[path] ?? { status: 404, body: {} }
+      return new Response(JSON.stringify(a.body), { status: a.status })
+    }) as unknown as typeof fetch,
+  })
+  const r = await api.list('co1')
+  assert.ok(r.success)
+  assert.deepEqual(r.data.items.filter(i => i.id === 'task-self01').map(i => [i.turn, i.personal]), [['mine', true]])
+  // Nothing the list asks names a folder: a department tab cannot narrow it.
+  assert.equal(asked.some(a => /folder/.test(a)), false)
+})

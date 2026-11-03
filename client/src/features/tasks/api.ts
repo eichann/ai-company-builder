@@ -10,8 +10,8 @@ import type { BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordL
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
-/** Reading the list, and hearing that the member's turn or notices may have changed. */
-export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
+/** Reading the list, and hearing that the member's turn, notices or records may have changed. */
+export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged' | 'onRecordsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskAction'>
 /** Setting or taking off a link between two records (the server decides which links may change). */
@@ -50,11 +50,14 @@ export function getTaskList(companyId: string, reads: TaskReads = window.electro
 }
 
 /**
- * `listener` hears that this company's 「あなたの番」 or notices may have changed
- * (the title bar keeps main watching; this only listens).
+ * `listener` hears that this company's 「あなたの番」, notices or records may have changed (the
+ * title bar keeps main watching; `records:changed` comes at once when the member's own AI wrote a
+ * record, and on every records signal of the push channel). This only listens.
  */
 export function onTasksMayHaveChanged(companyId: string, listener: () => void, reads: TaskReads = window.electronAPI): () => void {
-  return reads.onNotificationsChanged(change => { if (change.companyId === companyId) listener() }) ?? (() => {})
+  const mine = (change: { companyId: string }) => { if (change.companyId === companyId) listener() }
+  const stops = [reads.onNotificationsChanged(mine), reads.onRecordsChanged?.(mine)]
+  return () => { for (const stop of stops) stop?.() }
 }
 
 export function createTask(companyId: string, input: TaskCreateInput, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {

@@ -733,6 +733,12 @@ export interface IpcEventChannels {
   'minutes:changed': [data: { companyId: string }]
   /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
   'notifications:changed': [data: { companyId: string }]
+  /**
+   * A record this member may see may have changed in this company — their own AI wrote one
+   * (instant, in this app) or the push channel's `records` signal came: re-read the task list.
+   * No content: the list asks the server again (tasks-ui.md).
+   */
+  'records:changed': [data: { companyId: string }]
   /** The morning's 「今日のあなたの番」 Mac notification was clicked: show the task list. */
   'notifications:openTasks': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
@@ -978,6 +984,7 @@ export interface ElectronAPI {
   setNotificationSetting: Invoke<'notifications:setSetting'>
   onNotificationsChanged: Subscribe<'notifications:changed'>
   onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
+  onRecordsChanged: Subscribe<'records:changed'>
   searchRecords: Invoke<'recordViews:search'>
   findRecords: Invoke<'recordViews:find'>
   findRecordsHome: Invoke<'recordViews:findHome'>

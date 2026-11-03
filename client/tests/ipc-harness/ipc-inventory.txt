@@ -11,6 +11,7 @@ contract.events minutes:changed
 contract.events notifications:changed
 contract.events notifications:openTasks
 contract.events plugins:changed
+contract.events records:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
@@ -432,6 +433,7 @@ contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minute
 contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
 contract.type ElectronAPI.onNotificationsOpenTasks = onNotificationsOpenTasks: Subscribe<'notifications:openTasks'>
 contract.type ElectronAPI.onPluginsChanged = onPluginsChanged: Subscribe<'plugins:changed'>
+contract.type ElectronAPI.onRecordsChanged = onRecordsChanged: Subscribe<'records:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -606,6 +608,7 @@ contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { c
 contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'notifications:openTasks' = 'notifications:openTasks': [data: { companyId: string }]
 contract.type IpcEventChannels.'plugins:changed' = 'plugins:changed': [change: { companyId: string }]
+contract.type IpcEventChannels.'records:changed' = 'records:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
@@ -1078,6 +1081,7 @@ main.send minutes:changed @ main.ts
 main.send notifications:changed @ main.ts
 main.send notifications:openTasks @ main.ts
 main.send plugins:changed @ main.ts
+main.send records:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
@@ -1347,6 +1351,8 @@ preload onNotificationsOpenTasks -> on notifications:openTasks(<fn>) ; removeLis
 preload onNotificationsOpenTasks : (callback: (data: { companyId: string; }) => void) => () => void
 preload onPluginsChanged -> on plugins:changed(<fn>) ; removeListener plugins:changed(<fn>)
 preload onPluginsChanged : (callback: (change: { companyId: string; }) => void) => () => void
+preload onRecordsChanged -> on records:changed(<fn>) ; removeListener records:changed(<fn>)
+preload onRecordsChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)

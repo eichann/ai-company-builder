@@ -789,6 +789,34 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   unchanged and the column migration; share only by the owner, its ledger entry, never undone —
   mutation-checked), permission matrix rows + `CROSS`.
 
+### Where the AI puts a request (owner decision 2026-11-03)
+
+A task the consultation AI made once landed company-wide with nobody assigned (no turn, not in
+the department's list). Now `POST /api/records-ai/item` (tool `records_create`) runs
+`recordEngine.createByAi` (`services/record-engine/create.ts` `aiPlacement`), which fills the
+defaults before the ordinary `create` (and its checks) — only for a type implementing `request`
+with a server `assignee`, and never for a meeting's output (`links.meeting`: minutes.md keeps its
+own place). A person's create (session) gets no defaults.
+
+- **About the member alone** — no `personal`, no `folder`, and no assignee or the member
+  themself → `personal: true` (owner-only, above), assignee = the member (their turn). A business
+  plugin's type is never made owner-only (it falls to the next rule).
+- **Another person, or a department asked for** — an assignee other than the member, or
+  `personal: false` (「部署のやることにして」) → `folder` = the one the AI named, else the app's
+  `defaultFolder` (the department on screen when the message was sent: `chat-server.ts` passes
+  `activeDepartment.folder` to the record tools, which add it to the body; 全社 = none = the whole
+  company); assignee as said, else the member. The default folder is checked like any `folder`
+  (`placeFolder`: a private one is refused — never placed company-wide instead); an assignee who
+  cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
+- The answer carries `placed: { personal, folder }` (every create's), and the tool adds
+  `tellMember` — 「あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）」 /
+  「「コンテンツ」のやることに、<担当>さんの担当で入れました」; the tool's description tells the AI
+  when to name someone or a department and to always say where it went.
+- Tests: `server/tests/unit/record-ai-placement.test.ts` (defaults, nobody else sees the personal
+  one — owner and admin included, the department and 全社 cases, the private default refused, a
+  person's create untouched), `client/tests/records-tools.test.ts` (`defaultFolder` sent, the
+  description, `tellMember`).
+
 ### Who can see it (見られる人, plan「新しい画面のデモ」K サーバー乙 ②, owner decision 2026-11-02)
 
 - `POST /api/companies/:id/viewers { records?: string[], files?: string[] }` (any member, ≤ 200
