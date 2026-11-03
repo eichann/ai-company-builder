@@ -172,7 +172,8 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 「詳しい設定 › 仕事の進め方」 `/companies/[id]/advanced/work` and 「会社の暦」 `/advanced/calendar` (owner/admin;
 管理画面の見直し 2-3, `admin/src/components/advanced/task-settings-page.tsx`; the old `/task-list` redirects;
 who belongs to a department — 所属, 不在と代わりの人 — is on 「部署」, for department managers too):
-plain questions in Japanese, no builder words (型・プラグイン・つなぎ先). Owners/admins answer the
+plain questions in Japanese, no builder words (型・プラグイン・つなぎ先). 仕事の進め方 opens with the
+records switch 「記録とやることの一覧を使う」 (`records.md` "Off per company"). Owners/admins answer the
 company questions (one save for all, with a sticky bar; 「人に頼んだとき、相手が「引き受ける」を押すまで待ちますか？」 is one
 checkbox per automatic case; the reply card shows today's example
 due date from `replyTarget`); everyone on the page sees who belongs to each department and gets

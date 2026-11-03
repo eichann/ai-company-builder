@@ -100,8 +100,15 @@ the only writer of a record's server values, with its append-only ledger — and
 Everything is behind a per-company switch (`record_settings.enabled`): owner/admin
 turn it on with `PUT /records/settings { enabled: true }`. A company created from 2026-11-02 starts
 with it on (`services/companies.ts` `tryCreate`), and turning a business plugin on (its first
-install too) turns it on (`plugins.ts` `recordsOn`) — 管理画面の見直し 2-4: no screen offers the
-switch, and minutes, tasks and business plugins need it. Existing companies keep their value. While off, nothing is indexed (pushes
+install too) turns it on (`plugins.ts` `recordsOn`), since minutes, tasks and business plugins
+need it. Existing companies keep their value. The admin console shows the switch at the top of
+「詳しい設定 › 仕事の進め方」 (「記録とやることの一覧を使う」, owner/admin, `RecordsSwitchCard` in
+`admin/src/components/advanced/task-settings-page.tsx`; added 2026-11-03 because an existing
+company had no way to turn it on): on at once, off after a confirmation that says records are
+kept (off only stops reading and answering; nothing is deleted). While off, every card of that
+page says 「記録をオンにすると使えます」 and stays editable; the 詳しい設定 list counts off as
+「変えています」 (the starting value is a new company's, on: `admin/src/lib/advanced.ts`
+`workChanged`). Tests: `admin/tests/task-list.test.tsx`, `admin/tests/advanced.test.ts`. While off, nothing is indexed (pushes
 schedule nothing) and every route except the settings answers 404 `RECORDS_DISABLED`. The one
 thing that applies to every company is the push checker's rule on `.acb/types/` (below): nobody
 used that folder before, and a type someone added while the switch was off would steer the

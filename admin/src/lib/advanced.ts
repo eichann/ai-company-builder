@@ -13,7 +13,7 @@ import type { SecondOpinionView } from '../../../shared/types/second-opinion'
 export type AdvancedSection = 'work' | 'calendar' | 'inbox' | 'ai-safety' | 'info'
 
 export const ADVANCED_SECTIONS: Array<{ id: AdvancedSection; title: string; description: string; path: string }> = [
-  { id: 'work', title: '仕事の進め方', description: '受信を読む・AI が自動で進める・チームの進め方・会議から AI が作るやること・呼び名・返事の目安', path: 'advanced/work' },
+  { id: 'work', title: '仕事の進め方', description: '記録とやることの一覧を使う・受信を読む・AI が自動で進める・チームの進め方・会議から AI が作るやること・呼び名・返事の目安', path: 'advanced/work' },
   { id: 'calendar', title: '会社の暦', description: '夏休み・年末年始など、会社の休み（土日・祝日は自動）', path: 'advanced/calendar' },
   { id: 'inbox', title: '来た連絡の決まり', description: '宛先が何人もいるとき・CC だけのとき・メルマガ・共有の受付アドレスなど', path: 'advanced/inbox' },
   { id: 'ai-safety', title: 'AI の安全', description: 'AI を止める・AI の操作の記録・AI の囲い・API キー・もう一方の AI に聞く', path: 'advanced/ai-safety' },
@@ -23,8 +23,15 @@ export const ADVANCED_SECTIONS: Array<{ id: AdvancedSection; title: string; desc
 const sorted = <T,>(xs: readonly T[]) => [...xs].map(String).sort()
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
-/** 仕事の進め方: every task setting but the holidays (those are 会社の暦). */
-export function workChanged(s: TaskSettings): boolean {
+/**
+ * 仕事の進め方: every task setting but the holidays (those are 会社の暦), and the records switch
+ * (「記録とやることの一覧を使う」). Its starting value is the one a new company gets — on
+ * (services/companies.ts `tryCreate`) — so a company with it off (an older company that never
+ * turned it on, or one that turned it off) shows 「変えています」. `recordsEnabled` null/undefined =
+ * not known (loading, or not answered): judged by the task settings alone.
+ */
+export function workChanged(s: TaskSettings, recordsEnabled?: boolean | null): boolean {
+  if (recordsEnabled === false) return true
   const { companyHolidays: _a, ...mine } = s
   const { companyHolidays: _b, ...defaults } = DEFAULT_TASK_SETTINGS
   void _a

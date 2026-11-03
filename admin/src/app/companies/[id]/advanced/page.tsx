@@ -5,7 +5,7 @@ import { CaretRight, LockSimple } from '@phosphor-icons/react'
 
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
-import { agentEventsApi, agentSandboxApi, inboxSettingsApi, keyBrokerApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
+import { agentEventsApi, agentSandboxApi, inboxSettingsApi, keyBrokerApi, recordSettingsApi, secondOpinionApi, taskSettingsApi } from '@/lib/api'
 import { ADVANCED_SECTIONS, aiSafetyChanged, calendarChanged, inboxChanged, workChanged, type AdvancedSection } from '@/lib/advanced'
 import { useCompany } from '@/lib/company-context'
 import { useQuery } from '@/lib/use-query'
@@ -18,6 +18,7 @@ export default function AdvancedSettingsPage() {
   const { companyId, isAdmin, role } = useCompany()
   const on = (key: string) => (isAdmin ? `${key}:${companyId}` : null)
   const tasks = useQuery(on('task-settings'), () => taskSettingsApi.get(companyId))
+  const records = useQuery(on('records-settings'), () => recordSettingsApi.get(companyId))
   const inbox = useQuery(on('inbox-settings'), () => inboxSettingsApi.get(companyId))
   const sandbox = useQuery(on('agent-sandbox'), () => agentSandboxApi.get(companyId))
   const events = useQuery(on('agent-events-settings'), () => agentEventsApi.settings(companyId))
@@ -35,7 +36,7 @@ export default function AdvancedSettingsPage() {
 
   // null while not known (loading, or a part the server cannot answer): no badge rather than a wrong one.
   const changed: Record<AdvancedSection, boolean | null> = {
-    work: tasks.data ? workChanged(tasks.data.settings) : null,
+    work: tasks.data && !records.loading ? workChanged(tasks.data.settings, records.data?.enabled) : null,
     calendar: tasks.data ? calendarChanged(tasks.data.settings) : null,
     inbox: inbox.data ? inboxChanged(inbox.data.settings) : null,
     'ai-safety':

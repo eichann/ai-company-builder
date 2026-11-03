@@ -26,7 +26,13 @@ const view: TaskSettingsView = { settings: defaultTaskSettings(), canEdit: true,
 type Reply = { status?: number; body: unknown }
 function stubApi(caps: Capabilities, membership: (id: string) => DepartmentMembersView, extra: Record<string, Reply | ((call: Call) => Reply)> = {}) {
   const memberRoutes = Object.fromEntries(departments.map((d) => [`GET ${base}/departments/${d.id}/members`, { body: ok(membership(d.id)) }]))
-  const routes = { ...companyRoutes(caps), ...memberRoutes, [`GET ${base}/task-settings`]: { body: ok(view) }, ...extra } as Record<string, Reply | ((call: Call) => Reply)>
+  const routes = {
+    ...companyRoutes(caps),
+    ...memberRoutes,
+    [`GET ${base}/task-settings`]: { body: ok(view) },
+    [`GET ${base}/records/settings`]: { body: ok({ enabled: true, updatedAt: null }) },
+    ...extra,
+  } as Record<string, Reply | ((call: Call) => Reply)>
   const calls: Call[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = decodeURIComponent(String(input))
@@ -149,5 +155,65 @@ describe('仕事の進め方・会社の暦', () => {
 
     expect(await within(dialog).findByText('代わりの人が見られないものが 2 件あります。部署の管理役に知らせました。')).toBeInTheDocument()
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ userId: 'u_member', from: '2026-11-02', until: '2026-11-06', delegateId: 'u_owner' })
+  })
+})
+
+// 「記録とやることの一覧を使う」 (records.md "Off per company"): the per-company records switch at the top
+// of 仕事の進め方, owners and admins only; off asks first, and every card below says it needs records.
+describe('仕事の進め方: the records switch', () => {
+  const adminCapabilities: Capabilities = { role: 'admin', managedDepartmentIds: [], canViewAgentEvents: true }
+  const recordsRoutes = (enabled: boolean) => ({
+    [`GET ${base}/records/settings`]: { body: ok({ enabled, updatedAt: null }) },
+    [`PUT ${base}/records/settings`]: (call: Call) => ({ body: ok({ enabled: (call.body as { enabled: boolean }).enabled, updatedAt: '2026-11-03T00:00:00.000Z' }) }),
+  })
+  const NOTE = '記録をオンにすると使えます'
+
+  it('shows the state and turns it on at once; the cards stop saying they need records', async () => {
+    const calls = stubApi(adminCapabilities, () => ({ members: [], canEdit: true }), recordsRoutes(false))
+    renderInCompany(<WorkSettingsPage />)
+    const toggle = await screen.findByRole('switch', { name: '記録とやることの一覧を使う' })
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText('オフ（使っていません）')).toBeInTheDocument()
+    // Every card of 仕事の進め方 works on records (チームの進め方 off: no 引き受け card); they say so and stay editable.
+    expect(await screen.findAllByText(NOTE)).toHaveLength(7)
+    expect(screen.getByRole('radio', { name: /その日のうち/ })).toBeEnabled()
+
+    await userEvent.click(toggle)
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/records/settings')).map((c) => c.body)).toEqual([{ enabled: true }])
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+  })
+
+  it('turning it off asks first (records are kept); cancelling sends nothing', async () => {
+    const calls = stubApi(ownerCapabilities, () => ({ members: [], canEdit: true }), recordsRoutes(true))
+    renderInCompany(<WorkSettingsPage />)
+    const toggle = await screen.findByRole('switch', { name: '記録とやることの一覧を使う' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByText(NOTE)).not.toBeInTheDocument()
+    const puts = () => calls.filter((c) => c.method === 'PUT' && c.url.endsWith('/records/settings'))
+
+    await userEvent.click(toggle)
+    let dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('オフにすると、アプリからやることなどが見えなくなります。記録は消えません。')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(puts()).toEqual([])
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+
+    await userEvent.click(toggle)
+    dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'オフにする' }))
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'false'))
+    expect(puts().map((c) => c.body)).toEqual([{ enabled: false }])
+    expect((await screen.findAllByText(NOTE)).length).toBeGreaterThan(0)
+  })
+
+  it('a department manager never reads or changes it', async () => {
+    const calls = stubApi(managerCapabilities, () => ({ members: [], canEdit: true }), recordsRoutes(false))
+    renderInCompany(<WorkSettingsPage />)
+    expect(await screen.findByText('このページはオーナーと管理者だけが使えます')).toBeInTheDocument()
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument()
+    expect(calls.some((c) => c.url.endsWith('/records/settings'))).toBe(false)
   })
 })

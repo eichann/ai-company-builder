@@ -17,6 +17,7 @@ import {
   agentEventViewersSchema,
   agentSandboxSchema,
   agentStopSchema,
+  recordSettingsSchema,
   secondOpinionSchema,
   brokerSchema,
   capabilitiesSchema,
@@ -780,6 +781,19 @@ export const secondOpinionApi = {
   get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema),
   update: (companyId: string, allowed: boolean) =>
     getData(`/api/companies/${enc(companyId)}/second-opinion`, secondOpinionSchema, { method: 'PUT', body: { allowed } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「記録とやることの一覧を使う」 (records.md "Off per company"): the per-company switch, owners/admins.
+// Turning it off deletes nothing; the app's やること・来た連絡・議事録・案件 stop until it is on again.
+// ---------------------------------------------------------------------------
+
+export type { RecordSettings } from '../../../shared/types/records'
+
+export const recordSettingsApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/records/settings`, recordSettingsSchema),
+  update: (companyId: string, enabled: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/records/settings`, recordSettingsSchema, { method: 'PUT', body: { enabled } }),
 }
 
 // ---------------------------------------------------------------------------
