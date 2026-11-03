@@ -13,6 +13,8 @@
  *   notifies nothing), approval requests in their own words, or a notice the
  *   server marks fresh (`desktop`) — once per PC, kept across a restart, the
  *   morning summary opening the task list; being asked speaks for its turn item;
+ * - the title bar counts and lists only this week's turn — a task not started with no due or due
+ *   after this week rests in the list (the server's morning summary counts the same);
  * - sign-out forgets everything;
  * - for a department without the task list, its meetings reach the title bar: a まとまり to
  *   choose and received minutes, counted as the member's only when the AI will not read them.
@@ -79,8 +81,37 @@ function fakeServer(server: Server) {
   }) as unknown as typeof fetch
 }
 
-const task = (id: string, title: string, type = 'task') => ({ id, type, title, state: 'todo', fields: { due: '2026-11-05' } })
+// Started (in_progress): this week's turn whatever the day the test runs (shared/core/turn-timing.ts).
+const task = (id: string, title: string, type = 'task') => ({ id, type, title, state: 'in_progress', fields: { due: '2026-11-05' } })
 const NOTICES = { available: true, unread: 1, items: [{ id: 'n1', kind: 'request_done', recordId: 'task-aaaaaa01', recordType: 'task', recordTitle: 'x', version: 3, text: 'Bobさんが「x」を完了にしました', createdAt: '2026-11-01T00:00:00Z', read: false }] }
+
+test('the title bar counts only this week\'s turn: a task not started with no due or due after this week rests', async () => {
+  const todo = (id: string, fields: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ id, type: 'task', title: id, state: 'todo', fields, ...extra })
+  const server: Server = {
+    turn: [
+      todo('task-week0001', { due: '2026-11-08' }), // Sunday: still this week
+      todo('task-over0002', { due: '2026-11-01' }), // overdue
+      todo('task-next0003', { due: '2026-11-09' }), // next week, not started: 先のこと
+      todo('task-none0004', {}), // no due, not started: いつか
+      { ...todo('task-strt0005', {}), state: 'in_progress' }, // started
+      todo('task-mins0006', { task_kind: 'minutes_review' }), // a minutes check waits for a press
+      todo('task-prep0007', { prep_summary: '下書きを用意しました' }), // the AI handed it over
+      todo('task-back0008', {}, { waitCameBack: { waitedSince: null, overAt: '2026-11-02T00:00:00Z' } }),
+      { id: 'approval-appr0009', type: 'approval', title: '承認', state: 'pending', fields: {} },
+    ],
+    notices: { available: true, unread: 0, items: [] }, calls: [],
+  }
+  const watcher = createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},
+    fetch: fakeServer(server), log: quiet, setInterval: () => 0, clearInterval: () => {},
+    now: () => Date.parse('2026-11-03T01:00:00Z'), // Tuesday 10:00 in Japan
+  })
+  await watcher.watch('co')
+  const { myTurn } = watcher.state('co')
+  assert.deepEqual(myTurn.items.map(i => i.id), ['task-week0001', 'task-over0002', 'task-strt0005', 'task-mins0006', 'task-prep0007', 'task-back0008', 'approval-appr0009'])
+  assert.equal(myTurn.total, 7)
+  assert.equal(myTurn.resting, 2)
+})
 
 test('the watcher reads with the session in a header; a Mac notification only for what is new', async () => {
   const server: Server = { turn: [task('task-aaaaaa01', '見積書')], notices: NOTICES, calls: [] }

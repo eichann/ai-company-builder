@@ -40,12 +40,19 @@ test('by turn: only the member\'s own far future folds; meetings to come join th
     { id: 'e2', title: 'B社', start: '2026-11-05T08:00:00.000Z', end: '2026-11-05T08:30:00.000Z', allDay: false, online: true, attendeeCount: 3, hasExternalAttendees: true },
   ], NOW)
   const sections = listSections([
-    item('soon', 'mine', '2026-11-06'), item('far', 'mine', '2026-12-10'), item('far-other', 'others', '2026-12-10'),
+    item('soon', 'mine', '2026-11-06'), { ...item('far', 'mine', '2026-12-10'), resting: true }, item('far-other', 'others', '2026-12-10'),
+    // Started (not resting): stays in あなたの番 whatever its due — it is counted as this week's turn.
+    { ...item('far-started', 'mine', '2026-12-11'), state: 'in_progress' },
+    { ...item('someday', 'mine', null), resting: true }, item('no-due-asked', 'mine', null),
     item('acc', 'acceptance', null), item('done', 'done', null),
   ], events, 'turn', NOW)
   const by = Object.fromEntries(sections.map(s => [s.key, s]))
-  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'done'])
-  assert.deepEqual(by.mine.items.map(i => i.id), ['soon'])
+  assert.deepEqual(sections.map(s => s.key), ['acceptance', 'mine', 'others', 'later', 'someday', 'done'])
+  assert.deepEqual(by.mine.items.map(i => i.id), ['soon', 'far-started', 'no-due-asked'])
+  // A task not started with no due waits in 「いつか」, folded (owner 2026-11-03).
+  assert.deepEqual(by.someday.items.map(i => i.id), ['someday'])
+  assert.equal(by.someday.foldable, true)
+  assert.equal(by.someday.title, 'いつか')
   assert.deepEqual(by.mine.events.map(e => e.event.id), ['e2'])
   assert.equal(by.mine.events[0].start, '17:00')
   assert.deepEqual(by.later.items.map(i => i.id), ['far'])

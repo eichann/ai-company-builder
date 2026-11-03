@@ -86,7 +86,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
         type="button"
         onClick={() => toggle('turn')}
         className="rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-800 hover:bg-amber-500/25 dark:text-amber-300"
-        title="あなたが次に動くもの"
+        title="あなたが今週動くもの"
         aria-expanded={open === 'turn'}
       >
         あなたの番 <b className="tabular-nums">{turnTotal}</b>
@@ -113,6 +113,9 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
             </section>
           ))}
           {myTurn.total > myTurn.items.length && <p className="px-3 py-2 text-xs text-gray-500">ほかに {myTurn.total - myTurn.items.length} 件</p>}
+          {(myTurn.resting ?? 0) > 0 && (
+            <p className="px-3 py-1.5 text-[11px] text-gray-500 dark:text-zinc-400">まだ始めていない、期限が来週より先か期限のないもの {myTurn.resting}件は、やることの一覧の「先のこと」「いつか」にあります。</p>
+          )}
           <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-800 dark:text-zinc-400">起きたことはベルに出ます。ここは押すものだけです。</p>
         </div>
       )}

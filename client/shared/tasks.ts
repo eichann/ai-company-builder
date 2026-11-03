@@ -8,6 +8,7 @@ import { addBusinessDays, addDays, businessDaysBetween, isBusinessDay, nextBusin
 import { argDefaultOf } from '../../shared/core/core-types'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { parseTagsValue } from '../../shared/core/record-types'
+import { restingTask } from '../../shared/core/turn-timing'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { stateLabel } from './record-views'
@@ -76,6 +77,12 @@ export interface TaskListItem {
    * its row shows 「人に頼んだもの」, not the task's icon, which read as a ticked box (owner 2026-11-02).
    */
   askedOfOthers?: true
+  /**
+   * In the member's turn but only resting there (`restingTask`, shared/core/turn-timing.ts): a task
+   * not started with nothing to press. With no due it goes to 「いつか」, due after this week to
+   * 「先のこと」; neither is counted in 「あなたの番」 (the title bar and the morning summary agree).
+   */
+  resting?: true
 }
 
 const COMPLETE_FROM = new Set(['todo', 'in_progress', 'review', 'waiting', 'awaiting_acceptance', 'declined'])
@@ -368,6 +375,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       ...(bundleGroup ? { needsBundle: true as const, bundleGroup } : {}),
       ...(bundleGroup && suggested ? { suggestedBundle: suggested } : {}),
       ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
+      ...(turn === 'mine' && restingTask(r) ? { resting: true as const } : {}),
       ...(r.type === 'task' && turn !== 'done' && r.fields.requested_by === src.me && typeof r.fields.assignee === 'string' && r.fields.assignee !== src.me ? { askedOfOthers: true as const } : {}),
       // ☑ on the member's own rows (and a check waiting for them), never on what they asked of someone else.
       ...((turn !== 'ai' && (turn !== 'others' || r.fields.assignee === src.me)) && checkOf(r, src.me) ? { check: checkOf(r, src.me) } : {}),
@@ -403,6 +411,12 @@ export const OPEN_TASK_STATES = ['todo', 'in_progress', 'review', 'waiting', 'pr
 
 /** How many archived tasks one press shows (the first opening, then each 「さらに読み込む」). */
 export const ARCHIVE_PAGE = 20
+
+/**
+ * The folded 「アーカイブ」 shows what was archived within this many days (owner 2026-11-03, 使い心地のメモ
+ * #1: 「残り続けるのが嫌」); older ones are never deleted and stay findable in 探す and in 経緯.
+ */
+export const ARCHIVE_SHOWN_DAYS = 30
 
 /**
  * Where the next page starts in each of the two queries main merges: archived tasks assigned to

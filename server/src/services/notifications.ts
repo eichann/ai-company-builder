@@ -31,7 +31,8 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
-import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, WAIT_OVER_ACTION } from '../../shared/core/core-types'
+import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
+import { restingTask, turnTiming } from '../../shared/core/turn-timing'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -383,23 +384,32 @@ export function createNotificationService(deps: NotificationServiceDeps) {
   const holidaysOf = (companyId: string) => deps.holidaysOf?.(companyId) ?? []
 
   /**
-   * The member's 「あなたの番」 now — the same items the title bar counts
+   * The member's 「あなたの番」 this week — the same items the title bar counts
    * (`records.myTurn`: their own and those of whom they cover, read with
-   * their reader) — with how many are due today and past due (company day).
+   * their reader; only `turnTiming` `now`, shared/core/turn-timing.ts: a task
+   * not started with no due or one after this week is not counted) — with how
+   * many are due today and past due (company day).
    */
   function turnCounts(companyId: string, handle: CompanyData, userId: string, mayRead: (userId: string, rec: RecordAccessRow) => boolean, today: string) {
     const waiting = waitingFor(handle.records, [userId, ...(deps.actsFor?.(companyId, userId) ?? [])], new Set(handle.plugins.oldConnectionRecordIds()))
       .filter(w => mayRead(userId, w.row))
+    const types = new Map(waiting.map(w => [w.row.id, w.row.type]))
+    let total = 0
     let dueToday = 0
     let overdue = 0
     for (const s of handle.records.states(waiting.map(w => w.row.id))) {
       let fields: Record<string, LedgerValue> = {}
       try { fields = JSON.parse(s.fields) as Record<string, LedgerValue> } catch { continue }
+      const r = { type: types.get(s.recordId) ?? '', state: s.state, fields }
+      // A resting task given back by the clock waits for the member (read the ledger only then).
+      const back = restingTask(r) && waitCameBack(r.type, handle.records.ledger(s.recordId)) !== null
+      if (turnTiming({ ...r, waitCameBack: back }, today) !== 'now') continue
+      total++
       const day = str(fields.due)?.slice(0, 10)
       if (day === today) dueToday++
       else if (day !== undefined && day < today) overdue++
     }
-    return { total: waiting.length, dueToday, overdue }
+    return { total, dueToday, overdue }
   }
 
   /**

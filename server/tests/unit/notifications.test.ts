@@ -340,6 +340,7 @@ describe('noticing one’s own turn without Slack (owner decision 2026-11-03)', 
     nowMs = jst('2026-11-02T10:00')
     await startedTask({ title: '見積書', due: '2026-11-04' })
     await startedTask({ title: '議事録', due: '2026-11-02' })
+    // Not started, no due (「いつか」): in bob's turn but not counted (shared/core/turn-timing.ts).
     ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '下書き', fields: { assignee: 'u-bob' } }))
     // 文化の日 (a holiday): no morning.
     nowMs = jst('2026-11-03T09:00')
@@ -357,8 +358,8 @@ describe('noticing one’s own turn without Slack (owner decision 2026-11-03)', 
     expect(bobPc.filter(e => e.kind === 'notifications')).toHaveLength(1)
     const [summary] = ofKind('u-bob', 'morning_summary')
     expect(summary).toMatchObject({
-      recordId: '', text: '今日のあなたの番 3件（期限が今日 1件・期限を過ぎた 1件）',
-      desktop: { title: '今日のあなたの番 3件（期限が今日 1件・期限を過ぎた 1件）' },
+      recordId: '', text: '今日のあなたの番 2件（期限が今日 1件・期限を過ぎた 1件）',
+      desktop: { title: '今日のあなたの番 2件（期限が今日 1件・期限を過ぎた 1件）' },
     })
     // Opened after 15:00: no Mac notification any more (the notice stays in the bell).
     nowMs = jst('2026-11-04T15:00')
@@ -375,6 +376,22 @@ describe('noticing one’s own turn without Slack (owner decision 2026-11-03)', 
     expect(ofKind('u-bob', 'morning_summary')).toHaveLength(2)
     ok(notices.setSettings(m('u-bob'), { kinds: { morning_summary: false } }))
     expect(ofKind('u-bob', 'morning_summary')).toEqual([])
+  })
+
+  it('「今日のあなたの番」 counts only this week: a task not started with no due or a due after this week is not counted, nor greeted for', async () => {
+    nowMs = jst('2026-11-02T10:00')
+    // carol: only resting tasks — no due (いつか) and due next week, not started (先のこと).
+    ok(engine.create(m('u-carol'), HUMAN, { type: 'task', title: 'いつか読む', fields: { assignee: 'u-carol' } }))
+    ok(engine.create(m('u-carol'), HUMAN, { type: 'task', title: '来週の準備', fields: { assignee: 'u-carol', due: '2026-11-12' } }))
+    // bob: one due this week (counted), one started with no due (counted), one resting (not).
+    ok(engine.create(m('u-bob'), HUMAN, { type: 'task', title: '今週の見積', fields: { assignee: 'u-bob', due: '2026-11-06' } }))
+    const started = ok(engine.create(m('u-bob'), HUMAN, { type: 'task', title: '進めている', fields: { assignee: 'u-bob' } })).record
+    ok(await engine.act(m('u-bob'), HUMAN, started.id, 'start', { expectedVersion: 1 }))
+    ok(engine.create(m('u-bob'), HUMAN, { type: 'task', title: 'いつか', fields: { assignee: 'u-bob' } }))
+    nowMs = jst('2026-11-04T08:30')
+    notices.sweep('a', 500)
+    expect(rowsOf('morning_summary')).toEqual([{ user_id: 'u-bob', dedupe_key: 'morning_summary:2026-11-04' }])
+    expect(ofKind('u-bob', 'morning_summary')[0].text).toBe('今日のあなたの番 2件')
   })
 
   it('「明日が期限」: to the assignee on the last business day before the due, once per due value, never when finished', async () => {

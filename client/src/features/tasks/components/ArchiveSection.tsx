@@ -3,7 +3,7 @@
 // never while folded; a row opens the card, where ［戻す］ brings it back.
 import { useState } from 'react'
 import { Archive, CaretDown, CaretRight, CircleNotch } from '@phosphor-icons/react'
-import type { ArchiveCursor, ArchivedTask } from '../../../../shared/tasks'
+import { ARCHIVE_SHOWN_DAYS, type ArchiveCursor, type ArchivedTask } from '../../../../shared/tasks'
 import { getArchivedTasks } from '../api'
 import { companyNow } from '../model'
 
@@ -80,6 +80,7 @@ export function ArchiveSection({ companyId, activeRecordId, onOpen }: Props) {
               さらに読み込む
             </button>
           )}
+          {!loading && !next && <p className="px-2.5 pt-0.5 text-[10.5px] text-gray-400 dark:text-zinc-500">{ARCHIVE_SHOWN_DAYS}日より前のものは、探すタブから見つかります</p>}
         </div>
       )}
     </section>

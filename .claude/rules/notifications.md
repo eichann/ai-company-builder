@@ -15,6 +15,7 @@ paths:
   - "client/tests/notifications.test.ts"
   - "client/tests/title-bar-notices-ui.*"
   - "client/tests/ui/title-bar-notices.spec.ts"
+  - "shared/core/turn-timing.ts"
 ---
 
 # Notices (知らせ) and the title bar's 「あなたの番」 (stage 2 S5)
@@ -80,8 +81,10 @@ a plugin can never draw a notice (§2-2).
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
-    (`membersOf`) who is not absent today and has something in 「あなたの番」 (`waitingFor` with whom
-    they cover, read with their reader — the title bar's items), key `morning_summary:<day>`. A
+    (`membersOf`) who is not absent today and has something in **this week's** 「あなたの番」
+    (`waitingFor` with whom they cover, read with their reader, kept by `turnTiming` `now` —
+    `shared/core/turn-timing.ts`, the title bar's items: a task not started with nothing to press and
+    no due or a due after this week is not counted, owner decision 2026-11-03), key `morning_summary:<day>`. A
     server down until after 15:00 skips the day (no evening greeting). **No record and no counts
     stored** (`recordId` ''; `RECORDLESS_NOTIFICATION_KINDS`): the counts are built when read —
     today's shows 「あなたの番」 as it is now, an older one only 「11月4日の「今日のあなたの番」（朝の知らせ）」.
@@ -209,7 +212,11 @@ carry on. The app never acts on the signal itself: it only asks the server again
   「あなたの番 N」 = what the member presses, until it is done — grouped by kind with what to do
   (`turnGroups`: 「承認のお願い 3件 — 承認してください」, 「送るメールの下書き 1件 — 確かめて送ってください」,
   `thing-words.ts`), due shown, 「起きたことはベルに出ます。ここは押すものだけです。」; N is the list's
-  count. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
+  count. **Only this week's turn** (owner decision 2026-11-03): main reads the whole
+  `/records/my-turn` (unchanged: a released app still counts it all) and keeps the items whose
+  `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today);
+  the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
+  list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
   that notice read.
 - **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
@@ -226,7 +233,8 @@ carry on. The app never acts on the signal itself: it only asks the server again
 
 `server/tests/unit/notifications.test.ts` (one morning summary per business day per member with
 a turn — none on a holiday, a weekend, before 08:30 or first run after 15:00, never twice, counts
-built when read, gone when the kind is off; 「明日が期限」 once per due value to the assignee on the
+built when read, gone when the kind is off; only this week's turn counted — a member with only
+resting tasks is not greeted; 「明日が期限」 once per due value to the assignee on the
 last business day before it, not for a cancelled task, again for a moved due; `asked` once per
 assignment for a person, someone's AI, the own AI's hand-over and 引き受け待ち, never the requester —
 mutation-checked; a member never receives nor marks another's;
@@ -245,7 +253,7 @@ owner-only record's notices only to its owner (not other members, not owners/adm
 signal), `client/tests/notifications.test.ts` (signal only refetches, content-carrying event dropped, an
 unknown kind dropped without closing, session in the header, Mac notification only for new items;
 a fresh notice once per PC across a restart, also on the first look, the morning summary opening
-the task list, `asked` speaking for its new turn item),
+the task list, `asked` speaking for its new turn item; the title bar counts only this week's turn),
 `client/tests/ui/title-bar-notices.spec.ts` (opening a notice marks only it read and opens its
 record; the dot goes; 「あなたの番」 lists what waits; the morning summary opens the task list) —
 each mutation-checked.
