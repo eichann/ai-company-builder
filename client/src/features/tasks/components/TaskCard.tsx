@@ -1,6 +1,6 @@
 // A task's card in one file: the press's notices (取り消す, 先に変えた) belong to the card that
 // holds its version, so the loader and the body stay together.
-import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import { fileNameFromTitle } from '../../../../shared/today-folder'
 import { InputDialog } from '../../../shared/ui/InputDialog'
@@ -11,16 +11,17 @@ import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../sh
 import type { BundleKind } from '../../../../../shared/types/records'
 import { CALM } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
-import { fileRow, recordRow } from '../../records/components/linkRows'
+import { fileRow, pathFacts, recordRow, type NotDownloadedFolderOf } from '../../records/components/linkRows'
 import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/consultationLinks'
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
 import { actOnTask, createBundle, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
-import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
+import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
+import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
 import { whenDoneLine } from '../cardActions'
-import { companyNow, companyPathOf } from '../model'
+import { companyNow } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { MinutesReview } from './MinutesReview'
@@ -69,6 +70,8 @@ interface Props {
    * empty file in today's folder (`.personal`, this Mac only) and answers its company path, or why not.
    */
   createTodayFile?: (name: string) => Promise<{ path: string } | { error: string }>
+  /** The not-downloaded folder holding a path (a linked folder left out on this computer is marked). */
+  notDownloadedFolderOf?: NotDownloadedFolderOf
 }
 
 /** What the member's last press left on the card. */
@@ -82,10 +85,12 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
   const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
+  const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', onChanged: () => { reload(); onChanged?.() } })
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
   if (!result.success) return <div role="alert" className="flex h-full items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400">{result.error}</div>
 
@@ -150,6 +155,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
   return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+    linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
       const made = await createTodayFile(name)
@@ -187,6 +193,8 @@ interface BodyProps {
   onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>, done?: string) => Promise<string | null>
   onRetry: (runId: string) => Promise<string | null>
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
+  linkDrop: ReturnType<typeof useLinkDrop>
+  notDownloadedFolderOf?: NotDownloadedFolderOf
   onLinkFile: (companyPath: string) => Promise<string | null>
   onUnlinkFile: (companyPath: string) => Promise<string | null>
   /** Linked `.personal/` files that are on this computer. */
@@ -210,7 +218,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -235,11 +243,6 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
     setLinkError(failure)
     if (!failure) setUnlinked(null)
   }
-  // A file dragged from the file tree onto 「つながっているもの」 is linked (the first one; one link per drop).
-  const drop = async (e: DragEvent) => {
-    const path = draggedFilePaths(e.dataTransfer).map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
-    if (path) setLinkError(await onLinkFile(path))
-  }
   // The 案件 is at the head of the card, so it is not repeated on the right.
   const rows: LinkedRow[] = [
     ...card.links.flatMap(l => (l.record ? [{
@@ -248,7 +251,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       ...(l.removable ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => { if (!busy) void onUnlinkRecord(l.removable!, l.record!.title).then(setLinkError) } }] } : {}),
     }] : [])),
     ...card.files.map(f => ({
-      ...fileRow(rootPath, f.path, f.broken, personalHere.has(f.path)),
+      ...fileRow(rootPath, f.path, f.broken, personalHere.has(f.path), pathFacts(f, notDownloadedFolderOf)),
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
     })),
   ]
@@ -276,8 +279,9 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
           <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />
           {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
         </>, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
-        drop={{ label: 'ここにファイルをドロップしてつなぐ', accepts: e => isFileTreeDrag(e.dataTransfer), onDrop: e => void drop(e) }}
+        drop={{ label: `ファイル・フォルダ・やること・${bundleWord}・相談`, accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(record.id, e) } }}
         notice={<>
+          <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} />
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
           {unlinked && (
             <p role="status" className="flex flex-wrap items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11.5px] dark:bg-zinc-800">

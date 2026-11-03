@@ -3,7 +3,7 @@
 import type { Icon } from '@phosphor-icons/react'
 import {
   ArrowBendUpLeft, Briefcase, Buildings, CalendarBlank, ChatCircleDots, ChatTeardropText, ClipboardText,
-  Envelope, Eye, FileText, FilmSlate, GoogleDriveLogo, Lightning, ListChecks, LockSimple, PaperPlaneRight, PaperPlaneTilt, Robot,
+  Envelope, Eye, FileText, FilmSlate, FolderSimple, GoogleDriveLogo, Lightning, ListChecks, LockSimple, PaperPlaneRight, PaperPlaneTilt, Robot,
   Scales, SealCheck, SlackLogo, Stamp, Target, UserCircle, UsersThree, VideoCamera,
 } from '@phosphor-icons/react'
 import { bundleLook, ONLY_YOU, thingKindOf, thingName, THING_NAMES, type ThingKind } from '../../../shared/thing-words'
@@ -23,6 +23,7 @@ const LOOKS: Record<Exclude<ThingKind, 'bundle'>, { icon: Icon; color: string }>
   skill: { icon: Lightning, color: 'text-amber-500' },
   counterpart: { icon: Buildings, color: 'text-slate-600 dark:text-slate-300' },
   file: { icon: FileText, color: 'text-gray-500' },
+  folder: { icon: FolderSimple, color: 'text-amber-500' },
   other: { icon: FileText, color: 'text-gray-500' },
 }
 const BUNDLE_ICONS = { deal: Briefcase, program: FilmSlate, project: Target } as const

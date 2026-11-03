@@ -300,6 +300,17 @@ export function AppShell() {
     return { path: `${made.folder}/${name}` }
   }
   useCommandHandler('files.openToday', () => { void openToday() })
+  // A folder linked to a record opens in the file tree, under its department (records.md "Folder links").
+  useCommandHandler('folder.reveal', async ({ path }) => {
+    const inside = rootPath ? companyPathOf(path, rootPath) : null
+    if (!inside) return
+    const top = inside.split('/')[0]
+    const dept = departments.find(d => d.folder === top)
+    if (dept && selectedDeptId !== dept.id) handleSelectDept(dept.id)
+    setLeftTab('files')
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+    await treeControls.current?.reveal(path)
+  })
 
   // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
   const middleHidden = useRef(false)
@@ -362,11 +373,13 @@ export function AppShell() {
   const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
   const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
   const meetingWords = meetingBundleWords(bundleWord)
+  // A linked folder left out on this computer is marked on the cards (download-choices.md).
+  const notDownloadedFolderOf = sparseCheckout.enabled ? sparseCheckout.notDownloadedFolderOf : undefined
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile}
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} />
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
@@ -374,7 +387,7 @@ export function AppShell() {
       ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} word={bundleWord} onChoose={setChoosingBundle} onChanged={taskList.reload} />
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {

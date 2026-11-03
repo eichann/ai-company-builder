@@ -11,7 +11,7 @@
 /** What a member can open, by how it is shown (one icon and one name each). */
 export type ThingKind =
   | 'task' | 'minutes_check' | 'meeting' | 'decision' | 'incoming' | 'outbound' | 'sent'
-  | 'approval' | 'reply_request' | 'bundle' | 'consultation' | 'skill' | 'counterpart' | 'file' | 'other'
+  | 'approval' | 'reply_request' | 'bundle' | 'consultation' | 'skill' | 'counterpart' | 'file' | 'folder' | 'other'
 
 /** The fixed names; `bundle` and `other` are named by their type's own label (案件, 番組, プロジェクト…). */
 export const THING_NAMES: Readonly<Record<Exclude<ThingKind, 'bundle' | 'other'>, string>> = {
@@ -28,6 +28,7 @@ export const THING_NAMES: Readonly<Record<Exclude<ThingKind, 'bundle' | 'other'>
   skill: 'スキル',
   counterpart: '相手',
   file: 'ファイル',
+  folder: 'フォルダ',
 }
 
 /** A record as far as its look goes: its type, the type's label and interfaces, its state. */

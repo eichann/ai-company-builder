@@ -20,6 +20,7 @@ import type { AbsenceAddInput } from '../shared/absences'
 import type { WorkSwitch } from '../shared/work-switches'
 import type { ViewersQuery } from '../shared/viewers'
 import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, TaskCreateInput } from '../shared/tasks'
+import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
@@ -175,6 +176,7 @@ const api: ElectronAPI = {
   createBundle: (companyId: string, input: BundleCreateInput) => invoke('tasks:createBundle', companyId, input),
   linkRecordToRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:linkRecord', companyId, recordId, input),
   unlinkRecordFromRecord: (companyId: string, recordId: string, input: RecordLinkInput) => invoke('tasks:unlinkRecord', companyId, recordId, input),
+  dropLinkOnRecord: (companyId: string, targetId: string, dropped: DroppedThing, link?: string) => invoke('tasks:dropLink', companyId, targetId, dropped, link),
   undoTaskAction: (companyId: string, recordId: string, version: number, expectedVersion: number) => invoke('tasks:undo', companyId, recordId, version, expectedVersion),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
   checkMinutes: (companyId: string) => invoke('minutes:check', companyId),

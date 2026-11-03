@@ -60,10 +60,10 @@ test('a task completed on someone\'s OK says so in words, never as an approval',
   expectNoPageErrors(state)
 })
 
-test('「＋ファイルをつなぐ」 links a company file; a linked file is taken away from its 「…」 and put back; a dropped file is linked', async ({ page }) => {
+test('「＋ファイル・フォルダをつなぐ」 links a company file; a linked file is taken away from its 「…」 and put back; a dropped file is linked', async ({ page }) => {
   const state = await openPreview(page, 'task-card')
-  await page.getByRole('button', { name: 'ファイルをつなぐ' }).click()
-  const picker = page.getByRole('group', { name: 'つなぐファイル' })
+  await page.getByRole('button', { name: 'ファイル・フォルダをつなぐ' }).click()
+  const picker = page.getByRole('group', { name: 'つなぐファイル・フォルダ' })
   await picker.getByLabel('ファイルを探す').fill('提案')
   await expect(picker.getByRole('button')).toHaveCount(1)
   await picker.getByRole('button', { name: /提案書\.md/ }).click()
@@ -84,7 +84,7 @@ test('「＋ファイルをつなぐ」 links a company file; a linked file is t
   })
   await card.dispatchEvent('dragover', { dataTransfer: data })
   await card.dispatchEvent('drop', { dataTransfer: data })
-  await expect(page.locator('#acted')).toContainText('link 経理/請求書.xlsx@3')
+  await expect(page.locator('#acted')).toContainText('drop task-0000aa 経理/請求書.xlsx target:files')
   expectNoPageErrors(state)
 })
 
@@ -460,10 +460,10 @@ test('［＋ 新しいファイル］ only on an owner-only task: named, made in
   expectNoPageErrors(state)
 })
 
-test('a task shown to a department keeps only ［ファイルをつなぐ］', async ({ page }) => {
+test('a task shown to a department keeps only ［ファイル・フォルダをつなぐ］', async ({ page }) => {
   const state = await openPreview(page, 'task-card', { shared: '1' })
   const links = page.getByTestId('task-card').getByRole('complementary', { name: 'つながっているもの' })
-  await expect(links.getByRole('button', { name: 'ファイルをつなぐ' })).toBeVisible()
+  await expect(links.getByRole('button', { name: 'ファイル・フォルダをつなぐ' })).toBeVisible()
   await expect(links.getByRole('button', { name: '新しいファイル' })).toHaveCount(0)
   expectNoPageErrors(state)
 })
@@ -476,5 +476,60 @@ test('「このやることから外す」 on a consultation row of 「AIへの�
   await links.getByRole('button', { name: '「見積の相談」の操作' }).click()
   await page.getByRole('menuitem', { name: /このやることから外す/ }).click()
   await expect(page.locator('#acted')).toHaveText('detach s-1')
+  expectNoPageErrors(state)
+})
+
+// 「落とすと、つながります」 (owner decision 2026-11-03, tasks-ui.md "Dropping links"). What a row of the
+// list, 探す, a tab or 「AIへの相談」 puts on a drag (`dragTypes.ts`) dropped on the card's 「つながっているもの」.
+async function dropOnLinks(page: import('@playwright/test').Page, type: string, value: unknown) {
+  const links = page.getByRole('complementary', { name: 'つながっているもの' })
+  const data = await page.evaluateHandle(([t, v]) => { const dt = new DataTransfer(); dt.setData(t as string, JSON.stringify(v)); return dt }, [type, value] as const)
+  await links.dispatchEvent('dragenter', { dataTransfer: data })
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  return { links, drop: () => links.dispatchEvent('drop', { dataTransfer: data }) }
+}
+
+test('a record dropped on the card links it with ［取り消す］; one no link allows is refused in one line', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const { links, drop } = await dropOnLinks(page, 'application/x-acb-record', { id: 'task-0000zz', title: '会場を押さえる' })
+  await expect(links.locator('[data-link-drop-zone]')).toHaveText('ここに落とすと、つながります')
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/drop-over-card.png` })
+  await drop()
+  await expect(page.locator('#acted')).toHaveText('drop task-0000aa task-0000zz target:related')
+  const done = links.getByRole('status').filter({ hasText: 'をつなぎました' })
+  await done.getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toHaveText('drop task-0000aa task-0000zz target:related,undo 9@9')
+
+  const refused = await dropOnLinks(page, 'application/x-acb-record', { id: 'decision-0000yy', title: '今回だけ値引き' })
+  await refused.drop()
+  await expect(links.getByRole('alert')).toHaveText('やることには決めたことはつなげません')
+  await expect(page.locator('#acted')).not.toContainText('decision-0000yy')
+  expectNoPageErrors(state)
+})
+
+test('a consultation dropped on the card becomes one about this やること, and ［取り消す］ puts its topic back', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const { links, drop } = await dropOnLinks(page, 'application/x-acb-consultation', { sessionId: 's-9', title: '会場の相談', topicRecordId: 'task-0000bb' })
+  await drop()
+  await expect(page.locator('#acted')).toHaveText('topic s-9=task-0000aa')
+  const done = links.getByRole('status').filter({ hasText: '「会場の相談」をこのやることについての相談にしました' })
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/drop-consultation.png` })
+  await done.getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#acted')).toHaveText('topic s-9=task-0000aa,topic s-9=task-0000bb')
+  expectNoPageErrors(state)
+})
+
+test('a folder from the tree is linked; linked folders open in the tree, say who cannot open them by count only, and one not downloaded is marked', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { folders: '1' })
+  const { links, drop } = await dropOnLinks(page, 'application/x-file-paths', ['/Users/me/company/営業/見積'])
+  await drop()
+  await expect(page.locator('#acted')).toHaveText('drop task-0000aa 営業/見積 target:files')
+  const folders = links.getByRole('region', { name: 'フォルダ' })
+  await expect(folders).toContainText('月次')
+  await expect(folders).toContainText('2人はこのフォルダを開けません')
+  await expect(folders).toContainText('この Mac には未ダウンロード')
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/folder-links.png` })
+  await folders.getByRole('button', { name: /^月次/ }).click()
+  await expect(page.locator('#acted')).toContainText('reveal /Users/me/company/経理/月次')
   expectNoPageErrors(state)
 })

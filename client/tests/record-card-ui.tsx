@@ -15,6 +15,7 @@ import type { RecordSummary } from '../../shared/types/records'
 import { bundleDetailOf, recordDetailOf } from '../shared/record-details'
 import { summaryView, type RecordCardLink } from '../shared/record-views'
 import { installElectronAPI } from './ui/fixtures/electron-api'
+import { fakeDropLink } from './ui/fixtures/link-drop'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const people = { 'u-sato': '佐藤', 'u-abe': '阿部' }
@@ -65,6 +66,7 @@ const card = kind === 'bundle'
 
 installElectronAPI({
   getRecordCard: async () => ({ success: true, card }),
+  dropLinkOnRecord: fakeDropLink(say),
   openExternal: async url => { opened.push(url); document.getElementById('opened')!.textContent = opened.join('\n'); return { success: true } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { say(`unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   undoTaskAction: async (_c, recordId, version, expected) => { say(`undo ${recordId} ${version}@${expected}`); return { success: true, recordId } },

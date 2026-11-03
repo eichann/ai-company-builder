@@ -45,6 +45,7 @@ import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } f
 import type { ConsultationTopicsResult } from './consultation-topics'
 import type { CalendarTodayResult } from './calendar'
 import type { ArchiveCursor, ArchivedTasksResult, BundleChoicesResult, BundleCreateInput, BundleKindsAnswer, RecordLinkInput, TaskActInput, TaskCreateInput, TaskListResult, TaskProposalsResult, TaskWriteResult } from './tasks'
+import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
@@ -542,6 +543,8 @@ export interface IpcInvokeChannels {
   'tasks:linkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
   'tasks:unlinkRecord': { args: [companyId: string, recordId: string, input: RecordLinkInput]; result: TaskWriteResult }
   'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
+  /** Something dropped on a record's 「つながっているもの」 or list row (a record, a file, a folder) linked to it; `link` answers a choice. */
+  'tasks:dropLink': { args: [companyId: string, targetId: string, dropped: DroppedThing, link?: string]; result: DropLinkResult }
   // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
   /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
   'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -966,6 +969,7 @@ export interface ElectronAPI {
   createBundle: Invoke<'tasks:createBundle'>
   linkRecordToRecord: Invoke<'tasks:linkRecord'>
   unlinkRecordFromRecord: Invoke<'tasks:unlinkRecord'>
+  dropLinkOnRecord: Invoke<'tasks:dropLink'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>
   checkMinutes: Invoke<'minutes:check'>

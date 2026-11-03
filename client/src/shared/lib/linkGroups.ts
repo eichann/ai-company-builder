@@ -3,7 +3,7 @@
 import type { ThingKind } from '../../../shared/thing-words'
 
 /** The order of 「つながっているもの」: what a thing belongs to first, then work, then what was said. */
-const LINK_ORDER: ThingKind[] = ['bundle', 'task', 'minutes_check', 'meeting', 'decision', 'approval', 'incoming', 'reply_request', 'outbound', 'sent', 'counterpart', 'other', 'file', 'consultation', 'skill']
+const LINK_ORDER: ThingKind[] = ['bundle', 'task', 'minutes_check', 'meeting', 'decision', 'approval', 'incoming', 'reply_request', 'outbound', 'sent', 'counterpart', 'other', 'file', 'folder', 'consultation', 'skill']
 
 export interface LinkGroup<T> {
   /** The kind's name (「会議の記録」「案件」): one group per name, so 案件 and プロジェクト stay apart. */

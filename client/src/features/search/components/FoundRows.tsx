@@ -1,7 +1,8 @@
 // The rows of 探す: a 相手 / 案件's summary card, a section of things grouped by kind (top 3 each,
 // 「ほか N件」), one row per thing with its best sentence, and a やること / 案件's consultations folded
 // under it. Props in, JSX out; opening goes through the callbacks.
-import { useState, type ReactNode } from 'react'
+import { useState, type DragEvent, type ReactNode } from 'react'
+import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED, startConsultationDrag, startRecordDrag } from '../../../shared/lib/dragTypes'
 import { ArrowsOutSimple, CaretDown, CaretRight, LinkSimple } from '@phosphor-icons/react'
 import { foldAsciiCase } from '../../../../../shared/core/paths'
 import type { RecordFindHub } from '../../../../../shared/types/records'
@@ -50,6 +51,18 @@ export interface FoundRowActions {
   department: string | null
   departmentName: (folder: string | null) => string
   today: string
+  /** The company folder: a found file is dragged by its full path, as the file tree does. */
+  rootPath: string
+}
+
+/** A found thing dragged onto a record's 「つながっているもの」 links it (owner decision 2026-11-03). */
+function startDrag(t: FoundThing, a: FoundRowActions, e: DragEvent): void {
+  if (t.recordId) startRecordDrag(e.dataTransfer, { id: t.recordId, title: t.title })
+  else if (t.sessionId) startConsultationDrag(e.dataTransfer, { sessionId: t.sessionId, title: t.title, ...(t.topicRecordId ? { topicRecordId: t.topicRecordId } : {}) })
+  else if (t.path) {
+    e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([`${a.rootPath}/${t.path}`]))
+    e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED
+  }
 }
 
 export function SummaryCard({ t, hub, q, bundleWord, consults, consultsOn, onConsults, a }: {
@@ -58,7 +71,7 @@ export function SummaryCard({ t, hub, q, bundleWord, consults, consultsOn, onCon
   const counts = hubCounts(hub, bundleWord, consults)
   const active = a.activeRecordId === t.recordId
   return (
-    <div role="button" tabIndex={0} onClick={() => a.open(t, q)} onKeyDown={e => { if (e.key === 'Enter') a.open(t, q) }} data-summary-card={t.recordId}
+    <div role="button" tabIndex={0} onClick={() => a.open(t, q)} onKeyDown={e => { if (e.key === 'Enter') a.open(t, q) }} data-summary-card={t.recordId} draggable onDragStart={e => startDrag(t, a, e)}
       className={`w-full text-left rounded-lg border px-2.5 py-2 transition-colors cursor-pointer ${active ? 'border-accent bg-accent/5' : 'border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-accent/60 hover:bg-gray-50 dark:hover:bg-zinc-800/60'}`}>
       <span className="flex items-center gap-1.5">
         <FoundIcon t={t} size={16} />
@@ -121,7 +134,7 @@ export function HitRow({ t, q, a }: { t: FoundThing; q: string; a: FoundRowActio
   const when = t.kind === 'meeting' && t.meetingAt ? shortDate(t.meetingAt, a.today) : shortDate(t.at, a.today)
   return (
     <div>
-      <button type="button" onClick={() => a.open(t, q)} data-hit={t.key}
+      <button type="button" onClick={() => a.open(t, q)} data-hit={t.key} draggable onDragStart={e => startDrag(t, a, e)}
         className={`w-full text-left flex items-start gap-2 px-3 py-1 ${active ? 'bg-accent/10' : 'hover:bg-gray-100 dark:hover:bg-white/[0.04]'}`}>
         <span className="pt-px"><FoundIcon t={t} /></span>
         <span className="flex-1 min-w-0">
@@ -159,7 +172,8 @@ function ConsultsUnder({ t, a }: { t: FoundThing; a: FoundRowActions }) {
       {shown && (
         <div className="mt-0.5 border-l border-gray-200 dark:border-zinc-700 ml-1">
           {list.map(c => (
-            <button key={c.id} type="button" onClick={() => a.openConsultation(c.id)} data-consult={c.id}
+            <button key={c.id} type="button" onClick={() => a.openConsultation(c.id)} data-consult={c.id} draggable
+              onDragStart={e => startConsultationDrag(e.dataTransfer, { sessionId: c.id, title: c.title, ...(t.recordId ? { topicRecordId: t.recordId } : {}) })}
               className="w-full flex items-center gap-1.5 pl-2 pr-1 py-0.5 text-left text-[11px] text-gray-700 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-white/[0.04] rounded-r">
               <span className="flex-1 min-w-0 truncate">{c.title}</span>
               <span className="shrink-0 text-[10px] text-gray-400 tabular-nums">{shortDate(c.updatedAt, a.today)}</span>
