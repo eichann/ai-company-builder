@@ -125,7 +125,7 @@ test('at 1440×900 every left tab shows its name on one line: stacked in the nar
   expect(await leftTabsLook(page)).toEqual(NAMES.map(() => 'stacked'))
   await page.screenshot({ path: 'test-results/left-tabs-narrow.png' })
   await strip.locator('button[title="探す"]').click()
-  await expect(page.getByPlaceholder('探す（言葉を入れて Enter）')).toBeVisible()
+  await expect(page.getByPlaceholder('覚えている言葉で探す')).toBeVisible()
 
   // スキル covers the whole left side: room for icon and name side by side.
   await strip.locator('button[title="スキル"]').click()

@@ -158,6 +158,8 @@ contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
 contract.invoke privateFolders:reservedPathRefusal
 contract.invoke recordViews:card
+contract.invoke recordViews:find
+contract.invoke recordViews:findHome
 contract.invoke recordViews:forFile
 contract.invoke recordViews:search
 contract.invoke recordViews:topics
@@ -332,6 +334,8 @@ contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:di
 contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
 contract.type ElectronAPI.dismissAppLinkServer = dismissAppLinkServer: Invoke<'appLink:dismissServer'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
+contract.type ElectronAPI.findRecords = findRecords: Invoke<'recordViews:find'>
+contract.type ElectronAPI.findRecordsHome = findRecordsHome: Invoke<'recordViews:findHome'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
 contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
@@ -750,6 +754,8 @@ contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null }
 contract.type IpcInvokeChannels.'recordViews:card' = 'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
+contract.type IpcInvokeChannels.'recordViews:find' = 'recordViews:find': { args: [companyId: string, text: string, today: string]; result: FindResult }
+contract.type IpcInvokeChannels.'recordViews:findHome' = 'recordViews:findHome': { args: [companyId: string, today: string, from: string, to: string]; result: FindHomeResult }
 contract.type IpcInvokeChannels.'recordViews:forFile' = 'recordViews:forFile': { args: [companyId: string, companyPath: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:search' = 'recordViews:search': { args: [companyId: string, text: string]; result: RecordListResult }
 contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { args: [companyId: string, recordIds: string[]]; result: ConsultationTopicsResult }
@@ -1010,6 +1016,8 @@ main.handle privateFolders:createContext @ features/private-folders/ipc.ts (comp
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
 main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts (targetPath: string)
 main.handle recordViews:card @ features/record-views/ipc.ts (companyId, recordId)
+main.handle recordViews:find @ features/record-views/ipc.ts (companyId, text, today)
+main.handle recordViews:findHome @ features/record-views/ipc.ts (companyId, today, from, to)
 main.handle recordViews:forFile @ features/record-views/ipc.ts (companyId, companyPath)
 main.handle recordViews:search @ features/record-views/ipc.ts (companyId, text)
 main.handle recordViews:topics @ features/record-views/ipc.ts (companyId, recordIds)
@@ -1143,6 +1151,10 @@ preload dismissAppLinkServer -> invoke appLink:dismissServer()
 preload dismissAppLinkServer : () => Promise<void>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
+preload findRecords -> invoke recordViews:find($0, $1, $2)
+preload findRecords : (companyId: string, text: string, today: string) => Promise<FindResult>
+preload findRecordsHome -> invoke recordViews:findHome($0, $1, $2, $3)
+preload findRecordsHome : (companyId: string, today: string, from: string, to: string) => Promise<FindHomeResult>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
 preload flushChatSession : (companyId: string, session: ChatSession) => ChatSaveReceipt
 preload focusChatWindow -> invoke chatWindow:focus($0)

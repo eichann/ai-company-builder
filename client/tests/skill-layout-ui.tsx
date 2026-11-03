@@ -177,6 +177,16 @@ const api: Partial<ElectronAPI> = {
       ? { success: true, available: true, total: 2, records: [RECORD_TASK, RECORD_DECISION] }
       : { success: true, available: true, total: 0, records: [] }
   },
+  // The 探す tab's records: the same two, each with its department.
+  findRecords: async (companyId: string, text: string) => {
+    record('findRecords', [companyId, text])
+    return text === '提案'
+      ? { success: true, available: true, total: 2, hubs: [], hits: [
+        { record: RECORD_TASK, department: '営業部', mine: true },
+        { record: { ...RECORD_DECISION, summary: '提案の金額は150万円' }, department: '営業部', mine: false },
+      ] }
+      : { success: true, available: true, total: 0, hits: [], hubs: [] }
+  },
   getRecordCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
     ? { success: true, card: {
       record: RECORD_TASK,

@@ -317,10 +317,14 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   inside a readable private folder is read from that folder's own clone (the deepest `.git` under
   the company root, validated by the allowed roots), as is `git:commitFileDiff` (`repoHolding`;
   test `ipc-git.test.ts`). `git:showCommit` was removed with the 履歴 tab.
-- The 探す tab (formerly 検索; the narrow column, `SearchPanel`) also lists records (`records.md`
-  "The app's views"): `RecordHits` above the files, kind chips over both; company-wide (the server
-  decides what the member reads), cleared like the file hits. A file's hit opens the file in a tab
-  in the middle at that line (`gotoLine`); there is no preview pane of its own.
+- The 探す tab (formerly 検索; the narrow column, `SearchPanel`; `records.md` "探す"): live as the
+  member types (250 ms after the last key, never mid-IME, Enter at once, Esc clears), one row per
+  file however many lines match (its best line shown; it opens at that line, `gotoLine`), records and
+  consultations beside the files. The file contents are grepped in the department on screen, or the
+  whole company after 「全社で探す」 — still one capped `git:grep` per search, the previous one
+  stopped; file names come from one `git:listFiles` of the company kept 30 s; only the found files'
+  times are read (`fs:stat`, ≤ 80). A not-downloaded folder in the scope is said in one line
+  (「ダウンロードしていないフォルダのファイルは探していません」); its files are never searched.
 - The review diff (`src/features/doc-review/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder
@@ -331,4 +335,5 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   (`CompanySearchReads`: the file list for Cmd+P, content search, a hit's text),
   `src/features/history/api.ts` (`FileVersionReads`: a file's log) and, for
   `DiffViewer` (shown by the sync preview and 「前の版」), `src/shared/ipc/diffs.ts` (`DiffReads`).
-  Record hits go through `RecordSearchOutbound` (search's `api.ts`: the words go to the server).
+  Record hits go through `RecordSearchOutbound` (⌘K) and `RecordFindOutbound` (the 探す tab) in
+  search's `api.ts` (the words go to the server); a found file's time through `FileTimeReads`.
