@@ -257,6 +257,14 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `src/features/chat/api.ts`: `ChatHistoryReads` / `ChatHistoryWrites`, `HandoffReads`, and
   `HandoffOutbound` (`handoff:update` / `handoff:complete` start or schedule the member's AI
   on the conversation, so they are not a plain write).
+- **The topic is metadata** (`topicRecordId`, `topicDetached`; `consultation-task.ts`): a save
+  keeps what `patch` set — main's topic (the task the AI made) survives a save that lacks it, and
+  once the member took it off (`patch { topicRecordId: null }` → `topicDetached: true`) no save
+  brings it back and no task becomes the topic again. The renderer's first save still brings the
+  topic of 「相談する」. A tab re-reads it on a `patch` of its own conversation (`useChatHistory`
+  `topicRecordId` state) for the topic chip (`TopicChip.tsx`; `tasks-ui.md` "Consultations centre
+  on the task"). A reply's linked files are stored as `linkedFiles` (`data-file-linked`). Test:
+  `client/tests/consultation-task.test.ts`.
 - A message stores its tool calls only as `[Tool: name]` text (plus `toolLines`, see 「Tool rows」); what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the

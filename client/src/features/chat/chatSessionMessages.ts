@@ -7,6 +7,7 @@ import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperati
 import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard, type MinutesBundleChoiceCard } from '../../../shared/minutes-app'
 import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
+import { FILE_LINKED_PART_TYPE, readFileLinkedPart, type FileLinkedPart } from '../../../shared/consultation-task'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { RESTORED_TOOL_PART_TYPE, TOOL_MARKER_RE, restoredToolLine, storedToolLine, type StoredToolLine } from '../../../shared/tool-display'
 import { toolRowOf } from './toolRows'
@@ -35,6 +36,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   // The app's cards, in the order the tools produced them (restored in that order).
   const cardOrder: string[] = []
   const mailDrafts: MailDraftCard[] = []
+  const linkedFiles: FileLinkedPart[] = []
   const secondOpinions: SecondOpinionRecord[] = []
   const toolLines: Record<string, StoredToolLine> = {}
   const appInstruction = appInstructionOf(msg)
@@ -57,6 +59,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     if (part.type === MAIL_DRAFT_PART_TYPE) {
       const card = readMailDraftCard((part as { data?: unknown }).data)
       if (card && !mailDrafts.some(c => c.id === card.id)) { mailDrafts.push(card); cardOrder.push(`mail-draft-${card.id}`) }
+      continue
+    }
+    if (part.type === FILE_LINKED_PART_TYPE) {
+      const linked = readFileLinkedPart((part as { data?: unknown }).data)
+      if (linked && !linkedFiles.some(l => l.path === linked.path)) linkedFiles.push(linked)
       continue
     }
     if (part.type === SECOND_OPINION_PART_TYPE) {
@@ -103,6 +110,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
     ...(cardOrder.length > 1 ? { cardOrder } : {}),
     ...(mailDrafts.length ? { mailDrafts } : {}),
+    ...(linkedFiles.length ? { linkedFiles } : {}),
     ...(secondOpinions.length ? { secondOpinions } : {}),
     ...(Object.keys(toolLines).length ? { toolLines } : {}),
     ...(appInstruction ? { appInstruction } : {}),
@@ -161,6 +169,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     if (card) cards.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card })
   }
   parts.push(...inCardOrder(cards, msg.cardOrder))
+  for (const stored of msg.linkedFiles || []) {
+    const linked = readFileLinkedPart(stored)
+    if (linked) parts.push({ type: FILE_LINKED_PART_TYPE, id: `file-linked-${linked.path}`, data: linked })
+  }
   for (const stored of msg.secondOpinions || []) {
     const record = readSecondOpinionRecord(stored)
     if (record) parts.push({ type: SECOND_OPINION_PART_TYPE, id: `second-opinion-${record.id}`, data: record })

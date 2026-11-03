@@ -96,6 +96,13 @@ export function unlinkFileFromTask(companyId: string, recordId: string, companyP
   return writes.unlinkFileFromTask(companyId, recordId, companyPath, expectedVersion)
 }
 
+/** Whether a linked file inside a `.personal/` folder (never synced) is on this computer. */
+export type PersonalFileReads = ElectronPort<'exists'>
+
+export function fileIsHere(absPath: string, reads: PersonalFileReads = window.electronAPI): Promise<boolean> {
+  return reads.exists(absPath)
+}
+
 /** Company-relative paths of the files on this computer. */
 export function listCompanyFiles(rootPath: string, reads: CompanyFileReads = window.electronAPI) {
   return reads.gitListFiles(rootPath, '')

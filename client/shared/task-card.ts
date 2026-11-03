@@ -12,8 +12,8 @@ import type { ViewersLabel } from '../../shared/types/viewers'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
 import { recordActionChoices } from './record-actions'
 import {
-  cardFields, historyEntries, historyLines, removableOf, summaryView,
-  type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
+  cardFields, historyEntries, historyLines, linkedPathOf, removableOf, summaryView,
+  type LinkedPath, type RecordCardField, type RecordCardHistoryLine, type RecordCardLink, type RecordViewSummary,
 } from './record-views'
 
 export interface TaskCardArg {
@@ -105,7 +105,7 @@ export interface TaskCardData {
   prepSummary: string | null
   /** The drafts and approval requests the AI made (「AI が用意したもの」), newest first. */
   prepared: RecordViewSummary[]
-  files: Array<{ path: string; broken?: boolean }>
+  files: LinkedPath[]
   links: RecordCardLink[]
   history: RecordCardHistoryLine[]
   runs: TaskCardRun[]
@@ -184,6 +184,8 @@ export interface TaskCardSources {
   teamMode?: boolean
   /** The company's own holidays (`GET /task-settings`); absent = none. */
   holidays?: string[]
+  /** `POST /viewers { linked }`'s `cannotOpen`: per linked path, how many who see the task cannot open it. */
+  cannotOpen?: unknown
 }
 
 export function taskCardOf(src: TaskCardSources): TaskCardData {
@@ -243,10 +245,10 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   let bundle: RecordViewSummary | null = null
   let originLink: { kind: 'meeting' | 'interaction'; record: RecordSummary } | null = null
   let fromIncoming = false
-  const files: Array<{ path: string; broken?: boolean }> = []
+  const files: LinkedPath[] = []
   for (const l of src.detail.links) {
     if (l.path !== undefined) {
-      if (l.direction === 'out') files.push({ path: l.path, ...(l.broken !== undefined ? { broken: l.broken } : {}) })
+      if (l.direction === 'out') files.push(linkedPathOf({ ...l, path: l.path }, src.cannotOpen))
       continue
     }
     if (!l.record) continue

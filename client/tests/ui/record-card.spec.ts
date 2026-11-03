@@ -137,3 +137,18 @@ test('a row of 「つながっているもの」 says no raw type name under it 
   await expect(page.getByRole('complementary', { name: 'つながっているもの' })).not.toContainText('タスク')
   expectNoPageErrors(state)
 })
+
+// 「落とすと、つながります」 on any record (owner decision 2026-11-03): a やること from the list dropped on
+// a 案件 becomes that 案件's (the link is the やること's own `bundle`), with ［取り消す］ on the やること.
+test('a やること dropped on a 案件 is linked to it, held by the やること, with ［取り消す］', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'bundle' })
+  const links = page.getByRole('complementary', { name: 'つながっているもの' })
+  const data = await page.evaluateHandle(() => { const dt = new DataTransfer(); dt.setData('application/x-acb-record', JSON.stringify({ id: 'task-0000zz', title: '会場を押さえる' })); return dt })
+  await links.dispatchEvent('dragover', { dataTransfer: data })
+  await links.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#opened')).toHaveText('drop deal-0000cc task-0000zz dropped:bundle')
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/drop-on-deal.png` })
+  await links.getByRole('status').filter({ hasText: 'をつなぎました' }).getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#opened')).toContainText('undo task-0000zz 9@9')
+  expectNoPageErrors(state)
+})

@@ -15,6 +15,11 @@ export const COMMANDS = defineCommands([
     args: z.object({ path: z.string().min(1).describe('The file\'s absolute path inside the company folder') }),
   },
   {
+    // Shows a folder in the file tree (its department, the ファイル tab), e.g. a folder linked to a record.
+    id: 'folder.reveal', title: 'フォルダをファイルの一覧で開く', class: 'view',
+    args: z.object({ path: z.string().min(1).describe('The folder\'s absolute path inside the company folder') }),
+  },
+  {
     // Sending the message starts the AI on it, hence outbound.
     id: 'chat.newConsultation', title: '新しい相談を始める', class: 'outbound',
     args: z.object({
@@ -129,6 +134,12 @@ export const COMMANDS = defineCommands([
     // ⌘P, kept for members used to it: the same 探す window.
     id: 'file.search', title: 'ファイルを名前で探す', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
+  },
+  {
+    // 今日のフォルダ (<department>/.personal/inbox/日付別/YYYY/YYYYMMDD): its department's files, the folder
+    // shown in the tree; made when missing. Only this computer is touched (never synced), hence local.
+    id: 'files.openToday', title: '今日のフォルダを開く', class: 'local',
+    args: z.object({}), keybinding: { key: 'mod+shift+t', area: 'app' },
   },
   {
     // The left panel's 探す tab, with the cursor in its box.

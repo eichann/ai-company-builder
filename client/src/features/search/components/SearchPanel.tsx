@@ -130,6 +130,7 @@ export function SearchPanel(props: SearchPanelProps) {
     department: dept,
     departmentName: nameOf,
     today,
+    rootPath,
   }
   const consultRow = (c: FindConsultation): FoundThing => {
     const rec = c.linked ? things.find(t => t.recordId === c.linked!.id) : undefined

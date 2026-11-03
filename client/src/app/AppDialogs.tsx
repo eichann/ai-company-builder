@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
@@ -39,6 +39,8 @@ interface Props {
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; at: number } | null
   onCloseSettings: () => void
+  /** 自分の設定's 「今日のフォルダ」 row. */
+  todayFolderSetting?: ReactNode
   showBackupHistory: boolean
   setShowBackupHistory: Dispatch<SetStateAction<boolean>>
 }
@@ -98,6 +100,7 @@ export function AppDialogs(props: Props) {
             key={settingsFocus?.at ?? 'settings'}
             onClose={onCloseSettings}
             {...(settingsFocus ? { initialTab: 'ownkeys' as const, focusService: settingsFocus.service } : {})}
+            todayFolder={props.todayFolderSetting}
           />
         )}
 

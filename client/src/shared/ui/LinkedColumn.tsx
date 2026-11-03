@@ -34,7 +34,7 @@ export interface LinkedGroupExtra {
 }
 
 export interface LinkedDrop {
-  /** 「ここにファイルをドロップしてつなぐ」 */
+  /** What may be dropped, under 「ここに落とすと、つながります」 (「ファイル・フォルダ・やること・相談」). */
   label: string
   accepts: (e: DragEvent) => boolean
   onDrop: (e: DragEvent) => void
@@ -95,8 +95,9 @@ export function LinkedColumn({ rows, extras = [], first, drop, notice }: {
         )
       })}
       {drop && (
-        <div className={`rounded-md border border-dashed px-2 py-2 text-center text-[11px] ${over ? 'border-accent text-accent' : 'border-gray-300 text-gray-400 dark:border-zinc-700'}`}>
-          {over ? 'ここに落とすと、つながります' : drop.label}
+        <div data-link-drop-zone className={`rounded-md border border-dashed px-2 py-2 text-center text-[11px] ${over ? 'border-accent text-accent' : 'border-gray-300 text-gray-400 dark:border-zinc-700'}`}>
+          ここに落とすと、つながります
+          {!over && <span className="block text-[10px]">{drop.label}</span>}
         </div>
       )}
     </aside>

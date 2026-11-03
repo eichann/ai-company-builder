@@ -211,8 +211,14 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   new path (`followRename` / `retargetFileLinks`) — after the record files of the same push, so a
   record file re-read there (its own text may still name the old path) ends on the new one; the
   next edit of that file restores what its text says (file records are a company's own types
-  only). Exact path matches only: a link to a folder follows a department rename (below), not
-  a member's folder move.
+  only). Exact path matches only — and **a folder moved or renamed by a member** comes as a rename
+  of its own (owner decision 2026-11-03, 「フォルダもつなげる」): `folderMoves` (`lib/record-files.ts`,
+  pure) finds, for each folder above a renamed file, the one new folder every rename `P/x → Q/x`
+  under it agrees on (renames that do not keep their place below P say nothing; two different Qs
+  → none; at most 5000 candidates), and `readRecordFiles` keeps the ones gone at the tip, so a
+  link to P (or to a folder inside it) follows to Q by the same `followRename` rules. A folder
+  that still exists (only some files moved out) keeps its links. A department renamed by the
+  server follows through `moveFolder` (below).
 - Never across a private folder's edge (`followRename`): both paths in the same place (company
   repository or one private folder), and the new path one the source may link to at all
   (`linkAllowed`) — a record outside a private folder never gets a path inside it (a rename
@@ -228,7 +234,9 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   marks each file link it shows `broken: true | false` — whether a file or folder is at that path
   on the shared branch now (`RecordFileSource.existing`, `lib/repo-paths.ts`; the private folder's own repository for a
   path inside one; only paths already shown to the reader are looked up; absent when git could not
-  tell). The app says 「つながりが切れています」.
+  tell). The app says 「つながりが切れています」. A path where a **folder** is now also says
+  `folder: true` (the object's type: `existing` answers file or folder); the app shows it as a
+  folder row.
 - Tests: `tests/unit/record-file-links.test.ts` (linking later, below), `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
   folder for an outside record nor across its edge, department move with `_` in names,
   cross-company), `tests/integration/record-links.test.ts` (real git rename detection, broken
@@ -265,11 +273,38 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   from the tree onto a task row or the task card, and the card's 「＋ファイルをつなぐ」 / 「外す」,
   all through `tasks:linkFile` / `tasks:unlinkFile` with the session (`tasks-ui.md` "Linking
   files"); the AI links with `records_link_file` / `records_unlink_file`.
-- The consultation AI: no consultation is linked to a task in the app yet (only a minutes
-  consultation stores `minutesId`, `minutes.md`). `records_get` returns the file links (`path`,
+- The consultation AI: a consultation about a task (its topic, `tasks-ui.md` "Consultations centre
+  on the task") gets the files the AI newly creates linked as the AI (`RecordTools.linkNewFile`:
+  `file-links` with the turn's act token at the version read, note 「AI が相談の中で作ったファイル」,
+  once more on `VERSION_CONFLICT`; a read token links nothing). `records_get` returns the file links (`path`,
   `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked
   files there and read the ones it needs with its normal file tools — names only, never contents,
   through the API.
+
+### Links into .personal/ (owner decision 2026-11-03)
+
+A file or folder inside any `.personal/` folder (`isPersonalPath`, `shared/core/records.ts`; any
+depth, A–Z folded) is on one member's Mac only, never synced, and its name can itself be private. A
+link to one is **its maker's alone**: everyone else — owners and admins included — gets no trace of it.
+
+- `record_links.created_by` (nullable, `migrateRecordLinkCreator`) keeps who made a file link: the
+  member of a `file-links` link or a create's file link — their AI counts as them (the consultation
+  AI's `linkNewFile` links as the member) — and an undo that brings a link back gives it to the
+  entry's actor (only its maker could see it to take it off). Rewrites of a record's links keep it
+  (`withLinkTargets` matches each target to the row it had). A row with no maker (a record file's
+  link, a link made before the column): shown only to the owner of an owner-only record, else to
+  nobody.
+- `fileLinkShown(viewer, source, link)` decides, in every answer: the detail (`GET /records/item/:id`,
+  the AI's `records_get`), `linkedToFile` (a record counts only where the caller made the link), 探す's
+  file counts (`record-find.ts`), 経緯 and a replay (`record-engine/personal-links.ts`: someone else's
+  `.personal/` paths are dropped from `links.*` before / after, and an entry left saying nothing is
+  left out; the paths a member linked themselves stay visible to them).
+- Another member's `.personal/` link is not there for `file-links`: removing it answers 404
+  `LINK_NOT_FOUND` as for any link that is not there, and linking the same path (two members' 今日のフォルダ
+  can hold the same name) makes a link of their own.
+- Test: `server/tests/unit/record-personal-links.test.ts` (detail, linkedToFile, 経緯, replay, 探す;
+  unlink / link by another; kept through others' changes and undo; links without a maker) —
+  mutation-checked.
 
 ### Task version 12: 返事待ち says until when (owner decision 2026-11-03 「②」)
 
@@ -839,6 +874,11 @@ own place). A person's create (session) gets no defaults.
   path inside it is answered exactly like a path that does not exist (asking cannot tell it is
   private or name it). Test: `server/tests/unit/viewers.test.ts` (mutation-checked: dropping the
   record check or the unreadable-folder filter fails it).
+- **Who cannot open a linked file** (owner decision 2026-11-03: 「〇人はこのファイルを開けません」):
+  the body may add `linked: { record, paths }` (≤ 200 paths); the answer then has
+  `cannotOpen: { <path>: n }` — for a record the caller reads and only paths the caller reads
+  (anything else left out, as above), the number of members who read the record but not the path
+  (counts > 0 only; an owner-only record → none). A number, never names or places. Same test.
 - App: IPC `viewers:get(companyId, { records?, files? })` → `ViewersResult`
   (`client/electron/features/viewers/ipc.ts`, `client/shared/viewers.ts`;
   `client/tests/viewers-ipc.test.ts`).

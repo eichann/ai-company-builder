@@ -65,6 +65,12 @@ export interface RecordLinkRow {
   position: number
   targetId: string | null
   targetPath: string | null
+  /**
+   * Who made a file link (the member; their AI counts as them), kept so a link into a
+   * `.personal/` folder is shown to that member alone (records.md "Links into .personal/").
+   * Absent / null: not known (a record file's link, a link from before it was kept).
+   */
+  createdBy?: string | null
 }
 
 export interface RecordProblemRow {

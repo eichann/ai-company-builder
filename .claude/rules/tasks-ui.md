@@ -19,6 +19,20 @@ paths:
   - "client/tests/tasks-*.test.ts"
   - "client/tests/tasks-*-ui.*"
   - "client/tests/ui/tasks-*.spec.ts"
+  - "client/shared/today-folder.ts"
+  - "client/tests/today-folder.test.ts"
+  - "client/src/shared/lib/todayFolderSetting.ts"
+  - "client/src/features/workspace/hooks/useTodayFolder.ts"
+  - "client/src/features/settings/components/TodayFolderSetting.tsx"
+  - "client/shared/consultation-task.ts"
+  - "client/tests/consultation-task.test.ts"
+  - "client/src/features/chat/components/TopicChip.tsx"
+  - "client/shared/link-drop.ts"
+  - "client/src/shared/hooks/useLinkDrop.ts"
+  - "client/src/shared/ipc/link-drop.ts"
+  - "client/src/shared/ui/LinkDropNotice.tsx"
+  - "client/tests/link-drop.test.ts"
+  - "client/tests/ui/fixtures/link-drop.ts"
 ---
 
 # The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
@@ -360,6 +374,42 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   (「相談する」 starts one with the topic, then opens it instead), `task-card.spec.ts`,
   `tasks-list.spec.ts` (the buttons).
 
+## Consultations centre on the task (owner decision 2026-11-03)
+
+- **The task the AI makes becomes the topic** of a consultation that has none: `records_create`
+  answers a task → `RecordToolsOptions.onRecordCreated` → main (`server-config.ts`) patches the
+  history (`topicAfterTaskMade`, `client/shared/consultation-task.ts`) and tells the chat
+  (`chatHistory:changed` `patch`). The card's 「AIへの相談」 lists it, the conversation list shows
+  its やること, and the chat shows **the topic chip** under the header (`TopicChip.tsx`:
+  「このやることについての相談：<title>」, opens the card; it replaces the task instruction chip for
+  the same task). A record the member cannot read shows no chip.
+- **Taking it off**: the chip's × or the card's consultation row 「…」→「このやることから外す」
+  (`consultationLinks(…, onDetach)`, composed by AppShell) → `patchChatSession { topicRecordId: null }`
+  → `topicDetached`: no topic is set by itself again, no more automatic links (`chat-ui-and-history.md`
+  "History store"). The consultation and the links already made stay.
+- **New files are linked** (`chat-server.ts`, a consultation whose topic is a `task-` record; not an
+  unattended step): each file the AI **newly creates** in the company folder in a turn
+  (`toolEventContext.onFileCreated`, `chat-and-agents.md` "AI action log") is linked with
+  `RecordTools.linkNewFile` (the turn's act token, as the AI; `records.md` "Linking files later":
+  a private folder's file for a task outside it is refused, `.personal/` files link and read as
+  「あなたの Mac だけにあるファイル」). The topic is read at each file, so a task the AI made earlier in
+  the turn counts. Never linked: edits of a file that exists, files outside the company folder,
+  `.workspace/` / `.backups/` / `.git`, temporary save files, what a script / `cp` / a shell variable
+  writes, files the member makes by hand. A failure says nothing and never stops the chat; a link
+  shows one line in the reply, 「『見積メモ.md』をやること「…」につなぎました」 (`data-file-linked`,
+  stored as the message's `linkedFiles`). Codex (read token) links nothing.
+- **What the AI is told** (`taskTopicInstructions`, read at the turn's start with `RecordTools.readTask`):
+  new files are linked by the app, to create them with the Write tool; for a task only the member
+  sees, new files go to the member's 今日のフォルダ unless told where (the chat request's
+  `todayFolder`, from AppShell's `useTodayFolder`; main accepts only an app-built path,
+  `isTodayFolderPath`).
+- Tests: `client/tests/consultation-task.test.ts` (topic only without one and never after taking it
+  off, kept through saves; only created files, after an ok finish; the link as the AI at the version,
+  retried once, never thrown, none with a read token; the instructions), `tests/ui/chat-panel.spec.ts`
+  (「the topic chip」: the line, ×; `SCREENSHOTS=<dir>`), `tests/ui/task-card.spec.ts`
+  (「このやることから外す」). Real-agent check: Claude through the app's connection and record tools
+  against local staging (the PR says what ran).
+
 ## Tags on the card (owner 2026-11-02: あとから足す・外す)
 
 - The card's 「タグ」 field (`TagField.tsx`, pure rules `tagEditor.ts` + `tagEditor.test.ts`): read
@@ -409,15 +459,58 @@ The list and the card are complete without Gmail / Slack; following mail and cha
   `task-card.test.ts` (`canSetTags`), `tasks-list.spec.ts` (a variant suggested, added only when
   picked), `task-card.spec.ts` (asked on the press inside the tag editor, `set_tags` with the existing tags).
 
+## 今日のフォルダ (owner decision 2026-11-03, the Obsidian daily-note idea)
+
+- **Where**: `<department>/.personal/inbox/日付別/YYYY/YYYYMMDD/` (`todayFolderPath`,
+  `client/shared/today-folder.ts`) — on the member's Mac only (`.personal/` is never synced; push
+  checker `[PERSONAL_PATH]`). The date is **the company's day** (`dayWindow`, Japan time until a
+  company setting exists), the same "today" as the task list, so a note written at 00:30 lands in
+  the day the list calls today.
+- **Which department** (`todayFolderDepartment`): the member's choice in 設定 → 自分の設定 「今日のフォルダ」
+  (`TodayFolderSetting.tsx`, per company on this PC: localStorage `acb.todayFolder:<company id>`,
+  `src/shared/lib/todayFolderSetting.ts`) while that department is downloaded here; otherwise
+  おまかせ = the first department the member belongs to (所属, `getMyDepartments`, in the tabs' order)
+  that is downloaded, else the first downloaded one (所属 unknown offline). A choice not downloaded
+  now is said in the row and おまかせ is used meanwhile. `useTodayFolder` (`features/workspace`)
+  composes it for AppShell; the settings row is AppShell's (`SettingsPanel` `todayFolder` slot).
+- **「今日のフォルダを開く」**: the file panel header's calendar button and the command
+  `files.openToday` (⌘⇧T, `commands.md`), from any department: makes the folder when missing
+  (`ensureTodayFolder`, `fs:createDirectory` = `mkdir -p`; main refuses a folder not downloaded),
+  switches to that department's files and reveals it in the tree (parents opened, selected,
+  dot files shown: `FileTreePanel` `controls.reveal`). None downloaded → a notice.
+- Tests: `client/tests/today-folder.test.ts` (path and company day, default department, the
+  choice, made only when missing, what main accepts), `tests/ui/skill-layout.spec.ts`
+  (「今日のフォルダを開く」 from another department: made once, selected; the settings row;
+  `SCREENSHOTS=<dir>`).
+
+## A new file on a task only the member sees (owner decision 2026-11-03)
+
+- **［＋ 新しいファイル］** next to ［ファイルをつなぐ］ on an owner-only task's card (`record.personal`);
+  department / company tasks keep only ［ファイルをつなぐ］. The name window is the file tree's
+  (`InputDialog`, `fileNameProblem`, main's `wx` create: a taken name keeps it open with
+  `NAME_TAKEN_MESSAGE`), offering the task's title (`fileNameFromTitle`, `.md`). The screen's
+  `createTodayFile` (AppShell) makes the empty file in today's folder; the card links it
+  (`tasks:linkFile` at the version shown) and opens it with `file.open` (the active tab).
+- **A linked file inside a `.personal/` folder** (`isPersonalPath`, any depth, one copy in
+  `shared/core/records.ts`): **only the member who linked it ever gets the row** — the server leaves
+  the link out of every answer to anyone else, file name included (owner decision 2026-11-03;
+  `records.md` "Links into .personal/"), so nobody else sees a line about it, even after 部署に出す.
+  The server never has the file, so its `broken` is ignored; the row says 「あなたの Mac だけにあるファイル」
+  when the file is on this computer (`useTaskCard` checks with `exists`), else — the same member on
+  another Mac of theirs — 「ほかの Mac で作ったファイルです（この Mac にはありません）」 and does not
+  open (`fileRow`, `PERSONAL_FILE_WORDS`).
+- Tests: `tests/ui/task-card.spec.ts` (only on an owner-only task; the name offered; a taken name;
+  made, linked at the version, opened; the `.personal` row words; `SCREENSHOTS=<dir>`).
+
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 
-Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /
+Three entrances (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /
 `…/file-links/remove`, the version the screen shows): the file tree's right-click
-「やることにつなぐ…」 (shown only while the task list shows for the department on screen; the
-chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file dragged from the tree
-onto a task row or onto the card's 「つながっているもの」 (its drop zone 「ここにファイルをドロップしてつなぐ」;
-`src/shared/lib/dragTypes.ts`; the first dragged path inside the company folder), and the card's
-「＋ファイルをつなぐ」 (the company's file names on this computer, `git:listFiles`). Each linked file's
+「やることにつなぐ…」 (shown only while the task list shows for the department on screen, also on a
+folder not downloaded; the chooser `LinkToTaskDialog` lists the member's open tasks from the list), a
+file or folder dropped on a task row or a card's 「つながっているもの」 ("Dropping links" below), and the
+card's 「＋ファイル・フォルダをつなぐ」 (the company's file names on this computer, `git:listFiles`, and
+every folder above them: `linkCandidates`, `model.ts`). Each linked file's
 「…」 offers 「つながりを外す」, then 「「<name>」とのつながりを外しました［取り消す］」 (取り消す links it again).
 
 **Links between records** (owner 2026-11-02; server `records.md` "Linking records later"): each row
@@ -454,6 +547,58 @@ as its `bundle` at its version. Tests: `client/tests/bundle-create.test.ts`,
 company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
+
+## Dropping links (owner decision 2026-11-03: 「ドラッグ＆ドロップで全部つなげる」)
+
+One rule: **something dropped on a record's 「つながっているもの」 (`LinkedColumn`, every card: the task
+card, the record card, a 案件's page) or on a task row of the list links it.** Without a drag every
+link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇につなぐ］, ［相談する］).
+
+- **Drag sources** (`src/shared/lib/dragTypes.ts`): the file tree (files and folders,
+  `application/x-file-paths`, `linkMove`; a folder not downloaded drags for linking only, `link`),
+  a task row of the list, a 探す row (a record, a file, a consultation), a tab in the middle (its
+  record, or its file) — records as `application/x-acb-record` `{ id, title }` — and a row of
+  「AIへの相談」 or a consultation under a 探す row as `application/x-acb-consultation`
+  `{ sessionId, title, topicRecordId? }`. Record and consultation drags allow `link` only, so they
+  never move anything in the tree. Malformed ids are not a drag (`draggedRecord`,
+  `draggedConsultation`).
+- **What the drop becomes** (`useLinkDrop`, `src/shared/hooks/`): a file or folder (the first
+  dragged path inside the company folder) or a record goes to main's **`tasks:dropLink(companyId,
+  targetId, dropped, link?)`**, which reads both records and the types now and decides with the pure
+  `dropLinkPlan` (`client/shared/link-drop.ts`): a link of the record dropped on whose target is the
+  dropped type or an interface it implements, else a link of the dropped record back to it (a やること
+  dropped on a 案件 becomes that やること's `bundle`; the link is held, and undone, there). Never an
+  `origin` link, never on a `SERVICE_STATE_TYPES` record. Several fit → a tiny chooser
+  (「…を、どのつながりにしますか？」 + the links' names, 「まとまり」 never shown: an interface link says
+  the kind it reaches); none → one line, 「やることには決めたことはつなげません」 (`typeWord` names
+  both). A file needs a non-origin `file` link (「決めたことにはファイルやフォルダはつなげません」). The
+  link is made at the version just read; the answer's entry gives 「…をつなぎました［取り消す］」
+  (`tasks:undo` of that entry on the record holding it); already linked → 「…はもうつながっています」.
+- **A consultation dropped on a record** becomes one about it (its topic, as 「相談する」 and the
+  AI's task do: `patchChatSession { topicRecordId }`) — 「「見積の相談」をこのやることについての相談に
+  しました［取り消す］」, 取り消す putting the earlier topic back (none → taken off). Setting a topic
+  clears `topicDetached`, so the next save keeps it (`chat-history-store.ts` `patch`).
+- **Wording**: the card's zone says what happens — 「ここに落とすと、つながります」 with what may be
+  dropped under it; the chat input's drop keeps its own 「ファイルをドロップして参照」 (the AI reads it).
+- **Folders** (server `records.md` "Links to files": the detail's `folder: true`, links follow a
+  member's folder move): a folder row (`fileRow` with `PathFacts`, `linkRows.tsx`; group 「フォルダ」,
+  `ThingKind` `folder`) opens the folder in the file tree (command `folder.reveal`, AppShell: its
+  department, the ファイル tab, `reveal`). A folder left out on this computer stays linkable and says
+  「この Mac には未ダウンロード」 (the screen's `notDownloadedFolderOf`; a link to the left-out folder
+  itself is a folder before the server says); a file inside one says the same and does not open.
+- **Who cannot open it**: the cards ask `POST /viewers { linked: { record, paths } }` with the file
+  links shown and draw `cannotOpen` as 「2人はこのファイルを開けません」 / 「…このフォルダを…」
+  (`linkedPathOf`: only a positive count from the server — never who, never a private folder's name).
+- Tests: `client/tests/link-drop.test.ts` (per type: related / bundle both ways / refusal text /
+  origin never / service types / files; main links at the version read, on the holder, refused drops
+  never reach the server; the count), `src/shared/lib/dragTypes.test.ts` (drag data read back,
+  malformed ids refused), `consultation-task.test.ts` (a dropped topic survives a save),
+  `src/features/tasks/model.test.ts` (`linkCandidates`); UI `tests/ui/task-card.spec.ts` (a record
+  dropped with ［取り消す］, the refusal, a consultation and its 取り消す, a folder dropped, folder rows:
+  count, not downloaded, opens in the tree — `?folders=1`, `SCREENSHOTS=<dir>`), `record-card.spec.ts`
+  (a やること dropped on a 案件), `tasks-list.spec.ts` (a file, a record, a consultation on a row; a row
+  drags as its record). Preview pages answer drops with the real `dropLinkPlan`
+  (`tests/ui/fixtures/link-drop.ts`).
 
 ## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
 

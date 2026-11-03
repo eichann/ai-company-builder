@@ -92,6 +92,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
   once opened.
+- The screen may ask the tree to show a folder (`FileTreePanel` `controls.reveal(absPath)`: each level re-read
+  and opened, the folder selected and scrolled to; dot files shown) — 「今日のフォルダを開く」, `tasks-ui.md`.
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
 - **Too large to share** (owner decision 2026-11-02, 案A): a file sync keeps on this computer
   because it is over 100 MB (`sync.md` step 4) carries 「共有されていません」 in its row

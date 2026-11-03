@@ -1,7 +1,8 @@
 /** Linking a file to a record after it was made, or removing that link (records.md "Linking files later"). */
 import { findPrivateScope } from '../../../shared/core/permissions'
 import type { LedgerEntry } from '../../../shared/core/record-ledger'
-import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
+import { fileLinkPath, fileLinkShown, RECORD_ID_RE } from '../../../shared/core/records'
+import type { RecordLinkRow } from '../../ports/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
@@ -9,7 +10,7 @@ import { linkAllowed } from '../record-access'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
-import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
+import { linkLedgerValue, MAX_LINK_TARGETS } from './links'
 import { bad, conflict, FILE_NOT_LINKABLE, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
@@ -64,17 +65,21 @@ export function fileLinking(ctx: EngineContext) {
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
       const allLinks = records.linksFrom([row.id])
       const mine = allLinks.filter(l => l.name === name)
-      const before = mine.map(l => l.targetPath).filter((p): p is string => p !== null)
-      let after: string[]
+      // A `.personal/` link someone else made is not there for this member (records.md "Links into .personal/").
+      const shown = mine.filter(l => fileLinkShown(member.userId, row, l))
+      let nextLinks: RecordLinkRow[]
       if (op === 'link') {
-        if (before.includes(path)) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
-        after = def.links[name].cardinality === 'one' ? [path] : [...before, path]
-        if (after.length > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} files per link`, 'TOO_MANY_LINKS')
+        if (shown.some(l => l.targetPath === path)) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
+        const added: RecordLinkRow = { sourceId: row.id, name, position: 0, targetId: null, targetPath: path, createdBy: member.userId }
+        const kept = def.links[name].cardinality === 'one' ? allLinks.filter(l => l.name !== name) : allLinks
+        if (kept.filter(l => l.name === name).length + 1 > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} files per link`, 'TOO_MANY_LINKS')
+        nextLinks = [...kept, added]
       } else {
-        if (!before.includes(path)) return refuse('not-found', 'このファイルはこの記録につながっていません', { code: 'LINK_NOT_FOUND' })
-        after = before.filter(p => p !== path)
+        const gone = shown.find(l => l.targetPath === path)
+        if (!gone) return refuse('not-found', 'このファイルはこの記録につながっていません', { code: 'LINK_NOT_FOUND' })
+        nextLinks = allLinks.filter(l => l !== gone)
       }
-      const nextLinks = withLinkTargets(row.id, allLinks, name, 'file', after)
+      nextLinks = nextLinks.map((l, i) => ({ ...l, position: i }))
       const at = clock.now()
       const entry: LedgerEntry = {
         recordId: row.id, version: current.version + 1, action: op === 'link' ? 'link_file' : 'unlink_file', fromState: current.state, toState: current.state,

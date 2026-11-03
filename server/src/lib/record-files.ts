@@ -7,7 +7,9 @@
  *   adds, changes or deletes (deleted → text null; a renamed one is its old
  *   path deleted and its new path added), and every file the diff renames
  *   or moves (git's rename detection, any file type): links to a file follow
- *   it (services/record-index.ts).
+ *   it (services/record-index.ts). A folder that is gone at the tip and whose
+ *   files moved together to one new folder (`folderMoves`) is reported as a
+ *   rename too, so links to the folder follow it.
  * - In full (first run, after a reindex, or when the known commit is gone):
  *   the `.md` files that have both an `id:` and a `type:` line (`git grep`,
  *   which reads the tree in C — a 15k-file company is not read file by file
@@ -18,6 +20,7 @@
 import { existsSync } from 'fs'
 import { gitAsync, gitBufferAsync } from './git-exec'
 import { resolveSharedBranch } from './repo-folders'
+import { pathKinds } from './repo-paths'
 
 export const MAX_RECORD_FILE_BYTES = 1024 * 1024
 const BATCH = 500
@@ -43,6 +46,37 @@ export interface RecordRepoRead {
   changes: RecordFileChange[]
   /** Files renamed or moved since the commit read last (none on a full read). */
   renames: RecordFileRename[]
+}
+
+/** At most this many folders are considered moved per read (a huge move still follows its top folders). */
+export const MAX_FOLDER_MOVE_CANDIDATES = 5000
+
+/**
+ * Folders the renames moved as a whole (pure; the caller keeps only the ones
+ * gone at the tip): for each folder P above a renamed file (never the
+ * repository root), the Q every rename `P/x → Q/x` under it agrees on.
+ * Renames under P that do not keep their path below P (`P/a → R/b`) say
+ * nothing; at least one must agree, and two different Qs mean no move.
+ */
+export function folderMoves(renames: readonly RecordFileRename[]): RecordFileRename[] {
+  const votes = new Map<string, string | null>()
+  for (const { from, to } of renames) {
+    const parts = from.split('/')
+    for (let depth = parts.length - 1; depth >= 1; depth--) {
+      const folder = parts.slice(0, depth).join('/')
+      const rest = parts.slice(depth).join('/')
+      if (!to.endsWith(`/${rest}`)) continue
+      const target = to.slice(0, to.length - rest.length - 1)
+      if (target === folder || target === '') continue
+      if (!votes.has(folder)) {
+        if (votes.size >= MAX_FOLDER_MOVE_CANDIDATES) continue
+        votes.set(folder, target)
+      } else if (votes.get(folder) !== target) {
+        votes.set(folder, null)
+      }
+    }
+  }
+  return [...votes].flatMap(([from, to]) => (to === null ? [] : [{ from, to }]))
 }
 
 const isMarkdown = (p: string) => /\.md$/i.test(p) && !p.includes('\n')
@@ -137,6 +171,12 @@ export async function readRecordFiles(repo: string, since: string | null): Promi
     }
     const texts = await readTexts(repo, tip, present)
     for (const p of present) changes.push({ path: p, text: texts.get(p) ?? null })
+    // A folder moved or renamed as a whole (gone at the tip): links to it follow like a file's.
+    const moved = folderMoves(renames)
+    if (moved.length > 0) {
+      const still = await pathKinds(repo, tip, moved.map(m => m.from))
+      for (const m of moved) if (!still.has(m.from)) renames.push(m)
+    }
     return { tip, full: false, changes, renames }
   }
   const paths = await candidatePaths(repo, tip)

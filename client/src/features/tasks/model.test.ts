@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag } from './model'
+import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates } from './model'
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
@@ -112,4 +112,12 @@ test('meetings asking for their まとまり in one group become one row where t
   // An item with a group key but no question (never happens from the server) is not swallowed.
   const odd: TaskListItem = { ...task, id: 't2', bundleGroup: { key: 'a', label: 'x' } }
   assert.equal(listRows([odd, q('m5', 'a')]).length, 2)
+})
+
+// 「＋ファイル・フォルダをつなぐ」: a folder must be linkable without dragging (owner decision 2026-11-03).
+test('the link chooser offers every folder above the files once, then the files', () => {
+  assert.deepEqual(linkCandidates(['営業部/見積/A社.md', '営業部/見積/B社.md', 'メモ.md']), [
+    { path: '営業部', folder: true }, { path: '営業部/見積', folder: true },
+    { path: '営業部/見積/A社.md', folder: false }, { path: '営業部/見積/B社.md', folder: false }, { path: 'メモ.md', folder: false },
+  ])
 })

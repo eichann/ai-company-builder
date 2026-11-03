@@ -70,7 +70,8 @@ export function undoing(ctx: EngineContext) {
           const l = linkOf(c.field) as { name: string; target: string }
           const targets = linkTargetsOf(l.target, c.after)
           if (targets === null) return conflict('そのあとにも変更があるため、この変更だけを取り消せません', 'CHANGED_SINCE')
-          nextLinks = withLinkTargets(row.id, nextLinks ?? currentLinks, l.name, l.target, targets)
+          // A file brought back is the one who took it off's (only its maker could see it to take it off).
+          nextLinks = withLinkTargets(row.id, nextLinks ?? currentLinks, l.name, l.target, targets, target.actorId)
         } else nextFields[c.field] = c.after
       }
       const at = clock.now()

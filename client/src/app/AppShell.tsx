@@ -4,7 +4,7 @@ import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListCh
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
 import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
-import { getChatSessionSummaries } from '../features/chat/api'
+import { getChatSessionSummaries, patchChatSession } from '../features/chat/api'
 import { paletteConsultations } from '../features/chat/conversationRows'
 import { refreshFileVersions } from '../features/history/refresh'
 import { RecordCard } from '../features/records/components/RecordCard'
@@ -23,7 +23,11 @@ import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
 import { recordIdOfTab, recordTabKey, tabDepartmentLabels, type RecordTabLook } from '../features/editor/editorTabs'
 import { COMPANY_TAB_ID } from '../shared/lib/departments'
 import { TitleBar } from './TitleBar'
-import { FileTreePanel } from '../features/files/components/FileTreePanel'
+import { FileTreePanel, type FileTreeControls } from '../features/files/components/FileTreePanel'
+import { createEmptyFile } from '../features/files/api'
+import { useTodayFolder } from '../features/workspace/hooks/useTodayFolder'
+import { TodayFolderSetting } from '../features/settings/components/TodayFolderSetting'
+import { fileNameProblem, NAME_TAKEN_MESSAGE } from '../../shared/file-names'
 import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { AppDialogs } from './AppDialogs'
 import { LeftPanelTabs } from '../features/workspace/components/LeftPanelTabs'
@@ -239,6 +243,7 @@ export function AppShell() {
     }
   }, [leaving, signOut])
   const { handleSync } = sync
+
   // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
   const autoSync = useAutoSync({
     rootPath,
@@ -270,6 +275,42 @@ export function AppShell() {
     skillsTab.selectSkill(null)
     // Open file tabs stay: one strip for the whole company, labelled with their department.
   }
+
+  // 今日のフォルダ (client/shared/today-folder.ts): which department holds it, opening it, a task's new file in it.
+  const { enabled: sparseEnabled, isCheckedOut } = sparseCheckout
+  const isDownloaded = useCallback((folder: string) => !sparseEnabled || isCheckedOut(folder), [sparseEnabled, isCheckedOut])
+  const today = useTodayFolder(currentCompany?.id, rootPath, departments, isDownloaded)
+  const treeControls = useRef<FileTreeControls>(null)
+  const openToday = async () => {
+    const made = await today.ensure()
+    if ('error' in made) { sync.setSyncNotification({ type: 'error', message: made.error }); return }
+    if (selectedDeptId !== made.department.id) handleSelectDept(made.department.id)
+    setLeftTab('files')
+    // The tree shows the department after the next render.
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+    await treeControls.current?.reveal(`${rootPath}/${made.folder}`)
+  }
+  const createTodayFile = async (name: string): Promise<{ path: string } | { error: string }> => {
+    const problem = fileNameProblem(name)
+    if (problem) return { error: problem }
+    const made = await today.ensure()
+    if ('error' in made) return made
+    const r = await createEmptyFile(`${rootPath}/${made.folder}/${name}`)
+    if (!r.success) return { error: r.code === 'name_taken' ? r.error || NAME_TAKEN_MESSAGE : 'ファイルを作れませんでした。もう一度試してください。' }
+    return { path: `${made.folder}/${name}` }
+  }
+  useCommandHandler('files.openToday', () => { void openToday() })
+  // A folder linked to a record opens in the file tree, under its department (records.md "Folder links").
+  useCommandHandler('folder.reveal', async ({ path }) => {
+    const inside = rootPath ? companyPathOf(path, rootPath) : null
+    if (!inside) return
+    const top = inside.split('/')[0]
+    const dept = departments.find(d => d.folder === top)
+    if (dept && selectedDeptId !== dept.id) handleSelectDept(dept.id)
+    setLeftTab('files')
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)))
+    await treeControls.current?.reveal(path)
+  })
 
   // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
   const middleHidden = useRef(false)
@@ -332,18 +373,21 @@ export function AppShell() {
   const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
   const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
   const meetingWords = meetingBundleWords(bundleWord)
+  // A linked folder left out on this computer is marked on the cards (download-choices.md).
+  const notDownloadedFolderOf = sparseCheckout.enabled ? sparseCheckout.notDownloadedFolderOf : undefined
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} />
+      return <TaskCard key={`${recordId}@${taskList.data?.items.find(i => i.id === recordId)?.version ?? 0}`} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf}
+        onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} />
     }
     // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
     const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
       ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} word={bundleWord} onChoose={setChoosingBundle} onChanged={taskList.reload} />
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout}
+    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
@@ -441,6 +485,8 @@ export function AppShell() {
           onPrivateFolderCreated={handlePrivateFolderCreated}
           onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
           extraMenuItems={plugins.fileMenuItems}
+          onOpenToday={() => { void openToday() }}
+          controls={treeControls}
         />
       ),
     },
@@ -547,6 +593,7 @@ export function AppShell() {
             aiTurnQueue={aiTurns}
             onAiTurnItems={setAiTurnItems}
             focus={activeRecordId ? { recordId: activeRecordId, title: recordLooks[activeRecordId]?.title ?? '' } : null}
+            todayFolder={today.folderNow}
           />
         ) : (
         <>
@@ -663,6 +710,9 @@ export function AppShell() {
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}
+        todayFolderSetting={<TodayFolderSetting choices={today.choices} chosenId={today.chosenId} onChoose={today.choose}
+          defaultName={today.defaultDepartment?.name ?? null}
+          chosenMissingName={today.chosenMissing?.name ?? null} folderNow={today.folderNow()} />}
         showBackupHistory={showBackupHistory}
         setShowBackupHistory={setShowBackupHistory}
       />

@@ -285,3 +285,41 @@ test('ログアウト is the one sign-out: the session ends and the company clos
     .toEqual({ user: null, company: null })
   expect(await calls(page, 'signOut')).toEqual([[]])
 })
+
+// 今日のフォルダ (tasks-ui.md "今日のフォルダ"): from any department, ⌘⇧T (command files.openToday) or the
+// file panel's button switches to the department that holds it (the first 所属 downloaded here: 開発部 is
+// not, so 営業部), makes the day's folder when missing and shows it in the tree, selected. A second press
+// makes nothing (it is there). SCREENSHOTS=<dir> writes the tree and the settings row.
+test('今日のフォルダを開く: from another department, made when missing, shown selected in the 所属 department', async ({ page }) => {
+  // 2026-11-03 09:00 in Japan.
+  await page.clock.install({ time: new Date('2026-11-03T00:00:00Z') })
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '総務').click()
+  await leftTab(page, 'スキル').click()
+  await page.keyboard.press('ControlOrMeta+Shift+T')
+  const day = page.getByRole('button', { name: '20261103', exact: true })
+  await expect(day).toBeVisible()
+  await expect(day).toHaveClass(/bg-accent\/20/)
+  await expect(page.getByRole('button', { name: 'A社_提案.md' })).toBeVisible()
+  expect(await calls(page, 'createDirectory')).toEqual([[`${ROOT}/営業部/.personal/inbox/日付別/2026/20261103`]])
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/today-folder-tree.png` })
+
+  // The header button does the same; the folder is there now, so nothing is made again.
+  await deptTab(page, '総務').click()
+  await page.getByRole('button', { name: '今日のフォルダを開く' }).click()
+  await expect(day).toBeVisible()
+  expect((await calls(page, 'createDirectory')).length).toBe(1)
+})
+
+test('自分の設定: 今日のフォルダ says where it is and which department おまかせ uses; a choice moves it', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-03T00:00:00Z') })
+  await openPreview(page, 'skill-layout')
+  await page.getByTitle('設定').first().click()
+  const row = page.locator('[data-today-folder-setting]')
+  await expect(row).toContainText('営業部/.personal/inbox/日付別/2026/20261103/')
+  const select = row.getByRole('combobox', { name: '今日のフォルダを置く部署' })
+  await expect(select.locator('option')).toHaveText(['おまかせ（営業部）', '営業部', '総務'])
+  if (process.env.SCREENSHOTS) await row.screenshot({ path: `${process.env.SCREENSHOTS}/today-folder-setting.png` })
+  await select.selectOption({ label: '総務' })
+  await expect(row).toContainText('総務/.personal/inbox/日付別/2026/20261103/')
+})

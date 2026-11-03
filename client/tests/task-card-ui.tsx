@@ -8,6 +8,8 @@
 // チームの進め方 on; `?task=todo-own`: the member's own task with チームの進め方 off (返事待ちにする still in 「…」). The wait tests install the page clock (Mon 11-02 or Sat 11-07).
 // `?task=unassigned`: a task the member asked with nobody holding it (「自分が担当する」 heads the 「…」, 「終わったら」, アーカイブ);
 // `?task=archived`: the same task archived (［戻す］, 経緯 「佐藤さんがアーカイブしました」).
+// The owner-only task links a note in a `.personal/` folder (on this Mac); ［＋ 新しいファイル］ makes one through the
+// screen's `createTodayFile` (`today <name>` in `#acted`, 「既存.md」 answers a taken name), and `file.open` is logged as `open <path>`.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -18,6 +20,8 @@ import type { AiRunView } from '../../shared/types/ai-runs'
 import type { RecordSummary } from '../../shared/types/records'
 import { taskCardOf } from '../shared/task-card'
 import { installElectronAPI } from './ui/fixtures/electron-api'
+import { commands } from '../src/shared/commands/commands'
+import { fakeDropLink } from './ui/fixtures/link-drop'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
@@ -34,6 +38,8 @@ const noBundle = params.get('bundle') === 'none'
 // 返事待ち (task version 12): waiting, given back by the clock, or a plain task to make wait.
 const waitMode = ['waiting', 'back', 'todo-team', 'todo-own'].includes(params.get('task') ?? '') ? params.get('task') : null
 const plainTodo = waitMode === 'todo-team' || waitMode === 'todo-own'
+// `?folders=1`: linked folders — one 2 members cannot open (`cannotOpen`), one left out on this Mac (総務); `folder.reveal` logs `reveal <path>`.
+const withFolders = params.get('folders') === '1'
 const menuMode = ['unassigned', 'archived'].includes(params.get('task') ?? '') ? params.get('task') : null
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
@@ -79,6 +85,7 @@ const menuCard = menuMode ? taskCardOf({
 }) : null
 const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
   me: ME, defs, def: defs.get('task'), people, entries, runs: done ? [] : runs,
+  ...(withFolders ? { cannotOpen: { '経理/月次': 2 } } : {}),
   detail: {
     record: task,
     links: [
@@ -86,7 +93,11 @@ const shownCard = menuCard ?? waitCard ?? (reviewing ? reviewCard : taskCardOf({
       ...(noBundle ? [] : [{ name: 'bundle', direction: 'out' as const, record: rec('deal-0001ab', 'deal', 'A社 問い合わせ対応の効率化', 'open') }]),
       { name: 'tasks', direction: 'in', record: rec('decision-0002', 'decision', '今回だけ20%値引き', 'confirmed', { exception: true }, { exceptionNotice: '例外' }) },
       { name: 'files', direction: 'out', path: '営業/見積書_v2.xlsx', broken: false },
+      // Never synced: the server calls it broken; this Mac has it.
+      { name: 'files', direction: 'out', path: '営業/.personal/inbox/日付別/2026/20261102/打ち合わせメモ.md', broken: true },
       { name: 'related', direction: 'out', record: rec('task-0000bb', 'task', 'スケジュール案を出す', 'todo') },
+      // The server says `folder: true` for a folder on the shared branch (records.md "Folder links").
+      ...(withFolders ? [{ name: 'files', direction: 'out' as const, path: '経理/月次', broken: false, folder: true as const }, { name: 'files', direction: 'out' as const, path: '総務', broken: false }] : []),
       { name: 'meeting', direction: 'out', fixed: true, record: rec('meeting-0000cc', 'meeting', 'A社 打ち合わせ', 'read') },
       ...(withSource ? [{ name: 'interaction', direction: 'out' as const, fixed: true as const, record: rec('interaction-0000ii', 'interaction', 'Re: 見積のご相談', 'handled') }] : []),
     ],
@@ -98,6 +109,8 @@ const show = (id: string, line: string) => { acted.push(line); document.getEleme
 
 installElectronAPI({
   getTaskCard: async () => ({ success: true, card }),
+  dropLinkOnRecord: fakeDropLink(line => show('acted', line)),
+  patchChatSession: async (_c, sessionId, patch) => { show('acted', `topic ${sessionId}=${String(patch.topicRecordId)}`); return {} as never },
   createBundle: async (_c, input) => { show('acted', `create ${input.type} ${input.title} folder=${input.folder ?? ''}`); return { success: true, recordId: 'deal-0009zz' } },
   linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
@@ -117,11 +130,20 @@ installElectronAPI({
   undoTaskAction: async (_c, recordId, version, expected) => { show('acted', `undo ${version}@${expected}`); return { success: true, recordId } },
   linkFileToTask: async (_c, recordId, companyPath, version) => { show('acted', `link ${companyPath}@${version}`); return { success: true, recordId } },
   unlinkFileFromTask: async (_c, recordId, companyPath, version) => { show('acted', `unlink ${companyPath}@${version}`); return { success: true, recordId } },
+  exists: async (path: string) => path.endsWith('打ち合わせメモ.md'),
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => { show('acted', `share ${folder}@${version}`); return { success: true, recordId } },
   suggestTaskTags: async (_c, title, inUse) => ({ source: 'ai', tags: title.includes('見積') ? inUse.filter(t => t === '経理') : [] }),
   reconcileTaskRun: async (_c, runId, key, isDone) => { show('acted', `reconcile ${runId} ${key} ${isDone}`); return { success: true, recordId: '' } },
 })
+
+commands.register('file.open', ({ path }) => { show('acted', `open ${path}`) })
+commands.register('folder.reveal', ({ path }) => { show('acted', `reveal ${path}`) })
+const TODAY = '営業/.personal/inbox/日付別/2026/20261103'
+const createTodayFile = async (name: string) => {
+  show('acted', `today ${name}`)
+  return name === '既存.md' ? { error: '同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。' } : { path: `${TODAY}/${name}` }
+}
 
 function Preview() {
   return (
@@ -134,7 +156,7 @@ function Preview() {
         onNudge={r => show('acted', `nudge ${r.id}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
-        tagsInUse={['営業', '見積', '経理']} />
+        tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />
     </main>
   )
 }

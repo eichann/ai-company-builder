@@ -8,6 +8,11 @@
  * - a file renamed and moved in one push takes the record's link along;
  * - a deleted file's link stays and the detail says it is broken
  *   (`broken: true`), a present one `broken: false`;
+ * - a folder renamed in one push takes the links to it and to folders inside
+ *   it along, and the detail says `folder: true`; a folder only some files
+ *   left keeps its links (it still exists);
+ * - with both: a shared folder link says `folder: true` to everyone, a link
+ *   into `.personal/` reaches only the member who made it;
  * - a department renamed by the server takes its server records' folder and
  *   their links to files under it along (the record stays readable, the
  *   links stay whole).
@@ -57,8 +62,8 @@ function commitAndPush(message: string) {
   if (r.status !== 0) throw new Error(`${r.stdout}${r.stderr}`)
 }
 
-async function api(method: string, path: string, body?: unknown) {
-  currentUser.id = 'u-owner'
+async function api(method: string, path: string, body?: unknown, as = 'u-owner') {
+  currentUser.id = as
   const res = await fetch(`${origin}/api/companies/${CO}/records${path}`, {
     method, headers: { 'Content-Type': 'application/json' }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
@@ -76,6 +81,7 @@ beforeAll(async () => {
   const now = new Date().toISOString()
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'u-owner', now, now)
   db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-u-owner', 'u-owner', CO, 'owner', now, now)
+  db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-u-admin', 'u-admin', CO, 'admin', now, now)
   db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('dep-sales', CO, '営業部', '営業部', now, now)
   const { ensureCompanyScope } = await import('../../src/adapters/sqlite/permission-store')
   ensureCompanyScope(db, CO)
@@ -128,6 +134,50 @@ describe('links to files', () => {
     commitAndPush('rename, move and delete')
     await services.records.refreshIndex(owner)
     expect(await fileLinks(id)).toEqual([{ path: '営業部/提案/提案書_最終.md', broken: false }, { path: '営業部/見積.md', broken: true }])
+  })
+
+  it('a folder moved as a whole takes its links along (and says it is a folder); one only partly emptied keeps them', async () => {
+    write('営業部/資料/概要.md', '# 概要\n')
+    write('営業部/資料/図/構成.md', '# 構成\n')
+    write('営業部/束/一.md', '# 一\n')
+    write('営業部/束/二.md', '# 二\n')
+    commitAndPush('folders')
+    await services.records.refreshIndex(owner)
+    const created = await api('POST', '/item', { type: 'task', title: '資料をまとめる', folder: '営業部', links: { files: ['営業部/資料', '営業部/資料/図', '営業部/束'] } })
+    expect(created.status).toBe(201)
+    const folderTask = (created.body.data?.record as { id: string }).id
+    const links = async () => ((await api('GET', `/item/${folderTask}`)).body.data?.links as Array<{ path?: string; broken?: boolean; folder?: true }>)
+      .filter(l => l.path !== undefined).map(l => ({ path: l.path, broken: l.broken, folder: l.folder }))
+    expect(await links()).toEqual([
+      { path: '営業部/資料', broken: false, folder: true },
+      { path: '営業部/資料/図', broken: false, folder: true },
+      { path: '営業部/束', broken: false, folder: true },
+    ])
+
+    git(['mv', '営業部/資料', '営業部/資料2024'], clone)
+    mkdirSync(join(clone, '営業部/別'), { recursive: true })
+    git(['mv', '営業部/束/一.md', '営業部/別/一.md'], clone)
+    commitAndPush('rename a folder; move one file out of another')
+    await services.records.refreshIndex(owner)
+    expect(await links()).toEqual([
+      { path: '営業部/資料2024', broken: false, folder: true },
+      { path: '営業部/資料2024/図', broken: false, folder: true },
+      // Still there (二.md stayed): the link stays.
+      { path: '営業部/束', broken: false, folder: true },
+    ])
+  })
+
+  // Folder links (#560) together with `.personal/` links shown only to their maker (#561).
+  it('a shared folder link says it is a folder to everyone; a .personal folder link reaches only its maker', async () => {
+    const created = await api('POST', '/item', { type: 'task', title: '下書きと資料', folder: '営業部', links: { files: ['営業部/資料2024', '営業部/.personal/inbox/メモ'] } })
+    expect(created.status).toBe(201)
+    const task = (created.body.data?.record as { id: string }).id
+    const seen = async (as: string) => ((await api('GET', `/item/${task}`, undefined, as)).body.data?.links as Array<{ path?: string; folder?: true }>)
+      .filter(l => l.path !== undefined).map(l => ({ path: l.path, folder: l.folder }))
+    expect(await seen('u-owner')).toEqual([{ path: '営業部/資料2024', folder: true }, { path: '営業部/.personal/inbox/メモ', folder: undefined }])
+    const other = await seen('u-admin')
+    expect(other).toEqual([{ path: '営業部/資料2024', folder: true }])
+    expect(JSON.stringify((await api('GET', `/item/${task}`, undefined, 'u-admin')).body)).not.toContain('.personal')
   })
 
   it('a department renamed by the server takes its records and their links along', async () => {

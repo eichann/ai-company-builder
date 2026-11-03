@@ -87,7 +87,7 @@ UI=(
 PERF=(
   client/tests/perf/ client/electron/company-watcher.ts client/electron/git-search.ts
   client/electron/chat-history-store.ts client/electron/sync/
-  client/shared/agents/ client/shared/chat-history-summary.ts client/shared/sparse-paths.ts
+  client/shared/agents/ client/shared/chat-history-summary.ts client/shared/sparse-paths.ts client/shared/task-consult.ts
   client/src/features/chat/ client/src/features/files/ client/src/shared/lib/
   ':(glob)client/tsconfig*.json' client/package.json shared/core/paths.ts
 )

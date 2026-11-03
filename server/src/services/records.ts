@@ -11,7 +11,7 @@
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { aiTurnStates, noTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
-import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
+import { fileLinkPath, fileLinkShown, RECORD_ID_RE } from '../../shared/core/records'
 import { turnsOf } from '../../shared/core/record-turns'
 import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
 import type {
@@ -54,11 +54,12 @@ export interface RecordServiceDeps {
 }
 
 /**
- * Which of these company paths exist now: each read from the repository
- * holding it (a private folder's own, else the company's). Paths in a
- * repository that cannot be read are left out of both answers.
+ * Which of these company paths exist now, and which are folders: each read
+ * from the repository holding it (a private folder's own, else the
+ * company's). Paths in a repository that cannot be read are left out of
+ * every answer.
  */
-async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId: string, paths: string[], scopes: ScopeWithRules[]): Promise<{ missing: Set<string>; known: Set<string> }> {
+async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId: string, paths: string[], scopes: ScopeWithRules[]): Promise<{ missing: Set<string>; known: Set<string>; folders: Set<string> }> {
   const groups = new Map<string, { repo: RecordFileRepo; prefix: string; paths: string[] }>()
   for (const p of paths) {
     const s = findPrivateScope(scopes, p)
@@ -69,9 +70,10 @@ async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId
   }
   const missing = new Set<string>()
   const known = new Set<string>()
+  const folders = new Set<string>()
   for (const g of groups.values()) {
     const inside = (p: string) => (g.prefix === '' ? p : p.slice(g.prefix.length + 1))
-    let found: Set<string> | null = null
+    let found: Map<string, 'file' | 'folder'> | null = null
     try {
       found = await files.existing(companyId, g.repo, g.paths.filter(p => p !== g.prefix).map(inside))
     } catch (err) {
@@ -81,9 +83,10 @@ async function missingPaths(files: Pick<RecordFileSource, 'existing'>, companyId
     for (const p of g.paths) {
       known.add(p)
       if (p !== g.prefix && !found.has(inside(p))) missing.add(p)
+      if (p !== g.prefix && found.get(inside(p)) === 'folder') folders.add(p)
     }
   }
-  return { missing, known }
+  return { missing, known, folders }
 }
 
 type Scalar = RecordFieldValue
@@ -440,8 +443,12 @@ export function createRecordService(deps: RecordServiceDeps) {
         const path = q.linkedToFile
         if (!reader.file(path)) return ok({ total: 0, records: [] })
         const target = { scopeId: findPrivateScope(handleOf(member).scopes.listWithRules(), path)?.id ?? null }
-        const sourceIds = [...new Set(records.fileLinksTo([path]).map(l => l.sourceId))].slice(0, MAX_NEIGHBOURS)
-        filter.ids = records.byIds(sourceIds).filter(r => linkAllowed(r, target)).map(r => r.id)
+        const linksTo = records.fileLinksTo([path])
+        const sourceIds = [...new Set(linksTo.map(l => l.sourceId))].slice(0, MAX_NEIGHBOURS)
+        // A `.personal/` path counts only where the caller made the link (records.md "Links into .personal/").
+        filter.ids = records.byIds(sourceIds)
+          .filter(r => linkAllowed(r, target) && linksTo.some(l => l.sourceId === r.id && fileLinkShown(member.userId, r, l)))
+          .map(r => r.id)
       }
       // By a link (a task's bundle): the target must be one the member reads, as linkedTo; a link that
       // may not be followed (public → private) never matches.
@@ -594,7 +601,7 @@ export function createRecordService(deps: RecordServiceDeps) {
       const fixed = (source: RecordRow, name: string) =>
         types.get(source.type)?.definition.links[name]?.origin === true || SERVICE_STATE_TYPES.includes(source.type) || source.path !== null
       for (const l of out) {
-        if (l.targetPath !== null) { if (reader.file(l.targetPath)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
+        if (l.targetPath !== null) { if (reader.file(l.targetPath) && fileLinkShown(member.userId, row, l)) links.push({ name: l.name, direction: 'out', path: l.targetPath, fixed: fixed(row, l.name) }); continue }
         const t = others.get(l.targetId as string)
         if (t && linkAllowed(row, t) && reader.record(t)) { shown.set(t.id, t); links.push({ name: l.name, direction: 'out', id: t.id, fixed: fixed(row, l.name) }) }
       }
@@ -613,7 +620,7 @@ export function createRecordService(deps: RecordServiceDeps) {
         links: links.map((l): RecordLinkView => ({
           ...(l.id
             ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }
-            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}) }),
+            : { name: l.name, direction: l.direction, path: l.path!, ...(files?.known.has(l.path!) ? { broken: files.missing.has(l.path!) } : {}), ...(files?.folders.has(l.path!) ? { folder: true as const } : {}) }),
           ...(l.fixed ? { fixed: true as const } : {}),
         })),
       })

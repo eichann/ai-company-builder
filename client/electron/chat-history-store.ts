@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatSessionSummary } from '../shared/chat-history'
 import { normalizeSearchText, summarizeSession } from '../shared/chat-history-summary'
 import { isAgentId } from '../shared/agents/registry'
+import { TOPIC_RECORD_RE } from '../shared/task-consult'
 
 interface HistoryFile {
   sessions: ChatSession[]
@@ -428,6 +429,9 @@ export class ChatHistoryStore {
         createdAt: existing.createdAt,
         claudeSessionId: existing.claudeSessionId || incoming.claudeSessionId,
         agentSession: existing.agentSession !== undefined ? existing.agentSession : incoming.agentSession,
+        // The topic set or taken off by patch() stays; a save only brings the first one (「相談する」).
+        topicRecordId: existing.topicDetached ? undefined : existing.topicRecordId ?? incoming.topicRecordId,
+        topicDetached: existing.topicDetached,
       } : {}),
       revision: (existing?.revision ?? 0) + 1,
       // 「更新」 is when the conversation itself changed (a message or the draft): a save of the same
@@ -465,6 +469,15 @@ export class ChatHistoryStore {
       session.agentSession = patch.agentSession
     }
     if (typeof patch.claudeSessionId === 'string') session.claudeSessionId = patch.claudeSessionId
+    if (patch.topicRecordId === null) {
+      delete session.topicRecordId
+      session.topicDetached = true
+    } else if (patch.topicRecordId !== undefined) {
+      if (typeof patch.topicRecordId !== 'string' || !TOPIC_RECORD_RE.test(patch.topicRecordId)) throw new Error('不正な記録です。')
+      session.topicRecordId = patch.topicRecordId
+      // Set by the member (a consultation dropped on a やること): a later save must keep it.
+      delete session.topicDetached
+    }
     this.replace(entry, session)
     this.schedule(companyId, entry)
     return session

@@ -14,6 +14,8 @@ export interface ChatRequestContextValues {
   companyRootPath: string | undefined
   modelId: string | undefined
   effort: string
+  /** The member's 今日のフォルダ at request time (today-folder.ts); absent in a consultation's own window. */
+  todayFolder?: () => string | null
 }
 
 /**
@@ -32,8 +34,9 @@ export function useChatRequestContext(v: ChatRequestContextValues) {
   const effortRef = useLatestRef(v.effort)
   const companyIdRef = useLatestRef(v.companyId)
   const companyRootRef = useLatestRef(v.companyRootPath)
+  const todayFolderRef = useLatestRef(v.todayFolder)
 
-  return { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef, effortRef, companyIdRef, companyRootRef }
+  return { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef, effortRef, companyIdRef, companyRootRef, todayFolderRef }
 }
 
 /** useChat's transport: posts to the chat server with the body built from refs at request time. */

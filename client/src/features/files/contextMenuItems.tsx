@@ -55,6 +55,8 @@ export function treeMenuItems(
         icon: <CloudArrowDown size={16} />,
         onClick: () => { actions.closeContextMenu(); actions.download(entry) },
       },
+      // A folder left out on this computer can still be linked (the card marks it as not downloaded).
+      ...(actions.linkToTask ? [{ label: 'やることにつなぐ…', icon: <Link size={16} />, onClick: () => { actions.closeContextMenu(); actions.linkToTask!(entry) } }] : []),
     ]
   }
 

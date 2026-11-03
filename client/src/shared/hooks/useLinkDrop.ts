@@ -1,0 +1,98 @@
+// ACB foundation: dropping something on a record links it (owner decision 2026-11-03), used by the
+// tasks feature (the task card, the list's rows) and the records feature (record card, 案件).
+import { useState, type DragEvent } from 'react'
+import { isPathWithin, normalizePathSeparators } from '../lib/path'
+import type { DropLinkChoice, DroppedThing } from '../../../shared/link-drop'
+import { draggedConsultation, draggedFilePaths, draggedRecord, isLinkableDrag } from '../lib/dragTypes'
+import { dropLinkOnRecord, setConsultationTopic, undoDropLink, type ConsultationTopics, type LinkDrops } from '../ipc/link-drop'
+
+/** What the last drop left: what happened with ［取り消す］, a question with its choices, or why not. */
+export type LinkDropNotice =
+  | { kind: 'done'; text: string; undo: (() => Promise<void>) | null }
+  | { kind: 'choose'; question: string; choices: DropLinkChoice[]; pick: (link: string) => Promise<void>; cancel: () => void }
+  | { kind: 'error'; text: string }
+
+export interface LinkDropOptions {
+  companyId: string
+  /** The member's company folder (a dragged file's path is named inside it). */
+  rootPath: string
+  /** The record's kind name (やること, 案件): 「…をこのやることについての相談にしました」. */
+  targetWord: string
+  /** Something was linked or put back (the card / the list reads again). */
+  onChanged?: () => void
+  ports?: { links?: LinkDrops; topics?: ConsultationTopics }
+}
+
+const companyPath = (path: string, rootPath: string): string | null => {
+  const p = normalizePathSeparators(path)
+  const root = normalizePathSeparators(rootPath).replace(/\/+$/, '')
+  return root && isPathWithin(p, root) && p !== root ? p.slice(root.length + 1) : null
+}
+
+/**
+ * What a drop on a record does: a file or folder from the tree, a record (list row, 探す, a tab)
+ * or a consultation. Links go through `tasks:dropLink` (the link the two types allow, or a
+ * choice); a consultation becomes one about the record (its topic, this PC's history). One notice
+ * per target, so a drop on a list row speaks where the list shows its messages.
+ */
+export function useLinkDrop({ companyId, rootPath, targetWord, onChanged, ports = {} }: LinkDropOptions) {
+  const [notice, setNotice] = useState<LinkDropNotice | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const link = async (targetId: string, dropped: DroppedThing, choice?: string): Promise<void> => {
+    setBusy(true)
+    try {
+      const r = await dropLinkOnRecord(companyId, targetId, dropped, choice, ports.links)
+      if (!r.success) { setNotice({ kind: 'error', text: r.error }); return }
+      if ('choose' in r) {
+        setNotice({ kind: 'choose', question: r.question, choices: r.choose, pick: l => link(targetId, dropped, l), cancel: () => setNotice(null) })
+        return
+      }
+      const undo = r.done.undo
+      setNotice({
+        kind: 'done', text: r.done.text,
+        undo: undo ? async () => {
+          const u = await undoDropLink(companyId, undo.recordId, undo.version, ports.links)
+          setNotice(u.success ? { kind: 'done', text: '取り消しました', undo: null } : { kind: 'error', text: u.error })
+          onChanged?.()
+        } : null,
+      })
+      onChanged?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const topic = async (targetId: string, sessionId: string, title: string, before: string | undefined): Promise<void> => {
+    if (before === targetId) { setNotice({ kind: 'done', text: `「${title}」はもうこの${targetWord}についての相談です`, undo: null }); return }
+    const set = async (to: string | null) => (await setConsultationTopic(companyId, sessionId, to, ports.topics).catch(() => null)) !== null
+    if (!await set(targetId)) { setNotice({ kind: 'error', text: '相談が見つかりませんでした。消されたかもしれません。' }); return }
+    setNotice({
+      kind: 'done', text: `「${title || '相談'}」をこの${targetWord}についての相談にしました`,
+      undo: async () => {
+        setNotice(await set(before ?? null) ? { kind: 'done', text: '取り消しました', undo: null } : { kind: 'error', text: 'できませんでした。' })
+        onChanged?.()
+      },
+    })
+    onChanged?.()
+  }
+
+  /** Drop handler for `targetId`: true when it took the drop. */
+  const drop = (targetId: string, e: Pick<DragEvent, 'dataTransfer'>): boolean => {
+    const data = e.dataTransfer
+    const record = draggedRecord(data)
+    if (record) { void link(targetId, { kind: 'record', id: record.id }); return true }
+    const consultation = draggedConsultation(data)
+    if (consultation) { void topic(targetId, consultation.sessionId, consultation.title, consultation.topicRecordId); return true }
+    // The first dragged path inside the company folder (one link per drop).
+    const path = draggedFilePaths(data).map(p => companyPath(p, rootPath)).find((p): p is string => p !== null)
+    if (path) { void link(targetId, { kind: 'path', path }); return true }
+    return false
+  }
+
+  return {
+    notice, busy, clear: () => setNotice(null),
+    accepts: (e: Pick<DragEvent, 'dataTransfer'>) => isLinkableDrag(e.dataTransfer),
+    drop,
+  }
+}

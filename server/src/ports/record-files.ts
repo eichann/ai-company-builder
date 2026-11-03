@@ -44,7 +44,8 @@ export interface RecordFileSource {
   read(companyId: string, repo: RecordFileRepo, since: string | null): Promise<RecordRepoRead>
   /**
    * Which of `paths` (inside `repo`) exist on its shared branch now, as a file
-   * or a folder; null when that cannot be told (no repository, git failed).
+   * or a folder (which one is the value); null when that cannot be told (no
+   * repository, git failed).
    */
-  existing(companyId: string, repo: RecordFileRepo, paths: string[]): Promise<Set<string> | null>
+  existing(companyId: string, repo: RecordFileRepo, paths: string[]): Promise<Map<string, 'file' | 'folder'> | null>
 }

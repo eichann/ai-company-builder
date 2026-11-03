@@ -1,4 +1,5 @@
 import { X } from '@phosphor-icons/react'
+import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED, startRecordDrag } from '../../../shared/lib/dragTypes'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { RecordIcon } from '../../../shared/ui/ThingIcon'
 import { thingName } from '../../../../shared/thing-words'
@@ -49,6 +50,15 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
               aria-selected={isActive}
               data-tab={recordId ? `record:${recordId}` : 'file'}
               onClick={() => onSelect(filePath)}
+              // A tab dragged onto a record's 「つながっているもの」 links what it shows (owner decision 2026-11-03).
+              draggable
+              onDragStart={e => {
+                if (recordId) startRecordDrag(e.dataTransfer, { id: recordId, title: look?.title ?? '' })
+                else {
+                  e.dataTransfer.setData(FILE_PATHS_DRAG_TYPE, JSON.stringify([filePath]))
+                  e.dataTransfer.effectAllowed = LINK_EFFECT_ALLOWED
+                }
+              }}
               onDoubleClick={() => { if (isPreview && onPin) onPin(filePath) }}
               className={`
                 group flex items-center gap-2 px-3 py-2 cursor-pointer

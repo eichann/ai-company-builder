@@ -249,3 +249,16 @@ export function listRows(items: readonly TaskListItem[]): ListRow[] {
   }
   return out
 }
+
+/**
+ * What 「＋ファイル・フォルダをつなぐ」 offers: the company's files and every folder above them
+ * (a folder can be linked too, owner decision 2026-11-03), each folder once, folders first.
+ */
+export function linkCandidates(files: readonly string[]): Array<{ path: string; folder: boolean }> {
+  const folders = new Set<string>()
+  for (const f of files) {
+    const parts = f.split('/')
+    for (let i = 1; i < parts.length; i++) folders.add(parts.slice(0, i).join('/'))
+  }
+  return [...[...folders].sort().map(path => ({ path, folder: true })), ...files.map(path => ({ path, folder: false }))]
+}

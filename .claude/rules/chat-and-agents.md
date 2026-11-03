@@ -418,7 +418,13 @@ the server: `agent-events.md` ("Sending from the app").
 - **Where it is reported.** The host's `onToolEvent` (`AgentHostConfig`, plus `toolEventPaths`
   for home / userData); the chat server only adds `toolEventContext` (company, root, turn id, department) to
   the request. Each turn builds a tracker with `agents/tool-events.ts` `turnToolEvents`; every
-  emission is wrapped (a failing recorder never reaches the agent). Translation per agent:
+  emission is wrapped (a failing recorder never reaches the agent). With `toolEventContext.onFileCreated`
+  (a consultation about a task, `tasks-ui.md` "Consultations centre on the task") the tracker is
+  wrapped by `watchNewFiles`: what a write is about to create is read when the call is decided or
+  starts (`newFilesOfCall`, `client/shared/consultation-task.ts`: a `Write` / `writeFile` where
+  nothing is, a shell command's literal redirect / `tee` target where nothing is — the write guard's
+  `bashWriteTargets`, after a leading `cd <literal> &&` — Codex's `add` change), and told once the
+  call finished ok with the file there. Test: `client/tests/consultation-task.test.ts`. Translation per agent:
   - Claude (`agents/claude-tool-events.ts`): the PreToolUse hook and canUseTool return a
     `ToolVerdict` (the unchanged CLI answer + its decision) and are recorded at one point each;
     PostToolUse / PostToolUseFailure (outcome, the CLI's `duration_ms`, the sandbox's violations)
