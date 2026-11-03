@@ -4,6 +4,7 @@ import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { isPersonalPath } from '../../../../shared/today-folder'
 import { fileIsHere, getTaskCard, onTasksMayHaveChanged } from '../api'
+import { nextCard } from '../model'
 
 /** What a record's tab shows of it (its title and kind). */
 export interface CardLook { title: string; type: string; typeLabel: string; state: string | null }
@@ -25,7 +26,8 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
     void getTaskCard(companyId, recordId).then(
       r => {
         if (!r) return
-        setResult(prev => (!r.success && prev?.success && !r.notFound ? prev : r))
+        // Two reads may race: an older version landing last never replaces a newer one.
+        setResult(prev => nextCard(prev, r))
         if (r.success && rootPath) {
           const personal = r.card.files.map(f => f.path).filter(isPersonalPath)
           void Promise.all(personal.map(p => fileIsHere(`${rootPath}/${p}`).then(here => (here ? [p] : []), () => [])))

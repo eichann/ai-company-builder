@@ -114,7 +114,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
           ))}
           {myTurn.total > myTurn.items.length && <p className="px-3 py-2 text-xs text-gray-500">ほかに {myTurn.total - myTurn.items.length} 件</p>}
           {(myTurn.resting ?? 0) > 0 && (
-            <p className="px-3 py-1.5 text-[11px] text-gray-500 dark:text-zinc-400">まだ始めていない、期限が来週より先か期限のないもの {myTurn.resting}件は、やることの一覧の「先のこと」「いつか」にあります。</p>
+            <p className="px-3 py-1.5 text-[11px] text-gray-500 dark:text-zinc-400">まだ始めていない、期限が来週以降か、期限のないもの {myTurn.resting}件は、やることの一覧の「先のこと」「いつか」にあります。</p>
           )}
           <p className="border-t border-gray-100 px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-zinc-800 dark:text-zinc-400">起きたことはベルに出ます。ここは押すものだけです。</p>
         </div>

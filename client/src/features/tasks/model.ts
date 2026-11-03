@@ -3,6 +3,7 @@
 // company's day (Japan time until a company setting exists, calendar.md).
 import type { CalendarEvent } from '../../../shared/calendar'
 import type { TaskListItem } from '../../../shared/tasks'
+import type { TaskCardResult } from '../../../shared/task-card'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { weekEndOf } from '../../../../shared/core/turn-timing'
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
@@ -27,6 +28,17 @@ export function companyNow(ms: number, timeZone = DEFAULT_COMPANY_TIME_ZONE): Co
   const p = (t: Intl.DateTimeFormatPartTypes) => parts.find(x => x.type === t)?.value ?? ''
   const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p('weekday'))
   return { date: `${p('year')}-${p('month')}-${p('day')}`, time: `${p('hour')}:${p('minute')}`, weekday, ms }
+}
+
+/**
+ * What the card shows after a read answered (`useTaskCard`): two reads may race and the older
+ * answer land last, so an answer with an older version than the one shown is ignored; a failed
+ * re-read keeps a shown card (unless the task is gone).
+ */
+export function nextCard(prev: TaskCardResult | null, next: TaskCardResult): TaskCardResult {
+  if (!prev?.success) return next
+  if (!next.success) return next.notFound ? next : prev
+  return next.card.record.version < prev.card.record.version ? prev : next
 }
 
 /** `YYYY-MM-DD` plus `days`. */

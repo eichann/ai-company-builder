@@ -5,7 +5,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates } from './model'
+import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard } from './model'
+import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
+
+// The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
+// landing last must never replace a newer card; a failed re-read keeps the card unless it is gone.
+test('a card read that lands late with an older version never replaces the newer card shown', () => {
+  const at = (version: number): TaskCardResult => ({ success: true, card: { record: { version } } as unknown as TaskCardData })
+  const shown = at(5)
+  assert.equal(nextCard(shown, at(4)), shown)
+  const newer = at(6)
+  assert.equal(nextCard(shown, newer), newer)
+  assert.equal(nextCard(null, at(4)).success, true)
+  const offline: TaskCardResult = { success: false, offline: true, error: 'x' }
+  assert.equal(nextCard(shown, offline), shown)
+  const gone: TaskCardResult = { success: false, offline: false, notFound: true, error: '見つかりません' }
+  assert.equal(nextCard(shown, gone), gone)
+})
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))

@@ -94,7 +94,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   tab is marked (`activeRecordId`). A まとまり chip opens that まとまり the same way. AppShell keys
   the card **by record id only** and passes the version the list knows (`knownVersion`): a newer one
   makes the card read again (`useTaskCard`; a change made from the list shows on the card), and a
-  re-read never blanks the card or closes its folds — the shown card stays until the new one comes
+  re-read never blanks the card or closes its folds — the shown card stays until the new one comes, and
+  an answer older than the version shown never replaces it (`nextCard`: two reads can race)
   (owner 2026-11-03, 使い心地のメモ #3: keying by version remounted the card on every change the
   consultation's AI made, and the whole screen flickered). The list keeps its last answer while it
   reads again too (`useTaskList`). Test: `tests/ui/tasks-layout.spec.ts` (「the AI changing the task
