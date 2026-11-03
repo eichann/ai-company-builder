@@ -210,7 +210,10 @@ jobs:
   bundle-size:
     name: Renderer bundle size (Linux)
     # The renderer bundle stays within its budget (check-bundle-size.mjs,
-    # testing.md "Performance baselines"). The JS Vite emits does not depend on
+    # testing.md "Performance baselines"), and on a pull request grows by at
+    # most 50 KB over the base (the base is built here too, so both sizes come
+    # from one runner and one toolchain; a committed baseline file would go
+    # stale and conflict between parallel PRs). The JS Vite emits does not depend on
     # the OS, so this left the macOS perf job on 2026-11-02. Same area as the
     # UI tests (what the renderer bundle is built from).
     needs: changes
@@ -219,12 +222,28 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # A pull request is checked out as its merge into the base: HEAD^1 is the base's tip, the
+          # growth guard's reference (built below with the same runner and toolchain).
+          fetch-depth: 2
       - uses: ./.github/actions/setup
+      - name: Build the base (pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          git worktree add --detach ../acb-base HEAD^1
+          cd ../acb-base
+          pnpm install --frozen-lockfile --prefer-offline
+          cd client
+          npx vite build
       - name: Renderer bundle size
         working-directory: client
         run: |
           npx vite build
-          node scripts/check-bundle-size.mjs dist
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            node scripts/check-bundle-size.mjs dist --base ../../acb-base/client/dist
+          else
+            node scripts/check-bundle-size.mjs dist
+          fi
 
   sync-harness-shard:
     name: Sync harness ${{ matrix.shard }}/4 (macOS)
