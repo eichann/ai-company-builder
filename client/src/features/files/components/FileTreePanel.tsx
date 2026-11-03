@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { useTranslation } from 'react-i18next'
 import { LockSimple } from '@phosphor-icons/react'
 import { ContextMenu } from '../../../shared/ui/ContextMenu'
@@ -36,6 +36,15 @@ interface FileTreePanelProps {
   onLinkToTask?: (path: string) => void
   /** Items business plugins add to a row's right-click menu (plugin-frame.md "The four slots"); the entry's absolute path. */
   extraMenuItems?: (entry: { path: string; isDirectory: boolean; notDownloaded?: boolean }) => FileMenuExtraItem[]
+  /** 「今日のフォルダを開く」 in the header (command `files.openToday`, composed by the screen). */
+  onOpenToday?: () => void
+  /** What the screen may ask of the tree: show a folder (its parents opened, it selected). */
+  controls?: Ref<FileTreeControls>
+}
+
+export interface FileTreeControls {
+  /** Opens every folder down to `absPath` (inside the shown department) and selects it; false when it is elsewhere. */
+  reveal: (absPath: string) => Promise<boolean>
 }
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -49,6 +58,8 @@ export function FileTreePanel({
   onPrivateFolderCreated,
   onLinkToTask,
   extraMenuItems,
+  onOpenToday,
+  controls,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
@@ -96,6 +107,27 @@ export function FileTreePanel({
     refuseReserved: ops.refuseReserved,
     warn,
   })
+
+  useImperativeHandle(controls, () => ({
+    reveal: async (absPath: string) => {
+      if (!departmentPath || !isPathWithin(absPath, departmentPath) || absPath === departmentPath) return false
+      setShowDotFiles(true)
+      let dir = departmentPath
+      // Each level is read again first: the folder may have just been made.
+      for (const name of absPath.slice(departmentPath.length + 1).split('/')) {
+        await model.invalidate(dir)
+        dir = `${dir}/${name}`
+        await model.expand(dir)
+      }
+      selection.setSelectedPaths(new Set([absPath]))
+      requestAnimationFrame(() => {
+        const row = [...document.querySelectorAll<HTMLElement>('[data-tree-path]')].find(el => el.dataset.treePath === absPath)
+        row?.scrollIntoView({ block: 'nearest' })
+        row?.focus()
+      })
+      return true
+    },
+  }), [departmentPath, model, selection])
 
   // The target directory for new file/folder creation, from the current selection
   const activeParentPath = (() => {
@@ -161,6 +193,7 @@ export function FileTreePanel({
         parentNotDownloaded={parentNotDownloaded}
         onNewFile={() => ops.newFile(activeParentPath)}
         onNewFolder={() => ops.newFolderIn(activeParentPath)}
+        onOpenToday={onOpenToday}
       />
 
       {currentPrivate && <PrivateFolderBanner folder={currentPrivate} />}

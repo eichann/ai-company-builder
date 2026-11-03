@@ -1,7 +1,10 @@
 // A task's card in one file: the press's notices (取り消す, 先に変えた) belong to the card that
 // holds its version, so the loader and the body stay together.
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
-import { CheckCircle, CircleNotch, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { CheckCircle, CircleNotch, Plus, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { fileNameFromTitle } from '../../../../shared/today-folder'
+import { InputDialog } from '../../../shared/ui/InputDialog'
+import { runCommand } from '../../../shared/commands/commands'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
 import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
@@ -59,6 +62,11 @@ interface Props {
   bundleFolder?: string | null
   /** Read: its title and kind, for its tab in the middle. */
   onLoaded?: (look: CardLook) => void
+  /**
+   * ［＋ 新しいファイル］ on a task only the member sees (owner decision 2026-11-03): the screen makes the
+   * empty file in today's folder (`.personal`, this Mac only) and answers its company path, or why not.
+   */
+  createTodayFile?: (name: string) => Promise<{ path: string } | { error: string }>
 }
 
 /** What the member's last press left on the card. */
@@ -72,8 +80,8 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded }: Props) {
-  const { result, reload } = useTaskCard(companyId, recordId, onLoaded)
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile }: Props) {
+  const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
@@ -140,7 +148,15 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
   return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
-    onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
+    onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
+    {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
+      const made = await createTodayFile(name)
+      if ('error' in made) return { error: made.error }
+      // Made in today's folder: linked to this task, then opened as the active tab in the middle.
+      const failure = await fileLink(made.path, false)
+      void runCommand('file.open', { path: `${rootPath}/${made.path}` })
+      return { linkError: failure }
+    } } : {})}
     companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
     onCreateBundle={bundleKind ? (title: string) => change(async () => {
       const made = await createBundle(companyId, { type: bundleKind.type, title, folder: bundleFolder })
@@ -171,6 +187,10 @@ interface BodyProps {
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
   onLinkFile: (companyPath: string) => Promise<string | null>
   onUnlinkFile: (companyPath: string) => Promise<string | null>
+  /** Linked `.personal/` files that are on this computer. */
+  personalHere: ReadonlySet<string>
+  /** ［＋ 新しいファイル］ (a task only the member sees): `error` keeps the name window open. */
+  onNewFile?: (name: string) => Promise<{ error: string } | { linkError: string | null }>
   companyId: string
   bundleWord: string
   onCreateBundle?: (title: string) => Promise<string | null>
@@ -187,12 +207,20 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [unlinked, setUnlinked] = useState<string | null>(null)
+  const [naming, setNaming] = useState<{ error: string | null } | null>(null)
+  const makeFile = async (name: string) => {
+    if (!onNewFile) return
+    const r = await onNewFile(name.trim())
+    if ('error' in r) { setNaming({ error: r.error }); return }
+    setNaming(null)
+    setLinkError(r.linkError ? `ファイルは今日のフォルダに作りましたが、つなげませんでした：${r.linkError}` : null)
+  }
   const runAction = async (fn: () => Promise<string | null>) => setRunError(await fn())
   const unlink = async (path: string) => {
     const failure = await onUnlinkFile(path)
@@ -217,7 +245,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       ...(l.removable ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => { if (!busy) void onUnlinkRecord(l.removable!, l.record!.title).then(setLinkError) } }] } : {}),
     }] : [])),
     ...card.files.map(f => ({
-      ...fileRow(rootPath, f.path, f.broken),
+      ...fileRow(rootPath, f.path, f.broken, personalHere.has(f.path)),
       menu: [{ label: 'つながりを外す', hint: 'ファイルは消えません。経緯に残ります', onClick: () => { if (!busy) void unlink(f.path) } }],
     })),
   ]
@@ -241,7 +269,10 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       bottom={<><HistoryFold lines={card.history} /><FieldsFold fields={card.fields} /></>}
       seenBy={card.viewers && <SeenBy who={card.viewers.text} />}
       links={<LinkedColumn rows={[...rows, ...consult.rows]}
-        extras={[{ name: 'ファイル', kind: 'file', action: <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
+        extras={[{ name: 'ファイル', kind: 'file', action: <>
+          <TaskFiles rootPath={rootPath} linked={card.files.map(f => f.path)} busy={busy} onLink={onLinkFile} />
+          {onNewFile && <button type="button" disabled={busy} onClick={() => setNaming({ error: null })} data-new-file className="ml-1 mt-0.5 inline-flex items-center gap-0.5 rounded px-1 text-[11.5px] text-accent hover:underline disabled:opacity-50"><Plus size={10} />新しいファイル</button>}
+        </>, note: 'つながりは、このやることを見られる人みんなに見えます' }, ...(consult.extra ? [consult.extra] : [])]}
         drop={{ label: 'ここにファイルをドロップしてつなぐ', accepts: e => isFileTreeDrag(e.dataTransfer), onDrop: e => void drop(e) }}
         notice={<>
           {linkError && <p role="alert" className="text-[11.5px] text-red-600 dark:text-red-400">{linkError}</p>}
@@ -294,6 +325,8 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       {/* もとの連絡: only for a task that came from one (no read, no 「読み込んでいます」 on every task). */}
       <RecordSourcePanel record={record}>{card.fromIncoming ? renderSource(record) : null}</RecordSourcePanel>
       {renderSections?.(record)}
+      <InputDialog isOpen={naming !== null} title="新しいファイル（今日のフォルダ・あなたの Mac だけ）" defaultValue={fileNameFromTitle(record.title)}
+        placeholder="メモ.md" error={naming?.error ?? null} onConfirm={makeFile} onCancel={() => setNaming(null)} />
     </RecordPage>
   )
 }

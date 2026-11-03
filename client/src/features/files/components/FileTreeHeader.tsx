@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { ArrowClockwise, Eye, EyeSlash, FilePlus, FolderPlus, LockSimple } from '@phosphor-icons/react'
+import { ArrowClockwise, CalendarBlank, Eye, EyeSlash, FilePlus, FolderPlus, LockSimple } from '@phosphor-icons/react'
 import { ReadOnlyBadge } from '../../../shared/ui/ReadOnlyBadge'
 import { lastSegment, viewersLabel, type MyPrivateFolder } from '../../../../shared/private-folder-ui'
 
@@ -13,12 +13,14 @@ interface FileTreeHeaderProps {
   parentNotDownloaded: boolean
   onNewFile: () => void
   onNewFolder: () => void
+  /** 「今日のフォルダを開く」 (command `files.openToday`); absent = no button. */
+  onOpenToday?: () => void
 }
 
 const iconButton = 'p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors'
 
 export function FileTreeHeader({
-  readOnly, showDotFiles, onToggleDotFiles, isLoading, onRefresh, parentNotDownloaded, onNewFile, onNewFolder,
+  readOnly, showDotFiles, onToggleDotFiles, isLoading, onRefresh, parentNotDownloaded, onNewFile, onNewFolder, onOpenToday,
 }: FileTreeHeaderProps) {
   const { t } = useTranslation()
   return (
@@ -30,6 +32,11 @@ export function FileTreeHeader({
         {readOnly && <ReadOnlyBadge compact />}
       </span>
       <div className="flex items-center gap-1">
+        {onOpenToday && (
+          <button onClick={onOpenToday} className={iconButton} title="今日のフォルダを開く（⌘⇧T）" aria-label="今日のフォルダを開く">
+            <CalendarBlank size={14} />
+          </button>
+        )}
         <button
           onClick={onToggleDotFiles}
           className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] transition-colors ${

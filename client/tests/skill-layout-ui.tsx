@@ -12,6 +12,9 @@
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //
+// 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
+// `createDirectory` makes folders on the fake disk (recorded).
+//
 // Departments: 営業部 (downloaded), 開発部 (not downloaded on this computer),
 // 総務 (read-only for this member). window.__acbLayout lets the Playwright UI
 // tests (tests/ui/skill-layout.spec.ts) act as the AI / a teammate and see
@@ -133,6 +136,18 @@ const api: Partial<ElectronAPI> = {
   },
   onSparseProgress: () => () => {},
   exists: async (path: string) => path === ROOT || path in DISK || path in FILES,
+  getMyDepartments: async () => ({ success: true, departmentIds: ['d_dev', 'd_sales'] }),
+  createDirectory: async (path: string) => {
+    record('createDirectory', [path])
+    // mkdir -p: every missing level appears in its parent.
+    let dir = ROOT
+    for (const name of path.slice(ROOT.length + 1).split('/')) {
+      const next = `${dir}/${name}`
+      if (!(next in DISK)) { (DISK[dir] ??= []).push({ name, isDirectory: true }); DISK[next] = [] }
+      dir = next
+    }
+    return true
+  },
   getStats: async () => { throw new Error('not found') },
   readDirectoryTree: async (dir: string, max?: number) => { record('readDirectoryTree', [dir]); return tree(dir, 0, max ?? 2) },
   readDirectory: async (dir: string) => { record('readDirectory', [dir]); return listDir(dir) },
