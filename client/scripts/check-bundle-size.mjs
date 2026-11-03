@@ -13,7 +13,7 @@
 // 2026-11-02: 2.3 → 2.5 MiB (owner decision): the stage-2 screens keep growing it; code splitting is planned with the visual batch.
 // 2026-11-03: 2.5 → 2.55 MiB. next/task-list stood at 2,615,921 bytes (99.8%); 「落とすと、つながります」 (drag
 // to link records, consultations and folders, +7.6 KB) passed it. Lazy chunks count here too, so only
-// removing code lowers it; to be revisited with the owner.
+// removing code lowers it. Owner decision (option A).
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N]
 import fs from 'node:fs'
