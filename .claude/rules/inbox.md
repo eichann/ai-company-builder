@@ -138,6 +138,19 @@ member reads), and for a 返事のお願い `request` (its state, version and `p
 run sees it in the view and reuses it. `reply` links the 相手 found now by 名寄せ when the message
 had none.
 
+**A task from a message** (owner FB #13, 2026-11-04: a MoneyForward mail asking the owner to approve
+an expense became their task, but with no notice and no due it sat unseen under 「いつか」):
+- **Due**: `recordEngine.createByAi` (`record-engine/create.ts` `messageDue`) gives a request the AI
+  makes with an origin link to a message (`messageOriginLinks` in `core-types.ts`: a task's
+  `interaction`) a `due` when the AI sent none (or null): the 目安 from the message's `occurred_at`
+  (engine dep `replyGuideline`, composition.ts: `replyTarget` with the task settings' rule and
+  company holidays — the rule a 返事のお願い uses; without the dep the default settings). A due the AI
+  read in the message (`fields.due`; the triage prompt asks for it) is kept. Enforced on the server,
+  so a task from a message never lands without a due; a person changes it afterwards like any
+  due. A person's own create gets none.
+- **Notice**: the member's own AI making it their turn tells them (`from_message`,
+  `notifications.md`), although their AI was the actor.
+
 **The thread itself** is read through A4's one AI route, `GET /api/records-ai/threads/:recordId`
 (`outbound-mail.md` "Replies": an interaction or a record linking one, read now with the member's
 own permission, a plugin step's run only with the role declared; nothing stored). The PC's
@@ -221,7 +234,8 @@ members, owner, admin; CC / several To / shared address / internal / free mail /
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; B4: the item view is the owner's alone and a reply request answers its
+「やることにする」 wins; a task the AI makes from a message always has a due — the stated one kept,
+else the 目安 past public and company holidays, none made up for other creates (mutation-checked); B4: the item view is the owner's alone and a reply request answers its
 message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is

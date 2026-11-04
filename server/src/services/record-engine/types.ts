@@ -74,6 +74,13 @@ export interface RecordEngineDeps {
    * the default zone's now and no company holidays.
    */
   companyDay?: (companyId: string) => { now: string; holidays: string[] }
+  /**
+   * The company's reply 目安 (`YYYY-MM-DD`) for a message received at `receivedAt` (task settings:
+   * 翌営業日 / 当日中 + cutoff, the company's holidays; `replyTarget`): the due of a request the AI
+   * makes from a message without a deadline (inbox.md "A task from a message"). Without it: the
+   * default settings and no company holidays.
+   */
+  replyGuideline?: (companyId: string, receivedAt: string) => string
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */

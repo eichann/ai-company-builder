@@ -643,6 +643,18 @@ export const INBOX_ACTIONS = Object.freeze({
 /** The inbox as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
 export const INBOX_ACTOR = Object.freeze({ id: 'acb:inbox', kind: 'external' as const, source: 'ACB の受付' })
 
+/** The type a message is recorded as (来た連絡, inbox.md). */
+export const MESSAGE_TYPE = 'interaction'
+
+/**
+ * The origin links of a type that point at a message (`origin: true`, target `interaction`: a
+ * task's もとの連絡): a record made with one was made from that message (inbox.md "A task from a
+ * message": its due is never empty, and the member's own AI making it tells them).
+ */
+export function messageOriginLinks(def: { links: Record<string, { target: string; origin?: true; targetIsInterface?: true }> }): string[] {
+  return Object.entries(def.links).filter(([, l]) => l.origin === true && !l.targetIsInterface && l.target === MESSAGE_TYPE).map(([name]) => name)
+}
+
 /** The interaction state that asks its assignee to decide (確認待ち): the `intake_unsure` notice. */
 export const INTAKE_UNSURE_STATE = 'unsure'
 

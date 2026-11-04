@@ -10,7 +10,8 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
-import { acceptanceOf, proposalOf } from '../../../shared/core/core-types'
+import { acceptanceOf, messageOriginLinks, proposalOf } from '../../../shared/core/core-types'
+import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-settings'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
@@ -54,13 +55,48 @@ export function creating(ctx: EngineContext) {
     return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
   }
 
+  /**
+   * A request the AI makes from a message that came in (an origin link to an interaction: a task's
+   * もとの連絡; inbox.md "A task from a message", owner FB #13) never lands without a due: the
+   * deadline the AI read in the message (`fields.due`, kept), else the company's reply 目安 from
+   * when the message came — the rule a 返事のお願い uses (`replyTarget`: 翌営業日 / 当日中, weekends,
+   * public and company holidays). A person may change or remove it afterwards.
+   */
+  function messageDue(member: Member, body: unknown): unknown {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
+    const b = body as Record<string, unknown>
+    const opened = open(member)
+    const def = opened && typeof b.type === 'string' ? currentTypes(opened.records).get(b.type)?.definition : undefined
+    if (!opened || !def || !def.implements.includes('request') || def.fields.due?.source !== 'server' || def.fields.due.kind !== 'date') return body
+    if (b.fields !== undefined && (typeof b.fields !== 'object' || b.fields === null || Array.isArray(b.fields))) return body
+    const fields = (b.fields ?? {}) as Record<string, unknown>
+    if (fields.due !== undefined && fields.due !== null) return body
+    const links = b.links
+    if (typeof links !== 'object' || links === null || Array.isArray(links)) return body
+    const said = messageOriginLinks(def).map(name => (links as Record<string, unknown>)[name]).find(v => v !== undefined)
+    const target = Array.isArray(said) ? said[0] : said
+    if (typeof target !== 'string' || !RECORD_ID_RE.test(target)) return body
+    // Only a message the member reads (else `create` refuses the link with its usual answer).
+    const row = opened.records.byIds([target]).find(r => r.removedAt === null && opened.reader.record(r))
+    if (!row) return body
+    let occurred: string | null = null
+    try {
+      const v = (JSON.parse(opened.records.states([row.id])[0]?.fields ?? '{}') as Record<string, unknown>).occurred_at
+      occurred = typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null
+    } catch { occurred = null }
+    const at = occurred ?? clock.now()
+    const due = deps.replyGuideline?.(member.companyId, at) ?? replyTarget(at, DEFAULT_TASK_SETTINGS.reply).date
+    return { ...b, fields: { ...fields, due } }
+  }
+
   const api = {
     /**
      * The member's AI (`POST /api/records-ai/item`, tool records_create): `create` after the
-     * AI's defaults (`aiPlacement`). The answer says where it went (`placed`), for the AI to tell.
+     * AI's defaults (`aiPlacement`, and a due for what comes from a message: `messageDue`). The
+     * answer says where it went (`placed`), for the AI to tell.
      */
     createByAi(member: Member, actor: ActorInput, body: unknown) {
-      return api.create(member, actor, aiPlacement(member, body))
+      return api.create(member, actor, messageDue(member, aiPlacement(member, body)))
     },
 
     /**

@@ -28,6 +28,7 @@ import { createPushChannel, type PushChannel } from '../../src/services/push-cha
 import type { Member } from '../../src/services/access'
 import type { PushEvent } from '../../../shared/types/agent-stop'
 import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-types'
+import { INBOX_ACTOR } from '../../../shared/core/core-types'
 
 const TS = '2026-11-01T00:00:00.000Z'
 const MEMBERS: Record<string, string[]> = {
@@ -467,5 +468,74 @@ describe('noticing one’s own turn without Slack (owner decision 2026-11-03)', 
     expect(ofKind('u-bob', 'asked')).toHaveLength(1)
     ok(notices.setSettings(m('u-bob'), { kinds: { asked: false } }))
     expect(ofKind('u-bob', 'asked')).toEqual([])
+  })
+})
+
+/** A message that came in (来た連絡) as the inbox records it: alice's own, or a department's. */
+function message(opts: { folder?: string } = {}): string {
+  const made = writer.create('a', {
+    type: 'interaction', title: '経費精算の承認依頼',
+    ...(opts.folder ? { folder: opts.folder } : { personalOwner: 'u-alice' }),
+    fields: { assignee: 'u-alice', next_actor: 'u-alice', occurred_at: '2026-11-02T01:00:00.000Z', channel: 'email' },
+    actor: INBOX_ACTOR, state: 'received', quiet: true,
+  })
+  if (!made.ok) throw new Error(made.reason)
+  return made.record.id
+}
+
+describe('a task from a message (owner FB #13)', () => {
+  const AI_ACTOR = { kind: 'ai' as const, source: 'claude-code' }
+
+  it('the member’s own AI making their task from a message tells them once; a person’s own create and the AI’s other work do not', async () => {
+    const msg = message()
+    const alicePc = subscribe('a', 'u-alice')
+    const t = ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: '経費精算を承認する', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    expect(ofKind('u-alice', 'from_message')).toMatchObject([{ recordId: t.id, text: '来た連絡から、やることを作りました：「経費精算を承認する」' }])
+    expect(alicePc.filter(e => e.kind === 'notifications')).toHaveLength(1)
+    // Owner-only like its message: nobody else — the owner included — hears of it.
+    for (const u of ['u-bob', 'u-owner']) expect(list(u).items).toEqual([])
+    // A retried notify writes nothing more (once per record).
+    const entry = source.forCompany('a').records.ledger(t.id)[0]
+    notices.recordChange('a', ['u-alice'], { type: 'task', entry, fields: { assignee: 'u-alice', requested_by: 'u-alice', next_actor: 'u-alice' } })
+    expect(ofKind('u-alice', 'from_message')).toHaveLength(1)
+    // The AI's other work on it (a due changed) is not a new notice of this kind.
+    ok(await engine.act(m('u-alice'), AI_ACTOR, t.id, 'set_due', { expectedVersion: 1, args: { due: '2026-11-06' } }))
+    expect(ofKind('u-alice', 'from_message')).toHaveLength(1)
+    // The AI's own task not made from a message, and a person's own create from it: nothing.
+    const plain = ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: 'メモを整理する', fields: { assignee: 'u-alice' } })).record
+    const byHand = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分で作った', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    expect(list('u-alice').items.map(i => i.recordId)).not.toContain(plain.id)
+    expect(list('u-alice').items.map(i => i.recordId)).not.toContain(byHand.id)
+    // A member switches the kind off like any other.
+    ok(notices.setSettings(m('u-alice'), { kinds: { from_message: false } }))
+    expect(ofKind('u-alice', 'from_message')).toEqual([])
+  })
+
+  it('made in the AI’s preparation: told when the AI hands it over, once', async () => {
+    const msg = message()
+    const p = ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: '請求書を確かめる', personal: true, state: 'preparing', fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    expect(ofKind('u-alice', 'from_message')).toEqual([])
+    ok(await engine.act(m('u-alice'), AI_ACTOR, p.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '金額を確かめました' } }))
+    expect(ofKind('u-alice', 'from_message').map(i => i.recordId)).toEqual([p.id])
+    // Made by the person (in the AI's preparation), handed over by their AI: their own create, no notice.
+    const own = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分で頼んだ', personal: true, state: 'preparing', fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    ok(await engine.act(m('u-alice'), AI_ACTOR, own.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '確かめました' } }))
+    expect(ofKind('u-alice', 'from_message').map(i => i.recordId)).toEqual([p.id])
+  })
+
+  it('a department’s message: only the assignee is told, and not once they cannot read it', async () => {
+    const msg = message({ folder: '経理' })
+    // Made for bob (he is `asked`); alice's AI later giving it to her is not a task made from a message for her.
+    const forBob = ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: '請求を確かめる', folder: '経理', fields: { assignee: 'u-bob' }, links: { interaction: [msg] } })).record
+    expect(ofKind('u-bob', 'asked').map(i => i.recordId)).toEqual([forBob.id])
+    expect(ofKind('u-bob', 'from_message')).toEqual([])
+    ok(await engine.act(m('u-alice'), AI_ACTOR, forBob.id, 'assign', { expectedVersion: 1, note: '私がやります', args: { assignee: 'u-alice' } }))
+    expect(ofKind('u-alice', 'from_message')).toEqual([])
+    const t = ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: '支払いを確かめる', personal: false, folder: '経理', fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    expect(ofKind('u-alice', 'from_message').map(i => i.recordId)).toEqual([t.id])
+    expect(ofKind('u-carol', 'from_message')).toEqual([])
+    closeAccounting('u-alice')
+    expect(list('u-alice').items).toEqual([])
+    expect(JSON.stringify(list('u-alice'))).not.toMatch(/支払い/)
   })
 })

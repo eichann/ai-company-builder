@@ -37,7 +37,7 @@ a plugin can never draw a notice (§2-2).
   create / act / undo, the service writer, the external writer). `composition.ts`
   `notifyRecords` sends the `records` signal as before and hands the entry to
   `services/notifications.ts` `recordChange`, which writes one notice per named member — **never
-  the entry's actor (except their own AI handing them what someone else asked: `asked` below; the
+  the entry's actor (except their own AI handing them what someone else asked, `asked`, or what it made them from a message, `from_message`, below; the
   engine's `tell` names the member for an AI actor's entry for that), and only a member who can
   read the record now** (an owner-only record's
   notice reaches its owner alone, owners/admins included; `records.md`) — and pushes `{ kind: 'notifications', version }` to those who have that
@@ -58,7 +58,7 @@ a plugin can never draw a notice (§2-2).
   `records.md` "Acceptance"), `acceptance_waiting` (the server clock, below), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
-  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee) and `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`, both on by default),
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`) and `from_message` (below; all three on by default),
   `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
@@ -78,6 +78,17 @@ a plugin can never draw a notice (§2-2).
     **Once per assignment**: dedupe key `asked:<record>:<version that made them the assignee>`,
     so a hand-over after a create that already told them, or a retried notify, writes nothing;
     the row's actor is the asker.
+  - `from_message` 「来た連絡から、やることを作りました：「…」」 (`fromMessageOf`, owner FB #13): the
+    member's **own AI** made a request **from a message that came in** (its create entry is their
+    AI, the record has an origin link to a message: `messageOriginLinks`) and this entry leaves
+    them its assignee in a person's turn — the create, or the AI's hand-over of its preparation.
+    Told although their AI was the actor. Not a person's own create, not the AI's other actions
+    (a later `assign` to themselves, a due changed), not a task from a message made for someone
+    else (that one is `asked`). **Once per record** (`from_message:<record>`); several messages
+    in a short time are separate notices (grouping them is a later step). No `desktop`: its due
+    (`inbox.md` "A task from a message") puts it in this week's 「あなたの番」, whose new item is
+    the Mac notification. An app released before it shows the server's text (the watcher keeps
+    any kind with a record) and has no switch for it.
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
@@ -258,6 +269,9 @@ built when read, gone when the kind is off; only this week's turn counted — a 
 resting tasks is not greeted; 「明日が期限」 once per due value to the assignee on the
 last business day before it, not for a cancelled task, again for a moved due; `asked` once per
 assignment for a person, someone's AI, the own AI's hand-over and 引き受け待ち, never the requester —
+mutation-checked; `from_message` once per record for the own AI's create or hand-over from a
+message, not for a person's own create, the AI's task without a message, its later actions or a
+later `assign` to the member, only to the assignee and gone when they cannot read it —
 mutation-checked; a member never receives nor marks another's;
 cross-company; the push is kind + version only, to the told members, never the actor; gone when
 access is lost; read state shared by two service instances = two PCs; default kinds and switches;

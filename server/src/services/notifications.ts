@@ -31,7 +31,7 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
-import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
+import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, MESSAGE_TYPE, messageOriginLinks, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
 import { restingTask, turnTiming } from '../../shared/core/turn-timing'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -241,6 +241,29 @@ export function askedOf(userId: string, change: RecordChange, def: TypeDefinitio
   }
   const asker = str(fields.requested_by) ?? assignedBy
   return asker === null || asker === userId ? null : { asker, since }
+}
+
+/**
+ * Whether this entry is the member's own AI giving them a request it made from a message that came
+ * in (`from_message`, owner FB #13: the AI turned a mail into the owner's task and nobody was told,
+ * since the actor was "the owner"). Narrow on purpose: the AI made the record (its create entry is
+ * the member's AI), the record names a message as its origin (`messageOriginLinks`), and this
+ * entry leaves the member its assignee in a person's turn — at the create, or when the AI hands
+ * its preparation over (`noTurnStates`). Not a person's own create, not the AI's other actions;
+ * what someone else asked of them stays `asked`. Once per record (dedupe key).
+ */
+export function fromMessageOf(userId: string, change: RecordChange, def: TypeDefinition | undefined, ledger: () => LedgerEntry[], originIds: (names: string[]) => string[]): boolean {
+  if (!def || !def.implements.includes('request')) return false
+  const { entry, fields } = change
+  if (entry.actorKind !== 'ai' || entry.actorId !== userId || str(fields.assignee) !== userId || entry.toState === null) return false
+  const quiet = noTurnStates(def)
+  if (quiet.has(entry.toState)) return false
+  const handedOver = entry.fromState !== null && entry.fromState !== entry.toState && quiet.has(entry.fromState) && !def.final.includes(entry.fromState)
+  if (entry.action !== 'create' && !handedOver) return false
+  const made = entry.action === 'create' ? entry : ledger().find(e => e.action === 'create')
+  if (!made || made.actorKind !== 'ai' || made.actorId !== userId) return false
+  const names = messageOriginLinks(def)
+  return names.length > 0 && originIds(names).length > 0
 }
 
 export function createNotificationService(deps: NotificationServiceDeps) {
@@ -562,6 +585,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       }
       case 'reply_arrived':
         return `${t}に相手から返事が来ました。AI が終わりの条件と照らし合わせます`
+      case 'from_message':
+        return `来た連絡から、やることを作りました：${t}`
       case 'intake_unsure':
         return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':
@@ -612,13 +637,25 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const readerOf = readersIn(companyId, handle)
       let ledger: LedgerEntry[] | null = null
       const ledgerOf = () => (ledger ??= handle.records.ledger(change.entry.recordId))
+      /** The messages the record names under these origin links (records of the message type only). */
+      const originIdsOf = (names: string[]) => {
+        const ids = handle.records.linksFrom([change.entry.recordId]).filter(l => names.includes(l.name) && l.targetId !== null).map(l => l.targetId as string)
+        return handle.records.byIds(ids).filter(r => r.type === MESSAGE_TYPE).map(r => r.id)
+      }
       for (const userId of recipients) {
         if (!mayRead(userId)) continue
         const asked = askedOf(userId, change, def, ledgerOf)
-        // Never the actor — except their own AI handing them what someone else asked (they did not do that).
-        if (userId === change.entry.actorId && !(asked && change.entry.actorKind === 'ai')) continue
-        const kind = asked ? 'asked' : noticeKind(userId, change, final)
-        const base = asked
+        const fromMessage = !asked && fromMessageOf(userId, change, def, ledgerOf, originIdsOf)
+        // Never the actor — except their own AI handing them what someone else asked, or what it
+        // made them from a message that came in (they did not do that).
+        if (userId === change.entry.actorId && !((asked || fromMessage) && change.entry.actorKind === 'ai')) continue
+        const kind = asked ? 'asked' : fromMessage ? 'from_message' : noticeKind(userId, change, final)
+        const base = fromMessage
+          ? {
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+            actorKind: change.entry.actorKind, dedupeKey: `from_message:${change.entry.recordId}`, createdAt: now, readAt: null,
+          }
+          : asked
           ? {
             // Once per assignment; the asker stands as the actor (「〇〇さんから頼まれました」).
             recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: asked.asker,
@@ -643,7 +680,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       }
       if (stops.length > 0) writeComputed(companyId, handle, stops)
       if (rows.length === 0) return
-      // An `asked` already told for this assignment is skipped (its dedupe key).
+      // An `asked` already told for this assignment, or a `from_message` for this record, is skipped (its dedupe key).
       const written = new Set(handle.notifications.insert(rows))
       const fresh = rows.filter(r => written.has(r.id))
       if (fresh.length === 0) return

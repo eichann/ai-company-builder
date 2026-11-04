@@ -56,7 +56,7 @@ import { noticeKind } from '../../src/services/notifications'
 import { recordReader } from '../../src/services/record-access'
 import { slackSignalMessage } from '../../src/composition/inbox'
 import type { Member } from '../../src/services/access'
-import { defaultTaskSettings } from '../../../shared/core/task-settings'
+import { defaultTaskSettings, replyTarget } from '../../../shared/core/task-settings'
 import { coreTypeDefinitions } from '../../../shared/core/core-types'
 import type { IncomingMessage } from '../../../shared/types/inbox'
 import type { ConnectorRole } from '../../../shared/core/connector-roles'
@@ -82,6 +82,8 @@ let cutAt: string | null = null
 let listedSince: string[] = []
 let engine: RecordEngine
 let serviceWriter: ReturnType<typeof createServiceRecordWriter>
+/** The company's own days off (task settings), for the reply 目安. */
+let companyHolidays: string[] = []
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -137,6 +139,7 @@ function settings(body: Record<string, unknown>, co = 'a') {
 
 beforeEach(() => {
   n = 0
+  companyHolidays = []
   told = []
   mailbox = {}
   ready = new Set()
@@ -176,6 +179,8 @@ beforeEach(() => {
     files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
     managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf, notify: () => {},
     afterAct: (co, change) => inbox.afterAct(co, change),
+    // As composition.ts: the company's reply 目安 with its own holidays.
+    replyGuideline: (_co, at) => replyTarget(at, defaultTaskSettings().reply, companyHolidays).date,
   })
   const fake: InboxSource = {
     async listSince(_co, userId, since) {
@@ -568,6 +573,25 @@ describe('B4: a task as the outcome', () => {
     expect(ok(judge(mine.value.record.id))).toMatchObject({ state: 'handled', taskId: mine.value.record.id, replyRequestId: null })
     expect(fieldsOf(row.id).needs_reply).toBe(false)
     expect(ok(inbox.item(m('u-alice'), row.id)).tasks).toEqual([{ id: mine.value.record.id, title: '見積を作る' }])
+  })
+
+  it('a task the AI makes from a message always has a due: the stated deadline, else the 目安 past holidays (owner FB #13)', () => {
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const AI_ACTOR = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
+    const byAi = (fields: Record<string, unknown>) => ok(engine.createByAi(m('u-alice'), AI_ACTOR,
+      { type: 'task', title: '経費精算を承認する', personal: true, fields: { assignee: 'u-alice', ...fields }, links: { interaction: [row.id] } })).record.id
+    // None sent (or null): received Monday 11/2, 翌営業日 past 文化の日 (11/3) → 11/4.
+    expect(fieldsOf(byAi({})).due).toBe('2026-11-04')
+    expect(fieldsOf(byAi({ due: null })).due).toBe('2026-11-04')
+    // The deadline the AI read in the message is kept.
+    expect(fieldsOf(byAi({ due: '2026-11-10T12:00' })).due).toBe('2026-11-10T12:00')
+    // The company's own day off is skipped too.
+    companyHolidays = ['2026-11-04']
+    expect(fieldsOf(byAi({})).due).toBe('2026-11-05')
+    // Not from a message, or a person's own create: no due is made up.
+    expect(fieldsOf(ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: 'メモ', fields: { assignee: 'u-alice' } })).record.id).due).toBeUndefined()
+    expect(fieldsOf(ok(engine.create(m('u-alice'), AI_ACTOR, { type: 'task', title: '手で', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [row.id] } })).record.id).due).toBeUndefined()
   })
 
   it('a 返事のお願い links the 相手 found now (名寄せ), when the message had none', () => {
