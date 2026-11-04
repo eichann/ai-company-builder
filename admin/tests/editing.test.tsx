@@ -272,7 +272,7 @@ describe('セキュリティ', () => {
   it('explains the built-in rules and lists rejected pushes with their files', async () => {
     mockApi({ ...companyRoutes(), [`GET ${base}/push-rejections?limit=25`]: { body: ok(rejectionPage) } })
     renderInCompany(<SecurityPage />)
-    for (const title of ['配布設定の保護', 'スキルの自動実行', '個人用フォルダ（.personal）', '秘密情報の検出', 'Windowsで使えない名前', '編集権限']) {
+    for (const title of ['配布設定の保護', 'スキルの保護', '個人用フォルダ（.personal）', '秘密情報の検出', 'Windowsで使えない名前', '編集権限']) {
       expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
     }
     expect(screen.getByText('メンバーの役割の変更')).toBeInTheDocument()
@@ -383,5 +383,36 @@ describe('会社の設定: 名前の変更', () => {
     await userEvent.type(input, '  株式会社あたらしい ')
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')).toMatchObject({ body: { name: '株式会社あたらしい' } }))
+  })
+})
+
+describe('「Skill を直せる人」', () => {
+  const routes = (caps = ownerCapabilities) => ({
+    ...companyRoutes(caps),
+    [`GET ${base}/permissions`]: { body: ok({ scopes: permissionScopes }) },
+    [`GET ${base}/permissions/effective?path=`]: { body: ok(effectiveAt('', '', ['u_member'])) },
+    [`GET ${base}/skill-editors`]: { body: ok({ company: [], departments: [] }) },
+  })
+
+  it('an owner chooses someone for the whole company: the save names that list', async () => {
+    const user = userEvent.setup()
+    const chosen = members[members.length - 1]
+    const { calls } = mockApi({
+      ...routes(),
+      [`PUT ${base}/skill-editors`]: { body: ok({ company: [{ userId: chosen.userId, name: chosen.name, email: chosen.email }], departments: [] }) },
+    })
+    renderInCompany(<PermissionsPage />)
+    await user.click(await screen.findByRole('button', { name: '会社全体の Skill を直せる人を選ぶ' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('option', { name: new RegExp(chosen.email ?? '') }))
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ departmentId: null, userIds: [chosen.userId] }]))
+  })
+
+  it('a department manager is not offered the list', async () => {
+    mockApi(routes(managerCapabilities))
+    renderInCompany(<PermissionsPage />)
+    await screen.findByRole('tree')
+    expect(screen.queryByText('Skill を直せる人')).toBeNull()
   })
 })

@@ -27,6 +27,7 @@ import { isForbidden } from '@/lib/errors'
 import { SUMMARY_LABELS } from '@/lib/permission-labels'
 import { compareScopePaths, deepestAncestor, isSameOrAncestorPath, pathSegments } from '@/lib/scope-paths'
 import { useQuery } from '@/lib/use-query'
+import { SkillEditorsCard } from './skill-editors-card'
 import { cn } from '@/lib/utils'
 
 const SUMMARY_BADGE: Record<EffectiveSummary, 'success' | 'warning' | 'brand'> = {
@@ -237,6 +238,8 @@ export function PermissionsView() {
               </div>
             </Card>
           )}
+
+          {isAdmin && <SkillEditorsCard companyId={companyId} departments={departments.data ?? []} members={members.data ?? []} />}
 
           <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
             <Card className="overflow-hidden py-0 lg:sticky lg:top-6">

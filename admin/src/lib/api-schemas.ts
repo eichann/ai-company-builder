@@ -48,6 +48,7 @@ import type {
   DeletePrivateFolderResult,
   Department,
   DepartmentManager,
+  SkillEditors,
   EffectiveAccess,
   Invitation,
   InvitationPreview,
@@ -288,6 +289,7 @@ export const deletePrivateFolderSchema = topLevel<DeletePrivateFolderResult>({ p
 // Departments
 export const departmentStatsSchema = topLevel<{ files: number; folders: number; exists: boolean }>({ files: num, folders: num, exists: bool })
 export const managersSchema = topLevel<{ managers: DepartmentManager[] }>({ managers: list })
+export const skillEditorsSchema = topLevel<SkillEditors>({ company: list, departments: list })
 export const departmentMembersSchema = topLevel<DepartmentMembersView>({ members: list, canEdit: bool })
 
 // The AI action log, sandbox and emergency stop
