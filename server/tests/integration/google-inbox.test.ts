@@ -363,7 +363,8 @@ describe('the server clock reads Gmail into the inbox', () => {
       const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(t => t.name)
       const dump = tables.map(t => JSON.stringify(db.prepare(`SELECT * FROM ${t}`).all())).join('\n')
       expect(dump.includes('本文です')).toBe(false)
-      expect(dump.includes('定例') || dump.includes('打ち合わせ')).toBe(false)
+      // Their subjects neither (the clock's meeting discovery records the seed's own 「営業定例（社内）」, so look for the subjects themselves).
+      expect(dump.includes('メモ: 定例') || dump.includes('招待: 打ち合わせ')).toBe(false)
     } finally {
       vi.useRealTimers()
     }
