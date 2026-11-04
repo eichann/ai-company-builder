@@ -34,6 +34,7 @@ paths:
   - "server/tests/helpers/plugin-packages.ts"
   - "server/tests/fakes/hubspot/**"
   - "server/tests/fakes/google/**"
+  - "server/tests/fakes/portal/**"
   - "server/src/services/plugin-operations.ts"
   - "server/src/services/plugin-operation-*.ts"
   - "server/src/services/plugin-mapping-check.ts"
@@ -354,7 +355,7 @@ optional), so older packages read exactly as before.
 contract: 3
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
 account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
-actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
+actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }
 limits: { per_minute: 60 }
 errors: { map: { STATE_CHANGED: check_wait } }
 result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending } }
@@ -439,6 +440,12 @@ events:
 - **A released app** keeps working: `pluginsFor` lists a contract-3 business plugin, the fingerprint
   matches, and its older `parsePluginManifest` does not know contract 3, so `screensOfPackage` shows
   no screens for it until the app is updated.
+- **The practice service**: `server/tests/fakes/portal/` (`pnpm fake:portal`, staging port 14013) behaves as
+  a contract-3 service must, and holds a client to it (actor header on every call, search by POST, flat
+  errors, `{id}` an `EXTERNAL_ID_RE`). Faults: a 429 with `Retry-After`, an undeclared field, an
+  instruction-like name. A real service's host, base path and paths are never in this repository: the
+  private kit config's `portal` line gives them (`ACB_FAKE_PORTAL_HOST` / `_SERVICE`, `FAKE_PORTAL_BASE_PATH`,
+  `FAKE_PORTAL_ALIASES`); without it the fake stands in for the fixture's made-up host.
 - Test: `tests/unit/plugin-contract-v3.test.ts` with `fixtures/plugins/sample-portal` and
   `sample-portal-care` — each guard mutation-checked.
 

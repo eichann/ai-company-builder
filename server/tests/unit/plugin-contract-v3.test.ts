@@ -83,7 +83,7 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment' })
     expect(m.calling).toEqual({
       auth: { type: 'company_key', header: 'authorization', format: 'bearer', slots: ['read', 'act'] },
-      actor: { memberHeader: 'X-Sample-Actor', emailHeader: 'X-Sample-Email' },
+      actor: { memberHeader: 'X-ACB-Actor', emailHeader: 'X-ACB-Actor-Email' },
       limits: { perMinute: 60 },
       errors: { map: { STATE_CHANGED: 'check_wait', BAD_INPUT: 'refused' } },
       result: { path: '/operations/{id}', statusField: 'status', map: { done: 'applied', in_progress: 'pending', unknown_key: 'not_found' } },
@@ -276,24 +276,24 @@ describe('plugin contract 3: what a connector declares', () => {
   })
 
   it('every call says who acted: a member header, an address only if wanted; there is no key for a run with no member', () => {
-    expect(portalErrors('member_header: X-Sample-Actor, ', '')).toMatch(/member_header: ヘッダーの名前/)
-    expect(valid(edited(PORTAL, ', email_header: X-Sample-Email', '')).manifest.calling?.actor).toEqual({ memberHeader: 'X-Sample-Actor', emailHeader: null })
+    expect(portalErrors('member_header: X-ACB-Actor, ', '')).toMatch(/member_header: ヘッダーの名前/)
+    expect(valid(edited(PORTAL, ', email_header: X-ACB-Actor-Email', '')).manifest.calling?.actor).toEqual({ memberHeader: 'X-ACB-Actor', emailHeader: null })
     expect(portalErrors('actor: { member_header', 'actor: { system: robot, member_header')).toMatch(/知らない項目「system」/)
-    expect(portalErrors('actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }\n', '')).toMatch(/actor（誰の操作か/)
+    expect(portalErrors('actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }\n', '')).toMatch(/actor（誰の操作か/)
   })
 
   it('a header cannot take over the key or what the way out owns', () => {
-    expect(portalErrors('member_header: X-Sample-Actor', 'member_header: Authorization')).toMatch(/ほかの役目/)
+    expect(portalErrors('member_header: X-ACB-Actor', 'member_header: Authorization')).toMatch(/ほかの役目/)
     expect(portalErrors('header: authorization, format: bearer', 'header: X-Key, format: bearer')).toBe('')
-    expect(errorsOf(edited(edited(PORTAL, 'header: authorization, format: bearer', 'header: X-Key, format: bearer'), 'email_header: X-Sample-Email', 'email_header: x-key'))).toMatch(/ほかの役目/)
-    expect(portalErrors('email_header: X-Sample-Email', 'email_header: x-sample-actor')).toMatch(/ほかの役目/)
+    expect(errorsOf(edited(edited(PORTAL, 'header: authorization, format: bearer', 'header: X-Key, format: bearer'), 'email_header: X-ACB-Actor-Email', 'email_header: x-key'))).toMatch(/ほかの役目/)
+    expect(portalErrors('email_header: X-ACB-Actor-Email', 'email_header: x-acb-actor')).toMatch(/ほかの役目/)
     expect(portalErrors('timestamp_header: X-Sample-Timestamp', 'timestamp_header: X-Sample-Signature')).toMatch(/ほかの役目/)
-    expect(portalErrors('header: X-Sample-Signature', 'header: X-Sample-Actor')).toMatch(/ほかの役目/)
-    expect(portalErrors('member_header: X-Sample-Actor', 'member_header: Idempotency-Key')).toMatch(/ほかの役目/)
+    expect(portalErrors('header: X-Sample-Signature', 'header: X-ACB-Actor')).toMatch(/ほかの役目/)
+    expect(portalErrors('member_header: X-ACB-Actor', 'member_header: Idempotency-Key')).toMatch(/ほかの役目/)
     expect(portalErrors('header: authorization, format: bearer', 'header: Idempotency-Key, format: bearer')).toMatch(/ほかの役目/)
-    for (const h of ['Host', 'Cookie', 'X-HTTP-Method-Override', 'Transfer-Encoding']) expect(portalErrors('member_header: X-Sample-Actor', `member_header: ${h}`), h).toMatch(/本体が決めるヘッダー/)
+    for (const h of ['Host', 'Cookie', 'X-HTTP-Method-Override', 'Transfer-Encoding']) expect(portalErrors('member_header: X-ACB-Actor', `member_header: ${h}`), h).toMatch(/本体が決めるヘッダー/)
     expect(portalErrors('header: authorization, format: bearer', 'header: Host, format: bearer')).toMatch(/本体が決めるヘッダー/)
-    expect(portalErrors('member_header: X-Sample-Actor', 'member_header: "X Bad"')).toMatch(/ヘッダーの名前/)
+    expect(portalErrors('member_header: X-ACB-Actor', 'member_header: "X Bad"')).toMatch(/ヘッダーの名前/)
   })
 
   it('an act can be told apart and never doubled: idempotency, the account, the key', () => {

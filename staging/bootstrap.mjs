@@ -46,7 +46,7 @@ export function resolveTarget(s) {
     const cfg = loadPrivateConfig(s.private)
     if (!cfg.ok) return { private: 'unreadable', error: '本番の設定を読めませんでした（ネットワークか gh auth login を確かめてください）' }
     if (!cfg.production) return { private: 'unreadable', error: '本番の版がまだ設定に書かれていません' }
-    return { private: 'ok', sha: cfg.production, lockText: cfg.lockText }
+    return { private: 'ok', sha: cfg.production, lockText: cfg.lockText, portal: cfg.portal }
   }
   try {
     const sha = git(['ls-remote', '--', s.remote, `refs/heads/${s.branch}`], { timeout: 30_000 }).split(/\s+/)[0]
@@ -92,12 +92,16 @@ function stopContainers(project) {
 
 /**
  * Bring the kit checkout to the version to run. Returns { note, private } — `note` is a line
- * for the person (or null). Writes production's plugin lock to <home>/plugins.lock (0600).
+ * for the person (or null). Writes production's plugin lock to <home>/plugins.lock and what the
+ * practice portal stands in for to <home>/portal-practice.json (0600).
  */
 export function followProduction(s, paths, logger, { stop = stopContainers } = {}) {
   const local = localHead(paths.app)
   const target = resolveTarget(s)
-  if (target.private === 'ok') writePrivateFile(paths.lock, target.lockText)
+  if (target.private === 'ok') {
+    writePrivateFile(paths.lock, target.lockText)
+    writePrivateFile(paths.portal, JSON.stringify(target.portal))
+  }
   const what = target.private === 'ok' ? '本番と同じ版' : `公開版の最新（${s.branch}）`
   const d = decideUpdate({ localSha: local, remoteSha: target.sha ?? null, error: target.error })
   const done = note => ({ note, private: target.private })

@@ -7,7 +7,7 @@
  * contract: 3
  * auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
  * account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
- * actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
+ * actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }
  * limits: { per_minute: 60 }
  * errors: { map: { STATE_CHANGED: check_wait } }
  * result: { path: "/operations/{id}", status_field: status, map: { done: applied } }

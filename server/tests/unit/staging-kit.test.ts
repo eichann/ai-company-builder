@@ -32,9 +32,9 @@ describe('secrets', () => {
     const s = kit.settingsFrom(env())
     const p = kit.kitPaths(s.home)
     const first = kit.prepareSecrets(s, p, logger)
-    expect(first.created).toHaveLength(3)
-    const values = [p.authSecret, p.kek, p.fakeHubspotKey].map(f => fs.readFileSync(f, 'utf8').trim())
-    for (const f of [p.authSecret, p.kek, p.fakeHubspotKey, p.env]) expect(mode(f)).toBe(0o600)
+    expect(first.created).toHaveLength(4)
+    const values = [p.authSecret, p.kek, p.fakeHubspotKey, p.fakePortalKey].map(f => fs.readFileSync(f, 'utf8').trim())
+    for (const f of [p.authSecret, p.kek, p.fakeHubspotKey, p.fakePortalKey, p.env]) expect(mode(f)).toBe(0o600)
     expect(mode(p.secrets)).toBe(0o700)
     expect(fs.readFileSync(p.env, 'utf8')).toContain(`AUTH_SECRET=${values[0]}`)
     expect(Buffer.from(values[1], 'base64')).toHaveLength(32) // the server's KEK format
@@ -42,7 +42,7 @@ describe('secrets', () => {
 
     const again = kit.prepareSecrets(s, p, logger)
     expect(again.created).toEqual([])
-    expect([p.authSecret, p.kek, p.fakeHubspotKey].map(f => fs.readFileSync(f, 'utf8').trim())).toEqual(values)
+    expect([p.authSecret, p.kek, p.fakeHubspotKey, p.fakePortalKey].map(f => fs.readFileSync(f, 'utf8').trim())).toEqual(values)
 
     const out = lines.join('\n')
     for (const v of values) expect(out).not.toContain(v)
@@ -114,8 +114,12 @@ describe('private kit config', () => {
   const sha = 'a'.repeat(40)
   it('parses the production commit and the plugin lock lines', () => {
     expect(kit.parsePrivateConfig(`# x\nproduction ${sha}\nexample-org/connectors hubspot@0.3.0 abc\n`))
-      .toEqual({ production: sha, pluginsLockPath: null, lockLines: ['example-org/connectors hubspot@0.3.0 abc'] })
+      .toEqual({ production: sha, pluginsLockPath: null, lockLines: ['example-org/connectors hubspot@0.3.0 abc'], portal: null })
     expect(() => kit.parsePrivateConfig('production main\n')).toThrow()
+    // What the practice portal stands in for is the private config's, and never becomes a lock line.
+    const line = 'portal api.other.example /base/v1 other-service /a/{id}/b=/people/{id}/mail'
+    expect(kit.parsePrivateConfig(`${line}\n`)).toMatchObject({ lockLines: [], portal: { host: 'api.other.example', basePath: '/base/v1', service: 'other-service', aliases: ['/a/{id}/b=/people/{id}/mail'] } })
+    for (const bad of ['portal https://x.example /a s', 'portal x.example a s', 'portal x.example /a', 'portal x.example /a s nope']) expect(() => kit.parsePrivateConfig(`${bad}\n`), bad).toThrow()
   })
   it('mark-production changes only the production line', () => {
     const file = path.join(tmp, 'kit.conf')
@@ -181,6 +185,8 @@ describe('following production (bootstrap.mjs)', () => {
     expect(git(['-C', p.app, 'rev-parse', 'HEAD'])).toBe(one)
     expect(fs.readFileSync(p.lock, 'utf8')).toBe('example-org/connectors hubspot@0.3.0 abc\n')
     expect(mode(p.lock)).toBe(0o600)
+    // No `portal` line: the public fixture's made-up host.
+    expect(kit.portalPractice(p)).toEqual(kit.PUBLIC_PORTAL)
 
     // Same commit: nothing to do.
     expect(followProduction(s, p, logger, { stop }).note).toBeNull()

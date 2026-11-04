@@ -3,7 +3,7 @@
 # production build, no source mounts — with staging-only settings:
 #   - one front door (Caddy) on 127.0.0.1:${ACB_STAGING_PORT}: /api/* → api, the rest → admin,
 #     so PUBLIC_URL is one local origin the server's auth already trusts;
-#   - the practice HubSpot / Google / Slack on this Mac (staging/fakes.ts) through
+#   - the practice HubSpot / Google / Slack / portal on this Mac (staging/fakes.ts) through
 #     host.docker.internal (ACB_FAKE_*_URL; never in a production compose file);
 #   - the kit's own data, plugin shelf (read-only) and key-encryption key, all under the kit's
 #     home (~/acb-staging-kit), never this checkout.
@@ -41,11 +41,15 @@ services:
       - OPERATOR_USER_IDS=
       - COMPANY_CREATION_POLICY=operator
       - APP_DOWNLOAD_URL=
-      # Staging only (deployment.md): every HubSpot / Google / Slack request goes to the practice copy.
+      # Staging only (deployment.md): every HubSpot / Google / Slack / portal request goes to the practice copy.
       - ACB_ALLOW_FAKE_UPSTREAMS=1
       - ACB_FAKE_HUBSPOT_URL=http://host.docker.internal:${FAKE_HUBSPOT_PORT}
       - ACB_FAKE_GOOGLE_URL=http://host.docker.internal:${FAKE_GOOGLE_PORT}
       - ACB_FAKE_SLACK_URL=http://host.docker.internal:${FAKE_SLACK_PORT}
+      # The practice portal stands in for a host the private kit config names (a public default without it).
+      - ACB_FAKE_PORTAL_URL=http://host.docker.internal:${FAKE_PORTAL_PORT}
+      - ACB_FAKE_PORTAL_HOST=${FAKE_PORTAL_HOST}
+      - ACB_FAKE_PORTAL_SERVICE=${FAKE_PORTAL_SERVICE}
     read_only: true
     volumes:
       - ${KIT_DATA_DIR}:/app/data

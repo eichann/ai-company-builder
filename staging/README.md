@@ -66,8 +66,8 @@ pnpm staging:setup
 | `~/acb-staging-kit/acb-staging remove` | キットが作ったものをすべて消す（確認があります） |
 
 - 管理画面: <http://localhost:14001/>（アプリの「サーバー」もこの URL です）
-- 使う番号（ポート）: 14001（検証環境）、14010〜14012（練習用の HubSpot・Google・Slack）。
-  ほかと重なるときは `ACB_STAGING_PORT=15001` のように変えられます（`ACB_STAGING_FAKE_HUBSPOT_PORT` / `_GOOGLE_PORT` / `_SLACK_PORT` も）。
+- 使う番号（ポート）: 14001（検証環境）、14010〜14013（練習用の HubSpot・Google・Slack・ポータル）。
+  ほかと重なるときは `ACB_STAGING_PORT=15001` のように変えられます（`ACB_STAGING_FAKE_HUBSPOT_PORT` / `_GOOGLE_PORT` / `_SLACK_PORT` / `_PORTAL_PORT` も）。
 
 ## アカウントとパスワード
 
