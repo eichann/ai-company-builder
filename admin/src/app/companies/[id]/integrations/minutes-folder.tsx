@@ -1,21 +1,19 @@
 'use client'
 
-// 「つなぎ先」→「Google」→「議事録の置き場所」 (milestone 4 G7, `.claude/rules/minutes.md`):
-// the department folder the meeting records (and the tasks and decisions made from them) go to,
-// which meetings are read (default: only those with someone from outside), and how many days
-// 「どのまとまりの会議ですか？」 stays in a member's あなたの番.
-// Only department folders that are not private are offered; until one is chosen, members'
-// apps read nothing. Words for non-engineers: 「会議」「議事録」「置き場所」.
+// 「つなぎ先」→「Google」→「会議の記録」 (`.claude/rules/minutes.md` "Meetings for their attendees"):
+// meetings are found from members' Google calendars and recorded for their attendees only; events
+// marked private in the calendar are skipped. The old 「議事録の置き場所」 and 「読む会議」 no longer do
+// anything and are gone; only how many days 「どのまとまりの会議ですか？」 stays in a member's
+// あなたの番 is still chosen here. Words for non-engineers: 「会議」「議事録」「出た人」.
 import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { ErrorState, ListSkeleton } from '@/components/app/states'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ApiError, minutesApi, type MeetingIntake, type MinutesFolderSetting } from '@/lib/api'
+import { ApiError, minutesApi, type MinutesFolderSetting } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 
-const NONE = '__none__'
 const DAY_CHOICES = [3, 7, 14, 30]
 
 function explain(err: unknown): string {
@@ -28,31 +26,6 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
   const [view, setView] = useState<MinutesFolderSetting | null>(null)
   const [busy, setBusy] = useState(false)
   const data = view ?? setting.data
-
-  async function choose(value: string) {
-    setBusy(true)
-    try {
-      setView(await minutesApi.setFolder(companyId, value === NONE ? null : value))
-      toast.success(value === NONE ? '議事録の置き場所を外しました。議事録は読み込まれなくなります。' : `議事録の置き場所を「${value}」にしました。`)
-    } catch (err) {
-      toast.error(explain(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function chooseMeetings(value: string) {
-    if (value !== 'external' && value !== 'all') return
-    setBusy(true)
-    try {
-      setView(await minutesApi.setMeetings(companyId, value as MeetingIntake))
-      toast.success(value === 'all' ? '社内だけの会議の議事録も読むようにしました。' : '社外の人が参加した会議の議事録だけを読むようにしました。')
-    } catch (err) {
-      toast.error(explain(err))
-    } finally {
-      setBusy(false)
-    }
-  }
 
   async function chooseDays(value: string) {
     const days = Number(value)
@@ -70,41 +43,17 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
 
   return (
     <section className="space-y-2" data-testid="minutes-folder">
-      <h3 className="text-sm font-medium">議事録の置き場所</h3>
+      <h3 className="text-sm font-medium">会議の記録</h3>
+      <p className="text-xs text-muted-foreground" data-testid="minutes-attendees-note">
+        Google をつないだメンバーのカレンダーから Meet の会議を見つけ、その会議に出た人だけが見られる記録にします（会社の持ち主・管理者も、出ていない会議は見えません）。
+        カレンダーで「非公開」にした予定は記録しません。議事録を AI が読むのは、出た人が［AI に読ませる］を押したときだけです。
+      </p>
       {setting.loading && !data ? (
         <ListSkeleton rows={1} />
       ) : setting.error && !data ? (
         <ErrorState error={setting.error} onRetry={setting.reload} />
       ) : data ? (
         <>
-          <Select value={data.folder ?? NONE} onValueChange={choose} disabled={busy}>
-            <SelectTrigger className="w-64" aria-label="議事録の置き場所">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>選んでいない（議事録を読み込まない）</SelectItem>
-              {data.choices.map((folder) => (
-                <SelectItem key={folder} value={folder}>{folder}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Meet の会議の議事録を、この部署の記録として受け取ります。
-            議事録から作る宿題や決めたことも、この部署に置かれます。非公開のフォルダは選べません。
-          </p>
-          <h3 className="pt-2 text-sm font-medium">読む会議</h3>
-          <Select value={data.meetings} onValueChange={chooseMeetings} disabled={busy}>
-            <SelectTrigger className="w-64" aria-label="読む会議">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="external">社外の人が参加した会議だけ（おすすめ）</SelectItem>
-              <SelectItem value="all">社内だけの会議も含めて、すべて</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            「すべて」にすると、人事の面談など社内だけの会議の議事録も読み、出席したメンバーの宿題や決めたことにします。
-          </p>
           <h3 className="pt-2 text-sm font-medium">どの案件・プロジェクトの会議かを聞く期間</h3>
           <Select value={String(data.bundleQuestionDays)} onValueChange={chooseDays} disabled={busy}>
             <SelectTrigger className="w-64" aria-label="どの案件・プロジェクトの会議かを聞く期間">
@@ -117,7 +66,7 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            案件・プロジェクトが決まらないまま読んだ社外の会議は、この日数のあいだ担当の人の「あなたの番」に「どの案件の会議ですか？」（部署の呼び方で）として出ます。過ぎたら一覧から消えます（会議のカードからは、あとでも選べます）。
+            案件・プロジェクトが決まらないまま読んだ社外の会議は、この日数のあいだ読んだ人の「あなたの番」に「どの案件の会議ですか？」（部署の呼び方で）として出ます。過ぎたら一覧から消えます（会議のカードからは、あとでも選べます）。
           </p>
         </>
       ) : null}

@@ -18,6 +18,11 @@ export interface MeetingAttendee {
   organizer: boolean
   /** The attendee declined the event: not one of the meeting's people (minutes.md). */
   declined: boolean
+  /**
+   * On the event's attendee list. False for an organizer the provider names only as the organizer
+   * (kept for the thank-you mail's recipients): not one of the meeting's people.
+   */
+  listed: boolean
 }
 
 export interface MeetEvent {

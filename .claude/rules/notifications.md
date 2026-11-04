@@ -185,7 +185,9 @@ compare-and-set and ledger), and writes notices.
 - **Meetings**: `pollMeetings` — the minutes' `pollCompany` (`minutes.md` "Meetings for their
   attendees"): each member's calendar of the last 3 days with their own grant (a member without a
   usable one is refused locally), one members-only record per conference, yielding between members;
-  `ClockRun.meetingsFound` counts the records made. Never the minutes' text.
+  `ClockRun.meetingsFound` counts the records made. Never the minutes' text. Run **after** every
+  company's moves, notices, content and mail (a second pass), so a slow calendar never holds them
+  up; capped per company and run (`minutes.md`). Test: `server-clock.test.ts`.
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
   task is no longer waiting; a notice's dedupe key is already there), so a second run writes
   nothing. A run while one is going returns `ran: false`. Per company and run at most 50 moves

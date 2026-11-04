@@ -42,6 +42,8 @@ export interface SeedEvent {
   visibility?: 'default' | 'public' | 'private' | 'confidential'
   /** An instance of a recurring event: the series' id. */
   recurringEventId?: string
+  /** Attendees whose own copy of the event is marked private (Google keeps visibility per copy for attendees' edits). */
+  privateFor?: string[]
 }
 
 export type ArtifactState = 'STARTED' | 'ENDED' | 'FILE_GENERATED'

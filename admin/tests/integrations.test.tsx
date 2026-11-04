@@ -436,6 +436,20 @@ describe('つなぎ先 and the business using it, each on its own (owner decisio
 })
 
 describe('つなぎ先 → Google', () => {
+  it('says meetings are recorded for their attendees and private events are skipped; no minutes folder or "which meetings" to choose', async () => {
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView({ practice: true })) },
+      [`GET ${base}/google/minutes-folder`]: { body: ok({ folder: '営業部', choices: ['営業部'], meetings: 'external', bundleQuestionDays: 7 }) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const note = await screen.findByTestId('minutes-attendees-note')
+    expect(note).toHaveTextContent('出た人だけが見られる')
+    expect(note).toHaveTextContent('「非公開」にした予定は記録しません')
+    await screen.findByLabelText('どの案件・プロジェクトの会議かを聞く期間')
+    expect(screen.queryByLabelText('議事録の置き場所')).toBeNull()
+    expect(screen.queryByLabelText('読む会議')).toBeNull()
+  })
+
   it('shows the address to register, sends the secret once (never shown), keeps it when left empty, stops a member, and uses no jargon', async () => {
     const saves: Call[] = []
     const calls = stubApi(ownerCapabilities, {

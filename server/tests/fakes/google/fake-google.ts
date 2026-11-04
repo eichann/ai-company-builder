@@ -158,6 +158,8 @@ export interface FakeGoogleFaults {
   delayMs: number
   /** The next `count` API / token requests answer `status` (500 or 429 shapes) without doing anything. */
   failNext(count?: number, status?: number): void
+  /** Like `failNext`, only for requests whose path starts with `prefix` (others are answered). */
+  failOn(prefix: string, count?: number, status?: number): void
   /**
    * The next `count` Gmail sends are stored (the mail went out) and then never
    * answered: over a real socket the connection is cut; through `app.fetch`
@@ -294,14 +296,16 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   // ---- faults ----
   let failCount = 0
   let failStatus = 500
+  let failPrefix: string | null = null
   let dropCount = 0
   const held = new Set<() => void>()
   const faults: FakeGoogleFaults = {
     delayMs: 0,
-    failNext(count = 1, status = 500) { failCount = count; failStatus = status },
+    failNext(count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = null },
+    failOn(prefix, count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = prefix },
     dropAnswerAfterSend(count = 1) { dropCount = count },
     ignoreRefreshScope: false,
-    reset() { faults.delayMs = 0; failCount = 0; dropCount = 0; faults.ignoreRefreshScope = false },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false },
   }
 
   const app = new Hono()
@@ -314,7 +318,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   app.use('*', async (c, next) => {
     const control = c.req.path.startsWith('/__fake/')
     if (!control && faults.delayMs > 0) await new Promise(r => setTimeout(r, faults.delayMs))
-    if (!control && c.req.path !== '/o/oauth2/v2/auth' && failCount > 0) {
+    if (!control && c.req.path !== '/o/oauth2/v2/auth' && failCount > 0 && (failPrefix === null || c.req.path.startsWith(failPrefix))) {
       failCount--
       const message = failStatus === 429 ? 'Resource has been exhausted (e.g. check quota).' : 'Internal error encountered.'
       const err = apiError(failStatus, message, failStatus === 429 ? 'rateLimitExceeded' : 'backendError')
@@ -554,7 +558,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       } : {}),
       reminders: { useDefault: true },
       eventType: 'default',
-      ...(e.visibility ? { visibility: e.visibility } : {}),
+      ...(e.privateFor?.some(x => x.toLowerCase() === me) ? { visibility: 'private' } : e.visibility ? { visibility: e.visibility } : {}),
       ...(e.recurringEventId ? { recurringEventId: e.recurringEventId } : {}),
     }
   }

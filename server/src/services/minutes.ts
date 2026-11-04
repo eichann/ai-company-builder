@@ -101,6 +101,12 @@ export const MINUTES_READING_STALE_MS = 30 * 60 * 1000
 const STALE_PUT_BACK_NOTE = '読み始めてから30分たっても終わらなかったため、AI の番に戻しました'
 const RUN_PUT_BACK_NOTE = 'AI の自動実行が読み終えずに止まったため、AI の番に戻しました'
 const MAX_MEETINGS_PER_CHECK = 50
+/** Google calls of the meetings' discovery per company and clock run (the rest waits for the next run), and per app check. */
+export const MEETING_CALLS_PER_RUN = 300
+const MEETING_CALLS_PER_CHECK = 100
+/** Minutes not generated yet: look again after these waits (minutes), shared by every attendee's discovery. */
+const MEETING_LOOK_AGAIN_MIN = [5, 15, 30, 60, 120, 240]
+const FOUND_NOTE = 'カレンダーの予定から見つけました'
 /** At most this many meetings in the member's 「議事録が届きました」 answer. */
 const MAX_ARRIVALS = 100
 const AUTO_SERIES_NOTE = 'この定例は自動で読む設定のため、AI に読ませました'
@@ -188,6 +194,8 @@ export function googleRefusal(err: GoogleReadFailed): Refusal {
 
 export function createMinutesService(deps: MinutesServiceDeps) {
   const { companyData, writer, meetings } = deps
+  /** Who goes first in each company's next clock run (fairness only; nothing depends on it). */
+  const pollTurn = new Map<string, number>()
 
   /** A meeting still 「読んでいる」 back to 「届いた」 (the type's `retry`), with the actor that caused it. */
   const PUT_BACK: Record<string, { action: string; to: string }> = {
@@ -293,7 +301,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   /** A person closed 「どのまとまりの会議ですか？」 for this meeting (its ledger keeps the choice). */
   const noBundleChosen = (handle: CompanyData, id: string) => handle.records.ledger(id).some(e => e.action === MEETING_NO_BUNDLE_ACTION)
   const hasBundleLink = (handle: CompanyData, id: string) => handle.records.linksFrom([id]).some(l => l.name === 'bundle' && l.targetId)
-  const mayChooseBundle = (member: Member, fields: Record<string, LedgerValue>) => fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role)
+  /**
+   * Who chooses a meeting's まとまり: its assignee, an owner / admin (for a meeting they may read), and
+   * on a members-only meeting anyone on its list (design §2: the attendees choose to share it).
+   */
+  const mayChooseBundle = (member: Member, fields: Record<string, LedgerValue>, row: RecordRow) =>
+    fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role) || (row.members?.includes(member.userId) ?? false)
 
   /**
    * Which meetings ask together (one row 「まとまりを選ぶ会議 n件」): the same 相手, else the same
@@ -414,82 +427,146 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return ok({ recordId, version: r.entry.version, state: 'received' })
   }
 
+  /** A calendar event's key in `meeting_events` (a digest: no calendar id is stored there). */
+  const eventKey = (eventId: string) => deps.tokenDigest.digest(`meeting-event:${eventId}`).slice(0, 24)
+
   /**
-   * One member's calendar of the last 3 days (minutes.md "Meetings for their attendees"): each Meet
-   * meeting not marked private, with generated minutes, is one members-only record of its attending
-   * members, `arrived`; a known one gets the attendees the calendar added since. Their own
-   * 「自動で読む」 series are asked to be read for them.
+   * Members by an address Google verified for them: the account of their active Google grant (the
+   * grant is only given for the member's own address, google-connector.md). The ACB account's email
+   * is chosen at sign-up and not verified, so it never puts anyone on a meeting's list.
    */
-  async function discover(companyId: string, userId: string): Promise<Outcome<MinutesCheckResult>> {
-    const handle = companyData.forCompany(companyId)
-    const records = handle.records
-    if (!records.settings().enabled) return disabled()
+  function verifiedMembers(companyId: string): Map<string, MinutesMember> {
+    const members = new Map(deps.members(companyId).map(m => [m.userId, m]))
+    const out = new Map<string, MinutesMember>()
+    for (const g of companyData.forCompany(companyId).connectors.grants('google')) {
+      const m = members.get(g.userId)
+      const e = normalizeEmail(g.accountEmail)
+      if (g.status === 'active' && m && e) out.set(e, m)
+    }
+    return out
+  }
+
+  /** Someone's calendar marks these events private: no member's discovery records them (now or later). */
+  function markPrivate(companyId: string, events: MeetEvent[]): void {
+    const records = companyData.forCompany(companyId).records
+    for (const e of events) {
+      if (e.private && !records.meetingEvent(eventKey(e.eventId))?.private) records.setMeetingEvent(eventKey(e.eventId), { private: true }, deps.clock.now())
+    }
+  }
+
+  /** The member's Meet events of the last 3 days, newest first. */
+  async function eventsOf(companyId: string, userId: string): Promise<Outcome<MeetEvent[]>> {
     const nowMs = deps.clock.nowMs()
-    const result: MinutesCheckResult = { checked: false, meetings: 0, internalOnly: 0, created: [], existing: 0, waiting: 0, stale: [] }
-    let events: MeetEvent[]
     try {
-      events = await meetings.meetEvents(companyId, userId, new Date(nowMs - MINUTES_LOOKBACK_MS), new Date(nowMs))
+      const events = await meetings.meetEvents(companyId, userId, new Date(nowMs - MINUTES_LOOKBACK_MS), new Date(nowMs))
+      return ok([...events].sort((a, b) => (a.start < b.start ? 1 : a.start > b.start ? -1 : 0)))
     } catch (err) {
       if (err instanceof GoogleReadFailed) return googleRefusal(err)
       throw err
     }
+  }
+
+  /** No minutes yet: look again after a growing wait (shared by every attendee's discovery). */
+  function lookLater(companyId: string, key: string): void {
+    const records = companyData.forCompany(companyId).records
+    const tries = (records.meetingEvent(key)?.tries ?? 0) + 1
+    const wait = MEETING_LOOK_AGAIN_MIN[Math.min(tries - 1, MEETING_LOOK_AGAIN_MIN.length - 1)] * 60_000
+    records.setMeetingEvent(key, { tries, nextAt: new Date(deps.clock.nowMs() + wait).toISOString() }, deps.clock.now())
+  }
+
+  /**
+   * One member's events (minutes.md "Meetings for their attendees"): each ended Meet meeting not
+   * marked private by anyone, with generated minutes, is one members-only record of its attending
+   * members, `arrived`; a meeting recorded from this very event gets the attendees the calendar
+   * added since. Their own 「自動で読む」 series are asked to be read for them. Google calls stop at
+   * the budget (the rest waits for the next run) and at a rate limit.
+   */
+  async function discoverEvents(companyId: string, userId: string, events: MeetEvent[], budget: { calls: number }): Promise<Outcome<MinutesCheckResult>> {
+    const handle = companyData.forCompany(companyId)
+    const records = handle.records
+    const result: MinutesCheckResult = { checked: true, meetings: 0, internalOnly: 0, created: [], existing: 0, waiting: 0, stale: [] }
     const domain = handle.connectors.client()?.domain
     if (!domain) return refuse('forbidden', 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。', { code: 'GOOGLE_STOPPED' })
-    result.checked = true
     // The meeting definition in force must know its states and fields before the intake writes them,
     // also in a company whose map was not indexed since the server was updated.
     ensureCoreTypes(records, deps.clock.now())
-    const members = deps.members(companyId)
-    const finder = members.find(m => m.userId === userId)
+    const finder = deps.members(companyId).find(m => m.userId === userId)
     if (!finder) return ok(result)
-    const byEmail = new Map(members.flatMap(m => {
-      const e = normalizeEmail(m.email)
-      return e ? [[e, m] as const] : []
-    }))
+    const byEmail = verifiedMembers(companyId)
     const auto = new Set(records.meetingAutoSeries(userId))
+    const nowMs = deps.clock.nowMs()
 
     for (const event of events.slice(0, MAX_MEETINGS_PER_CHECK)) {
-      // Marked private in the calendar: not recorded at all — not even its Meet record is looked up.
-      if (event.private) { result.internalOnly++; continue }
+      const key = eventKey(event.eventId)
+      const known = records.meetingEvent(key)
+      // Marked private in someone's calendar: not recorded at all — not even its Meet record is looked
+      // up. A meeting recorded before it turned private stays, and gets no one added or told.
+      if (event.private || known?.private) {
+        if (event.private && !known?.private) records.setMeetingEvent(key, { private: true }, deps.clock.now())
+        result.internalOnly++
+        continue
+      }
       result.meetings++
+      // The meeting's people: attendees on the event's list who are members by an address Google
+      // verified for them (another address or a mailing list is not matched yet: design §4-4),
+      // never one who declined.
+      const attending = [...new Set(event.attendees.flatMap(a => {
+        if (a.declined || !a.listed) return []
+        const m = byEmail.get(normalizeEmail(a.email) ?? '')
+        return m ? [m.userId] : []
+      }))]
+      const wantsAuto = !!event.series && auto.has(seriesKey(event.series)) && attending.includes(userId)
+      // Recorded from this event already: no Google call for it.
+      if (known?.recordId) {
+        result.existing++
+        await joinAndAuto(companyId, userId, known.recordId, attending, wantsAuto)
+        continue
+      }
+      if (Date.parse(event.end) > nowMs) { result.waiting++; continue }
+      if (known?.nextAt && known.nextAt > deps.clock.now()) { result.waiting++; continue }
+      if (attending.length === 0) continue
+      if (budget.calls <= 0) { result.waiting++; continue }
       try {
+        budget.calls--
         const conference = await meetings.conferenceFor(companyId, userId, event)
-        if (!conference) { result.waiting++; continue }
+        if (!conference) { lookLater(companyId, key); result.waiting++; continue }
         // One record per conference, whoever finds it (the id is the conference's). A record made
         // before the type was renamed keeps its `minutes-…` id (db migrateCoreInterfaceLinks).
-        const key = deps.tokenDigest.digest(`minutes:${conference}`).slice(0, 24)
-        const id = newRecordId(MEETING_TYPE, key)
-        // The meeting's people: attendees who are members by their ACB email (another address or a
-        // mailing list is not matched yet: design §4-4), never one who declined.
-        const attending = [...new Set(event.attendees.flatMap(a => {
-          if (a.declined) return []
-          const m = byEmail.get(normalizeEmail(a.email) ?? '')
-          return m ? [m.userId] : []
-        }))]
-        const wantsAuto = !!event.series && auto.has(seriesKey(event.series)) && attending.includes(userId)
-        const known = [id, newRecordId('minutes', key)].find(rid => !!records.find(rid) && records.states([rid]).length > 0)
-        if (known) {
+        const confKey = deps.tokenDigest.digest(`minutes:${conference}`).slice(0, 24)
+        const id = newRecordId(MEETING_TYPE, confKey)
+        const existing = [id, newRecordId('minutes', confKey)].find(rid => !!records.find(rid) && records.states([rid]).length > 0)
+        if (existing) {
           result.existing++
-          await joinAndAuto(companyId, userId, known, attending, wantsAuto)
+          // Only the event it was recorded from is that meeting: another event on the same Meet
+          // (a reused link, a copied event) never widens its list.
+          if (parseRef(fieldsOf(records, existing).fields.source_ref)?.event === event.eventId) {
+            records.setMeetingEvent(key, { recordId: existing }, deps.clock.now())
+            await joinAndAuto(companyId, userId, existing, attending, wantsAuto)
+          } else {
+            lookLater(companyId, key)
+          }
           continue
         }
-        if (attending.length === 0) continue
+        budget.calls -= 2
         const docs = await meetings.documents(companyId, userId, conference)
-        if (docs.length === 0) { result.waiting++; continue }
+        if (docs.length === 0) { lookLater(companyId, key); result.waiting++; continue }
         const versions: string[] = []
-        for (const d of docs) versions.push(`${d.kind}:${await meetings.docVersion(companyId, userId, d.docId)}`)
+        for (const d of docs) {
+          budget.calls--
+          versions.push(`${d.kind}:${await meetings.docVersion(companyId, userId, d.docId)}`)
+        }
 
         // The field is text (500 characters): a very large meeting keeps the first members that fit (the list keeps all).
         const shown = [...attending]
         while (JSON.stringify(shown).length > 500) shown.pop()
-        const external = event.attendees.filter(a => isExternalAddress(a.email, [domain]))
+        const external = event.attendees.filter(a => a.listed && isExternalAddress(a.email, [domain]))
         const ref: SourceRef = { conference, event: event.eventId, docs: docs.map(d => ({ kind: d.kind, id: d.docId })), ...(event.series ? { series: event.series } : {}) }
         // No まとまり at intake (choosing one shows part of the meeting to its department: an
         // attendee's choice). The outside participants' company (名寄せ) is still its 相手.
         const counterpart = participantsCompany({ companyId, userId, role: finder.role }, external.map(a => a.email))
         const made = writer.create(companyId, {
           type: MEETING_TYPE, id, title: (event.title || '会議').slice(0, 200), members: attending,
-          actor: GOOGLE_ACTOR, note: `${userId} のカレンダーから`,
+          actor: GOOGLE_ACTOR, note: FOUND_NOTE,
           fields: {
             // occurred_at: the common outside time (`outside_event`); meeting_at stays for older readers.
             meeting_at: event.start, occurred_at: event.start, attendees: JSON.stringify(shown), external_count: external.length,
@@ -500,13 +577,17 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           notify: attending,
         })
         if (made.ok) {
+          records.setMeetingEvent(key, { recordId: made.record.id }, deps.clock.now())
           result.created.push(made.record.id)
           if (wantsAuto) await askToRead(companyId, userId, made.record.id, made.entry.version, { ...CLOCK_ACTOR }, AUTO_SERIES_NOTE)
         } else if (made.reason === 'exists') result.existing++
       } catch (err) {
         if (err instanceof GoogleReadFailed) {
-          // A switch turned off mid-way stops the whole check; a single unreadable meeting waits.
+          // A switch turned off mid-way stops the whole check; Google asking us to slow down stops this
+          // member until the next run; a single unreadable meeting waits.
           if (err.result.kind === 'not-sent') return googleRefusal(err)
+          if (err.result.kind === 'rate-limited') { result.waiting++; return ok(result) }
+          lookLater(companyId, key)
           result.waiting++
           continue
         }
@@ -516,10 +597,22 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return ok(result)
   }
 
+  /** One member's discovery on its own (the app's check): their events, private marks, then the meetings. */
+  async function discover(companyId: string, userId: string, budget: { calls: number }): Promise<Outcome<MinutesCheckResult>> {
+    if (!companyData.forCompany(companyId).records.settings().enabled) return disabled()
+    budget.calls -= 1
+    const events = await eventsOf(companyId, userId)
+    if (!events.ok) return events
+    markPrivate(companyId, events.value)
+    return discoverEvents(companyId, userId, events.value, budget)
+  }
+
   /**
-   * A meeting found again: the attendees the calendar added since join its list (removed ones
-   * stay; told 「議事録が届きました」 while it is still arrived), and the finder's 「自動で読む」 series
-   * asks the AI to read it. Best effort: someone else's change in between leaves it to the next run.
+   * A meeting found again from the event it was recorded from (the caller checked: `meeting_events`
+   * maps only that event to it): the attendees the calendar added
+   * since join its list (removed ones stay; told 「議事録が届きました」 while it is still arrived), and
+   * the finder's 「自動で読む」 series asks the AI to read it. Best effort: someone else's change in
+   * between leaves it to the next run.
    */
   async function joinAndAuto(companyId: string, userId: string, recordId: string, attending: string[], wantsAuto: boolean): Promise<void> {
     const records = companyData.forCompany(companyId).records
@@ -616,7 +709,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     async check(member: Member): Promise<Outcome<MinutesCheckResult>> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return disabled()
       const stale = putBackStale(member)
-      const found = await discover(member.companyId, member.userId)
+      const found = await discover(member.companyId, member.userId, { calls: MEETING_CALLS_PER_CHECK })
       if (!found.ok) return found
       return ok({ ...found.value, stale })
     },
@@ -627,13 +720,33 @@ export function createMinutesService(deps: MinutesServiceDeps) {
      * usable for meetings (no grant, 予定と議事録を読む off, the company's switches) is refused
      * locally, before anything leaves ACB, and skipped. Returns the meetings recorded.
      */
-    async pollCompany(companyId: string, between: () => Promise<void> = async () => {}): Promise<number> {
+    async pollCompany(companyId: string, between: () => Promise<void> = async () => {}, calls = MEETING_CALLS_PER_RUN): Promise<number> {
       if (!companyData.forCompany(companyId).records.settings().enabled) return 0
-      let created = 0
-      for (const m of deps.members(companyId)) {
+      const budget = { calls }
+      // A different member first on each run, so a capped run does not always leave the same ones out.
+      const all = deps.members(companyId)
+      const start = all.length > 0 ? (pollTurn.get(companyId) ?? 0) % all.length : 0
+      pollTurn.set(companyId, start + 1)
+      const order = [...all.slice(start), ...all.slice(0, start)]
+      // First every member's events: someone's private copy marks the event before anyone records it.
+      const found: Array<{ userId: string; events: MeetEvent[] }> = []
+      for (const m of order) {
+        if (budget.calls <= 0) break
         try {
           putBackStale({ companyId, userId: m.userId, role: m.role })
-          const r = await discover(companyId, m.userId)
+          budget.calls--
+          const r = await eventsOf(companyId, m.userId)
+          if (r.ok) { markPrivate(companyId, r.value); found.push({ userId: m.userId, events: r.value }) }
+        } catch (e) {
+          logError('minutes', 'discovery failed', e, { companyId })
+        }
+        await between()
+      }
+      let created = 0
+      for (const f of found) {
+        if (budget.calls <= 0) break
+        try {
+          const r = await discoverEvents(companyId, f.userId, f.events, budget)
           if (r.ok) created += r.value.created.length
         } catch (e) {
           // One member's failure never stops the others (no meeting, address or text in the log).
@@ -653,7 +766,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
-      if (!isYours(now.fields, member.userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
+      if (!isAttendee(row, now.fields, member.userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
       const ref = parseRef(now.fields.source_ref)
       if (!ref || ref.docs.length === 0) return refuse('conflict', 'この議事録の元の文書が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
 
@@ -721,7 +834,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, reader, recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
-      if (!mayChooseBundle(member, now.fields)) {
+      if (!mayChooseBundle(member, now.fields, row)) {
         return refuse('forbidden', 'どのまとまりの会議かを選べるのは、会議の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
       }
       const b = body as Record<string, unknown> | null
@@ -809,7 +922,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(handle.records, row.id)
-      const canChoose = mayChooseBundle(member, now.fields) && !hasBundleLink(handle, row.id)
+      const canChoose = mayChooseBundle(member, now.fields, row) && !hasBundleLink(handle, row.id)
       const reader = recordReader(member, handle.scopes.listWithRules())
       return ok({
         recordId: row.id, title: row.title, version: now.version, canChoose,
@@ -830,7 +943,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)
       if (!row) return notFound()
       const now = fieldsOf(records, row.id)
-      if (!mayChooseBundle(member, now.fields)) {
+      if (!mayChooseBundle(member, now.fields, row)) {
         return refuse('forbidden', 'まとまりがないと決められるのは、会議の担当の人か管理者です。', { code: 'MINUTES_NOT_YOURS' })
       }
       const b = body as Record<string, unknown> | null
@@ -947,8 +1060,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (!records.settings().enabled) return disabled()
       const reader = recordReader(member, handle.scopes.listWithRules())
       const since = new Date(deps.clock.nowMs() - MEETING_ARRIVED_DAYS * 86_400_000).toISOString()
-      const rows = records.candidates({ types: [MEETING_TYPE], ranges: [{ name: 'meeting_at', gte: since }], sort: { field: 'meeting_at', order: 'desc' } }, MAX_ARRIVALS * 5)
-        .filter(r => reader.record(r)).slice(0, MAX_ARRIVALS)
+      // Only meetings whose list names the member (every meeting found since 2026-11-04), then by time.
+      const listed = records.listedRecordIds(member.userId, MEETING_TYPE)
+      const recent = new Set(records.states(listed).filter(st => {
+        try { const at = (JSON.parse(st.fields) as Record<string, unknown>).meeting_at; return typeof at === 'string' && at >= since } catch { return false }
+      }).map(st => st.recordId))
+      const rows = records.byIds(listed.filter(id => recent.has(id))).filter(r => r.removedAt === null && reader.record(r)).slice(0, MAX_ARRIVALS)
       const names = new Map(deps.members(member.companyId).map(m => [m.userId, m.name]))
       const auto = new Set(records.meetingAutoSeries(member.userId))
       const status: Record<string, MeetingArrival['status']> = { arrived: 'arrived', received: 'asked', reading: 'reading', read: 'read', skipped: 'skipped', failed: 'failed' }
@@ -986,7 +1103,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const row = readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), meetingId)
       if (!row) return notFound()
       const now = fieldsOf(handle.records, row.id)
-      if (!isYours(now.fields, userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
+      if (!isAttendee(row, now.fields, userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
       const ref = parseRef(now.fields.source_ref)
       if (!ref) return refuse('conflict', 'この議事録の元の会議が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
       let event: MeetEvent | null

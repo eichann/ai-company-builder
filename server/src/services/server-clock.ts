@@ -133,7 +133,6 @@ export function createServerClock(deps: ServerClockDeps) {
     run.notices += deps.notifications.sweep(companyId, limits.notices)
     if (deps.expireContent) run.expired += await deps.expireContent(companyId)
     if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId, deps.yieldNow)
-    if (deps.pollMeetings) run.meetingsFound += await deps.pollMeetings(companyId, deps.yieldNow)
   }
 
   return {
@@ -153,6 +152,18 @@ export function createServerClock(deps: ServerClockDeps) {
             log(`[server-clock] company ${companyId} failed: ${error instanceof Error ? error.name : 'unknown error'}`)
           }
           await deps.yieldNow()
+        }
+        // Meetings last, after every company's moves and notices: a slow calendar never holds those up.
+        if (deps.pollMeetings) {
+          for (const companyId of deps.companyIds()) {
+            try {
+              if (deps.companyData.forCompany(companyId).records.settings().enabled) run.meetingsFound += await deps.pollMeetings(companyId, deps.yieldNow)
+            } catch (error) {
+              run.failedCompanies++
+              log(`[server-clock] company ${companyId} meetings failed: ${error instanceof Error ? error.name : 'unknown error'}`)
+            }
+            await deps.yieldNow()
+          }
         }
       } finally {
         running = false

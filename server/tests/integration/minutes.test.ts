@@ -300,9 +300,9 @@ describe('discovery', () => {
     expect(t.body.data.bundle).toBeNull()
     expect(t.body.data.candidates.map((c: Json) => c.title).sort()).toEqual(['生成AI研修 2期（株式会社サンプル）', '研修導入（株式会社サンプル）'])
     expect(t.body.data.candidates.map((c: Json) => c.typeLabel)).toEqual(['案件', '案件'])
-    // Only the assignee or an admin chooses; only a まとまり (not the 顧客, a 相手).
+    // Only the meeting's people (its list) choose — someone who was not there finds no meeting; only a まとまり (not the 顧客, a 相手).
     const deal = dealIdOf('研修導入（株式会社サンプル）')
-    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(403)
+    expect((await call('mn-yamada', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(404)
     const customerId = (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'customer'").get(CO) as Json).id as string
     const notBundle = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: customerId })
     expect([notBundle.status, notBundle.body.code]).toEqual([400, 'BAD_LINK'])
@@ -570,7 +570,8 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     const card = await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)
     expect(card.status, card.text).toBe(200)
     expect(card.body.data).toMatchObject({ recordId: salesId, canChoose: true, noBundle: false })
-    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.canChoose).toBe(false)
+    // Tanaka was there too (on its list): he may choose as well (design §2: the attendees choose).
+    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.canChoose).toBe(true)
     const set = await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { bundleQuestionDays: 30 })
     expect(set.status, set.text).toBe(200)
     expect(set.body.data).toMatchObject({ bundleQuestionDays: 30, folder: '営業部' })
@@ -612,8 +613,8 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     db.prepare("UPDATE record_state SET state = 'lost' WHERE company_id = ? AND record_id = ?").run(CO, other)
     expect(await suggestedOf('mn-sato')).toEqual({ id: deal, title: '研修導入（株式会社サンプル）', typeLabel: '案件' })
     expect((await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toMatchObject({ id: deal })
-    // Not the assignee: nothing to choose, nothing suggested.
-    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toBeNull()
+    // Someone who was not there: no meeting, nothing suggested.
+    expect((await call('mn-yamada', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).status).toBe(404)
     // Suggesting changed nothing: no まとまり, still read.
     expect(linkOf(salesId, 'bundle')).toBeNull()
     expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
