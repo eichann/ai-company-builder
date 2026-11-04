@@ -182,6 +182,8 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
 
   it('the AI (its owner is the assignee) updates two auto fields; HubSpot, the record and the ledger follow', async () => {
     const notify = vi.spyOn(services.push, 'notify')
+    // The assignee's app is connected (the records signal goes to connected readers only).
+    const opened = services.push.open(CO, 'op-member', { send: () => {} })
     const token = await tokenFor('op-member')
     const id = recordOf('1000000001')
     const r = await ai(token, 'POST', `/records/${id}/operations/update_deal`, update(id, { confidence: 'a', next_step: '11/7 デモ' }))
@@ -203,13 +205,14 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
       changes: [{ field: 'confidence', before: 'b', after: 'a' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }],
       receipt: { kind: 'written', operationId: r.body.data.operation.id, accountId: '90000001' },
     })
-    // The notice names the assignee, and says only that something changed.
+    // The signal reaches the connected reader (the assignee), and says only that something changed.
     expect(notify).toHaveBeenCalled()
     for (const [, users, signal] of notify.mock.calls) {
       expect(users).toEqual(['op-member'])
       expect(Object.keys(signal as object).sort()).toEqual(['kind', 'version'])
     }
     notify.mockRestore()
+    if (opened.ok) opened.close()
 
     // The AI cannot write the previous value back (people do); its owner can.
     expect((await ai(token, 'POST', `/operations/${r.body.data.operation.id}/undo`)).status).toBe(404)

@@ -16,7 +16,7 @@ import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
 export function fileLinking(ctx: EngineContext) {
-  const { companyData, transactions, clock, open, stateOf, summaryOf } = ctx
+  const { companyData, transactions, clock, open, stateOf, summaryOf, changed } = ctx
   return {
     /**
      * Link a file to a record after it was made, or remove that link
@@ -94,6 +94,7 @@ export function fileLinking(ctx: EngineContext) {
         return true
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
+      changed(member.companyId, row.id)
       return ok({ record: summaryOf(records, row.id), entry, changed: true })
     },
   }

@@ -5,6 +5,7 @@ import { GOOGLE_OPENED_TEXT, type GoogleFeature, type MyGoogle } from '../../../
 import { SLACK_OPENED_TEXT, type MySlack } from '../../../../shared/slack'
 import { SLACK_SETUP_FEATURES } from '../../../../../shared/core/slack'
 import { useInterval } from '../../../shared/hooks/useInterval'
+import { googlePermissionKey as googleKey } from '../../../shared/lib/googlePermission'
 import { connectGoogleAll, connectSlack, getGoogleStatus, getSlackStatus, markGoogleSeen, markSlackSeen } from '../api'
 import { googleDeclined, googleDeclinedText } from '../connectTools'
 
@@ -15,7 +16,6 @@ type Waiting =
   | { service: 'google'; asked: GoogleFeature[]; before: string; until: number }
   | { service: 'slack'; before: string; until: number }
 
-const googleKey = (g: MyGoogle | null) => (g ? `${g.connected}|${g.status}|${g.features.join()}` : '')
 const slackKey = (s: MySlack | null) => (s ? `${s.connected}|${s.status}|${s.features.join()}` : '')
 
 export function useConnectTools(companyId: string) {

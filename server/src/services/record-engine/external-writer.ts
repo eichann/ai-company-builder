@@ -53,7 +53,7 @@ export type ExternalRecordResult =
  * compare-and-set on the version, tell whom the record names — and nothing
  * else: it sends nothing outside, computes nothing, writes no file.
  */
-export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'notify'>) {
+export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'notify' | 'recordChanged'>) {
   return {
     apply(companyId: string, input: ExternalRecordInput): ExternalRecordResult {
       const records = deps.companyData.forCompany(companyId).records
@@ -79,6 +79,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         return valid.filter(t => !misses.includes(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
       })
       const tellAbout = (values: Record<string, LedgerValue>, entry: LedgerEntry) => {
+        try { deps.recordChanged?.(companyId, entry.recordId) } catch { /* the app's own check catches up */ }
         const to = [...new Set([values.assignee, values.next_actor].filter((u): u is string => typeof u === 'string'))]
         if (to.length > 0) { try { deps.notify(companyId, to, { type: def.name, entry, fields: values }) } catch { /* the app's own check catches up */ } }
       }

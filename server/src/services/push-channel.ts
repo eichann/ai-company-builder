@@ -84,6 +84,14 @@ export function createPushChannel(options: PushChannelOptions = {}) {
       }
     },
 
+    /**
+     * The members of this company with an open connection now: who a signal could reach
+     * (services/record-signal.ts works out readers among these only).
+     */
+    listeners(companyId: string): string[] {
+      return [...(byCompany.get(companyId)?.keys() ?? [])]
+    },
+
     /** Open connections (diagnostics, tests). */
     count: () => total,
   }

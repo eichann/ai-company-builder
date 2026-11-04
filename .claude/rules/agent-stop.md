@@ -64,9 +64,10 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 - Frames: `event: policy` + `data: {"kind":"policy","version":"<32 hex>"}`, sent once at
   connect (the current version, so an app that missed one while disconnected learns it) and on
   every change; `:` heartbeat comments every 25 s (`PUSH_HEARTBEAT_MS`). Since the state engine
-  (`records.md`): `event: records` + `{"kind":"records","version":"<fresh 32 hex>"}` to the
-  members an action names (`notify(companyId, userIds, event)`; test
-  `server/tests/unit/push-channel.test.ts`). Released apps drop it (unknown kind); the app only
+  (`records.md`): `event: records` + `{"kind":"records","version":"<fresh 32 hex>"}` to every
+  connected member who reads the changed record (`notifications.md` "The push signal";
+  `notify(companyId, userIds, event)`; tests `server/tests/unit/push-channel.test.ts`,
+  `record-signal.test.ts`). Released apps drop it (unknown kind); the app only
   refetches the policy on `policy` (`client/tests/agent-stop.test.ts`) and, on `records`, asks the
   server again for the member's received minutes (`minutes.md` "The app",
   `client/tests/minutes-app.test.ts`) and 「あなたの番」. Since the notices (`notifications.md`):

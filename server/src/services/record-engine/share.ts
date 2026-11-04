@@ -15,7 +15,7 @@ import { NOTE_MAX, provenance } from './values'
 export const SHARE_ACTION = 'share'
 
 export function sharing(ctx: EngineContext) {
-  const { transactions, clock, open, placeFolder, stateOf, summaryOf } = ctx
+  const { transactions, clock, open, placeFolder, stateOf, summaryOf, changed } = ctx
   return {
     /**
      * 「部署に出す／案件につなぐ」 (records.md "Owner-only records"): an owner-only
@@ -63,6 +63,7 @@ export function sharing(ctx: EngineContext) {
         return true
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
+      changed(member.companyId, row.id)
       return ok({ record: summaryOf(records, row.id), entry })
     },
   }

@@ -183,6 +183,22 @@ only, like `records` (`agent-stop.md` "The push channel"). Released apps know on
 `dropped` and keeps reading (only an over-long line closes the connection), so they log it and
 carry on. The app never acts on the signal itself: it only asks the server again.
 
+**Who hears a `records` signal** (owner 2026-11-04: 「A さんが期限を変えたら、B さんの方もすぐ
+更新されるべき（名前の載っていない、見られるだけの人にも）」): every member who **can read the changed
+record now**, not only the people named on it — `services/record-signal.ts` (`recordChanged`,
+the engine dep `RecordEngineDeps.recordChanged`, wired in `composition.ts`). Who reads it is
+exactly `recordReader` (`recordReaders` in `services/record-access.ts`): an owner-only record
+reaches its owner alone (owners and admins included in "nobody else"), a private folder's record
+only its readers, a member closed out of the folder nobody; the channel is per company. Sent on
+every ledger entry the engine and its service / external writers make (create, act, undo, links,
+file links, share; a `quiet` service write sends this signal and no notice), the actor's other
+PCs included. The notices (`notify` with the `RecordChange`) still go to the named people only.
+Cost: only members with an open connection are evaluated (`PushChannel.listeners`), one
+`recordReader` each per change, memberships in one query. The event is unchanged — kind + a fresh
+version, no record id. Test: `server/tests/unit/record-signal.test.ts` (a reader not named hears
+it, also when the actor is the only person named; closed folder, private folder, someone's
+owner-only record, another company hear nothing; content-free) — mutation-checked.
+
 ## The app
 
 - Main: `electron/features/notifications/watcher.ts` (`createNotificationsWatcher`) reads

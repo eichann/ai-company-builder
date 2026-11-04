@@ -71,6 +71,7 @@ import { createBundleKinds } from './services/bundle-kinds'
 import { createRecordFind } from './services/record-find'
 import { createPeopleNames } from './services/people-names'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
+import { createRecordSignal } from './services/record-signal'
 import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createSkillUseService } from './services/skill-uses'
@@ -274,12 +275,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // 大事な知らせを Slack の DM で (lane A, composition/connectors.ts): called after construction only.
     outside: (companyId, rows) => connectorsLane.noticesOutside(companyId, rows),
   })
-  /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
+  /** The engine's notify: the notices of the people an entry concerns (the push signal is `recordChanged`'s). */
   const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
-    push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) })
     if (!change) return
     try { notifications.recordChange(companyId, userIds, change) } catch (err) { logError('notifications', 'Writing notices failed', err, { company: companyId }) }
   }
+  // The `records` push signal: every connected member who reads the changed record now (records.md, notifications.md).
+  const recordChanged = createRecordSignal({ ...shared, memberships: repos.memberships, push })
   // Acceptance (引き受け, records.md "Acceptance"): the company's setting decides when a request waits.
   const taskAcceptance = createTaskAcceptance({ ...shared, settingsOf: companyId => taskSettings.settingsOf(companyId) })
   const recordEngine = createRecordEngine({
@@ -289,6 +291,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
+    recordChanged,
     actsFor,
     autoAccepts: taskAcceptance.autoAccepts,
     // A meeting output's item key → its id: what one reading made is made once (minutes.md).
@@ -315,6 +318,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: notifyRecords,
+    recordChanged,
   })
   const minutesReview = createMinutesReview({ companyData: shared.companyData, writer: serviceRecords, tokenDigest: sha256TokenDigest })
   // The content store's eraser: only the server clock's retention run here (no route; records.md).
@@ -362,6 +366,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     notify: notifyRecords,
+    recordChanged,
   })
   const pluginImport = createPluginImportService({
     ...shared, plugins, connector: pluginConnector, writer: externalRecords,

@@ -311,14 +311,6 @@ export function TabbedEditorPanel({
       {activeFile && aside}
       </div>
 
-      {/* Footer hint */}
-      <div className="flex-shrink-0 px-4 py-1.5 border-t border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">
-        <span className="text-[10px] text-gray-400 dark:text-zinc-600">
-          {activeFile?.external
-            ? '自動保存を止めています（外部の変更あり・未保存の変更あり）'
-            : `自動保存 ${saving.hasChanges ? '(未保存の変更あり)' : ''}`}
-        </span>
-      </div>
       </>}
     </div>
   )

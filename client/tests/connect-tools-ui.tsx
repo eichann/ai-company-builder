@@ -3,12 +3,14 @@
 // `?state=first` (a new member: Google and Slack offered), `new` (shown before; the company
 // turned 受信 on since), `seen` (nothing new: the screen stays closed), `noslack` (the company
 // has no Slack), `settings` (opened from 設定). 「Google でつなぐ」 here grants everything but
-// メール (the member unticked it on Google's page). `&theme=dark` for the dark look.
+// メール (the member unticked it on Google's page). `&theme=dark` for the dark look. `&calendar=1`
+// also mounts the task list's today's-calendar hook (one meeting once Google is allowed).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { ConnectToolsScreen } from '../src/features/settings/components/ConnectToolsScreen'
+import { useCalendarToday } from '../src/features/tasks/hooks/useCalendarToday'
 import type { MyGoogle } from '../shared/google'
 import type { MySlack } from '../shared/slack'
 import { installElectronAPI } from './ui/fixtures/electron-api'
@@ -41,8 +43,18 @@ installElectronAPI({
   },
   connectSlack: async (_companyId, features) => { calls.push(`connectSlack:${features.join(',')}`); return { success: true } },
   markGoogleSeen: async () => { calls.push('markGoogleSeen'); google = { ...google, seen: [...google.companyFeatures] }; return { success: true, data: google } },
+  // The server answers from the grant: not-connected until Google is allowed.
+  getCalendarToday: async () => {
+    calls.push('getCalendarToday')
+    return { success: true, data: { date: '2026-11-04', timeZone: 'Asia/Tokyo', reason: google.connected ? null : 'not-connected', events: google.connected ? [{ id: 'ev-1', title: 'B社 打ち合わせ', start: '2026-11-04T05:00:00.000Z', end: '2026-11-04T06:00:00.000Z', allDay: false, online: true, attendeeCount: 3, hasExternalAttendees: true }] : [] } }
+  },
   markSlackSeen: async () => { calls.push('markSlackSeen'); slack = { ...slack, seen: ['read', 'notices'] }; return { success: true, data: slack } },
 })
+
+function CalendarProbe() {
+  const today = useCalendarToday('co-preview')
+  return <output data-testid="calendar">{today ? (today.reason ?? today.events.map(e => e.title).join(',')) : 'loading'}</output>
+}
 
 function Preview() {
   const [log] = useState(calls)
@@ -51,6 +63,7 @@ function Preview() {
       <p className="p-4 text-xs text-zinc-500">表示確認用の人工データ。本番のサーバーや Google には接続しません。</p>
       <ConnectToolsScreen companyId="co-preview" firstRun={state !== 'settings'} />
       <output data-testid="calls" hidden>{log.length}</output>
+      {params.get('calendar') && <CalendarProbe />}
     </main>
   )
 }
