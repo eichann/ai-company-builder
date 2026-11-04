@@ -49,6 +49,8 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
    * department ids: the push check's snapshot and the app's guards decide by path.
    */
   function skillEditing(companyId: string, userId: string): SkillEditing {
+    // 「全員が直せる」: as if everyone were on the company's list. The write check still applies.
+    if (scopesOf(companyId).skillEditingOpen()) return { everywhere: true, folders: [] }
     const { everywhere, departmentIds } = scopesOf(companyId).skillEditorPlaces(userId)
     if (departmentIds.length === 0) return { everywhere, folders: [] }
     const named = new Set(departmentIds)

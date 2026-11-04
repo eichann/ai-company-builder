@@ -58,6 +58,15 @@ export const permissionSchema = `
     WHEN NEW.department_id IS NOT NULL AND NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
     BEGIN SELECT RAISE(ABORT, 'skill_editors.company_id must be the company of its department'); END;
 
+    -- 「全員が直せる」: one switch per company. No row, or everyone = 0: only the people above.
+    -- Everyone with write access then may change skill files; auto-run parts stay owner/admin.
+    CREATE TABLE IF NOT EXISTS skill_editing_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      everyone INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
     -- Pushes the pre-receive hook rejected (lib/push-rejections.ts).
     -- paths: JSON array of strings, capped.
     CREATE TABLE IF NOT EXISTS push_rejections (

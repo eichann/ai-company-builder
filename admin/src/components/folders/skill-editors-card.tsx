@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { skillEditorsApi, type Department, type DepartmentManager, type Member, type SkillEditors } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
+import { cn } from '@/lib/utils'
 
 interface Place {
   /** null: the whole company. */
@@ -21,11 +22,26 @@ interface Place {
 /**
  * 「Skill を直せる人」 (owner/admin): besides owners, admins and a department's 管理役, who may
  * change skills. A skill's scripts run on the computer of whoever uses it, so this is a short
- * list on purpose. It says nothing about folders: the place must also be writable for them.
+ * list by default; a company that prefers can open it with one switch (全員が直せる). It says
+ * nothing about folders: the place must also be writable for them.
  */
 export function SkillEditorsCard({ companyId, departments, members }: { companyId: string; departments: Department[]; members: Member[] }) {
   const editors = useQuery(`skill-editors:${companyId}`, () => skillEditorsApi.get(companyId))
   const [editing, setEditing] = useState<Place | null>(null)
+  const [switching, setSwitching] = useState(false)
+
+  const setEveryone = async (everyone: boolean) => {
+    setSwitching(true)
+    try {
+      const view = await skillEditorsApi.setEveryone(companyId, everyone)
+      editors.setData(() => view)
+      toast.success(everyone ? '全員がスキルを直せるようにしました' : 'スキルを直せる人を、選んだ人だけに戻しました')
+    } catch (err) {
+      toast.error('設定を変更できませんでした', { description: describeError(err) })
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   const inDepartment = (id: string) => editors.data?.departments.find((d) => d.departmentId === id)?.editors ?? []
   const places: Place[] = [
@@ -41,7 +57,22 @@ export function SkillEditorsCard({ companyId, departments, members }: { companyI
           スキルの中身（スクリプトを含む）は使う人のパソコンで動くため、変えられるのはオーナー・管理者・部署の管理役と、ここで選んだ人だけです。「会社全体」で選ぶと全部のスキルを、部署で選ぶとその部署のスキルを直せます。
         </p>
       </div>
-      <ul className="divide-y">
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={editors.data?.everyone ?? false}
+          disabled={!editors.data || switching}
+          onChange={(e) => void setEveryone(e.target.checked)}
+        />
+        <span>
+          <span className="block font-medium">全員が直せるようにする</span>
+          <span className="block text-xs text-muted-foreground">
+            編集できるフォルダのスキルを、メンバーのだれでも直せます。下の一覧は残り、切るとまた使われます。自動実行の設定だけは、オーナー・管理者のままです。
+          </span>
+        </span>
+      </label>
+      <ul className={cn('divide-y', editors.data?.everyone && 'opacity-50')}>
         {places.map((p) => (
           <li key={p.departmentId ?? 'company'} className="flex items-center justify-between gap-3 py-2">
             <span className="min-w-0">

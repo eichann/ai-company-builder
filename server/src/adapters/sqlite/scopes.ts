@@ -20,6 +20,8 @@ import {
   removeSkillEditorFromCompany,
   replaceDepartmentManagers,
   replaceSkillEditors,
+  setSkillEditingOpen,
+  skillEditingOpen,
   skillEditorPlaces,
   listSkillEditorIds,
   replaceScopeRules,
@@ -64,5 +66,7 @@ export function sqliteScopeRepository(conn: Database.Database, companyId: string
     replaceSkillEditors: (departmentId, userIds, createdBy) => replaceSkillEditors(conn, companyId, departmentId, userIds, createdBy),
     skillEditorPlaces: userId => skillEditorPlaces(conn, companyId, userId),
     removeSkillEditorFromCompany: userId => removeSkillEditorFromCompany(conn, companyId, userId),
+    skillEditingOpen: () => skillEditingOpen(conn, companyId),
+    setSkillEditingOpen: (open, updatedBy) => setSkillEditingOpen(conn, companyId, open, updatedBy),
   }
 }

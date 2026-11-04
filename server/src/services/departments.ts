@@ -31,6 +31,8 @@ const FOLDER_EXISTS_ERROR = 'A folder with this name already exists'
 
 /** 「Skill を直せる人」 (`GET /skill-editors`). */
 export interface SkillEditorsView {
+  /** 「全員が直せる」 is on: the lists are kept, and count again when it goes off. */
+  everyone: boolean
   company: ManagerView[]
   departments: Array<{ departmentId: string; editors: ManagerView[] }>
 }
@@ -87,6 +89,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       return ids.map(id => ({ userId: id, name: users.get(id)?.name ?? null, email: users.get(id)?.email ?? null }))
     }
     return {
+      everyone: scopes.skillEditingOpen(),
       company: view(scopes.skillEditorIds(null)),
       departments: departmentsOf(member).listUnordered()
         .map(d => ({ departmentId: d.id, editors: view(scopes.skillEditorIds(d.id)) }))
@@ -316,6 +319,12 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     /** 「Skill を直せる人」: the whole company's list and each department's that has someone on it. */
     skillEditors,
+
+    /** 「全員が直せる」 on or off (owner/admin acting). */
+    setSkillEditingOpen(member: Member, open: boolean): SkillEditorsView {
+      scopesOf(member.companyId).setSkillEditingOpen(open, member.userId)
+      return skillEditors(member)
+    },
 
     /**
      * Replace one list (owner/admin acting; `departmentId` null: the whole

@@ -69,4 +69,7 @@ export interface ScopeRepository {
   skillEditorPlaces(userId: string): { everywhere: boolean; departmentIds: string[] }
   /** The user is on no list of the company any more. */
   removeSkillEditorFromCompany(userId: string): void
+  /** 「全員が直せる」: off unless an owner/admin turned it on. */
+  skillEditingOpen(): boolean
+  setSkillEditingOpen(open: boolean, updatedBy: string): void
 }

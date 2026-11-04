@@ -182,8 +182,9 @@ what git actually sees through the app's `createGit`.
   「同期が完了しました」, with the member missing the server's changes for good (a look-alike path on a
   Mac did this). No origin/main (a company's first push) still goes on. Scenario: 「a pull that fails…」
   in `skill-files.test.ts`.
-- What running a skill leaves in its own folder (`__pycache__/`, `*.pyc`, `node_modules/`,
-  `package-lock.json`, the desktop's files; `client/shared/skill-leftovers.ts`) stays on each
+- What running a skill leaves in its own folder (`__pycache__/`, `*.pyc`, `node_modules/`, virtual
+  environments, `.next/` and the like, `dist/` / `build/` under `tools/`, `package-lock.json`, the
+  desktop's files; `client/shared/skill-leftovers.ts`) stays on each
   computer: a managed block of `.git/info/exclude`, unstaged if a shared negation re-included it.
   To the server it is a skill change, which would stop automatic sync at every run. New files only:
   taking a tracked one out of the index would delete it for everyone. A shared lock file that a

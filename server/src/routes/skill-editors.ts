@@ -7,6 +7,8 @@
  *   GET /skill-editors   owner/admin: the whole company's list and the departments'
  *   PUT /skill-editors   owner/admin: { departmentId: string | null, userIds };
  *                        replaces one list (null: the whole company)
+ *   PUT /skill-editors/everyone   owner/admin: { everyone: boolean }, 「全員が直せる」:
+ *                        everyone with write access may change skill files
  */
 import { Hono } from 'hono'
 import { z } from 'zod'
@@ -21,6 +23,17 @@ const { departments } = services
 const SkillEditorsBody = z.object({
   departmentId: z.string().min(1).nullable(),
   userIds: z.array(z.string().min(1)),
+})
+
+const EveryoneBody = z.object({ everyone: z.boolean() })
+
+skillEditorsRoute.put('/skill-editors/everyone', companyMember, serviceBody, async (c) => {
+  const actor = requireFullAccess(c.var.member, 'Only owners and admins can choose who may change skills')
+  if (!actor.ok) return refusal(c, actor)
+  if (c.var.body === null) return c.json({ error: 'Invalid JSON body' }, 400)
+  const parsed = EveryoneBody.safeParse(c.var.body)
+  if (!parsed.success) return c.json({ error: 'everyone must be true or false' }, 400)
+  return c.json({ success: true, data: departments.setSkillEditingOpen(actor.value, parsed.data.everyone) })
 })
 
 skillEditorsRoute.get('/skill-editors', companyMember, async (c) => {

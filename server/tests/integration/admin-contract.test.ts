@@ -309,6 +309,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Managers', USERS.owner, 'GET', `${base}/departments/${created.id}/managers`)
     await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors`, { departmentId: created.id, userIds: [USERS.member] })
     await expectShape('SkillEditors', USERS.owner, 'GET', `${base}/skill-editors`)
+    await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors/everyone`, { everyone: false })
     await expectShape('DepartmentMembers', USERS.owner, 'PUT', `${base}/departments/${created.id}/members`, { userIds: [USERS.member] })
     await expectShape('DepartmentMembers', USERS.member, 'GET', `${base}/departments/${created.id}/members`)
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)

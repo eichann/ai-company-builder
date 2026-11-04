@@ -391,7 +391,7 @@ describe('「Skill を直せる人」', () => {
     ...companyRoutes(caps),
     [`GET ${base}/permissions`]: { body: ok({ scopes: permissionScopes }) },
     [`GET ${base}/permissions/effective?path=`]: { body: ok(effectiveAt('', '', ['u_member'])) },
-    [`GET ${base}/skill-editors`]: { body: ok({ company: [], departments: [] }) },
+    [`GET ${base}/skill-editors`]: { body: ok({ everyone: false, company: [], departments: [] }) },
   })
 
   it('an owner chooses someone for the whole company: the save names that list', async () => {
@@ -399,7 +399,7 @@ describe('「Skill を直せる人」', () => {
     const chosen = members[members.length - 1]
     const { calls } = mockApi({
       ...routes(),
-      [`PUT ${base}/skill-editors`]: { body: ok({ company: [{ userId: chosen.userId, name: chosen.name, email: chosen.email }], departments: [] }) },
+      [`PUT ${base}/skill-editors`]: { body: ok({ everyone: false, company: [{ userId: chosen.userId, name: chosen.name, email: chosen.email }], departments: [] }) },
     })
     renderInCompany(<PermissionsPage />)
     await user.click(await screen.findByRole('button', { name: '会社全体の Skill を直せる人を選ぶ' }))
@@ -407,6 +407,21 @@ describe('「Skill を直せる人」', () => {
     await user.click(within(dialog).getByRole('option', { name: new RegExp(chosen.email ?? '') }))
     await user.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ departmentId: null, userIds: [chosen.userId] }]))
+  })
+
+  it('the one switch: starts off, and turning it on says so to the server', async () => {
+    const user = userEvent.setup()
+    const { calls } = mockApi({
+      ...routes(),
+      [`PUT ${base}/skill-editors/everyone`]: { body: ok({ everyone: true, company: [], departments: [] }) },
+    })
+    renderInCompany(<PermissionsPage />)
+    const box = await screen.findByRole('checkbox', { name: /全員が直せるようにする/ })
+    await waitFor(() => expect(box).toBeEnabled())
+    expect(box).not.toBeChecked()
+    await user.click(box)
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ everyone: true }]))
+    await waitFor(() => expect(box).toBeChecked())
   })
 
   it('a department manager is not offered the list', async () => {

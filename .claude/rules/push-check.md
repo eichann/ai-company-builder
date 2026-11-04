@@ -116,7 +116,9 @@ Deletions are always allowed except where noted (they are how something gets uns
   anything under `.claude/skills/`, `.claude/agents/`, `.claude/commands/` (any depth, A–Z
   case-insensitive, every file type, a file or link at the folder's own path too): owner/admin
   anywhere; a department manager inside a department they manage; people on
-  「Skill を直せる人」 (`skill_editors`: for the whole company, or one department). A department's
+  「Skill を直せる人」 (`skill_editors`: for the whole company, or one department), or everyone with
+  write access while the company's one switch 「全員が直せる」 is on (`skill_editing_settings`, off by
+  default; the snapshot then says `everywhere`). A department's
   list reaches any depth inside its folder, not root-level skills. In a scope repo the path is
   judged as `<scopePath>/<path>`. Rules: `shared/core/skill-files.ts`. Why (owner decision
   2026-11-04, audit B-H2): a skill's script reaches every member by sync and runs on their

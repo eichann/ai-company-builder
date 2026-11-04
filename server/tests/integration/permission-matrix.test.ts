@@ -177,6 +177,7 @@ const MATRIX: Row[] = [
   // 「Skill を直せる人」: owner/admin only, a department's manager included in the refusal
   r('GET /api/companies/:companyId/skill-editors', w => ({ path: `${C(w)}/skill-editors` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/skill-editors', w => ({ path: `${C(w)}/skill-editors`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/skill-editors/everyone', w => ({ path: `${C(w)}/skill-editors/everyone`, body: {} }), [400, 400, 403, 403, 404, 401]),
   // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),

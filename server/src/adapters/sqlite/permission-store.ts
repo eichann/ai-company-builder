@@ -372,6 +372,19 @@ export function skillEditorPlaces(conn: Conn, companyId: string, userId: string)
   }
 }
 
+/** 「全員が直せる」 (read at every push: the snapshot). */
+export function skillEditingOpen(conn: Conn, companyId: string): boolean {
+  const row = conn.prepare(`SELECT everyone FROM skill_editing_settings WHERE company_id = ?`).get(companyId) as { everyone: number } | undefined
+  return row?.everyone === 1
+}
+
+export function setSkillEditingOpen(conn: Conn, companyId: string, open: boolean, updatedBy: string): void {
+  conn.prepare(`
+    INSERT INTO skill_editing_settings (company_id, everyone, updated_at, updated_by) VALUES (?, ?, ?, ?)
+    ON CONFLICT (company_id) DO UPDATE SET everyone = excluded.everyone, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `).run(companyId, open ? 1 : 0, timestamp(), updatedBy)
+}
+
 /** A member left the company: they are on none of its lists any more. */
 export function removeSkillEditorFromCompany(conn: Conn, companyId: string, userId: string): void {
   conn.prepare(`DELETE FROM skill_editors WHERE company_id = ? AND user_id = ?`).run(companyId, userId)

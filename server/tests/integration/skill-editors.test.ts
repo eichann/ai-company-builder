@@ -105,4 +105,25 @@ describe('「Skill を直せる人」', () => {
   it('the database itself refuses a row for another company\'s department', () => {
     expect(() => db.prepare(`INSERT INTO skill_editors (company_id, department_id, user_id, created_at) VALUES (?, 'd-other', 'ann', ?)`).run(CO, now)).toThrow(/skill_editors\.company_id/)
   })
+
+  it('「全員が直せる」: off by default; on, every member is as if named for the company; off again, the lists count as before', async () => {
+    await put(null, [])
+    await put('d-sales', ['ben'])
+    const everyone = (value: unknown, user = 'owner') => call(user, 'PUT', `${base}/skill-editors/everyone`, { everyone: value })
+    const answer = async () => (await (await call('owner', 'GET', `${base}/skill-editors`)).json() as { data: { everyone: boolean } }).data.everyone
+    expect(await answer()).toBe(false)
+    expect(editing('ann')).toEqual({ everywhere: false, folders: [] })
+
+    expect((await everyone(true, 'ann')).status).toBe(403)
+    expect(editing('ann')).toEqual({ everywhere: false, folders: [] })
+
+    expect((await everyone(true)).status).toBe(200)
+    expect(await answer()).toBe(true)
+    expect(editing('ann')).toEqual({ everywhere: true, folders: [] })
+    expect(services.permissionViews.skillEditing(OTHER, 'someone')).toEqual({ everywhere: false, folders: [] })
+
+    expect((await everyone(false)).status).toBe(200)
+    expect(editing('ann')).toEqual({ everywhere: false, folders: [] })
+    expect(editing('ben')).toEqual({ everywhere: false, folders: ['営業部'] })
+  })
 })
