@@ -66,7 +66,8 @@ of the company went to (`outbound.sentDomains()`).
 
 - Record `outbound_message` (「送るもの」, version 5; server only, `records.md`), created / changed
   only through the service writer; folder = the まとまり's (else the meeting's, the 連絡's, the
-  task's) folder (an owner-only task without まとまり / meeting: its owner's);
+  task's) folder — but an owner-only or members-only 連絡 / meeting / task keeps its own place
+  whatever the まとまり (`placeOf` → `placeOfRow`, `records.md` "Members-only records");
   `requested_by` / `assignee` = the author; fields `subject`, `payload_hash`, `payload_version`,
   `channel: email` | `slack` (one type for every channel; Slack replies: "Replies" below),
   `slack_thread`, `expects_reply`, `reply_wait_until` ("Waiting for their answer"); links
@@ -139,7 +140,7 @@ the card without the server keeping it.
   **Nothing of a thread is stored or logged** (test: marked texts in no table, no log line).
 - **A reply draft**: `POST /outbound { interactionId, … }` (session or the AI's token). The
   interaction must be readable; its まとまり is taken along; link `interaction`. Place: an
-  owner-only 連絡's reply is owner-only (`personalOwner`), else the まとまり's / meeting's / 連絡's
+  owner-only / members-only 連絡's reply keeps that place, else the まとまり's / meeting's / 連絡's
   folder. No thread pointer → 409 `THREAD_UNKNOWN`.
   - Mail: recipients from the thread (source `thread` 「スレッドの相手」: From / To / CC of its
     messages in the member's own mailbox, the member left out; re-read before sending like every
@@ -209,7 +210,9 @@ no AI.
 - **After a confirmed send** (or `unknown` → 「送られていた」: the day is kept on the record as
   `reply_wait_until` at `send_unknown`, cleared by 「送られていなかった」): the sent mail's
   `interaction` additionally keeps our Message-ID (`message_id`, `<acb.<send id>@<domain>>`) and
-  the Gmail thread (`thread_ref`), is placed like the mail record (not only the まとまり's folder),
+  the Gmail thread (`thread_ref`), is placed like the mail record (not only the まとまり's folder; a
+  sent mail without 「返事を待つ」 too when its record is owner-only or members-only — never wider
+  than the mail; no record → no receipt),
   is the sender's (`assignee`) and starts `handled` (nobody's turn). Then
   `outboundMail.onAwaitingReply` → `inbox.awaitOwnMessage` (`composition.ts`): our message is
   registered in that interaction's thread (`inbox_messages`, direction out) and a 返事のお願い is made

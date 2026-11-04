@@ -68,7 +68,7 @@ export function engineContext(deps: RecordEngineDeps) {
     const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
     // Server-only records outside private folders for now (their links and reads assume a public place).
     if (findPrivateScope(scopes, f)) return bad('A server-only record cannot be placed in a private folder yet', 'PRIVATE_PLACE')
-    if (!reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null })) return refuse('forbidden', 'You cannot read that folder')
+    if (!reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null, members: null })) return refuse('forbidden', 'You cannot read that folder')
     return f
   }
 

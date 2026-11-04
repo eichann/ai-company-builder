@@ -48,7 +48,7 @@ import type { RecordRow } from '../ports/records'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
-import type { ServiceActor, ServiceRecordWriter, ServiceWriteResult } from './record-engine'
+import { placeOfRow, type ServiceActor, type ServiceRecordWriter, type ServiceWriteResult } from './record-engine'
 import { recordSummaries, RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
 /** How far before its window each poll also lists (mail that shows up late keeps its earlier time). */
@@ -408,6 +408,8 @@ export function createInboxService(deps: InboxDeps) {
       // Someone's own interaction takes the other side's message only when it reached its owner
       // (a reply that went to another member alone is not the owner's to hear of).
       if (!outgoing && row.personalOwner !== null && !reporterAndRecipients.has(row.personalOwner)) continue
+      // A members-only one only when it reached someone on its list (never as if it were the company's).
+      if (row.members !== null && !row.members.some(u => reporterAndRecipients.has(u))) continue
       continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
       return 'continued'
     }
@@ -418,7 +420,8 @@ export function createInboxService(deps: InboxDeps) {
       const since = new Date(Date.parse(msg.occurredAt) - DM_REPLY_WINDOW_MS).toISOString()
       const last = dm ? handle.inbox.latestIncoming('chat', `${dm[1]}:`, since, msg.occurredAt) : null
       const row = last ? handle.records.byIds([last.interactionId])[0] : undefined
-      if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)) {
+      if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)
+        && (row.members === null || row.members.includes(reporterId))) {
         continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
         return 'continued'
       }
@@ -496,7 +499,7 @@ export function createInboxService(deps: InboxDeps) {
     const task = input.taskId ? readable(member, input.taskId, 'task') : null
     const made = deps.writer.create(companyId, {
       type: 'reply_request', title: oneLine(input.title, INBOX_LIMITS.title) || SUBJECT_NONE,
-      ...(interaction.personalOwner !== null ? { personalOwner: interaction.personalOwner } : { folder: interaction.folder }),
+      ...placeOfRow(interaction),
       fields: {
         assignee: userId, occurred_at: input.occurredAt, wait_until: input.waitUntil,
         waiting_on: oneLine(input.waitingOn, 200) || null, end_condition: AWAITED_END_CONDITION,
@@ -761,7 +764,7 @@ export function createInboxService(deps: InboxDeps) {
           const counterpart = linked('counterpart').length > 0 ? linked('counterpart') : counterpartOf(member, str(cur.fields.from_address))
           const made = deps.writer.create(member.companyId, {
             type: 'reply_request', title: title || found.row.title,
-            ...(found.row.personalOwner !== null ? { personalOwner: found.row.personalOwner } : { folder: found.row.folder }),
+            ...placeOfRow(found.row),
             fields: {
               assignee: member.userId, occurred_at: occurred, end_condition: endCondition || null,
               due: typeof body.deadline === 'string' ? body.deadline : guideline, guideline_due: guideline, due_note: deadlineNote || null,

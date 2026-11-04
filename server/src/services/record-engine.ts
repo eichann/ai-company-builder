@@ -49,16 +49,16 @@ export {
 export { linkLedgerValue } from './record-engine/links'
 export { mayAct, NOT_VIA } from './record-engine/act'
 export { callVia } from './record-engine/types'
-export { SHARE_ACTION } from './record-engine/share'
+export { INVITE_ACTION, SHARE_ACTION } from './record-engine/share'
 export {
   createExternalRecordWriter, type ExternalRecordInput, type ExternalRecordResult, type ExternalRecordWriter,
 } from './record-engine/external-writer'
 export {
-  createServiceRecordWriter, type ServiceActor, type ServiceCreateInput, type ServiceRecordWriter, type ServiceTransitionInput,
+  createServiceRecordWriter, placeOfRow, type ServiceActor, type ServicePlace, type ServiceCreateInput, type ServiceRecordWriter, type ServiceTransitionInput,
   type ServiceWriteFailed, type ServiceWriteFailure, type ServiceWriteResult,
 } from './record-engine/service-writer'
 
-/** The member-facing engine (records routes, a member's AI): create, act, undo, fileLink, recordLink, share, history, atVersion. */
+/** The member-facing engine (records routes, a member's AI): create, act, undo, fileLink, recordLink, share, invite, history, atVersion. */
 export function createRecordEngine(deps: RecordEngineDeps) {
   const ctx = engineContext(deps)
   return {

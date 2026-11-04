@@ -307,6 +307,7 @@ const MATRIX: Row[] = [
   // The app opened a record (the turn-holder's first opening is kept): any member who reads it.
   r('POST /api/companies/:companyId/records/item/:recordId/opened', w => ({ path: `${C(w)}/records/item/deal-nosuch01/opened`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/share', w => ({ path: `${C(w)}/records/item/deal-nosuch01/share`, body: { folder: '営業部', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/members', w => ({ path: `${C(w)}/records/item/deal-nosuch01/members`, body: { add: [], expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/records-ai/item/:recordId/file-links', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -469,6 +470,11 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/connectors/:connectorId/enabled', w => ({ path: `${C(w)}/connectors/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
   // 受信を読む … off / on (google-connector.md): any member, their own grant only.
   r('PUT /api/companies/:companyId/me/google/features', w => ({ path: `${C(w)}/me/google/features`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // 「本人の許可で中継する」 (google-connector.md "The relay"): the settings are owners / admins; a member reads their own.
+  r('GET /api/companies/:companyId/google/relay', w => ({ path: `${C(w)}/google/relay` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/relay', w => ({ path: `${C(w)}/google/relay`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/relay/members/:userId', w => ({ path: `${C(w)}/google/relay/members/pm-nobody`, body: { stopped: true } }), [404, 404, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/me/google/relay', w => ({ path: `${C(w)}/me/google/relay` }), MEMBERS, 'the member\'s own relay view and records'),
   // The Slack connection (slack-connector.md): the company's app and members' grants are owner/admin;
   // a member's own permission is theirs. Slack's events are public: an unsigned request is an empty 401 for everyone.
   r('GET /api/companies/:companyId/slack', w => ({ path: `${C(w)}/slack` }), [200, 200, 403, 403, 404, 401]),
@@ -584,6 +590,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/records/item/:recordId/record-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/record-links/remove`, body: { link: 'related', target: 'task-nosuch02', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/opened', (w, id) => ({ path: `${C(w)}/records/item/${id}/opened`, body: {} }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/share', (w, id) => ({ path: `${C(w)}/records/item/${id}/share`, body: { folder: '営業部', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/members', (w, id) => ({ path: `${C(w)}/records/item/${id}/members`, body: { add: [], expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
 
   x('GET /api/companies/:companyId/ai-runs/:runId', (w, id) => ({ path: `${C(w)}/ai-runs/${id}` }), w => w.other.aiRun),
@@ -612,6 +619,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/me/minutes/item/:recordId/no-bundle', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/no-bundle`, body: {} }), w => w.other.record, 'meeting-nosuch01'),
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/bundle-question', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/bundle-question` }), w => w.other.record, 'meeting-nosuch01'),
   x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
+  x('PUT /api/companies/:companyId/google/relay/members/:userId', (w, id) => ({ path: `${C(w)}/google/relay/members/${id}`, body: { stopped: true } }), w => w.other.googleGrant, 'pm-nobody'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),

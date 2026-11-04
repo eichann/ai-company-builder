@@ -60,8 +60,9 @@ is missing, the rule files are the complete working instructions.
 - **Push checker** — the server's pre-receive hook (`server/src/lib/push-check/`); its rejection
   markers (`[WRITE_DENIED]`, `[PROTECTED_CONFIG]`, …) drive the app's automatic recoveries.
 - **Roles** — `owner` and `admin` have full access; `member` follows per-folder rules (scopes)
-  for read/write. **One exception**: an owner-only record (「持ち主だけ」, `personal_owner`) is
-  seen by its owner alone — not by owners, admins or managers either (`records.md`). Any member can also be a **department manager** (`department_managers`), which
+  for read/write. **Exceptions**: an owner-only record (「持ち主だけ」, `personal_owner`) is
+  seen by its owner alone, and a members-only record (「この人たちだけ」, `record_viewers`) by the
+  members on its list alone — not by owners, admins or managers either unless listed (`records.md`). Any member can also be a **department manager** (`department_managers`), which
   allows managing that department's private folders and AI instruction files.
 
 ## Commands

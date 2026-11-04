@@ -98,3 +98,21 @@ test('「Google でつなぐ」 (connectAll) asks for { all } and opens only the
   assert.equal((await seen.api.markSeen('co1')).success, true)
   assert.deepEqual(seen.requests.map(r => [r.method, r.url]), [['PUT', 'https://acb.test/api/companies/co1/me/google/seen']])
 })
+
+test('「スプレッドシートを中継で使う」: 「やめる」 sends only the member\'s own switch of sheets; a refusal never carries the server\'s text', async () => {
+  const ok = harness({ status: 200, body: { success: true, data: { available: true, reason: null, services: [], stopped: null, capPerDay: 500, usedToday: 0, records: [] } } })
+  const r = await ok.api.setRelay('co1', false)
+  assert.equal(r.success, true)
+  assert.deepEqual(ok.requests.map(q => [q.method, q.url, q.body]), [
+    ['PUT', 'https://acb.test/api/companies/co1/me/google/features', { feature: 'sheets', on: false }],
+    ['GET', 'https://acb.test/api/companies/co1/me/google/relay', undefined],
+  ])
+  const refused = harness({ status: 409, body: { error: `server text ${STATE}`, code: 'GOOGLE_NOT_CONNECTED' } })
+  const no = await refused.api.setRelay('co1', true)
+  assert.equal(no.success, false)
+  assert.ok(!JSON.stringify(no).includes(STATE))
+  assert.equal(refused.requests.length, 1)
+  // A view that is not the relay's shape is not handed to the renderer.
+  const odd = harness({ status: 200, body: { data: { available: true } } })
+  assert.equal((await odd.api.relay('co1')).success, false)
+})

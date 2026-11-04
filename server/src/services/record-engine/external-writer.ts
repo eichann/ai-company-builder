@@ -100,7 +100,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         }
         deps.transactions.run(() => {
           records.upsert({
-            id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder: input.folder, personalOwner: null,
+            id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder: input.folder, personalOwner: null, members: null,
             title: title || def.label, summary: '', createdAt: at, updatedAt: at, removedAt: null,
           })
           records.replaceLinks(id, linkRows(id))

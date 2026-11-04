@@ -169,15 +169,16 @@ describe('「仕事の道具をつなぐ」: one consent for what the company of
     const saved = await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })
     expect(saved.status).toBe(200)
     // The defaults (owner decision 2026-11-02): 受信を読む allowed (each member starts off); no Picker yet, so no Drive.
-    expect(saved.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
+    // The relay's スプレッドシート is off until the admin ticks it (2026-11-04, google-relay.test.ts).
+    expect(saved.body.data).toMatchObject({ featuresOff: ['sheets'], companyFeatures: ['minutes', 'mail', 'inbox'] })
     expect((await call('g-sato', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })).status).toBe(403)
     expect((await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'everything', on: false })).status).toBe(400)
     // Off, on and off again: the history says so, and it is the company's 受信を読む (task settings) itself.
     const off = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })
-    expect(off.body.data).toMatchObject({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })
+    expect(off.body.data).toMatchObject({ featuresOff: ['inbox', 'sheets'], companyFeatures: ['minutes', 'mail'] })
     expect(services.taskSettings.settingsOf(CO).readIncoming.allowed).toBe(false)
     const on = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })
-    expect(on.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
+    expect(on.body.data).toMatchObject({ featuresOff: ['sheets'], companyFeatures: ['minutes', 'mail', 'inbox'] })
     expect(services.taskSettings.settingsOf(CO).readIncoming.allowed).toBe(true)
     const offAgain = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })
     expect(offAgain.body.data.history[0]).toMatchObject({ action: 'features', detail: { feature: 'inbox', on: false } })

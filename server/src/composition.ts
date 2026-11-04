@@ -50,6 +50,7 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createTaskSettingsService } from './services/task-settings'
+import { replyTarget } from '../shared/core/task-settings'
 import { createWorkSwitches } from './services/work-switches'
 import { slackFeaturesOf } from './services/slack-client'
 
@@ -96,6 +97,7 @@ import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createGoogleRelay, googleRelayOffered, GOOGLE_RELAY_TOOL } from './services/google-relay'
 import { createGoogleDriveService } from './services/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
@@ -119,6 +121,11 @@ export function brokerCipherFromEnv(): BrokerCipherState {
 }
 
 /** The relay's day for daily caps (YYYY-MM-DD at BROKER_DAY_UTC_OFFSET_MINUTES, default Japan). */
+/** The Google relay's per-member daily count in `broker_usage` (a key id no registered key can have). */
+const GOOGLE_RELAY_USAGE_KEY = 'person-relay:google'
+/** Its refused calls per member and day (only how many are recorded). */
+const GOOGLE_RELAY_REFUSED_KEY = 'person-relay:google:refused'
+
 export function brokerDayOf(ms: number): string {
   return new Date(ms + BROKER_DAY_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10)
 }
@@ -214,6 +221,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     // With several company keys, the one a plugin's connection uses (bound below).
     connectionKeyId: (companyId, service) => plugins.connectionKeyId(companyId, service),
+    // 「本人の許可で中継する」 (google-connector.md "The relay"): Google once the company turned a relay service on.
+    personRelaysOffered: companyId => googleRelayOffered(shared.companyData, companyId),
   })
 
   // The company map (light ontology 4-2): indexed from pushes, off per company by default.
@@ -309,6 +318,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       now: companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE),
       holidays: taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
     }),
+    // A task the AI makes from a message gets a due: the message's deadline, else this 目安 (inbox.md).
+    replyGuideline: (companyId, receivedAt) => {
+      const s = taskSettings.settingsOf(companyId)
+      return replyTarget(receivedAt, s.reply, s.companyHolidays.map(h => h.date)).date
+    },
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -458,6 +472,27 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       setAllowed: (companyId, allowed, by) => taskSettings.setReadIncomingAllowed(companyId, allowed, by),
       choose: (member, on) => { void workSwitches.set(member, { switch: 'readIncoming', on }) },
     },
+  })
+
+  // The Google relay with the member's own permission (google-connector.md "The relay"): the key
+  // broker's relay hands /api/broker/google/… to it; it calls Google only through googleClient.
+  const googleRelay = createGoogleRelay({
+    ...shared,
+    google: googleClient,
+    unavailable: companyId => googleConnector.unavailable(companyId),
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    // The member's daily count, in the key broker's daily use under a key id no key can have.
+    usage: {
+      count: (companyId, userId, day) => repos.brokerKeys.usage(companyId, GOOGLE_RELAY_USAGE_KEY, userId, day).memberRequests,
+      add: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, GOOGLE_RELAY_USAGE_KEY, userId, day, 1, 0),
+    },
+    refusals: {
+      count: (companyId, userId, day) => repos.brokerKeys.usage(companyId, GOOGLE_RELAY_REFUSED_KEY, userId, day).memberRequests,
+      add: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, GOOGLE_RELAY_REFUSED_KEY, userId, day, 1, 0),
+    },
+    companyStopped: companyId => agentStops.companyStopped(companyId),
+    dayOf: brokerDayOf,
+    records: (companyId, userId, limit) => repos.agentEvents.page(companyId, { category: 'broker', tool: GOOGLE_RELAY_TOOL, ...(userId ? { userId } : {}) }, null, limit),
   })
 
   // Google Drive (google-drive.md): picked files and folders only (drive.file), through the one Google client.
@@ -617,6 +652,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     googleClient,
     googleConnector,
     googleDrive,
+    googleRelay,
     memberOAuth,
     minutes,
     calendar,
@@ -695,6 +731,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
       companyStopped: agentStops.companyStopped,
       managedConnection: (companyId, userId, service) => plugins.relayPolicy(companyId, userId, service),
+      personRelays: service => (service === 'google' ? googleRelay.relay : null),
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     clientActivity: createClientActivityService({ ...repos, ...shared }),

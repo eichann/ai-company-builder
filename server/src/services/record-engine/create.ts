@@ -10,7 +10,8 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
-import { acceptanceOf, proposalOf } from '../../../shared/core/core-types'
+import { acceptanceOf, messageOriginLinks, proposalOf } from '../../../shared/core/core-types'
+import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-settings'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
@@ -19,6 +20,7 @@ import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
 import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
+import { meetingMembers, membersList, withNamedPeople } from './members'
 
 export function creating(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, placeFolder, changed, tell, summaryOf } = ctx
@@ -32,6 +34,8 @@ export function creating(ctx: EngineContext) {
   function aiPlacement(member: Member, body: unknown): unknown {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
     const { defaultFolder, ...rest } = body as Record<string, unknown>
+    // A list of members says where it goes (records.md "Members-only records"): no defaults added.
+    if (rest.members !== undefined && rest.members !== null) return rest
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
     if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
@@ -51,20 +55,55 @@ export function creating(ctx: EngineContext) {
     return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
   }
 
+  /**
+   * A request the AI makes from a message that came in (an origin link to an interaction: a task's
+   * もとの連絡; inbox.md "A task from a message", owner FB #13) never lands without a due: the
+   * deadline the AI read in the message (`fields.due`, kept), else the company's reply 目安 from
+   * when the message came — the rule a 返事のお願い uses (`replyTarget`: 翌営業日 / 当日中, weekends,
+   * public and company holidays). A person may change or remove it afterwards.
+   */
+  function messageDue(member: Member, body: unknown): unknown {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
+    const b = body as Record<string, unknown>
+    const opened = open(member)
+    const def = opened && typeof b.type === 'string' ? currentTypes(opened.records).get(b.type)?.definition : undefined
+    if (!opened || !def || !def.implements.includes('request') || def.fields.due?.source !== 'server' || def.fields.due.kind !== 'date') return body
+    if (b.fields !== undefined && (typeof b.fields !== 'object' || b.fields === null || Array.isArray(b.fields))) return body
+    const fields = (b.fields ?? {}) as Record<string, unknown>
+    if (fields.due !== undefined && fields.due !== null) return body
+    const links = b.links
+    if (typeof links !== 'object' || links === null || Array.isArray(links)) return body
+    const said = messageOriginLinks(def).map(name => (links as Record<string, unknown>)[name]).find(v => v !== undefined)
+    const target = Array.isArray(said) ? said[0] : said
+    if (typeof target !== 'string' || !RECORD_ID_RE.test(target)) return body
+    // Only a message the member reads (else `create` refuses the link with its usual answer).
+    const row = opened.records.byIds([target]).find(r => r.removedAt === null && opened.reader.record(r))
+    if (!row) return body
+    let occurred: string | null = null
+    try {
+      const v = (JSON.parse(opened.records.states([row.id])[0]?.fields ?? '{}') as Record<string, unknown>).occurred_at
+      occurred = typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : null
+    } catch { occurred = null }
+    const at = occurred ?? clock.now()
+    const due = deps.replyGuideline?.(member.companyId, at) ?? replyTarget(at, DEFAULT_TASK_SETTINGS.reply).date
+    return { ...b, fields: { ...fields, due } }
+  }
+
   const api = {
     /**
      * The member's AI (`POST /api/records-ai/item`, tool records_create): `create` after the
-     * AI's defaults (`aiPlacement`). The answer says where it went (`placed`), for the AI to tell.
+     * AI's defaults (`aiPlacement`, and a due for what comes from a message: `messageDue`). The
+     * answer says where it went (`placed`), for the AI to tell.
      */
     createByAi(member: Member, actor: ActorInput, body: unknown) {
-      return api.create(member, actor, aiPlacement(member, body))
+      return api.create(member, actor, messageDue(member, aiPlacement(member, body)))
     },
 
     /**
      * A record that lives on the server (types with storage `server` or
      * `either`; a company's own file-backed type is created by writing its file).
      */
-    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; placed?: { personal: boolean; folder: string | null } }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; placed?: { personal: boolean; folder: string | null; membersOnly?: true } }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -93,6 +132,18 @@ export function creating(ctx: EngineContext) {
       if (personalOwner !== null && b.folder !== undefined && b.folder !== null) {
         return bad('自分用の記録には部署を指定できません。部署に出すときは「部署に出す」を使ってください', 'PERSONAL_WITH_FOLDER')
       }
+      // `members` = members-only (「この人たちだけ」, records.md "Members-only records"): the creator and these.
+      const isPluginType = records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')
+      let members: string[] | null = null
+      if (b.members !== undefined && b.members !== null) {
+        if (personalOwner !== null || (b.folder !== undefined && b.folder !== null)) {
+          return bad('見る人を選んだ記録には、自分用や部署を一緒に指定できません', 'MEMBERS_WITH_PLACE')
+        }
+        if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')
+        const list = membersList(b.members, id => deps.isMember(member.companyId, id))
+        if (!Array.isArray(list)) return bad(list.error, list.code)
+        members = [...new Set([member.userId, ...list])]
+      }
       let folder: string | null = null
       if (b.folder !== undefined && b.folder !== null) {
         const f = placeFolder(member, def.name, b.folder, reader)
@@ -113,13 +164,6 @@ export function creating(ctx: EngineContext) {
         const v = checkValue(f.kind, value, f.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v
-      }
-      const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner }
-      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, place)) {
-        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
-      }
-      if (typeof fields.reviewer === 'string' && !canRead(member.companyId, fields.reviewer, place)) {
-        return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
       }
       // The state it starts in: `initial`, or one the type lists in `create_states` (task: `preparing`, the AI's turn).
       let initial = def.initial
@@ -168,6 +212,27 @@ export function creating(ctx: EngineContext) {
           return refuse('bad-request', r.error, { code: r.code })
         }
       }
+      // Made from a members-only meeting: members-only too — the meeting's list and the people named
+      // here (records.md "Members-only records"); never placed wider by the system.
+      const meetingList = personalOwner === null ? meetingMembers(records, links) : null
+      // The AI may narrow a meeting's list but not widen it: showing it to others is a person's act.
+      if (meetingList !== null && members !== null && actor.kind === 'ai') {
+        const allowed = new Set(withNamedPeople([member.userId, ...meetingList], def, fields))
+        if (members.some(u => !allowed.has(u))) return bad('会議に出ていない人を、AI が見る人に足すことはできません', 'MEMBERS_NOT_IN_MEETING')
+      }
+      const inherited = members === null ? meetingList : null
+      if (inherited !== null) {
+        if (folder !== null) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
+        if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')
+        members = withNamedPeople([member.userId, ...inherited], def, fields)
+      }
+      const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, place)) {
+        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
+      }
+      if (typeof fields.reviewer === 'string' && !canRead(member.companyId, fields.reviewer, place)) {
+        return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
+      }
       // What a meeting's reading makes, made once: the same item of the same meeting is the answer.
       const meetingId = def.links.meeting?.target === 'meeting' ? links.find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
       if (itemKey !== null && !meetingId) return bad('key: only for a record linked to its meeting (links.meeting)', 'KEY_NEEDS_MEETING')
@@ -209,9 +274,10 @@ export function creating(ctx: EngineContext) {
       }
       transactions.run(() => {
         records.upsert({
-          id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder, personalOwner,
+          id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder, personalOwner, members,
           title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
         })
+        if (members !== null) records.addMembers(id, members, member.userId, at)
         records.replaceLinks(id, links)
         if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
         records.appendLedger(entry)
@@ -219,7 +285,7 @@ export function creating(ctx: EngineContext) {
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
       if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       else changed(member.companyId, id)
-      return ok({ record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder } })
+      return ok({ record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder, ...(members !== null ? { membersOnly: true as const } : {}) } })
     },
   }
   return api

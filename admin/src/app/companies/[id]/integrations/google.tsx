@@ -33,6 +33,7 @@ export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   mail: 'メールを送る',
   drive: 'Drive で選んだものを読む・置く',
   inbox: '受信を読む',
+  sheets: 'スプレッドシートを中継で使う',
 }
 
 const GRANT_STATUS_TEXT: Record<GoogleGrantSummary['status'], string> = {
@@ -262,7 +263,8 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
             メンバーはアプリの「仕事の道具をつなぐ」で、ここでオンのものを一度にまとめて許可します。オフにしたものは誰にも許可を求めず、すでに許可した人の分も次から使いません。
           </p>
           <ul className="space-y-1">
-            {GOOGLE_FEATURES.map((f) => {
+            {/* スプレッドシート (the relay) is switched under 「API キー」→「本人の許可で中継する」. */}
+            {GOOGLE_FEATURES.filter((f) => f !== 'sheets').map((f) => {
               const on = !view.featuresOff.includes(f)
               const needsPicker = f === 'drive' && on && !view.picker.configured
               return (

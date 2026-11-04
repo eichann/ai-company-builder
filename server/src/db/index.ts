@@ -16,14 +16,14 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
+import { migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import { slackSchema } from './schema/slack'
-import { migrateGoogleCompanyFeatures } from './schema/connectors'
+import { migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/connectors'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
@@ -38,7 +38,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 export { migrateInvitationClaims } from './schema/company'
 export { migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
-export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources } from './schema/records'
+export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
@@ -108,6 +108,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordLedgerProvenance(conn)
   migrateRecordPersonalOwner(conn)
   migrateRecordLinkCreator(conn)
+  // Members-only records (records.md "Members-only records").
+  migrateRecordViewers(conn)
   migrateAgentEventSandbox(conn)
   // 「もう一方の AI に聞く」: made once, on for the companies that exist then (agents.ts).
   migrateSecondOpinionSetting(conn)
@@ -141,6 +143,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane A ▼
   // The Google features the admin turned off for the company (google-connector.md).
   migrateGoogleCompanyFeatures(conn)
+  // The Google relay's cap and stops (google-connector.md "The relay").
+  migrateGoogleRelay(conn)
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)

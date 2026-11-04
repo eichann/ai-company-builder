@@ -231,6 +231,7 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
       state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s && s.updatedAt > r.updatedAt ? s.updatedAt : r.updatedAt,
       ...(old?.has(r.id) ? { fromOldConnection: true as const, notice: OLD_CONNECTION_LABEL } : {}),
       ...(r.personalOwner !== null ? { personal: true as const } : {}),
+      ...(r.members !== null ? { membersOnly: true as const } : {}),
       // 例外（この件だけ）: said in words wherever the AI reads it (never a precedent elsewhere).
       ...(r.type === 'decision' && fields.exception === true ? { exceptionNotice: DECISION_EXCEPTION_NOTICE } : {}),
     } satisfies RecordSummary]

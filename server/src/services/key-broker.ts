@@ -40,6 +40,7 @@ import {
   companyKeyEligibility,
   defaultBrokerRule,
   isValidBrokerServiceName,
+  isPersonRelayService,
   isValidRelayServiceId,
   parseBrokerAudience,
   parseBrokerRelayDefinition,
@@ -358,6 +359,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
       if (!isValidBrokerServiceName(body.service)) return refuse('bad-request', 'service must be a lower-case ASCII name (a-z, 0-9, -, _)')
       const service = body.service
+      // Google is relayed with each member's own permission, never a key (google-connector.md "The relay").
+      if (isPersonRelayService(service)) return refuse('bad-request', 'Google には鍵を登録しません。メンバー本人の Google の許可で中継します（「本人の許可で中継する」）。', { code: 'SERVICE_RESERVED' })
       const name = parseBrokerDisplayName(body.displayName)
       if ('error' in name) return refuse('bad-request', name.error)
       const secret = checkBrokerSecret(body.secret)

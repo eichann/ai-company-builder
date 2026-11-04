@@ -231,7 +231,7 @@ export function createPluginStepService(deps: PluginStepDeps) {
      * AI's turn. The まとまり's type must be one an enabled contract-2 business plugin has an
      * `ai_turn` step for; exactly one action of that type must lead there (`to` = a step's state,
      * the current state in `from`, `ai` in `who`). It runs as the same AI for the member who read
-     * the meeting or chose its まとまり (the engine's `who` / `mayAct` apply), its note naming the meeting. Zero or two
+     * the meeting or chose its まとまり (the engine's `who` / `mayAct` apply), its note naming the meeting (not an owner-only or members-only one). Zero or two
      * or more such actions, already at a step's state, no permission or a version conflict →
      * nothing: no guessing. The core never names a business operation (owner rule).
      */
@@ -253,12 +253,14 @@ export function createPluginStepService(deps: PluginStepDeps) {
       const moves = Object.entries(def?.actions ?? {}).filter(([, a]) =>
         a.to !== null && a.to !== undefined && states.has(a.to) && (a.from?.includes(bundle.state) ?? false) && a.who.includes('ai'))
       if (moves.length !== 1) return
-      const title = handle.records.byIds([done.recordId])[0]?.title ?? ''
+      const row = handle.records.byIds([done.recordId])[0]
+      // The まとまり's readers see this note: an owner-only or members-only meeting is not named there
+      // (records.md "Members-only records" — its title and id stay with its own readers).
+      const restricted = !row || row.personalOwner !== null || row.members !== null
+      const note = restricted ? '会議を読んだあと' : `会議「${row.title.slice(0, 80)}」（${done.recordId}）を読んだあと`.slice(0, 200)
       // A person's choice moves it as their AI too: the step it leads to is the AI's turn.
       const ai: ActorInput = actor.kind === 'ai' ? actor : { kind: 'ai', conversationId: null, runId: null }
-      await deps.act(member, ai, bundleId, moves[0][0], {
-        expectedVersion: bundle.version, note: `会議「${title.slice(0, 80)}」（${done.recordId}）を読んだあと`.slice(0, 200),
-      })
+      await deps.act(member, ai, bundleId, moves[0][0], { expectedVersion: bundle.version, note })
     },
 
     /**

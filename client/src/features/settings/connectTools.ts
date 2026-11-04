@@ -10,6 +10,7 @@ export const TOOL_GOOGLE_TEXT: Record<GoogleFeature, string> = {
   mail: 'AI が書いたメールを、あなたが確かめてから送れます',
   drive: '選んだ Drive のフォルダに、作った資料を置けます',
   inbox: '届いたメールから、やることを作れます',
+  sheets: 'あなたが編集できる表に、AI のスクリプトが読み書きできます（消す操作は通しません）',
 }
 
 export const TOOL_SLACK_TEXT: Record<SlackFeature, string> = {

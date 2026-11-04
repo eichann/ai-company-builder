@@ -41,7 +41,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `duplicate`. **One interaction per thread**: a message whose `references` hold a known message
   joins that interaction (`continued`) — unless it is the other side's message to someone else
   than the interaction's owner (an owner-only interaction takes it only when its owner was the
-  reporter, in To or in CC; otherwise it is routed as new: never told to someone it did not reach).
+  reporter, in To or in CC; a members-only one only when someone on its list was — for any
+  message; otherwise it is routed as new: never told to someone it did not reach).
 - **Routing a new message** (`shared/core/intake-settings.ts` `routeIncoming`, in this order):
   spam → nothing; internal (sender is a member, or of the company's domains — the settings'
   plus the members' own, never free mail; mail only — a colleague's Slack DM or mention is what
@@ -65,7 +66,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). A Slack DM is seldom
   threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
   incoming message of that DM within `DM_REPLY_WINDOW_MS` (3 days; `latestIncoming`), never
-  another DM's or older. When the member's reply is seen: each open reply request moves as below
+  another DM's or older, and only when the member reads it (owner-only: theirs; members-only: they
+  are on the list). When the member's reply is seen: each open reply request moves as below
   with the note 「メールで返信済み」/「チャット（Slack）で返信済み」 and its reply drafts still in
   `draft` — the prepared ones and the card's own replies to that 連絡 (`interaction` link) — are
   **discarded** (never offered to send); an
@@ -135,6 +137,19 @@ member reads), and for a 返事のお願い `request` (its state, version and `p
 `interaction` link is this message (the AI makes it with `records_create`, owner-only); a second
 run sees it in the view and reuses it. `reply` links the 相手 found now by 名寄せ when the message
 had none.
+
+**A task from a message** (owner FB #13, 2026-11-04: a MoneyForward mail asking the owner to approve
+an expense became their task, but with no notice and no due it sat unseen under 「いつか」):
+- **Due**: `recordEngine.createByAi` (`record-engine/create.ts` `messageDue`) gives a request the AI
+  makes with an origin link to a message (`messageOriginLinks` in `core-types.ts`: a task's
+  `interaction`) a `due` when the AI sent none (or null): the 目安 from the message's `occurred_at`
+  (engine dep `replyGuideline`, composition.ts: `replyTarget` with the task settings' rule and
+  company holidays — the rule a 返事のお願い uses; without the dep the default settings). A due the AI
+  read in the message (`fields.due`; the triage prompt asks for it) is kept. Enforced on the server,
+  so a task from a message never lands without a due; a person changes it afterwards like any
+  due. A person's own create gets none.
+- **Notice**: the member's own AI making it their turn tells them (`from_message`,
+  `notifications.md`), although their AI was the actor.
 
 **The thread itself** is read through A4's one AI route, `GET /api/records-ai/threads/:recordId`
 (`outbound-mail.md` "Replies": an interaction or a record linking one, read now with the member's
@@ -219,7 +234,8 @@ members, owner, admin; CC / several To / shared address / internal / free mail /
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; B4: the item view is the owner's alone and a reply request answers its
+「やることにする」 wins; a task the AI makes from a message always has a due — the stated one kept,
+else the 目安 past public and company holidays, none made up for other creates (mutation-checked); B4: the item view is the owner's alone and a reply request answers its
 message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is

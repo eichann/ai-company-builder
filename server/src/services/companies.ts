@@ -349,8 +349,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
 
     /**
      * Remove a member (an owner/admin acting; never an owner). Membership,
-     * management rights and every rule naming them (private folders
-     * included) go together: re-adding the account later starts from nothing
+     * management rights, every rule naming them (private folders included)
+     * and their place on members-only records' lists go together: re-adding the account later starts from nothing
      * instead of silently restoring their old access.
      */
     removeMember(actor: Member, targetUserId: string): Outcome<void> {
@@ -364,6 +364,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         scopesOf(companyId).deleteUserRules(targetUserId)
         // They belong to no department of it any more (tasks.md "Department membership").
         companyData.forCompany(companyId).tasks.removeMember(targetUserId, actor.userId, clock.now())
+        // …and on no members-only record's list (records.md "Members-only records").
+        companyData.forCompany(companyId).records.forgetMember(targetUserId)
       })
       return ok(undefined)
     },

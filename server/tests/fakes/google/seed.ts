@@ -112,6 +112,19 @@ export interface SeedMail {
   textBytesBase64?: string
 }
 
+/** A Google Sheets spreadsheet (the relay, google-connector.md "The relay"): who may read and edit it, its sheets' cells. */
+export interface SeedSpreadsheet {
+  /** Google's ids are 44 characters of [A-Za-z0-9_-]. */
+  id: string
+  title: string
+  owner: string
+  /** May edit (the owner always may). */
+  editors: string[]
+  /** May only read. */
+  readers: string[]
+  sheets: Array<{ sheetId: number; title: string; rows: string[][] }>
+}
+
 export interface GoogleSeed {
   users: SeedUser[]
   events: SeedEvent[]
@@ -119,6 +132,7 @@ export interface GoogleSeed {
   docs: SeedDoc[]
   driveFiles?: SeedDriveFile[]
   mails?: SeedMail[]
+  spreadsheets?: SeedSpreadsheet[]
 }
 
 export const GOOGLE_SEED = {
@@ -151,6 +165,9 @@ export const GOOGLE_SEED = {
   pastProposalDoc: 'fake-doc-past-proposal-0001',
   pastProposalSlides: 'fake-slides-past-proposal-0001',
   handNotesPdf: 'fake-pdf-hand-notes-0001',
+  // Sheets (the relay): a practice coefficient table 佐藤 edits, and a budget he may only read.
+  practiceSheet: 'fakesheet-keisu-practice-0000000000000000001',
+  readOnlySheet: 'fakesheet-budget-readonly-000000000000000002',
 } as const
 
 const S = GOOGLE_SEED
@@ -332,5 +349,25 @@ export function defaultGoogleSeed(): GoogleSeed {
       text: '田中さんの受信箱にだけある連絡です。\n',
     },
   ]
-  return { users, events, conferences, docs, driveFiles, mails }
+  const spreadsheets: SeedSpreadsheet[] = [
+    {
+      id: S.practiceSheet, title: '練習用 係数表', owner: S.member, editors: [S.member], readers: [],
+      sheets: [
+        {
+          sheetId: 0, title: '案件',
+          rows: [
+            ['案件番号', '顧客', '担当', '受注確度', '係数', '受注金額'],
+            ['A-0001', '株式会社サンプル', '佐藤', 'B', '0.5', '=IF(D2="A",100,50)'],
+            ['A-0002', '練習商事', '田中', 'A', '0.8', '=IF(D3="A",100,50)'],
+          ],
+        },
+        { sheetId: 1, title: '係数', rows: [['確度', '係数'], ['A', '0.8'], ['B', '0.5'], ['C', '0.2']] },
+      ],
+    },
+    {
+      id: S.readOnlySheet, title: '経理部 予算表（見るだけ）', owner: S.colleague, editors: [S.colleague], readers: [S.member],
+      sheets: [{ sheetId: 0, title: '予算', rows: [['部署', '予算'], ['営業部', '1000']] }],
+    },
+  ]
+  return { users, events, conferences, docs, driveFiles, mails, spreadsheets }
 }

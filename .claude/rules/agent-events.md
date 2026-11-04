@@ -95,7 +95,10 @@ events through it), the read shapes and the limits. The admin re-exports the rea
 - **Server-recorded events** (`recordServerEvent`): the key broker's relay files one event per
   API call (category `broker`, agent `script`, target kind `broker`; `key-broker.md` K5). Same
   table and readers; `parseAgentToolEvent` refuses these values from apps (`SERVER_ONLY_CATEGORIES`).
-  Guard reasons `key-not-available`, `destination-not-allowed`, `internal-address`, `over-cap`.
+  Guard reasons `key-not-available`, `destination-not-allowed`, `internal-address`, `over-cap`,
+  and `no-deletion` (the Google relay refused a clear / delete, `google-connector.md` "The relay");
+  a broker target may carry `operation` (the relay's call, e.g. `values.append`). Filter `tool`
+  (exact) on the repository's `page` serves the relay's own record lists.
 - Guard reasons `type-definition` and `record-file`: the chat write guard's company-map refusals
   (`records.md`); an older server drops the unknown reason and keeps the event.
 

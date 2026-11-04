@@ -56,7 +56,7 @@ import { noticeKind } from '../../src/services/notifications'
 import { recordReader } from '../../src/services/record-access'
 import { slackSignalMessage } from '../../src/composition/inbox'
 import type { Member } from '../../src/services/access'
-import { defaultTaskSettings } from '../../../shared/core/task-settings'
+import { defaultTaskSettings, replyTarget } from '../../../shared/core/task-settings'
 import { coreTypeDefinitions } from '../../../shared/core/core-types'
 import type { IncomingMessage } from '../../../shared/types/inbox'
 import type { ConnectorRole } from '../../../shared/core/connector-roles'
@@ -82,6 +82,8 @@ let cutAt: string | null = null
 let listedSince: string[] = []
 let engine: RecordEngine
 let serviceWriter: ReturnType<typeof createServiceRecordWriter>
+/** The company's own days off (task settings), for the reply 目安. */
+let companyHolidays: string[] = []
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -137,6 +139,7 @@ function settings(body: Record<string, unknown>, co = 'a') {
 
 beforeEach(() => {
   n = 0
+  companyHolidays = []
   told = []
   mailbox = {}
   ready = new Set()
@@ -176,6 +179,8 @@ beforeEach(() => {
     files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
     managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf, notify: () => {},
     afterAct: (co, change) => inbox.afterAct(co, change),
+    // As composition.ts: the company's reply 目安 with its own holidays.
+    replyGuideline: (_co, at) => replyTarget(at, defaultTaskSettings().reply, companyHolidays).date,
   })
   const fake: InboxSource = {
     async listSince(_co, userId, since) {
@@ -570,6 +575,25 @@ describe('B4: a task as the outcome', () => {
     expect(ok(inbox.item(m('u-alice'), row.id)).tasks).toEqual([{ id: mine.value.record.id, title: '見積を作る' }])
   })
 
+  it('a task the AI makes from a message always has a due: the stated deadline, else the 目安 past holidays (owner FB #13)', () => {
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const AI_ACTOR = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
+    const byAi = (fields: Record<string, unknown>) => ok(engine.createByAi(m('u-alice'), AI_ACTOR,
+      { type: 'task', title: '経費精算を承認する', personal: true, fields: { assignee: 'u-alice', ...fields }, links: { interaction: [row.id] } })).record.id
+    // None sent (or null): received Monday 11/2, 翌営業日 past 文化の日 (11/3) → 11/4.
+    expect(fieldsOf(byAi({})).due).toBe('2026-11-04')
+    expect(fieldsOf(byAi({ due: null })).due).toBe('2026-11-04')
+    // The deadline the AI read in the message is kept.
+    expect(fieldsOf(byAi({ due: '2026-11-10T12:00' })).due).toBe('2026-11-10T12:00')
+    // The company's own day off is skipped too.
+    companyHolidays = ['2026-11-04']
+    expect(fieldsOf(byAi({})).due).toBe('2026-11-05')
+    // Not from a message, or a person's own create: no due is made up.
+    expect(fieldsOf(ok(engine.createByAi(m('u-alice'), AI_ACTOR, { type: 'task', title: 'メモ', fields: { assignee: 'u-alice' } })).record.id).due).toBeUndefined()
+    expect(fieldsOf(ok(engine.create(m('u-alice'), AI_ACTOR, { type: 'task', title: '手で', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [row.id] } })).record.id).due).toBeUndefined()
+  })
+
   it('a 返事のお願い links the 相手 found now (名寄せ), when the message had none', () => {
     inbox.receive('a', 'u-alice', mail())
     const [row] = interactions()
@@ -809,6 +833,53 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
     if (!t.ok) throw new Error(t.reason)
     const { rr } = sentWaiting(t.record.id)
     expect(linkOf(rr, 'task')).toBeNull()
+  })
+
+  it('a members-only やりとり takes a message of its thread only when it reached someone on its list', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: '面談のお礼', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    handle().inbox.insertMessage({ channel: 'email', messageId: OURS, interactionId: made.record.id, direction: 'out', occurredAt: TS, seenAt: TS, sourceRef: 'gmail:s1' })
+    // Their answer reached u-carol alone: not this thread's record (a record of her own instead).
+    expect(inbox.receive('a', 'u-carol', mail({ references: [OURS], to: [{ address: 'carol@acme.example' }] }))).not.toBe('continued')
+    expect(handle().inbox.messagesOf(made.record.id).map(x => x.direction)).toEqual(['out'])
+    // It reached u-bob, who is on the list: it joins.
+    expect(inbox.receive('a', 'u-bob', mail({ references: [OURS], to: [{ address: 'bob@acme.example' }] }))).toBe('continued')
+  })
+
+  it('a member\'s plain Slack DM answers a members-only やりとり only when the member is on its list', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: 'DM', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'chat', source_ref: 'slack:D0AB:1793581200.000100', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'received', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    handle().inbox.insertMessage({ channel: 'chat', messageId: 'D0AB:1793581200.000100', interactionId: made.record.id, direction: 'in', occurredAt: '2026-11-02T01:00:00.000Z', seenAt: TS, sourceRef: 'slack:D0AB:1793581200.000100' })
+    const own = (userId: string, slackId: string) => slackSignalMessage({
+      companyId: 'a', userId, kind: 'own', channelId: 'D0AB', ts: '1793584800.000100', threadTs: null, senderSlackUserId: slackId, external: true,
+    } as Parameters<typeof slackSignalMessage>[0])
+    expect(inbox.receive('a', 'u-carol', own('u-carol', 'U0CAROL'))).toBe('skipped')
+    expect(inbox.receive('a', 'u-bob', own('u-bob', 'U0BOB'))).toBe('continued')
+  })
+
+  it('a members-only やりとり\'s 返事のお願い stays its members\' (records.md "Members-only records": placed like its 連絡, never company-wide)', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: '面談のお礼', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    const rr = inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId: made.record.id, channel: 'email', messageId: OURS, sourceRef: 'gmail:s1',
+      occurredAt: TS, waitUntil: '2026-11-05T09:00', title: '面談のお礼', waitingOn: '田中さんからの返事', to: 'tanaka@client.example', taskId: null,
+    })
+    if (!rr) throw new Error('no reply request')
+    expect(handle().records.find(rr)).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice', 'u-bob'] })
+    for (const who of ['u-carol', 'u-admin', 'u-owner']) expect(canRead(who, rr)).toBe(false)
+    expect(canRead('u-bob', rr)).toBe(true)
   })
 
   it('their reply in the thread: the AI checks it, the sender and the task\'s assignee hear 「返事が来た」; an automatic reply is no reply', () => {

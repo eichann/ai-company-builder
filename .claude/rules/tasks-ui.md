@@ -102,6 +102,9 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   consultation's AI made, and the whole screen flickered). The list keeps its last answer while it
   reads again too (`useTaskList`). Test: `tests/ui/tasks-layout.spec.ts` (「the AI changing the task
   updates its open card in place」: same node, 経緯 still open, no 「読み込んでいます」).
+  A card mounted again (its tab switched back to) starts from the card it showed last and reads
+  again (owner FB #14; `useShown`, `records.md` "What was shown comes back at once"); the list never
+  remounts (it lives in AppShell, the left panels stay mounted), so it needs no cache.
 - `useTaskList` (in AppShell): read at mount, on `notifications:changed` and `records:changed` for
   the company (`onTasksMayHaveChanged`, `src/features/tasks/api.ts`), every 2 minutes and after the
   member's own change. `records:changed` (no content) is sent by main **at once when the member's

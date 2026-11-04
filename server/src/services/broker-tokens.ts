@@ -22,6 +22,7 @@ import {
   chooseBrokerKeySource,
   clampBrokerTokenTtl,
   companyKeyUsable,
+  isPersonRelayService,
   isValidBrokerServiceName,
   looksLikeBrokerToken,
   upgradeBrokerAudience,
@@ -61,6 +62,13 @@ export interface BrokerTokenDeps {
    * registered first (staging: an old practice key went to the real HubSpot).
    */
   connectionKeyId?: (companyId: string, service: string) => string | null
+  /**
+   * Services relayed with the member's own permission instead of a key (「本人の許可で中継する」:
+   * `google`, google-connector.md "The relay") that the company offers now. A token covers them
+   * like a keyed service (the app then hands `ACB_GOOGLE_*` to scripts); every call is decided
+   * again by that relay. Not offered → `unknown-service` (the app sets nothing for it).
+   */
+  personRelaysOffered?: (companyId: string) => string[]
 }
 
 /** What the relay may do with a validated token (no key value: that is `vault.reveal(companyId, keyId)`). */
@@ -179,12 +187,19 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       const folder = typeof department === 'string' ? department.normalize('NFC') : null
       const rows = brokerKeys.list(member.companyId)
       const known = new Set([...rows.map(r => r.service), ...keyBroker.knownServices(member.companyId)])
+      const personRelays = deps.personRelaysOffered?.(member.companyId) ?? []
       const requested = body.services !== undefined
         ? [...new Set(body.services as string[])]
-        : [...new Set(rows.map(r => r.service))]
+        : [...new Set([...rows.map(r => r.service), ...personRelays])]
       const granted: BrokerTokenIssued['services'] = []
       const unavailable: Array<{ service: string; reason: BrokerUnavailableReason }> = []
       for (const service of requested) {
+        // The member's own permission, not a key: offered → covered (each call decides again); else nothing.
+        if (isPersonRelayService(service)) {
+          if (personRelays.includes(service)) granted.push({ service, source: 'user' })
+          else unavailable.push({ service, reason: 'unknown-service' })
+          continue
+        }
         if (!known.has(service) && !builtinBrokerService(service)) { unavailable.push({ service, reason: 'unknown-service' }); continue }
         const key = resolveKey(member.companyId, member.userId, folder, service, rows)
         // Not chosen yet: granted, so the relay tells the AI to ask the admin (not 「自分の鍵」); validate decides again.
@@ -231,6 +246,24 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
     /** Stop every live token of a member, or of the whole company (userId null) — the emergency stop (M2). */
     revokeAll(companyId: string, userId: string | null): number {
       return brokerTokens.revokeAll(companyId, userId, clock.now())
+    },
+
+    /**
+     * For a person relay (`google`): is `token` a live token of a current member that covers
+     * `service`? No key is resolved — the relay acts with that member's own permission, so the
+     * token's member is the only identity used (never anything the request names).
+     */
+    holder(token: unknown, service: string): { ok: true; who: BrokerTokenHolder } | { ok: false; reason: BrokerTokenRefusal; who?: BrokerTokenHolder } {
+      if (!brokerVault.status().enabled) return { ok: false, reason: 'broker-off' }
+      if (!looksLikeBrokerToken(token)) return { ok: false, reason: 'malformed' }
+      const row = brokerTokens.findByHash(tokenDigest.digest(token))
+      if (!row) return { ok: false, reason: 'unknown' }
+      if (row.revokedAt) return { ok: false, reason: 'revoked' }
+      if (Date.parse(row.expiresAt) <= clock.nowMs()) return { ok: false, reason: 'expired' }
+      if (memberships.roleOf(row.companyId, row.userId) === null) return { ok: false, reason: 'not-member' }
+      const who: BrokerTokenHolder = { tokenId: row.id, companyId: row.companyId, userId: row.userId, conversationId: row.conversationId, department: row.department }
+      if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted', who }
+      return { ok: true, who }
     },
 
     /**

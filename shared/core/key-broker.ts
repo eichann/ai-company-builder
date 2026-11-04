@@ -551,6 +551,19 @@ export function isValidRelayServiceId(value: unknown): value is string {
     && value.length >= 2 && value.length <= BROKER_RELAY_LIMITS.serviceId
     && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value)
     && !builtinBrokerService(value)
+    && !isPersonRelayService(value)
+}
+
+/**
+ * Services the relay serves with the member's own permission instead of a key
+ * (「本人の許可で中継する」, owner decision 2026-11-04: Google, `google-connector.md`
+ * "The relay"). Reserved: no company key, own key or generic service may take the name, so
+ * `/api/broker/google/…` and `ACB_GOOGLE_*` always mean the person relay.
+ */
+export const PERSON_RELAY_SERVICES = ['google'] as const
+
+export function isPersonRelayService(value: unknown): boolean {
+  return typeof value === 'string' && (PERSON_RELAY_SERVICES as readonly string[]).includes(value)
 }
 
 /**

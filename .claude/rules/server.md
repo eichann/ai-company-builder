@@ -361,7 +361,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   without departments; a full folder looked empty in the delete warning).
   `departments-list.test.ts`, `department-stats.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
-  (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
+  (`deleteUserRules`, private folders included) and takes them off every members-only record's
+  list (`RecordRepository.forgetMember`, `records.md` "Members-only records"), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
   inheriting.
 - Invitations are single-use (`services/invitations.ts` `signUp`): a sign-up with `X-Invitation-Token`
@@ -550,8 +551,10 @@ no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
   records / smartNotes / transcripts (`docsDestination`), Drive v3 file metadata
   (`version`, `modifiedTime`) and text export (BOM + CRLF, 10 MB → 403
   `exportSizeLimitExceeded`; with only `drive.meet.readonly` a file Meet did not create is 404),
-  and Gmail `messages.send` (stored decoded in `fake.sent`; a From that is not the token's account
-  is refused). Google's paths on one origin, so a practice redirect maps Google's hosts by path
+  Gmail `messages.send` (stored decoded in `fake.sent`; a From that is not the token's account
+  is refused), and Sheets v4 (spreadsheets.get / batchUpdate, values get / batchGet / update /
+  batchUpdate / append / clear / batchClear; scopes per token, each spreadsheet's editors and
+  readers → 403 PERMISSION_DENIED; `fake.spreadsheet(id)`). Google's paths on one origin, so a practice redirect maps Google's hosts by path
   (the table is in `fake-google.ts`). Practice values: secrets `fake-google-secret-…`, tokens
   `ya29.fake-…` / `1//fake-…`; scopes enforced per token (403 `PERMISSION_DENIED`). Faults:
   delay, 500 / 429, a send stored whose answer never arrives, revoked access (`invalid_grant`),

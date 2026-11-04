@@ -43,6 +43,14 @@ export interface RecordRow {
    * Written on insert and by `setPlace` only (an upsert of an existing row keeps it).
    */
   personalOwner: string | null
+  /**
+   * Members-only record (「この人たちだけ」, records.md "Members-only records"): the members who
+   * may see it — nobody else, owners and admins included (an empty list: nobody). null = not
+   * members-only. `upsert` marks a new row members-only (an existing row keeps its place; a list
+   * asked for an existing row that is not members-only throws) and the caller lists its readers
+   * with `addMembers` in the same transaction; `setPlace` ends it. Never set together with `personalOwner`.
+   */
+  members: readonly string[] | null
   title: string
   summary: string
   createdAt: string
@@ -110,6 +118,8 @@ export interface RecordAccessRow {
   path: string | null
   folder: string | null
   personalOwner: string | null
+  /** Members-only (records.md "Members-only records"): the members who read it; null = not members-only. */
+  members: readonly string[] | null
 }
 
 /** The AI's credential for the company map (only the digest of its value). */
@@ -162,8 +172,19 @@ export interface RecordRepository {
   fileRecordsIn(scopeId: string | null): RecordRow[]
   upsert(row: RecordRow): void
   markRemoved(id: string, at: string): void
-  /** Who may see a server-only record: an owner-only record shared to a folder (records.md "Owner-only records"). */
+  /**
+   * Who may see a server-only record: an owner-only or members-only record shared to a folder
+   * (records.md "Owner-only records", "Members-only records"). Ends members-only (its list is dropped).
+   */
   setPlace(id: string, place: { folder: string | null; personalOwner: string | null }, at: string): void
+  /**
+   * Add readers to a members-only record (「招待する」, records.md "Members-only records"); a member
+   * already listed is kept as is. Returns the ids newly added. Throws for a record that is not
+   * members-only (call it inside the transaction that wrote the record or its version).
+   */
+  addMembers(id: string, userIds: readonly string[], by: string, at: string): string[]
+  /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */
+  forgetMember(userId: string): void
 
   linksFrom(ids: string[]): RecordLinkRow[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */

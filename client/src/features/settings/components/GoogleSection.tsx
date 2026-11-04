@@ -6,6 +6,8 @@ import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
 import { GOOGLE_PRACTICE_TEXT, googleSectionView } from '../../../../shared/google'
 import { useGoogle } from '../hooks/useGoogle'
+import { googlePermissionKey } from '../../../shared/lib/googlePermission'
+import { GoogleRelayCard } from './GoogleRelayCard'
 
 export function GoogleSection({ companyId }: { companyId: string }) {
   const { loadRef, data, error, message, busy, waiting, connect, disconnect } = useGoogle(companyId)
@@ -66,6 +68,10 @@ export function GoogleSection({ companyId }: { companyId: string }) {
             )}
             {message && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{message}</p>}
           </Card>
+          {/* Remounted when the permission changes (after ［許可する］ in the browser): it reads its view again. */}
+          {data.available && (
+            <GoogleRelayCard key={googlePermissionKey(data)} companyId={companyId} account={view.account} busy={busy} waiting={waiting} connect={connect} />
+          )}
         </>
       )}
     </div>

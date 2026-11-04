@@ -295,7 +295,7 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
   entry's actor (only its maker could see it to take it off). Rewrites of a record's links keep it
   (`withLinkTargets` matches each target to the row it had). A row with no maker (a record file's
   link, a link made before the column): shown only to the owner of an owner-only record, else to
-  nobody.
+  nobody (a members-only record's listed members included: there is no maker to match).
 - `fileLinkShown(viewer, source, link)` decides, in every answer: the detail (`GET /records/item/:id`,
   the AI's `records_get`), `linkedToFile` (a record counts only where the caller made the link), 探す's
   file counts (`record-find.ts`), 経緯 and a replay (`record-engine/personal-links.ts`: someone else's
@@ -739,7 +739,8 @@ POST    /records/reindex           owner/admin, { full: true }
 GET     /records/types             any member: definitions in force + stored versions
 POST    /records/item/:recordId/file-links (+ /remove)   link a file later ("Linking files later")
 POST    /records/item/:recordId/record-links (+ /remove) link a record later ("Linking records later")
-POST    /records/item/:recordId/share          the owner shows an owner-only record to a folder (session only)
+POST    /records/item/:recordId/share          the owner / a listed member shows an owner-only / members-only record to a folder (session only)
+POST    /records/item/:recordId/members        a listed member adds members to a members-only record (「招待する」, session only)
 POST    /records/item/:recordId/opened         the app opened it: the turn-holder's first opening kept ("Whose turn it was")
 POST    /records/find              any member: 探す { text, today } → hits with department / mine / 案件, hub summaries ("探す" below)
 POST    /records/find-home         any member: 探す with nothing typed { today, from, to }
@@ -751,8 +752,8 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 - **No leaks** (0.13-1, 4-2): a record is readable exactly when its file is (`resolveAccess`
   read; inside a private folder also `canReadPrivateScope`), a server-only record when its
-  folder is (none = everyone) — and an owner-only record by its owner alone ("Owner-only
-  records" below). Answers, `total`, link lists and traversals all apply it, so an
+  folder is (none = everyone) — and an owner-only record by its owner alone, a members-only record
+  by its listed members alone ("Owner-only records", "Members-only records" below). Answers, `total`, link lists and traversals all apply it, so an
   unreadable private record is identical to a nonexistent one (same 404 body). `total` counts up
   to `MAX_CANDIDATES` (20,000) rows.
 - Records imported through an earlier connection of an outside system are marked
@@ -830,6 +831,83 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   unchanged and the column migration; share only by the owner, its ledger entry, never undone —
   mutation-checked), permission matrix rows + `CROSS`.
 
+### Members-only records (「この人たちだけ」, owner decision 2026-11-04)
+
+The fourth way a record is seen (design: 会議の記録と「参加した人だけ」の見え方, §3/§5/§7): **a list of
+members** — those members only. The same rule as owner-only, for more than one person: **not owners,
+admins or department managers either unless listed**; for everyone else it is a record that does not
+exist (the same 404 body), through every caller of `recordReader` (its branch sits right after the
+owner-only one, before every role or folder rule).
+
+- Storage: `record_viewers (company_id, record_id, user_id, added_at, added_by)` (+ index
+  `(company_id, user_id)`; `migrateRecordViewers`, additive). The record is marked by `@members` in
+  `records.personal_owner` — an older server build reads that as an owner nobody is, so it shows
+  the record to nobody (fails closed). The adapter alone knows the marker: rows come out as
+  `personalOwner: null, members: [...]` (`RecordRow` / `RecordAccessRow.members`, null = not
+  members-only; a marked record with no rows is read by nobody). `upsert` marks a new row (insert
+  only), the caller adds the list with `addMembers` in the same transaction; `setPlace` ends it
+  (drops the rows). Asking for a list on an existing row that is not members-only, or `addMembers`
+  on one, throws inside the caller's transaction (never quietly wider). A member removed from the company is taken off every list in the same
+  transaction as their rules (`forgetMember`, `services/companies.ts` `removeMember`), so joining
+  again starts from nothing.
+- **Create** (`POST /records/item`, the AI's `records_create`): `members: string[]` (≤ 200; the
+  creator is added). Refused with `personal` / `folder` (400 `MEMBERS_WITH_PLACE`), for a business
+  plugin's type (400 `MEMBERS_NOT_FOR_TYPE`), with a non-member (400 `BAD_MEMBER`); an assignee /
+  reviewer not listed → `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`. The summary carries
+  `membersOnly: true` (no names); the answer's `placed` adds `membersOnly: true`. The AI's create
+  with `members` gets none of its placement defaults (`aiPlacement`).
+- **Made from a members-only meeting** (`record-engine/members.ts`, used by create and the service
+  writer): a record linked to one (any record link whose target is a `meeting` with a list) is
+  members-only by itself — the meeting's list (several meetings: who is on all of them) plus the
+  creator and every person its fields name (an assignee who was not there must see their own task).
+  A `folder` with it is refused (create: 400 `MEMBERS_WITH_PLACE`; service writer: `bad-place`;
+  decisions: `DECISION_PLACE_REFUSED`, and `folder` may be left out). The AI's meeting outputs get
+  this too (`aiPlacement` leaves meeting outputs alone). With an explicit `members` the AI may only
+  narrow: everyone listed must be on the meeting's list or named by the record (400
+  `MEMBERS_NOT_IN_MEETING`); a person may widen (it is their act). Only meetings are inherited from:
+  a record linking someone's owner-only record stays where it was put (an established pattern,
+  "Owner-only records": the link is hidden from the others); the mail service places by its source
+  instead (below).
+- **Invite** 「招待する」: `POST /records/item/:recordId/members { add, expectedVersion, note? }`
+  (contract `InviteRecordMembersRequest`), **session only**. Any listed member (nobody else finds it:
+  404 `RECORD_NOT_FOUND`); not members-only → 409 `NOT_MEMBERS_ONLY`; each a member (400
+  `BAD_MEMBER`, ≤ 200). Ledger action `invite`, change `place.members` before / after (ids,
+  comma-separated), version + 1 (`VERSION_CONFLICT`), answer `added` (the newly listed). **Never
+  undone** (`place.*`). No notice kind: the `records` signal reaches the added. No removing (not
+  built).
+- **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
+  member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
+  read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see
+  the record and its 経緯, including who was on the list: intended (owner decision 2026-11-04) —
+  sharing is the listed member's own act, and the ledger must be accurate, so `place.members`
+  before keeps the previous list.
+- **Places copied from a record** go through `placeOfRow` (`record-engine/service-writer.ts`:
+  folder | owner | members) — the mail draft (an owner-only / members-only 連絡, meeting or やること
+  keeps its place whatever the まとまり), the sent mail's やりとり (with or without 「返事を待つ」 when the
+  mail's record is restricted; `outbound-mail.ts`) and the inbox's 返事のお願い (`inbox.ts`). Copying
+  `folder` alone would place it company-wide.
+- **Elsewhere**: the inbox joins a message to a members-only やりとり's thread only when it reached
+  someone on the list (`inbox.md`); a members-only (or owner-only) meeting is not named in the note
+  of its まとまり's step move (`plugin-steps.ts`, 「会議を読んだあと」).
+- 見られる人 (`services/viewers.ts`): judged by its own list before the per-place cache (every such
+  record has folder null; the cache would hand one record's readers to another), with the existing
+  phrases (「あなただけ」「あなたと〇〇さん」「N人が見られます」…), names only to listed callers.
+- Acceptance's personal rule (`act.ts`, "Acceptance") stays owner-only. Delegates and approvals:
+  nothing special (listed under "Not yet").
+- Tests: `server/tests/unit/record-members.test.ts` (same-department member, manager, admin, company
+  owner: a missing record's answers on every route; query / count / text / link / finishedSince /
+  sort / linkedTo / linkedToFile / 探す / 「あなたの番」 / 「AI の番」 exclude it; links to it refused
+  like missing, links from it hidden; `set_bundle`; another company; marked without rows = nobody;
+  create refusals; inheritance meeting → task (+ assignee), decision, review task, mail draft;
+  invite and share rules (share: assignee / reviewer must read the folder); 見られる人; the push
+  signal; a member leaving; migration twice; a sent mail's やりとり without 「返事を待つ」; a members-only
+  やること's mail in a まとまり; the AI's create with `members`; the AI narrowing only; an existing row
+  never quietly made members-only — mutation-checked: the reader branch, the viewers cache bypass,
+  the `placeOfRow` copies, the inheritance in create and the writer, the writer's folder refusal,
+  `forgetMember`, `NOT_MEMBERS_ONLY`, each fix of the leak review), `inbox.test.ts` (a members-only
+  やりとり's 返事のお願い; its thread and DM only for the listed), `plugin-steps.test.ts` (no meeting
+  named), permission matrix rows + `CROSS`.
+
 ### Where the AI puts a request (owner decision 2026-11-03)
 
 A task the consultation AI made once landed company-wide with nobody assigned (no turn, not in
@@ -849,6 +927,8 @@ own place). A person's create (session) gets no defaults.
   company); assignee as said, else the member. The default folder is checked like any `folder`
   (`placeFolder`: a private one is refused — never placed company-wide instead); an assignee who
   cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
+- A request made with an origin link to a message (a task's `interaction`) always gets a `due`: the
+  AI's, else the company's reply 目安 (`messageDue`; `inbox.md` "A task from a message").
 - The answer carries `placed: { personal, folder }` (every create's), and the tool adds
   `tellMember` — 「あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）」 /
   「「コンテンツ」のやることに、<担当>さんの担当で入れました」; the tool's description tells the AI
@@ -871,7 +951,8 @@ own place). A person's create (session) gets no defaults.
   folders above the item (a list costs a few evaluations, not one per row).
 - **No leaks** (owner decision B; asked and confirmed 2026-11-02: the name is shown only on the
   readers' screens): a record the caller cannot read is **left out** of `records` (an owner-only
-  record too — owners and admins included); files are judged over the folders the caller can
+  or members-only record too — owners and admins included; a members-only record is judged by its
+  own list, outside the per-place cache: "Members-only records"); files are judged over the folders the caller can
   see — an unreadable private folder (and every rule inside it) is treated as not there, so a
   path inside it is answered exactly like a path that does not exist (asking cannot tell it is
   private or name it). Test: `server/tests/unit/viewers.test.ts` (mutation-checked: dropping the
@@ -969,7 +1050,9 @@ The engine's entry for the core services (approvals G6, minutes G7, mail G8, dec
 external writer, composition.ts hands it to those services only (`serviceRecords`, not in
 `services`). `create(companyId, { type, id?, title, summary?, folder?, fields, links, actor,
 note? })` — service-owned types only, server records only (`folder`: the readers' place, never a
-private folder); `check(companyId, input)` is the same validation without writing (ask it before
+private folder; or `personalOwner`, or `members` — each a member, not with a folder — and a record
+linked to a members-only meeting is members-only by itself, a folder then `bad-place`: "Members-only
+records"); `check(companyId, input)` is the same validation without writing (ask it before
 outside work, e.g. the minutes intake). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, links?,
 actor, note?, decisionReason?, notify? })` — the state only along `SERVICE_TRANSITIONS` (next to
 the types; `serviceTransitionAllowed`), `to: null` changes fields only; `links` replaces the named
@@ -1443,6 +1526,21 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
   Generic and without actions: a task opens in the task card with actions instead (`tasks-ui.md`).
 - **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
+- **What was shown comes back at once** (owner FB #14, 2026-11-04: 「タブを切り替えるたびに『読み込み中』と
+  出るのがうざい」): the middle shows only the active tab's card, so switching tabs mounts it again.
+  The record card, the task card (`tasks-ui.md`) and a file's 「つながっているもの」 start from what they
+  showed last and read again at once (stale-while-revalidate): `src/shared/lib/shownCache.ts`
+  (`createShownCache`, one per view, ≤ 200 entries, least recently used out) through
+  `src/shared/hooks/useShown.ts`. 「読み込んでいます」 only when nothing was shown before. **Renderer memory
+  only** (never disk, localStorage or main); one company at a time (another company's key never
+  answers), and every cache is forgotten (`forgetAllShown`) when the company changes or the member
+  signs out (`appStore.setCurrentCompany`, which sign-out calls with none). An answer read as gone
+  (`notFound`: deleted or no longer readable) replaces the card and is forgotten; an offline failure
+  keeps what is shown. Freshness: a mounted task card re-reads on `records:changed` as before; any
+  view not mounted is re-read the moment it mounts again, so a stale card shows for one read at most.
+  Tests: `src/shared/lib/shownCache.test.ts` (hit, newer replaces, gone forgotten, company switch and
+  sign-out, the bound), `tests/ui/tasks-layout.spec.ts` 「a task tab switched back to shows its card at
+  once…」 (no 「読み込んでいます」, then the server's newer card).
 
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 
@@ -1576,6 +1674,9 @@ same title of the same meeting: `minutes.md` "Outputs made once"; a key with a m
 
 The plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
 the app's id assignment and duplicate repair, archiving finished tasks (0.6).
+Members-only records ("Members-only records"): removing someone from a list; delegates (代わりの人)
+reading a list they are not on; approvals placed by a members-only record; the app's screens
+(招待する, the label of members-only cards) — the server's label text already reaches old apps.
 A money field (`money: true`) of a company's own type is written only by a plugin operation
 (through an approval request): the engine has no approval path of its own, so no action or create
 writes it (coordinator decision 2026-11-02: acceptable for now).
