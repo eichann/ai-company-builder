@@ -10,8 +10,8 @@
  * repositories) are available — the operator's machine or the server host,
  * not the api container. The lock is the operator's file, one package per line:
  *
- *   eichann/acb-connectors              hubspot@0.3.0          <fingerprint v2>
- *   eichann/acb-plugin-corporate-sales  corporate-sales@0.4.0  <fingerprint v2>
+ *   example-org/connectors        hubspot@0.3.0          <fingerprint v2>
+ *   example-org/corporate-sales   corporate-sales@0.4.0  <fingerprint v2>
  *
  * Refuses, writing nothing, when a fingerprint differs from the lock or the
  * shelf already holds a listed version with other content. `--prune` also

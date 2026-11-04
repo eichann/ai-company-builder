@@ -544,7 +544,7 @@ v3 `bundle`, `meeting`; decision v3 `bundle`, `meeting`, `approval`. Where-it-ca
 one type or one interface, and an origin interface would be a fifth one; stage 3's mail / Slack
 intake adds an `interaction` link the same way (additive).
 
-The business plugin 「法人営業」 (`acb-plugin-corporate-sales`, corporate-sales 0.3.0) implements them: `deal` v3
+The business plugin 「法人営業」 (corporate-sales 0.3.0, private repository) implements them: `deal` v3
 `implements: [bundle]` (adds `owner`, `purpose`; final won / lost), `customer` v3
 `implements: [counterpart]` (adds `counterpart_kind`, `email`; `domain` as before). Until a company
 moves to it, its deals are not まとまり (minutes candidates, approval / decision `bundle` links

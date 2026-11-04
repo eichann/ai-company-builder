@@ -1,0 +1,19 @@
+{
+  // The staging kit's TypeScript (staging/*.ts) uses the server's collector and the fakes in
+  // server/tests/fakes: typechecked with the server (`pnpm --filter server typecheck`) so a
+  // change of those APIs fails CI instead of the kit on someone's Mac.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@hono/node-server": ["./node_modules/@hono/node-server"],
+      "hono": ["./node_modules/hono"],
+      "hono/*": ["./node_modules/hono/*"]
+    },
+    "types": ["node"],
+    "typeRoots": ["./node_modules/@types"]
+  },
+  "include": ["../staging/*.ts"],
+  "exclude": []
+}

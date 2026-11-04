@@ -92,7 +92,8 @@ PERF=(
   ':(glob)client/tsconfig*.json' client/package.json shared/core/paths.ts
 )
 UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
-SERVER=(server/ shared/)
+# staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.
+SERVER=(server/ shared/ staging/)
 ADMIN=(admin/ shared/)
 
 pathspecs() {

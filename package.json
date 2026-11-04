@@ -9,6 +9,13 @@
     "dev:server": "pnpm --filter server dev",
     "dev:admin": "pnpm --filter admin dev",
     "fake:hubspot": "pnpm --filter server fake:hubspot",
+    "staging:setup": "node staging/bootstrap.mjs setup",
+    "staging:up": "node staging/bootstrap.mjs up",
+    "staging:down": "node staging/bootstrap.mjs down",
+    "staging:reset": "node staging/bootstrap.mjs reset",
+    "staging:app": "node staging/bootstrap.mjs app",
+    "staging:status": "node staging/bootstrap.mjs status",
+    "staging:remove": "node staging/bootstrap.mjs remove",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"

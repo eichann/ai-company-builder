@@ -2,8 +2,7 @@
 # 2026-11-01): it owns the deal / customer types and uses the HubSpot-shaped
 # connector sample-hub — which of its objects become which type, which of its
 # operations it uses and who may run them, its field policy defaults. The real
-# one, 「法人営業」 (corporate-sales), lives in the private acb-plugin-corporate-sales
-# repository.
+# one, 「法人営業」 (corporate-sales), lives in a private repository.
 id: sample-sales
 label: 見本の営業
 version: 0.1.0
