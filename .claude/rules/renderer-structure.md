@@ -176,7 +176,10 @@ owner-approved reduction, refactor stage 3); most belong elsewhere. Sort each on
   tell the parent, fill a field after a choice): do it in the event handler or callback that
   caused the change.
 - **D. Data loading**: in the feature's small data hook (`hooks/use<Thing>.ts` over its
-  `api.ts`), not inline in a component.
+  `api.ts`), not inline in a component. A view that reads from the server and is mounted again (a tab
+  switched back to) starts from what it showed last: `useShown` over a `createShownCache`
+  (`shared/hooks/useShown.ts`, `shared/lib/shownCache.ts`; memory only, `records.md` "What was shown
+  comes back at once") rather than a cache of its own.
 - **E. Resetting state when a prop changes**: give the component a `key` (or render it only while
   open) instead of clearing state in an effect.
 

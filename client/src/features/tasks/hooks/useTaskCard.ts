@@ -2,9 +2,14 @@ import { useCallback, useState } from 'react'
 import type { TaskCardResult } from '../../../../shared/task-card'
 import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
+import { useShown } from '../../../shared/hooks/useShown'
+import { createShownCache } from '../../../shared/lib/shownCache'
 import { isPersonalPath } from '../../../../shared/today-folder'
 import { fileIsHere, getTaskCard, onTasksMayHaveChanged } from '../api'
 import { nextCard } from '../model'
+
+/** The cards shown before, so a tab switched back to shows its card at once and reads it again (owner FB #14). */
+const shownCards = createShownCache<TaskCardResult>()
 
 /** What a record's tab shows of it (its title and kind). */
 export interface CardLook { title: string; type: string; typeLabel: string; state: string | null }
@@ -14,12 +19,13 @@ export interface CardLook { title: string; type: string; typeLabel: string; stat
  * turn or notices may have changed, on `reload` after the member's own change, and when the list
  * knows a newer version (`knownVersion`, e.g. a press in the list). A re-read never blanks the card:
  * the shown one stays until the new one arrives, so folds and scroll stay (owner 2026-11-03,
- * 使い心地のメモ #3: a remount per version made the screen flicker). The caller keys the component
- * by record id only.
+ * 使い心地のメモ #3: a remount per version made the screen flicker). Mounted again (a tab switched
+ * back to), it starts from the card shown last and reads it again (owner FB #14: no 「読み込んでいます」
+ * on every switch); a card read as gone is forgotten. The caller keys the component by record id only.
  */
 export function useTaskCard(companyId: string, recordId: string, onLoaded?: (look: CardLook) => void, rootPath?: string, knownVersion?: number) {
   const loadedRef = useLatestRef(onLoaded)
-  const [result, setResult] = useState<TaskCardResult | null>(null)
+  const [result, show] = useShown(shownCards, companyId, recordId)
   // Linked files inside a `.personal/` folder that are on this computer (the server never has them).
   const [personalHere, setPersonalHere] = useState<ReadonlySet<string>>(new Set())
   const reload = useCallback(() => {
@@ -27,7 +33,7 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
       r => {
         if (!r) return
         // Two reads may race: an older version landing last never replaces a newer one.
-        setResult(prev => nextCard(prev, r))
+        show(r, nextCard)
         if (r.success && rootPath) {
           const personal = r.card.files.map(f => f.path).filter(isPersonalPath)
           void Promise.all(personal.map(p => fileIsHere(`${rootPath}/${p}`).then(here => (here ? [p] : []), () => [])))
@@ -35,9 +41,9 @@ export function useTaskCard(companyId: string, recordId: string, onLoaded?: (loo
         }
         if (r.success) loadedRef.current?.({ title: r.card.record.title, type: r.card.record.type, typeLabel: r.card.record.typeLabel, state: r.card.record.state })
       },
-      () => setResult(prev => prev ?? { success: false, offline: true, error: '表示できませんでした。' }),
+      () => show({ success: false, offline: true, error: '表示できませんでした。' }),
     )
-  }, [companyId, recordId, loadedRef, rootPath])
+  }, [companyId, recordId, loadedRef, rootPath, show])
   // The newest version the list told us of that the card has not shown: read again once for it
   // (adjusted while rendering; it only grows, so each newer version asks once).
   const [asked, setAsked] = useState(0)
