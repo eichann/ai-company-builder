@@ -53,11 +53,12 @@ export function useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActi
     })
   }, [activeFilePath, setOpenFiles, setActiveFilePath])
 
-  /** Closes several tabs at once (「タブを片づける」); the active one moves to a tab that stays. */
+  /** Closes several tabs at once (「タブを片づける」, a task checked off); the active one moves to a tab that stays. */
   const closeTabs = useCallback((keys: readonly string[]) => {
     const gone = new Set(keys)
     setPreviewFilePath(prev => prev && gone.has(prev) ? null : prev)
     setOpenFiles(prev => {
+      if (!prev.some(k => gone.has(k))) return prev // none of them open (a task checked off with no tab)
       const next = prev.filter(k => !gone.has(k))
       setActiveFilePath(active => active && !gone.has(active) ? active : (next[next.length - 1] ?? null))
       return next

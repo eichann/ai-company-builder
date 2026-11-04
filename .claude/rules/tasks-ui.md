@@ -170,7 +170,13 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   any state but 準備中 (no made-up start), on the member's rows (and a check waiting for them as
   確かめる人), never on what they asked of someone else; asked of them with 確かめてから →
   「終わったので見てもらう」 (`request_review` to the 確かめる人); a finished one they asked or checked →
-  やり直す. The list never states someone's OK; that is the card's. An AI-turn
+  やり直す. The list never states someone's OK; that is the card's.
+  **Checked off (完了にする) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
+  `onCompleted` → AppShell `closeTabs([recordTabKey(id)])`, the tidy's path, so 固定 marks and
+  named groups follow): only that task's tab (a card holds nothing unsaved), only after the server
+  accepted it; not for 見てもらう or やり直す, and やり直す does not reopen it. A press on the card's
+  own 完了にする keeps the card open (it shows 「完了」 and ［取り消す］). Test: `tests/ui/tasks-layout.spec.ts`
+  (「checking a task off…」: the other task's tab in the same named group stays). An AI-turn
   row shows the automatic runner's state and reason (`AiTurnItemView`, `ai-turns.md`) with
   「もう一度」 / 「人に渡す」 when stopped.
 - `QuickAdd` + `quickAdd.ts` (no window, owner 2026-11-02): while the line has the focus, chips show

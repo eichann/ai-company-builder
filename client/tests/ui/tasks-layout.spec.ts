@@ -196,3 +196,29 @@ test('at 1440×900 every left tab shows its name on one line: stacked in the nar
   await page.screenshot({ path: 'test-results/left-tabs-wide.png' })
   expectNoPageErrors(state)
 })
+
+// Owner FB #15: 「やることを左のチェックボックスからチェックして消した時、もしタブで開いていたら、そのタブも同時に消す」.
+// The ☑ in the list completes the task and closes its tab — also inside a named group (まとまり) — and
+// only its own: another task's tab, in the same group, stays.
+test('checking a task off in the list closes its tab in the middle; another task’s tab (same named group) stays', async ({ page }) => {
+  const TASK = 'acb-record:task-aaaaaa1'
+  const OTHER = 'acb-record:task-row001'
+  const state = await openPreview(page, 'skill-layout', { tasks: '1', check: '1', seed: JSON.stringify({
+    'editor:demo': JSON.stringify({ openFiles: [OTHER, TASK], activeFilePath: TASK, leftTab: 'tasks', records: {
+      'task-aaaaaa1': { title: 'A社 提案書を仕上げる', type: 'task' }, 'task-row001': { title: 'やること 2', type: 'task' },
+    } }),
+    'tabGroups:demo': JSON.stringify({ byKind: false, collapsedKinds: [], groups: [{ id: 'g1', name: '提案準備', color: 'rose' }], members: { [TASK]: 'g1', [OTHER]: 'g1' } }),
+  }) })
+  const tabs = middleTabs(page)
+  await expect(tabs.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.locator('[data-tab-group="提案準備"]')).toContainText('2')
+
+  const list = page.getByRole('region', { name: 'やることの一覧' })
+  await list.getByRole('button', { name: '「A社 提案書を仕上げる」を完了にする' }).click()
+  await expect(tabs.getByRole('tab', { name: /A社 提案書を仕上げる/ })).toHaveCount(0)
+  await expect(tabs.getByRole('tab', { name: /やること 2/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(tabs.locator('[data-tab-group="提案準備"]')).toContainText('1')
+  const acts = await page.evaluate(() => (window as unknown as { __acbLayout: { calls: Array<{ name: string; args: unknown[] }> } }).__acbLayout.calls.filter(c => c.name === 'actOnTask').map(c => c.args))
+  expect(acts).toEqual([['demo', 'task-aaaaaa1', { action: 'complete', expectedVersion: 2 }]])
+  expectNoPageErrors(state)
+})
