@@ -17,7 +17,7 @@ import { isDrivePickerPage, readDrivePickerResult } from './features/google/driv
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
-import { createCloseGuard, type CloseAnswer, type CloseGuard } from './services/close-guard'
+import { CLOSE_DURING_SYNC_CHOICES, CLOSE_DURING_SYNC_QUESTION, createCloseGuard, type CloseAnswer, type CloseGuard } from './services/close-guard'
 
 /** Desktop notifications still on screen (one that is garbage-collected loses its click). */
 const liveNotifications = new Set<Notification>()
@@ -275,6 +275,8 @@ export function createMainWindowHost(options: {
   /** Sent with requests to image.docbase.io (its images answer 403 otherwise). */
   docbaseCookie: () => string | undefined
   onClosed: () => void
+  /** The running app's sync (null until it is wired): closing waits for it. */
+  sync: () => { isRunning(): boolean; whenIdle(): Promise<void>; resumeAutomaticRuns(): void } | null
 }) {
   let current: BrowserWindow | null = null
   let guard: CloseGuard | null = null
@@ -304,6 +306,17 @@ export function createMainWindowHost(options: {
         quit: () => app.quit(),
         setTimer: (fn, ms) => setTimeout(fn, ms),
         clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+        sync: {
+          running: () => options.sync()?.isRunning() ?? false,
+          done: () => options.sync()?.whenIdle() ?? Promise.resolve(),
+          resume: () => options.sync()?.resumeAutomaticRuns(),
+          confirm: async () => {
+            const { response } = await dialog.showMessageBox(win, { type: 'warning', ...CLOSE_DURING_SYNC_QUESTION })
+            const choice = CLOSE_DURING_SYNC_CHOICES[response] ?? 'stay'
+            if (choice === 'stay') quitRequested = false
+            return choice
+          },
+        },
       })
       if (quitRequested) winGuard.onQuitRequested()
       guard = winGuard

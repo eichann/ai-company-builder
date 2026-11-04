@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { previewSync, revertChange, summarizeChanges, syncCompany } from '../api'
 import { syncNoticeFor, syncNoticeHidesItself, type SyncNotice } from '../model'
 import { afterSync, recordRun } from '../autoSyncSchedule'
 import { updateAutoSyncState } from '../autoSyncState'
+import { keepNotice, keptNotice, type NoticeOwner } from '../lastingNotice'
 
 const REVERT_FAILED = '元に戻せませんでした。もう一度試してください。'
 
@@ -15,14 +16,37 @@ export interface SyncPreview {
 interface Options {
   rootPath: string | undefined
   companyId: string | undefined
+  /** The signed-in account: a kept notice is theirs alone. */
+  userId: string | undefined
   /** After a successful sync, before the notice: reload what teammates may have changed. */
   onSynced: () => Promise<void>
 }
 
 /** 「サーバーと同期」, 「変更を確認」 (the preview, its AI summary, undoing one change) and the notice after a sync. */
-export function useSync({ rootPath, companyId, onSynced }: Options) {
+export function useSync({ rootPath, companyId, userId, onSynced }: Options) {
   const [isSyncing, setIsSyncing] = useState(false)
-  const [syncNotification, setSyncNotification] = useState<SyncNotice | null>(null)
+  const [syncNotification, showNotification] = useState<SyncNotice | null>(null)
+  // A notice about moved work outlives the window (lastingNotice.ts).
+  const ownerOf = useCallback((company: string | undefined): NoticeOwner | null => (
+    company && userId ? { userId, companyId: company } : null
+  ), [userId])
+  /** For a notice of a company no longer on the screen. */
+  const keepNoticeFor = useCallback((company: string, notice: SyncNotice) => {
+    const owner = ownerOf(company)
+    if (owner) keepNotice(owner, notice)
+  }, [ownerOf])
+  // A sync outlives a switch of company: its notice is kept for its company, not shown over another.
+  const companyOnScreen = useRef(companyId)
+  companyOnScreen.current = companyId
+  const setSyncNotification = useCallback((notice: SyncNotice | null) => {
+    const owner = ownerOf(companyId)
+    const shown = owner ? keepNotice(owner, notice) : notice
+    if (companyOnScreen.current === companyId) showNotification(shown)
+  }, [companyId, ownerOf])
+  useEffect(() => {
+    const owner = ownerOf(companyId)
+    showNotification(owner ? keptNotice(owner) : null)
+  }, [companyId, ownerOf])
 
   const [showPreview, setShowPreview] = useState(false)
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
@@ -53,7 +77,7 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
     } finally {
       setIsLoadingPreview(false)
     }
-  }, [rootPath])
+  }, [rootPath, setSyncNotification])
 
   const handleRequestSummary = useCallback(async () => {
     if (!rootPath) return
@@ -82,6 +106,9 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
         companyId,
         customCommitMessage || 'Sync from AI Company Builder'
       )
+      // Before anything slow: the window may be closing, waiting only for this sync.
+      const notice = syncNoticeFor(result)
+      if (!syncNoticeHidesItself(result)) keepNoticeFor(companyId, notice)
       if (result.success) {
         setCommitMemo('')
         await onSynced()
@@ -91,7 +118,7 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
         const next = afterSync(s, result, { manual: true }).state
         return result.success ? recordRun(next, 'send', 'ran', Date.now()) : next
       })
-      setSyncNotification(syncNoticeFor(result))
+      setSyncNotification(notice)
       if (syncNoticeHidesItself(result)) {
         setTimeout(() => setSyncNotification(null), 3000)
       }
@@ -104,7 +131,7 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
     } finally {
       setIsSyncing(false)
     }
-  }, [rootPath, companyId, onSynced])
+  }, [rootPath, companyId, onSynced, setSyncNotification, keepNoticeFor])
 
   /** 「元に戻す」 one change; answers why it was not undone, or null. */
   const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted'): Promise<string | null> => {
@@ -126,7 +153,7 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
   }, [rootPath])
 
   return {
-    isSyncing, setIsSyncing, syncNotification, setSyncNotification, handleSync,
+    isSyncing, setIsSyncing, syncNotification, setSyncNotification, keepNoticeFor, handleSync,
     showPreview, setShowPreview, isLoadingPreview, isLoadingSummary, previewData,
     handlePreview, handleRequestSummary, handleRevertFile,
     commitMemo, setCommitMemo,

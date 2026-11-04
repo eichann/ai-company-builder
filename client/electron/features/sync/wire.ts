@@ -6,7 +6,7 @@ import path from 'path'
 import { createGitSync, type SyncDialog } from '../../sync/git-sync'
 import { createFetchSyncServerApi } from '../../sync/server-api'
 import { createCommitMessages, type CommitMessagesDeps } from '../../services/commit-messages'
-import { createSyncActivity } from '../../services/sync-activity'
+import { createSyncActivity, gitMayBeRunningElsewhere } from '../../services/sync-activity'
 import type { AppGit } from '../../services/app-git'
 import type { Session } from '../../services/session'
 import type { WriteAccessStore } from '../../write-access-store'
@@ -35,6 +35,8 @@ export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog
   // the search tab and Cmd+P (features/git-history).
   registerGitHistoryIpc(ipc, { paths, git: appGit, commitMessagesFor })
 
+  // Download-choice changes and private-folder creation, which automatic sync waits for.
+  const activity = createSyncActivity()
   const gitSync = createGitSync({
     createGit: appGit.create,
     dialog,
@@ -43,10 +45,9 @@ export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog
     now: () => new Date(),
     platform: process.platform,
     log: console,
+    otherGitRunning: options => gitMayBeRunningElsewhere(activity, aiRunning, options),
   })
 
-  // Download-choice changes and private-folder creation, which automatic sync waits for.
-  const activity = createSyncActivity()
   registerSyncIpc(ipc, { paths, gitSync, writeAccess, activity, aiRunning })
   return { gitSync, activity }
 }

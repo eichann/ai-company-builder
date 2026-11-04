@@ -99,6 +99,8 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
         return '復元の前の内容'
       case 'before_revert':
         return '「元に戻す」の前の内容'
+      case 'before_recovery':
+        return '同期が途中で止まっていた間の内容'
       default:
         return reason
     }

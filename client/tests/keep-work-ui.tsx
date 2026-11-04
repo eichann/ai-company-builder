@@ -79,7 +79,7 @@ installElectronAPI({
 })
 
 function PreviewView() {
-  const sync = useSync({ rootPath: ROOT, companyId: 'demo', onSynced: async () => {} })
+  const sync = useSync({ rootPath: ROOT, companyId: 'demo', userId: 'u1', onSynced: async () => {} })
   return (
     <div className="p-6">
       <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded bg-accent text-white text-sm">変更を確認</button>
