@@ -880,7 +880,7 @@ owner-only one, before every role or folder rule).
   `BAD_MEMBER`, ≤ 200). Ledger action `invite`, change `place.members` before / after (ids,
   comma-separated), version + 1 (`VERSION_CONFLICT`), answer `added` (the newly listed). **Never
   undone** (`place.*`). No notice kind: the `records` signal reaches the added. No removing (not
-  built).
+  built). The app: the meeting card's ［招待する］ (`minutes:invite`, `minutes.md` "In the app").
 - **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
   member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
   read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see

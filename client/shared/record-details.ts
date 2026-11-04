@@ -2,6 +2,7 @@
 // built by main from the record's fields, which hold pointers only — never the minutes or the
 // message body. Links out go to Google / Slack, where the member's own permission decides. Pure.
 import type { RecordSummary } from '../../shared/types/records'
+import type { ViewersLabel } from '../../shared/types/viewers'
 
 export interface OpenLink {
   label: string
@@ -183,4 +184,15 @@ export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summa
     }
   }
   return null
+}
+
+/**
+ * A members-only meeting's 見られる人 (design §3, 「参加した人（N人）」): who attended, and who was
+ * invited besides (the server's count minus the attendees). A meeting seen another way (one made
+ * before 2026-11-04, in a folder; shared to a department) keeps the server's own phrase.
+ */
+export function meetingSeenWords(attendees: number, label: ViewersLabel): string {
+  if (label.kind === 'company' || label.kind === 'department' || label.kind === 'private-folder' || attendees <= 0) return label.text
+  const invited = label.count - attendees
+  return `参加した人（${attendees}人）${invited > 0 ? `・招待した人（${invited}人）` : ''}`
 }

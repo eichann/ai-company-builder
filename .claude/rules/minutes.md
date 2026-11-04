@@ -19,6 +19,11 @@ paths:
   - "client/src/features/chat/components/MinutesBundleChoiceCard.tsx"
   - "client/tests/minutes-app.test.ts"
   - "client/tests/ui/minutes.spec.ts"
+  - "client/src/app/meetingCard.tsx"
+  - "client/src/app/RecordBundleFieldBox.tsx"
+  - "client/tests/meetings-app.test.ts"
+  - "client/tests/meetings-ui.*"
+  - "client/tests/ui/meetings.spec.ts"
 ---
 
 # Minutes intake (milestone 4 G7)
@@ -241,8 +246,61 @@ meeting's reading makes is made once per meeting and item, decided by the server
   still answers and stores them for older admin consoles (harmless); `bundleQuestionDays` is still
   used. The admin home no longer lists 「議事録の置き場所を選ぶ」; the admin's Google page shows 「会議の
   記録」 with a note (recorded for their attendees, private events skipped) and only the days setting
-  (`minutes-folder.tsx`, `admin/tests/integrations.test.tsx`). The app's banner comes with the app PR.
+  (`minutes-folder.tsx`, `admin/tests/integrations.test.tsx`).
 - Tests: `server/tests/integration/meeting-attendees.test.ts` (each mutation-checked).
+
+### In the app (design §4-5, demo `demo/minutes-arrived`)
+
+- **Main** (`client/electron/features/minutes/meetings.ts`, session only; channels in `ipc.ts`):
+  `minutes:arrivals` → `MeetingArrivalsResult { available, items }` — the server's arrivals, each
+  checked field by field; a `read` one carries `made { decisions, proposals }` counted from the
+  meeting's links (decisions not retracted; tasks linked to it except the review task and archived
+  ones), looked up once per version. **An older server** (no route: any non-200) → `available:
+  false`: no banner, and `minutes:meeting` answers a failure with an empty error: the card shows no
+  new buttons (quietly). `minutes:meeting` (the card: the record's state and version now, the
+  arrival's series / by when listed, `review` = `reviewOf` once read), `minutes:requestReading` /
+  `minutes:skipReading` (at the version shown; 403 `MINUTES_NO_ACCESS` → `MEETING_NO_ACCESS_TEXT`
+  「…ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます。」, `noAccess: true`; a request
+  accepted re-reads the received minutes at once, `onReadRequested` → `minutes.recordsSignal`),
+  `minutes:autoSeries`, `minutes:invite` (`POST /records/item/:id/members`, any members-only record;
+  member ids checked, de-duplicated). Malformed ids never reach a URL.
+- **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
+  `meetingBanner`): at the top of やること (AppShell wraps `TaskListPanel`; `useMeetingArrivals`: at
+  mount, on `minutes:changed` / `records:changed` / `notifications:changed`, every 2 minutes, after a
+  press). Per meeting: 「議事録が届きました　<title>（今日 12:00・N人）」 ［AI に読ませる］［読まない］
+  (also after a failed reading); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」
+  — nothing opens; the member's AI reads it as their 「AI の番」 (below) — with ［読まない］ (今回だけ)
+  while it waits for their own AI, 「〇〇さんの AI が読んでいます…」 when another attendee pressed it,
+  and the runner's reason instead of the spinner when this PC cannot start it (Codex, not signed in,
+  failed; 「もう一度」). The member's own automatic series: 「自動で読む定例です。AI が読んでいます…」 with
+  ［次から自動で読まない］ (toast with 元に戻す). Read: 「読み終わりました　<title>：決めたことN・やることの案N」
+  ［見る］ (opens the card) and ×, closed per PC (localStorage `meeting-banners-closed:<company>`).
+  ［読まない］: the line goes at once, toast 「「…」は読まないにしました」 with 元に戻す = the generic undo of
+  that entry (`tasks:undo` at the skip's version); the other attendees see 「〇〇さんが読まないにしました」
+  (no buttons). The server drops a meeting after 3 days.
+- **AI turn**: a meeting the arrivals answer as `asked` by the member (`byYou`) is queued with
+  `asked` (`aiTurnQueue`) and runs even while 「自動で進める」 is off — the press is the start
+  (`ai-turns.md`). No consultation opens; the hidden run is the existing reading.
+- **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, composed in
+  `src/app/meetingCard.tsx` with the tasks feature's `MinutesReview`, `onMeetingCard`: no second
+  summary): ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
+  the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members; 「招待した人は
+  会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
+  一度招待すると、取り消すことはできません。」), once read the proposals and decisions, and once per meeting
+  (localStorage `meeting-auto-offered:<company>`) for a series 「この定例は次から自動で読みますか？」. 見られる人:
+  `meetingSeenWords` 「参加した人（N人）・招待した人（N人）」 (another place keeps the server's phrase).
+- **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): on a meeting, choosing or making a 案件
+  first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
+  (`meetingLinkSentence` over `viewers:get` of the 案件); nothing is linked or made before ［つなぐ］.
+  Not yet: the 「どの〇〇の会議ですか？」 question's ［はい］ / chooser links without this sentence.
+- Not built from the demo: the consultation's first answer as the AI's summary; ［部署に出す］ on the card.
+- Tests: `client/tests/meetings-app.test.ts` (older server quiet, counts, the card's decisions, the
+  press with the session and the runner re-read, NO_ACCESS words, malformed input never sent, the
+  words), `src/features/minutes/model.test.ts` (each banner state), `src/features/chat/aiTurns.test.ts`
+  (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
+  (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
+  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link),
+  `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 
 ## The text
 
@@ -414,8 +472,8 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the current one.
 - Meetings are members-only since 2026-11-04 ("Meetings for their attendees"): the intake passes no
   folder, the review task and decisions take the meeting's list, the text answers `folder: null`.
-  The app still finds received minutes in 「AI の番」; the banner and the meeting card's buttons come
-  with the app PR.
+  The app still finds received minutes in 「AI の番」; the banner and the card's buttons: "In the app"
+  above.
 
 ## Tests
 

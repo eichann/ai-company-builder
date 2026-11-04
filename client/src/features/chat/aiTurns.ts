@@ -97,8 +97,11 @@ export function orderAiTurns(queue: readonly AiTurnCandidate[]): AiTurnCandidate
 /** The record to run now, or why nothing starts. The order of the checks is the order of the reasons shown. */
 export function nextAiTurn(input: AiTurnDecisionInput): { run: AiTurnCandidate } | { wait: AiTurnWait } {
   const { settings, log, now } = input
-  if (!settings || !settings.enabled) return { wait: 'off' }
-  const waiting = orderAiTurns(input.queue).filter(c => !log.handed[c.id] && (log.attempts[c.id] ?? 0) < MAX_ATTEMPTS_PER_RECORD)
+  if (!settings) return { wait: 'off' }
+  // 「自動で進める」 off: only what the member asked for themselves (［AI に読ませる］) starts.
+  const queue = settings.enabled ? input.queue : input.queue.filter(c => c.asked)
+  if (queue.length === 0) return { wait: 'off' }
+  const waiting = orderAiTurns(queue).filter(c => !log.handed[c.id] && (log.attempts[c.id] ?? 0) < MAX_ATTEMPTS_PER_RECORD)
   if (waiting.length === 0) return { wait: 'empty' }
   // Codex and the API key cannot take the record's AI actions (registry recordActions).
   if (!agentCan(input.agent, 'recordActions')) return { wait: 'needs-claude' }
@@ -183,6 +186,8 @@ export function aiTurnItems(input: {
   wait: AiTurnWait | null
   noticeText: string | null
   running: { id: string; needsYou: boolean } | null
+  /** 「自動で進める」 is off: only what the member asked for runs, the rest says so. */
+  autoOff?: boolean
 }): AiTurnItemView[] {
   const { log, wait, noticeText, running } = input
   return orderAiTurns(input.queue).map((c): AiTurnItemView => {
@@ -194,7 +199,7 @@ export function aiTurnItems(input: {
         : { recordId: c.id, state: 'running', reason: '', canRetry: false, canHand: false }
     }
     if ((log.attempts[c.id] ?? 0) >= MAX_ATTEMPTS_PER_RECORD) return { recordId: c.id, state: 'failed', reason: UNFINISHED_REASON, canRetry: true, canHand: true }
-    switch (wait) {
+    switch (input.autoOff && !c.asked ? 'off' : wait) {
       case 'off':
         return { recordId: c.id, state: 'not-allowed', reason: '会社の設定で、AI の番は自動では進めません。', canRetry: false, canHand: true }
       case 'needs-claude':
