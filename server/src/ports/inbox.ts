@@ -68,6 +68,14 @@ export interface InboxSource {
    * every one and skips what is not), or
    * `not-connected` when the member has no grant now (their connection is
    * kept: when they reconnect, the window starts where it stopped).
+   * `{ messages, readFrom }` when the source stopped at its limit: only what
+   * came at or after `readFrom` was listed (the span before is an unchecked gap).
    */
-  listSince(companyId: string, userId: string, since: string): Promise<unknown[] | 'not-connected'>
+  listSince(companyId: string, userId: string, since: string): Promise<unknown[] | { messages: unknown[]; readFrom: string } | 'not-connected'>
+  /**
+   * Whether a read of the member works now (for Gmail: granted, their 受信を読む
+   * and the company's switches on): the poll connects such a member before
+   * reading (a first connection starts then).
+   */
+  ready?(companyId: string, userId: string): Promise<boolean>
 }

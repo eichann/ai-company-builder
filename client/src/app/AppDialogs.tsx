@@ -3,7 +3,10 @@ import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
 import { FindPalette } from '../features/search/components/FindPalette'
-import type { PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
+import type { PaletteAction, PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
+import type { useTabTidying } from '../features/editor/hooks/useTabTidying'
+import { TabTidyingList } from '../features/editor/components/TabTidyingControls'
+import { TidyTabsSetting } from '../features/settings/components/TidyTabsSetting'
 import { BackupHistorySlideOver } from '../features/sync/components/BackupHistorySlideOver'
 import { SettingsPanel } from '../features/settings/components/SettingsPanel'
 import { ConnectToolsScreen } from '../features/settings/components/ConnectToolsScreen'
@@ -12,6 +15,9 @@ import { SyncNotification } from '../features/sync/components/SyncNotification'
 import type { useSkillsTab } from '../features/skills/hooks/useSkillsTab'
 import type { useSync } from '../features/sync/hooks/useSync'
 import type { DepartmentConfig } from '../types'
+
+// 探す ⌘K finds 「片づけたタブ」 by these words too.
+const PALETTE_ACTIONS: PaletteAction[] = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }]
 
 interface Props {
   /** The open company: 「仕事の道具をつなぐ」 offers itself once per member and company. */
@@ -41,6 +47,8 @@ interface Props {
   onCloseSettings: () => void
   /** 自分の設定's 「今日のフォルダ」 row. */
   todayFolderSetting?: ReactNode
+  /** 「タブを片づける」 (features/editor): 「片づけたタブ」, its ⌘K entry and the daily tidy's setting. */
+  tidying: ReturnType<typeof useTabTidying>
   showBackupHistory: boolean
   setShowBackupHistory: Dispatch<SetStateAction<boolean>>
 }
@@ -51,6 +59,7 @@ export function AppDialogs(props: Props) {
   const { showFileSearch, onCloseFileSearch, onFileSearchSelect, showSettings, settingsFocus, onCloseSettings, showBackupHistory, setShowBackupHistory } = props
   return (
     <>
+        <TabTidyingList tidying={props.tidying} />
         {/* New Skill Wizard Modal */}
         {skillsTab.wizardOpen && selectedDept && (
           <NewSkillWizard
@@ -88,6 +97,8 @@ export function AppDialogs(props: Props) {
             onOpenSkill={props.onOpenSkill}
             loadConsultations={props.loadConsultations}
             onOpenConsultation={props.onOpenConsultation}
+            actions={PALETTE_ACTIONS}
+            onAction={id => { if (id === 'tidiedTabs') props.tidying.openList() }}
           />
         )}
 
@@ -100,7 +111,7 @@ export function AppDialogs(props: Props) {
             key={settingsFocus?.at ?? 'settings'}
             onClose={onCloseSettings}
             {...(settingsFocus ? { initialTab: 'ownkeys' as const, focusService: settingsFocus.service } : {})}
-            todayFolder={props.todayFolderSetting}
+            mineRows={<>{props.todayFolderSetting}<TidyTabsSetting on={props.tidying.dailyOn} onChange={props.tidying.setDailyTidy} /></>}
           />
         )}
 

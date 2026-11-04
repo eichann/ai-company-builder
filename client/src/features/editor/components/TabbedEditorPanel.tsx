@@ -1,3 +1,4 @@
+// Over ~300 lines: it only composes the editor's hooks and parts (files-and-editor.md); splitting its JSX would scatter one screen.
 import { useState, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { FileText, Code, Eye } from '@phosphor-icons/react'
 import { CodeEditor } from '../../../shared/ui/CodeEditor'
@@ -12,6 +13,7 @@ import { useEditorReview } from '../hooks/useEditorReview'
 import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/useMarkdownView'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
+import type { TabArrangement } from '../hooks/useTabArrangement'
 import { fileTabsOf, recordIdOfTab, type RecordTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
@@ -37,6 +39,15 @@ interface TabbedEditorPanelProps {
   renderRecord?: (recordId: string) => ReactNode
   /** Beside the active file (「つながっているもの」, 「前の版」). */
   aside?: ReactNode
+  /** Pinned (固定) tabs and their toggle (「タブを片づける」 leaves them open). */
+  pinnedTabs?: ReadonlySet<string>
+  onTogglePinned?: (key: string) => void
+  /** How the tabs stand: order by drag, named groups, by kind (`useTabArrangement`). */
+  arrangement?: TabArrangement
+  /** At the tabs' right end (the 「…」 menu), also shown with no tab open. */
+  tabsEnd?: ReactNode
+  /** One line above the tabs (what a tidy did). */
+  notice?: ReactNode
 }
 
 export function TabbedEditorPanel({
@@ -53,6 +64,11 @@ export function TabbedEditorPanel({
   recordLooks,
   renderRecord,
   aside,
+  pinnedTabs,
+  onTogglePinned,
+  arrangement,
+  tabsEnd,
+  notice: topNotice,
 }: TabbedEditorPanelProps) {
   // Records share the tabs; only the file tabs load text, save and keep scroll positions.
   const activeRecordId = recordIdOfTab(activeFilePath)
@@ -138,7 +154,8 @@ export function TabbedEditorPanel({
   if (tabs.length === 0) {
     return (
       <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30">
-        {navigation && <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}</div>}
+        {topNotice}
+        {(navigation || tabsEnd) && <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">{navigation}<div className="flex-1" />{tabsEnd && <div className="flex items-center px-1">{tabsEnd}</div>}</div>}
         <div className="flex-1 flex flex-col items-center justify-center text-gray-400 dark:text-zinc-600">
           <FileText size={44} className="mb-3 opacity-50" />
           <p className="text-[12.5px]">左のやることやファイルを押すと、ここにタブで開きます</p>
@@ -151,6 +168,7 @@ export function TabbedEditorPanel({
   return (
     // tabIndex: a click on the preview (nothing focusable) still puts the focus in this editor's area.
     <div ref={rootRef} {...commandArea('editor', paneId)} tabIndex={-1} className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30 outline-none">
+      {topNotice}
       <div className="flex-shrink-0 flex min-w-0 bg-gray-100 dark:bg-zinc-900/50">
       {navigation}
       <div className="flex-1 min-w-0">
@@ -164,6 +182,10 @@ export function TabbedEditorPanel({
         onSelect={handleSelectFile}
         onPin={onPinFile}
         onClose={handleCloseTab}
+        pinnedTabs={pinnedTabs}
+        onTogglePinned={onTogglePinned}
+        arrangement={arrangement}
+        end={tabsEnd}
       />
       </div>
       </div>

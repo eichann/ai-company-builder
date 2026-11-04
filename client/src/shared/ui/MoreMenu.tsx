@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { DotsThreeVertical } from '@phosphor-icons/react'
+import { Check, DotsThreeVertical } from '@phosphor-icons/react'
 import { useEventListener } from '../hooks/useEventListener'
 
 export interface MoreMenuItem {
@@ -8,6 +8,8 @@ export interface MoreMenuItem {
   hint?: string
   danger?: boolean
   icon?: ReactNode
+  /** A switch: shown with a check while on (role menuitemcheckbox). */
+  checked?: boolean
   onClick: () => void
 }
 
@@ -42,11 +44,11 @@ export function MoreMenu({ items, label = 'その他の操作', compact, align =
         <div role="menu" className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-40 w-[280px] rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-xl p-1 text-left`}>
           {items.map(i => (
             <button
-              key={i.label} type="button" role="menuitem"
+              key={i.label} type="button" role={i.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={i.checked}
               onClick={e => { e.stopPropagation(); setOpen(false); i.onClick() }}
               className="w-full rounded-md px-2.5 py-1.5 text-left hover:bg-gray-100 dark:hover:bg-zinc-700"
             >
-              <span className={`flex items-center gap-1.5 text-[12.5px] ${i.danger ? 'text-rose-600 dark:text-rose-400' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}</span>
+              <span className={`flex items-center gap-1.5 text-[12.5px] ${i.danger ? 'text-rose-600 dark:text-rose-400' : 'text-gray-800 dark:text-zinc-100'}`}>{i.icon}{i.label}{i.checked && <Check size={13} weight="bold" className="ml-auto text-accent" />}</span>
               {i.hint && <span className="block text-[10.5px] leading-snug text-gray-500 dark:text-zinc-400">{i.hint}</span>}
             </button>
           ))}

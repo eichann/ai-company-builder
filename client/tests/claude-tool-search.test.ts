@@ -21,6 +21,7 @@ import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools, recordToolId } from '../electron/records/tools'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
+import { createAppCommandTools } from '../electron/app-commands/tools'
 
 const TYPES = coreTypeDefinitions()
 const ALWAYS_LOAD = 'anthropic/alwaysLoad'
@@ -68,6 +69,7 @@ test('Claude Code: the app\'s tools are never hidden behind tool search; other t
     references: { execute: text },
     companyFiles: { execute: text },
     review: { execute: text },
+    appCommands: createAppCommandTools(async () => ({ ok: true, result: {} })),
     webResearch: { execute: text },
     secondOpinion: { tools: [{ name: 'ask_codex', id: 'mcp__acb_second_opinion__ask_codex', description: 'x', target: 'codex' }], execute: text } as never,
     records,
@@ -87,7 +89,9 @@ test('Claude Code: the app\'s tools are never hidden behind tool search; other t
   assert.match(instructions, /select:/)
   assert.match(instructions, /用意されていない/)
 
-  for (const server of ['acb_consultations', 'acb_company_files', 'acb_review', 'acb_web', 'acb_second_opinion']) {
+  // The app's commands handed to the AI (tabs_list / tabs_tidy / tabs_restore) too: never asked, always there.
+  for (const id of ['mcp__acb_app__tabs_list', 'mcp__acb_app__tabs_tidy', 'mcp__acb_app__tabs_restore']) assert.ok(options.allowedTools.includes(id), id)
+  for (const server of ['acb_consultations', 'acb_company_files', 'acb_review', 'acb_app', 'acb_web', 'acb_second_opinion']) {
     assert.ok(options.mcpServers[server], server)
     const tools = (await listed(options.mcpServers[server])).loaded
     assert.ok(tools.size > 0 && [...tools.values()].every(Boolean), server)

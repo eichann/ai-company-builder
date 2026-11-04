@@ -13,6 +13,7 @@ import type { TaskSettings } from '../../shared/core/task-settings'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { InboxSource } from '../ports/inbox'
 import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { createIdentityService } from '../services/identities'
@@ -37,6 +38,8 @@ export interface InboxLaneDeps {
   roles?: InboxDeps['roles']
   /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
   onSlackSignal?: (listen: (signal: SlackSignal) => void) => void
+  /** Lane A's mail sources by connector id (Gmail): the server clock's poll reads through them. */
+  inboxSources?: Record<string, InboxSource>
   /** A plugin screen's bridge (plan 4b B6, plugin-frame.md): what it reaches, all as the member. */
   bridge: PluginBridgeDeps
 }
@@ -81,6 +84,7 @@ export function wireInboxLane(deps: InboxLaneDeps) {
     taskSettings: deps.taskSettings,
     roles: deps.roles,
   })
+  for (const [connectorId, source] of Object.entries(deps.inboxSources ?? {})) inbox.registerSource(connectorId, source)
   // Slack's events (A3): each signal is one incoming chat message for that member.
   deps.onSlackSignal?.(signal => {
     try { inbox.receive(signal.companyId, signal.userId, slackSignalMessage(signal)) } catch { /* never fails Slack's answer */ }

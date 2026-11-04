@@ -1,6 +1,7 @@
 import type { ReferenceTools } from '../consultations/tools'
 import type { CompanyFileTools } from '../company-files/tools'
 import type { ReviewTools } from '../review/tools'
+import type { AppCommandTools } from '../app-commands/tools'
 import type { RecordTools } from '../records/tools'
 import type { WebResearchTools } from '../web-research/tools'
 import type { SecondOpinionTools } from './second-opinion'
@@ -64,6 +65,8 @@ export interface AgentConnection {
     companyFiles?: CompanyFileTools
     /** 「確認をお願いする」: ask the member to review and stop (review/tools.ts). */
     review?: ReviewTools
+    /** The app's commands handed to the AI (app-commands/tools.ts: the middle's tabs of the main window). */
+    appCommands?: AppCommandTools
     /** The company map's typed tools for this turn (records/tools.ts), with the turn's record token. */
     records?: RecordTools
     /**

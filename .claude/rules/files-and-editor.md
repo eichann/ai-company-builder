@@ -44,6 +44,9 @@ paths:
   - "client/tests/file-names.test.ts"
   - "client/tests/keep-work-ui.*"
   - "client/tests/ui/keep-work.spec.ts"
+  - "client/tests/ui/tidy-tabs.spec.ts"
+  - "client/tests/ui/tab-arrangement.spec.ts"
+  - "client/src/features/settings/components/TidyTabsSetting.tsx"
 ---
 
 # File watching, file tree, editor, search
@@ -229,14 +232,98 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
   preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
 - Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
-  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records }` (`records`: the open
+  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records, pinned }` (`records`: the open
   record tabs' titles, so they show at once after a restart; a record tab is not checked against
-  the disk)
+  the disk; `pinned`: the tabs pinned 固定, "Tidying the tabs"; missing = none)
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
   (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
   background; any `leftTab` string is kept and one no registered panel has opens the default tab
   (`renderer-structure.md`, panel registry). Existing installs hold this shape:
   keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
+
+## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
+
+- **Pinned (固定)** is its own mark (not the preview tab's 「固定」 on double-click, `pinFile`): a
+  tab's right-click menu or the tabs' 「…」 → 「このタブを固定する」; a pinned tab shows a pin
+  (pressing it unpins). Closing a pinned tab forgets the mark.
+- ［タブを片づける］ (the tabs' 「…」, command `tabs.tidy`, also the AI's): every editor's saver runs
+  first (`saveUnsavedEdits`, as on leaving); a tab still holding edits (changed on disk, the write
+  failed) stays open and the notice names it — **a tidy never loses an edit**. Every other tab
+  but the pinned ones closes and is saved as one group (time, company day, by hand / automatic)
+  in 「片づけたタブ」. A one-line notice above the tabs says what happened (`TidyNoticeBar`).
+- **Daily tidy**: when a company's tabs are restored (`useEditorPersistence` `onRestored`) on a
+  company day (`companyDay`, Japan time like 今日のフォルダ) later than the one remembered, the
+  restored tabs are tidied the same way (`auto`). No day remembered (first open after the update,
+  a new company) → nothing is closed. Once per company day; 設定 → 自分の設定 「前の日のタブを自動で
+  片づける」 (per Mac, on by default) turns it off. The first time it closes something:
+  「毎日、前の日のタブを自動で片づけます（設定でオフにできます）」 with 「片づけたタブを見る」. Only on
+  open: an app left open overnight is not tidied under the member.
+- **「片づけたタブ」** (`components/TidiedTabsDialog.tsx`; from the tabs' 「…」, the notice, ⌘K
+  「片づけたタブ」): sections per company day, newest first, ［全部開き直す］［この日の分を消す］; an item
+  opens alone. Files are kept by company path (they follow a moved company folder); a file gone
+  (checked on this computer) or a record the server answers `notFound` for (first 60, offline =
+  unknown) is greyed 「見つかりません」 and can still be removed. Reopened items leave the list.
+  Cap: the last 30 tidies and 500 tabs, oldest dropped (the list's footer and the tidy notice say so).
+- **Storage: this Mac only** — localStorage `tidiedTabs:<company id>` (groups),
+  `tidiedTabs:lastDay:<company id>`, `acb.tabs.dailyTidy` (`off` when switched off),
+  `acb.tabs.dailyTidyNoticeShown`; nothing reaches the server or another company.
+- Code: `features/editor/tidyTabs.ts` (pure rules + the store, Storage injected),
+  `hooks/useTabTidying.ts` (pinning, the commands, the daily tidy, restoring),
+  `components/TabTidyingControls.tsx` (the 「…」 menu, the notice, the list as `AppShell` /
+  `AppDialogs` place them). The AI's side (another company refused, private names hidden):
+  `commands.md` "Handed to the AI". Tests:
+  `tidyTabs.test.ts` (pinned / unsaved kept, cap, once per day, the switch, local per company),
+  `tests/ui/tidy-tabs.spec.ts` (tidy → list → restore, missing items, saving first, the daily
+  tidy and its notice, the AI's commands).
+- A tidy can take **one kind** (`tabs.tidy { kind }`: a kind chip's menu 「この種類（…）を片づける」, the
+  「…」 for the shown tab's kind) or **one named group** (`{ group }`: id from the chip, or the name
+  the AI read; 「このまとまりを片づける」) — same rules (pinned stay, edits saved first). **A kind tidy takes
+  only the tabs under that kind's chip**: a tab in a named group (unpinned) stands under the group's
+  chip and stays. Unknown group → `{ error }`, which the AI gets as `ok: false` (nothing closes).
+- **Every tidy keeps each tab's named group** (item `tabGroup: { name, color }`; whole, daily, by kind
+  or by group), so reopening puts it back in a group of that name (`regroup`: the open group of that
+  name, else a new one with the colour it had). A group left with no tab goes with the tidy.
+  Without this, the daily tidy (on by default) dissolved every group overnight.
+
+## Arranging the tabs (owner 2026-11-04, after the tidy: order, kinds, named groups)
+
+- **One order, shown in runs.** `openFiles` stays the one order (saved as before); the bar shows a
+  stable split of it (`tabArrangement.ts` `arrangeTabs`): **pinned first**, then the member's
+  **named groups** (まとまり, in the order made), then the rest — one run, or, with
+  「種類ごとにまとめる」 on, by kind in a fixed order: ファイル, やること, the bundles (named by the labels
+  of the ones open: 「案件・プロジェクト」, `bundleWords`), 会議の記録, 決めたこと, その他 (a record not
+  read yet, other kinds). A kind group and a named group start with a chip (icon or colour, name,
+  count; press = fold / open, its 「…」 or right-click = menu). A folded group still shows the tab
+  that is open (the chip is ringed): the member always sees where they are. A new tab lands at the
+  end of its run (its kind group when grouped; outside any named group).
+- **Drag inside the bar moves; anywhere else links** (the drop target decides). A tab's drag still
+  carries the record / file data with `effectAllowed: link` (a tab never moves a file in the tree)
+  plus `TAB_DRAG_TYPE` (`dragTypes.ts`); the bar takes it only for its own tab (a ref, not state:
+  changing the dragged element on dragstart can cancel the drag), shows an insertion line
+  (`data-drop-line`) and moves it (`moveTab`). Rules (`canMoveTab`): a pinned tab moves only among
+  the pinned and nothing else enters them; beside a tab of a named group a tab joins it, beside one
+  outside it leaves its group; by kind, a tab stays among its kind. Dropped on a named group's chip
+  it joins at the end (`addToGroup`).
+- **Named groups (Chrome-style)**: a tab's right-click or the 「…」 → 「新しいまとまりに入れる…」 (name +
+  one of six colours, `TabGroupParts.tsx` on `InputDialog`), 「〇〇に入れる」, 「まとまりから外す」; the
+  chip's menu: たたむ / ひらく, 名前と色を変える, このまとまりを片づける, まとまりを解く (tabs stay open). A
+  pinned tab stands with the pinned (its membership is ignored meanwhile). A group with no open tab
+  left is not shown and is dropped on the next change (`pruneGrouping`). **Names are unique** as the
+  member reads them (`groupNameKey`: NFKC, A–Z case, outer spaces): a taken name keeps the dialog
+  open with 「同じ名前のまとまりがあります。別の名前にしてください。」 (the AI's `group` and reopening
+  rely on the name).
+- **Storage: this Mac only**, per company, localStorage `tabGroups:<company id>` =
+  `{ byKind, collapsedKinds, groups: [{ id, name, color, collapsed? }], members: { <tab key>: <group id> } }`
+  (unreadable parts dropped, `parseGrouping`); beside `editor:<company id>`, so older apps reading that
+  entry are unaffected. The AI's `tabs.list` gives each open tab `kindId` and `tabGroup` (name).
+- Code: `features/editor/tabArrangement.ts` (pure rules + the store), `hooks/useTabArrangement.ts`
+  (mounted by `AppShell`), `components/EditorTabBar.tsx`, `TabGroupParts.tsx`, the 「…」 in
+  `TabTidyingControls.tsx`. Tests: `tabArrangement.test.ts` (runs, moves, joining / leaving,
+  pruning, ungrouping, unique names, regrouping, the store), `tidyTabs.test.ts` (an item's group kept),
+  `tests/ui/tab-arrangement.spec.ts` (reorder + pinned + kept; reorder vs drag out to the
+  consultation on `chat-header-ui.html?tabs=1`; by kind, folding, a kind tidied — not a grouped tab of
+  that kind; named groups made, a taken name refused, joined, renamed, tidied and reopened; the daily
+  tidy keeping groups; the AI by kind / group, unknown group `ok: false`).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 

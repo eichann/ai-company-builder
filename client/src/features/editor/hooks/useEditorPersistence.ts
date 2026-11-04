@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { fileExists } from '../api'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { looksOfOpenTabs, parseRecordLooks, recordIdOfTab, type RecordTabLook } from '../editorTabs'
 
 // Per company, in localStorage under `editor:<company id>`: the open tabs (files
@@ -15,6 +16,15 @@ type PersistedEditorState = {
   leftTab: string
   /** The open record tabs' titles and kinds, so they show at once after a restart. */
   records: Record<string, RecordTabLook>
+  /** Tabs the member pinned (固定): 「タブを片づける」 leaves them open. */
+  pinned: string[]
+}
+
+/** The tabs as restored for a company (files deleted meanwhile dropped). */
+export interface RestoredTabs {
+  openFiles: string[]
+  pinned: string[]
+  records: Record<string, RecordTabLook>
 }
 
 function safeReadEditorState(companyId: string, defaultLeftTab: string): PersistedEditorState | null {
@@ -28,6 +38,7 @@ function safeReadEditorState(companyId: string, defaultLeftTab: string): Persist
       activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
       leftTab: typeof parsed.leftTab === 'string' && parsed.leftTab ? parsed.leftTab : defaultLeftTab,
       records: parseRecordLooks(parsed.records),
+      pinned: Array.isArray(parsed.pinned) ? parsed.pinned.filter((p: unknown): p is string => typeof p === 'string') : [],
     }
   } catch {
     return null
@@ -47,7 +58,9 @@ function safeWriteEditorState(companyId: string, state: PersistedEditorState): v
  * company, restored when the company opens and saved on every change. Tabs of
  * files deleted meanwhile are dropped in the background.
  */
-export function useEditorPersistence(companyId: string | undefined, defaultLeftTab: string) {
+export function useEditorPersistence(companyId: string | undefined, defaultLeftTab: string, onRestored?: (companyId: string, tabs: RestoredTabs) => void) {
+  // Told once per company open, after the tabs are restored (the daily tidy, tidyTabs.ts).
+  const onRestoredRef = useLatestRef(onRestored)
   // Synchronously hydrate editor state from localStorage during the first render
   // so the persisted tabs/sidebar are visible immediately — no empty→populated
   // flicker. Background file-existence validation happens in the effect below.
@@ -59,6 +72,7 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
   const [openFiles, setOpenFiles] = useState<string[]>(() => initialEditorState?.openFiles ?? [])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(() => initialEditorState?.activeFilePath ?? null)
   const [recordLooks, setRecordLooks] = useState<Record<string, RecordTabLook>>(() => initialEditorState?.records ?? {})
+  const [pinnedTabs, setPinnedTabs] = useState<string[]>(() => initialEditorState?.pinned ?? [])
 
   // editorRestoredForId tracks which company we've finished validating files for.
   // It gates the persist effect to prevent any transient cross-company state from
@@ -86,10 +100,15 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
       setActiveFilePath(persisted?.activeFilePath ?? null)
       setLeftTab(persisted?.leftTab ?? defaultLeftTab)
       setRecordLooks(persisted?.records ?? {})
+      setPinnedTabs(persisted?.pinned ?? [])
     }
 
-    if (!persisted || persisted.openFiles.length === 0) {
+    const restored = (openFiles: string[]) => {
       setEditorRestoredForId(targetCompanyId)
+      onRestoredRef.current?.(targetCompanyId, { openFiles, pinned: persisted?.pinned ?? [], records: persisted?.records ?? {} })
+    }
+    if (!persisted || persisted.openFiles.length === 0) {
+      restored([])
       return
     }
     let cancelled = false
@@ -100,18 +119,18 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
       )
       if (cancelled) return
       const allValid = checks.every(Boolean)
+      const validFiles = persisted.openFiles.filter((_, i) => checks[i])
       if (!allValid) {
-        const validFiles = persisted.openFiles.filter((_, i) => checks[i])
         const active = validFiles.includes(persisted.activeFilePath ?? '')
           ? persisted.activeFilePath
           : (validFiles[validFiles.length - 1] ?? null)
         setOpenFiles(validFiles)
         setActiveFilePath(active)
       }
-      setEditorRestoredForId(targetCompanyId)
+      restored(validFiles)
     })()
     return () => { cancelled = true }
-  }, [companyId, editorRestoredForId, defaultLeftTab])
+  }, [companyId, editorRestoredForId, defaultLeftTab, onRestoredRef])
 
   // Persist editor state whenever it changes. Gated on restoration having
   // completed for this company so the initial empty state can't clobber a
@@ -123,8 +142,10 @@ export function useEditorPersistence(companyId: string | undefined, defaultLeftT
       activeFilePath,
       leftTab,
       records: looksOfOpenTabs(openFiles, recordLooks),
+      // A pinned tab that was closed is no longer pinned.
+      pinned: pinnedTabs.filter(k => openFiles.includes(k)),
     })
-  }, [companyId, editorRestoredForId, openFiles, activeFilePath, leftTab, recordLooks])
+  }, [companyId, editorRestoredForId, openFiles, activeFilePath, leftTab, recordLooks, pinnedTabs])
 
-  return { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks }
+  return { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks, pinnedTabs, setPinnedTabs }
 }

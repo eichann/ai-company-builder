@@ -13,10 +13,11 @@ export function draggedFilePaths(data: Pick<DataTransfer, 'getData'>): string[] 
   }
 }
 
+/** Whether a drag carries `type` (while dragging only the types are readable). */
+export const hasDragType = (data: Pick<DataTransfer, 'types'>, type: string): boolean => Array.from(data.types).includes(type)
+
 /** Whether a drag over a target comes from the file tree (its data is readable only on drop). */
-export function isFileTreeDrag(data: Pick<DataTransfer, 'types'>): boolean {
-  return Array.from(data.types).includes(FILE_PATHS_DRAG_TYPE)
-}
+export const isFileTreeDrag = (data: Pick<DataTransfer, 'types'>): boolean => hasDragType(data, FILE_PATHS_DRAG_TYPE)
 
 /**
  * What a drag from the file tree allows: moving onto a folder, linking onto a record (its card's
@@ -29,6 +30,13 @@ export function dropEffectAllowed(effectAllowed: string, dropEffect: 'copy' | 'm
   if (effectAllowed === 'all' || effectAllowed === 'uninitialized') return true
   return effectAllowed.toLowerCase().includes(dropEffect)
 }
+
+/**
+ * Added to a drag that starts on a middle tab: the tab bar takes it to reorder (the record or file data
+ * beside it still links it wherever it is dropped). Its value is not read: the bar knows its own tab.
+ */
+export const TAB_DRAG_TYPE = 'application/x-acb-tab'
+export const isTabDrag = (data: Pick<DataTransfer, 'types'>): boolean => hasDragType(data, TAB_DRAG_TYPE)
 
 /** A record dragged from a list row, a 探す row or its tab in the middle: `{ id, title }` as JSON. */
 export const RECORD_DRAG_TYPE = 'application/x-acb-record'

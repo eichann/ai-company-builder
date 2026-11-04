@@ -14,6 +14,11 @@ export function hasUnsavedEdits(): boolean {
   return dirty.size > 0
 }
 
+/** The tabs (paths) holding unsaved edits now. */
+export function unsavedPaths(): string[] {
+  return [...dirty]
+}
+
 // Leaving (sign-out, closing the window): every editor saves its tabs first.
 // A saver writes what it can without asking and answers the paths it could
 // not save (changed on disk meanwhile, the write failed); the caller then

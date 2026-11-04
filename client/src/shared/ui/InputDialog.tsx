@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 interface InputDialogProps {
   isOpen: boolean
@@ -10,6 +10,8 @@ interface InputDialogProps {
   confirmText?: string
   onConfirm: (value: string) => void | Promise<void>
   onCancel: () => void
+  /** More fields under the box (a colour choice); their state is the caller's. */
+  children?: ReactNode
 }
 
 export function InputDialog({
@@ -21,6 +23,7 @@ export function InputDialog({
   confirmText = '作成',
   onConfirm,
   onCancel,
+  children,
 }: InputDialogProps) {
   const [value, setValue] = useState(defaultValue)
   const [busy, setBusy] = useState(false)
@@ -75,6 +78,7 @@ export function InputDialog({
             aria-invalid={error ? true : undefined}
             className="w-full px-3 py-2 bg-editor-bg border border-border rounded-md text-text-primary placeholder-text-secondary focus:outline-none focus:border-accent"
           />
+          {children}
           {error && (
             <p role="alert" className="mt-2 text-xs text-red-500 dark:text-red-400 whitespace-pre-line">{error}</p>
           )}

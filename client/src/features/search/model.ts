@@ -18,6 +18,8 @@ export interface PaletteItem {
   /** A skill (its id in the スキル tab's list) or an AI consultation (its conversation id). */
   skillId?: string
   consultationId?: string
+  /** One of the screen's own lists (「片づけたタブ」), opened by the screen. */
+  actionId?: string
   /** The line under the name: a skill's place (全社, 営業部…). */
   detail?: string
   /** The kind's plain name shown at the right (やること, 案件…). */
@@ -26,6 +28,8 @@ export interface PaletteItem {
 
 /** A skill the member has (the スキル tab's list and the company-wide ones behind slash commands). */
 export interface PaletteSkill { id: string; name: string; /** Its folder name, the slash command. */ command: string; group?: string }
+/** A list of the screen's own found by its name or other words (「片づけたタブ」: タブ, 片づけ…). */
+export interface PaletteAction { id: string; title: string; words: readonly string[] }
 /** A consultation in 「AIへの相談」 (this computer's history), titled as the list shows it. */
 export interface PaletteConsultation { id: string; title: string }
 
@@ -40,7 +44,7 @@ const MAX_CONSULTATIONS = 20
  */
 export function paletteItems(
   query: string, files: readonly string[], records: readonly RecordViewSummary[], recent: readonly PaletteRecent[],
-  more: { skills?: readonly PaletteSkill[]; consultations?: readonly PaletteConsultation[] } = {},
+  more: { skills?: readonly PaletteSkill[]; consultations?: readonly PaletteConsultation[]; actions?: readonly PaletteAction[] } = {},
 ): PaletteItem[] {
   const q = query.trim()
   if (!q) {
@@ -50,10 +54,14 @@ export function paletteItems(
   }
   const fold = (t: string) => foldAsciiCase(t.normalize('NFC'))
   const fq = fold(q)
-  const out: PaletteItem[] = records.map(r => ({
+  // The screen's own lists first: few, and named by what the member typed.
+  const out: PaletteItem[] = (more.actions ?? [])
+    .filter(a => [a.title, ...a.words].some(w => fold(w).includes(fq) || fq.includes(fold(w))))
+    .map(a => ({ key: `action:${a.id}`, title: a.title, actionId: a.id, kindName: '一覧' }))
+  out.push(...records.map(r => ({
     key: `record:${r.id}`, title: r.title, recordId: r.id, kindName: r.typeLabel,
     record: { type: r.type, typeLabel: r.typeLabel, implements: r.thing === 'bundle' ? ['bundle'] : undefined },
-  }))
+  })))
   const seen = new Set<string>()
   for (const s of more.skills ?? []) {
     if (seen.size >= MAX_SKILLS) break

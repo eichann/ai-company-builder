@@ -45,8 +45,13 @@ export interface CommandDefinition<Id extends string = string, Args extends z.Zo
   readonly title: string
   readonly class: CommandClass
   readonly args: Args
-  /** Handed to the AI as a tool. Defaults to false; nothing reads it yet. */
+  /**
+   * Handed to the consultation AI as a tool (`electron/app-commands/tools.ts`). Defaults to
+   * false; only `view` and `local` commands may set it, and only with the owner (commands.md).
+   */
   readonly exposeToAI?: boolean
+  /** What the AI reads about the tool (Japanese, then English). Required with `exposeToAI`. */
+  readonly aiDescription?: string
   readonly keybinding?: CommandKeybinding
   /**
    * The command acts on one of several instances of an area (a chat pane):
@@ -84,6 +89,9 @@ export function defineCommands<const Defs extends readonly CommandDefinition[]>(
     if (typeof def.title !== 'string' || def.title.trim() === '') throw new CommandDefinitionError(`Command "${id}" needs a title`)
     if (!(def.args instanceof z.ZodObject)) throw new CommandDefinitionError(`Command "${id}": args must be a zod object`)
     if (def.exposeToAI && def.class === 'never') throw new CommandDefinitionError(`Command "${id}" is class never and cannot be handed to the AI`)
+    // outbound / admin need the member's 「はい」 or ACB's confirmation screen first, which is not built.
+    if (def.exposeToAI && def.class !== 'view' && def.class !== 'local') throw new CommandDefinitionError(`Command "${id}": only view and local commands can be handed to the AI`)
+    if (def.exposeToAI && !def.aiDescription?.trim()) throw new CommandDefinitionError(`Command "${id}" is handed to the AI and needs an aiDescription`)
     if (def.target) {
       if (!COMMAND_AREAS.includes(def.target.area)) throw new CommandDefinitionError(`Command "${id}": unknown target area ${def.target.area}`)
       if (!(def.target.arg in def.args.shape)) throw new CommandDefinitionError(`Command "${id}": target argument "${def.target.arg}" is not one of its args`)

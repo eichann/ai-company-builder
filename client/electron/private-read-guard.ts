@@ -226,11 +226,12 @@ export type PrivateWriteDecision =
 const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
 /**
- * The app's own MCP servers: read-only, never send anything out (acb_review only
- * shows a request to the member). Not the web research (`acb_web`): its question
- * goes out to the web.
+ * The app's own MCP servers: never send anything out (acb_review only shows a
+ * request to the member; acb_app only lists, closes and reopens the main window's
+ * tabs on this computer). Not the web research (`acb_web`): its question goes out
+ * to the web.
  */
-const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations', 'acb_review']
+const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations', 'acb_review', 'acb_app']
 
 /**
  * Never shared: the app's scratch area, and anything inside a `.personal/`

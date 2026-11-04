@@ -25,6 +25,7 @@ import type { MinutesNotice } from '../shared/minutes-app'
 import type { TaskListItem } from '../shared/tasks'
 import { EditorTabBar } from '../src/features/editor/components/EditorTabBar'
 import { recordTabKey } from '../src/features/editor/editorTabs'
+import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangement'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -361,19 +362,22 @@ export function AutoTurnList() {
   )
 }
 
-// ?tabs=1: the middle's open tabs, as AppShell shows them (drag sources only here).
+// ?tabs=1: the middle's open tabs, as AppShell shows them (dragged out to the input, or moved inside the bar).
 const RECORD_TAB = recordTabKey('task-0000aa')
 const DEAL_TAB = recordTabKey('deal-0000bb')
 const FILE_TAB = '/tmp/acb-preview/営業部/価格表.pdf'
+const MIDDLE_LOOKS = {
+  'task-0000aa': { title: '見積書を作り直す', type: 'task', state: 'in_progress' },
+  'deal-0000bb': { title: '株式会社サンプル', type: 'deal', typeLabel: '案件', implements: ['bundle'], state: 'open' },
+}
+const NO_PINS = new Set<string>()
 function MiddleTabs() {
+  const [openFiles, setOpenFiles] = useState([RECORD_TAB, DEAL_TAB, FILE_TAB])
+  const arrangement = useTabArrangement({ companyId: 'preview-company', openTabs: openFiles, setOpenTabs: setOpenFiles, pinned: NO_PINS, recordLooks: MIDDLE_LOOKS })
   return (
     <div className="h-full min-w-0 flex-1" data-middle-tabs>
-      <EditorTabBar openFiles={[RECORD_TAB, DEAL_TAB, FILE_TAB]} fileContents={new Map()} activeFilePath={RECORD_TAB}
-        recordLooks={{
-          'task-0000aa': { title: '見積書を作り直す', type: 'task', state: 'in_progress' },
-          'deal-0000bb': { title: '株式会社サンプル', type: 'deal', typeLabel: '案件', implements: ['bundle'], state: 'open' },
-        }}
-        onSelect={() => {}} onClose={() => {}} />
+      <EditorTabBar openFiles={openFiles} fileContents={new Map()} activeFilePath={RECORD_TAB} recordLooks={MIDDLE_LOOKS}
+        arrangement={arrangement} onSelect={() => {}} onClose={() => {}} />
     </div>
   )
 }

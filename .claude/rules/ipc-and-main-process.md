@@ -115,7 +115,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `chatWindow:getContext` / `reportStatus` / `openFile` only a registered consultation window, and
   only about itself (`openFile`: a file of its own company folder, then `chatWindow:fileRequested`
   to the main window only); `app:closeResponse` (the answer to closing the main window,
-  `services/close-guard.ts`) only the main window. Choice prompts and tool approvals go to the window that shows their conversation
+  `services/close-guard.ts`) only the main window; `appCommand:respond` (the main window's answer to
+  the consultation AI's app command, `features/app-commands/ipc.ts`) only the window that was asked,
+  and `appCommand:request` goes to the main window only (`commands.md` "Handed to the AI"). Choice prompts and tool approvals go to the window that shows their conversation
   (`webContentsForSession` in `main.ts`, `features/agent-interactions/owner.ts`; the owner is
   that window's webContents, so only it may answer, as before). Conversation events (`chatHistory:changed`, `handoff:changed`) go to every
   window (`createBroadcastPort`). Tests: `tests/chat-windows.test.ts`,

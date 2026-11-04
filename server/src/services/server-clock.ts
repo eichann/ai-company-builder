@@ -12,7 +12,9 @@
  *    actor, `CLOCK_ACTOR`), which tells the assignee (a notice, S5);
  * 2. writes the overdue (A-2) and stuck-AI-turn (C-18) notices
  *    (`notifications.sweep`);
- * 3. erases expired content (the content store's retention, `expireContent`).
+ * 3. erases expired content (the content store's retention, `expireContent`);
+ * 4. reads each connected member's new mail into the inbox (`pollInbox`,
+ *    inbox.md "Receiving": header facts and pointers, never the text).
  *
  * Everything is derived from stored data (no state kept between runs is
  * needed for correctness): running twice changes nothing more — a moved task
@@ -53,6 +55,8 @@ export interface ServerClockDeps {
    * what expired in this company (reason `retention`), the number erased.
    */
   expireContent?: (companyId: string) => number | Promise<number>
+  /** The inbox's poll of this company's mail (inbox.md): the number of messages read; `between` yields between members. */
+  pollInbox?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** Let the event loop serve requests between companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
@@ -65,6 +69,7 @@ export interface ClockRun {
   moved: number
   notices: number
   expired: number
+  mailRead: number
   failedCompanies: number
 }
 
@@ -121,12 +126,13 @@ export function createServerClock(deps: ServerClockDeps) {
     run.moved += moveWaitOver(companyId)
     run.notices += deps.notifications.sweep(companyId, limits.notices)
     if (deps.expireContent) run.expired += await deps.expireContent(companyId)
+    if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId, deps.yieldNow)
   }
 
   return {
     /** One pass over every company. A call while a pass is running does nothing (`ran: false`). */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, failedCompanies: 0 }
       if (running) return run
       running = true
       run.ran = true
@@ -144,8 +150,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },

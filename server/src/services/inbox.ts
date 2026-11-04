@@ -51,6 +51,8 @@ import { recordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter, ServiceWriteResult } from './record-engine'
 import { recordSummaries, RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
+/** How far before its window each poll also lists (mail that shows up late keeps its earlier time). */
+export const INBOX_POLL_OVERLAP_MS = 10 * 60_000
 export const INBOX_SETTINGS_FORBIDDEN = 'Only owners and admins can change the intake settings'
 export const INBOX_NOT_CONNECTED = { error: 'まだつないでいません。設定から「つなぐ」を押してください', code: 'INBOX_NOT_CONNECTED' }
 export const NOT_AI_TURN = { error: 'この連絡はいま AI の番ではありません', code: 'NOT_AI_TURN' }
@@ -541,17 +543,37 @@ export function createInboxService(deps: InboxDeps) {
     if (!source) return { read: 0, outcome: 'no-source' }
     const startedMs = clock.nowMs()
     const window = pollWindow(conn.checkedUntil, startedMs)
-    let messages: unknown[] | 'not-connected'
+    // A little before the window too (mail listed late keeps its earlier time; seen ones are
+    // `duplicate`), never before the connection unless the window itself is (「過去7日を見直す」).
+    const fromMs = Date.parse(window.from)
+    const since = new Date(Math.max(fromMs - INBOX_POLL_OVERLAP_MS, Math.min(fromMs, Date.parse(conn.connectedAt)))).toISOString()
+    let listed: Awaited<ReturnType<InboxSource['listSince']>>
     try {
-      messages = await source.listSince(companyId, userId, window.from)
+      listed = await source.listSince(companyId, userId, since)
     } catch {
       return { read: 0, outcome: 'not-connected' }
     }
-    if (messages === 'not-connected') return { read: 0, outcome: 'not-connected' }
+    if (listed === 'not-connected') return { read: 0, outcome: 'not-connected' }
+    const messages = Array.isArray(listed) ? listed : listed.messages
     if (window.gap) handle.inbox.addGap({ userId, channel: 'email', from: window.gap.from, to: window.gap.to, notedAt: clock.now() })
+    // The source stopped at its limit: what came before its oldest is an unchecked gap, never skipped silently.
+    if (!Array.isArray(listed) && Date.parse(listed.readFrom) > fromMs) {
+      handle.inbox.addGap({ userId, channel: 'email', from: window.from, to: new Date(Date.parse(listed.readFrom)).toISOString(), notedAt: clock.now() })
+    }
     for (const m of messages) receive(companyId, userId, m)
     handle.inbox.setCheckedUntil(userId, 'email', new Date(startedMs).toISOString())
     return { read: messages.length, outcome: 'done' }
+  }
+
+  /**
+   * The member can be read (the poll, when the source says they are ready): a first
+   * connection starts now (no reading back: spec §7-1); a reconnection keeps where the
+   * last poll got to, so the next poll reads back up to 7 days.
+   */
+  function connect(companyId: string, userId: string, channel: InboxChannel): void {
+    const now = clock.now()
+    const existing = handleOf(companyId).inbox.connection(userId, channel)
+    handleOf(companyId).inbox.putConnection({ userId, channel, connectedAt: now, checkedUntil: existing?.checkedUntil ?? now })
   }
 
   return {
@@ -576,23 +598,29 @@ export function createInboxService(deps: InboxDeps) {
       discardDrafts(companyId, handleOf(companyId), change.entry.recordId, 'ほかの経路で返信済み（もう返した）', true)
     },
 
-    /**
-     * The member granted reading (the connector calls it). A first connection
-     * starts now (no reading back: spec §7-1); a reconnection keeps where the
-     * last poll got to, so the next poll reads back up to 7 days.
-     */
-    connect(companyId: string, userId: string, channel: InboxChannel): void {
-      const now = clock.now()
-      const existing = handleOf(companyId).inbox.connection(userId, channel)
-      handleOf(companyId).inbox.putConnection({ userId, channel, connectedAt: now, checkedUntil: existing?.checkedUntil ?? now })
-    },
+    connect,
 
     poll,
 
-    /** Every connected member's mail of one company (the server clock's job). */
-    async pollCompany(companyId: string): Promise<number> {
+    /**
+     * Every connected member's mail of one company (the server clock's job). A member the
+     * source can read now but not yet connected (they granted, 受信を読む on) is connected
+     * first: their first window starts at this run. `between` lets the event loop serve
+     * requests between members (the clock's yield).
+     */
+    async pollCompany(companyId: string, between: () => Promise<void> = async () => {}): Promise<number> {
+      const source = await sourceFor(companyId)
+      if (source?.ready) {
+        for (const { userId } of deps.memberAddresses(companyId)) {
+          if (handleOf(companyId).inbox.connection(userId, 'email')) continue
+          if (await source.ready(companyId, userId).catch(() => false)) connect(companyId, userId, 'email')
+        }
+      }
       let read = 0
-      for (const c of handleOf(companyId).inbox.connected('email')) read += (await poll(companyId, c.userId)).read
+      for (const c of handleOf(companyId).inbox.connected('email')) {
+        read += (await poll(companyId, c.userId)).read
+        await between()
+      }
       return read
     },
 

@@ -165,6 +165,9 @@ compare-and-set and ledger), and writes notices.
   summary, the ones already told today skipped through `usersWithKey`).
 - **Expired content**: `expireContent` — the content store's retention, per company
   (`RecordContentEraser.eraseExpired`, reason `retention`; `records.md` "The content store").
+- **Incoming mail**: `pollInbox` — the inbox's `pollCompany` (`inbox.md` "Connections"):
+  connects the members the mail source can read, then reads each one's new mail as header facts
+  and pointers (never the text), yielding between members; `ClockRun.mailRead` counts them.
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
   task is no longer waiting; a notice's dedupe key is already there), so a second run writes
   nothing. A run while one is going returns `ran: false`. Per company and run at most 50 moves
