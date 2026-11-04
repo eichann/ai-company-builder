@@ -14,7 +14,10 @@
  *   refuses the next call before anything leaves ACB, while the other features keep working; on
  *   again works; it survives a re-consent; the company not allowing it refuses it too;
  * - 「つないでいるサービス」: owners / admins see Google with the roles it serves, switch it,
- *   and a switched-off Google serves no role from the next call.
+ *   and a switched-off Google serves no role from the next call;
+ * - the server clock reads Gmail into the inbox (inbox.md "Receiving"): a member who can be
+ *   read is connected on the next run, only mail after that is taken, as `gmail:` pointers.
+ *   (Runs last: inbox records keep the subject and addresses by design.)
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -308,5 +311,39 @@ describe('Google as a core connector: 受信を読む', () => {
     expect(await services.mailReader.listMessages(OTHER, 'g-other-member', { afterMs: AFTER })).toEqual({ ok: false, reason: 'stopped' })
     expect(gmailReads()).toBe(before)
     expect((await services.workSwitches.my({ companyId: OTHER, userId: 'g-other-member', role: 'member' })).channels).toEqual({ mail: false, chat: false })
+  })
+})
+
+describe('the server clock reads Gmail into the inbox', () => {
+  it('a member who can be read is connected on the next run; only mail after that is taken, as gmail: pointers', async () => {
+    // After every seeded mail: none of them is read back.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T00:00:00.000Z'))
+    try {
+      expect(services.records.updateSettings({ companyId: CO, userId: 'g-owner', role: 'owner' }, { enabled: true }).ok).toBe(true)
+      const first = await services.serverClock.runOnce()
+      expect(first).toMatchObject({ ran: true, mailRead: 0 })
+      const status = (userId: string) => services.inbox.status({ companyId: CO, userId, role: 'member' })
+      expect(status('g-sato').connections).toEqual([expect.objectContaining({ channel: 'email', connectedAt: '2026-11-07T00:00:00.000Z' })])
+      // Tanaka never allowed 受信を読む; the other company has no Google.
+      expect(status('g-tanaka').connections).toEqual([])
+      expect(services.inbox.status({ companyId: OTHER, userId: 'g-other-member', role: 'member' }).connections).toEqual([])
+
+      fake.deliver({
+        id: 'fakemail0100', threadId: 'fakethread0100', account: GOOGLE_SEED.member, labelIds: ['INBOX'], receivedAt: '2026-11-07T00:02:00.000Z',
+        headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: '佐藤 健 <sato@div.example>', Subject: 'ご相談', 'Message-ID': '<fake-0100@a-corp.example>' },
+        text: '本文です。',
+      })
+      vi.setSystemTime(new Date('2026-11-07T00:05:00.000Z'))
+      expect(await services.serverClock.runOnce()).toMatchObject({ ran: true, mailRead: 1 })
+      const rows = db.prepare('SELECT message_id, source_ref, direction FROM inbox_messages WHERE company_id = ?').all(CO)
+      expect(rows).toEqual([{ message_id: '<fake-0100@a-corp.example>', source_ref: 'gmail:fakemail0100', direction: 'in' }])
+      // The text is never kept.
+      const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(t => t.name)
+      const dump = tables.map(t => JSON.stringify(db.prepare(`SELECT * FROM ${t}`).all())).join('\n')
+      expect(dump.includes('本文です')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

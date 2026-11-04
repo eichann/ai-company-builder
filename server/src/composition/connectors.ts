@@ -25,6 +25,7 @@ import type { PracticeUpstream } from '../lib/config'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { InboxSource } from '../ports/inbox'
 import type { NotificationRow } from '../ports/notifications'
 import type { UpstreamClient } from '../ports/upstream'
 import type { BrokerVault } from '../services/broker-vault'
@@ -43,7 +44,7 @@ import { createCoreConnectors } from '../services/core-connectors'
 import { createGoogleCalendar } from '../services/google-calendar'
 import type { GoogleClient } from '../services/google-client'
 import type { GoogleConnector } from '../services/google-connector'
-import { createGoogleMail } from '../services/google-mail'
+import { createGoogleMail, googleMailInboxSource } from '../services/google-mail'
 import { createGoogleMeetings, type GoogleRequester } from '../services/google-meetings'
 
 /**
@@ -93,7 +94,10 @@ export function wireCoreConnectors(deps: CoreConnectorsWiringDeps) {
     },
   })
 
-  return { connectorRoles, roleProviders, googleConnector }
+  // The inbox's source per connector (inbox.md "Receiving"): the server clock's poll reads Gmail through it.
+  const inboxSources: Record<string, InboxSource> = { [BUILTIN_CONNECTORS.google.id]: googleMailInboxSource(googleMail, () => clock.nowMs()) }
+
+  return { connectorRoles, roleProviders, googleConnector, inboxSources }
 }
 
 export type CoreConnectorsWiring = ReturnType<typeof wireCoreConnectors>

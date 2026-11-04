@@ -18,6 +18,7 @@
 import { googleFeaturesOff, GOOGLE_SCOPE } from '../../shared/core/google'
 import { normalizeEmail } from '../../shared/core/mail'
 import type { CompanyDataSource } from '../ports/company-data'
+import type { InboxSource } from '../ports/inbox'
 import type { MailAddress, MailMessage, MailRead, MailReader, MailReadFailure, MailSender, MailSenderAccount, MailSummary } from '../ports/mail'
 import type { GoogleResult } from './google-client'
 import type { GoogleRequester } from './google-meetings'
@@ -278,6 +279,63 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
         api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send',
         body: threadId ? { raw, threadId } : { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: threadId ? 'gmail.send.reply' : 'gmail.send',
       })
+    },
+  }
+}
+
+/** The most messages one poll hands the inbox (a 7-day read-back of a busy mailbox stays bounded). */
+export const INBOX_POLL_MAX = 1000
+
+/**
+ * Gmail as the inbox's source (`ports/inbox.ts` `InboxSource`, inbox.md
+ * "Receiving"): the member's received messages since a time, oldest first,
+ * as header facts and pointers (`gmail:<id>`, `gmail:<thread id>`) — never
+ * the text. Any failure reads as `not-connected`, so the poll keeps its window.
+ * At the limit, the newest are kept and `readFrom` says where they start.
+ */
+export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, nowMs: () => number): InboxSource {
+  const party = (a: MailAddress) => ({ address: a.email, name: a.name || null })
+  return {
+    async listSince(companyId, userId, since) {
+      const afterMs = Date.parse(since)
+      const found: MailSummary[] = []
+      let pageToken: string | undefined
+      do {
+        const r = await reader.listMessages(companyId, userId, { afterMs, max: PAGE_MAX, ...(pageToken ? { pageToken } : {}) })
+        if (!r.ok) return 'not-connected'
+        found.push(...r.value.messages)
+        pageToken = r.value.nextPageToken ?? undefined
+      } while (pageToken && found.length < INBOX_POLL_MAX)
+      const cut = found.length > INBOX_POLL_MAX || pageToken !== undefined
+      const kept = found.slice(0, INBOX_POLL_MAX)
+      const messages = kept
+        // Gmail's `after:` counts whole seconds: what came before the window is left out here.
+        .filter((m): m is MailSummary & { from: MailAddress; receivedAt: string } => m.from !== null && m.receivedAt !== null && Date.parse(m.receivedAt) >= afterMs)
+        .reverse()
+        .map(m => ({
+          channel: 'email' as const,
+          // No Message-ID header (rare): Gmail's own id, which differs per mailbox.
+          messageId: m.messageIdHeader ?? `gmail:${m.id}`,
+          references: m.inReplyTo ? [m.inReplyTo] : [],
+          threadRef: `gmail:${m.threadId}`,
+          sourceRef: `gmail:${m.id}`,
+          occurredAt: m.receivedAt,
+          subject: m.subject,
+          from: party(m.from),
+          to: m.to.map(party),
+          cc: m.cc.map(party),
+          outgoing: false,
+          bulk: m.bulk,
+          automated: m.automated,
+        }))
+      if (!cut) return messages
+      // The oldest kept message's time (newest first: the last one listed that has a time).
+      const oldest = kept.map(m => m.receivedAt).filter((t): t is string => t !== null).at(-1) ?? new Date(nowMs()).toISOString()
+      return { messages, readFrom: oldest }
+    },
+    // Ready = one list call answers now: granted, 受信を読む on, the company's switches on.
+    async ready(companyId, userId) {
+      return (await reader.listMessages(companyId, userId, { afterMs: nowMs(), max: 1 })).ok
     },
   }
 }
