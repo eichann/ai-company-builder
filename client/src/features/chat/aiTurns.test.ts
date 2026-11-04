@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../shared/ai-turns'
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
-  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
+  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -156,4 +156,27 @@ test('a record due soon goes to the person early instead of waiting for the AI',
   assert.deepEqual(nextAiTurn(input({ log, queue: [soon, later] })), { run: later })
   // The one the AI already works on is not taken away from it.
   assert.equal(handUrgent(freshLog(NOW), [soon], soon.id, NOW).handed[soon.id], undefined)
+})
+
+test('a meeting asked for again after the AI could not read it runs again; a hand-off is otherwise kept', () => {
+  const at = (version: number) => [{ ...B, version }]
+  const failed = recordOutcome(recordStarted(recordStarted(freshLog(NOW), B.id), B.id), B.id, 'failed', ON, 0, 3)
+  // The queue not read again since the run: still the failure.
+  assert.deepEqual(askedAgain(failed, at(3)), [])
+  // ［AI に読ませる］ moved it back at a newer version: the hand-off and today's attempts no longer hold it.
+  assert.deepEqual(askedAgain(failed, at(7)), [B.id])
+  assert.deepEqual(nextAiTurn(input({ log: failed, queue: at(7) })), { wait: 'empty' })
+  assert.equal(('run' in nextAiTurn(input({ log: retried(failed, B.id), queue: at(7) }))), true)
+  // Stopped unfinished, handed by the member, due soon: the record never left, only 「もう一度」 brings it back.
+  assert.deepEqual(askedAgain(recordOutcome(freshLog(NOW), B.id, 'unfinished', ON, 0, 3), at(7)), [])
+  assert.deepEqual(askedAgain(handedOver(freshLog(NOW), B.id, ''), at(7)), [])
+})
+
+test('a hand-off an older build kept (no version, its old words) counts as asked again and no longer says the AI judged', () => {
+  const stored = { ...freshLog(NOW), handed: { [B.id]: { kind: 'failed', reason: 'AI が「読み取れない」と判断しました。理由は「AIへの相談」に残っています。' } } }
+  const log = logForToday(JSON.parse(JSON.stringify(stored)), NOW)
+  assert.equal(log.handed[B.id].reason, FAILED_REASON)
+  assert.deepEqual(askedAgain(log, [B]), [B.id])
+  // A kept version survives the daily read of the log.
+  assert.equal(logForToday(recordOutcome(freshLog(NOW), B.id, 'failed', ON, 0, 3), NOW).handed[B.id].version, 3)
 })

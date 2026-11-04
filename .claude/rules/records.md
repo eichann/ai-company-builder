@@ -1167,7 +1167,7 @@ POST /ai-run-claims                              { recordId, step, deviceId, con
 GET  /ai-runs/:runId
 POST /ai-runs/:runId/renew                       { generation }
 POST /ai-runs/:runId/finish                      { generation, outcome: done | failed, failure?: { class, code? } }
-POST /ai-runs/:runId/retry                       「もう一度」
+POST /ai-runs/:runId/retry                       「もう一度」 (a meeting's ［AI に読ませる］ does the same: ai-turns.md "Asked again")
 POST /ai-runs/:runId/operations/:key/reconcile   { done }
 ```
 

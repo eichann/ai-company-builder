@@ -9,7 +9,7 @@ import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
 import { claimAiTurn, getAutoTurnSettings, retryAiTurn, settleAiTurn } from '../api'
 import {
-  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, handUrgent, handedOver, logForToday,
+  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, handUrgent, handedOver, logForToday,
   nextAiTurn, recordOutcome, recordStarted, resumed, retried, usageLimitReached, usagePauseUntil, type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
 import type { ChatInputRequest } from '../components/ChatConversation'
@@ -22,6 +22,8 @@ const SETTINGS_TTL_MS = 10 * 60_000
 
 interface Running {
   recordId: string
+  /** The record's version in the queue when this run started. */
+  version: number
   tabId: string
   phase: 'claiming' | 'running'
   since: number
@@ -86,7 +88,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const result = await settleAiTurn(o.companyId, run.recordId).catch(() => ({ outcome: 'unknown' as const }))
     const outcome: AiTurnOutcome = result.outcome === 'done' ? 'done'
       : usageLimitReached(snapshot) ? 'usage-limit' : result.outcome === 'failed' ? 'failed' : 'unfinished'
-    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePauseUntil(snapshot, now)))
+    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePauseUntil(snapshot, now), run.version))
     running.current = null
   }, [latest, loadLog, saveLog])
 
@@ -98,7 +100,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const stepName = step?.step ?? pluginStep
     if (!stepName) return
     const tabId = o.openBackgroundTab()
-    const run: Running = { recordId: notice.id, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false }
+    const run: Running = { recordId: notice.id, version: notice.version, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false }
     running.current = run
     if (!pass.current || now - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: now, started: 0 }
     pass.current.started += 1
@@ -128,14 +130,16 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
   }, [latest, loadLog, saveLog])
 
   // The member's two choices; the next tick (≤ 3 s) publishes the new states.
-  const retry = useCallback((recordId: string) => {
+  const giveBack = useCallback(async (recordId: string) => {
+    // The server's run may be waiting for a person too (S10b). It goes first: a claim that reached
+    // the server before it would be refused and the record marked taken.
+    const companyId = latest.current.companyId
+    if (companyId) await retryAiTurn(companyId, recordId).catch(() => undefined)
     saveLog(retried(loadLog(Date.now()), recordId))
     published.current = ''
-    // The server's run may be waiting for a person too (S10b): give it back, and let this PC try the record again.
     for (const k of [...taken.current]) if (k.startsWith(`${recordId}@`)) taken.current.delete(k)
-    const companyId = latest.current.companyId
-    if (companyId) void retryAiTurn(companyId, recordId).catch(() => undefined)
   }, [latest, loadLog, saveLog])
+  const retry = useCallback((recordId: string) => { void giveBack(recordId) }, [giveBack])
   const handOver = useCallback((recordId: string) => {
     const shown = published.current ? JSON.parse(published.current) as AiTurnItemView[] : []
     saveLog(handedOver(loadLog(Date.now()), recordId, shown.find(i => i.recordId === recordId)?.reason ?? ''))
@@ -173,6 +177,8 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
       }
       const current = running.current
       const queue = o.queue.filter(n => !taken.current.has(`${n.id}@${n.version}`))
+      // Asked for again after a failure: the same as 「もう一度」, without the member pressing twice.
+      for (const id of askedAgain(loadLog(now), queue)) await giveBack(id)
       let log = loadLog(now)
       if (settings.current?.value.enabled) {
         const urgent = handUrgent(log, queue, current?.recordId ?? null, now)
@@ -196,7 +202,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     } finally {
       ticking.current = false
     }
-  }, [latest, loadLog, saveLog, settle, start, retry, handOver])
+  }, [latest, loadLog, saveLog, settle, start, giveBack, retry, handOver])
 
   useInterval(() => { void tick() }, AI_TURN_TICK_MS)
 

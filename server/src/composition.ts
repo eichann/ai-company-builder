@@ -525,6 +525,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     resolveAddress: (member, address) => inboxLane.identities.resolveAddress(member, address),
     // A まとまり chosen after the reading moves to the business plugin's step, as after a reading (plugin-steps.md).
     afterAction: (member, actor, done) => recordEngine.afterAction(member, actor, done),
+    // Built below; called only after construction.
+    readingAskedAgain: (companyId, recordId) => aiRuns.askedAgain(companyId, recordId, 'minutes-reading'),
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
       const accounts = shared.accounts.byIds(rows.map(m => m.user_id))

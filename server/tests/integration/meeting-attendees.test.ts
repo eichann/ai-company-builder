@@ -435,7 +435,7 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
     for (const [reason, status, code, words] of [
       ['appNotAuthorizedToFile', 403, 'MINUTES_TEXT_REFUSED', 'いま ACB に許可している範囲'],
       ['insufficientPermissions', 403, 'MINUTES_TEXT_REFUSED', 'いま ACB に許可している範囲'],
-      ['cannotExportFile', 403, 'MINUTES_TEXT_REFUSED', 'コピーやダウンロードをさせない設定'],
+      ['cannotExportFile', 403, 'MINUTES_TEXT_REFUSED', 'ファイルの持ち主がコピーやダウンロードを止めている'],
       ['exportSizeLimitExceeded', 403, 'MINUTES_TOO_LARGE', '大きすぎて'],
       ['someNewReason', 403, 'MINUTES_TEXT_REFUSED', 'Google が文章の取り出しを断りました'],
       ['userRateLimitExceeded', 503, 'GOOGLE_UNAVAILABLE', '少し待って'],
@@ -490,6 +490,44 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
     expect(stateOf(retro).state).toBe('received')
     // Back where the 3-day window's test expects it.
     expect((await call('ma-tanaka', 'POST', `${C()}/me/minutes/item/${retro}/skip`, {})).status).toBe(200)
+  })
+
+  it('copying blocked by the file\'s owner: Meet\'s record is no way around it, also when only one document says so', async () => {
+    for (const [notes, transcript] of [['cannotExportFile', 'cannotExportFile'], ['cannotDownloadFile', 'cannotDownload'], ['appNotAuthorizedToFile', 'cannotExportFile'], ['cannotExportFile', 'appNotAuthorizedToFile']]) {
+      google.faults.reset()
+      google.faults.refuseExport(DOC.retro, notes)
+      google.faults.refuseExport(DOC.retroTranscript, transcript)
+      google.requests.length = 0
+      const before = stateOf(retro)
+      const t = await textOf(retro)
+      const r = await press(retro)
+      for (const answer of [t, r]) {
+        expect([answer.status, answer.body.code], `${notes}/${transcript}`).toEqual([403, 'MINUTES_TEXT_REFUSED'])
+        expect(answer.body.error).toContain('ファイルの持ち主がコピーやダウンロードを止めている')
+      }
+      expect(JSON.stringify(t.body)).not.toContain(SECRET_LINES[5])
+      expect(google.requests.some(q => q.path.includes('/transcripts'))).toBe(false)
+      expect(stateOf(retro)).toEqual(before)
+    }
+    google.faults.reset()
+  })
+
+  it('Meet\'s record stands in only for what ACB is not allowed: any other refusal stops', async () => {
+    for (const reason of ['appNotAuthorizedToFile', 'insufficientPermissions', 'insufficientScopes', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']) {
+      google.faults.reset()
+      google.faults.refuseExport(DOC.retro, reason)
+      google.faults.refuseExport(DOC.retroTranscript, reason)
+      const t = await textOf(retro)
+      expect(t.status, reason).toBe(200)
+      expect(t.body.data.text, reason).toContain('■ 文字起こし（Google Meet の記録から）')
+    }
+    google.faults.reset()
+    google.faults.refuseExport(DOC.retro, 'someNewReason')
+    google.faults.refuseExport(DOC.retroTranscript, 'someNewReason')
+    google.requests.length = 0
+    expect((await textOf(retro)).body.code).toBe('MINUTES_TEXT_REFUSED')
+    expect(google.requests.some(q => q.path.includes('/transcripts'))).toBe(false)
+    google.faults.reset()
   })
 
   it('a document Drive does not open stays 「共有されていません」: Meet\'s record is no way around the sharing', async () => {

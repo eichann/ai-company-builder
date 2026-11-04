@@ -45,7 +45,8 @@ import { useTabArrangement } from '../src/features/editor/hooks/useTabArrangemen
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
 //                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
-//                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
+//                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it;
+//                  ?autoturn=asked-again: the log of an older build holds the failed record, back in the queue
 //   ?topic=1       with ?history=edit: the restored conversation is about a readable やること (the topic chip
 //                  with ×; taking it off is recorded in __acbChat.patches)
 //   ?tabs=1        the middle's tab bar beside the chat: a やること, a 案件 and a file tab, to drag onto the
@@ -149,15 +150,22 @@ const MEETING_ITEM: TaskListItem = {
   id: MINUTES_NOTICE.id, type: 'meeting', typeLabel: '会議', title: MINUTES_NOTICE.title, state: 'received', stateLabel: '届いた', version: 1,
   due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
 }
-const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[] }
+const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[], order: [] as string[] }
 installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
     aiTurns.claims.push([companyId, recordId, version, conversationId])
+    aiTurns.order.push('claim')
     return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true, version: version + 1 }
   },
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
-  retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
+  retryAiTurn: async (_companyId, recordId) => {
+    // The server takes a moment: the claim must still come after its answer.
+    await new Promise(r => setTimeout(r, 1500))
+    aiTurns.order.push('retry')
+    aiTurns.retried.push(recordId)
+    return { ok: true }
+  },
   linkMinutesBundle: async (companyId, minutesId, bundleId) => { minutesLinks.push([companyId, minutesId, bundleId]); return { success: true } },
   // The task list as main answers it: the received meeting waits in 「AI の番」.
   getTaskList: async () => ({ success: true, data: { available: true, listDepartmentIds: null, items: [MEETING_ITEM] } }),
@@ -342,6 +350,13 @@ commands.register('file.open', ({ path }) => { control.opened.push(path) })
 // What a skill's 実行 (or, later, another feature) runs, for the specs.
 Object.assign(window, { __acbCommands: { run: runCommand } })
 
+if (autoTurn === 'asked-again') {
+  try {
+    localStorage.setItem('aiTurns:preview-company:preview-user', JSON.stringify({
+      handed: { [MINUTES_NOTICE.id]: { kind: 'failed', reason: 'AI が「読み取れない」と判断しました。理由は「AIへの相談」に残っています。' } },
+    }))
+  } catch { /* preview only */ }
+}
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 

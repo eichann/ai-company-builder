@@ -226,7 +226,11 @@ meeting's reading makes is made once per meeting and item, decided by the server
   Google refuses the text" below, nothing changes; then → `received` with **assignee = the presser**
   (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
   the existing reading, `text` with their grant). Same member while it waits for their AI → the same
-  answer, nothing written; `reading` / `read` / someone else's `received` → 409 `MEETING_NOT_WAITING`.
+  answer, nothing written on the record; `reading` / `read` / someone else's `received` → 409
+  `MEETING_NOT_WAITING`. **The press is a fresh attempt** (production 2026-11-05: a press after a
+  failed reading answered 200 and nothing ran): both answers also give back an earlier run of the
+  reading that stopped for a person, whoever's it was (`readingAskedAgain` → `aiRuns.askedAgain`,
+  `ai-turns.md` "Asked again"); the app drops its own hand-off there too.
 - **［読まない］**: `POST /me/minutes/item/:recordId/skip { expectedVersion? }` — any of its people
   from `arrived` / `failed`, the assignee alone from `received` (「今回だけ読まない」); → `skipped`
   (ledger `skip`, the person as actor, note 「読まない」, quiet): nobody is asked again, the record is
@@ -351,14 +355,21 @@ while transcripts work. Unconfirmed until the log line below shows Google's reas
 - **One document's export refused** (403/404) does not stop the others: the notes refused, the
   transcript document is still read; the part refused says so in the text (「■ 会議メモ」
   「（Google が文章の取り出しを断ったため…）」), so the AI knows it reads only part.
-- **No transcript came through** → Meet's own record (`transcriptText`, `conferenceRecords.transcripts`
+- **Meet's record stands in only for what ACB is not allowed** (owner decision 2026-11-05): every
+  refusal among the documents must be `appNotAuthorizedToFile` / `insufficientPermissions` /
+  `insufficientScopes` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` (`MEET_RECORD_REASONS`). A copy block
+  (`cannotExportFile`, `cannotDownload…`) is the file's owner saying no: one such document, and Meet's
+  record is not asked at all, nor for any other reason (an unknown one, the size limit). A document Google
+  does export is still read (a block is per file).
+- **No transcript came through**, and the rule above allows it → Meet's own record (`transcriptText`, `conferenceRecords.transcripts`
   + `.entries` + `.participants`, `meetings.space.readonly`, already granted; every transcript not
   `STARTED`, also one without a document; 100 entries a page) under 「■ 文字起こし（Google Meet の記録から）」
   as `<name>: <words>`. Kept by Google 30 days after the meeting, may differ a little from the
   document; handed over like the rest, never stored. **Smart notes have no such way**: the Meet API
   gives their metadata and the document's id only.
-- **Nothing readable** → `textRefusal`, by reason: `exportSizeLimitExceeded` → `MINUTES_TOO_LARGE`;
-  `cannotExportFile` / `cannotDownload…` → `MINUTES_TEXT_REFUSED` (no copying); `appNotAuthorizedToFile`
+- **Nothing readable** → `textRefusal`, by reason, a copy block first when the documents differ:
+  `exportSizeLimitExceeded` → `MINUTES_TOO_LARGE`; `cannotExportFile` / `cannotDownload…` →
+  `MINUTES_TEXT_REFUSED` (「ファイルの持ち主がコピーやダウンロードを止めているため、AI は読めません」); `appNotAuthorizedToFile`
   / `insufficientPermissions` / `insufficientScopes` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → the same code
   (「いま ACB に許可している範囲では」); anything else the same code, generic. Never 「共有されていません」.
   403 with `rateLimitExceeded` / `userRateLimitExceeded` / `dailyLimitExceeded` → 503 `GOOGLE_UNAVAILABLE`;
@@ -367,7 +378,9 @@ while transcripts work. Unconfirmed until the log line below shows Google's reas
 - **Not done without the owner**: a wider scope. `drive`, `drive.readonly` are `GOOGLE_NEVER_SCOPES`;
   `documents.readonly` (Docs API) is not allowed yet either.
 - Tests: `meeting-attendees.test.ts` 「Drive opens the minutes but refuses their text」 (each
-  mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`).
+  mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`), with 「copying blocked by
+  the file's owner」 and 「Meet's record stands in only for what ACB is not allowed」;
+  `minutes.test.ts` 「a reading the AI could not do, then ［AI に読ませる］」 (mutation-checked).
 
 ## What is stored, and what never
 

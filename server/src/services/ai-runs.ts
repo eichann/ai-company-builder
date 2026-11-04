@@ -181,6 +181,11 @@ export function createAiRunService(deps: AiRunDeps) {
     return run !== null && run.userId === userId && run.state === 'running' && run.generation === generation
   }
 
+  /** What a person's 「もう一度」 leaves: claimable, the failure forgotten; the run's operations (idempotency keys) stay. */
+  const givenBack = (run: AiRunRow, at: string): AiRunRow => ({
+    ...run, state: 'open', deviceId: null, claimExpiresAt: null, attempts: 0, failureClass: null, failureCode: null, retryAt: null, updatedAt: at,
+  })
+
   function generationOf(body: unknown): number | null {
     const g = isObj(body) ? body.generation : undefined
     return typeof g === 'number' && Number.isInteger(g) && g >= 1 ? g : null
@@ -342,11 +347,21 @@ export function createAiRunService(deps: AiRunDeps) {
         return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
       }
       if (unsettled(r.operations(run.id)).length > 0) return refuse('conflict', RUN_NEEDS_RECONCILE.error, { code: RUN_NEEDS_RECONCILE.code, run: view(r, run) })
-      const next: AiRunRow = {
-        ...run, state: 'open', deviceId: null, claimExpiresAt: null, attempts: 0, failureClass: null, failureCode: null, retryAt: null, updatedAt: nowIso(nowMs),
-      }
+      const next = givenBack(run, nowIso(nowMs))
       if (!save(r, run, next)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
       return ok({ run: view(r, next) })
+    },
+
+    /**
+     * A person asked for the record's step anew (［AI に読ませる］, minutes.md): that is the answer the
+     * stopped run waits for, whoever's run it was (another attendee may press; `retry` is the run's
+     * own member only). A run someone is on, or one with an unknown outside result, stays as it is.
+     */
+    askedAgain(companyId: string, recordId: string, step: string): void {
+      const r = repo(companyId)
+      const run = r.openRun(recordId, step)
+      if (!run || !(['waiting_person', 'waiting_setup', 'retry_later'] as AiRunRow['state'][]).includes(run.state)) return
+      save(r, run, givenBack(run, clock.now()))
     },
 
     /**
