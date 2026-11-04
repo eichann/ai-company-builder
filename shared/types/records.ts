@@ -18,7 +18,8 @@
  *   POST /records/item/:recordId/record-links        RecordLinkRequest → RecordLinkResult (link a record later)
  *   POST /records/item/:recordId/record-links/remove RecordLinkRequest → RecordLinkResult (remove that link;
  *                                                  取り消す = POST …/undo { version: entry.version, expectedVersion })
- *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only → a folder; session only)
+ *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only / members-only → a folder; session only)
+ *   POST /records/item/:recordId/members           InviteRecordMembersRequest → { record, entry, added } (members-only; session only)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState
  *
@@ -155,6 +156,12 @@ export interface RecordSummary {
    * Absent for every other record.
    */
   personal?: true
+  /**
+   * Members-only (「この人たちだけ」, records.md "Members-only records"): only the members on its
+   * list see it — owners and admins included only when listed. No names here (who is on it is
+   * the 見られる人 label's). Absent for every other record.
+   */
+  membersOnly?: true
   /**
    * 「あなたの番」 and 「AI の番」 only: the absent member this item waits for,
    * when it is in the caller's list as their delegate (代わりの人,
@@ -307,6 +314,15 @@ export interface CreateRecordRequest {
    * cannot read it (400 ASSIGNEE_CANNOT_READ). Shown to a folder later with ShareRecordRequest.
    */
   personal?: boolean
+  /**
+   * Members-only (「この人たちだけ」): only these members see it (the creator is added; at most
+   * 200) — not owners or admins unless listed. Not with `personal` / `folder` (400
+   * MEMBERS_WITH_PLACE), not for a business plugin's type (400 MEMBERS_NOT_FOR_TYPE); a
+   * non-member → 400 BAD_MEMBER; every person field must name a listed member (400
+   * ASSIGNEE_CANNOT_READ). A record linked to a members-only meeting (`links.meeting`) is
+   * members-only by itself: the meeting's list plus the people its fields name.
+   */
+  members?: string[]
   /** Server-field values (requested_by defaults to the creator for request types). */
   fields?: Record<string, RecordFieldValue>
   links?: Record<string, string | string[]>
@@ -373,6 +389,19 @@ export interface ShareRecordRequest {
   note?: string
   proposedBy?: 'ai'
   conversationId?: string
+}
+
+/**
+ * 「招待する」 (records.md "Members-only records"): a listed member adds members to a
+ * members-only record (at most 200 at once; each must be a member of the company, else 400
+ * BAD_MEMBER). Ledger action `invite` (`place.members` before / after), never undone. Not
+ * members-only → 409 NOT_MEMBERS_ONLY; anyone not listed cannot find the record (404
+ * RECORD_NOT_FOUND). Session only (no AI route).
+ */
+export interface InviteRecordMembersRequest {
+  add: string[]
+  expectedVersion: number
+  note?: string
 }
 
 /**

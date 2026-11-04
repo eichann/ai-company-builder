@@ -184,7 +184,7 @@ export function createApprovalService(deps: ApprovalDeps) {
   const managesFolder = (companyId: string, userId: string, folder: string | null) =>
     folder !== null && folder !== '' && deps.managedFolders(companyId, userId).some(f => isSameOrAncestorPath(f, folder.normalize('NFC')))
 
-  function canReadPlace(companyId: string, handle: CompanyData, userId: string, row: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>): boolean {
+  function canReadPlace(companyId: string, handle: CompanyData, userId: string, row: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner' | 'members'>): boolean {
     const role = deps.roleOf(companyId, userId)
     return role !== null && recordReader({ companyId, userId, role }, handle.scopes.listWithRules()).record(row)
   }
@@ -409,7 +409,7 @@ export function createApprovalService(deps: ApprovalDeps) {
    * role (plan C3): its first holder for this まとまり who can read the place,
    * else an owner / admin (who always qualifies).
    */
-  function resolveApprover(member: Member, rule: ApproverSpec, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner'>,
+  function resolveApprover(member: Member, rule: ApproverSpec, place: Pick<RecordRow, 'id' | 'type' | 'scopeId' | 'path' | 'folder' | 'personalOwner' | 'members'>,
     work: { pluginId: string; bundle: string | null }): string | null {
     const handle = companyData.forCompany(member.companyId)
     if (rule === 'self') return member.userId
@@ -500,7 +500,7 @@ export function createApprovalService(deps: ApprovalDeps) {
         if (v) return ok({ outcome: 'approval-requested', approval: v, existing: true })
       }
 
-      const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null, personalOwner: null }
+      const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null, personalOwner: null, members: null }
       // The work's まとまり: the record when it is one, else the record's own `bundle` link (a role's override).
       const workBundle = recordRow ? (isBundle ? recordRow.id : handle.records.linksFrom([recordRow.id]).find(l => l.name === 'bundle')?.targetId ?? null) : null
       const approver = resolveApprover(member, rule, place, { pluginId, bundle: workBundle })

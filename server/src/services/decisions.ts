@@ -78,7 +78,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
   return {
     /**
      * Record a decision: `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-     * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
+     * important?, exception?, key? }` (`exception`: 例外（この件だけ）, never a precedent; no `folder` — and none allowed — from a members-only meeting). The person's own call (session) or their AI's (record token, `actor.kind: ai`).
      */
     async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean; reused?: true; note?: string }>> {
       const handle = companyData.forCompany(member.companyId)
@@ -99,7 +99,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (b.exception !== undefined && typeof b.exception !== 'boolean') return bad('exception: true or false')
       const givenKey = line(b.key, KEY_MAX, false)
       if (givenKey === null) return bad(`key: up to ${KEY_MAX} characters`)
-      if (typeof b.folder !== 'string') return bad('folder: a department folder')
+      if (b.folder !== undefined && typeof b.folder !== 'string') return bad('folder: a department folder')
 
       // Links: readable records of the type the link names (`bundle`: of any type implementing it).
       const reader = recordReader(member, handle.scopes.listWithRules())
@@ -122,10 +122,15 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         linked.push(row)
       }
 
+      // From a members-only meeting (records.md "Members-only records"): the meeting's members read
+      // it — the service writer inherits the list, and refuses a folder with it (bad-place below).
+      const fromListedMeeting = linked.some(r => r.type === 'meeting' && r.members !== null)
+      if (!fromListedMeeting && typeof b.folder !== 'string') return bad('folder: a department folder')
+
       // The place: a department folder the member may write, not private, not wider than a linked record.
       // Its readers are the decision's readers.
       const scopes = handle.scopes.listWithRules()
-      const wanted = normalizeRepoPath(b.folder)
+      const wanted = typeof b.folder === 'string' ? normalizeRepoPath(b.folder) : null
       const department = wanted ? handle.departments.folders().find(d => nameKey(d.folder) === nameKey(wanted)) : undefined
       const perms: PermissionRepository = { getMemberRole: () => member.role, listScopes: () => scopes }
       // A meeting's item key is that meeting's: another meeting's `1` is never this one.
@@ -135,10 +140,10 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         ? newRecordId('decision', deps.tokenDigest.digest(`decision-key:${key}`).slice(0, 24))
         : newRecordId('decision', deps.ids.newToken().slice(0, 16))
       const folder = department?.folder ?? null
-      const placeOk = folder !== null
+      const placeOk = fromListedMeeting || (folder !== null
         && !findPrivateScope(scopes, folder)
         && resolveAccess(member.companyId, member.userId, folder, perms).write
-        && linked.every(r => r.folder === null || isSameOrAncestorPath(r.folder, folder))
+        && linked.every(r => r.folder === null || isSameOrAncestorPath(r.folder, folder)))
       if (!placeOk) return bad(DECISION_PLACE_REFUSED.error, DECISION_PLACE_REFUSED.code)
 
       // The same item once: an earlier decision with this key is the answer.

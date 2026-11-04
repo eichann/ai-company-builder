@@ -199,6 +199,25 @@ export function migrateRecordPersonalOwner(conn: Database.Database): void {
 }
 
 /**
+ * Members-only records (records.md "Members-only records", owner decision 2026-11-04): who may
+ * read a record marked `@members` in `records.personal_owner` (adapters/sqlite/records.ts). Additive: a new table and index, nothing else
+ * changes. Idempotent.
+ */
+export function migrateRecordViewers(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS record_viewers (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      added_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, record_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_record_viewers_user ON record_viewers(company_id, user_id);
+  `)
+}
+
+/**
  * Who made a file link (records.md "Links into .personal/", owner decision 2026-11-03): a link into
  * a `.personal/` folder is shown to that member alone. Additive and nullable: older rows stay unknown.
  */

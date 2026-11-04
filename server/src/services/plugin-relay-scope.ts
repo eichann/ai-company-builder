@@ -24,7 +24,7 @@ export function createPluginRelayScope(deps: Pick<PluginServiceDeps, 'companyDat
     if (departments.length === 0) return false
     const handle = companyData.forCompany(companyId)
     const reader = recordReader({ companyId, userId, role }, handle.scopes.listWithRules())
-    return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder, personalOwner: null }))
+    return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder, personalOwner: null, members: null }))
   }
 
   return {

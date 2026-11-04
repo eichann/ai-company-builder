@@ -387,12 +387,13 @@ describe('a meeting read moves its まとまり to the business plugin\'s step (
   const setState = (id: string, state: string) => db.prepare('UPDATE record_state SET state = ?, version = version + 1 WHERE company_id = ? AND record_id = ?').run(state, CO, id)
   let n = 0
   /** A meeting being read (or its まとまり's part being done), assigned to `assignee`, linked to `bundle`. */
-  function meeting(bundle: string | null, state = 'reading', assignee = member.userId): string {
+  function meeting(bundle: string | null, state = 'reading', assignee = member.userId, members: string[] | null = null): string {
     const handle = companyData.forCompany(CO)
     ensureCoreTypes(handle.records, ts())
     const id = `meeting-ps${String(++n).padStart(8, '0')}`
     const typeVersion = (db.prepare("SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'meeting'").get(CO) as Json).v
-    handle.records.upsert({ id, type: 'meeting', typeVersion, scopeId: null, path: null, folder: null, personalOwner: null, title: `商談 ${n}`, summary: '', createdAt: ts(), updatedAt: ts(), removedAt: null })
+    handle.records.upsert({ id, type: 'meeting', typeVersion, scopeId: null, path: null, folder: null, personalOwner: null, members, title: `商談 ${n}`, summary: '', createdAt: ts(), updatedAt: ts(), removedAt: null })
+    if (members) handle.records.addMembers(id, members, member.userId, ts())
     handle.records.writeState({ recordId: id, state, fields: JSON.stringify({ assignee }), version: 1, updatedAt: ts() }, 0)
     if (bundle) handle.records.replaceLinks(id, [{ sourceId: id, name: 'bundle', position: 0, targetId: bundle, targetPath: null }])
     return id
@@ -412,6 +413,19 @@ describe('a meeting read moves its まとまり to the business plugin\'s step (
     expect(last).toMatchObject({ action: 'meeting_held', actorId: member.userId, actorKind: 'ai' })
     expect(last.note).toContain(m)
     expect((services.pluginSteps.turns(member).value.turns as Json[]).some(t => t.recordId === deal && t.step === 'reflect_meeting')).toBe(true)
+    setState(deal, 'talking')
+  })
+
+  it('a members-only meeting: the deal moves the same way, its note naming no meeting (the deal\'s readers are not on the list)', async () => {
+    const deal = recordOf('1000000002')
+    setState(deal, 'talking')
+    const m = meeting(deal, 'reading', member.userId, [member.userId])
+    expect(await finish(member, m)).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('after_meeting')
+    const entries = services.recordEngine.history(member, deal).value.entries as Json[]
+    const last = entries[entries.length - 1]
+    expect(last).toMatchObject({ action: 'meeting_held', note: '会議を読んだあと' })
+    expect(last.note).not.toContain(m)
     setState(deal, 'talking')
   })
 

@@ -307,6 +307,7 @@ const MATRIX: Row[] = [
   // The app opened a record (the turn-holder's first opening is kept): any member who reads it.
   r('POST /api/companies/:companyId/records/item/:recordId/opened', w => ({ path: `${C(w)}/records/item/deal-nosuch01/opened`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/share', w => ({ path: `${C(w)}/records/item/deal-nosuch01/share`, body: { folder: '営業部', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/members', w => ({ path: `${C(w)}/records/item/deal-nosuch01/members`, body: { add: [], expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/records-ai/item/:recordId/file-links', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -589,6 +590,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/records/item/:recordId/record-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/record-links/remove`, body: { link: 'related', target: 'task-nosuch02', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/opened', (w, id) => ({ path: `${C(w)}/records/item/${id}/opened`, body: {} }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/share', (w, id) => ({ path: `${C(w)}/records/item/${id}/share`, body: { folder: '営業部', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/members', (w, id) => ({ path: `${C(w)}/records/item/${id}/members`, body: { add: [], expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
 
   x('GET /api/companies/:companyId/ai-runs/:runId', (w, id) => ({ path: `${C(w)}/ai-runs/${id}` }), w => w.other.aiRun),

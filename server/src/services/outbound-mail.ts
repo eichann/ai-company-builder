@@ -51,7 +51,7 @@ import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader } from './record-access'
-import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
+import { placeOfRow, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 import { findMeetingOutput } from './meeting-outputs'
@@ -673,7 +673,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * The 「やりとり」 of a sent new mail. With `waiting` (「返事を待つ」 ticked) it also keeps our
    * Message-ID and the Gmail thread (their reply finds it), is placed like the mail itself and is
    * the sender's, already handled (nobody's turn; a reply after the waiting ended is judged again by
-   * their AI, inbox.md). Without it: as before.
+   * their AI, inbox.md). Without it: in the まとまり's folder — except that a mail whose own record is
+   * owner-only or members-only keeps that place either way (records.md "Members-only records"):
+   * the receipt says what was sent, so it is never wider than the mail.
    */
   function recordInteraction(member: Member, mail: OutboundMailRow, at: string, gmailId: string | null, recipients: string[], waiting: { messageId: string; threadId: string | null } | null = null): string | null {
     const handle = companyData.forCompany(member.companyId)
@@ -681,9 +683,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const subject = subjectOf(member.companyId, mail.messageId)
     const domains = [...new Set(recipients.map(emailDomain))].join(', ').slice(0, 500)
     const own = handle.records.byIds([mail.messageId])[0]
-    const place = waiting && own
-      ? (own.personalOwner ? { personalOwner: own.personalOwner } : { folder: own.folder })
-      : { folder: bundle?.folder ?? null }
+    // Without its own record the mail's place is not known: no receipt rather than a guessed one.
+    if (!own) { logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: 'no-record' }); return null }
+    const place = waiting || restricted(own) ? placeOfRow(own) : { folder: bundle?.folder ?? null }
     const made = writer.create(member.companyId, {
       type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), ...place,
       fields: {
@@ -716,12 +718,19 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
   }
 
-  /** Who may see the draft's record: an owner-only 連絡's reply stays its owner's; else the まとまり's / meeting's / 連絡's folder. */
-  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): { folder: string | null } | { personalOwner: string } {
-    if (ctx.interaction?.personalOwner) return { personalOwner: ctx.interaction.personalOwner }
-    // A mail for someone's own task (持ち主だけ) is theirs alone too.
-    if (!ctx.bundle && !ctx.meeting && ctx.task?.personalOwner) return { personalOwner: ctx.task.personalOwner }
+  /**
+   * Who may see the draft's record: an owner-only or members-only 連絡's / meeting's / やること's mail
+   * stays theirs, whatever its まとまり (the mail carries their content; a まとまり's folder would widen
+   * it); else the まとまり's / meeting's / 連絡's / やること's folder.
+   */
+  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): ServicePlace {
+    for (const r of [ctx.interaction, ctx.meeting, ctx.task]) if (r && restricted(r)) return placeOfRow(r)
     return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? ctx.task?.folder ?? null }
+  }
+
+  /** Owner-only or members-only: what is made from it keeps its place (records.md "Members-only records"). */
+  function restricted(r: RecordRow): boolean {
+    return r.personalOwner !== null || r.members !== null
   }
 
   const linksOf = (ctx: { meetingId: string | null; bundleId: string | null; interactionId: string | null; taskId?: string | null }) => ({

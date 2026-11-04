@@ -811,6 +811,53 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
     expect(linkOf(rr, 'task')).toBeNull()
   })
 
+  it('a members-only やりとり takes a message of its thread only when it reached someone on its list', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: '面談のお礼', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    handle().inbox.insertMessage({ channel: 'email', messageId: OURS, interactionId: made.record.id, direction: 'out', occurredAt: TS, seenAt: TS, sourceRef: 'gmail:s1' })
+    // Their answer reached u-carol alone: not this thread's record (a record of her own instead).
+    expect(inbox.receive('a', 'u-carol', mail({ references: [OURS], to: [{ address: 'carol@acme.example' }] }))).not.toBe('continued')
+    expect(handle().inbox.messagesOf(made.record.id).map(x => x.direction)).toEqual(['out'])
+    // It reached u-bob, who is on the list: it joins.
+    expect(inbox.receive('a', 'u-bob', mail({ references: [OURS], to: [{ address: 'bob@acme.example' }] }))).toBe('continued')
+  })
+
+  it('a member\'s plain Slack DM answers a members-only やりとり only when the member is on its list', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: 'DM', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'chat', source_ref: 'slack:D0AB:1793581200.000100', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'received', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    handle().inbox.insertMessage({ channel: 'chat', messageId: 'D0AB:1793581200.000100', interactionId: made.record.id, direction: 'in', occurredAt: '2026-11-02T01:00:00.000Z', seenAt: TS, sourceRef: 'slack:D0AB:1793581200.000100' })
+    const own = (userId: string, slackId: string) => slackSignalMessage({
+      companyId: 'a', userId, kind: 'own', channelId: 'D0AB', ts: '1793584800.000100', threadTs: null, senderSlackUserId: slackId, external: true,
+    } as Parameters<typeof slackSignalMessage>[0])
+    expect(inbox.receive('a', 'u-carol', own('u-carol', 'U0CAROL'))).toBe('skipped')
+    expect(inbox.receive('a', 'u-bob', own('u-bob', 'U0BOB'))).toBe('continued')
+  })
+
+  it('a members-only やりとり\'s 返事のお願い stays its members\' (records.md "Members-only records": placed like its 連絡, never company-wide)', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: '面談のお礼', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    const rr = inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId: made.record.id, channel: 'email', messageId: OURS, sourceRef: 'gmail:s1',
+      occurredAt: TS, waitUntil: '2026-11-05T09:00', title: '面談のお礼', waitingOn: '田中さんからの返事', to: 'tanaka@client.example', taskId: null,
+    })
+    if (!rr) throw new Error('no reply request')
+    expect(handle().records.find(rr)).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice', 'u-bob'] })
+    for (const who of ['u-carol', 'u-admin', 'u-owner']) expect(canRead(who, rr)).toBe(false)
+    expect(canRead('u-bob', rr)).toBe(true)
+  })
+
   it('their reply in the thread: the AI checks it, the sender and the task\'s assignee hear 「返事が来た」; an automatic reply is no reply', () => {
     const { rr } = sentWaiting(task('u-bob'))
     expect(inbox.receive('a', 'u-alice', mail({ references: [OURS], automated: true }))).toBe('continued')

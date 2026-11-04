@@ -15,6 +15,10 @@
  * "owner/admin see everything"), nor department managers or delegates. For
  * everyone else it is a record that does not exist, through every caller of
  * this check (answers, counts, links, traversals, 「あなたの番」, the AI, undo).
+ *
+ * Members-only records (「この人たちだけ」, records.md "Members-only records", owner decision
+ * 2026-11-04): the same rule for a list — readable by the members on its `members` list alone
+ * (an empty list: nobody), owners, admins and department managers included.
  */
 import {
   canReadPrivateScope, findPrivateScope, resolveAccess, type PermissionRepository, type ScopeWithRules,
@@ -41,6 +45,8 @@ export function recordReader(member: Member, scopes: ScopeWithRules[]): RecordRe
     record(r) {
       // Before every role or folder rule: an owner-only record is its owner's alone.
       if (r.personalOwner !== null) return r.personalOwner === member.userId
+      // …and a members-only record its listed members' (`!= null`: a row built without the field is not one).
+      if (r.members != null) return r.members.includes(member.userId)
       if (r.path === null) return r.scopeId === null && readable(r.folder ?? '')
       if (r.scopeId !== null) {
         const scope = byId.get(r.scopeId)
@@ -58,13 +64,18 @@ export function recordReader(member: Member, scopes: ScopeWithRules[]): RecordRe
 
 /**
  * Which of these members read the record now — `recordReader` per member, once
- * per call (an owner-only record: its owner alone, without evaluating anyone).
+ * per call (an owner-only record: its owner alone, a members-only record: the listed among them,
+ * without evaluating anyone).
  * For "who should hear of a change" (services/record-signal.ts).
  */
 export function recordReaders(
   companyId: string, row: RecordAccessRow, members: Array<{ userId: string; role: string }>, scopes: ScopeWithRules[],
 ): string[] {
   if (row.personalOwner !== null) return members.some(m => m.userId === row.personalOwner) ? [row.personalOwner] : []
+  if (row.members != null) {
+    const listed = new Set(row.members)
+    return members.filter(m => listed.has(m.userId)).map(m => m.userId)
+  }
   return members.filter(m => recordReader({ companyId, userId: m.userId, role: m.role }, scopes).record(row)).map(m => m.userId)
 }
 
