@@ -70,4 +70,9 @@ export interface InboxSource {
    * kept: when they reconnect, the window starts where it stopped).
    */
   listSince(companyId: string, userId: string, since: string): Promise<unknown[] | 'not-connected'>
+  /**
+   * Whether the member can be read now (granted, their 受信を読む on): the
+   * poll connects such a member before reading (a first connection starts then).
+   */
+  ready?(companyId: string, userId: string): Promise<boolean>
 }

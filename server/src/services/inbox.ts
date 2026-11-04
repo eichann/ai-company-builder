@@ -554,6 +554,17 @@ export function createInboxService(deps: InboxDeps) {
     return { read: messages.length, outcome: 'done' }
   }
 
+  /**
+   * The member can be read (the poll, when the source says they are ready): a first
+   * connection starts now (no reading back: spec §7-1); a reconnection keeps where the
+   * last poll got to, so the next poll reads back up to 7 days.
+   */
+  function connect(companyId: string, userId: string, channel: InboxChannel): void {
+    const now = clock.now()
+    const existing = handleOf(companyId).inbox.connection(userId, channel)
+    handleOf(companyId).inbox.putConnection({ userId, channel, connectedAt: now, checkedUntil: existing?.checkedUntil ?? now })
+  }
+
   return {
     settingsOf,
 
@@ -576,21 +587,23 @@ export function createInboxService(deps: InboxDeps) {
       discardDrafts(companyId, handleOf(companyId), change.entry.recordId, 'ほかの経路で返信済み（もう返した）', true)
     },
 
-    /**
-     * The member granted reading (the connector calls it). A first connection
-     * starts now (no reading back: spec §7-1); a reconnection keeps where the
-     * last poll got to, so the next poll reads back up to 7 days.
-     */
-    connect(companyId: string, userId: string, channel: InboxChannel): void {
-      const now = clock.now()
-      const existing = handleOf(companyId).inbox.connection(userId, channel)
-      handleOf(companyId).inbox.putConnection({ userId, channel, connectedAt: now, checkedUntil: existing?.checkedUntil ?? now })
-    },
+    connect,
 
     poll,
 
-    /** Every connected member's mail of one company (the server clock's job). */
+    /**
+     * Every connected member's mail of one company (the server clock's job). A member the
+     * source can read now but not yet connected (they granted, 受信を読む on) is connected
+     * first: their first window starts at this run.
+     */
     async pollCompany(companyId: string): Promise<number> {
+      const source = await sourceFor(companyId)
+      if (source?.ready) {
+        for (const { userId } of deps.memberAddresses(companyId)) {
+          if (handleOf(companyId).inbox.connection(userId, 'email')) continue
+          if (await source.ready(companyId, userId).catch(() => false)) connect(companyId, userId, 'email')
+        }
+      }
       let read = 0
       for (const c of handleOf(companyId).inbox.connected('email')) read += (await poll(companyId, c.userId)).read
       return read

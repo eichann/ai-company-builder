@@ -99,8 +99,11 @@ stay listed until finished.
 
 ## Connections (reconnecting, spec §7-5)
 
-`inbox.connect(companyId, userId, channel)` (the connector, when the member grants): a first
-connection reads from now (no reading back); a reconnection keeps `checked_until`. Each poll
+`inbox.connect(companyId, userId, channel)`: a first connection reads from now (no reading
+back); a reconnection keeps `checked_until`. `pollCompany` connects every member the role's
+source reports `ready` (`InboxSource.ready`; Gmail: one list call answers, i.e. granted, their
+受信を読む and the company's switches on) before reading, so a grant becomes a connection within
+one clock run; a member turned off later keeps their connection (their reads are `not-connected`). Each poll
 reads from `checked_until` but at most `BACKFILL_DAYS` (7) back (`pollWindow`); a longer break
 leaves the span before as an **unchecked gap** (`inbox_gaps`), shown in `GET /inbox/status` to
 that member only. `checked_until` moves only after a successful read (`not-connected` / a throw
@@ -225,9 +228,13 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
 
 - Wired: `roles` = lane A's `connectorRoles`; Slack's signals (`connectorsLane.onSlackSignal`)
   become chat messages through `slackSignalMessage` (`composition/inbox.ts`: ids
-  `<channel>:<ts>`, the thread root as reference, no text). Not yet: an `InboxSource` over lane
-  A's `mailReader` (it lists header facts newest first; the inbox needs Message-ID / References
-  and `outgoing`), the server clock calling `inbox.pollCompany`, and `connect` on a grant.
+  `<channel>:<ts>`, the thread root as reference, no text). Gmail: `googleMailInboxSource`
+  (`services/google-mail.ts`, registered by `wireCoreConnectors` → `wireInboxLane`) lists INBOX
+  since the window (every page, at most `INBOX_POLL_MAX` per poll, oldest first; `messageId` =
+  the Message-ID header else `gmail:<id>`, `references` = In-Reply-To, pointers `gmail:<id>` /
+  `gmail:<thread id>`); the server clock (`server-clock.ts` `pollInbox`) runs `pollCompany` for
+  each company with records on. Not yet: the References header (only In-Reply-To is read) and
+  the member's Sent mail as `outgoing`.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (A4).
 - A task's own wait (`WAIT_OVER.task` → `preparing`) runs as lane C's `task-wait-over` step

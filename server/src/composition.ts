@@ -582,6 +582,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     taskSettings: companyId => taskSettings.settingsOf(companyId),
     roles: connectorsLane.connectorRoles,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
+    inboxSources: coreConnectors.inboxSources,
     bridge: {
       // Lane C's list (built below; called only after construction): what the company's apps may keep now.
       listed: companyId => pluginsLane.pluginDistribution.pluginsFor(companyId),
@@ -642,6 +643,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
       // The content store's retention (records.md "The content store"): reason `retention`, per company.
       expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
+      // 来た連絡 (inbox.md): connect members who can be read now, then read each one's new mail.
+      pollInbox: companyId => inboxLane.inbox.pollCompany(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
