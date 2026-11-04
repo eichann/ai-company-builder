@@ -164,11 +164,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     return { values }
   }
 
-  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false) {
+  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false, alsoActor = false) {
     // Every reader hears that it changed (the app refetches); quiet: that signal only, no notice.
     try { deps.recordChanged?.(companyId, change.entry.recordId) } catch { /* the app's own check catches up */ }
     if (quiet) return
-    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
+    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && (alsoActor || u !== actorId)))]
     if (to.length > 0) { try { deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
   }
 
@@ -285,8 +285,14 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       if (!records.settings().enabled) return fail('records-off')
       const row = RECORD_ID_RE.test(input.recordId) ? records.byIds([input.recordId])[0] : undefined
       if (!row || row.removedAt !== null) return fail('not-found')
-      // Another type (task) only along its listed state changes: the server clock's move (core-types.ts WAIT_OVER).
-      if (!SERVICE_OWNED_TYPES.includes(row.type) && (input.to === null || !Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, row.type))) return fail('not-service-owned')
+      // Another type (task) only along its listed state changes (the server clock's move, core-types.ts
+      // WAIT_OVER; the inbox's reply check) — or a note alone that changes nothing (「返事は済み」):
+      // never a field-only or link change.
+      if (!SERVICE_OWNED_TYPES.includes(row.type)) {
+        if (!Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, row.type)) return fail('not-service-owned')
+        const noteOnly = Object.keys(input.fields ?? {}).length === 0 && input.links === undefined && (input.note ?? '') !== ''
+        if (input.to === null && !noteOnly) return fail('not-service-owned')
+      }
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return fail('type-unknown')
       const s = records.states([row.id])[0]
@@ -352,7 +358,10 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         return true
       })
       if (!written) return fail('stale')
-      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet)
+      // A member's own AI acting for them, the service naming them in `notify` (the inbox's reply check,
+      // owner FB #19): they did not do it, so they are told — the notices keep only the kinds meant for it.
+      const alsoActor = input.actor.kind === 'ai' && (input.notify ?? []).includes(input.actor.id)
+      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet, alsoActor)
       return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
     },
 

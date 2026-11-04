@@ -34,6 +34,12 @@
  *   into the AI's turn to draft a nudge (自動で進める on; else the assignee's);
  *   their reply then sends it to the AI's check and drops the nudge's draft;
  *   the AI is told why it is its turn (draft / follow_up / check_reply).
+ * - owner FB #19, a reply sent elsewhere (the phone, Gmail / Slack itself): the
+ *   member's Sent mail found by the poll ends what it answered like any reply of
+ *   theirs; another member's sent mail never moves someone else's records; tasks
+ *   made from the message become the member's AI's check, which may complete
+ *   only their own open tasks from that message (notice, undo), or notes
+ *   「返事は済み」 — with 自動で進める off, the note alone.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
@@ -52,7 +58,7 @@ import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-ty
 
 const CUSTOMER_TYPE = '---\nlabel: 顧客\nversion: 1\nstorage: server\nimplements: [counterpart]\nfields:\n  counterpart_kind: { label: 会社か人か, kind: choice, options: [company, person], source: server }\n  domain: { label: ドメイン, kind: text, source: server }\n  email: { label: メール, kind: text, source: server }\nstates: [active]\n---\n'
 import { createConnectorRoles } from '../../src/services/connector-roles'
-import { noticeKind } from '../../src/services/notifications'
+import { noticeKind, repliedDoneOf } from '../../src/services/notifications'
 import { recordReader } from '../../src/services/record-access'
 import { slackSignalMessage } from '../../src/composition/inbox'
 import type { Member } from '../../src/services/access'
@@ -90,6 +96,8 @@ let roles: ReturnType<typeof createConnectorRoles>
 let slackReads = new Set<string>()
 /** What installed connector plugins declare (the composition's `pluginNotifiers`). */
 let pluginNotifiers: ConnectedNotifier[] = []
+/** Members whose own 自動で進める is off (the composition's `autoRunFor`). */
+let autoRunOff = new Set<string>()
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -148,6 +156,7 @@ beforeEach(() => {
   companyHolidays = []
   slackReads = new Set()
   pluginNotifiers = []
+  autoRunOff = new Set()
   told = []
   mailbox = {}
   ready = new Set()
@@ -183,6 +192,7 @@ beforeEach(() => {
     roles: { resolve: (co, role: ConnectorRole, op) => roles.resolve(co, role, op ?? null) },
     connectorReadsFor: (_co, userId, connectorId) => connectorId === 'slack' && slackReads.has(userId),
     pluginNotifiers: async () => pluginNotifiers,
+    autoRunFor: (_co, userId) => !autoRunOff.has(userId),
   })
   engine = createRecordEngine({
     companyData: source, transactions: sqliteTransactions(conn), clock, ids,
@@ -1108,5 +1118,143 @@ describe('notification mails of connected services (owner FB #18)', () => {
   it('a chat message is never matched, and receive() alone (Slack\'s events, our replies) is unchanged', async () => {
     google()
     expect(inbox.receive('a', 'u-alice', mail({ from: MEET, subject: '直接' }))).toBe('created')
+  })
+})
+
+
+describe('owner FB #19: a reply sent elsewhere (the phone, Gmail / Slack itself)', () => {
+  const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+  const AI_ACTOR = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
+  /** Alice's own reply, as her Sent mail lists it (from her, In-Reply-To the message). */
+  const sent = (first: IncomingMessage, over: Partial<IncomingMessage> = {}) => mail({
+    references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true,
+    occurredAt: '2026-11-02T01:30:00.000Z', ...over,
+  })
+  function judgedAsTask() {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const task = (title: string, link: string, assignee = 'u-alice', personal = true) =>
+      ok(engine.create(m('u-alice'), AI_ACTOR, { type: 'task', title, personal, fields: { assignee }, links: { interaction: [link] } })).record.id
+    const sendQuote = task('見積書を送る', row.id)
+    const approve = task('経費を承認する', row.id)
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'task', reason: '見積の依頼', taskId: sendQuote }))
+    return { first, id: row.id, sendQuote, approve, task }
+  }
+
+  it('her Sent mail found by the poll (a phone reply) moves the 返事のお願い and drops its draft, like a reply of hers in the thread', async () => {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const draft = serviceWriter.create('a', {
+      type: 'outbound_message', title: 'Re: お見積り', personalOwner: 'u-alice', fields: { assignee: 'u-alice', requested_by: 'u-alice', channel: 'email' },
+      links: { interaction: [row.id] }, actor: { id: 'u-alice', kind: 'human', source: null }, note: '', quiet: true,
+    })
+    if (!draft.ok) throw new Error(draft.reason)
+    inbox.connect('a', 'u-alice', 'email')
+    mailbox['u-alice'] = [sent(first)]
+    nowMs = Date.parse('2026-11-02T02:00:00.000Z')
+    expect(await inbox.poll('a', 'u-alice')).toEqual({ read: 1, outcome: 'done' })
+    expect(stateOf(rr).state).toBe('checking')
+    expect(handle().records.ledger(rr).at(-1)?.note).toBe('メールで返信済み')
+    expect(stateOf(draft.record.id).state).toBe('discarded')
+    // Seen once: the next poll's overlap lists it again as a duplicate.
+    expect(handle().inbox.messagesOf(row.id).map(x => x.direction)).toEqual(['in', 'out'])
+  })
+
+  it('another member\'s sent mail never moves someone else\'s records; her own copy of it (CC) still counts', () => {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const bobs = mail({
+      references: [first.messageId], from: { address: 'bob@acme.example' }, to: [{ address: 'tanaka@client.example' }], cc: [{ address: 'alice@acme.example' }], outgoing: true,
+    })
+    // Bob's Sent mail: Bob cannot read Alice's own message — nothing moves, nothing is kept.
+    expect(inbox.receive('a', 'u-bob', bobs)).toBe('skipped')
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(handle().inbox.message('email', bobs.messageId)).toBeNull()
+    // The copy that reached her (CC) is a reply of the company in her thread, as before.
+    expect(inbox.receive('a', 'u-alice', { ...bobs, outgoing: false })).toBe('continued')
+    expect(stateOf(rr).state).toBe('checking')
+  })
+
+  it('her reply makes the tasks from that message her AI\'s check, which lists only her own open ones from it', () => {
+    const { first, id, sendQuote, approve, task } = judgedAsTask()
+    inbox.receive('a', 'u-alice', mail())
+    const otherMessage = interactions().find(r => r.id !== id)!.id
+    const elsewhere = task('別の連絡のタスク', otherMessage)
+    const bobs = task('ボブの作業', id, 'u-bob', false)
+    expect(stateOf(id).state).toBe('handled')
+    expect(inbox.receive('a', 'u-alice', sent(first))).toBe('continued')
+    expect(stateOf(id).state).toBe('replied')
+    const view = ok(inbox.item(m('u-alice'), id))
+    expect(view.replyCheck?.tasks.map(t => t.id).sort()).toEqual([sendQuote, approve].sort())
+    expect(view.replyCheck?.tasks.map(t => t.id)).not.toContain(elsewhere)
+    expect(view.replyCheck?.tasks.map(t => t.id)).not.toContain(bobs)
+    // Nobody is told: it is her AI's turn.
+    expect(notices()).toEqual([])
+  })
+
+  it('the AI may complete only her own open tasks from that message: anything else refuses the whole check, nothing written', () => {
+    const { first, id, sendQuote, approve, task } = judgedAsTask()
+    inbox.receive('a', 'u-alice', mail())
+    const elsewhere = task('別の連絡のタスク', interactions().find(r => r.id !== id)!.id)
+    const bobs = task('ボブの作業', id, 'u-bob', false)
+    inbox.receive('a', 'u-alice', sent(first))
+    const v = stateOf(id).version
+    for (const taskId of [elsewhere, bobs, 'task-0000000000000000']) {
+      const r = inbox.replyCheck(m('u-alice'), AI('u-alice'), id, { expectedVersion: v, tasks: [{ taskId: sendQuote, outcome: 'done' }, { taskId, outcome: 'done' }] })
+      expect(!r.ok && r.body).toMatchObject({ code: 'NOT_FROM_THIS_REPLY' })
+    }
+    expect(stateOf(sendQuote).state).toBe('todo')
+    expect(stateOf(bobs).state).toBe('todo')
+    expect(stateOf(id).state).toBe('replied')
+    // Another member (even an admin) is told it does not exist; a message not in this check is not the AI's turn.
+    for (const u of ['u-bob', 'u-admin']) expect(inbox.replyCheck(m(u), AI(u), id, { expectedVersion: v, tasks: [] }).ok).toBe(false)
+    const other = interactions().find(r => r.id !== id)!.id
+    expect(inbox.replyCheck(m('u-alice'), AI('u-alice'), other, { expectedVersion: 1, tasks: [] })).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+    // 確かめてから: never completed by the AI.
+    handle().records.writeState({ recordId: approve, state: 'todo', fields: JSON.stringify({ ...fieldsOf(approve), when_done: 'check' }), version: stateOf(approve).version + 1, updatedAt: TS }, stateOf(approve).version)
+    expect(inbox.replyCheck(m('u-alice'), AI('u-alice'), id, { expectedVersion: v, tasks: [{ taskId: approve, outcome: 'done' }] })).toMatchObject({ ok: false, body: { code: 'NEEDS_CHECK' } })
+  })
+
+  it('done: completed (never archived) as her AI, she is told 「返事をしたので完了にしました」 and can undo it; open: the note 「返事は済み」', async () => {
+    const { first, id, sendQuote, approve } = judgedAsTask()
+    inbox.receive('a', 'u-alice', sent(first))
+    told = []
+    const r = ok(inbox.replyCheck(m('u-alice'), AI('u-alice'), id, {
+      expectedVersion: stateOf(id).version, tasks: [{ taskId: sendQuote, outcome: 'done' }, { taskId: approve, outcome: 'open', note: '今日見ると返しただけ' }],
+    }))
+    expect(r).toMatchObject({ state: 'handled', tasks: [{ taskId: sendQuote, outcome: 'done', ok: true }, { taskId: approve, outcome: 'open', ok: true }] })
+    expect(stateOf(id).state).toBe('handled')
+    // Completed — not cancelled (archived) — as her AI.
+    expect(stateOf(sendQuote).state).toBe('done')
+    const doneEntry = handle().records.ledger(sendQuote).at(-1)!
+    expect(doneEntry).toMatchObject({ action: 'replied_done', actorId: 'u-alice', actorKind: 'ai', note: '返事をしたので完了にしました' })
+    // She is told although her AI was the actor (the notice kind `replied_done`).
+    const change = told.find(t => t.change?.entry.recordId === sendQuote)
+    expect(change?.userIds).toContain('u-alice')
+    const final = new Set(coreTypeDefinitions().find(d => d.name === 'task')!.final)
+    expect(repliedDoneOf('u-alice', change!.change!, final)).toBe(true)
+    expect(repliedDoneOf('u-bob', change!.change!, final)).toBe(false)
+    // 元に戻す: the undo of that entry, hers.
+    ok(await engine.undo(m('u-alice'), person('u-alice'), sendQuote, { version: doneEntry.version, expectedVersion: doneEntry.version }))
+    expect(stateOf(sendQuote).state).toBe('todo')
+    // Work remains: open, with the note.
+    expect(stateOf(approve).state).toBe('todo')
+    expect(handle().records.ledger(approve).at(-1)).toMatchObject({ action: 'reply_noted', note: '返事は済み（今日見ると返しただけ）', changes: [] })
+  })
+
+  it('with her 自動で進める off: no AI turn, each open task from the message gets the note 「返事は済み」 and stays hers', () => {
+    autoRunOff.add('u-alice')
+    const { first, id, sendQuote, approve } = judgedAsTask()
+    inbox.receive('a', 'u-alice', sent(first))
+    expect(stateOf(id).state).toBe('handled')
+    for (const t of [sendQuote, approve]) {
+      expect(stateOf(t).state).toBe('todo')
+      expect(handle().records.ledger(t).at(-1)).toMatchObject({ action: 'reply_noted', note: '返事は済み（メールで返信済み）', actorId: 'acb:inbox' })
+    }
   })
 })

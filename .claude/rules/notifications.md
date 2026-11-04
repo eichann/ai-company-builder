@@ -58,7 +58,7 @@ a plugin can never draw a notice (§2-2).
   `records.md` "Acceptance"), `acceptance_waiting` (the server clock, below), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
-  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`) and `from_message` (below; all three on by default),
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`), `from_message` and `replied_done` (below; all four on by default),
   `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above),
   `minutes_arrived` (「議事録が届きました：「…」」, on by default: a meeting recorded `arrived`, or
   attendees joining it while still there, to each member on its list — the minutes service names
@@ -92,6 +92,15 @@ a plugin can never draw a notice (§2-2).
     (`inbox.md` "A task from a message") puts it in this week's 「あなたの番」, whose new item is
     the Mac notification. An app released before it shows the server's text (the watcher keeps
     any kind with a record) and has no switch for it.
+  - `replied_done` 「返事をしたので完了にしました：「…」」 (`repliedDoneOf`, owner FB #19, `inbox.md` "Tasks
+    made from that message"): the member's **own AI** completed their task because their own reply
+    finished it (ledger action `replied_done`, the inbox's reply check through the service writer, which
+    names them in `notify` so they are told although their AI was the actor — the writer's `tell`
+    keeps the actor only then). The bell's row has **［元に戻す］** (`TitleBarNotices`, `undoNoticedChange`
+    → `tasks:undo` of that entry at the notice's version: the server refuses when something changed
+    since); then 「元に戻しました」. Not a person's own completion, not the AI's other actions.
+    Tests: `notifications.test.ts` 「a task the member's reply finished」, `tests/ui/title-bar-notices.spec.ts`
+    (`?undo=1`) — mutation-checked.
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member

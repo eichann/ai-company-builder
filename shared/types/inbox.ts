@@ -189,4 +189,28 @@ export interface InboxItemView {
     endCondition: string | null
     triggerKind: string | null
   }
+  /**
+   * In 「返事のあとを確かめる」 (`replied`, interaction v7, owner FB #19): the member's own reply was seen
+   * and these tasks made from the message are still open — the member's own, from this message. The
+   * AI decides each (`POST …/reply-check`); `canComplete: false` = it waits for a check (確かめてから):
+   * leave it open with a note.
+   */
+  replyCheck?: { tasks: Array<{ id: string; title: string; state: string | null; version: number; canComplete: boolean }> }
+}
+
+/**
+ * The member's AI after their own reply (`POST /api/records-ai/inbox/items/:recordId/reply-check`,
+ * an act token): for each task made from this message, `done` (the reply finished it: completed,
+ * the member told, undone like any entry) or `open` (work remains: a note 「返事は済み」). Only tasks
+ * the item view lists under `replyCheck`; anything else is refused before anything is written.
+ */
+export interface InboxReplyCheckRequest {
+  expectedVersion: number
+  tasks: Array<{ taskId: string; outcome: 'done' | 'open'; note?: string }>
+}
+
+export interface InboxReplyCheckResult {
+  interactionId: string
+  state: string
+  tasks: Array<{ taskId: string; outcome: 'done' | 'open'; ok: boolean; version?: number }>
 }

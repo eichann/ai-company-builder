@@ -518,6 +518,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/inbox/items/:recordId/claim', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/claim`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/inbox/items/:recordId', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/inbox/items/:recordId/judgement', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/judgement', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/inbox/items/:recordId/reply-check', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/reply-check', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // A plugin screen's bridge (plugin-frame.md): any member's session; a plugin nobody granted is the bridge's one 403.
   r('POST /api/companies/:companyId/plugin-bridge', w => ({ path: `${C(w)}/plugin-bridge`, body: { pluginId: 'no-such-plugin', version: '0.1.0', op: 'records.query', args: { type: 'deal' } } }), [403, 403, 403, 403, 404, 401]),
   // lane B ▲
@@ -723,6 +724,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',
   'GET /api/records-ai/inbox/items/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
   'POST /api/records-ai/inbox/items/:recordId/judgement': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
+  'POST /api/records-ai/inbox/items/:recordId/reply-check': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
   // lane B ▲
   // lane C ▼
   // lane C ▲

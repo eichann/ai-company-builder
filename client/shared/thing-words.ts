@@ -102,7 +102,7 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
     proposed: 'AI の案', dismissed: '外した AI の案',
   },
   interaction: {
-    received: '届いた', handled: '対応済み', unsure: '確認待ち', unclaimed: '部署の番', excluded: 'やることにしなかった',
+    received: '届いた', handled: '対応済み', unsure: '確認待ち', unclaimed: '部署の番', excluded: 'やることにしなかった', replied: '返事のあとを確かめる',
   },
   meeting: { arrived: '議事録が届いた', received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
   decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },

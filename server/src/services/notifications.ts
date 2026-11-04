@@ -277,6 +277,18 @@ export function fromMessageOf(userId: string, change: RecordChange, def: TypeDef
   return names.length > 0 && originIds(names).length > 0
 }
 
+/**
+ * Whether this entry is the member's own AI completing their task because their reply finished it
+ * (`replied_done`, owner FB #19; the inbox's reply check, `INBOX_ACTIONS.repliedDone`): their AI is
+ * the actor, they are the assignee, it reached a final state. The notice carries the entry's version,
+ * so the app's ［元に戻す］ undoes exactly it.
+ */
+export function repliedDoneOf(userId: string, change: RecordChange, final: ReadonlySet<string>): boolean {
+  const { entry, fields } = change
+  return entry.action === INBOX_ACTIONS.repliedDone && entry.actorKind === 'ai' && entry.actorId === userId
+    && str(fields.assignee) === userId && entry.toState !== null && final.has(entry.toState)
+}
+
 export function createNotificationService(deps: NotificationServiceDeps) {
   const { companyData, clock } = deps
 
@@ -600,6 +612,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `来た連絡から、やることを作りました：${t}`
       case 'minutes_arrived':
         return `議事録が届きました：${t}`
+      case 'replied_done':
+        return `返事をしたので完了にしました：${t}`
       case 'intake_unsure':
         return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':
@@ -659,12 +673,14 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (!mayRead(userId)) continue
         const asked = askedOf(userId, change, def, ledgerOf)
         const fromMessage = !asked && fromMessageOf(userId, change, def, ledgerOf, originIdsOf)
+        // Their own AI completed what their reply finished (the inbox's reply check, owner FB #19).
+        const repliedDone = !asked && !fromMessage && repliedDoneOf(userId, change, final)
         // Never the actor — except their own AI handing them what someone else asked, or what it
         // made them from a message that came in (they did not do that).
-        if (userId === change.entry.actorId && !((asked || fromMessage) && change.entry.actorKind === 'ai')) continue
+        if (userId === change.entry.actorId && !((asked || fromMessage || repliedDone) && change.entry.actorKind === 'ai')) continue
         // A meeting's minutes arrived (minutes.md): once per meeting and member, whoever's calendar found it.
-        const arrived = !asked && !fromMessage && minutesArrivedOf(change)
-        const kind = asked ? 'asked' : fromMessage ? 'from_message' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
+        const arrived = !asked && !fromMessage && !repliedDone && minutesArrivedOf(change)
+        const kind = asked ? 'asked' : fromMessage ? 'from_message' : repliedDone ? 'replied_done' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
         const base = arrived
           ? {
             recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,

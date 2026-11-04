@@ -46,6 +46,8 @@ export interface InboxLaneDeps {
   bridge: PluginBridgeDeps
   /** Whether the member's own grant of a core connector reads now (notification mails, inbox.md). */
   connectorReadsFor?: InboxDeps['connectorReadsFor']
+  /** The member's own 自動で進める (after their own reply: their AI checks the tasks from that message). */
+  autoRunFor?: InboxDeps['autoRunFor']
   /** The shelf: an installed connector plugin's declared `notification_senders` (inbox.md). */
   pluginShelf?: Pick<PluginShelf, 'find' | 'isStopped'>
 }
@@ -111,6 +113,7 @@ export function wireInboxLane(deps: InboxLaneDeps) {
     taskSettings: deps.taskSettings,
     roles: deps.roles,
     connectorReadsFor: deps.connectorReadsFor,
+    autoRunFor: deps.autoRunFor,
     pluginNotifiers: deps.pluginShelf ? pluginNotifiersOf(deps.companyData, deps.pluginShelf) : undefined,
   })
   for (const [connectorId, source] of Object.entries(deps.inboxSources ?? {})) inbox.registerSource(connectorId, source)

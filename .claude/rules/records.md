@@ -1069,9 +1069,13 @@ the one passed (human / ai / external), assignee / next actor / `notify` told (k
 only). Results `{ ok: true, record, entry }` or `{ ok: false, reason }`. Whether that actor may
 do it (the approver approving) is the calling service's rule. A type that is **not**
 service-owned (`task`) changes only along its `SERVICE_TRANSITIONS` rows, state changes only (a
-field-only change → `not-service-owned`): the server clock's 「見込みの日時が過ぎた」 moves (waiting →
+field-only or link change → `not-service-owned`; a note alone that changes nothing is allowed — the
+inbox's 「返事は済み」): the server clock's 「見込みの日時が過ぎた」 moves (waiting →
 preparing / todo, ledger action `wait_over`, actor `CLOCK_ACTOR` = kind `external`, id
-`acb:clock`; `notifications.md` "The server clock").
+`acb:clock`; `notifications.md` "The server clock"), and the inbox's reply check (todo / in_progress /
+waiting → done as the member's AI, owner FB #19, `inbox.md` "Tasks made from that message"). A
+transition whose actor is a member's AI and whose `notify` names that member tells them too (the
+writer otherwise never tells the actor).
 
 ## The state engine (4-3, `services/record-engine.ts`)
 

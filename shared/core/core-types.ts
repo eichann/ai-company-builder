@@ -85,6 +85,10 @@
  * Version 6 (owner FB #20, additive): the assignee's 「済んだ」 (`settle`, 確認待ち → handled) and
  * the field `settled_by` the engine fills with them (`ACTOR_ARGS`); the inbox clears it when the
  * thread goes on.
+ * Version 7 (owner FB #19, additive): 「返事のあとを確かめる」 (`replied`) — the member's own reply was seen
+ * (sent from the phone, or in Slack / Gmail itself) and tasks made from the message are still open:
+ * the member's AI checks whether the reply finished them (`finish_reply_check`, `who: [ai]`; the
+ * inbox's reply-check route completes them), or the assignee looks themselves (`check_myself`).
  *
  * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
  * of a thing that happened outside implements `outside_event` — `occurred_at`
@@ -196,7 +200,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 6
+version: 7
 implements: [outside_event, request]
 storage: server
 fields:
@@ -221,7 +225,7 @@ links:
   counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: interactions }
   tasks:        { label: 関係するタスク, target: task, cardinality: many }
   bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: interactions }
-states: [received, handled, unsure, unclaimed, excluded]
+states: [received, handled, unsure, unclaimed, excluded, replied]
 initial: received
 final: [handled, excluded]
 actions:
@@ -232,12 +236,15 @@ actions:
   drop:         { label: やることにしない（自分で決める）, from: [unsure], to: excluded, who: [assignee], note: optional }
   take_up:      { label: やることにする, from: [excluded], to: received, who: [assignee], note: optional, hand_to: assignee }
   settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
+  finish_reply_check: { label: 返事のあとを確かめた, from: [replied], to: handled, who: [ai], note: optional }
+  check_myself: { label: 自分で確かめる, from: [replied], to: handled, who: [assignee], note: optional }
 ---
 # やりとり
 
 外から来たもの（メール・Slack など）の受付票。本文は持たず、要約と元への目印だけを持ちます。
 来た連絡（メール・チャット）は、宛先（To）の人の「持ち主だけ」の記録になります（CC の人には出しません）。「届いた」は AI の番で、AI が返事が要るかを判断して「返事のお願い」を作るか、「やることにしない」にします。決めきれないものは「確認待ち」で担当の人の番、共有の受付アドレスに来たものは「部署の番」で、誰かが引き受けます。
 確認待ちの連絡は、話がもう決着していれば担当が「済んだ」で終わりにでき（今日終わったことに出て、すぐなら取り消せます）、取り込まないなら「やることにしない（自分で決める）」でやることにしなかった一覧に移します。
+担当がスマホや Slack・Gmail で自分で返事をしたとき、この連絡から作ったタスクが残っていれば「返事のあとを確かめる」（AI の番）になります。AI が返事でタスクが済んだかを見て、済んでいれば完了にして知らせ（取り消せます）、まだなら「返事は済み」と書き残します。
 `,
   meeting: `---
 label: 会議
@@ -526,6 +533,10 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['handled'], to: 'received' },
     // The member replied in the thread before it was judged (B4): nothing is left to do.
     { from: ['unsure'], to: 'handled' },
+    // The member's own reply was seen and tasks made from the message are open (owner FB #19):
+    // their AI checks them (the reply-check route), then it is handled again.
+    { from: ['handled'], to: 'replied' },
+    { from: ['replied'], to: 'handled' },
   ],
   reply_request: [
     // Their reply came (not an automatic one): the AI checks it against the end condition.
@@ -545,6 +556,10 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
   task: [
     { from: ['waiting'], to: 'preparing' },
     { from: ['waiting'], to: 'todo' },
+    // The member's reply finished a task made from that message (owner FB #19, inbox.md "Tasks made
+    // from that message"): their AI's check through the inbox, which allows only the member's own
+    // task from that message, never one waiting for a check (確かめてから) or another's turn.
+    { from: ['todo', 'in_progress', 'waiting'], to: 'done' },
   ],
 }
 
@@ -652,6 +667,14 @@ export const INBOX_ACTIONS = Object.freeze({
   claimed: 'claim',
   /** An interaction: the thread went on after it was handled. */
   continued: 'continued',
+  /** An interaction: the member's own reply was seen and tasks made from it are open (handled → replied). */
+  replySeen: 'reply_seen',
+  /** An interaction: the member's AI checked those tasks (replied → handled). */
+  replyChecked: 'reply_checked',
+  /** A task: the member's reply finished it (the notice `replied_done`, undone like any entry). */
+  repliedDone: 'replied_done',
+  /** A task: the member replied, but work remains (a note only: 「返事は済み」). */
+  replyNoted: 'reply_noted',
 })
 
 /** The inbox as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
