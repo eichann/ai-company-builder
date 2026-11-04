@@ -1,10 +1,28 @@
 // The rows of 「つながっているもの」 built from a card's links: a record opens its card, a file
 // opens in the editor. Both card kinds (the generic one, the task's) use these.
+import type { ReactNode } from 'react'
+import { Microphone, NotePencil } from '@phosphor-icons/react'
+import type { MeetingDetailView, OpenLink } from '../../../../shared/record-details'
 import type { RecordCardLink, RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
 import type { LinkedRow } from '../../../shared/ui/LinkedColumn'
+import { SourceIcon } from '../../../shared/ui/ThingIcon'
+import { openOutside } from '../api'
 import { RecordMarks } from './RecordRows'
 import { isPersonalPath, PERSONAL_FILE_WORDS } from '../../../../shared/today-folder'
+
+export const OPEN_ICON: Record<OpenLink['kind'], ReactNode> = {
+  transcript: <Microphone size={12} className="text-emerald-600" />,
+  notes: <NotePencil size={12} className="text-sky-600" />,
+  calendar: <SourceIcon source="calendar" />,
+  gmail: <SourceIcon source="gmail" />,
+  slack: <SourceIcon source="slack" />,
+}
+
+/** A meeting's documents and calendar day, as one group of 「つながっているもの」. */
+export function meetingOpenRows(m: MeetingDetailView): LinkedRow[] {
+  return m.opens.map(l => ({ key: `open:${l.kind}`, name: 'Google で開く', kind: 'other', icon: OPEN_ICON[l.kind], label: l.label, onOpen: () => void openOutside(l.url) }))
+}
 
 export function recordRow(record: RecordViewSummary, linkLabel?: string): LinkedRow {
   return {

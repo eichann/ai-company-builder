@@ -13,6 +13,8 @@ export interface LinkedRow {
   /** The kind's plain name (`thingName`): rows with the same name form one group. */
   name: string
   kind: ThingKind
+  /** Instead of the kind's icon (something outside: a Google document, the calendar). */
+  icon?: ReactNode
   label: string
   sub?: string
   /** Finished: drawn faint and struck through. */
@@ -113,7 +115,7 @@ function Row({ row, typeLabel }: { row: LinkedRow; typeLabel?: string }) {
       <button type="button" onClick={row.onOpen} disabled={!row.onOpen}
         className="min-w-0 flex-1 rounded-md px-2 py-1 text-left hover:bg-gray-100 disabled:hover:bg-transparent dark:hover:bg-zinc-800">
         <span className="flex min-w-0 items-center gap-1.5 text-[12px]">
-          <ThingIcon kind={row.kind} typeLabel={typeLabel} label="" size={12} />
+          {row.icon ?? <ThingIcon kind={row.kind} typeLabel={typeLabel} label="" size={12} />}
           <span className={`min-w-0 truncate ${row.done ? 'text-gray-400 line-through' : row.onOpen ? 'text-accent' : 'text-gray-700 dark:text-zinc-200'}`}>{row.label}</span>
           {row.marks}
         </span>

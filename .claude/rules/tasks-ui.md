@@ -307,10 +307,13 @@ unchanged. Tests: `record-card.spec.ts`, `task-card.spec.ts`.
 
 A **meeting** and a **来た連絡** get their own parts in the record card (`RecordDetails.tsx`, built by
 main with `recordDetailOf`, `client/shared/record-details.ts`; the fields they show are not repeated
-under ほかの項目): a meeting's thin line (when, members who attended + 社外 n人, 担当), 「文字起こしを
-開く」「Gemini のメモを開く」 (Google Docs by the ids in `source_ref`) and 「カレンダーの予定を開く」 (the
-meeting's day: ACB keeps no calendar id to build the event's own link), the summary as the body, and
-決めたこと / 宿題 apart (its linked decisions and tasks). A 来た連絡: who and where it came from,
+under ほかの項目): a meeting's thin line (when, members who attended + 社外 n人, 担当), the summary as
+the body, 決めたこと / やること apart (its linked decisions and tasks, not its 「議事録を確認する」:
+`minutesReview`), and in 「つながっているもの」 the group 「Google で開く」: 「文字起こしを開く」「Gemini のメモを
+開く」 (Google Docs by the ids in `source_ref`) and 「カレンダーの予定を開く」 (the meeting's day: ACB keeps
+no calendar id to build the event's own link). **A meeting's order** (owner 2026-11-05, 「ごちゃついてるな」;
+`minutes.md` "In the app" has the card): title, when, people (+ 見られる人) → 要約 → 決めたこと・やることの案 →
+the actions and the 案件 → 「つながっているもの」, 経緯 (`bottomLast`: also when narrow). A 来た連絡: who and where it came from,
 返事が要る, 「要約（本文は Slack にあります）」 — ACB keeps no body — 「Slack で開く」 / 「Gmail で開く」
 (only from a well-formed `slack:<channel>:<ts>` / `gmail:<id>` pointer), and the screen's thread slot
 (`renderSource`: the thread around it and the reply draft). Beside its title, where a task has 完了
@@ -328,7 +331,8 @@ whose turn and the due and opening the task; the right column starts with its �
 whose turn. **The AI on a record** (plan I.4, every record card; `aiOnRecord`): a run of it held or
 open → 「AI が反映しています…（あと少し）」; otherwise, when the newest change in 経緯 is the AI's,
 「AI が反映しました（11/2 09:56）」 — one line in fixed words, never the AI's step names; what it did is in
-経緯, opened by the band's ［経緯で見る］. **見られる人** at the top right of a record's card
+経緯, opened by the band's ［経緯で見る］. On a meeting only the working line shows: its state chip
+(「AI が読み終えた」) already says it. **見られる人** at the top right of a record's card
 (`SeenBy`, the lock only for 「あなただけ」): main asks `POST …/viewers { records: [id] }` with the card
 and passes only what the server answered for that record (`viewers`); a record left out shows
 nothing (`client/tests/record-card-viewers.test.ts`).
@@ -599,7 +603,7 @@ entry's version; each change says what it did with ［取り消す］ (`tasks:un
 record that holds the link). Tests: `client/tests/task-card.test.ts`, `tests/ui/task-card.spec.ts` The **record card** does the same
 (`recordViews:card` marks `removable` and the record's own `bundle` link, and answers its `version`):
 「…」→「つながりを外す」 with ［取り消す］ on every row not `fixed`, and on a meeting or a 来た連絡 the
-same 案件・プロジェクト field at its head (the screen's `renderBundleField`, `src/app/recordBundleField.tsx`:
+same 案件・プロジェクト field — at its head on a 来た連絡, with the actions on a meeting — (the screen's `renderBundleField`, `src/app/recordBundleField.tsx`:
 a meeting is linked through `minutes:linkBundle` so its 案件's step follows, anything else through
 `tasks:linkRecord`; ［外す］ only where the link can be removed). Tests: `client/tests/record-card-links.test.ts`,
 `tests/ui/record-card.spec.ts`. **〇〇** is what the department on screen makes (`tasks:bundleKinds`,
@@ -703,7 +707,7 @@ unchanged.
   department's kind else the core kind under the company's name, default 「プロジェクト」 — the same
   as ［〇〇につなぐ］), through `meetingBundleWords(word)` (`client/shared/tasks.ts`): 営業部 →
   「どの案件の会議ですか？」「案件を選ぶ」「案件はない（社内の会議など）」「案件を選ぶ会議 3件」. The list,
-  `BundleChooser`, `MeetingBundleBar` and the title bar's buttons take it from the screen; main's
+  `BundleChooser`, the meeting card's field and the title bar's buttons take it from the screen; main's
   `MEETING_NEEDS_BUNDLE_TEXT` (it knows no department) is said again by the list. The chat's card
   (`MinutesBundleChoiceCard`) names its candidates' kinds (`bundleWords`). Below, 〇〇 = that word.
 - 「どの〇〇の会議ですか？」 is an item of あなたの番: `tasks:list` reads the server's

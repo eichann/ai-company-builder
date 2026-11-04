@@ -12,7 +12,7 @@ import { ThingIcon } from './ThingIcon'
  * chips, the big title with the one main action and 「…」 beside it, where it came from, the body,
  * fields and 経緯 folded at the bottom, and 「つながっているもの」 on the right (below when narrow).
  */
-export function RecordPage({ testId, kind, name, chips, seenBy, top, title, actions, from, children, bottom, links }: {
+export function RecordPage({ testId, kind, name, chips, seenBy, top, title, actions, from, children, bottom, bottomLast, links }: {
   testId?: string
   kind: ThingKind
   /** The kind's plain name (`typeLabel`: 会議の記録, 案件…). */
@@ -28,9 +28,13 @@ export function RecordPage({ testId, kind, name, chips, seenBy, top, title, acti
   from?: ReactNode
   children?: ReactNode
   bottom?: ReactNode
+  /** When narrow, 「つながっているもの」 comes before `bottom` (a meeting's order). */
+  bottomLast?: boolean
   links: ReactNode
 }) {
   const [ref, narrow] = useIsNarrowerThan<HTMLDivElement>(720)
+  const folds = bottom && <div className="min-w-0 space-y-3">{bottom}</div>
+  const foldsLast = narrow && bottomLast
   return (
     <div ref={ref} data-testid={testId}
       className={`grid gap-x-5 gap-y-6 p-5 text-gray-900 dark:text-zinc-100 ${narrow ? 'grid-cols-1' : 'grid-cols-[minmax(0,1fr)_240px]'}`}>
@@ -49,9 +53,10 @@ export function RecordPage({ testId, kind, name, chips, seenBy, top, title, acti
           {from}
         </header>
         {children}
-        {bottom && <div className="space-y-3">{bottom}</div>}
+        {!foldsLast && folds}
       </article>
       <div className={narrow ? 'border-t border-gray-100 pt-4 dark:border-zinc-800' : 'border-l border-gray-100 pl-5 dark:border-zinc-800'}>{links}</div>
+      {foldsLast && folds}
     </div>
   )
 }

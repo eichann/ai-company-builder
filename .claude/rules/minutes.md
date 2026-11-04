@@ -296,25 +296,34 @@ meeting's reading makes is made once per meeting and item, decided by the server
 - **AI turn**: a meeting the arrivals answer as `asked` by the member (`byYou`) is queued with
   `asked` (`aiTurnQueue`) and runs even while 「自動で進める」 is off — the press is the start
   (`ai-turns.md`). No consultation opens; the hidden run is the existing reading.
-- **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, composed in
-  `src/app/meetingCard.tsx` with the tasks feature's `MinutesReview`, `onMeetingCard`: no second
-  summary): ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
+- **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, which hands it the card's
+  parts — `MeetingCardParts` — composed in `src/app/meetingCard.tsx` with the tasks feature's
+  `MinutesReview`, `onMeetingCard`: no second summary). **Each thing once, in this order** (owner
+  2026-11-05, 「ごちゃついてるな」): title, when, people (+ 見られる人); 要約; 決めたこと and **one list**
+  「やることの案」 (「やること」 with no proposal left: the proposals with their buttons, put-away ones with
+  ［戻す］, then the other tasks made from the meeting, each once; its 「議事録を確認する」 only on the
+  right), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
   the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members; 「招待した人は
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
-  一度招待すると、取り消すことはできません。」), once read the proposals and decisions, and once per meeting
-  (localStorage `meeting-auto-offered:<company>`) for a series 「この定例は次から自動で読みますか？」. 見られる人:
+  一度招待すると、取り消すことはできません。」) and the 案件 field; then 「つながっているもの」 (the documents
+  and the calendar day: 「Google で開く」), 経緯. The offer comes once per meeting (localStorage
+  `meeting-auto-offered:<company>`) for a series: 「この定例は次から自動で読みますか？」. No band 「AI が反映
+  しました」 here: the chip says it. An older server (no card state): no buttons, plain lists. 見られる人:
   `meetingSeenWords` 「参加者のうち ACB の人 N人・招待した人 N人」 (another place keeps the server's phrase).
-- **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): on a meeting, choosing or making a 案件
-  first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
+- **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): one element. While none is linked and the
+  server says the member may choose, the field itself asks 「どの〇〇の会議ですか？」 (or 「『…』の会議ですか？」
+  with ［はい］［ちがう／選ぶ］), with ［新しい〇〇にする］ and ［〇〇はない（社内の会議など）］; otherwise
+  「〇〇 なし」. On a meeting, every way of choosing or making a 案件 here first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
   (`meetingLinkSentence` over `viewers:get` of the 案件); nothing is linked or made before ［つなぐ］.
-  Not yet: the 「どの〇〇の会議ですか？」 question's ［はい］ / chooser links without this sentence.
+  Not yet: the list's and the title bar's 「どの〇〇の会議ですか？」 chooser links without this sentence.
 - Not built from the demo: the consultation's first answer as the AI's summary; ［部署に出す］ on the card.
 - Tests: `client/tests/meetings-app.test.ts` (older server quiet, counts, the card's decisions, the
   press with the session and the runner re-read, NO_ACCESS words, malformed input never sent, the
   words), `src/features/minutes/model.test.ts` (each banner state), `src/features/chat/aiTurns.test.ts`
   (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
   (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
-  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link; `?flood=12`:
+  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link, ［はい］ too;
+  the card's order wide and narrow, each thing once; `?flood=12`:
   two rows, the fold's own scroll, the list's height and scroll also in a short window, ［まとめて読まない］ and its 元に戻す),
   `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 
@@ -535,7 +544,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the server's `bundle-questions` are items of the task list's あなたの番 with 「まとまりを選ぶ」 (the
   unfinished まとまり the member reads, `tasks:bundles`; choosing calls `minutes:linkBundle`) and
   「まとまりはない」 (`minutes:noBundle`); two or more of one group are one row 「まとまりを選ぶ会議 n件」
-  that opens. The meeting's card (`MeetingBundleBar`, `minutes:bundleQuestion`) offers both while
+  that opens. The meeting's card (its 案件 field, `RecordBundleFieldBox`, `minutes:bundleQuestion`) offers both while
   no まとまり is linked, also after the item left あなたの番; the consultation's card offers
   「まとまりはない」 too. The first message tells the AI to leave the まとまり's fields
   and the meeting log alone and finish the rest when none is linked, so an automatic run never waits

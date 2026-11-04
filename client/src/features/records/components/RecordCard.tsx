@@ -12,8 +12,8 @@ import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/Re
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
-import { linkRows, type NotDownloadedFolderOf } from './linkRows'
-import { IncomingActions, IncomingBody, IncomingLine, MeetingBody, MeetingLine, OpenButton } from './RecordDetails'
+import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
+import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
 
 interface Props {
@@ -37,8 +37,21 @@ interface Props {
   renderBundleField?: (field: BundleFieldContext) => ReactNode
   /** The not-downloaded folder holding a path (a linked folder left out on this computer is marked). */
   notDownloadedFolderOf?: NotDownloadedFolderOf
-  /** A meeting's own buttons and, once read, its proposals (minutes.md "Meetings for their attendees"), drawn by the screen. */
-  renderMeeting?: (record: RecordViewSummary) => ReactNode
+  /** A meeting's middle in its order: the card's parts with its own buttons and proposals (minutes.md "Meetings for their attendees"), drawn by the screen. */
+  renderMeeting?: (record: RecordViewSummary, parts: MeetingCardParts) => ReactNode
+}
+
+/** The card's parts the screen places around a meeting's own buttons and proposals. */
+export interface MeetingCardParts {
+  summary: ReactNode
+  /** 決めたこと and やること as plain lists, where the screen has no proposals to show. */
+  outputs: ReactNode
+  /** The 案件・プロジェクト field. */
+  bundle: ReactNode
+  /** The tasks its reading made, proposals and tasks alike (not its 「議事録を確認する」). */
+  tasks: RecordViewSummary[]
+  /** Something it shows changed: the card reads again. */
+  onChanged: () => void
 }
 
 /** What the screen's 案件・プロジェクト field gets: the record, its current one, and how to say what changed. */
@@ -110,7 +123,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     ? renderBundleField({
       record: card.record, version: card.version, bundle: bundleLink?.record ?? null, removable: bundleLink?.removable ?? null, onChanged: changed,
       counterpart: card.links.flatMap(l => (l.counterpart && l.record ? [{ id: l.record.id, title: l.record.title }] : []))[0] ?? null,
-      homework: card.detail?.kind === 'meeting' ? card.links.flatMap(l => (l.record?.thing === 'task' && l.recordVersion !== undefined && !l.record.finished ? [{ id: l.record.id, version: l.recordVersion }] : [])) : [],
+      homework: card.detail?.kind === 'meeting' ? card.links.flatMap(l => (l.record?.thing === 'task' && !l.record.minutesReview && l.recordVersion !== undefined && !l.record.finished ? [{ id: l.record.id, version: l.recordVersion }] : [])) : [],
     })
     : null
   const notes = <>
@@ -122,18 +135,17 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       </p>
     )}
   </>
-  const meeting = card.detail?.kind === 'meeting' ? renderMeeting?.(card.record) : null
-  return <CardBody card={card} rootPath={rootPath} incoming={incoming} meeting={meeting} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  return <CardBody card={card} rootPath={rootPath} incoming={incoming} renderMeeting={renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
 
-function CardBody({ card, rootPath, incoming, meeting, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
+function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
   drop: LinkedDrop
   /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), beside the title. */
   incoming: ReactNode
-  /** A meeting's own buttons and proposals, under the 案件 field. */
-  meeting?: ReactNode
+  renderMeeting?: Props['renderMeeting']
+  onReload: () => void
   notDownloadedFolderOf?: NotDownloadedFolderOf
   card: RecordCardView; rootPath: string; sections?: ReactNode; source?: ReactNode; renderApproval?: (approvalId: string) => ReactNode
   consult: ReturnType<typeof consultationLinks>; field: ReactNode; notes: ReactNode; onUnlink: (link: RemovableLink, label: string) => void
@@ -151,7 +163,11 @@ function CardBody({ card, rootPath, incoming, meeting, sections, source, renderA
   let body: ReactNode = record.summary ? <p className="whitespace-pre-wrap text-[14px] leading-relaxed">{record.summary}</p> : null
   if (detail?.kind === 'meeting') {
     from = <MeetingLine m={detail} />
-    body = <MeetingBody m={detail} decisions={linked.filter(r => r.thing === 'decision')} homework={linked.filter(r => r.thing === 'task')} />
+    const decisions = linked.filter(r => r.thing === 'decision')
+    const tasks = linked.filter(r => r.thing === 'task' && !r.minutesReview)
+    const summary = <MeetingSummary m={detail} />
+    const outputs = <MeetingOutputs decisions={decisions} tasks={tasks} />
+    body = renderMeeting ? renderMeeting(record, { summary, outputs, bundle: field, tasks, onChanged: onReload }) : <>{summary}{outputs}{field}</>
   } else if (detail?.kind === 'incoming') {
     from = <IncomingLine m={detail} />
     actions = <>{incoming}{detail.open && <OpenButton link={detail.open} />}</>
@@ -167,15 +183,17 @@ function CardBody({ card, rootPath, incoming, meeting, sections, source, renderA
   const rows = [...linkRows(card.links, rootPath, notDownloadedFolderOf).filter(r => !shownAtHead.has(r.key)).map(r => ({
     ...(turns.has(r.key) ? { ...r, sub: turns.get(r.key) ?? undefined } : r),
     ...(removable.has(r.key) ? { menu: [{ label: 'つながりを外す', hint: '相手の記録は消えません', onClick: () => onUnlink(removable.get(r.key)!, r.label) }] } : {}),
-  })), ...consult.rows]
+  })), ...(detail?.kind === 'meeting' ? meetingOpenRows(detail) : []), ...consult.rows]
+  // A meeting's chip says the AI has read it: the band stays only while the AI works.
+  const ai = detail?.kind === 'meeting' && !card.ai?.working ? null : card.ai
   return (
     <RecordPage testId="record-card" kind={record.thing} name={record.typeLabel} title={record.title} chips={chips} from={from} actions={actions}
       seenBy={card.viewers ? <SeenBy who={detail?.kind === 'meeting' ? meetingSeenWords(detail.attendees.length, card.viewers) : card.viewers.text} /> : record.personal ? <SeenBy who={ONLY_YOU} /> : null}
-      top={card.ai && <AiBand ai={card.ai} onShowHistory={() => setHistoryOpen(true)} />}
+      top={ai && <AiBand ai={ai} onShowHistory={() => setHistoryOpen(true)} />}
+      bottomLast={detail?.kind === 'meeting'}
       bottom={<><HistoryFold lines={card.history} open={historyOpen} onToggle={setHistoryOpen} /><FieldsFold fields={card.fields} /></>}
       links={<LinkedColumn rows={rows} notice={notes} drop={drop} extras={consult.extra ? [consult.extra] : []} first={record.thing === 'bundle' ? 'task' : undefined} />}>
-      {field}
-      {meeting}
+      {detail?.kind !== 'meeting' && field}
       {body}
       {source}
       {sections}

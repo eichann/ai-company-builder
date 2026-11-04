@@ -61,7 +61,6 @@ import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { startMinutesReading } from '../features/minutes/startReading'
 import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
-import { MeetingBundleBar } from '../features/minutes/components/MeetingBundleBar'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import { MeetingBanners } from '../features/minutes/components/MeetingBanners'
 import { useMeetingArrivals } from '../features/minutes/hooks/useMeetingArrivals'
@@ -135,9 +134,9 @@ export function AppShell() {
     [minutes.available, minutes.notices, taskList.data, pluginTurns, askedMeetings],
   )
   const { isReadOnly } = useWriteAccess()
-  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or a meeting's card.
+  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or the list.
   const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
-  // Bumped when a まとまり is chosen, so an open meeting card asks the server again.
+  // Bumped when a まとまり is chosen there, so an open meeting card reads again.
   const [bundleRev, setBundleRev] = useState(0)
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
@@ -403,14 +402,12 @@ export function AppShell() {
       return <TaskCard key={recordId} knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} />
     }
-    // A meeting without a まとまり: 「どのまとまりの会議ですか？」 on its card, also after it left あなたの番.
-    const meetingBar = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
-      ? <MeetingBundleBar key={`${recordId}:${bundleRev}`} companyId={currentCompany.id} meetingId={recordId} word={bundleWord} onChoose={setChoosingBundle} onChanged={taskList.reload} />
-      : null
+    // A まとまり chosen from the list or the title bar: a meeting's open card reads again.
+    const isMeeting = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
-      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)}
-      renderMeeting={r => renderMeetingPanel(currentCompany.id, r.id, { members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+    const readOnly = <div key={isMeeting ? `${recordId}:${bundleRev}` : recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload)}
+      renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
