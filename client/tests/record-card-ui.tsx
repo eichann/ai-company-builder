@@ -30,8 +30,9 @@ const meeting = rec('meeting-0000aa', 'meeting', 'A社 研修導入のお打ち�
   summary_text: '窓口を2つから3つに増やす方向で合意。金額は150万円の見込み。',
   source_ref: JSON.stringify({ conference: 'c1', event: 'e1', docs: [{ kind: 'notes', id: 'notesDoc12345' }, { kind: 'transcript', id: 'transcriptDoc123' }] }),
 })
-const slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い', 'received', {
-  channel: 'slack', occurred_at: '2026-11-05T17:30:00Z', counterpart_text: '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456',
+// As the inbox stores a Slack message: channel `chat` with a `slack:` pointer, in 確認待ち (`unsure`).
+const slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い', 'unsure', {
+  channel: 'chat', occurred_at: '2026-11-05T17:30:00Z', counterpart_text: '山田 様（C社）', needs_reply: true, source_ref: 'slack:C0123ABCD:1730800000.123456',
 }, '先日の打ち合わせ資料を送ってほしいとのこと。')
 
 const realField = params.get('field') === 'real'

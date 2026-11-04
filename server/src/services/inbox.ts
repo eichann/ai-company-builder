@@ -37,7 +37,7 @@ import { isDateValue } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { replyTarget, type TaskSettings } from '../../shared/core/task-settings'
 import {
-  INBOX_CHANNELS, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
+  INBOX_AI_TITLE_MAX, INBOX_CHANNELS, INBOX_NO_SUBJECT, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
   type InboxSettingsView, type InboxStatus, type IntakeOutcome, type SetAsideItem, type SetAsideList,
 } from '../../shared/types/inbox'
 import type { RecordSummary } from '../../shared/types/records'
@@ -69,13 +69,15 @@ export const INBOX_LIMITS = {
   /** Addresses kept on the record (To / CC each), the rest only counted. */
   keptAddresses: 20,
   title: 200,
+  /** The AI's short title for a message without a subject (a chat message, a mail with none). */
+  aiTitle: INBOX_AI_TITLE_MAX,
   reason: 500,
   endCondition: 2000,
   deadlineNote: 200,
   setAsideList: 100,
 } as const
 
-const SUBJECT_NONE = '（件名なし）'
+const SUBJECT_NONE = INBOX_NO_SUBJECT
 /** The ledger's note when the member's own reply was seen in the thread. */
 const REPLIED_THERE: Record<InboxChannel, string> = { email: 'メールで返信済み', chat: 'チャット（Slack）で返信済み' }
 /** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
@@ -85,7 +87,7 @@ export interface InboxDeps {
   companyData: CompanyDataSource
   clock: Clock
   ids: IdGenerator
-  writer: Pick<ServiceRecordWriter, 'create' | 'transition'>
+  writer: Pick<ServiceRecordWriter, 'create' | 'transition' | 'retitle'>
   /** 名寄せ (identity.md): the 相手 an address is, as that member may see it. */
   resolveAddress: (member: Member, address: string) => Outcome<{ person: string[]; company: string[] }>
   roleOf: (companyId: string, userId: string) => string | null
@@ -442,7 +444,10 @@ export function createInboxService(deps: InboxDeps) {
     const fields: Record<string, LedgerValue> = {
       occurred_at: msg.occurredAt,
       channel: msg.channel === 'email' ? 'email' : 'chat',
-      counterpart_text: oneLine(msg.from.name ? `${msg.from.name} <${from.address ?? ''}>` : from.address ?? '', 200) || null,
+      // Chat: the sender's name only (the app shows 「<name> から」; a Slack user id says nothing to a member).
+      counterpart_text: msg.channel === 'chat'
+        ? oneLine(msg.from.name ?? '', 200) || null
+        : oneLine(msg.from.name ? `${msg.from.name} <${from.address ?? ''}>` : from.address ?? '', 200) || null,
       source_ref: msg.sourceRef,
       message_id: msg.messageId.slice(0, 500),
       thread_ref: msg.threadRef ?? null,
@@ -787,6 +792,11 @@ export function createInboxService(deps: InboxDeps) {
         quiet: to !== 'unsure',
       })
       if (!moved.ok) return refuse('conflict', VERSION_CONFLICT.error, { code: VERSION_CONFLICT.code })
+      // A message without a subject gets the owner's AI's short title — never over a subject it came with.
+      const aiTitle = title.slice(0, INBOX_LIMITS.aiTitle).trim()
+      if (aiTitle !== '' && found.row.title === SUBJECT_NONE && found.row.personalOwner === member.userId) {
+        deps.writer.retitle(member.companyId, recordId, SUBJECT_NONE, aiTitle)
+      }
       return ok({ interactionId: recordId, state: to, replyRequestId, taskId, ...(alreadyReplied ? { alreadyReplied: true } : {}) })
     },
 

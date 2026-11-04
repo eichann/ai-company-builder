@@ -22,7 +22,8 @@
 import { createHmac } from 'crypto'
 import { Hono, type Context } from 'hono'
 
-export interface FakeSlackUser { id: string; email: string; teamId: string }
+/** `name`: the display name `users.info` answers (none: an empty profile, like a user who set none). */
+export interface FakeSlackUser { id: string; email: string; teamId: string; name?: string }
 export interface FakeSlackApp { clientId: string; clientSecret: string; signingSecret: string; teamId: string; botToken: string; botUserId: string; rotation?: boolean }
 
 /** A thread's messages in a channel of a workspace (conversations.replies); the root is the one whose ts is the thread's. */
@@ -32,8 +33,8 @@ export interface FakeSlackSeed { users: FakeSlackUser[]; apps: FakeSlackApp[]; t
 export function defaultSlackSeed(): FakeSlackSeed {
   return {
     users: [
-      { id: 'U0ONE', email: 'one@div.example', teamId: 'T0DIV' },
-      { id: 'U0TWO', email: 'two@div.example', teamId: 'T0DIV' },
+      { id: 'U0ONE', email: 'one@div.example', teamId: 'T0DIV', name: '一ノ瀬 一' },
+      { id: 'U0TWO', email: 'two@div.example', teamId: 'T0DIV', name: '二宮 二郎' },
       { id: 'U0OUT', email: 'stranger@div.example', teamId: 'T0DIV' },
       { id: 'U0THREE', email: 'three@other.example', teamId: 'T0OTHER' },
       // The same address as U0ONE, in another workspace.
@@ -139,7 +140,7 @@ export function createFakeSlack(seed: FakeSlackSeed = defaultSlackSeed()) {
     const u = userById(f.user ?? '')
     if (!u || u.teamId !== team) return fail(c, 'user_not_found')
     const showEmail = who.kind === 'bot' || who.t.scopes.includes('users:read.email')
-    return c.json({ ok: true, user: { id: u.id, profile: showEmail ? { email: u.email } : {} } })
+    return c.json({ ok: true, user: { id: u.id, profile: { ...(showEmail ? { email: u.email } : {}), ...(u.name ? { display_name: u.name } : {}) } } })
   })
 
   app.post('/api/auth.revoke', c => {
