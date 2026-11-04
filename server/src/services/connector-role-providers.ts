@@ -71,6 +71,7 @@ export function createRoleProviders(resolver: RoleResolver, given: Record<string
     documents: async (companyId, userId, conferenceId) => (await meetingsOf(companyId)).documents(companyId, userId, conferenceId),
     docVersion: async (companyId, userId, docId) => (await meetingsOf(companyId)).docVersion(companyId, userId, docId),
     docText: async (companyId, userId, docId, max) => (await meetingsOf(companyId)).docText(companyId, userId, docId, max),
+    transcriptText: async (companyId, userId, conferenceId, max) => (await meetingsOf(companyId)).transcriptText(companyId, userId, conferenceId, max),
   }
 
   const mailReader: MailReader = {

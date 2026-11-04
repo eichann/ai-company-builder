@@ -9,7 +9,7 @@
  * - MINUTES_NO_ACCESS says, in plain words, that another attendee can press it;
  * - ［AI に読ませる］ accepted makes main read the AI turn runner's queue again at once;
  * - a malformed id or member never reaches the server's URL or body;
- * - the members-only meeting's 見られる人 is 「参加した人（N人）・招待した人（N人）」, and linking a
+ * - the members-only meeting's 見られる人 is 「参加者のうち ACB の人 N人・招待した人 N人」, and linking a
  *   meeting to a 案件 says who will then see part of it.
  */
 import { test } from 'node:test'
@@ -101,6 +101,12 @@ test('［AI に読ませる］ goes at the version shown with the session, and t
   assert.deepEqual(asked, ['co'])
 })
 
+test('shared minutes whose text Google refused: the server\'s sentence reaches the member, not the 「共有されていません」 one', async () => {
+  const error = 'この議事録は共有されていて開けますが、いま ACB に許可している範囲では、Google が文章の取り出しを断りました。'
+  const { api } = fakeServer({ readRequest: { status: 403, body: { error, code: 'MINUTES_TEXT_REFUSED' } } })
+  assert.deepEqual(await api.requestReading('co', ID, 1), { success: false, error })
+})
+
 test('MINUTES_NO_ACCESS: the member is told another attendee can press it; nothing is asked of the runner', async () => {
   const { api, asked } = fakeServer({ readRequest: { status: 403, body: { error: 'x', code: 'MINUTES_NO_ACCESS' } } })
   assert.deepEqual(await api.requestReading('co', ID, 1), { success: false, error: MEETING_NO_ACCESS_TEXT, noAccess: true })
@@ -121,8 +127,8 @@ test('a malformed meeting id or member never reaches the server', async () => {
 })
 
 test('見られる人 of a members-only meeting: who attended and who was invited; another place keeps the server\'s phrase', () => {
-  assert.equal(meetingSeenWords(4, { kind: 'people', text: '5人が見られます', count: 5 }), '参加した人（4人）・招待した人（1人）')
-  assert.equal(meetingSeenWords(2, { kind: 'you-and-one', text: 'あなたと鈴木さん', count: 2 }), '参加した人（2人）')
+  assert.equal(meetingSeenWords(4, { kind: 'people', text: '5人が見られます', count: 5 }), '参加者のうち ACB の人 4人・招待した人 1人')
+  assert.equal(meetingSeenWords(2, { kind: 'you-and-one', text: 'あなたと鈴木さん', count: 2 }), '参加者のうち ACB の人 2人')
   assert.equal(meetingSeenWords(3, { kind: 'department', text: '営業部のみんな', count: 9 }), '営業部のみんな')
 })
 

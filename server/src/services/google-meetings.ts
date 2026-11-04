@@ -32,6 +32,10 @@ const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
  */
 const CONFERENCE_EARLY_MS = 15 * 60 * 1000
 const TRUNCATED = '\n【長いため、ここから先は省きました】'
+/** A long meeting's transcript entries are read 100 at a time, this many pages at most. */
+const MAX_ENTRY_PAGES = 60
+const MAX_PARTICIPANT_PAGES = 5
+const UNKNOWN_SPEAKER = '参加者'
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
@@ -70,6 +74,21 @@ function eventOf(raw: unknown): MeetEvent | null {
 /** Docs' plain-text export: no byte-order mark, `\n` line ends, NFC. */
 export function cleanExportText(text: string): string {
   return text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').normalize('NFC')
+}
+
+function cutToMax(text: string, max: number): { text: string; truncated: boolean } {
+  if (text.length <= max) return { text, truncated: false }
+  return { text: `${text.slice(0, Math.max(0, max - TRUNCATED.length)).trimEnd()}${TRUNCATED}`, truncated: true }
+}
+
+/** A participant's name in the meeting (signed in, anonymous or by phone), or null. */
+function participantName(p: Record<string, unknown>): string | null {
+  for (const kind of ['signedinUser', 'anonymousUser', 'phoneUser']) {
+    const who = p[kind]
+    const name = isObj(who) ? str(who.displayName) : null
+    if (name) return name
+  }
+  return null
 }
 
 export function createGoogleMeetings(request: GoogleRequester): MeetingRecordsReader {
@@ -175,9 +194,73 @@ export function createGoogleMeetings(request: GoogleRequester): MeetingRecordsRe
       })
       const raw = r.text ?? (typeof r.json === 'string' || typeof r.json === 'number' ? String(r.json) : null)
       if (raw === null) throw new GoogleReadFailed({ ok: false, kind: 'unreadable', reason: 'unreadable' })
-      const text = cleanExportText(raw)
-      if (text.length <= max) return { text, truncated: false }
-      return { text: `${text.slice(0, Math.max(0, max - TRUNCATED.length)).trimEnd()}${TRUNCATED}`, truncated: true }
+      return cutToMax(cleanExportText(raw), max)
+    },
+
+    /**
+     * Meet's own transcript entries, under `meetings.space.readonly` (the grant's 予定と議事録を読む):
+     * the words without Drive. Google keeps them 30 days after the conference and they may differ
+     * slightly from the document. Names are best effort; reading stops once `max` is reached.
+     */
+    async transcriptText(companyId: string, userId: string, conferenceId: string, max = MINUTES_TEXT_MAX): Promise<{ text: string; truncated: boolean } | null> {
+      if (!ID_RE.test(conferenceId)) return null
+      const base = `/v2/conferenceRecords/${encodeURIComponent(conferenceId)}`
+      const list = await call(companyId, userId, {
+        api: 'meet', method: 'GET', path: `${base}/transcripts`, query: { pageSize: '10' },
+        scope: GOOGLE_SCOPE.meetReadonly, operation: 'meet.transcripts.list',
+      })
+      const listed = isObj(list.json) && Array.isArray(list.json.transcripts) ? list.json.transcripts as unknown[] : []
+      const ids = listed.flatMap(t => {
+        const id = isObj(t) && t.state !== 'STARTED' ? str(t.name)?.split('/').pop() : null
+        return id && ID_RE.test(id) ? [id] : []
+      })
+      if (ids.length === 0) return null
+
+      const names = new Map<string, string>()
+      let token: string | null = null
+      for (let page = 0; page < MAX_PARTICIPANT_PAGES; page++) {
+        const r = await request(companyId, userId, {
+          api: 'meet', method: 'GET', path: `${base}/participants`, query: { pageSize: '100', ...(token ? { pageToken: token } : {}) },
+          scope: GOOGLE_SCOPE.meetReadonly, operation: 'meet.participants.list',
+        })
+        if (!r.ok) break
+        const body = isObj(r.json) ? r.json : {}
+        for (const p of Array.isArray(body.participants) ? body.participants as unknown[] : []) {
+          const key = isObj(p) ? str(p.name) : null
+          const name = isObj(p) ? participantName(p) : null
+          if (key && name) names.set(key, name)
+        }
+        token = str(body.nextPageToken)
+        if (!token) break
+      }
+
+      const lines: string[] = []
+      let size = 0
+      let more = false
+      for (const id of ids) {
+        let pageToken: string | null = null
+        for (let page = 0; page < MAX_ENTRY_PAGES && size <= max; page++) {
+          const r = await call(companyId, userId, {
+            api: 'meet', method: 'GET', path: `${base}/transcripts/${encodeURIComponent(id)}/entries`,
+            query: { pageSize: '100', ...(pageToken ? { pageToken } : {}) },
+            scope: GOOGLE_SCOPE.meetReadonly, operation: 'meet.transcripts.entries.list',
+          })
+          const body = isObj(r.json) ? r.json : {}
+          for (const e of Array.isArray(body.transcriptEntries) ? body.transcriptEntries as unknown[] : []) {
+            const said = isObj(e) ? str(e.text)?.trim() : null
+            if (!said || !isObj(e)) continue
+            const line = `${names.get(str(e.participant) ?? '') ?? UNKNOWN_SPEAKER}: ${said}`
+            lines.push(line)
+            size += line.length + 1
+          }
+          pageToken = str(body.nextPageToken)
+          if (!pageToken) break
+        }
+        more ||= pageToken !== null
+      }
+      if (lines.length === 0) return null
+      const got = cutToMax(cleanExportText(lines.join('\n')), max)
+      return more && !got.truncated ? { text: `${got.text}${TRUNCATED}`, truncated: true } : got
     },
   }
 }

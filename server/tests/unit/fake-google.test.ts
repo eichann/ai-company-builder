@@ -253,6 +253,18 @@ describe('fake Google: APIs', () => {
     expect((await api(`/v2/conferenceRecords/${S.salesConference}/smartNotes`, other.access_token)).status).toBe(404)
   })
 
+  it('Drive: a document can open (files.get) while its export is refused, with the reason given', async () => {
+    make()
+    const t = await grant()
+    fake.faults.refuseExport(S.salesNotesDoc, 'appNotAuthorizedToFile')
+    expect((await api(`/drive/v3/files/${S.salesNotesDoc}?fields=id,version`, t.access_token)).status).toBe(200)
+    const refused = await api(`/drive/v3/files/${S.salesNotesDoc}/export?mimeType=text/plain`, t.access_token)
+    expect(refused.status).toBe(403)
+    expect(await refused.json()).toMatchObject({ error: { errors: [{ reason: 'appNotAuthorizedToFile' }] } })
+    fake.faults.reset()
+    expect((await api(`/drive/v3/files/${S.salesNotesDoc}/export?mimeType=text/plain`, t.access_token)).status).toBe(200)
+  })
+
   it('Drive: Meet documents export as text (BOM, CRLF) with a version that moves on edits; drive.meet.readonly cannot open a hand-made file; over 10 MB is 403', async () => {
     make({ exportLimitBytes: 2000 })
     const t = await grant()

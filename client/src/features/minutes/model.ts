@@ -18,11 +18,24 @@ export function meetingWhen(iso: string | null, now: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${time}`
 }
 
-/** 「今日 12:00・4人」: when, and how many of the company may see it. */
-export function meetingPeopleWords(item: Pick<MeetingArrivalView, 'meetingAt' | 'attendeeCount'>, now: number): string {
-  const when = meetingWhen(item.meetingAt, now)
-  const people = item.attendeeCount > 0 ? `${item.attendeeCount}人` : ''
-  return [when, people].filter(Boolean).join('・')
+/**
+ * A row's 「定例ミーティング・今日 12:00」. No count here: the number of people ACB knows on a meeting
+ * is not how many attended (the card says what it counts, `meetingSeenWords`).
+ */
+export function meetingRowWords(item: Pick<MeetingArrivalView, 'title' | 'meetingAt'>, now: number): string {
+  return [item.title, meetingWhen(item.meetingAt, now)].filter(Boolean).join('・')
+}
+
+/** Rows shown above the list; the rest fold behind 「ほか N 件」, so a first discovery never takes over the pane. */
+export const MEETING_ROWS_SHOWN = 2
+
+export function foldMeetings<T>(rows: readonly T[]): { shown: readonly T[]; folded: readonly T[] } {
+  return { shown: rows.slice(0, MEETING_ROWS_SHOWN), folded: rows.slice(MEETING_ROWS_SHOWN) }
+}
+
+/** The folded rows ［まとめて読まない］ acts on: the ones still offering ［読まない］ as arrived. */
+export function skippableMeetings<T extends { banner: MeetingBanner }>(folded: readonly T[]): T[] {
+  return folded.filter(r => r.banner.kind === 'arrived')
 }
 
 /** 「決めたこと2・やることの案3」 */

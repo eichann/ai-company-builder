@@ -53,6 +53,8 @@ export interface SeedArtifact {
   state: ArtifactState
   /** The Google Doc the artifact is saved to (`docsDestination.document`). */
   docId: string
+  /** A transcript's words as Meet keeps them (`transcripts.entries`, gone 30 days after the meeting). */
+  entries?: Array<{ speaker: string; text: string }>
 }
 
 export interface SeedConference {
