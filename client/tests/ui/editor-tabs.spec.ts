@@ -40,7 +40,7 @@ test('edits + a change on disk: banner, autosave paused, diff, keep mine, then s
   await openWithEdits(page)
   await page.getByTestId('external-edit').click()
   await expect(banner(page)).toContainText('このファイルは外部で変更されました。あなたの編集はまだ保存していません')
-  await expect(page.getByText('自動保存を止めています（外部の変更あり・未保存の変更あり）')).toBeVisible()
+  await expect(page.getByRole('tab').getByRole('img', { name: '保存していない変更があります' })).toBeVisible()
   await expect(editor(page)).toContainText('私の追記')
   // Autosave would have run after 1 s: the disk keeps the AI's version.
   await page.waitForTimeout(1500)

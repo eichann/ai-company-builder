@@ -168,7 +168,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
           </button>
         )}
         {isModified && (
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+          <span role="img" aria-label="保存していない変更があります" title="保存していない変更があります（1秒ほどで自動で保存します）" className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
         )}
         <button
           type="button"

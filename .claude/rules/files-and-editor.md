@@ -213,7 +213,10 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
-  (image, PDF); `fileKinds.ts` decides how a file is shown. ⌘S, ⌘⇧V and ⌘F are the commands
+  (image, PDF); `fileKinds.ts` decides how a file is shown. No band under the editor (owner
+  2026-11-04: it only said 「自動保存」 and took space): unsaved edits are the tab's dot
+  (「保存していない変更があります」), a paused autosave is the external-change banner, a failed
+  save is `EditorError` above the editor (`editor-panel.spec.ts` 「a failed autosave…」). ⌘S, ⌘⇧V and ⌘F are the commands
   `editor.save` / `editor.togglePreview` / `editor.find`, delivered only while the focus is in
   that editor (`commands.md`).
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
