@@ -144,3 +144,14 @@ test('many meetings at once: two one-line rows, the rest folded in a bounded are
   await expect(page.locator('#log')).toContainText('undo meeting-flood011 2@2')
   expectNoPageErrors(state)
 })
+
+test('a Google permission from before the Docs API: one line on the card, and its button asks the 議事録 feature again', async ({ page }) => {
+  await openPreview(page, 'meetings', { renew: '1' })
+  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: 'AI に読ませる' }).click()
+  await finish(page, 'meeting-teirei01')
+  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  await expect(page.getByTestId('record-card')).toContainText('Google の許可をし直すと、メモも読めるようになります')
+  await page.getByRole('button', { name: '許可をし直す' }).click()
+  await expect(page.locator('#log')).toContainText('google minutes')
+  await expect(page.getByTestId('record-card')).toContainText('ブラウザで Google の画面を開きました')
+})

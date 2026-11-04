@@ -15,6 +15,7 @@ import { GOOGLE_SCOPE } from '../../shared/core/google'
 import { isPrivateEventVisibility, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
 import { MeetingReadFailed as GoogleReadFailed, type MeetArtifactDoc, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { GoogleRequest, GoogleResult } from './google-client'
+import { docsBodyText } from './google-docs-text'
 
 export type GoogleRequester = (companyId: string, userId: string, req: GoogleRequest) => Promise<GoogleResult>
 
@@ -79,6 +80,21 @@ export function cleanExportText(text: string): string {
 function cutToMax(text: string, max: number): { text: string; truncated: boolean } {
   if (text.length <= max) return { text, truncated: false }
   return { text: `${text.slice(0, Math.max(0, max - TRUNCATED.length)).trimEnd()}${TRUNCATED}`, truncated: true }
+}
+
+/**
+ * What Drive says of copying this document: blocked for this member (the owner's setting, and it
+ * applies to them: a writer may still download), free, or unknown (the answer lacks it).
+ */
+function copyRule(file: unknown): 'blocked' | 'free' | 'unknown' {
+  if (!isObj(file) || typeof file.copyRequiresWriterPermission !== 'boolean') return 'unknown'
+  if (!file.copyRequiresWriterPermission) return 'free'
+  return isObj(file.capabilities) && file.capabilities.canDownload === true ? 'free' : 'blocked'
+}
+
+/** The Docs API did not answer in a way that ends the reading: no such scope, Google said no, or too big for one answer. */
+function docsFallsBack(r: Extract<GoogleResult, { ok: false }>): boolean {
+  return r.kind === 'refused' || r.reason === 'scope-not-granted' || r.reason === 'answer-too-large'
 }
 
 /** A participant's name in the meeting (signed in, anonymous or by phone), or null. */
@@ -186,8 +202,29 @@ export function createGoogleMeetings(request: GoogleRequester): MeetingRecordsRe
       return String(v)
     },
 
-    /** A document as plain text (BOM removed, `\n`, NFC), at most `max` characters with a notice. */
+    /**
+     * A document as plain text (BOM removed, `\n`, NFC), at most `max` characters with a notice:
+     * by the Docs API when the member's grant has it, else by Drive's export. The Docs API does not
+     * answer to a copy block as the export does, so it is used only once Drive says there is none,
+     * and a blocked document is refused here as the export would (minutes.md "The text").
+     */
     async docText(companyId: string, userId: string, docId: string, max = MINUTES_TEXT_MAX): Promise<{ text: string; truncated: boolean }> {
+      const meta = await request(companyId, userId, {
+        api: 'drive', method: 'GET', path: `/drive/v3/files/${encodeURIComponent(docId)}`, query: { fields: 'copyRequiresWriterPermission,capabilities(canDownload)' },
+        scope: GOOGLE_SCOPE.driveMeetReadonly, operation: 'drive.files.get',
+      })
+      const copy = meta.ok ? copyRule(meta.json) : 'unknown'
+      if (copy === 'blocked') throw new GoogleReadFailed({ ok: false, kind: 'refused', reason: 'refused', status: 403, googleReason: 'cannotDownloadFile' })
+      if (copy === 'free') {
+        const r = await request(companyId, userId, {
+          api: 'docs', method: 'GET', path: `/v1/documents/${encodeURIComponent(docId)}`, query: { includeTabsContent: 'true' },
+          scope: GOOGLE_SCOPE.documentsReadonly, operation: 'docs.documents.get',
+        })
+        if (r.ok) {
+          const text = cleanExportText(docsBodyText(r.json))
+          if (text.trim() !== '') return cutToMax(text, max)
+        } else if (!docsFallsBack(r)) throw new GoogleReadFailed(r)
+      }
       const r = await call(companyId, userId, {
         api: 'drive', method: 'GET', path: `/drive/v3/files/${encodeURIComponent(docId)}/export`, query: { mimeType: 'text/plain' },
         scope: GOOGLE_SCOPE.driveMeetReadonly, operation: 'drive.files.export',

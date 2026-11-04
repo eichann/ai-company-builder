@@ -201,7 +201,7 @@ describe('the Google connection', () => {
     expect(q.get('state')).toMatch(new RegExp(`^${CO}\\.[0-9a-f]{64}$`))
     // Minutes only: never mail, never broader Drive / Gmail scopes.
     expect(q.get('scope')!.split(' ')).toEqual(['openid', 'email', CAL,
-      'https://www.googleapis.com/auth/meetings.space.readonly', 'https://www.googleapis.com/auth/drive.meet.readonly'])
+      'https://www.googleapis.com/auth/meetings.space.readonly', 'https://www.googleapis.com/auth/drive.meet.readonly', 'https://www.googleapis.com/auth/documents.readonly'])
 
     expect(page.status).toBe(200)
     expect(page.text).toContain('許可しました。アプリに戻ってください。')

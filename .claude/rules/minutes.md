@@ -240,7 +240,9 @@ meeting's reading makes is made once per meeting and item, decided by the server
   series (`meeting_auto_series`, key = digest of the calendar's `recurringEventId`, kept in
   `source_ref.series`). When **that member's** discovery finds a meeting of the series (new, or still
   `arrived`) it is asked to be read for them as above (actor `CLOCK_ACTOR`, note
-  「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`.
+  「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`. Only this call sets
+  it (the card's button, or 元に戻す after 「次から自動で読まない」): never a press of ［AI に読ませる］, discovery or
+  a default. It is per series, so one press shows on every meeting of that series.
 - **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
   meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest
   first: `status` (arrived / asked / reading / read / skipped / failed), `attendeeCount`, `by` (the
@@ -346,7 +348,27 @@ owner can download by hand in every format — so not sharing, not a download li
 lists `drive.meet.readonly` among its scopes and Google's announcement says the scope reads and
 downloads "files created or edited by Google Meet", but a third party reports Gemini's notes Docs
 fail with it (「The user has not granted the app … read access to the file」, `appNotAuthorizedToFile`)
-while transcripts work. Unconfirmed until the log line below shows Google's reason.
+while transcripts work. Confirmed in production (2026-11-05): `appNotAuthorizedToFile` for both documents. Meet's entries
+were too rough to stand in (no speaker separation, many mis-conversions), so the Docs API comes first.
+
+- **Three ways, in this order** (`google-meetings.ts` `docText`, owner decision 2026-11-05):
+  1. **The Docs API** (`documents.get`, `includeTabsContent`, `documents.readonly`) when the grant has
+     the scope; `docsBodyText` makes the body plain text: headings, list items, smart chips, tables
+     (cells apart by a tab), every tab and child tab (under 「【タブ名】」 when there are several). `max`
+     holds; nothing stored or logged. A Google refusal, no scope, an answer too big or no text → the export.
+     Google asking to wait or a 5xx stops the reading (tried later), so it never quietly reads less.
+  2. **Drive's export**, the only way before; everything below still applies.
+  3. **Meet's record**, the last fallback, under the rule below.
+- **The copy block comes before the Docs API**, which does not answer to it as the export does:
+  `drive.files.get` asks `copyRequiresWriterPermission` and `capabilities.canDownload`. Set, and the member
+  cannot download → refused here as `cannotDownloadFile`. A writer may read. Not said → the export decides,
+  never the Docs API on a guess. A block that only the export reports (an admin's rule) cannot be seen
+  from the Docs side: `copyRequiresWriterPermission` is the file's own setting.
+- **`documents.readonly` reaches any Doc the member can open**: `docText` uses it only for a meeting's
+  documents, after `docVersion` (`drive.files.get` under `drive.meet.readonly`) opened them, so 「共有されて
+  いません」 stays what it was.
+- **A grant without the scope** keeps working by ways 2-3 and the card and 設定 → Google say
+  「Google の許可をし直すと、メモも読めるようになります」 (`MyGoogle.renew`, `google-connector.md`).
 
 - **The log**: every refused Google call prints `[google] call refused: … companyId= operation= status=
   reason=` (`google-client.ts`; Google's short code, never its message, which can name the file).
@@ -375,11 +397,12 @@ while transcripts work. Unconfirmed until the log line below shows Google's reas
   403 with `rateLimitExceeded` / `userRateLimitExceeded` / `dailyLimitExceeded` → 503 `GOOGLE_UNAVAILABLE`;
   `domainPolicy` / `accessNotConfigured` / `SERVICE_DISABLED` → `GOOGLE_STOPPED` (these two groups in
   `googleRefusal`, for `files.get` too). The app passes the server's sentence on (`memberText`).
-- **Not done without the owner**: a wider scope. `drive`, `drive.readonly` are `GOOGLE_NEVER_SCOPES`;
-  `documents.readonly` (Docs API) is not allowed yet either.
+- **Not done without the owner**: a wider Drive scope. `drive`, `drive.readonly` stay `GOOGLE_NEVER_SCOPES`.
 - Tests: `meeting-attendees.test.ts` 「Drive opens the minutes but refuses their text」 (each
   mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`), with 「copying blocked by
-  the file's owner」 and 「Meet's record stands in only for what ACB is not allowed」;
+  the file's owner」 and 「Meet's record stands in only for what ACB is not allowed」; its 「the minutes'
+  documents by the Docs API」 (order, fallback, a grant from before, copy block, sharing, switches);
+  `server/tests/unit/google-docs-text.test.ts` (the text, each way's choice, the scope's place);
   `minutes.test.ts` 「a reading the AI could not do, then ［AI に読ませる］」 (mutation-checked).
 
 ## What is stored, and what never

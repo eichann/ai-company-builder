@@ -74,6 +74,9 @@ test('受信を読む is offered only to a connected member without it, and a fe
   const { googleSectionView } = await import('../shared/google')
   const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false }
   const without = googleSectionView({ ...base, features: ['minutes', 'mail'], featuresOff: [] })
+  // 「許可をし直す」 only when the server names it: an older server leaves `renew` out.
+  assert.equal(without.canRenewMinutes, false)
+  assert.equal(googleSectionView({ ...base, features: ['minutes'], featuresOff: [], renew: ['minutes'] }).canRenewMinutes, true)
   assert.equal(without.canAddInbox, true)
   assert.deepEqual(without.allowed, ['予定と議事録を読む', 'メールを送る'])
   const off = googleSectionView({ ...base, features: ['minutes', 'inbox'], featuresOff: ['inbox'] })

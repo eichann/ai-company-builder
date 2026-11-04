@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
-import { GOOGLE_PRACTICE_TEXT, googleSectionView } from '../../../../shared/google'
+import { GOOGLE_PRACTICE_TEXT, GOOGLE_RENEW_MINUTES_TEXT, googleSectionView } from '../../../../shared/google'
 import { useGoogle } from '../hooks/useGoogle'
 import { googlePermissionKey } from '../../../shared/lib/googlePermission'
 import { GoogleRelayCard } from './GoogleRelayCard'
@@ -42,12 +42,16 @@ export function GoogleSection({ companyId }: { companyId: string }) {
             ) : (
               <p className="text-[13px] text-zinc-600 dark:text-zinc-300">まだ許可していません。</p>
             )}
-            {view.domainHint && (view.connectFeatures || view.canAddMail || view.canAddInbox) && (
+            {view.canRenewMinutes && <p className="text-[12px] text-zinc-500">{GOOGLE_RENEW_MINUTES_TEXT}</p>}
+            {view.domainHint && (view.connectFeatures || view.canAddMail || view.canAddInbox || view.canRenewMinutes) && (
               <p className="text-[12px] text-zinc-500">{view.domainHint}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-1">
               {view.connectFeatures && (
                 <Button size="sm" variant="primary" disabled={busy || waiting} onClick={() => void connect(view.connectFeatures!)}>Google で許可</Button>
+              )}
+              {view.canRenewMinutes && (
+                <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['minutes'])}>許可をし直す</Button>
               )}
               {view.canAddMail && (
                 <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['mail'])}>メールを送る許可も足す</Button>

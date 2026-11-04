@@ -75,6 +75,9 @@ export function isGoogleSignInUrl(url: unknown): url is string {
   return u.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)
 }
 
+/** A grant from before the Docs API: reading works, without Gemini's notes. */
+export const GOOGLE_RENEW_MINUTES_TEXT = 'Google の許可をし直すと、メモも読めるようになります'
+
 /** What the section shows for the member's state. */
 export interface GoogleSectionView {
   /** The account and what is allowed, when connected. */
@@ -88,6 +91,8 @@ export interface GoogleSectionView {
   canAddMail: boolean
   /** 「受信を読む許可も足す」 when connected without 受信を読む (asked only when the member wants it). */
   canAddInbox: boolean
+  /** 「許可をし直す」: connected before the minutes' documents could be read by name (`MyGoogle.renew`). */
+  canRenewMinutes: boolean
   canDisconnect: boolean
   domainHint: string | null
 }
@@ -105,6 +110,7 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
     connectFeatures: my.available && !my.connected ? ['minutes'] : null,
     canAddMail: my.available && my.connected && !my.features.includes('mail') && offered(my, 'mail'),
     canAddInbox: my.available && my.connected && !my.features.includes('inbox') && offered(my, 'inbox'),
+    canRenewMinutes: my.available && my.connected && (my.renew ?? []).includes('minutes'),
     canDisconnect: my.connected || my.status !== null,
     domainHint: my.domain ? `会社の Google アカウント（@${my.domain}）で許可してください。` : null,
   }

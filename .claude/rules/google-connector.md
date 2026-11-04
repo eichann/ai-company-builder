@@ -81,12 +81,23 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 ## Scopes (`shared/core/google.ts`)
 
 `minutes` (予定と議事録を読む) = `calendar.events.readonly`, `meetings.space.readonly`,
-`drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
+`drive.meet.readonly`, and optionally `documents.readonly` (below); `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
 = `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; `sheets`
 (スプレッドシートを中継で使う) = `spreadsheets` (the relay, below); each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
 `normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeatureOfScope`
 (each feature scope belongs to one feature), `googleFeaturesOff`.
+
+**Optional scopes** (`GOOGLE_FEATURE_OPTIONAL_SCOPES`): asked with their feature, but a grant without
+them still has it, so adding one never turns the feature off for members who allowed it earlier.
+Today `documents.readonly` of `minutes` (the Docs API, `docs.googleapis.com`, api `docs`; owner decision
+2026-11-05, `minutes.md` "When Google refuses the text"): never asked with another feature, and the
+feature's switches reach it (`googleFeatureOfScope`). `googleFeaturesToRenew` names what such a grant
+lacks; `MyGoogle.renew` (offered, not turned off) drives 「許可をし直す」 on the meeting card and in
+設定 → Google, which is `POST /me/google/connect { features: ['minutes'] }` as any feature asked
+again. Members are never sent to the consent by themselves for it (no loop for one who unticks it).
+The company's Cloud project needs the Google Docs API turned on; when it is not, reading falls to the
+export. `drive.readonly` stays in `GOOGLE_NEVER_SCOPES`.
 
 ## One consent (「仕事の道具をつなぐ」, owner decision 2026-11-02)
 
