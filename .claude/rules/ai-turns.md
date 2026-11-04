@@ -129,7 +129,9 @@ turns").
   the member's); only an older server that leaves it `reading` gets the session's `retry`. It also
   finishes the run (below).
 - `aiTurns:retry(companyId, recordId)` — 「もう一度」 also gives the server's run back
-  (`POST /ai-runs/:runId/retry`); the runner forgets that it saw the record taken.
+  (`POST /ai-runs/:runId/retry`); the runner forgets that it saw the record taken. The runner waits
+  for this answer before it clears its hand-off (`giveBack`): a claim that reached the server first
+  would be refused and the record marked taken for that version.
 - `aiTurns:settings(companyId)` — 「自動で進める」 for **this member** (the AI's turn runs on the
   assignee's PC, owner decision 2026-11-02): their own switch (`GET /me/work-switches`,
   `readOwnAutoRun`; `tasks.md` "Each member's switches") within the company's `autoRun` of S6's
@@ -204,10 +206,31 @@ exists in the minutes type (a type version for it would be a later change).
 
 Sending and approving stay a person's (no change): the AI makes drafts and approval requests only.
 
+### Asked again (production 2026-11-05)
+
+Seen: a meeting whose reading failed (Google refused the text), then ［AI に読ませる］ answered 200 and
+the meeting was `received`, but nothing ran and the banner showed the old failure. Two things held
+it, each alone enough: this PC's hand-off (kept until 「もう一度」, so `nextAiTurn` never claimed) and
+the server's run in `waiting_person` (a claim → `RUN_WAITING` → `taken`).
+
+- **Server** (`aiRuns.askedAgain`, called from the read-request): the reading's open run in
+  `waiting_person` / `waiting_setup` / `retry_later` goes to `open`, like 「もう一度」 but whoever's run
+  it was (another attendee may press); the same run, so its idempotency keys still answer what was
+  made, and the next claim raises the generation. A `running` or `waiting_reconcile` run stays.
+- **App** (`askedAgain` in `aiTurns.ts`, each tick): a hand-off from a `failed` outcome whose record
+  is back in the queue at a newer version than the run started from (`HandOff.version`) is treated as
+  「もう一度」 (`giveBack`). Safe because `failed` means the record left the step's claim states, so
+  only a person put it back; the same version is a queue not read again yet, and an `unfinished`
+  hand-off (the record never left) still waits for 「もう一度」. A hand-off without a version comes
+  from an older build and counts as asked again.
+- **An app without this** still shows the old failure after a press; its ［もう一度］ runs the reading.
+- **The words**: `FAILED_REASON` no longer says the AI judged (mostly Google refused and the app cannot
+  tell); `logForToday` reads the old stored sentence as the new one.
+
 ## Tests
 
 `src/features/chat/aiTurns.test.ts` (setting off, Codex, order, one at a time and the pass cap,
-daily limit, attempts per record, stop after failures and resume, usage pause, settings values; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
+daily limit, attempts per record, stop after failures and resume, usage pause, settings values; a meeting asked for again runs, other hand-offs stay; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
 `tests/ai-turn-unattended.test.ts` (an unattended run's Claude options: no settings layers, strict
 MCP config, no built-in tools, shell / web / write denied, only the record server, everything else
 refused even in bypass; a normal turn unchanged; Codex refuses; the minutes step's tool list; the
@@ -222,7 +245,7 @@ also: after earlier put-backs (version > 2) an unattended run finishes without `
 (`minutes_read`'s version, a conflict's version), `tests/ui/ai-turns.spec.ts`
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
 its title, `minutesId` and the claim's version in the first message, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
-Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again).
+Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again; `?autoturn=asked-again`: an older build's hand-off is given back, the claim after the server's answer).
 
 ## A business plugin's steps (plan C5; server side: `plugin-steps.md`)
 

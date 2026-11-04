@@ -422,6 +422,68 @@ describe('stuck reading and the switches', () => {
     expect([last.action, last.cause, last.runId]).toEqual(['retry', 'run', run.id])
   })
 
+  it('a reading the AI could not do, then ［AI に読ませる］: the next run is claimed and reads the text, even when another attendee\'s run stopped', async () => {
+    const versionOf = async () => (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}`)).body.data.record.version as number
+    const claimRun = (user: string, conversationId: string) => call(user, 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-reading', deviceId: 'app-device-a', conversationId })
+    const tokenOf = async (user: string, conversationId: string, run: Json) =>
+      (await call(user, 'POST', `${C()}/me/record-tokens`, { conversationId, agent: 'claude-code', scope: 'act', run: { id: run.id, generation: run.generation } })).body.data.token as string
+    const failOnce = async (user: string, conversationId: string) => {
+      const run = (await claimRun(user, conversationId)).body.data.run
+      const token = await tokenOf(user, conversationId, run)
+      expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: await versionOf() }, token)).status).toBe(200)
+      expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/fail_reading`, { expectedVersion: await versionOf() }, token)).status).toBe(200)
+      const finished = await call(user, 'POST', `${C()}/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'failed', failure: { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } })
+      expect(finished.body.data.run.state).toBe('waiting_person')
+      return run
+    }
+    const pressed = async (user: string) => {
+      const r = await call(user, 'POST', `${C()}/me/minutes/item/${salesId}/read-request`, {})
+      expect(r.status, r.text).toBe(200)
+      expect(minutesRows().find(m => m.id === salesId).state).toBe('received')
+    }
+
+    // The test above left a run retried later; this story starts with none.
+    db.prepare('DELETE FROM ai_runs WHERE company_id = ? AND record_id = ?').run(CO, salesId)
+    const first = await failOnce('mn-sato', 'conv-failed-1')
+    await pressed('mn-sato')
+    const again = await claimRun('mn-sato', 'conv-again-1')
+    expect(again.status, again.text).toBeLessThan(300)
+    expect(again.body.data.run).toMatchObject({ id: first.id, generation: first.generation + 1, state: 'running', failure: null })
+    const token = await tokenOf('mn-sato', 'conv-again-1', again.body.data.run)
+    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: await versionOf() }, token)).status).toBe(200)
+    const text = await call(null, 'GET', `/api/records-ai/minutes/${salesId}/text`, undefined, token)
+    expect(text.status, text.text).toBe(200)
+    expect(text.body.data.text).toContain('■ 会議メモ')
+    // The older claim's calls stay refused after the new one.
+    expect((await call('mn-sato', 'POST', `${C()}/ai-runs/${first.id}/renew`, { generation: first.generation })).body.code).toBe('RUN_SUPERSEDED')
+
+    // Failed again, and this time the other attendee presses: retry is Sato's alone, the press is not.
+    expect((await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/fail_reading`, { expectedVersion: await versionOf() }, token)).status).toBe(200)
+    await call('mn-sato', 'POST', `${C()}/ai-runs/${first.id}/finish`, { generation: again.body.data.run.generation, outcome: 'failed', failure: { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } })
+    await pressed('mn-tanaka')
+    const taken = await claimRun('mn-tanaka', 'conv-again-2')
+    expect(taken.status, taken.text).toBeLessThan(300)
+
+    // A meeting already waiting for the presser with a stopped run (pressed before this fix): pressing again frees it.
+    await call('mn-tanaka', 'POST', `${C()}/ai-runs/${first.id}/finish`, { generation: taken.body.data.run.generation, outcome: 'failed', failure: { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } })
+    expect((await claimRun('mn-tanaka', 'conv-again-3')).body.code).toBe('RUN_WAITING')
+    await pressed('mn-tanaka')
+    expect((await claimRun('mn-tanaka', 'conv-again-3')).status).toBeLessThan(300)
+    const held = await call('mn-tanaka', 'GET', `${C()}/ai-runs/${first.id}`)
+    // Left as the next test expects it: back with Sato, the run closed.
+    await call('mn-tanaka', 'POST', `${C()}/ai-runs/${first.id}/finish`, { generation: held.body.data.run.generation, outcome: 'done' })
+    db.prepare("UPDATE record_state SET fields = json_set(fields, '$.assignee', 'mn-sato') WHERE company_id = ? AND record_id = ?").run(CO, salesId)
+  })
+
+  it('an unknown outside result still holds the run after a press: a person reconciles it first', async () => {
+    const run = { id: 'run-press-unknown', recordId: 'meeting-pressunknown1', step: 'minutes-reading' }
+    const now = ts()
+    db.prepare(`INSERT INTO ai_runs (company_id, id, record_id, step, user_id, state, generation, created_at, updated_at) VALUES (?, ?, ?, ?, 'mn-sato', 'waiting_reconcile', 1, ?, ?)`).run(CO, run.id, run.recordId, run.step, now, now)
+    services.aiRuns.askedAgain(CO, run.recordId, run.step)
+    expect((db.prepare('SELECT state FROM ai_runs WHERE company_id = ? AND id = ?').get(CO, run.id) as Json).state).toBe('waiting_reconcile')
+    db.prepare('DELETE FROM ai_runs WHERE company_id = ? AND id = ?').run(CO, run.id)
+  })
+
   it('read without a まとまり, one chosen afterwards: the meeting stays read and no AI run is made; an older app\'s まとまりの分 is refused', async () => {
     // The reading happened while no まとまり was linked.
     db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name IN ('bundle', 'counterpart')").run(CO, salesId)

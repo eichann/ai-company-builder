@@ -27,6 +27,8 @@ export interface AiTurnLog {
 export interface HandOff {
   kind: 'failed' | 'urgent' | 'by-member'
   reason: string
+  /** The record's version the failed run started from: a newer one back in the queue was asked for again (`askedAgain`). */
+  version?: number
 }
 
 /** At most this many records are started in one pass; the next pass comes `AI_TURN_PASS_INTERVAL_MS` later. */
@@ -56,6 +58,11 @@ export interface AiTurnDecisionInput {
   now: number
 }
 
+// Not 「AI が判断した」: most often it was Google that refused the text, and the app cannot tell here.
+export const FAILED_REASON = '読み取れませんでした。理由は「AIへの相談」に残っています。'
+/** What a log kept from an older build says: read as `FAILED_REASON`. */
+const OLD_FAILED_REASON = 'AI が「読み取れない」と判断しました。理由は「AIへの相談」に残っています。'
+
 export function localDay(now: number): string {
   const d = new Date(now)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -75,7 +82,9 @@ export function logForToday(stored: unknown, now: number): AiTurnLog {
   const handed: Record<string, HandOff> = {}
   for (const [id, h] of Object.entries(s.handed && typeof s.handed === 'object' ? s.handed : {})) {
     const x = h as Partial<HandOff> | null
-    if (x && (x.kind === 'failed' || x.kind === 'urgent' || x.kind === 'by-member') && typeof x.reason === 'string') handed[id] = { kind: x.kind, reason: x.reason.slice(0, 300) }
+    if (x && (x.kind === 'failed' || x.kind === 'urgent' || x.kind === 'by-member') && typeof x.reason === 'string') {
+      handed[id] = { kind: x.kind, reason: x.reason === OLD_FAILED_REASON ? FAILED_REASON : x.reason.slice(0, 300), ...(typeof x.version === 'number' ? { version: x.version } : {}) }
+    }
   }
   if (s.day !== base.day) return { ...base, stopped, pausedUntil, failuresInARow, handed }
   const attempts: Record<string, number> = {}
@@ -122,7 +131,6 @@ export function recordStarted(log: AiTurnLog, recordId: string): AiTurnLog {
 /** `failed`: the AI said it could not; `unfinished`: the turn ended (or broke) before the record was done. */
 export type AiTurnOutcome = 'done' | 'failed' | 'unfinished' | 'usage-limit'
 
-export const FAILED_REASON = 'AI が「読み取れない」と判断しました。理由は「AIへの相談」に残っています。'
 export const UNFINISHED_REASON = 'AI が最後まで終えられませんでした。理由は「AIへの相談」に残っています。'
 
 /**
@@ -130,15 +138,30 @@ export const UNFINISHED_REASON = 'AI が最後まで終えられませんでし�
  * person at once with the reason (never left silently in 「AI の番」) and N in a row stop the
  * runner; Claude's limit pauses (not a failure, the record waits).
  */
-export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pauseUntil: number): AiTurnLog {
+export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pauseUntil: number, version?: number): AiTurnLog {
   if (outcome === 'done') return { ...log, failuresInARow: 0 }
   if (outcome === 'usage-limit') return { ...log, pausedUntil: pauseUntil }
   const failuresInARow = log.failuresInARow + 1
   const reason = outcome === 'failed' ? FAILED_REASON : UNFINISHED_REASON
   return {
     ...log, failuresInARow, stopped: log.stopped || failuresInARow >= settings.stopAfterFailures,
-    handed: { ...log.handed, [recordId]: { kind: 'failed', reason } },
+    handed: { ...log.handed, [recordId]: { kind: 'failed', reason, ...(version !== undefined ? { version } : {}) } },
   }
+}
+
+/**
+ * Records a person asked for again after the AI could not do them: a `failed` outcome means the
+ * record left the step's claim states (`settle.couldNot` / `closed`), so one back in the queue at a
+ * newer version was put there by someone's ［AI に読ませる］, on any PC. Its hand-off answers the
+ * earlier run, not this request (ai-turns.md "Asked again"). The same version is only a queue not
+ * read again yet; an unfinished run never left the queue and waits for 「もう一度」. A hand-off
+ * without a version comes from an older build, so from before this launch.
+ */
+export function askedAgain(log: AiTurnLog, queue: readonly AiTurnCandidate[]): string[] {
+  return queue.filter(c => {
+    const h = log.handed[c.id]
+    return h?.kind === 'failed' && h.reason === FAILED_REASON && (h.version === undefined || c.version > h.version)
+  }).map(c => c.id)
 }
 
 /** The member pressed 「もう一度自動で進める」. */
