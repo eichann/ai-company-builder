@@ -1041,9 +1041,10 @@ clock's, a separate service writing through the service writer: `notifications.m
   `recordReader`) → 400 `ASSIGNEE_CANNOT_READ` 「この人はこの記録を見られないため、担当にできません。…」,
   which never names the place. Test: `server/tests/unit/record-engine.test.ts` "an assignee must
   be able to see the record".
-- **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
-  the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
-  value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
+- **Notify** (duty 4): the notices go to the members named by the action's `notify` and the new
+  `next_actor`, never the actor. The push channel's `records` event (kind + version only, a fresh
+  value, addressed by company × member, `agent-stop.md`) goes to **every member who reads the
+  record now**, named or not (`recordChanged`, `notifications.md` "The push signal"). The app refetches; it never acts on the
   event itself (0.18-1, SSE rule). The app's listeners: received minutes (main asks the server
   again for the member's received minutes, `minutes.md` "The app") and the title bar's 「あなたの番」
   (`notifications.md`). `notify` also carries the ledger entry (`RecordChange`), from which the

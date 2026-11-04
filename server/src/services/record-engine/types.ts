@@ -32,11 +32,18 @@ export interface RecordEngineDeps {
   /** The member's role in the company, or null (an assignee must be able to read the record). */
   roleOf: (companyId: string, userId: string) => string | null
   /**
-   * Tell these members their 「あなたの番」 may have changed (push channel; kind + version only).
-   * `change` says which ledger entry it was, for the notices (services/notifications.ts), which
-   * keep only kind, record, version and actor — never a value — and push nothing but a version.
+   * The notices for these members (the people named on the record whom the entry concerns).
+   * `change` says which ledger entry it was (services/notifications.ts), which keep only kind,
+   * record, version and actor — never a value. Called without `change` it does nothing more:
+   * the `records` push signal is `recordChanged`'s.
    */
   notify: (companyId: string, userIds: string[], change?: RecordChange) => void
+  /**
+   * A record changed (any ledger entry): every member who can read it now gets the content-free
+   * `records` push signal (services/record-signal.ts; notifications.md "The push signal"). None
+   * without it.
+   */
+  recordChanged?: (companyId: string, recordId: string) => void
   /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
   tokenDigest?: TokenDigest
   /**

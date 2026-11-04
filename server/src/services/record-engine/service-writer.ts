@@ -108,7 +108,7 @@ const fail = (reason: ServiceWriteFailure, detail?: string): ServiceWriteFailed 
  * members it names told (kind + version only). Whether that actor may do it
  * (an approver approving, the author sending) is the calling service's rule.
  */
-export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify'>) {
+export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify' | 'recordChanged'>) {
   const { companyData } = deps
 
   /** Every person value can read a record at `place` (a private folder's name is never said). */
@@ -134,9 +134,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
   }
 
   function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false) {
+    // Every reader hears that it changed (the app refetches); quiet: that signal only, no notice.
+    try { deps.recordChanged?.(companyId, change.entry.recordId) } catch { /* the app's own check catches up */ }
+    if (quiet) return
     const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
-    // Quiet: the `records` signal only (the app refetches), no notice.
-    if (to.length > 0) { try { if (quiet) deps.notify(companyId, to); else deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
+    if (to.length > 0) { try { deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
   }
 
   /** Everything `create` checks, without writing: the prepared rows, or why not. */

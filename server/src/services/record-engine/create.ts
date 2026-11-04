@@ -21,7 +21,7 @@ import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../sha
 import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
 
 export function creating(ctx: EngineContext) {
-  const { deps, companyData, transactions, clock, open, canRead, placeFolder, tell, summaryOf } = ctx
+  const { deps, companyData, transactions, clock, open, canRead, placeFolder, changed, tell, summaryOf } = ctx
   /**
    * What the member's AI makes, placed as the member would expect (records.md "Where the AI puts
    * a request", owner decision 2026-11-03): a request about the member alone → owner-only with
@@ -218,6 +218,7 @@ export function creating(ctx: EngineContext) {
       })
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
       if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
+      else changed(member.companyId, id)
       return ok({ record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder } })
     },
   }

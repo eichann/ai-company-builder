@@ -88,7 +88,13 @@ export function engineContext(deps: RecordEngineDeps) {
       .catch(err => logError('records', 'Writing the history line failed', err, { company: member.companyId }))
   }
 
+  /** Every reader of the record learns it changed (the `records` signal; never throws into the engine). */
+  function changed(companyId: string, recordId: string) {
+    try { deps.recordChanged?.(companyId, recordId) } catch { /* the app's own check catches up */ }
+  }
+
   function tell(member: Member, userIds: Array<LedgerValue | undefined>, change: RecordChange) {
+    changed(member.companyId, change.entry.recordId)
     // The member's own AI acting: the member did not do it, so they are told too — the notices
     // then keep only what someone else asked of them (`asked`, notifications.md); a person never hears their own act.
     const self = change.entry.actorKind === 'ai'
@@ -100,7 +106,7 @@ export function engineContext(deps: RecordEngineDeps) {
 
   const summaryOf = (records: RecordRepository, id: string) => recordSummaries(records, records.byIds([id])).get(id) as RecordSummary
 
-  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, tell, summaryOf, roles, useRoles, afterAction, useAfterAction }
+  return { deps, companyData, transactions, clock, open, fileOf, canRead, placeFolder, stateOf, historyLine, changed, tell, summaryOf, roles, useRoles, afterAction, useAfterAction }
 }
 
 export type EngineContext = ReturnType<typeof engineContext>
