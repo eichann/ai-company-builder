@@ -213,3 +213,22 @@ export function sheetsPathParts(path: string): { spreadsheetId: string | null; r
   const range = seg[4] === 'values' && seg[5] ? seg[5].replace(/:(append|clear)$/, '') : null
   return { spreadsheetId, range }
 }
+
+/** One relayed call in the member's words (the records of the app and the admin console). */
+export function googleRelayRecordWords(r: {
+  operation: SheetsOperation | null
+  range: string | null
+  result: 'ok' | 'google-refused' | 'refused' | 'error'
+  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'other' | null
+}): { action: string; result: string; note: string | null } {
+  const action = r.operation ? SHEETS_OPERATION_TEXT[r.operation] : r.reason === 'deletion' ? '消す操作' : '中継しない操作'
+  if (r.result === 'ok') return { action, result: '届けました', note: null }
+  if (r.result === 'google-refused') return { action, result: 'Google が断りました', note: '編集する権限がないか、表が見つかりません' }
+  if (r.result === 'error') return { action, result: 'うまくいきませんでした', note: 'Google につながらないか、混み合っていました' }
+  const note = r.reason === 'deletion' ? '消す操作は中継しません'
+    : r.reason === 'not-relayed' ? 'この操作は中継しません'
+      : r.reason === 'stopped' ? '管理者が止めていました'
+        : r.reason === 'over-cap' ? '今日の上限に達していました'
+          : r.reason === 'not-allowed' ? '本人の許可がありませんでした' : null
+  return { action, result: '中継しませんでした', note }
+}

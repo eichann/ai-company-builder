@@ -1,6 +1,8 @@
 // The Google connection (「Google で許可」, milestone 4; .claude/rules/google-connector.md):
 //   google:status, google:connect, google:disconnect,
-//   google:connectAll and google:markSeen (「仕事の道具をつなぐ」: one consent for what the company offers)
+//   google:connectAll and google:markSeen (「仕事の道具をつなぐ」: one consent for what the company offers),
+//   google:relay and google:setRelay (「スプレッドシートを中継で使う」: the member's view and own records,
+//   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay")
 // The server holds everything (the permission, sealed); the app holds no token
 // at all. google:connect asks the server for the sign-in page's URL and opens
 // it in the system browser itself — the URL (with its one-time state) never
@@ -8,7 +10,7 @@
 // The session cookie stays here; the renderer gets the server's view or a
 // sentence built from status codes only. Logged: the method and the status.
 
-import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleStatusResult, type MyGoogle } from '../../../shared/google'
+import { GOOGLE_OFFLINE_TEXT, googleErrorText, isGoogleSignInUrl, type GoogleConnectResult, type GoogleFeature, type GoogleRelayResult, type GoogleStatusResult, type MyGoogle, type MyGoogleRelay } from '../../../shared/google'
 import { GOOGLE_FEATURES } from '../../../../shared/core/google'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell } from '../ports'
@@ -27,6 +29,10 @@ const invalid = { success: false, offline: false, error: '入力が正しくあ�
 
 const isMyGoogle = (v: unknown): v is MyGoogle =>
   !!v && typeof v === 'object' && typeof (v as MyGoogle).available === 'boolean' && Array.isArray((v as MyGoogle).features)
+
+const isMyGoogleRelay = (v: unknown): v is MyGoogleRelay =>
+  !!v && typeof v === 'object' && typeof (v as MyGoogleRelay).available === 'boolean' && Array.isArray((v as MyGoogleRelay).services)
+  && Array.isArray((v as MyGoogleRelay).records)
 
 export function createGoogleApi(deps: GoogleDeps) {
   const doFetch = deps.fetch ?? fetch
@@ -57,6 +63,26 @@ export function createGoogleApi(deps: GoogleDeps) {
     return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
   }
 
+  async function relayView(companyId: string): Promise<GoogleRelayResult> {
+    const r = await send(companyId, 'GET', '/relay')
+    if (!r) return offline
+    const data = (r.json as { data?: unknown } | null)?.data
+    if (r.res.ok && isMyGoogleRelay(data)) return { success: true, data }
+    log.warn(`[google] GET relay: answered ${r.res.status}`)
+    return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
+  }
+
+  /** 「やめる」 / back on: the member's own switch of the allowed feature (no consent), then the relay's view. */
+  async function setRelay(companyId: string, on: boolean): Promise<GoogleRelayResult> {
+    const r = await send(companyId, 'PUT', '/features', { feature: 'sheets', on })
+    if (!r) return offline
+    if (!r.res.ok) {
+      log.warn(`[google] PUT features: answered ${r.res.status}`)
+      return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
+    }
+    return relayView(companyId)
+  }
+
   async function openSignIn(companyId: string, body: { features: GoogleFeature[] } | { all: true }): Promise<GoogleConnectResult> {
     const r = await send(companyId, 'POST', '/connect', body)
     if (!r) return offline
@@ -82,6 +108,8 @@ export function createGoogleApi(deps: GoogleDeps) {
     /** 「Google でつなぐ」: one consent for every feature the company offers. */
     connectAll: (companyId: string) => openSignIn(companyId, { all: true }),
     connect: (companyId: string, features: GoogleFeature[]) => openSignIn(companyId, { features }),
+    relay: relayView,
+    setRelay,
   }
 }
 
@@ -107,6 +135,14 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
   ipc.handle('google:markSeen', async (_, companyId: string) => {
     if (typeof companyId !== 'string' || !companyId) return invalid
     return api.markSeen(companyId)
+  })
+  ipc.handle('google:relay', async (_, companyId: string) => {
+    if (typeof companyId !== 'string' || !companyId) return invalid
+    return api.relay(companyId)
+  })
+  ipc.handle('google:setRelay', async (_, companyId: string, on: boolean) => {
+    if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
+    return api.setRelay(companyId, on)
   })
   return api
 }

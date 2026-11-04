@@ -3,10 +3,11 @@
 // state, and which sign-in page main may open. Pure: used by main (the server
 // client) and the renderer. Nothing here ever holds a token: the app has none.
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_AUTHORIZE_PATH, type GoogleFeature } from '../../shared/core/google'
-import type { GoogleGrantStatus, GoogleUnavailableReason, MyGoogle } from '../../shared/types/google'
+import type { GoogleGrantStatus, GoogleUnavailableReason, MyGoogle, MyGoogleRelay } from '../../shared/types/google'
 
 export type { GoogleFeature } from '../../shared/core/google'
-export type { GoogleGrantStatus, GoogleUnavailableReason, MyGoogle } from '../../shared/types/google'
+export type { GoogleGrantStatus, GoogleRelayRecord, GoogleUnavailableReason, MyGoogle, MyGoogleRelay } from '../../shared/types/google'
+export { googleRelayRecordWords } from '../../shared/core/google-relay'
 
 /** What main answers the renderer: the member's view, or why not (built from status codes only). */
 export type GoogleStatusResult =
@@ -107,4 +108,32 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
     canDisconnect: my.connected || my.status !== null,
     domainHint: my.domain ? `会社の Google アカウント（@${my.domain}）で許可してください。` : null,
   }
+}
+
+// ---------------------------------------------------------------------------
+// 「スプレッドシートを中継で使う」 (google-connector.md "The relay").
+
+/** The relay as main answers the renderer: the member's view, or why not (built from status codes only). */
+export type GoogleRelayResult =
+  | { success: true; data: MyGoogleRelay }
+  | { success: false; offline: boolean; error: string }
+
+/** What the card shows, or null when the company does not offer the relay (no card). */
+export interface GoogleRelayCardView {
+  /** allow: ［許可する］ opens Google's page (a consent); resume: ［許可する］ turns it back on (no consent: the permission is kept); allowed: ［やめる］. */
+  state: 'allow' | 'resume' | 'allowed'
+  /** 「今日 37回 ／ 上限 500回」 */
+  usage: string
+  /** Why scripts cannot reach a sheet now although the member allowed it (an admin's stop), or null. */
+  notice: string | null
+}
+
+export function googleRelayCardView(r: MyGoogleRelay): GoogleRelayCardView | null {
+  const sheets = r.services.find(s => s.service === 'sheets')
+  if (!r.available || !sheets?.offered) return null
+  const state = sheets.allowed ? 'allowed' : sheets.turnedOff ? 'resume' : 'allow'
+  const notice = !sheets.allowed ? null
+    : r.stopped === 'company' ? '管理者が、いま全員の Google の中継を止めています。スクリプトは表に届きません（許可はそのまま残っています）。'
+      : r.stopped === 'member' ? '管理者が、いまあなたの Google の中継を止めています。スクリプトは表に届きません（許可はそのまま残っています）。' : null
+  return { state, usage: `今日 ${r.usedToday}回 ／ 上限 ${r.capPerDay}回`, notice }
 }

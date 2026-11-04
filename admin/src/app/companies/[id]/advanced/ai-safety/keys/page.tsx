@@ -9,6 +9,7 @@ import { ClockCounterClockwise, Key, LockSimple, Plus, ShieldWarning, SlidersHor
 
 import { KeyForm, createBody, type KeyFormValues } from '@/components/key-broker/key-form'
 import { RelayServicesCard } from '@/components/key-broker/relay-services'
+import { GoogleRelayCard } from '@/components/key-broker/google-relay'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { AdvancedCrumb } from '@/components/advanced/crumb'
 import { Badge } from '@/components/ui/badge'
@@ -250,6 +251,7 @@ export default function ApiKeysPage() {
             </div>
           </Card>
 
+          <GoogleRelayCard companyId={companyId} />
           <RelayServicesCard
             view={data}
             busy={busy}
