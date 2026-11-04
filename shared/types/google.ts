@@ -130,6 +130,8 @@ export interface MyGoogle {
   practice: boolean
   /** What the company offers (asked together by 「Google でつなぐ」); empty while unavailable. */
   companyFeatures: GoogleFeature[]
+  /** Allowed features that would do more if allowed again (`googleFeaturesToRenew`); an older server leaves it out. */
+  renew?: GoogleFeature[]
   /** Features already shown to the member on 「仕事の道具をつなぐ」 (connected, declined or 「あとで」). */
   seen: GoogleFeature[]
 }

@@ -66,7 +66,8 @@ export interface MeetingArrivalsResult {
  * 3-day banner) and, once read, its summary and decisions for the proposals' part.
  */
 export type MeetingCardStateResult =
-  | { success: true; meeting: MeetingArrivalView; review: MinutesReviewView | null }
+  /** `renewGoogle`: the member's Google permission is from before the Docs API (`MyGoogle.renew`). */
+  | { success: true; meeting: MeetingArrivalView; review: MinutesReviewView | null; renewGoogle?: true }
   | { success: false; error: string }
 
 /** ［AI に読ませる］ / ［読まない］: the record's version after it, or why not. */

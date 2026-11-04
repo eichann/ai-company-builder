@@ -158,7 +158,7 @@ afterAll(async () => {
 })
 
 const DRIVE = 'https://www.googleapis.com/auth/drive.file'
-const MINUTES = [CAL, 'https://www.googleapis.com/auth/meetings.space.readonly', 'https://www.googleapis.com/auth/drive.meet.readonly']
+const MINUTES = [CAL, 'https://www.googleapis.com/auth/meetings.space.readonly', 'https://www.googleapis.com/auth/drive.meet.readonly', 'https://www.googleapis.com/auth/documents.readonly']
 const featureScopes = (url: URL) => url.searchParams.get('scope')!.split(' ').filter(s => s !== 'openid' && s !== 'email').sort()
 const sendAs = (user: string) =>
   services.googleClient.request(CO, user, { api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw: Buffer.from('To: tanaka@div.example\r\nSubject: t\r\n\r\nhi').toString('base64url') }, scope: SEND, operation: 'gmail.send' })

@@ -28,12 +28,13 @@ const arrival = (over: Record<string, unknown> = {}) => ({
   by: { memberId: 'u-me', displayName: '阿部' }, byYou: true, series: true, autoSeries: false, ...over,
 })
 
-function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number; body: unknown } } = {}) {
+function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number; body: unknown }; google?: unknown } = {}) {
   const seen: Seen[] = []
   const fetch = (async (url: string, init: RequestInit) => {
     seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
     const json = (data: unknown, status = 200) => new Response(JSON.stringify({ success: true, data }), { status })
     if (url.endsWith('/api/me')) return json({ id: 'u-me' })
+    if (url.endsWith('/me/google')) return opts.google === undefined ? new Response('Not Found', { status: 404 }) : json(opts.google)
     if (url.endsWith('/me/minutes/arrivals')) {
       return opts.arrivals === 'missing' ? new Response('Not Found', { status: 404 }) : json({ days: 3, items: [arrival(), arrival({ recordId: 'bad id', status: 'arrived' })] })
     }
@@ -67,6 +68,18 @@ test('an older server without the meetings routes: no banner, no buttons on the 
   assert.deepEqual(await api.arrivals('co'), { available: false, items: [] })
   const card = await api.meeting('co', ID)
   assert.equal(card.success, false)
+})
+
+test('the card says a Google permission can be renewed only when the server says so, for the 議事録 feature', async () => {
+  const flag = async (google?: unknown) => {
+    const card = await fakeServer({ google }).api.meeting('co', ID)
+    return card.success ? card.renewGoogle : 'failed'
+  }
+  assert.equal(await flag({ renew: ['minutes'] }), true)
+  assert.equal(await flag({ renew: [] }), undefined)
+  // An older server, or one that cannot say: the card stays as it was.
+  assert.equal(await flag({}), undefined)
+  assert.equal(await flag(undefined), undefined)
 })
 
 test('a read meeting says what its reading made: proposals and tasks but not the review task or archived ones; decisions not retracted', async () => {

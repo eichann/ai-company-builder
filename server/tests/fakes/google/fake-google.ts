@@ -76,6 +76,7 @@ export const GOOGLE_SCOPES = {
   driveFile: 'https://www.googleapis.com/auth/drive.file',
   gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
+  documentsReadonly: 'https://www.googleapis.com/auth/documents.readonly',
 } as const
 
 /** The scopes milestone 4 asks for (design §5-2). */
@@ -92,7 +93,7 @@ const KNOWN_SCOPES = new Set<string>([
   ...Object.values(GOOGLE_SCOPES),
   `${AUTH}calendar`, `${AUTH}calendar.readonly`, `${AUTH}calendar.events`,
   `${AUTH}meetings.space.created`,
-  `${AUTH}drive`, `${AUTH}drive.readonly`, `${AUTH}spreadsheets.readonly`,
+  `${AUTH}drive`, `${AUTH}drive.readonly`, `${AUTH}spreadsheets.readonly`, `${AUTH}documents`,
   `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, `${AUTH}gmail.metadata`, 'https://mail.google.com/',
 ])
 /** Any one of these lets a call through (each method's "Authorization scopes" list). */
@@ -102,6 +103,7 @@ const NEEDS = {
   drive: [GOOGLE_SCOPES.driveMeetReadonly, GOOGLE_SCOPES.driveFile, `${AUTH}drive.readonly`, `${AUTH}drive`],
   gmailSend: [GOOGLE_SCOPES.gmailSend, `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
   gmailRead: [GOOGLE_SCOPES.gmailReadonly, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
+  docs: [GOOGLE_SCOPES.documentsReadonly, `${AUTH}documents`, `${AUTH}drive`, `${AUTH}drive.readonly`],
   sheetsRead: [GOOGLE_SCOPES.spreadsheets, `${AUTH}spreadsheets.readonly`, `${AUTH}drive`, `${AUTH}drive.readonly`],
   sheetsWrite: [GOOGLE_SCOPES.spreadsheets, `${AUTH}drive`],
 }
@@ -172,6 +174,10 @@ export interface FakeGoogleFaults {
   ignoreRefreshScope: boolean
   /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production). */
   refuseExport(docId: string, reason?: string): void
+  /** `documents.get` of this document answers 403 with this reason (the API not turned on, say). */
+  refuseDocs(docId: string, reason?: string): void
+  /** The owner's 「閲覧者にコピーやダウンロードを許可しない」: Drive says so; the Docs API still answers, as the worst case. */
+  blockCopy(docId: string): void
   reset(): void
 }
 
@@ -302,6 +308,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let failStatus = 500
   let failPrefix: string | null = null
   const exportRefused = new Map<string, string>()
+  const docsRefused = new Map<string, string>()
+  const copyBlocked = new Set<string>()
   let dropCount = 0
   const held = new Set<() => void>()
   const faults: FakeGoogleFaults = {
@@ -311,7 +319,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     dropAnswerAfterSend(count = 1) { dropCount = count },
     ignoreRefreshScope: false,
     refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false; exportRefused.clear() },
+    refuseDocs(docId, reason = 'PERMISSION_DENIED') { docsRefused.set(docId, reason) },
+    blockCopy(docId) { copyBlocked.add(docId) },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false; exportRefused.clear(); docsRefused.clear(); copyBlocked.clear() },
   }
 
   const app = new Hono()
@@ -917,6 +927,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       kind: 'drive#file', id: d.id, name: d.name, mimeType: 'application/vnd.google-apps.document',
       version: String(d.version), modifiedTime: d.modifiedTime, createdTime: d.modifiedTime,
       owners: [{ kind: 'drive#user', emailAddress: d.owner, me: false }],
+      copyRequiresWriterPermission: copyBlocked.has(d.id),
+      capabilities: { canDownload: !copyBlocked.has(d.id) },
     }
     const fields = c.req.query('fields')
     if (fields === '*') return c.json(all)
@@ -929,6 +941,22 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       else if (name !== 'headRevisionId') throw apiError(400, `Invalid field selection ${name}`, 'invalidParameter', { location: 'fields', locationType: 'parameter' })
     }
     return c.json(out)
+  })
+
+  // ---- Docs (documents.get): any Doc the account can open, whoever made it ----
+
+  app.get('/v1/documents/:documentId', c => {
+    const a = bearer(c, NEEDS.docs, 'docs.googleapis.com')
+    const id = c.req.param('documentId') ?? ''
+    const d = docs.get(id)
+    if (!d || !d.readers.some(r => r.toLowerCase() === a.email.toLowerCase())) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    const refusal = docsRefused.get(id)
+    if (refusal) throw apiError(403, 'The caller does not have permission', refusal)
+    const content = d.text.split(/(?<=\n)/).map(line => ({ paragraph: { elements: [{ textRun: { content: line } }] } }))
+    const body = { content }
+    return c.json(c.req.query('includeTabsContent') === 'true'
+      ? { documentId: id, title: d.name, tabs: [{ tabProperties: { title: 'タブ 1' }, documentTab: { body } }] }
+      : { documentId: id, title: d.name, body })
   })
 
   // ---- Gmail ----

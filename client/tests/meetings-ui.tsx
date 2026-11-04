@@ -3,7 +3,7 @@
 // the real banner 「議事録が届きました」 on top of やること (MeetingBanners) and the real meeting card
 // (RecordCard with the app's MeetingPanel and 案件 field) over a fake main kept in memory. Synthetic
 // data only. `?viewer=suzuki`: another attendee's screen (阿部 already chose ［読まない］ for 採用面接).
-// `?noaccess=1`: the member's Google cannot open the minutes. `?flood=N`: a first discovery, N more
+// `?noaccess=1`: the member's Google cannot open the minutes. `?renew=1`: their permission is from before the Docs API. `?flood=N`: a first discovery, N more
 // meetings at once, and a long list below. `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
 import { useState } from 'react'
@@ -72,9 +72,10 @@ installElectronAPI({
   getMeetingCardState: async (_c, id) => {
     const m = find(id)
     const d = detailOf(m)
-    return { success: true, meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
+    return { success: true, ...(params.get('renew') === '1' ? { renewGoogle: true as const } : {}), meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
       review: m.state === 'read' ? { meetingId: m.id, meetingTitle: m.title, summary: '要約', decisions: outputs(m).filter(r => r.type === 'decision').map(r => ({ id: r.id, title: r.title, state: r.state, version: 1, mine: r.fields.owner === ME })) } : null }
   },
+  connectGoogle: async (_c, features) => { say(`google ${features.join(',')}`); return { success: true } },
   requestMeetingReading: async (_c, id, at) => {
     say(`read ${id}@${at}`)
     if (params.get('noaccess') === '1') return { success: false, error: MEETING_NO_ACCESS_TEXT, noAccess: true }

@@ -7,7 +7,8 @@ import { ChatCircleDots, CircleNotch, UserPlus } from '@phosphor-icons/react'
 import type { MeetingArrivalView } from '../../../../shared/minutes-app'
 import type { MinutesReviewView } from '../../../../shared/task-card'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
-import { requestMeetingReading, setMeetingAutoSeries } from '../api'
+import { GOOGLE_OPENED_TEXT, GOOGLE_RENEW_MINUTES_TEXT } from '../../../../shared/google'
+import { renewMinutesPermission, requestMeetingReading, setMeetingAutoSeries } from '../api'
 import { useMeetingCardState } from '../hooks/useMeetingCardState'
 import { InviteDialog } from './InviteDialog'
 
@@ -64,6 +65,12 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, renderR
     setNote(on ? 'この定例は、次から AI が自動で読みます。' : 'この定例は、次から自動では読みません。')
     changed()
   }
+  const renew = async () => {
+    setError(null)
+    const failure = await renewMinutesPermission(companyId)
+    if (failure) setError(failure)
+    else setNote(GOOGLE_OPENED_TEXT)
+  }
   const canRead = m.status === 'arrived' || m.status === 'skipped' || m.status === 'failed'
   const reading = m.status === 'asked' || m.status === 'reading'
   return (
@@ -80,6 +87,11 @@ export function MeetingPanel({ companyId, meetingId, members, onConsult, renderR
       )}
       {m.status === 'skipped' && m.by && <p className="text-[12.5px] text-gray-500">{m.byYou ? 'あなた' : `${m.by.displayName}さん`}が読まないにしました。あとから［AI に読ませる］で読めます。</p>}
       {canRead && m.status !== 'skipped' && <p className="text-[12.5px] text-gray-500">AI はまだ議事録を読んでいません。読ませると、要約と決めたこと・やることの案ができます。</p>}
+      {result.renewGoogle && (
+        <p className="text-[12px] text-gray-500">{GOOGLE_RENEW_MINUTES_TEXT}
+          <button type="button" onClick={() => void renew()} className="ml-1 text-accent hover:underline">許可をし直す</button>
+        </p>
+      )}
       {error && <p role="alert" className="text-[12px] text-gray-600 dark:text-zinc-300">{error}</p>}
       {note && <p role="status" className="text-[12px] text-emerald-700 dark:text-emerald-400">{note}</p>}
       {m.status === 'read' && result.review && renderReview(result.review)}

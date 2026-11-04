@@ -428,6 +428,8 @@ describe('the meeting\'s people', () => {
 
 describe('Drive opens the minutes but refuses their text (Gemini\'s notes in production)', () => {
   const press = (id: string) => call('ma-tanaka', 'POST', `${C()}/me/minutes/item/${id}/read-request`, {})
+  // These tests are about Drive's export and what follows it: the Docs API has said no first.
+  const refuseText = (doc: string, reason?: string) => { google.faults.refuseDocs(doc); google.faults.refuseExport(doc, reason) }
   const textOf = (id: string) => call('ma-tanaka', 'GET', `${C()}/me/minutes/item/${id}/text`)
 
   it('the press says what happened, by Google\'s reason, and nothing changes: it was tried, not left to a failed AI turn', async () => {
@@ -442,7 +444,7 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
       ['accessNotConfigured', 403, 'GOOGLE_STOPPED', 'Google の管理者'],
     ] as const) {
       google.faults.reset()
-      google.faults.refuseExport(DOC.talk, reason)
+      refuseText(DOC.talk, reason)
       const r = await press(organized)
       expect([r.status, r.body.code], reason).toEqual([status, code])
       expect(r.body.error, reason).toContain(words)
@@ -455,17 +457,17 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
   })
 
   it('Google\'s short reason and the operation are in the server log, without Google\'s message', async () => {
-    google.faults.refuseExport(DOC.talk, 'appNotAuthorizedToFile')
+    refuseText(DOC.talk, 'appNotAuthorizedToFile')
     logLines.length = 0
     await textOf(organized)
     google.faults.reset()
-    const line = logLines.find(l => l.includes('[google] call refused'))
+    const line = logLines.find(l => l.includes('[google] call refused') && l.includes('drive.files.export'))
     expect(line).toContain('operation=drive.files.export status=403 reason=appNotAuthorizedToFile')
     expect(logLines.join('\n')).not.toContain('has not granted')
   })
 
   it('notes refused: the transcript document is still read, and the AI is told the notes were not', async () => {
-    google.faults.refuseExport(DOC.retro)
+    refuseText(DOC.retro)
     google.requests.length = 0
     const t = await textOf(retro)
     google.faults.reset()
@@ -477,8 +479,8 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
   })
 
   it('both refused: what was said comes from Meet\'s own record, with who said it, every page; the press goes through', async () => {
-    google.faults.refuseExport(DOC.retro)
-    google.faults.refuseExport(DOC.retroTranscript)
+    refuseText(DOC.retro)
+    refuseText(DOC.retroTranscript)
     const t = await textOf(retro)
     expect(t.status, t.text).toBe(200)
     expect(t.body.data.text).toContain('■ 文字起こし（Google Meet の記録から）\n田中 誠: 相づち0\n')
@@ -495,8 +497,8 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
   it('copying blocked by the file\'s owner: Meet\'s record is no way around it, also when only one document says so', async () => {
     for (const [notes, transcript] of [['cannotExportFile', 'cannotExportFile'], ['cannotDownloadFile', 'cannotDownload'], ['appNotAuthorizedToFile', 'cannotExportFile'], ['cannotExportFile', 'appNotAuthorizedToFile']]) {
       google.faults.reset()
-      google.faults.refuseExport(DOC.retro, notes)
-      google.faults.refuseExport(DOC.retroTranscript, transcript)
+      refuseText(DOC.retro, notes)
+      refuseText(DOC.retroTranscript, transcript)
       google.requests.length = 0
       const before = stateOf(retro)
       const t = await textOf(retro)
@@ -515,15 +517,15 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
   it('Meet\'s record stands in only for what ACB is not allowed: any other refusal stops', async () => {
     for (const reason of ['appNotAuthorizedToFile', 'insufficientPermissions', 'insufficientScopes', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']) {
       google.faults.reset()
-      google.faults.refuseExport(DOC.retro, reason)
-      google.faults.refuseExport(DOC.retroTranscript, reason)
+      refuseText(DOC.retro, reason)
+      refuseText(DOC.retroTranscript, reason)
       const t = await textOf(retro)
       expect(t.status, reason).toBe(200)
       expect(t.body.data.text, reason).toContain('■ 文字起こし（Google Meet の記録から）')
     }
     google.faults.reset()
-    google.faults.refuseExport(DOC.retro, 'someNewReason')
-    google.faults.refuseExport(DOC.retroTranscript, 'someNewReason')
+    refuseText(DOC.retro, 'someNewReason')
+    refuseText(DOC.retroTranscript, 'someNewReason')
     google.requests.length = 0
     expect((await textOf(retro)).body.code).toBe('MINUTES_TEXT_REFUSED')
     expect(google.requests.some(q => q.path.includes('/transcripts'))).toBe(false)
@@ -535,6 +537,88 @@ describe('Drive opens the minutes but refuses their text (Gemini\'s notes in pro
     const t = await call('ma-tanaka', 'GET', `${C()}/me/minutes/item/${weekly}/text`)
     expect([t.status, t.body.code]).toEqual([403, 'MINUTES_NO_ACCESS'])
     expect(google.requests.some(q => q.path.includes('/transcripts'))).toBe(false)
+  })
+})
+
+describe('the minutes\' documents by the Docs API (owner decision 2026-11-05)', () => {
+  const textOf = (id: string) => call('ma-tanaka', 'GET', `${C()}/me/minutes/item/${id}/text`)
+  const asked = (part: string) => google.requests.some(q => q.path.includes(part))
+  const scopesOf = () => JSON.parse((db.prepare("SELECT scopes FROM connector_grants WHERE company_id = ? AND user_id = 'ma-tanaka' AND provider = 'google'").get(CO) as Json).scopes) as string[]
+  const setScopes = (scopes: string[]) => db.prepare("UPDATE connector_grants SET scopes = ? WHERE company_id = ? AND user_id = 'ma-tanaka' AND provider = 'google'").run(JSON.stringify(scopes), CO)
+  const DOCS = 'https://www.googleapis.com/auth/documents.readonly'
+  const refuseExports = () => { google.faults.refuseExport(DOC.retro); google.faults.refuseExport(DOC.retroTranscript) }
+
+  it('read first, and what Drive\'s export refuses (production) comes through whole, with nothing kept or logged', async () => {
+    refuseExports()
+    google.requests.length = 0
+    logLines.length = 0
+    const t = await textOf(retro)
+    google.faults.reset()
+    expect(t.status, t.text).toBe(200)
+    expect(t.body.data.text).toContain(SECRET_LINES[2])
+    expect(t.body.data.text).toContain(SECRET_LINES[4])
+    expect(t.body.data.text).not.toContain('Google Meet の記録から')
+    expect(asked('/export')).toBe(false)
+    expect(asked('/entries')).toBe(false)
+    expect(logLines.join('\n')).not.toContain(SECRET_LINES[2])
+  })
+
+  it('the Docs API refusing falls to the export, then to Meet\'s record', async () => {
+    google.faults.refuseDocs(DOC.retro, 'SERVICE_DISABLED')
+    google.faults.refuseDocs(DOC.retroTranscript, 'SERVICE_DISABLED')
+    google.requests.length = 0
+    const exported = await textOf(retro)
+    expect(exported.body.data.text).toContain(SECRET_LINES[2])
+    expect(asked('/export')).toBe(true)
+    refuseExports()
+    const meet = await textOf(retro)
+    google.faults.reset()
+    expect(meet.body.data.text).toContain('■ 文字起こし（Google Meet の記録から）')
+  })
+
+  it('a grant from before keeps the meetings feature and reads by the export, and the member is told once they can allow again', async () => {
+    const before = scopesOf()
+    expect(before).toContain(DOCS)
+    expect((await call('ma-tanaka', 'GET', `${C()}/me/google`)).body.data.renew).toEqual([])
+    setScopes(before.filter(s => s !== DOCS))
+    google.requests.length = 0
+    const t = await textOf(retro)
+    const me = await call('ma-tanaka', 'GET', `${C()}/me/google`)
+    setScopes(before)
+    expect(t.status, t.text).toBe(200)
+    expect(t.body.data.text).toContain(SECRET_LINES[2])
+    expect(asked('/v1/documents/')).toBe(false)
+    expect(asked('/export')).toBe(true)
+    expect(me.body.data.features).toContain('minutes')
+    expect(me.body.data.renew).toEqual(['minutes'])
+  })
+
+  it('a copy block stops before the Docs API, which would answer: the export\'s refusal is not the only guard', async () => {
+    google.faults.blockCopy(DOC.retro)
+    google.faults.blockCopy(DOC.retroTranscript)
+    google.requests.length = 0
+    const t = await textOf(retro)
+    google.faults.reset()
+    expect([t.status, t.body.code]).toEqual([403, 'MINUTES_TEXT_REFUSED'])
+    expect(t.body.error).toContain('ファイルの持ち主がコピーやダウンロードを止めている')
+    expect(asked('/v1/documents/')).toBe(false)
+    expect(asked('/transcripts')).toBe(false)
+  })
+
+  it('the member\'s 予定と議事録を読む turned off stops the Docs API too', async () => {
+    db.prepare("UPDATE connector_grants SET features_off = ? WHERE company_id = ? AND user_id = 'ma-tanaka' AND provider = 'google'").run(JSON.stringify(['minutes']), CO)
+    google.requests.length = 0
+    const t = await textOf(retro)
+    db.prepare("UPDATE connector_grants SET features_off = '[]' WHERE company_id = ? AND user_id = 'ma-tanaka' AND provider = 'google'").run(CO)
+    expect(t.status).not.toBe(200)
+    expect(asked('/v1/documents/')).toBe(false)
+  })
+
+  it('a document not shared stays 「共有されていません」: the wider scope is no way around sharing', async () => {
+    google.requests.length = 0
+    const t = await textOf(weekly)
+    expect([t.status, t.body.code]).toEqual([403, 'MINUTES_NO_ACCESS'])
+    expect(asked('/v1/documents/')).toBe(false)
   })
 })
 
