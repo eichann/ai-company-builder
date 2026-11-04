@@ -106,7 +106,7 @@ test('inside a readable private folder the folder part counts in its stored spel
   assert.equal(evaluateWrite(access, '評価/café/下書き/x.md').write, false)
   assert.equal(evaluateWrite(access, '評価/CAFé/下書き/x.md').write, false)
   assert.equal(evaluateWrite(access, '評価/CAFé/下書き/x.md').scopePath, '評価/café/下書き')
-  assert.equal(evaluateWrite(access, '評価/CAFÉ/下書き/x.md').write, true) // É is not A–Z: another folder
+  assert.equal(evaluateWrite(access, '評価/CAFÉ/下書き/x.md').write, false) // a disk folds É too: the same clone
   assert.equal(evaluateWrite(access, '評価/CAFé/x.md').write, true)
   // The company root is read-only, the private folder writable: the typed
   // spelling no longer falls back to the root's rules.
