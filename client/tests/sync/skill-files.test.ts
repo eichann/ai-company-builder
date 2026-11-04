@@ -130,6 +130,8 @@ describe('git:sync skill files', { concurrency: CONCURRENCY }, () => {
     a.write('.claude/skills/report/__pycache__/make.cpython-312.pyc', Buffer.from([0, 1, 2, 255]))
       .write('.claude/skills/report/.DS_Store', Buffer.from([0, 1]))
       .write('営業部/.claude/skills/x/tools/app/package-lock.json', '{}\n')
+      .write('営業部/.claude/skills/x/tools/app/dist/index.html', '<html>\n')
+      .write('営業部/.claude/skills/x/tools/app/.next/cache/a', 'x\n')
       .write('notes.md', 'notes\n')
     a.hasWindow = false
     const out = ok(await a.sync(), 'a')

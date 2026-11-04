@@ -489,5 +489,10 @@ test('fs and skills handlers: a skill file the member may not change is refused 
   assert.equal(await h.invoke('fs:createDirectory', path.dirname(draft)), true)
   assert.deepEqual(await h.invoke('fs:createFile', draft, 'x'), { success: true })
   refused(await h.invoke('skills:publish', company, '.claude/skills/draft/'))
+
+  // 「他からコピー」 for such a member: the copy is marked first, then it may be written.
+  assert.deepEqual(await h.invoke('skills:makePrivate', company, '.claude/skills/mine/'), { success: true })
+  assert.deepEqual(await h.invoke('fs:copy', skill, path.join(company, '.claude/skills/mine')), { success: true })
+  assert.equal(await h.invoke('fs:writeFile', path.join(company, '.claude/skills/mine/make.py'), 'mine\n'), true)
   assert.match(fs.readFileSync(path.join(company, '.git/info/exclude'), 'utf-8'), /\.claude\/skills\/draft\//, 'still private')
 })

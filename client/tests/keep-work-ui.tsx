@@ -67,6 +67,8 @@ installElectronAPI({
   createDirectory: async p => { calls.push(['createDirectory', p]); return true },
   createFile: async p => { calls.push(['createFile', p]); return { success: true } },
   copyItem: async (from, to) => { calls.push(['copyItem', from, to]); return { success: true } },
+  // ?refuse-skills=1: a member who may not share skills.
+  reservedPathRefusal: async () => (new URLSearchParams(location.search).has('refuse-skills') ? 'スキルは変更できません' : null),
   readFile: async () => '---\nname: 提案書\ndescription: 提案書を作る\n---\n',
   writeFile: async p => { calls.push(['writeFile', p]); return true },
   listSkills: async (_root, folder) => ({

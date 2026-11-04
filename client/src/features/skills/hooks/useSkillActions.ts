@@ -61,9 +61,13 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
 
     try {
       if (await pathExists(destPath)) return { error: skillNameTakenMessage(folderName) }
-      // A copy is shared by the next sync, so it is asked like any change of a skill.
-      const refused = await skillWriteRefusal(destPath)
-      if (refused) return { error: refused }
+      // A copy is shared by the next sync. Someone who may not share it keeps it
+      // on this computer instead, to change and try: the way to make a skill of
+      // their own from a shared one.
+      if (await skillWriteRefusal(destPath)) {
+        const marked = await makeSkillPrivate(rootPath, `${departmentFolder}/.claude/skills/${folderName}/`)
+        if (!marked.success) return { error: marked.code === 'already_shared' ? SKILL_ALREADY_SHARED_MESSAGE : SKILL_COPY_FAILED }
+      }
       if (!await createSkillDirectory(skillsBasePath)) return { error: SKILL_COPY_FAILED }
 
       const copyResult = await copySkill(sourceSkillPath, destPath)
@@ -79,7 +83,7 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
         await writeSkillFile(skillMdPath, renameSkillMarkdown(content, name))
       }
 
-      // Copied skills are public by default (user intentionally copied them)
+      // Otherwise copied skills are public by default (user intentionally copied them)
 
       refreshSkills()
       return { id: `${departmentId}-${folderName}` }
