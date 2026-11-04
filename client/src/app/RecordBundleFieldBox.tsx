@@ -2,23 +2,32 @@
 // feature's field, chooser and 「新しい〇〇にする」 window, composed here because the records feature
 // does not import tasks. A meeting is linked through the minutes route (so its 案件's step follows,
 // minutes.md); anything else through the record links. A meeting is seen by its attendees only, so
-// linking it says first who will see part of it (design §2/§5) and links only on ［つなぐ］.
+// linking it says first who will see part of it (design §2/§5) and links only on ［つなぐ］. While a
+// meeting has none, the same field asks 「どの〇〇の会議ですか？」 (the server decides whether it may).
 import { useState } from 'react'
 import type { BundleKind } from '../../../shared/types/records'
 import { meetingLinkSentence } from '../../shared/minutes-app'
-import { bundleViewers } from '../features/minutes/api'
+import { meetingBundleWords, meetingSuggestedBundleText } from '../../shared/tasks'
+import { bundleViewers, declineMeetingBundle } from '../features/minutes/api'
+import { useMeetingBundleQuestion } from '../features/minutes/hooks/useMeetingBundleQuestion'
 import { ConfirmDialog } from '../shared/ui/ConfirmDialog'
 import type { BundleFieldContext } from '../features/records/components/RecordCard'
-import { BundleField } from '../features/tasks/components/BundleField'
+import { BundleField, type BundleQuestion } from '../features/tasks/components/BundleField'
 import { createBundle, linkMeetingBundle, setRecordLink } from '../features/tasks/api'
 
 /** Waiting for the member's answer to 「…に見えます」: the link goes on only with ［つなぐ］. */
 type Asking = { title: string; message: string; answer: (yes: boolean) => void }
 
-export function RecordBundleFieldBox({ companyId, ctx, kind, folder }: { companyId: string; ctx: BundleFieldContext; kind: BundleKind | null; folder: string | null }) {
+export function RecordBundleFieldBox({ companyId, ctx, kind, folder, onListChanged }: {
+  companyId: string; ctx: BundleFieldContext; kind: BundleKind | null; folder: string | null
+  /** The meeting's question was answered: 「どの〇〇の会議か」 leaves あなたの番. */
+  onListChanged?: () => void
+}) {
   const { record, version, bundle, removable, counterpart, homework, onChanged } = ctx
   const [asking, setAsking] = useState<Asking | null>(null)
   const isMeeting = record.type === 'meeting'
+  const asked = useMeetingBundleQuestion(companyId, isMeeting ? record.id : null, bundle?.id ?? null)
+  const [declined, setDeclined] = useState(false)
   const ask = (title: string, message: string) => new Promise<boolean>(resolve => setAsking({ title, message, answer: yes => { setAsking(null); resolve(yes) } }))
   /** A meeting: true once the member agreed to show part of it to the 案件's people. */
   const agreed = async (b: { id: string; title: string; typeLabel?: string } | null, name: string): Promise<boolean> => {
@@ -35,14 +44,33 @@ export function RecordBundleFieldBox({ companyId, ctx, kind, folder }: { company
     return r.success ? null : r.error
   }
   const name = kind?.name ?? 'プロジェクト'
+  const set = async (b: { id: string; title: string; typeLabel?: string }): Promise<string | null> => {
+    if (!await agreed(b, name)) return null
+    const failure = await link(b)
+    if (!failure) { onChanged(`「${b.title}」につなぎました`, null); onListChanged?.() }
+    return failure
+  }
+  const decline = async (): Promise<string | null> => {
+    const r = await declineMeetingBundle(companyId, record.id)
+    if (!r.success) return r.error
+    setDeclined(true)
+    onListChanged?.()
+    return null
+  }
+  const question = (): BundleQuestion | undefined => {
+    if (!asked?.success || !asked.canChoose) return undefined
+    const words = meetingBundleWords(name)
+    if (declined || asked.noBundle) return { text: words.declined }
+    const s = asked.suggested
+    return {
+      text: s ? meetingSuggestedBundleText(s.title) : words.question,
+      none: { label: words.noneLong, press: decline },
+      ...(s ? { yes: () => set(s), pick: 'ちがう／選ぶ' } : {}),
+    }
+  }
   return (<>
-    <BundleField companyId={companyId} bundle={bundle} word={kind?.name ?? 'プロジェクト'} canSet canRemove={!!removable} busy={false}
-      onSet={async b => {
-        if (!await agreed(b, name)) return null
-        const failure = await link(b)
-        if (!failure) onChanged(`「${b.title}」につなぎました`, null)
-        return failure
-      }}
+    <BundleField companyId={companyId} bundle={bundle} word={kind?.name ?? 'プロジェクト'} canSet canRemove={!!removable} busy={false} question={question()}
+      onSet={set}
       onRemove={async () => {
         if (!bundle || !removable) return null
         const r = await setRecordLink(companyId, removable.source, { link: removable.link, target: removable.target, expectedVersion: removable.sourceVersion }, true)

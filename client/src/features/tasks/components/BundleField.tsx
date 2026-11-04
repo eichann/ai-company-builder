@@ -11,9 +11,20 @@ import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useBundleChoices } from '../hooks/useBundleChoices'
 import { NewBundleDialog, type NewBundleSource } from './NewBundleDialog'
 
+/** A meeting's 「どの〇〇の会議ですか？」, asked in the field while none is linked. */
+export interface BundleQuestion {
+  text: string
+  /** ［はい］: the one the server suggests. null = done; else the reason in words. */
+  yes?: () => Promise<string | null>
+  /** The chooser's button, when it says something else than ［〇〇につなぐ］. */
+  pick?: string
+  /** ［〇〇はない］. */
+  none?: { label: string; press: () => Promise<string | null> }
+}
+
 const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
-export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, onCreate }: {
+export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, onCreate, question }: {
   companyId: string
   bundle: RecordViewSummary | null
   /** The kind's name where none is linked yet (「案件」「プロジェクト」). */
@@ -28,25 +39,36 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
   /** 「新しい〇〇にする」 while none is linked: what the window starts from, and making it (null = done). */
   newFrom?: NewBundleSource
   onCreate?: (title: string, withHomework: boolean) => Promise<string | null>
+  question?: BundleQuestion
 }) {
   const [picking, setPicking] = useState(false)
   const [making, setMaking] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pressing, setPressing] = useState(false)
   if (!bundle && !canSet) return null
   const name = bundle?.typeLabel ?? word
+  const asked = bundle ? undefined : question
+  const press = async (run: () => Promise<string | null>) => {
+    setPressing(true)
+    setError(await run())
+    setPressing(false)
+  }
+  const off = busy || pressing
   return (
-    <div role="group" aria-label={name} className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
+    <div role="group" aria-label={asked?.text ?? name} className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
       <div className="flex flex-wrap items-center gap-2">
         <ThingIcon kind="bundle" typeLabel={name} size={14} label="" />
-        <span className="text-gray-500">{name}</span>
+        {!asked && <span className="text-gray-500">{name}</span>}
         {bundle
           ? <button type="button" onClick={() => runCommand('record.open', { recordId: bundle.id })} className="min-w-0 truncate font-medium text-accent hover:underline">{bundle.title}</button>
-          : <span className="text-gray-400">なし</span>}
+          : asked ? <span className="min-w-0">{asked.text}</span> : <span className="text-gray-400">なし</span>}
         {canSet && (
-          <span className="ml-auto flex gap-1">
-            <button type="button" disabled={busy} onClick={() => setPicking(true)} className={SMALL_BUTTON}>{bundle ? '変える' : `${name}につなぐ`}</button>
-            {!bundle && newFrom && onCreate && <button type="button" disabled={busy} onClick={() => setMaking(true)} className={SMALL_BUTTON}>新しい{name}にする</button>}
-            {bundle && canRemove && <button type="button" disabled={busy} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
+          <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
+            {asked?.yes && <button type="button" disabled={off} onClick={() => void press(asked.yes!)} className={SMALL_BUTTON}>はい</button>}
+            <button type="button" disabled={off} onClick={() => setPicking(true)} className={SMALL_BUTTON}>{bundle ? '変える' : asked?.pick ?? `${name}につなぐ`}</button>
+            {!bundle && newFrom && onCreate && <button type="button" disabled={off} onClick={() => setMaking(true)} className={SMALL_BUTTON}>新しい{name}にする</button>}
+            {asked?.none && <button type="button" disabled={off} onClick={() => void press(asked.none!.press)} className={QUIET}>{asked.none.label}</button>}
+            {bundle && canRemove && <button type="button" disabled={off} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
           </span>
         )}
       </div>

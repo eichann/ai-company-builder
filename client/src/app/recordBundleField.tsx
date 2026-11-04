@@ -4,7 +4,7 @@ import type { BundleFieldContext } from '../features/records/components/RecordCa
 import { RecordBundleFieldBox } from './RecordBundleFieldBox'
 
 /** `kind`: what the department on screen makes (`tasks:bundleKinds`); null until known (no 「新しい〇〇にする」). */
-export function renderRecordBundleField(companyId: string, ctx: BundleFieldContext, kind: BundleKind | null, folder: string | null) {
-  return <RecordBundleFieldBox key={ctx.record.id} companyId={companyId} ctx={ctx} kind={kind} folder={folder} />
+export function renderRecordBundleField(companyId: string, ctx: BundleFieldContext, kind: BundleKind | null, folder: string | null, onListChanged?: () => void) {
+  return <RecordBundleFieldBox key={ctx.record.id} companyId={companyId} ctx={ctx} kind={kind} folder={folder} onListChanged={onListChanged} />
 }
 

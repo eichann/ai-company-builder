@@ -39,6 +39,8 @@ export interface RecordViewSummary {
   thing: ThingKind
   /** A request (やること, 承認のお願い…) that is over: its row is drawn faint. */
   finished?: true
+  /** A meeting's own 「議事録を確認する」: linked to it, but not something its reading made. */
+  minutesReview?: true
 }
 
 /** `available: false`: records are off for this company (nothing to show, no error). */
@@ -185,6 +187,7 @@ export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): 
     ...(r.exceptionNotice ? { exception: true as const } : {}),
     thing: thingKindOf({ type: r.type, implements: def?.implements, state: r.state }),
     ...(def?.implements.includes('request') && r.state !== null && def.final.includes(r.state) ? { finished: true as const } : {}),
+    ...(r.fields.task_kind === 'minutes_review' ? { minutesReview: true as const } : {}),
   }
 }
 

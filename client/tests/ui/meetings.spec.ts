@@ -5,8 +5,9 @@
 // member whose Google cannot open the minutes is told another attendee can press it; ［招待する］
 // says what the invited will see and that it cannot be undone before anything is sent; the
 // consultation opens only from the card's button; linking a 案件 says who will see part of it and
-// links only on ［つなぐ］; a first discovery of many meetings shows two one-line rows and 「ほか N 件」,
-// never taking the pane from the list.
+// links only on ［つなぐ］ (from the question's ［はい］ too); a first discovery of many meetings shows two
+// one-line rows and 「ほか N 件」, never taking the pane from the list; the card keeps its order and says
+// each thing once (「ごちゃついてる」, 2026-11-05).
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -32,7 +33,7 @@ test('read → 「AI が読んでいます…」 → 「読み終わりました
   await line.getByRole('button', { name: '見る' }).click()
   await expect(line).toHaveCount(0)
   const card = page.getByTestId('record-card')
-  await expect(card.getByRole('region', { name: 'AI のタスクの案' })).toContainText('11月の勉強会の会場を押さえる')
+  await expect(card.getByRole('region', { name: 'やることの案' })).toContainText('11月の勉強会の会場を押さえる')
   await expect(card).toContainText('参加者のうち ACB の人 3人')
   // The one-time offer for a series; ［この定例は次から自動で読む］ is the member's own choice.
   await card.getByRole('button', { name: 'この定例は次から自動で読む' }).click()
@@ -97,6 +98,96 @@ test('the card: ［招待する］ says what the invited see and that it cannot 
   await page.getByRole('button', { name: /B社 研修導入/ }).click()
   await page.getByRole('button', { name: 'つなぐ', exact: true }).click()
   await expect(page.locator('#log')).toContainText('link meeting-teirei01=deal-bsha0001')
+  expectNoPageErrors(state)
+})
+
+const readCard = async (page: import('@playwright/test').Page, params?: Record<string, string>) => {
+  const state = await openPreview(page, 'meetings', params)
+  await finish(page, 'meeting-teirei01')
+  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  const card = page.getByTestId('record-card')
+  await expect(card.getByRole('region', { name: 'やることの案' })).toBeVisible()
+  return { state, card }
+}
+
+for (const [where, width] of [['wide', 1300], ['narrow', 900]] as const) {
+  test(`a read meeting reads top to bottom in the owner's order (${where})`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const { state, card } = await readCard(page)
+    const top = async (l: import('@playwright/test').Locator) => (await l.boundingBox())!.y
+    const order = [
+      card.getByRole('heading', { level: 1, name: '定例ミーティング' }),
+      card.getByRole('region', { name: '要約' }),
+      card.getByRole('article').getByRole('region', { name: '決めたこと' }),
+      card.getByRole('region', { name: 'やることの案' }),
+      card.locator('[data-auto-offer]'),
+      card.getByRole('button', { name: 'この会議について相談する' }),
+      card.getByRole('group', { name: 'どの案件の会議ですか？' }),
+    ]
+    if (where === 'narrow') order.push(card.getByRole('complementary', { name: 'つながっているもの' }), card.getByRole('region', { name: '経緯' }))
+    else order.push(card.getByRole('region', { name: '経緯' }))
+    const ys = []
+    for (const l of order) ys.push(await top(l))
+    expect(ys).toEqual([...ys].sort((a, b) => a - b))
+    // Who attended and who can see it belong to the head.
+    expect(await top(card.locator('[data-seen]'))).toBeLessThan(ys[1])
+    expect(await top(card.getByText(/^参加 /))).toBeLessThan(ys[1])
+    if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/meeting-card-${where}.png`, fullPage: true })
+    expectNoPageErrors(state)
+  })
+}
+
+test('a read meeting says each thing once: one 案件 element, the chip without the band, one list, the documents on the right', async ({ page }) => {
+  const { state, card } = await readCard(page)
+  // The 案件: the question is the field; no second 「なし」 row.
+  await expect(card.getByRole('group', { name: 'どの案件の会議ですか？' })).toHaveCount(1)
+  await expect(page.getByText('どの案件の会議ですか？')).toHaveCount(1)
+  await expect(card.getByRole('group', { name: '案件', exact: true })).toHaveCount(0)
+  // The AI: the chip alone.
+  await expect(card.getByText('AI が読み終えた')).toHaveCount(1)
+  await expect(card.getByText(/AI が反映しました/)).toHaveCount(0)
+  // One list: each task once in the body, the proposal put away too, its review task not at all.
+  await expect(card.getByRole('region', { name: 'AI のタスクの案' })).toHaveCount(0)
+  await expect(card.getByRole('region', { name: '宿題' })).toHaveCount(0)
+  await expect(card.getByRole('region', { name: '決めたこと（AI が残した）' })).toHaveCount(0)
+  const body = card.getByRole('region', { name: 'この会議の議事録' })
+  for (const title of ['新しい日報の書き方を部署に案内する', '議事録の置き場所を決める', '日報のひな形を直す', '日報は 11月から AI の下書きを使う']) {
+    await expect(body.getByText(title)).toHaveCount(1)
+  }
+  await expect(body.getByText('議事録を確認する：定例ミーティング')).toHaveCount(0)
+  const list = card.getByRole('region', { name: 'やることの案' })
+  await expect(list.getByRole('listitem').filter({ hasText: '議事録の置き場所を決める' })).toContainText('しまった')
+  await expect(list.getByRole('button', { name: '全部足す' })).toBeVisible()
+  // The documents: rows of 「つながっているもの」, not buttons in the body.
+  const links = card.getByRole('complementary', { name: 'つながっているもの' })
+  for (const name of ['文字起こしを開く', 'Gemini のメモを開く', 'カレンダーの予定を開く']) {
+    await expect(links.getByRole('button', { name })).toHaveCount(1)
+    await expect(body.getByRole('button', { name })).toHaveCount(0)
+  }
+  expectNoPageErrors(state)
+})
+
+test('the question\'s ［はい］ says who will see part of it and links only on ［つなぐ］', async ({ page }) => {
+  const { state, card } = await readCard(page, { bundle: 'suggest' })
+  const field = card.getByRole('group', { name: '『B社 研修導入』の会議ですか？' })
+  await field.getByRole('button', { name: 'はい' }).click()
+  await expect(page.getByText('案件につなぐと、この会議の内容の一部（次のアクションなど）が営業部のみんなに見えます。')).toBeVisible()
+  await expect(page.locator('#log')).not.toContainText('link ')
+  await page.getByRole('button', { name: 'やめる' }).click()
+  await expect(page.locator('#log')).not.toContainText('link ')
+  await field.getByRole('button', { name: 'はい' }).click()
+  await page.getByRole('button', { name: 'つなぐ', exact: true }).click()
+  await expect(page.locator('#log')).toContainText('link meeting-teirei01=deal-bsha0001')
+
+  expectNoPageErrors(state)
+})
+
+test('［案件はない］ closes the question and a 案件 can still be chosen', async ({ page }) => {
+  const { state, card } = await readCard(page)
+  await card.getByRole('group', { name: 'どの案件の会議ですか？' }).getByRole('button', { name: '案件はない（社内の会議など）' }).click()
+  await expect(page.locator('#log')).toContainText('nobundle meeting-teirei01')
+  await expect(card.getByText('案件はない、と決めた会議です。あとからでも選べます。')).toBeVisible()
+  await expect(card.getByRole('button', { name: '案件につなぐ' })).toBeVisible()
   expectNoPageErrors(state)
 })
 
