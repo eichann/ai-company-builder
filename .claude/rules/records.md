@@ -878,7 +878,9 @@ owner-only one, before every role or folder rule).
 - **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
   member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
   read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see
-  the record and its 経緯, including who was on the list.
+  the record and its 経緯, including who was on the list: intended (owner decision 2026-11-04) —
+  sharing is the listed member's own act, and the ledger must be accurate, so `place.members`
+  before keeps the previous list.
 - **Places copied from a record** go through `placeOfRow` (`record-engine/service-writer.ts`:
   folder | owner | members) — the mail draft (an owner-only / members-only 連絡, meeting or やること
   keeps its place whatever the まとまり), the sent mail's やりとり (with or without 「返事を待つ」 when the
