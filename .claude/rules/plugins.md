@@ -166,7 +166,6 @@ The dependency points one way: **business → connector**. (#372's first cut had
   placeholder (exactly once for get / update / archive, never for the others), no `?` / `#`, and
   the relay's own path rule (`shared/core/upstream-path.ts` `checkUpstreamPath`, the same
   function `services/broker-relay.ts` uses): no `//`, `..`, `%2f`, `\`, control characters.
-  A contract-3 connector's `calls` have their own closed rule ("Contract 3"); the fixed calls keep this one.
 - **Operations** (`kind` read / update / create; the connector declares them, the business plugin's
   `operations` adds who and the rules — "Two roles"): `who` (person fields of the record's type or
   `PLUGIN_ACTORS`: `viewer` = anyone who can read the record, `ai` = the member's AI — only on
@@ -340,7 +339,8 @@ Company fields are never dropped. Test: `tests/integration/plugin-distribution.t
 
 ## Contract 3: calls beside operations (declaration only; `plugin-call-declaration.ts`)
 
-For a service that is not HubSpot-shaped. New kinds go in a separate `calls` map beside `operations`, so
+For a service that is not HubSpot-shaped. **ACB does not relax its rules for a service; the service
+conforms** (owner, 2026-11-05). New kinds go in a separate `calls` map beside `operations`, so
 a connector's objects, operations and fixed calls are untouched and **a call never reaches
 `manifest.operations`**: `plugins.aiTools` lists only that map and a released app's `pluginToolSpecs`
 sends any kind it does not know to its update tool (`combineUse` keeps them apart; `kind: act` in
@@ -353,25 +353,33 @@ optional), so older packages read exactly as before.
 # connector
 contract: 3
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
-account_info: { method: GET, path: /account, id_field: account_id }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
 actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
 limits: { per_minute: 60 }
-errors: { field: code, map: { STATE_CHANGED: check_wait } }
-result: { path: "/operations/{operation_id}", status_field: status, map: { done: applied, in_progress: pending } }
+errors: { map: { STATE_CHANGED: check_wait } }
+result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending } }
 calls:
-  diagnose:                # kind: read — GET
+  diagnose:                # kind: read — GET, inputs in the query
     label: 状態を調べる
     kind: read
-    path: "/people/{person_ref}/diagnosis"
-    inputs: { person_ref: { kind: id, class: personal } }
-    returns:               # an allow-list: what is not named is not taken
+    path: "/people/{id}/diagnosis"
+    inputs: { id: { kind: id, class: normal } }
+    returns:               # an allow-list by fixed names: what is not named is not taken
       name: { class: personal, keep: summary, outside: true }
-      "history/{entry}/note": { class: sensitive, keep: none }
-  pages:                   # kind: document — GET: page (required), list, search; list / search may say items, cursor
+      history:             # a list of entries with fixed fields, one level deep
+        each:
+          note: { class: sensitive, keep: none }
+  find_person:             # kind: search — POST, reading only, inputs in the body; may say items, cursor
+    label: メールで人を探す
+    kind: search
+    path: /people/search
+    inputs: { email: { kind: text, class: personal } }
+    returns: { person_ref: { class: normal, keep: pointer } }
+  pages:                   # kind: document — page (required) and list GET, search POST
     label: 案内のページ
     kind: document
-    page: { path: "/pages/{page_ref}", inputs: { page_ref: { kind: id, class: normal } }, returns: { body: { class: normal, keep: pointer } } }
-  resend:                  # kind: act — POST
+    page: { path: "/pages/{id}", inputs: { id: { kind: id, class: normal } }, returns: { body: { class: normal, keep: pointer } } }
+  resend:                  # kind: act — POST, inputs in the body
     label: もう一度送る
     kind: act
     nature: people
@@ -400,20 +408,27 @@ events:
   personal / sensitive. `keep`: none / pointer / summary. `errors.map` targets: `CALL_FAILURE_KINDS` (refused /
   retry_later / check_wait / needs_person). `result.map` targets: `CALL_RESULT_STATES` (applied / pending /
   failed / not_found). Input `kind`: id / text / number / boolean / date. `undo`: none only.
-- **`{name}` relaxes the `{id}`-only rule, for `calls` only** (closed choices; **needs the owner's
-  agreement**): in a path, each placeholder is a whole segment, once, and a required `kind: id` input, so
-  only a plain outside id fills a path; `result`'s path has exactly `{operation_id}`; a poll's none. A
-  `returns` key may be a path, `items/{entry}/name` (at most 6 segments, `{entry}` = each entry): it
-  selects, it computes nothing.
+- **Paths**: the fixed calls' rule, unchanged (`checkPluginPathTemplate`): `{id}` the only placeholder, at
+  most once (`result`: exactly once; a poll: none); what a call is about is fixed in the path. `{id}` is
+  filled by the required input `id`, of `kind: id`: a plain outside id, `EXTERNAL_ID_RE` (no `:` or `/`).
+- **Personal data never goes in a URL**: `id`, and every input of a GET (`read`, `page`, `list`), are
+  `class: normal`. Looking something up by personal data is a `search` (POST, inputs in the body); an
+  `act`'s inputs are in the body too.
+- **`returns`**: fixed names, one plain value each; `each: { <field>: … }` is a list of entries with
+  fixed fields, one level deep. No paths, wildcards or free-form objects. Every other field of an answer
+  (`status_field`, `items`, `cursor`, `id_field`, `environment_field`, `type_field`) is one name too.
+- **Errors**: one flat shape, `code` at the top level of the error body; `errors` declares only the
+  table of codes.
 - **`who` on a call**: `role:<name>` (declared), `admin`, `ai`, with at least one person. Narrower than an
   operation's on purpose: there is no record, so no person field; `viewer` becomes `anyone`
   (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI — all refused. `decision: true`
   only on an act (`combineUse`).
 - **What arrives by itself** (`events`, a poll's `fields`) carries only `class: normal` or `keep: pointer`
   fields: the content is read by a call, by someone allowed to.
-- **An act**: `idempotency` is required (a lost answer must not double it), and `account_info` with
-  `id_field`, as for any connector that writes. `calls` / `polls` need `auth`. A call may not share an
-  operation's or search's name (one tool name).
+- **`calls` / `polls` need** `auth`, `actor` (`member_header` required; `email_header` optional; on a run
+  with no member the header says `system`, `ACTOR_SYSTEM`, fixed) and `account_info` naming the account's
+  id and environment (`id_field`, `environment_field`). **An act** also needs `idempotency` (a lost answer
+  must not double it). A call may not share an operation's or search's name (one tool name).
 - **Headers**: `auth.header` holds only the key. No other declared header may be it, `Authorization`,
   `Idempotency-Key`, one another, or one the way out owns (`RESERVED_HEADERS`: `Host`, `Cookie`, the
   method overrides…).

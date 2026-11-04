@@ -5,7 +5,7 @@
  * What belongs to a business plugin is refused with where it goes now.
  */
 import { builtinBrokerService, isValidBrokerServiceName, parseRelayBaseUrl } from './key-broker'
-import { parseConnectorV3 } from './plugin-call-declaration'
+import { FIELD_NAME_RE, parseConnectorV3 } from './plugin-call-declaration'
 import {
   CREATE_CONTENT_SLOTS, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, noFlow,
   type CommonPart, type CreateContentSlot, type OperationReach, type PluginEndpoint, type PluginEndpointName, type PluginManifest,
@@ -167,7 +167,7 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
   for (const name of Object.keys(v3.calls ?? {})) {
     if (name in operations || name in searches) err(`呼び出し「${name}」: 同じ名前の操作があります（AI の道具の名前が重なります）`)
   }
-  const acts = Object.values(v3.calls ?? {}).some(c => c.kind === 'act')
+  const calling = v3.calls !== undefined || v3.polls !== undefined
 
   let accountInfo: PluginManifest['accountInfo'] = null
   if (raw.account_info !== undefined) {
@@ -175,21 +175,23 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
     if (!isYamlMap(e)) err('account_info は { method: GET, path } の形で書いてください')
     else {
       const atV3 = common.contract >= PLUGIN_CONTRACT_V3
-      unknownKeys('account_info: ', e, ['method', 'path', ...(atV3 ? ['id_field'] : [])], err, { id_field: `id_field は contract: ${PLUGIN_CONTRACT_V3} の包みだけに書けます` })
+      const v3Only = ['id_field', 'environment_field']
+      const reasons = Object.fromEntries(v3Only.map(k => [k, `${k} は contract: ${PLUGIN_CONTRACT_V3} の包みだけに書けます`]))
+      unknownKeys('account_info: ', e, ['method', 'path', ...(atV3 ? v3Only : [])], err, reasons)
       const problem = e.method !== 'GET' ? 'account_info の method は GET です' : checkPluginPathTemplate(e.path, 'properties_list')
       if (problem) err(`account_info: ${problem}`)
       else accountInfo = { method: 'GET', path: e.path as string }
-      if (atV3 && e.id_field !== undefined) {
-        if (typeof e.id_field !== 'string' || !EXTERNAL_NAME_RE.test(e.id_field)) err('account_info の id_field は項目名です')
-        else if (accountInfo) accountInfo = { ...accountInfo, idField: e.id_field }
+      if (atV3 && accountInfo) {
+        for (const k of v3Only) if (e[k] !== undefined && (typeof e[k] !== 'string' || !FIELD_NAME_RE.test(e[k]))) err(`account_info の ${k} は項目名です`)
+        accountInfo = { ...accountInfo, ...(typeof e.id_field === 'string' ? { idField: e.id_field } : {}), ...(typeof e.environment_field === 'string' ? { environmentField: e.environment_field } : {}) }
       }
     }
   }
-  if (!accountInfo && (acts || Object.values(operations).some(op => op.kind !== 'read'))) {
+  if (!accountInfo && (calling || Object.values(operations).some(op => op.kind !== 'read'))) {
     err('書き込む操作があるプラグインには account_info（鍵がどのアカウントのものかを読む道）が要ります')
   }
-  // A call has no HubSpot-shaped answer to fall back on: the account must be named, or nothing binds the connection.
-  if (acts && accountInfo && !accountInfo.idField) err('act の呼び出しがあるプラグインの account_info には id_field（アカウントの番号の項目名）が要ります')
+  // A call has no HubSpot-shaped answer to fall back on: the account and its environment must be named, or nothing binds the connection.
+  if (calling && accountInfo && (!accountInfo.idField || !accountInfo.environmentField)) err('calls / polls があるプラグインの account_info には id_field と environment_field（アカウントの番号と環境の項目名）が要ります')
 
   const operationScopes: Record<string, string[]> = {}
   const rawOpScopes = raw.operation_scopes ?? {}

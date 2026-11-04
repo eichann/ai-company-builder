@@ -6,17 +6,17 @@
  * ```yaml
  * contract: 3
  * auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
- * account_info: { method: GET, path: /account, id_field: account_id }
+ * account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
  * actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
  * limits: { per_minute: 60 }
- * errors: { field: code, map: { STATE_CHANGED: check_wait } }
- * result: { path: "/operations/{operation_id}", status_field: status, map: { done: applied } }
+ * errors: { map: { STATE_CHANGED: check_wait } }
+ * result: { path: "/operations/{id}", status_field: status, map: { done: applied } }
  * calls:
  *   diagnose:
  *     label: 状態を調べる
  *     kind: read
- *     path: "/people/{person_ref}/diagnosis"
- *     inputs: { person_ref: { kind: id, class: personal } }
+ *     path: "/people/{id}/diagnosis"
+ *     inputs: { id: { kind: id, class: normal } }
  *     returns: { name: { class: personal, keep: summary, outside: true } }
  * events:
  *   recovered: { fields: { person_ref: { class: personal, keep: pointer } } }
@@ -24,18 +24,19 @@
  *
  * The declaration does not grow into a language (owner rule §8-1): every value
  * is one of a closed list or a plain name; there is no condition, computation
- * or transformation, and `{name}` is only ever a whole path segment.
+ * or transformation. ACB does not bend for a service, the service conforms
+ * (owner, 2026-11-05): `{id}` is a path's only placeholder, as for the fixed
+ * calls; an error answer has `code` at its top level; `returns` names fixed fields.
  */
 import {
   CALL_ACTORS, CALL_AUTH_FORMATS, CALL_AUTH_SLOTS, CALL_FAILURE_KINDS, CALL_IDEMPOTENCY_STYLES, CALL_INPUT_KINDS, CALL_NATURES, CALL_RESULT_STATES,
   CALL_SIGNATURE_SCHEMES, DATA_CLASSES, KEEP_RULES, ROLE_WHO_PREFIX,
   type CallUse, type EventUse, type PluginCall, type PluginCallInput, type PluginCallListing, type PluginCallRequest, type PluginCalling, type PluginCursor,
-  type PluginDataField, type PluginEvent, type PluginManifest, type PluginPoll,
+  type PluginDataField, type PluginEvent, type PluginManifest, type PluginPoll, type PluginReturn,
 } from './plugin-declaration'
-import { EXTERNAL_NAME_RE, isStr, strList, unknownKeys } from './plugin-declaration-rules'
+import { EXTERNAL_NAME_RE, checkPluginPathTemplate, isStr, strList, unknownKeys } from './plugin-declaration-rules'
 import { settingDurationMinutes } from './plugin-settings'
 import { ONTOLOGY_NAME_RE } from './record-types'
-import { checkUpstreamPath } from './upstream-path'
 import { isYamlMap, type YamlValue } from './yaml-lite'
 
 type Raw = { [k: string]: YamlValue }
@@ -46,11 +47,9 @@ export const CONNECTOR_V3_KEYS: readonly string[] = ['auth', 'actor', 'limits', 
 /** Top-level keys only a contract-3 business plugin may write. */
 export const BUSINESS_V3_KEYS: readonly string[] = ['calls', 'events']
 
-const CALL_PATH_RE = /^[A-Za-z0-9/_.{}-]{1,300}$/
-const PLACEHOLDER_RE = /^\{([a-z][a-z0-9_]{0,39})\}$/
+/** A field of an answer: one fixed name, never a path to one. */
+export const FIELD_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/
 const HEADER_NAME_RE = /^[A-Za-z][A-Za-z0-9-]{0,63}$/
-const RETURN_SEGMENT_RE = /^(?:[A-Za-z0-9_-]{1,64}|\{[a-z][a-z0-9_]{0,39}\})$/
-const RETURN_MAX_DEPTH = 6
 const PER_MINUTE_MAX = 600
 const SIGNATURE_MAX_AGE_MINUTES = 60
 const POLL_EVERY_MAX_MINUTES = 1440
@@ -64,25 +63,11 @@ const RESERVED_HEADERS: readonly string[] = [
 const IDEMPOTENCY_HEADER = 'idempotency-key'
 
 const inList = <T extends string>(v: YamlValue | undefined, list: readonly T[]): v is T => typeof v === 'string' && (list as readonly string[]).includes(v)
-const plainName = (v: YamlValue | undefined): v is string => typeof v === 'string' && EXTERNAL_NAME_RE.test(v)
+const fieldName = (v: YamlValue | undefined): v is string => typeof v === 'string' && FIELD_NAME_RE.test(v)
 
-/**
- * A call's path template: the relay's path rule, and `{name}` placeholders each
- * a whole segment, none twice. Relaxes the fixed calls' `{id}`-only rule
- * (`checkPluginPathTemplate`) for `calls`, `result` and nothing else.
- */
-export function callPathPlaceholders(path: unknown): { names: string[] } | { problem: string } {
-  if (typeof path !== 'string' || !CALL_PATH_RE.test(path)) return { problem: '道は / で始まる英数字・/ _ . - と {名前} だけで書いてください（? や # は使えません）' }
-  const names: string[] = []
-  for (const segment of path.split('/')) {
-    if (!/[{}]/.test(segment)) continue
-    const m = PLACEHOLDER_RE.exec(segment)
-    if (!m) return { problem: '差し込みは /{名前}/ のように、区切りの間まるごとに書いてください' }
-    if (names.includes(m[1])) return { problem: `差し込み {${m[1]}} が2回書かれています` }
-    names.push(m[1])
-  }
-  if (!checkUpstreamPath(path.replace(/\{[a-z0-9_]+\}/g, '1'))) return { problem: '道の書き方が正しくありません（//・..・%2f などは使えません）' }
-  return { names }
+/** A call's path, by the fixed calls' own rule: `{id}` the only placeholder, at most once. Why not, or null. */
+function callPathProblem(path: YamlValue | undefined): string | null {
+  return checkPluginPathTemplate(path, typeof path === 'string' && path.includes('{id}') ? 'get' : 'properties_list')
 }
 
 function parseDataField(where: string, v: YamlValue, err: Err, eventOnly: boolean): PluginDataField | null {
@@ -97,20 +82,33 @@ function parseDataField(where: string, v: YamlValue, err: Err, eventOnly: boolea
   return { dataClass, keep, outside }
 }
 
-function parseReturnKey(key: string): boolean {
-  const segments = key.split('/')
-  return segments.length <= RETURN_MAX_DEPTH && segments.every(s => RETURN_SEGMENT_RE.test(s))
-}
-
-/** `returns`: the allow-list of what is taken from an answer. */
-function parseReturns(where: string, v: YamlValue | undefined, err: Err): Record<string, PluginDataField> {
-  const out: Record<string, PluginDataField> = {}
+/**
+ * `returns`: the allow-list of what is taken from an answer, by fixed names. A
+ * field is one plain value; `each: { <field>: … }` is a list of entries with
+ * those fixed fields, one level deep. Nothing else is taken, so there is no
+ * wildcard and no free-form object.
+ */
+function parseReturns(where: string, v: YamlValue | undefined, err: Err): Record<string, PluginReturn> {
+  const out: Record<string, PluginReturn> = {}
   if (v === undefined) return out
   if (!isYamlMap(v)) { err(`${where}の returns は「項目: { class, keep }」の形で書いてください`); return out }
   for (const [key, field] of Object.entries(v)) {
-    if (!parseReturnKey(key)) { err(`${where}の returns の「${key}」は項目名か、a/{item}/b のような項目の道です`); continue }
-    const f = parseDataField(`${where}の returns の「${key}」`, field, err, false)
-    if (f) out[key] = f
+    const at = `${where}の returns の「${key}」`
+    if (!FIELD_NAME_RE.test(key)) { err(`${at}は項目名です（道や * は書けません）`); continue }
+    if (!isYamlMap(field) || field.each === undefined) {
+      const f = parseDataField(at, field, err, false)
+      if (f) out[key] = f
+      continue
+    }
+    unknownKeys(`${at}: `, field, ['each'], err)
+    if (!isYamlMap(field.each) || Object.keys(field.each).length === 0) { err(`${at}の each は「項目: { class, keep }」の形で書いてください`); continue }
+    const each: Record<string, PluginDataField> = {}
+    for (const [name, entry] of Object.entries(field.each)) {
+      if (!FIELD_NAME_RE.test(name)) { err(`${at}の each の「${name}」は項目名です`); continue }
+      const f = parseDataField(`${at}の each の「${name}」`, entry, err, false)
+      if (f) each[name] = f
+    }
+    out[key] = { each }
   }
   return out
 }
@@ -121,7 +119,7 @@ function parseEventFields(where: string, v: YamlValue | undefined, err: Err): Re
   if (v === undefined) return out
   if (!isYamlMap(v)) { err(`${where}の fields は「項目: { class, keep }」の形で書いてください`); return out }
   for (const [key, field] of Object.entries(v)) {
-    if (!EXTERNAL_NAME_RE.test(key)) { err(`${where}の fields の「${key}」は項目名です`); continue }
+    if (!FIELD_NAME_RE.test(key)) { err(`${where}の fields の「${key}」は項目名です`); continue }
     const f = parseDataField(`${where}の fields の「${key}」`, field, err, true)
     if (f) out[key] = f
   }
@@ -147,15 +145,20 @@ function parseInputs(where: string, v: YamlValue | undefined, err: Err): Record<
   return out
 }
 
-/** `path`, `inputs`, `returns`: each placeholder is a required `id` input, so only a plain outside id ever fills a path. */
-function parseRequest(where: string, v: Raw, err: Err): PluginCallRequest | null {
-  const placeholders = callPathPlaceholders(v.path)
-  if ('problem' in placeholders) { err(`${where}: ${placeholders.problem}`); return null }
+/**
+ * `path`, `inputs`, `returns`. `{id}` is filled by the required input `id`, of kind
+ * `id`: a plain outside id (the connector's `EXTERNAL_ID_RE`: no `:` or `/`).
+ * Personal data never goes in a URL: what travels in one is `class: normal` —
+ * `id`, and with `inputsIn: 'query'` (a GET) every input.
+ */
+function parseRequest(where: string, v: Raw, inputsIn: 'query' | 'body', err: Err): PluginCallRequest | null {
+  const problem = callPathProblem(v.path)
+  if (problem) { err(`${where}: ${problem}`); return null }
   const inputs = parseInputs(where, v.inputs, err)
-  for (const name of placeholders.names) {
-    const input = Object.prototype.hasOwnProperty.call(inputs, name) ? inputs[name] : undefined
-    if (!input) err(`${where}: 道の差し込み {${name}} が inputs にありません`)
-    else if (input.kind !== 'id' || !input.required) err(`${where}: 道の差し込み {${name}} は kind: id の必須の入力です`)
+  const id = Object.prototype.hasOwnProperty.call(inputs, 'id') ? inputs.id : undefined
+  if ((v.path as string).includes('{id}') ? !id || id.kind !== 'id' || !id.required : id !== undefined) err(`${where}: 入力 id は、道の {id} を埋める kind: id の必須の入力です`)
+  for (const [name, input] of Object.entries(inputs)) {
+    if ((name === 'id' || inputsIn === 'query') && input.dataClass !== 'normal') err(`${where}の入力「${name}」: URL に載る入力は class: normal だけです（個人の情報は URL に載せません）`)
   }
   return { path: v.path as string, inputs, returns: parseReturns(where, v.returns, err) }
 }
@@ -163,19 +166,20 @@ function parseRequest(where: string, v: Raw, err: Err): PluginCallRequest | null
 function parseCursor(where: string, v: YamlValue | undefined, err: Err): PluginCursor | null {
   if (!isYamlMap(v)) { err(`${where}の cursor は { param, next } の形で書いてください`); return null }
   unknownKeys(`${where}の cursor: `, v, ['param', 'next'], err)
-  if (!plainName(v.param) || !plainName(v.next)) { err(`${where}の cursor の param / next は項目名です`); return null }
+  if (!fieldName(v.param) || !fieldName(v.next)) { err(`${where}の cursor の param / next は項目名です`); return null }
   return { param: v.param, next: v.next }
 }
 
-function parseListing(where: string, v: YamlValue | undefined, err: Err): PluginCallListing | null {
+/** A list (GET, inputs in the query) or a search (POST, inputs in the body). */
+function parseListing(where: string, v: YamlValue | undefined, inputsIn: 'query' | 'body', err: Err, ownKeys: readonly string[] = []): PluginCallListing | null {
   if (v === undefined) return null
   if (!isYamlMap(v)) { err(`${where}は { path, inputs, returns } の形で書いてください`); return null }
-  unknownKeys(`${where}: `, v, ['path', 'inputs', 'returns', 'items', 'cursor'], err)
-  const request = parseRequest(where, v, err)
+  unknownKeys(`${where}: `, v, [...ownKeys, 'path', 'inputs', 'returns', 'items', 'cursor'], err)
+  const request = parseRequest(where, v, inputsIn, err)
   if (!request) return null
   if (Object.keys(request.returns).length === 0) err(`${where}に returns（受け取る項目）を書いてください`)
-  if (v.items !== undefined && !plainName(v.items)) err(`${where}の items は項目名です`)
-  return { ...request, items: plainName(v.items) ? v.items : null, cursor: v.cursor === undefined ? null : parseCursor(where, v.cursor, err) }
+  if (v.items !== undefined && !fieldName(v.items)) err(`${where}の items は項目名です`)
+  return { ...request, items: fieldName(v.items) ? v.items : null, cursor: v.cursor === undefined ? null : parseCursor(where, v.cursor, err) }
 }
 
 function parseCall(name: string, raw: YamlValue, err: Err): PluginCall | null {
@@ -186,14 +190,18 @@ function parseCall(name: string, raw: YamlValue, err: Err): PluginCall | null {
   const base = { label: isStr(raw.label) ? raw.label : name, who: [], decision: false }
   if (raw.kind === 'read') {
     unknownKeys(`${where}: `, raw, ['label', 'kind', 'path', 'inputs', 'returns'], err)
-    const request = parseRequest(where, raw, err)
+    const request = parseRequest(where, raw, 'query', err)
     if (!request) return null
     if (Object.keys(request.returns).length === 0) err(`${where}に returns（受け取る項目）を書いてください`)
     return { ...base, kind: 'read', ...request }
   }
+  if (raw.kind === 'search') {
+    const listing = parseListing(where, raw, 'body', err, ['label', 'kind'])
+    return listing && { ...base, kind: 'search', ...listing }
+  }
   if (raw.kind === 'act') {
     unknownKeys(`${where}: `, raw, ['label', 'kind', 'nature', 'path', 'inputs', 'returns', 'idempotency', 'undo'], err)
-    const request = parseRequest(where, raw, err)
+    const request = parseRequest(where, raw, 'body', err)
     if (!inList(raw.nature, CALL_NATURES)) { err(`${where}の nature は ${CALL_NATURES.join(' / ')} です`); return null }
     if ((raw.undo ?? 'none') !== 'none') { err(`${where}の undo は none だけです（呼び出しを取り消す道はありません）`); return null }
     const idem = raw.idempotency
@@ -207,13 +215,13 @@ function parseCall(name: string, raw: YamlValue, err: Err): PluginCall | null {
     const rawPage = raw.page
     if (!isYamlMap(rawPage)) { err(`${where}に page（1ページを読む道）を書いてください`); return null }
     unknownKeys(`${where}の page: `, rawPage, ['path', 'inputs', 'returns'], err)
-    const page = parseRequest(`${where}の page`, rawPage, err)
+    const page = parseRequest(`${where}の page`, rawPage, 'query', err)
     if (page && Object.keys(page.returns).length === 0) err(`${where}の page に returns（受け取る項目）を書いてください`)
-    const list = parseListing(`${where}の list`, raw.list, err)
-    const search = parseListing(`${where}の search`, raw.search, err)
+    const list = parseListing(`${where}の list`, raw.list, 'query', err)
+    const search = parseListing(`${where}の search`, raw.search, 'body', err)
     return page && { ...base, kind: 'document', page, list, search }
   }
-  err(`${where}の kind は read / act / document です`)
+  err(`${where}の kind は read / search / act / document です`)
   return null
 }
 
@@ -239,20 +247,19 @@ function parseAuth(v: YamlValue | undefined, err: Err): PluginCalling['auth'] {
   return { type: 'company_key', header: v.header as string, format: v.format, slots: slots as Array<typeof CALL_AUTH_SLOTS[number]> }
 }
 
+/** Who acted, on every call: the member's id (`ACTOR_SYSTEM` on a run with no member); an address only if the service wants one. */
 function parseActor(v: YamlValue | undefined, taken: string[], err: Err): PluginCalling['actor'] {
   if (v === undefined) return null
   if (!isYamlMap(v)) { err('actor は { member_header, email_header } の形で書いてください'); return null }
   unknownKeys('actor: ', v, ['member_header', 'email_header'], err)
-  const out: Array<string | null> = []
-  for (const k of ['member_header', 'email_header']) {
-    if (v[k] === undefined) { out.push(null); continue }
-    const problem = headerProblem(v[k], taken)
-    if (problem) { err(`actor の ${k}: ${problem}`); out.push(null); continue }
-    taken.push((v[k] as string).toLowerCase())
-    out.push(v[k] as string)
-  }
-  if (v.member_header === undefined && v.email_header === undefined) err('actor には member_header か email_header を書いてください')
-  return { memberHeader: out[0], emailHeader: out[1] }
+  const member = headerProblem(v.member_header, taken)
+  if (member) { err(`actor の member_header: ${member}`); return null }
+  taken.push((v.member_header as string).toLowerCase())
+  if (v.email_header === undefined) return { memberHeader: v.member_header as string, emailHeader: null }
+  const email = headerProblem(v.email_header, taken)
+  if (email) { err(`actor の email_header: ${email}`); return null }
+  taken.push((v.email_header as string).toLowerCase())
+  return { memberHeader: v.member_header as string, emailHeader: v.email_header as string }
 }
 
 function parseLimits(v: YamlValue | undefined, err: Err): PluginCalling['limits'] {
@@ -276,23 +283,22 @@ function parseWordMap<T extends string>(where: string, v: YamlValue | undefined,
   return out
 }
 
+/** An error answer has one shape: `code` at the top level of its body. Only the table of codes is declared. */
 function parseErrors(v: YamlValue | undefined, err: Err): PluginCalling['errors'] {
   if (v === undefined) return null
-  if (!isYamlMap(v)) { err('errors は { field, map } の形で書いてください'); return null }
-  unknownKeys('errors: ', v, ['field', 'map'], err)
-  if (!plainName(v.field)) { err('errors の field は項目名です'); return null }
+  if (!isYamlMap(v)) { err('errors は { map } の形で書いてください'); return null }
+  unknownKeys('errors: ', v, ['map'], err, { field: 'エラーの答えの形は1つです（本文の一番上の code）。field は書きません' })
   const map = parseWordMap('errors の map', v.map, CALL_FAILURE_KINDS, err)
-  return map && { field: v.field, map }
+  return map && { map }
 }
 
 function parseResult(v: YamlValue | undefined, err: Err): PluginCalling['result'] {
   if (v === undefined) return null
   if (!isYamlMap(v)) { err('result は { path, status_field, map } の形で書いてください'); return null }
   unknownKeys('result: ', v, ['path', 'status_field', 'map'], err)
-  const placeholders = callPathPlaceholders(v.path)
-  if ('problem' in placeholders) { err(`result: ${placeholders.problem}`); return null }
-  if (placeholders.names.length !== 1 || placeholders.names[0] !== 'operation_id') { err('result の道には {operation_id} をちょうど1つ書いてください'); return null }
-  if (!plainName(v.status_field)) { err('result の status_field は項目名です'); return null }
+  const problem = checkPluginPathTemplate(v.path, 'get')
+  if (problem) { err(`result: ${problem}`); return null }
+  if (!fieldName(v.status_field)) { err('result の status_field は項目名です'); return null }
   const map = parseWordMap('result の map', v.map, CALL_RESULT_STATES, err)
   return map && { path: v.path as string, statusField: v.status_field, map }
 }
@@ -334,16 +340,15 @@ function parsePolls(v: YamlValue | undefined, err: Err): Record<string, PluginPo
     if (!ONTOLOGY_NAME_RE.test(name)) { err(`${where}: 名前は英小文字・数字・_ で書いてください`); continue }
     if (!isYamlMap(p)) { err(`${where}は { path, cursor, items, every } の形で書いてください`); continue }
     unknownKeys(`${where}: `, p, ['path', 'cursor', 'items', 'every', 'type_field', 'fields'], err)
-    const placeholders = callPathPlaceholders(p.path)
-    if ('problem' in placeholders) { err(`${where}: ${placeholders.problem}`); continue }
-    if (placeholders.names.length > 0) { err(`${where}: 道に差し込みは書けません`); continue }
+    const problem = checkPluginPathTemplate(p.path, 'properties_list')
+    if (problem) { err(`${where}: ${problem}`); continue }
     const cursor = parseCursor(where, p.cursor, err)
-    if (!plainName(p.items)) err(`${where}の items は項目名です`)
-    if (p.type_field !== undefined && !plainName(p.type_field)) err(`${where}の type_field は項目名です`)
+    if (!fieldName(p.items)) err(`${where}の items は項目名です`)
+    if (p.type_field !== undefined && !fieldName(p.type_field)) err(`${where}の type_field は項目名です`)
     const every = settingDurationMinutes(p.every)
     if (every === null || every > POLL_EVERY_MAX_MINUTES) err(`${where}の every は 5m のような時間です（1 日まで）`)
     const fields = parseEventFields(where, p.fields, err)
-    if (cursor && plainName(p.items) && every !== null) out[name] = { path: p.path as string, cursor, items: p.items, typeField: plainName(p.type_field) ? p.type_field : null, every: p.every as string, fields }
+    if (cursor && fieldName(p.items) && every !== null) out[name] = { path: p.path as string, cursor, items: p.items, typeField: fieldName(p.type_field) ? p.type_field : null, every: p.every as string, fields }
   }
   return out
 }
@@ -364,7 +369,10 @@ export function parseConnectorV3(raw: Raw, err: Err): Pick<PluginManifest, 'call
   }
   const events = parseEvents(raw.events, err)
   const polls = parsePolls(raw.polls, err)
-  if (!auth && (raw.calls !== undefined || raw.polls !== undefined)) err('calls / polls を書いたら auth（鍵の渡し方）を書いてください')
+  if (raw.calls !== undefined || raw.polls !== undefined) {
+    if (!raw.auth) err('calls / polls を書いたら auth（鍵の渡し方）を書いてください')
+    if (!raw.actor) err('calls / polls を書いたら actor（誰の操作かを伝えるヘッダー）を書いてください')
+  }
   return {
     ...(Object.values(calling).some(v => v !== null) ? { calling } : {}),
     ...(Object.keys(calls).length > 0 ? { calls } : {}),

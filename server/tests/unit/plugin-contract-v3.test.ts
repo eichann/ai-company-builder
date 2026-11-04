@@ -11,7 +11,10 @@
  *   make the package unusable; every value is a closed choice or a plain name;
  * - a call's `who` names `role:`, `admin`, `ai`, with at least one person: `[ai]`
  *   alone would pass for any member's AI and `viewer` for anyone (`mayAct`);
- * - a path is filled only by plain `id` inputs, each placeholder a whole segment;
+ * - ACB does not bend for a service: `{id}` is a path's only placeholder, once; an
+ *   error answer's `code` has no declared place; `returns` names fixed fields;
+ * - personal data never goes in a URL: what travels in one is `class: normal`;
+ * - every call says who acted (a member header) and which account and environment;
  * - what arrives by itself (polls, events) carries only normal fields or pointers;
  * - a header can never take over the key's, or one the way out owns;
  * - a combined use has only the calls and events the business plugin declared,
@@ -77,21 +80,22 @@ describe('plugin contract 3: what a connector declares', () => {
   it('reads every part of the sample connector', () => {
     const m = valid(PORTAL).manifest
     expect(m.contract).toBe(PLUGIN_CONTRACT_V3)
-    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id' })
+    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment' })
     expect(m.calling).toEqual({
       auth: { type: 'company_key', header: 'authorization', format: 'bearer', slots: ['read', 'act'] },
       actor: { memberHeader: 'X-Sample-Actor', emailHeader: 'X-Sample-Email' },
       limits: { perMinute: 60 },
-      errors: { field: 'code', map: { STATE_CHANGED: 'check_wait', BAD_INPUT: 'refused' } },
-      result: { path: '/operations/{operation_id}', statusField: 'status', map: { done: 'applied', in_progress: 'pending', unknown_key: 'not_found' } },
+      errors: { map: { STATE_CHANGED: 'check_wait', BAD_INPUT: 'refused' } },
+      result: { path: '/operations/{id}', statusField: 'status', map: { done: 'applied', in_progress: 'pending', unknown_key: 'not_found' } },
       signature: { scheme: 'hmac_sha256_ts_body', header: 'X-Sample-Signature', timestampHeader: 'X-Sample-Timestamp', maxAge: '5m' },
     })
     expect(m.calls?.diagnose).toMatchObject({
-      kind: 'read', path: '/people/{person_ref}/diagnosis',
-      returns: { name: { dataClass: 'personal', keep: 'summary', outside: true }, 'history/{entry}/note': { dataClass: 'sensitive', keep: 'none', outside: false } },
+      kind: 'read', path: '/people/{id}/diagnosis',
+      returns: { name: { dataClass: 'personal', keep: 'summary', outside: true }, history: { each: { note: { dataClass: 'sensitive', keep: 'none', outside: false } } } },
     })
+    expect(m.calls?.find_person).toMatchObject({ kind: 'search', items: 'people', inputs: { email: { dataClass: 'personal' } } })
     expect(m.calls?.resend).toMatchObject({ kind: 'act', nature: 'people', idempotency: { style: 'header' }, undo: 'none' })
-    expect(m.calls?.pages).toMatchObject({ kind: 'document', page: { path: '/pages/{page_ref}' }, list: { items: 'pages', cursor: { param: 'after', next: 'next_cursor' } }, search: { items: 'results' } })
+    expect(m.calls?.pages).toMatchObject({ kind: 'document', page: { path: '/pages/{id}' }, list: { items: 'pages', cursor: { param: 'after', next: 'next_cursor' } }, search: { items: 'results' } })
     expect(m.polls?.events).toMatchObject({ path: '/events', items: 'events', typeField: 'type', every: '5m' })
     expect(m.operations).toEqual({})
   })
@@ -129,7 +133,7 @@ describe('plugin contract 3: what a connector declares', () => {
     for (const contract of [1, 2]) {
       const text = errorsOf({ manifest: below(contract), types: {} })
       for (const key of ['auth', 'actor', 'limits', 'errors', 'result', 'calls', 'events', 'signature', 'polls']) expect(text, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
-      expect(text).toContain('id_field は contract: 3 の包みだけに書けます')
+      for (const key of ['id_field', 'environment_field']) expect(text).toContain(`${key} は contract: 3 の包みだけに書けます`)
       const care = errorsOf({ ...CARE, manifest: CARE.manifest.replace('contract: 3', `contract: ${contract}`) })
       for (const key of ['calls', 'events']) expect(care, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
     }
@@ -158,13 +162,15 @@ describe('plugin contract 3: what a connector declares', () => {
       ['account_info: { method: GET,', 'account_info: { retry: 1, method: GET,'],
       ['actor: { member_header', 'actor: { name_header: X-A, member_header'],
       ['limits: { per_minute: 60 }', 'limits: { per_minute: 60, burst: 2 }'],
-      ['errors: { field: code,', 'errors: { fallback: refused, field: code,'],
+      ['errors: { map:', 'errors: { fallback: refused, map:'],
       ['result: { path:', 'result: { every: 5m, path:'],
       ['    kind: read\n    path: "/people', '    kind: read\n    method: DELETE\n    path: "/people'],
-      ['person_ref: { kind: id, class: personal }\n    returns', 'person_ref: { kind: id, class: personal, default: x }\n    returns'],
+      ['    kind: search\n', '    kind: search\n    method: GET\n'],
+      ['id: { kind: id, class: normal }\n    returns', 'id: { kind: id, class: normal, default: x }\n    returns'],
+      ['        each:\n', '        sort: x\n        each:\n'],
       ['name: { class: personal, keep: summary, outside: true }', 'name: { class: personal, keep: summary, outside: true, rename: x }'],
       ['    kind: document\n', '    kind: document\n    index: x\n'],
-      ['      path: "/pages/{page_ref}"\n', '      path: "/pages/{page_ref}"\n      items: x\n'],
+      ['      path: "/pages/{id}"\n', '      path: "/pages/{id}"\n      items: x\n'],
       ['      path: /pages\n', '      path: /pages\n      order: x\n'],
       ['cursor: { param: after, next: next_cursor }', 'cursor: { param: after, next: next_cursor, limit: 5 }'],
       ['idempotency: { style: header }', 'idempotency: { style: header, ttl: 5m }'],
@@ -186,15 +192,12 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('    every: 5m\n', '    every: 5m\n    cron: x\n')).toMatch(/「cron」/)
     expect(portalErrors('    kind: act\n', '    kind: act\n    url: https://other.example\n')).toMatch(/送り先は base_url だけです/)
     // Values that try to be expressions.
-    expect(portalErrors('field: code', 'field: "code || status"')).toMatch(/errors の field は項目名/)
     expect(portalErrors('status_field: status', 'status_field: "status.toUpperCase()"')).toMatch(/status_field は項目名/)
     expect(portalErrors('STATE_CHANGED: check_wait', '"code > 400": check_wait')).toMatch(/外の言葉/)
     expect(portalErrors('items: events', 'items: "events[0]"')).toMatch(/items は項目名/)
-    expect(portalErrors('"history/{entry}/note"', '"history[*].note"')).toMatch(/項目の道/)
-    expect(portalErrors('"history/{entry}/note"', '"history/{entry}+1/note"')).toMatch(/項目の道/)
     // Closed choices.
     expect(portalErrors('nature: people', 'nature: dangerous')).toMatch(/nature は internal \/ people \/ money \/ irreversible/)
-    expect(portalErrors('kind: act', 'kind: write')).toMatch(/kind は read \/ act \/ document/)
+    expect(portalErrors('kind: act', 'kind: write')).toMatch(/kind は read \/ search \/ act \/ document/)
     expect(portalErrors('name: { class: personal,', 'name: { class: secret,')).toMatch(/class は normal \/ personal \/ sensitive/)
     expect(portalErrors('keep: summary, outside', 'keep: forever, outside')).toMatch(/keep は none \/ pointer \/ summary/)
     expect(portalErrors('outside: true', 'outside: maybe')).toMatch(/outside は true か false/)
@@ -213,23 +216,70 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('    every: 5m', '    every: soon')).toMatch(/every は/)
   })
 
-  it('fills a path only with a declared plain id, each placeholder a whole segment', () => {
-    expect(portalErrors('person_ref: { kind: id, class: personal }\n    returns', 'other: { kind: id, class: personal }\n    returns')).toMatch(/\{person_ref\} が inputs にありません/)
-    expect(portalErrors('person_ref: { kind: id, class: personal }\n    returns', 'person_ref: { kind: text, class: personal }\n    returns')).toMatch(/kind: id の必須の入力/)
-    expect(portalErrors('person_ref: { kind: id, class: personal }\n    returns', 'person_ref: { kind: id, class: personal, required: false }\n    returns')).toMatch(/kind: id の必須の入力/)
-    const path = '"/people/{person_ref}/diagnosis"'
-    expect(portalErrors(path, '"/people/x{person_ref}/diagnosis"')).toMatch(/区切りの間まるごと/)
-    expect(portalErrors(path, '"/people/{person_ref}{person_ref}/diagnosis"')).toMatch(/区切りの間まるごと/)
-    expect(portalErrors(path, '"/people/{person_ref}/{person_ref}"')).toMatch(/2回/)
-    expect(portalErrors(path, '"/people/{Person}/diagnosis"')).toMatch(/区切りの間まるごと/)
-    expect(portalErrors(path, '"/people/{person_ref}/../admin"')).toMatch(/道の書き方が正しくありません/)
-    expect(portalErrors(path, '"/people/{person_ref}?all=1"')).toMatch(/\? や # は使えません/)
-    expect(portalErrors(path, '"https://other.example/{person_ref}"')).toMatch(/\? や # は使えません/)
-    expect(portalErrors('"/operations/{operation_id}"', '"/operations/{other}"')).toMatch(/\{operation_id\} をちょうど1つ/)
-    expect(portalErrors('"/operations/{operation_id}"', '/operations')).toMatch(/\{operation_id\} をちょうど1つ/)
-    expect(portalErrors('path: /events', 'path: "/events/{day}"')).toMatch(/差し込みは書けません/)
-    // The fixed calls keep their `{id}`-only rule.
-    expect(errorsOf({ ...HUB, manifest: HUB.manifest.replace('{id}', '{deal}') })).toMatch(/差し込みは \{id\} だけ/)
+  it('a path has {id} as its only placeholder, once, as the fixed calls do', () => {
+    const path = '"/people/{id}/diagnosis"'
+    for (const to of ['"/people/{person_ref}/diagnosis"', '"/people/{id}/{kind}"', '"/{tenant}/people/{id}"']) expect(portalErrors(path, to), to).toMatch(/差し込みは \{id\} だけ/)
+    expect(portalErrors(path, '"/people/{id}/{id}"')).toMatch(/\{id\} をちょうど1つ/)
+    expect(portalErrors(path, '"/people/{id}/../admin"')).toMatch(/道の書き方が正しくありません/)
+    expect(portalErrors(path, '"/people/{id}?all=1"')).toMatch(/\? や # は使えません/)
+    expect(portalErrors(path, '"https://other.example/{id}"')).toMatch(/\? や # は使えません/)
+    expect(portalErrors('"/operations/{id}"', '"/operations/{operation_id}"')).toMatch(/差し込みは \{id\} だけ/)
+    expect(portalErrors('"/operations/{id}"', '/operations')).toMatch(/\{id\} をちょうど1つ/)
+    expect(portalErrors('path: /events', 'path: "/events/{id}"')).toMatch(/\{id\} は書けません/)
+    // {id} is filled by the required input `id`, a plain id; without a {id} there is no such input.
+    const input = 'id: { kind: id, class: normal }\n    returns'
+    expect(portalErrors(input, 'other: { kind: id, class: normal }\n    returns')).toMatch(/入力 id は、道の \{id\} を埋める/)
+    expect(portalErrors(input, 'id: { kind: text, class: normal }\n    returns')).toMatch(/入力 id は、道の \{id\} を埋める/)
+    expect(portalErrors(input, 'id: { kind: id, class: normal, required: false }\n    returns')).toMatch(/入力 id は、道の \{id\} を埋める/)
+    expect(portalErrors('    kind: read\n    path: /status\n', '    kind: read\n    path: /status\n    inputs: { id: { kind: id, class: normal } }\n')).toMatch(/入力 id は、道の \{id\} を埋める/)
+  })
+
+  it('personal data never goes in a URL: a GET\'s inputs and {id} are class: normal, a POST\'s body may carry it', () => {
+    const url = /URL に載る入力は class: normal だけです/
+    const read = '    kind: read\n    path: /status\n'
+    for (const c of ['personal', 'sensitive']) {
+      expect(portalErrors(read, `${read}    inputs: { email: { kind: text, class: ${c} } }\n`), c).toMatch(url)
+      expect(portalErrors('id: { kind: id, class: normal }\n    returns', `id: { kind: id, class: ${c} }\n    returns`), c).toMatch(url)
+      expect(portalErrors('      path: /pages\n', `      path: /pages\n      inputs: { email: { kind: text, class: ${c} } }\n`), c).toMatch(url)
+      expect(portalErrors('        id: { kind: id, class: normal }\n', `        id: { kind: id, class: normal }\n        email: { kind: text, class: ${c} }\n`), c).toMatch(url)
+    }
+    expect(portalErrors(read, `${read}    inputs: { day: { kind: date, class: normal } }\n`)).toBe('')
+    // An {id} in a POST's URL too.
+    expect(portalErrors('    path: /resend\n    inputs:\n', '    path: "/resend/{id}"\n    inputs:\n      id: { kind: id, class: personal }\n')).toMatch(url)
+    // The fixture's search and act take personal inputs in the body: valid(PORTAL) above; a document's search too.
+    expect(portalErrors('words: { kind: text, class: normal }', 'words: { kind: text, class: personal }')).toBe('')
+  })
+
+  it('an answer is read by fixed names: no path, wildcard or free-form object', () => {
+    const name = 'name: { class: personal, keep: summary, outside: true }'
+    for (const key of ['"history/note"', '"history[*].note"', '"a.b"', '"*"', '"{entry}"']) expect(portalErrors(name, `${key}: { class: normal, keep: none }`), key).toMatch(/項目名です/)
+    // A list is `each` with fixed fields, one level deep.
+    const note = '          note: { class: sensitive, keep: none }\n'
+    expect(portalErrors(note, '          "*": { class: sensitive, keep: none }\n')).toMatch(/each の「\*」は項目名です/)
+    expect(portalErrors(note, '          note:\n            each:\n              deep: { class: normal, keep: none }\n')).toMatch(/知らない項目「each」/)
+    expect(portalErrors('        each:\n' + note, '        each: {}\n')).toMatch(/each は「項目/)
+    expect(portalErrors('      history:\n        each:\n' + note, '      history: { class: normal, keep: none, each: { note: { class: normal, keep: none } } }\n')).toMatch(/知らない項目「class」/)
+    expect(portalErrors('      history:\n        each:\n' + note, '      history: {}\n')).toMatch(/class は normal/)
+    // The other answer fields are one name too.
+    expect(portalErrors('status_field: status', 'status_field: data.status')).toMatch(/status_field は項目名/)
+    expect(portalErrors('items: events', 'items: data.events')).toMatch(/items は項目名/)
+    expect(portalErrors('type_field: type', 'type_field: data.type')).toMatch(/type_field は項目名/)
+    expect(portalErrors('next: next_cursor }', 'next: paging.next }')).toMatch(/param \/ next は項目名/)
+    expect(portalErrors('id_field: account_id', 'id_field: data.id')).toMatch(/id_field は項目名/)
+    expect(portalErrors('environment_field: environment', 'environment_field: data.env')).toMatch(/environment_field は項目名/)
+    expect(portalErrors('      person_ref: { class: personal, keep: pointer }\n      kind:', '      data.ref: { class: personal, keep: pointer }\n      kind:')).toMatch(/fields の「data.ref」は項目名/)
+  })
+
+  it('an error answer has one shape: no field to point at', () => {
+    expect(portalErrors('errors: { map:', 'errors: { field: code, map:')).toMatch(/本文の一番上の code/)
+    expect(portalErrors('errors: { map:', 'errors: { field: error.code, map:')).toMatch(/本文の一番上の code/)
+  })
+
+  it('every call says who acted: a member header, an address only if wanted; there is no key for a run with no member', () => {
+    expect(portalErrors('member_header: X-Sample-Actor, ', '')).toMatch(/member_header: ヘッダーの名前/)
+    expect(valid(edited(PORTAL, ', email_header: X-Sample-Email', '')).manifest.calling?.actor).toEqual({ memberHeader: 'X-Sample-Actor', emailHeader: null })
+    expect(portalErrors('actor: { member_header', 'actor: { system: robot, member_header')).toMatch(/知らない項目「system」/)
+    expect(portalErrors('actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }\n', '')).toMatch(/actor（誰の操作か/)
   })
 
   it('a header cannot take over the key or what the way out owns', () => {
@@ -248,8 +298,9 @@ describe('plugin contract 3: what a connector declares', () => {
 
   it('an act can be told apart and never doubled: idempotency, the account, the key', () => {
     expect(portalErrors('    idempotency: { style: header }\n', '')).toMatch(/idempotency/)
-    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id }\n', '')).toMatch(/account_info/)
-    expect(portalErrors(', id_field: account_id', '')).toMatch(/id_field/)
+    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }\n', '')).toMatch(/account_info/)
+    expect(portalErrors(', id_field: account_id', '')).toMatch(/id_field と environment_field/)
+    expect(portalErrors(', environment_field: environment', '')).toMatch(/id_field と environment_field/)
     expect(portalErrors('auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }\n', '')).toMatch(/auth（鍵の渡し方）/)
     expect(portalErrors('    nature: people\n', '')).toMatch(/nature は/)
     expect(portalErrors('    label: もう一度送る\n', '')).toMatch(/label を書いてください/)
@@ -257,6 +308,7 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('    returns:\n      state: { class: normal, keep: none }\n', '')).toMatch(/returns（受け取る項目）/)
     // An act has no read-only twin: a read cannot carry what only an act may.
     expect(portalErrors('    kind: read\n    path: /status\n', '    kind: read\n    nature: people\n    path: /status\n')).toMatch(/知らない項目「nature」/)
+    expect(portalErrors('    kind: search\n', '    kind: search\n    nature: people\n')).toMatch(/知らない項目「nature」/)
   })
 
   it('what arrives by itself carries only normal fields or pointers', () => {

@@ -9,29 +9,40 @@ contract: 3
 service: sample-portal
 base_url: https://portal.sample.example/api
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
-account_info: { method: GET, path: /account, id_field: account_id }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
 actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
 limits: { per_minute: 60 }
-errors: { field: code, map: { STATE_CHANGED: check_wait, BAD_INPUT: refused } }
-result: { path: "/operations/{operation_id}", status_field: status, map: { done: applied, in_progress: pending, unknown_key: not_found } }
+errors: { map: { STATE_CHANGED: check_wait, BAD_INPUT: refused } }
+result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending, unknown_key: not_found } }
 calls:
   diagnose:
     label: 状態を調べる
     kind: read
-    path: "/people/{person_ref}/diagnosis"
+    path: "/people/{id}/diagnosis"
     inputs:
-      person_ref: { kind: id, class: personal }
+      id: { kind: id, class: normal }
     returns:
       name: { class: personal, keep: summary, outside: true }
       status: { class: normal, keep: summary }
-      "history/{entry}/note": { class: sensitive, keep: none }
+      history:
+        each:
+          note: { class: sensitive, keep: none }
+  find_person:
+    label: メールで人を探す
+    kind: search
+    path: /people/search
+    inputs:
+      email: { kind: text, class: personal }
+    items: people
+    returns:
+      person_ref: { class: normal, keep: pointer }
   pages:
     label: 案内のページ
     kind: document
     page:
-      path: "/pages/{page_ref}"
+      path: "/pages/{id}"
       inputs:
-        page_ref: { kind: id, class: normal }
+        id: { kind: id, class: normal }
       returns:
         body: { class: normal, keep: pointer }
     list:

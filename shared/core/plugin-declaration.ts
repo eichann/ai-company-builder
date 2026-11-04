@@ -217,6 +217,8 @@ export const CALL_AUTH_FORMATS = ['bearer', 'plain'] as const
 export const CALL_AUTH_SLOTS = ['read', 'act'] as const
 export const CALL_SIGNATURE_SCHEMES = ['hmac_sha256_ts_body'] as const
 export const CALL_IDEMPOTENCY_STYLES = ['header'] as const
+/** What the member header says on a run with no member. Fixed: the service conforms. */
+export const ACTOR_SYSTEM = 'system'
 /** Besides `role:<name>`, all a call's `who` may say: there is no record, so no person field and no `viewer`. */
 export const CALL_ACTORS = ['admin', 'ai'] as const
 
@@ -235,12 +237,16 @@ export interface PluginCallInput {
   label: string | null
 }
 
-/** One request: a path under `base_url` whose `{name}` placeholders are `id` inputs, its inputs and what is kept of the answer. */
+/** A list of entries with fixed fields, one level deep (`each`). */
+export interface PluginReturnList { each: Record<string, PluginDataField> }
+export type PluginReturn = PluginDataField | PluginReturnList
+
+/** One request: a path under `base_url` (`{id}` its only placeholder, filled by the input `id`), its inputs and what is kept of the answer. */
 export interface PluginCallRequest {
   path: string
   inputs: Record<string, PluginCallInput>
-  /** Field, or a path to one (`items/{item}/name`, `{item}` standing for each entry) → its rule. */
-  returns: Record<string, PluginDataField>
+  /** A fixed field of the answer → its rule. */
+  returns: Record<string, PluginReturn>
 }
 
 /** Paging of a list, a search or a poll: the query parameter sent and the answer's field holding the next value. */
@@ -258,8 +264,10 @@ interface PluginCallBase {
   /** The business plugin's `decision` (act only). False on a connector's own. */
   decision: boolean
 }
-/** GET. */
+/** GET: inputs in the query, so all `class: normal`. */
 export interface PluginReadCall extends PluginCallBase, PluginCallRequest { kind: 'read' }
+/** POST, reading only: inputs in the body, the way to look something up by personal data. */
+export interface PluginSearchCall extends PluginCallBase, PluginCallListing { kind: 'search' }
 /** POST: it changes something outside. */
 export interface PluginActCall extends PluginCallBase, PluginCallRequest {
   kind: 'act'
@@ -267,23 +275,24 @@ export interface PluginActCall extends PluginCallBase, PluginCallRequest {
   idempotency: { style: typeof CALL_IDEMPOTENCY_STYLES[number] }
   undo: 'none'
 }
-/** GET: a document store, read page by page. */
+/** A document store: `page` and `list` GET, `search` POST. */
 export interface PluginDocumentCall extends PluginCallBase {
   kind: 'document'
   page: PluginCallRequest
   list: PluginCallListing | null
   search: PluginCallListing | null
 }
-export type PluginCall = PluginReadCall | PluginActCall | PluginDocumentCall
+export type PluginCall = PluginReadCall | PluginSearchCall | PluginActCall | PluginDocumentCall
 
 /** How a contract-3 connector is called. Every part is the core's to carry out; a declaration only chooses. */
 export interface PluginCalling {
   auth: { type: 'company_key'; header: string; format: typeof CALL_AUTH_FORMATS[number]; slots: Array<typeof CALL_AUTH_SLOTS[number]> } | null
-  /** Headers telling the outside who acted. */
-  actor: { memberHeader: string | null; emailHeader: string | null } | null
+  /** Headers telling the outside who acted; the member header says `ACTOR_SYSTEM` on a run with no member. */
+  actor: { memberHeader: string; emailHeader: string | null } | null
   limits: { perMinute: number } | null
-  errors: { field: string; map: Record<string, CallFailureKind> } | null
-  /** Where the outcome of an act is asked for: `{operation_id}` the only placeholder. */
+  /** The `code` at the top level of an error answer → what it means. */
+  errors: { map: Record<string, CallFailureKind> } | null
+  /** Where the outcome of an act is asked for: `{id}` once. */
   result: { path: string; statusField: string; map: Record<string, CallResultState> } | null
   signature: { scheme: typeof CALL_SIGNATURE_SCHEMES[number]; header: string; timestampHeader: string; maxAge: string } | null
 }
@@ -545,10 +554,10 @@ export interface PluginManifest {
    * The one GET that names the outside account the key belongs to (HubSpot:
    * the portal id). Required when the connector writes (an update or create
    * operation): a connection is bound to one account, and nothing is ever
-   * written to another (review §5.7). `idField` (contract 3): the answer's
-   * field holding the account's id.
+   * written to another (review §5.7). Contract 3: the answer's fields holding
+   * the account's id and its environment.
    */
-  accountInfo: (PluginEndpoint & { idField?: string }) | null
+  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string }) | null
   /**
    * A connector: its service's notification mail senders (`notification_senders`: addresses or
    * `@domain`, notification-senders.ts), left out of the mail intake while it is installed and on.

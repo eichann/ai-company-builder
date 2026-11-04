@@ -40,7 +40,7 @@
  *
  * Owner rules (§8, 2026-10-31):
  * 1. The declaration does not grow into a language: no conditions, loops,
- *    expressions or templating beyond a path's `{name}` segments. A system it cannot describe
+ *    expressions or templating beyond `{id}`. A system it cannot describe
  *    needs the (future, sandboxed) second kind of plugin, not a new key here.
  * 2. Type names do not carry their layer (`deal`, never `pack_deal`,
  *    `company_deal` or `hubspot_deal`), so a type can move between core,
@@ -78,10 +78,10 @@ export {
   PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, SIMILAR_BY, noFlow,
   type PluginSearch, type SimilarBy, type SimilarRule,
   type FlowPart, type PluginSetting,
-  CALL_ACTORS, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
+  ACTOR_SYSTEM, CALL_ACTORS, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
   type CallFailureKind, type CallNature, type CallResultState, type CallUse, type DataClass, type EventUse, type KeepRule,
   type PluginActCall, type PluginCall, type PluginCallInput, type PluginCallListing, type PluginCallRequest, type PluginCalling, type PluginCursor, type PluginDataField,
-  type PluginDocumentCall, type PluginEvent, type PluginPoll, type PluginReadCall,
+  type PluginDocumentCall, type PluginEvent, type PluginPoll, type PluginReadCall, type PluginReturn, type PluginReturnList, type PluginSearchCall,
   type PluginRole, type PluginRoleDeclaration, type PluginStatePoint, type PluginStep, type PluginStepProcedure, type PluginStepProcedurePin, type PluginStepStart, type PluginUi, type PluginUpgrade, type UndoKind,
 } from './plugin-declaration'
 export {
@@ -93,7 +93,7 @@ export {
   type PluginSignature,
 } from './plugin-fingerprint'
 export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
-export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS, callPathPlaceholders } from './plugin-call-declaration'
+export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'
