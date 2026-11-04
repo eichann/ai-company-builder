@@ -22,6 +22,7 @@ paths:
   - "client/shared/today-folder.ts"
   - "client/tests/today-folder.test.ts"
   - "client/src/shared/lib/todayFolderSetting.ts"
+  - "client/src/shared/lib/googlePermission.ts"
   - "client/src/features/workspace/hooks/useTodayFolder.ts"
   - "client/src/features/settings/components/TodayFolderSetting.tsx"
   - "client/shared/consultation-task.ts"
@@ -114,7 +115,13 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   other; a department tab never narrows it (`tests/tasks-list.test.ts`). Where the company hides
   the tab for that department (`taskListDepartmentIds`), the title bar's 「あなたの番」 still
   counts it. `useCalendarToday`:
-  at mount and every 10 minutes.
+  at mount, every 10 minutes, and **at once when the app sees the member's Google permission
+  change** (owner FB 2026-11-04: 「Google の設定を全部終えたのに、今日の予定が出ない」 — the list said
+  「許可をすると…」 for up to 10 minutes). Settings' Google reads (`features/settings/api.ts`
+  `getGoogleStatus`, `disconnectGoogle`: 設定 →「Google」 and 「仕事の道具をつなぐ」) tell
+  `src/shared/lib/googlePermission.ts`, which signals only when connected / status / features /
+  featuresOff differ from the last read for that company (the first read is silent). Test:
+  `tests/ui/connect-tools.spec.ts` 「today's calendar is read again as soon as Google is allowed…」.
 - `model.ts` (pure, `model.test.ts`): "today" is the company's day (`companyNow`, Japan time until a
   setting exists). **By turn**: 引き受け待ち, あなたの番 (today's meetings still to come mixed in),
   AI の番, ほかの人の番・返事待ち, 先のこと (a task resting in the member's turn due after this week —

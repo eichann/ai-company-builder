@@ -255,7 +255,9 @@ before the redirect was on). The admin view says `practice` (「練習用の Goo
   メールを送る — no OAuth, scope, token or plugin on screen.
 - App 設定 →「Google」 (tab after 「自分の鍵」 in 「AI と連携」:
   `client/src/features/settings/components/GoogleSection.tsx`, `hooks/useGoogle.ts`, ports
-  `GoogleReads` / `GoogleOutbound` in `features/settings/api.ts`; words and the view in
+  `GoogleReads` / `GoogleOutbound` in `features/settings/api.ts`, whose status and 「許可をやめる」
+  answers also go to `src/shared/lib/googlePermission.ts` so the task list re-reads today's
+  calendar when the permission changed (`tasks-ui.md`); words and the view in
   `client/shared/google.ts`). Main: `client/electron/features/google/ipc.ts` —
   `google:status(companyId)`, `google:connect(companyId, features)`, `google:disconnect(companyId)`;
   the session cookie stays in main; answers are the server's `MyGoogle` or a sentence built from

@@ -7,6 +7,7 @@ import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature } from '../../../shared/google'
 import type { SlackFeature } from '../../../shared/slack'
 import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
+import { googlePermission } from '../../shared/lib/googlePermission'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
@@ -124,16 +125,21 @@ export type GoogleReads = ElectronPort<'getGoogleStatus'>
 /** 「Google で許可」 (main opens Google's page in the browser) and 「許可をやめる」. */
 export type GoogleOutbound = ElectronPort<'connectGoogle' | 'disconnectGoogle'>
 
-export function getGoogleStatus(companyId: string, reads: GoogleReads = window.electronAPI) {
-  return reads.getGoogleStatus(companyId)
+/** Every answer is also told to `googlePermission`: a change re-reads today's calendar at once. */
+export async function getGoogleStatus(companyId: string, reads: GoogleReads = window.electronAPI) {
+  const r = await reads.getGoogleStatus(companyId)
+  if (r?.success) googlePermission.seen(companyId, r.data)
+  return r
 }
 
 export function connectGoogle(companyId: string, features: GoogleFeature[], outbound: GoogleOutbound = window.electronAPI) {
   return outbound.connectGoogle(companyId, features)
 }
 
-export function disconnectGoogle(companyId: string, outbound: GoogleOutbound = window.electronAPI) {
-  return outbound.disconnectGoogle(companyId)
+export async function disconnectGoogle(companyId: string, outbound: GoogleOutbound = window.electronAPI) {
+  const r = await outbound.disconnectGoogle(companyId)
+  if (r?.success) googlePermission.seen(companyId, r.data)
+  return r
 }
 
 /** Sends the .env key `name` to the server as one's own key; the .env loses it only once the server kept it. */

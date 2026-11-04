@@ -3,13 +3,11 @@
 import { useCallback, useRef, useState } from 'react'
 import { GOOGLE_OPENED_TEXT, type GoogleFeature, type MyGoogle } from '../../../../shared/google'
 import { useInterval } from '../../../shared/hooks/useInterval'
+import { googlePermissionKey } from '../../../shared/lib/googlePermission'
 import { connectGoogle, disconnectGoogle, getGoogleStatus } from '../api'
 
 const POLL_MS = 3000
 const WAIT_MS = 2 * 60 * 1000
-
-const sameState = (a: MyGoogle | null, b: MyGoogle) =>
-  !!a && a.connected === b.connected && a.status === b.status && a.features.join() === b.features.join()
 
 export function useGoogle(companyId: string) {
   const [data, setData] = useState<MyGoogle | null>(null)
@@ -38,7 +36,7 @@ export function useGoogle(companyId: string) {
     if (!waiting) return
     if (Date.now() > waiting.until) { setWaiting(null); setMessage(null); return }
     void reload().then(r => {
-      if (r.success && !sameState(waiting.before, r.data)) { setWaiting(null); setMessage(null) }
+      if (r.success && googlePermissionKey(waiting.before) !== googlePermissionKey(r.data)) { setWaiting(null); setMessage(null) }
     })
   }, waiting ? POLL_MS : null)
 
