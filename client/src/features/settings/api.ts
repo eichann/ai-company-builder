@@ -136,6 +136,17 @@ export function connectGoogle(companyId: string, features: GoogleFeature[], outb
   return outbound.connectGoogle(companyId, features)
 }
 
+/** 「スプレッドシートを中継で使う」: the member's view and own records; 「やめる」 / back on (no consent). */
+export type GoogleRelayPort = ElectronPort<'getGoogleRelay' | 'setGoogleRelay'>
+
+export function getGoogleRelay(companyId: string, port: GoogleRelayPort = window.electronAPI) {
+  return port.getGoogleRelay(companyId)
+}
+
+export function setGoogleRelay(companyId: string, on: boolean, port: GoogleRelayPort = window.electronAPI) {
+  return port.setGoogleRelay(companyId, on)
+}
+
 export async function disconnectGoogle(companyId: string, outbound: GoogleOutbound = window.electronAPI) {
   const r = await outbound.disconnectGoogle(companyId)
   if (r?.success) googlePermission.seen(companyId, r.data)

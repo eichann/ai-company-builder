@@ -53,6 +53,7 @@ import type { MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbou
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import type { GoogleRelayResult } from './google'
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
 import type { RecordThreadResult } from './threads'
 import type { PluginBridgeAnswer } from './plugin-bridge-ops'
@@ -699,6 +700,9 @@ export interface IpcInvokeChannels {
   // company offers (the sign-in URL stays in main), and 「あとで」 per service.
   'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
   'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
+  // 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): the member's view and own records; 「やめる」 / back on.
+  'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
+  'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
@@ -1066,6 +1070,8 @@ export interface ElectronAPI {
   setSlackFeature: Invoke<'slack:setFeature'>
   connectGoogleAll: Invoke<'google:connectAll'>
   markGoogleSeen: Invoke<'google:markSeen'>
+  getGoogleRelay: Invoke<'google:relay'>
+  setGoogleRelay: Invoke<'google:setRelay'>
   markSlackSeen: Invoke<'slack:markSeen'>
   getRecordThread: Invoke<'threads:get'>
   callPluginBridge: Invoke<'plugins:bridge'>

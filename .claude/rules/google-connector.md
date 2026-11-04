@@ -27,6 +27,9 @@ paths:
   - "shared/core/google-relay.ts"
   - "server/src/services/google-relay.ts"
   - "server/tests/integration/google-relay.test.ts"
+  - "admin/src/components/key-broker/google-relay.tsx"
+  - "client/src/features/settings/components/GoogleRelayCard.tsx"
+  - "client/src/features/settings/hooks/useGoogleRelay.ts"
 ---
 
 # The Google connection (milestone 4 G3: 「Google で許可」)
@@ -193,6 +196,19 @@ grant** — never a key, never a service account — so every switch above appli
   A member stop survives the member's re-consent (it is not on the grant).
 - **Member**: `GET /me/google/relay` (`MyGoogleRelay`: offered / allowed / turned off per service,
   `stopped: company | member | null`, cap and today's count, their own latest 50 records only).
+- **Screens**: admin 「API キー」→ card 「本人の許可で中継する」
+  (`admin/src/components/key-broker/google-relay.tsx`, owners / admins): the services as
+  checkboxes (スプレッドシート; 「あとから足せるもの」 lists `GOOGLE_RELAY_LATER`), 1人あたりの上限,
+  全員の中継を止める / 再開 (asks first), 許可しているメンバー with today's count and
+  この人の中継を止める / 再開 (asks first), the records (filter by person). App 設定 → Google →
+  「スプレッドシートを中継で使う」 (`GoogleRelayCard.tsx`, `hooks/useGoogleRelay.ts`, shown only
+  while the company offers it, `googleRelayCardView`): ［許可する］ = 「Google で許可」 for `sheets`
+  (consent), or, when the member only turned it off, back on without a consent; ［やめる］ (asks
+  first) = the member's own switch; the admin's stop; the member's own records. IPC (lane A):
+  `google:relay`, `google:setRelay(companyId, on)` (main sends only `{ feature: 'sheets', on }`;
+  answers the server's `MyGoogleRelay` or a status sentence). Record words:
+  `googleRelayRecordWords` (shared/core). Tests: `client/tests/google-relay-card.test.ts`,
+  `client/tests/google-connect.test.ts` (setRelay), `admin/tests/google-relay.test.tsx`.
 - The name `google` is reserved in the key broker (`PERSON_RELAY_SERVICES`): no company key
   (400 `SERVICE_RESERVED`), no generic service id.
 - Token lifetime: the app renews per chat turn (≥ 10 minutes left, `REFRESH_MARGIN_MS`); one turn

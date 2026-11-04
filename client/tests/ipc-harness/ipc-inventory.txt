@@ -126,6 +126,8 @@ contract.invoke google:connect
 contract.invoke google:connectAll
 contract.invoke google:disconnect
 contract.invoke google:markSeen
+contract.invoke google:relay
+contract.invoke google:setRelay
 contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
@@ -369,6 +371,7 @@ contract.type ElectronAPI.getConsultationTopics = getConsultationTopics: Invoke<
 contract.type ElectronAPI.getDefaultParentFolder = getDefaultParentFolder: Invoke<'companySetup:defaultParentFolder'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
+contract.type ElectronAPI.getGoogleRelay = getGoogleRelay: Invoke<'google:relay'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
@@ -479,6 +482,7 @@ contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundM
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
@@ -732,6 +736,8 @@ contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [co
 contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:relay' = 'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
+contract.type IpcInvokeChannels.'google:setRelay' = 'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
@@ -997,6 +1003,8 @@ main.handle google:connect @ features/google/ipc.ts (companyId: string, features
 main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
 main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
+main.handle google:relay @ features/google/ipc.ts (companyId: string)
+main.handle google:setRelay @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
@@ -1231,6 +1239,8 @@ preload getDepartments -> invoke api:getDepartments($0)
 preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
 preload getEnvStatus -> invoke env:status($0)
 preload getEnvStatus : (rootPath: string) => Promise<EnvStatusResult>
+preload getGoogleRelay -> invoke google:relay($0)
+preload getGoogleRelay : (companyId: string) => Promise<GoogleRelayResult>
 preload getGoogleStatus -> invoke google:status($0)
 preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
@@ -1451,6 +1461,8 @@ preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setGoogleRelay -> invoke google:setRelay($0, $1)
+preload setGoogleRelay : (companyId: string, on: boolean) => Promise<GoogleRelayResult>
 preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
 preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
