@@ -22,7 +22,7 @@
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import { GOOGLE_API_HOSTS, GOOGLE_SCOPE, googleCompanyFeatureOn, googleCompanySwitched } from '../../shared/core/google'
 import {
-  GOOGLE_RELAY_CAP, GOOGLE_RELAY_SERVICES, SHEETS_OPERATIONS, checkSheetsBatchUpdate, isGoogleRelayCap, isGoogleRelayService, parseSheetsCall,
+  GOOGLE_RELAY_CAP, GOOGLE_RELAY_REFUSALS_PER_DAY, GOOGLE_RELAY_SERVICES, SHEETS_OPERATIONS, checkSheetsBatchUpdate, isGoogleRelayCap, isGoogleRelayService, parseSheetsCall,
   sheetsPathParts, sheetsQuery, type GoogleRelayService, type SheetsOperation,
 } from '../../shared/core/google-relay'
 import type { GoogleChangeAction, GoogleRelayAdminView, GoogleRelayMember, GoogleRelayRecord, GoogleUnavailableReason, MyGoogleRelay } from '../../shared/types/google'
@@ -58,6 +58,10 @@ export interface GoogleRelayDeps {
   isMember(companyId: string, userId: string): boolean
   /** The member's relayed calls counted for a day (the key broker's daily use, its own row per member). */
   usage: { count(companyId: string, userId: string, day: string): number; add(companyId: string, userId: string, day: string): void }
+  /** The member's refused calls counted for a day (only for how many are recorded). */
+  refusals: { count(companyId: string, userId: string, day: string): number; add(companyId: string, userId: string, day: string): void }
+  /** The company's AI emergency stop (M2, agent-stop.md); asked again right before the call leaves. */
+  companyStopped(companyId: string): boolean
   /** The caps' day of a moment (the key broker's: Japan by default). */
   dayOf(ms: number): string
   /** The relay's lines in the AI action log, newest first (one member, or everyone with null). */
@@ -203,35 +207,49 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
     }
   }
 
-  const relay: PersonRelay = {
-    async relay(call: PersonRelayCall): Promise<PersonRelayResult> {
-      const { who } = call
-      const out = (status: number, code: RelayErrorCode, message: string, extra: Partial<PersonRelayResult> = {}): PersonRelayResult =>
-        ({ status, body: new Uint8Array(0), refusal: { code, message }, bytesIn: 0, ...extra })
+  type Out = (status: number, code: RelayErrorCode, message: string, extra?: Partial<PersonRelayResult>) => PersonRelayResult
+  const out: Out = (status, code, message, extra = {}) => ({ status, body: new Uint8Array(0), refusal: { code, message }, bytesIn: 0, ...extra })
 
-      // 1. Where: only a relay service's API (Sheets), a plain path.
+  /**
+   * The stops and the company's service switch, read fresh: asked before the body is read and
+   * again right before the call leaves (a stop pressed while a large body arrives applies).
+   */
+  function stopNow(who: PersonRelayCall['who'], service: GoogleRelayService, meta: Partial<PersonRelayResult>): { settings: GoogleRelaySettingsRow } | { refused: PersonRelayResult } {
+    if (deps.companyStopped(who.companyId)) return { refused: out(403, 'ACB_STOPPED', '管理者が AI の利用を一時停止しています。再開されるまで使えません。', meta) }
+    const connectors = connectorsOf(who.companyId)
+    const settings = connectors.relaySettings()
+    if (!settings) return { refused: out(403, 'ACB_GOOGLE_OFF', 'この会社では Google がつながっていません。管理者に確かめてください。', meta) }
+    if (settings.stopped) return { refused: out(403, 'ACB_STOPPED', '管理者が Google の中継を止めています。再開されるまで使えません。', meta) }
+    if ((settings.stoppedUserIds ?? []).includes(who.userId)) {
+      return { refused: out(403, 'ACB_STOPPED', '管理者が、あなたの Google の中継を止めています。再開されるまで使えません。', meta) }
+    }
+    if (!servicesOn(connectors).includes(service)) {
+      return { refused: out(403, 'ACB_GOOGLE_OFF', 'この会社では、スプレッドシートの中継を使っていません。管理者に確かめてください。', meta) }
+    }
+    return { settings }
+  }
+
+  async function relayOnce(call: PersonRelayCall): Promise<PersonRelayResult> {
+    {
+      const { who } = call
+
+      // 1. Where: only a relay service's API (Sheets), a plain path. The path sent on is the raw
+      // path without its first segment (whatever its spelling, `%73heets` included).
       const checked = checkUpstreamPath(call.rawPath)
       if (!checked) return out(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。')
-      const service = checked.decoded.split('/')[1]
+      const decodedSegs = checked.decoded.split('/')
+      const service = decodedSegs[1]
       if (!isGoogleRelayService(service)) {
         return out(403, 'ACB_NOT_RELAYED', 'Google の中継は、いまスプレッドシート（/sheets/v4/spreadsheets/…）だけです。')
       }
-      const apiPath = call.rawPath.slice(service.length + 1)
-      const apiDecoded = checked.decoded.slice(service.length + 1)
+      const apiPath = `/${call.rawPath.split('/').slice(2).join('/')}`
+      const apiDecoded = `/${decodedSegs.slice(2).join('/')}`
       const parsed = parseSheetsCall(call.method, apiDecoded)
       const meta = { host: GOOGLE_API_HOSTS.sheets, path: apiDecoded.slice(0, 200), ...(parsed.ok ? { operation: parsed.call.operation } : {}) }
 
-      // 2. The admin's stops and the company's service switch.
-      const connectors = connectorsOf(who.companyId)
-      const settings = connectors.relaySettings()
-      if (!settings) return out(403, 'ACB_GOOGLE_OFF', 'この会社では Google がつながっていません。管理者に確かめてください。', meta)
-      if (settings.stopped) return out(403, 'ACB_STOPPED', '管理者が Google の中継を止めています。再開されるまで使えません。', meta)
-      if ((settings.stoppedUserIds ?? []).includes(who.userId)) {
-        return out(403, 'ACB_STOPPED', '管理者が、あなたの Google の中継を止めています。再開されるまで使えません。', meta)
-      }
-      if (!servicesOn(connectors).includes(service)) {
-        return out(403, 'ACB_GOOGLE_OFF', 'この会社では、スプレッドシートの中継を使っていません。管理者に確かめてください。', meta)
-      }
+      // 2. The admin's stops, the AI emergency stop and the company's service switch.
+      const first = stopNow(who, service, meta)
+      if ('refused' in first) return first.refused
 
       // 3. What: a listed call, never a deletion; listed query parameters only.
       if (call.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n))) return out(403, 'ACB_NOT_RELAYED', 'この操作は、ACB の中継では通しません。', meta)
@@ -265,9 +283,12 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
         }
       }
 
-      // 5. The member's daily cap (counted before the call leaves, like the key broker's caps).
+      // 5. The stops again (the body may have taken a while), then the member's daily cap
+      // (counted before the call leaves, like the key broker's caps).
+      const again = stopNow(who, service, { ...meta, bytesIn })
+      if ('refused' in again) return again.refused
       const day = deps.dayOf(clock.nowMs())
-      const cap = capOf(settings)
+      const cap = capOf(again.settings)
       if (deps.usage.count(who.companyId, who.userId, day) >= cap) {
         return out(429, 'ACB_OVER_CAP', `Google の中継の、今日の上限（${cap} 回）に達しました。明日になるのを待つか、管理者に上限を見直してもらってください。`, { ...meta, bytesIn })
       }
@@ -301,6 +322,17 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       }
       const status = result.kind === 'rate-limited' ? 429 : 502
       return { status, body: googleError(status, status === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAVAILABLE', 'Google が混み合っているか、使えませんでした。時間をおいてもう一度お試しください。'), bytesIn, ...meta }
+    }
+  }
+
+  const relay: PersonRelay = {
+    async relay(call: PersonRelayCall): Promise<PersonRelayResult> {
+      const result = await relayOnce(call)
+      if (!result.refusal) return result
+      // Refusals do not count against the cap: past a day's limit they are still refused, not recorded.
+      const day = deps.dayOf(clock.nowMs())
+      deps.refusals.add(call.who.companyId, call.who.userId, day)
+      return deps.refusals.count(call.who.companyId, call.who.userId, day) > GOOGLE_RELAY_REFUSALS_PER_DAY ? { ...result, unrecorded: true } : result
     },
   }
 

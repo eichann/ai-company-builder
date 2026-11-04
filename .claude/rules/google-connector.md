@@ -150,15 +150,21 @@ grant** — never a key, never a service account — so every switch above appli
   deletion**: `values/<range>:clear`, `values:batchClear(ByDataFilter)` and a batchUpdate with any
   `delete…` / `clear…` request → 403 `ACB_DELETE_REFUSED`; other batchUpdate kinds only from
   `SHEETS_BATCH_UPDATE_ALLOWED` (insertDimension, insertRange, appendDimension, appendCells,
-  updateCells, repeatCell, autoResizeDimensions, updateDimensionProperties, updateBorders,
-  mergeCells, unmergeCells, addSheet, updateSheetProperties), one kind per request, ≤ 500 — any
-  other kind (sortRange, cutPaste, findReplace, …) → `ACB_NOT_RELAYED`. Query parameters only from
-  `SHEETS_QUERY_ALLOWED` (`key` dropped; `access_token` & co. refused). Method-override headers
-  refused. Nothing of the client's headers is forwarded (the Google client builds its own).
+  addSheet, autoResizeDimensions, updateDimensionProperties, updateBorders, unmergeCells, and
+  copyPaste only with exactly one paste type `PASTE_FORMULA` — anken-sync's write_keisu.py copies
+  the formula columns into the row it inserted), one camelCase kind per request, ≤ 500 — any other
+  kind → `ACB_NOT_RELAYED`. Left out because they wipe like a deletion (review of #580):
+  updateCells (`fields: *` without rows), repeatCell (an empty cell), mergeCells (keeps only the
+  top-left value), updateSheetProperties (a smaller `gridProperties.rowCount` / `columnCount`
+  deletes rows / columns), copyPaste of values, cutPaste, sortRange, findReplace. Query parameters
+  only from `SHEETS_QUERY_ALLOWED` (`key` dropped; `access_token` & co. refused). Method-override
+  headers refused. Nothing of the client's headers is forwarded (the Google client builds its
+  own). The path sent on is the raw path without its first segment.
   Overwriting cells with values (also empty ones) is an edit and passes.
 - **Order, all before anything leaves ACB**: token → the company's AI stop (M2) → path → the
   company-wide relay stop → this member's relay stop → the company's service switch → the call →
-  query → body (JSON ≤ 10 MB; batchUpdate kinds) → the member's daily cap (default 500, admin
+  query → body (JSON ≤ 10 MB; batchUpdate kinds) → the AI stop, both relay stops and the service
+  switch again (a stop pressed while the body arrived applies) → the member's daily cap (default 500, admin
   1–10000; counted in `broker_usage` under the key id `person-relay:google`, before sending, like
   the key caps) → `googleClient.request` (operator stop, client on, vault, member, grant, scope,
   company feature, the member's own 「やめる」). No person is asked (auto + ledger).
@@ -173,6 +179,12 @@ grant** — never a key, never a service account — so every switch above appli
   department of the token; `googleClient` adds none: `recordedByCaller`). Refusals: deletion →
   guard-denied `no-deletion`, unlisted → `destination-not-allowed`, no permission →
   `key-not-available`, cap → `over-cap`, stops / Google off → `stopped`. Never a cell's content.
+  Refusals do not count against the cap; past `GOOGLE_RELAY_REFUSALS_PER_DAY` (200) refused calls
+  of one member in a day they are still refused but not recorded (a looping script cannot flood
+  the log; counted in `broker_usage` under `person-relay:google:refused`).
+- **Accepted residual risks** (owner): a formula written into a sheet (`=IMPORTDATA()`, `=IMAGE()`)
+  makes Google fetch outside URLs; a sheet the member can edit can be overwritten with values (no
+  per-file designation, decision §2-7).
 - **Admin** (owner/admin): `GET /google/relay` (`GoogleRelayAdminView`: available, services,
   `capPerMemberPerDay`, `stopped`, members who allowed / were stopped with today's count, the latest
   100 records); `PUT /google/relay { services?, capPerMemberPerDay?, stopped? }` (history `relay`);

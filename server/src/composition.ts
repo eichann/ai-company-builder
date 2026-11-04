@@ -122,6 +122,8 @@ export function brokerCipherFromEnv(): BrokerCipherState {
 /** The relay's day for daily caps (YYYY-MM-DD at BROKER_DAY_UTC_OFFSET_MINUTES, default Japan). */
 /** The Google relay's per-member daily count in `broker_usage` (a key id no registered key can have). */
 const GOOGLE_RELAY_USAGE_KEY = 'person-relay:google'
+/** Its refused calls per member and day (only how many are recorded). */
+const GOOGLE_RELAY_REFUSED_KEY = 'person-relay:google:refused'
 
 export function brokerDayOf(ms: number): string {
   return new Date(ms + BROKER_DAY_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10)
@@ -478,6 +480,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       count: (companyId, userId, day) => repos.brokerKeys.usage(companyId, GOOGLE_RELAY_USAGE_KEY, userId, day).memberRequests,
       add: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, GOOGLE_RELAY_USAGE_KEY, userId, day, 1, 0),
     },
+    refusals: {
+      count: (companyId, userId, day) => repos.brokerKeys.usage(companyId, GOOGLE_RELAY_REFUSED_KEY, userId, day).memberRequests,
+      add: (companyId, userId, day) => repos.brokerKeys.addUsage(companyId, GOOGLE_RELAY_REFUSED_KEY, userId, day, 1, 0),
+    },
+    companyStopped: companyId => agentStops.companyStopped(companyId),
     dayOf: brokerDayOf,
     records: (companyId, userId, limit) => repos.agentEvents.page(companyId, { category: 'broker', tool: GOOGLE_RELAY_TOOL, ...(userId ? { userId } : {}) }, null, limit),
   })

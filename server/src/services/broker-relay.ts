@@ -104,6 +104,8 @@ export interface PersonRelayResult {
   path?: string
   operation?: string
   bytesIn: number
+  /** Not recorded (a member's refusals past the day's limit: a looping script must not flood the log). */
+  unrecorded?: boolean
 }
 
 export interface PersonRelay {
@@ -158,6 +160,8 @@ interface CallMeta {
   connection?: string
   /** A person relay's call (`values.append`), never its content. */
   operation?: string
+  /** The call is answered but not recorded (PersonRelayResult.unrecorded). */
+  unrecorded?: boolean
   model?: string
   bytesIn: number
   /** The request reached the provider (counted for the caps). */
@@ -354,7 +358,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const meta: CallMeta = { bytesIn: 0, forwarded: false }
       const answer = await relayInner(req, meta)
       const who = meta.grant ?? meta.who
-      if (!who) return answer
+      if (!who || meta.unrecorded) return answer
       const finish = (bytesOut: number, usage: UsageScanner | null, outcome: 'ok' | 'error' | 'unfinished') => {
         const tokensIn = usage?.tokensIn
         const tokensOut = usage?.tokensOut
@@ -468,6 +472,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         meta.path = r.path
         meta.operation = r.operation
         meta.bytesIn = r.bytesIn
+        meta.unrecorded = r.unrecorded
         if (r.refusal) return jsonError(r.status, r.refusal.code, r.refusal.message)
         return { status: r.status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body: r.body, grant: null }
       }

@@ -55,17 +55,31 @@ export const SHEETS_OPERATION_TEXT: Record<SheetsOperation, string> = {
 }
 
 /**
- * `spreadsheets:batchUpdate` request kinds that pass: adding rows / columns / cells, writing
- * cells, formatting and sizing. Anything else is refused — a `delete…` / `clear…` kind as a
- * deletion, any other kind (moving, sorting, find-and-replace, protection, …) as "not relayed".
- * Writing cells (`updateCells`, `repeatCell`) may overwrite values, as `values.update` may; that
- * is an edit the member could make, not a deletion of a sheet, row or range.
+ * `spreadsheets:batchUpdate` request kinds that pass: adding rows / columns / cells / sheets,
+ * sizing, borders, unmerging, and `copyPaste` with `pasteType: PASTE_FORMULA` only (anken-sync's
+ * write_keisu.py copies the formula columns into a row it inserted). Anything else is refused — a
+ * `delete…` / `clear…` kind as a deletion, any other kind as "not relayed". Left out on purpose
+ * because they can wipe what is there like a deletion (review of #580): `updateCells` (`fields: *`
+ * without rows clears a range), `repeatCell` (an empty cell repeated), `mergeCells` (drops every
+ * value but the top-left), `updateSheetProperties` (a smaller `gridProperties.rowCount` /
+ * `columnCount` deletes rows / columns), `copyPaste` of values or everything, `cutPaste`,
+ * `sortRange`, `findReplace`. Writing values (`values.update`, also empty strings) stays an edit.
+ * Request kinds are matched as Google names them (camelCase); a snake_case kind is unlisted.
  */
 export const SHEETS_BATCH_UPDATE_ALLOWED: readonly string[] = [
-  'insertDimension', 'insertRange', 'appendDimension', 'appendCells', 'updateCells', 'repeatCell',
-  'autoResizeDimensions', 'updateDimensionProperties', 'updateBorders', 'mergeCells', 'unmergeCells',
-  'addSheet', 'updateSheetProperties',
+  'insertDimension', 'insertRange', 'appendDimension', 'appendCells', 'addSheet',
+  'autoResizeDimensions', 'updateDimensionProperties', 'updateBorders', 'unmergeCells', 'copyPaste',
 ]
+
+/** Google's JSON accepts both `pasteType` and `paste_type`: compare field names in one form. */
+const fieldKey = (name: string) => name.replace(/_([a-z0-9])/g, (_, c: string) => c.toUpperCase())
+
+/** `copyPaste` passes only as a formula copy (exactly one paste type field, PASTE_FORMULA). */
+function copyPasteAllowed(v: unknown): boolean {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const types = Object.entries(v as Record<string, unknown>).filter(([k]) => fieldKey(k) === 'pasteType')
+  return types.length === 1 && types[0][1] === 'PASTE_FORMULA'
+}
 
 /** Query parameters the relay passes on (Google's documented ones for these calls); any other is refused. */
 export const SHEETS_QUERY_ALLOWED: readonly string[] = [
@@ -73,6 +87,13 @@ export const SHEETS_QUERY_ALLOWED: readonly string[] = [
   'includeValuesInResponse', 'responseValueRenderOption', 'responseDateTimeRenderOption', 'includeGridData',
   'excludeTablesInBandedRanges', 'fields', 'prettyPrint',
 ]
+
+/**
+ * Refused calls of one member per day that are recorded (a looping AI would otherwise fill the
+ * action log, since refusals do not count against the cap). Later refusals that day are still
+ * refused, but not recorded; calls that pass are always recorded.
+ */
+export const GOOGLE_RELAY_REFUSALS_PER_DAY = 200
 
 /** At most this many requests in one batchUpdate (Google allows more; a script's batch is small). */
 export const SHEETS_BATCH_LIMIT = 500
@@ -160,6 +181,9 @@ export function checkSheetsBatchUpdate(body: unknown): { ok: true; kinds: string
   const named = [...new Set(kinds)].map(k => k.slice(0, 40))
   if (kinds.some(k => /^(delete|clear)/i.test(k))) return { ok: false, refusal: 'deletion', kinds: named }
   if (kinds.some(k => !SHEETS_BATCH_UPDATE_ALLOWED.includes(k))) return { ok: false, refusal: 'not-relayed', kinds: named }
+  if (requests.some(r => 'copyPaste' in (r as object) && !copyPasteAllowed((r as { copyPaste: unknown }).copyPaste))) {
+    return { ok: false, refusal: 'not-relayed', kinds: named }
+  }
   return { ok: true, kinds: named }
 }
 

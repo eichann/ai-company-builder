@@ -144,7 +144,14 @@ export interface SentMessage {
   sentAt: string
 }
 
-export interface FakeGoogleRequestLog { method: string; path: string; status: number }
+export interface FakeGoogleRequestLog {
+  method: string
+  path: string
+  status: number
+  /** The query string (`?…`, or '') and every header value as received: a test can prove nothing of ACB's own token arrived. */
+  search: string
+  headerValues: string[]
+}
 
 export interface FakeGoogleFaults {
   /** Delay every answer by this many milliseconds (0 = none). */
@@ -287,6 +294,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   }
 
   const app = new Hono()
+  const seen = (c: Context) => {
+    const headerValues: string[] = []
+    c.req.raw.headers.forEach(v => { headerValues.push(v) })
+    return { search: new URL(c.req.url).search, headerValues }
+  }
 
   app.use('*', async (c, next) => {
     const control = c.req.path.startsWith('/__fake/')
@@ -296,11 +308,11 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const message = failStatus === 429 ? 'Resource has been exhausted (e.g. check quota).' : 'Internal error encountered.'
       const err = apiError(failStatus, message, failStatus === 429 ? 'rateLimitExceeded' : 'backendError')
       const res = c.json(err.body as object, failStatus as 500)
-      requests.push({ method: c.req.method, path: c.req.path, status: failStatus })
+      requests.push({ method: c.req.method, path: c.req.path, status: failStatus, ...seen(c) })
       return res
     }
     await next()
-    requests.push({ method: c.req.method, path: c.req.path, status: c.res.status })
+    requests.push({ method: c.req.method, path: c.req.path, status: c.res.status, ...seen(c) })
   })
 
   app.onError((err, c) => {
@@ -1105,6 +1117,48 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
             const range = v.range as { sheetId?: number; startIndex?: number; endIndex?: number } | undefined
             const sheet = sp.sheets.find(sh => sh.sheetId === range?.sheetId)
             if (sheet) sheet.rows.splice(range?.startIndex ?? 0, (range?.endIndex ?? 0) - (range?.startIndex ?? 0))
+            replies.push({})
+          } else if (kind === 'updateSheetProperties') {
+            // A smaller grid deletes what lies outside it (gspread's resize does this).
+            const props = (v.properties ?? {}) as { sheetId?: number; title?: string; gridProperties?: { rowCount?: number; columnCount?: number } }
+            const sheet = sp.sheets.find(sh => sh.sheetId === props.sheetId)
+            if (!sheet) throw apiError(400, 'No grid with id', 'badRequest')
+            if (typeof props.title === 'string') sheet.title = props.title
+            const g = props.gridProperties ?? {}
+            if (typeof g.rowCount === 'number') sheet.rows = sheet.rows.slice(0, g.rowCount)
+            if (typeof g.columnCount === 'number') sheet.rows = sheet.rows.map(r => r.slice(0, g.columnCount))
+            replies.push({})
+          } else if (kind === 'updateCells' || kind === 'repeatCell' || kind === 'mergeCells') {
+            // Each can wipe values like a clear: updateCells with `fields: *` and no rows, an empty
+            // cell repeated, a merge keeping only the top-left value.
+            const range = v.range as { sheetId?: number; startRowIndex?: number; endRowIndex?: number; startColumnIndex?: number; endColumnIndex?: number } | undefined
+            const sheet = sp.sheets.find(sh => sh.sheetId === range?.sheetId)
+            if (!sheet) throw apiError(400, 'No grid with id', 'badRequest')
+            const r1 = range?.startRowIndex ?? 0, r2 = range?.endRowIndex ?? sheet.rows.length
+            const c1 = range?.startColumnIndex ?? 0, c2 = range?.endColumnIndex ?? 26
+            const rowsIn = kind === 'updateCells' ? (v.rows as Array<{ values?: Array<{ userEnteredValue?: { stringValue?: string } }> }> | undefined) : undefined
+            const repeated = kind === 'repeatCell' ? (v.cell as { userEnteredValue?: { stringValue?: string } } | undefined)?.userEnteredValue?.stringValue ?? '' : undefined
+            for (let i = r1; i < Math.min(r2, sheet.rows.length); i++) {
+              for (let j = c1; j < Math.min(c2, sheet.rows[i].length); j++) {
+                if (kind === 'mergeCells') { if (i !== r1 || j !== c1) sheet.rows[i][j] = '' } else if (kind === 'repeatCell') sheet.rows[i][j] = repeated
+                else sheet.rows[i][j] = rowsIn?.[i - r1]?.values?.[j - c1]?.userEnteredValue?.stringValue ?? ''
+              }
+            }
+            replies.push({})
+          } else if (kind === 'copyPaste') {
+            const src = v.source as { sheetId?: number; startRowIndex?: number; endRowIndex?: number; startColumnIndex?: number; endColumnIndex?: number }
+            const dst = v.destination as typeof src
+            const from = sp.sheets.find(sh => sh.sheetId === src?.sheetId)
+            const to = sp.sheets.find(sh => sh.sheetId === dst?.sheetId)
+            if (!from || !to) throw apiError(400, 'No grid with id', 'badRequest')
+            const formulasOnly = v.pasteType === 'PASTE_FORMULA'
+            for (let i = 0; i < (src.endRowIndex ?? 0) - (src.startRowIndex ?? 0); i++) {
+              const row = to.rows[(dst.startRowIndex ?? 0) + i] ?? (to.rows[(dst.startRowIndex ?? 0) + i] = [])
+              for (let j = 0; j < (src.endColumnIndex ?? 0) - (src.startColumnIndex ?? 0); j++) {
+                const value = from.rows[(src.startRowIndex ?? 0) + i]?.[(src.startColumnIndex ?? 0) + j] ?? ''
+                if (!formulasOnly || (typeof value === 'string' && value.startsWith('='))) row[(dst.startColumnIndex ?? 0) + j] = value
+              }
+            }
             replies.push({})
           } else if (typeof kind === 'string' && kind.length > 0) {
             replies.push({}) // formatting and the rest: accepted, nothing stored

@@ -246,6 +246,14 @@ describe('Google relay: never a deletion, never an unlisted call — refused bef
     ['an unlisted kind (sortRange)', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ sortRange: { range: { sheetId: 0 } } }] }],
     ['two kinds in one request', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ insertDimension: {}, deleteSheet: { sheetId: 0 } }] }],
     ['a new spreadsheet', 'POST', '/v4/spreadsheets', { properties: { title: 'x' } }],
+    // Allow-listed once, removed (review of #580): each can wipe values or rows like a deletion.
+    ['updateSheetProperties shrinking the grid', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ updateSheetProperties: { properties: { sheetId: 0, gridProperties: { rowCount: 1 } }, fields: 'gridProperties.rowCount' } }] }],
+    ['updateCells with fields * and no rows', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ updateCells: { range: { sheetId: 0 }, fields: '*' } }] }],
+    ['repeatCell with an empty cell', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ repeatCell: { range: { sheetId: 0 }, cell: {}, fields: 'userEnteredValue' } }] }],
+    ['mergeCells', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ mergeCells: { range: { sheetId: 0, startRowIndex: 0, endRowIndex: 3, startColumnIndex: 0, endColumnIndex: 5 }, mergeType: 'MERGE_ALL' } }] }],
+    ['copyPaste of values', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ copyPaste: { source: { sheetId: 1, startRowIndex: 5, endRowIndex: 9, startColumnIndex: 0, endColumnIndex: 6 }, destination: { sheetId: 0, startRowIndex: 0, endRowIndex: 4, startColumnIndex: 0, endColumnIndex: 6 }, pasteType: 'PASTE_NORMAL' } }] }],
+    ['copyPaste with a second, snake_case paste type', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ copyPaste: { source: { sheetId: 1, startRowIndex: 5, endRowIndex: 9, startColumnIndex: 0, endColumnIndex: 6 }, destination: { sheetId: 0, startRowIndex: 0, endRowIndex: 4, startColumnIndex: 0, endColumnIndex: 6 }, pasteType: 'PASTE_FORMULA', paste_type: 'PASTE_NORMAL' } }] }],
+    ['a snake_case kind', 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ update_sheet_properties: { properties: { sheet_id: 0, grid_properties: { row_count: 1 } }, fields: 'grid_properties.row_count' } }] }],
     ['another API', 'GET', '/v4/spreadsheets/../../drive/v3/files'],
   ]
   for (const [name, method, path, body] of cases) {
@@ -276,6 +284,23 @@ describe('Google relay: never a deletion, never an unlisted call — refused bef
     const r = await script(token!, 'GET', `${values(PRACTICE, '案件!A1')}?access_token=ya29.fake-someone-else`)
     expect(r.status).toBe(400)
     expect(sent()).toBe(before)
+  })
+})
+
+describe('Google relay: what anken-sync\'s write_keisu.py does passes', () => {
+  it('inserts a row, copies the formula columns into it (PASTE_FORMULA) and writes its values', async () => {
+    const { token } = await tokenFor('r-sato')
+    const ins = await script(token!, 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ insertDimension: { range: { sheetId: 0, dimension: 'ROWS', startIndex: 3, endIndex: 4 }, inheritFromBefore: true } }] })
+    expect(ins.status, JSON.stringify(ins.body)).toBe(200)
+    const copy = await script(token!, 'POST', `/v4/spreadsheets/${PRACTICE}:batchUpdate`, { requests: [{ copyPaste: {
+      source: { sheetId: 0, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 5, endColumnIndex: 6 },
+      destination: { sheetId: 0, startRowIndex: 3, endRowIndex: 4, startColumnIndex: 5, endColumnIndex: 6 }, pasteType: 'PASTE_FORMULA',
+    } }] })
+    expect(copy.status, JSON.stringify(copy.body)).toBe(200)
+    const write = await script(token!, 'PUT', `${values(PRACTICE, "'案件'!A4:E4")}?valueInputOption=USER_ENTERED`, { values: [['A-0050', '練習工業', '佐藤', 'A', '0.8']] })
+    expect(write.status, JSON.stringify(write.body)).toBe(200)
+    expect(rows()[3][0]).toBe('A-0050')
+    expect(String(rows()[3][5])).toMatch(/^=IF/)
   })
 })
 
@@ -360,6 +385,91 @@ describe('Google relay: every switch refuses before anything leaves ACB', () => 
   })
 })
 
+describe('Google relay: the request itself', () => {
+  it('the AI emergency stop (whole company) refuses before anything leaves; a release restores it', async () => {
+    const { token } = await tokenFor('r-sato')
+    const owner = { companyId: CO, userId: 'r-owner', role: 'owner' }
+    const view = services.agentStops.stop(owner, {})
+    expect(view.ok).toBe(true)
+    const before = sent()
+    const r = await script(token!, 'GET', values(PRACTICE, '案件!A1'))
+    expect(r.status).toBe(403)
+    expect(r.body.error.code).toBe('ACB_STOPPED')
+    expect(sent()).toBe(before)
+    for (const s of view.value.active) services.agentStops.release(owner, s.id)
+    expect((await script(token!, 'GET', values(PRACTICE, '案件!A1'))).status).toBe(200)
+  })
+
+  it('only the sheets prefix is relayed; the path sent on is the rest, whatever the prefix\'s spelling', async () => {
+    const { token } = await tokenFor('r-sato')
+    const before = sent()
+    currentUser.id = null
+    const other = await app.request(`${PUBLIC}/api/broker/google/sheetsx/v4/spreadsheets/${PRACTICE}`, { headers: { authorization: `Bearer ${token}` } })
+    expect(other.status).toBe(403)
+    expect(sent()).toBe(before)
+    const encoded = await app.request(`${PUBLIC}/api/broker/google/%73heets/v4/spreadsheets/${PRACTICE}`, { headers: { authorization: `Bearer ${token}` } })
+    expect(encoded.status).toBe(200)
+    expect(fake.requests.at(-1)!.path).toBe(`/v4/spreadsheets/${PRACTICE}`)
+  })
+
+  it('refuses a method-override header, a body over 10 MB and a body that is not JSON — nothing sent', async () => {
+    const { token } = await tokenFor('r-sato')
+    const before = sent()
+    expect((await script(token!, 'GET', values(PRACTICE, '案件!A1'), undefined, { 'x-http-method-override': 'POST' })).status).toBe(403)
+    currentUser.id = null
+    const big = await app.request(`${PUBLIC}/api/broker/google/sheets${values(PRACTICE, '案件!A1')}?valueInputOption=RAW`, {
+      method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ values: [['x'.repeat(10 * 1024 * 1024 + 10)]] }),
+    })
+    expect(big.status).toBe(413)
+    const notJson = await app.request(`${PUBLIC}/api/broker/google/sheets${values(PRACTICE, '案件!A1')}?valueInputOption=RAW`, {
+      method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain' }, body: 'values=1',
+    })
+    expect(notJson.status).toBe(400)
+    expect(sent()).toBe(before)
+  })
+
+  it('a stop pressed while the body is still arriving applies to that call', async () => {
+    const { token } = await tokenFor('r-sato')
+    const owner = { companyId: CO, userId: 'r-owner', role: 'owner' }
+    const chunk = new TextEncoder().encode(JSON.stringify({ values: [['late']] }))
+    let pulled = false
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (pulled) { controller.close(); return }
+        pulled = true
+        // The admin stops this member's relay after the first checks, before the body has arrived.
+        expect((await services.googleRelay.setMemberStopped(owner, 'r-sato', { stopped: true })).ok).toBe(true)
+        controller.enqueue(chunk)
+      },
+    })
+    const before = sent()
+    currentUser.id = null
+    const res = await app.request(`${PUBLIC}/api/broker/google/sheets${values(PRACTICE, '案件!A1')}?valueInputOption=RAW`, {
+      method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body, duplex: 'half',
+    } as RequestInit)
+    expect(res.status).toBe(403)
+    expect(sent()).toBe(before)
+    expect(rows()[0][0]).not.toBe('late')
+    expect((await services.googleRelay.setMemberStopped(owner, 'r-sato', { stopped: false })).ok).toBe(true)
+  })
+
+  it('the broker token never reaches Google (also when sent as ?key=)', async () => {
+    const { token } = await tokenFor('r-sato')
+    const from = fake.requests.length
+    currentUser.id = null
+    const r = await app.request(`${PUBLIC}/api/broker/google/sheets${values(PRACTICE, '案件!A1')}?key=${token}`)
+    expect(r.status).toBe(200)
+    const seen = fake.requests.slice(from)
+    expect(seen.length).toBeGreaterThan(0)
+    for (const q of seen) {
+      expect(q.search).not.toContain('acb_tok_')
+      expect(q.headerValues.join('\n')).not.toContain('acb_tok_')
+    }
+  })
+
+})
+
 describe('Google relay: the token\'s member is the only identity', () => {
   it('another member\'s token acts with that member\'s own permission (Google refuses what they cannot edit)', async () => {
     await allow('r-tanaka', ['sheets'], GOOGLE_SEED.colleague)
@@ -418,5 +528,22 @@ describe('Google relay: records', () => {
     const events = JSON.stringify(db.prepare("SELECT * FROM agent_events WHERE tool = 'broker:google'").all())
     expect(events).toContain('values.append')
     expect(events).not.toContain(CELL)
+  })
+})
+
+describe('Google relay: a looping script', () => {
+  it('refusals past the day\'s limit are still refused but no longer recorded; calls that pass still are', async () => {
+    const { GOOGLE_RELAY_REFUSALS_PER_DAY } = await import('../../../shared/core/google-relay')
+    const { token } = await tokenFor('r-sato')
+    const lines = () => (db.prepare("SELECT COUNT(*) AS n FROM agent_events WHERE company_id = ? AND user_id = 'r-sato' AND tool = 'broker:google'").get(CO) as { n: number }).n
+    const start = lines()
+    for (let i = 0; i < GOOGLE_RELAY_REFUSALS_PER_DAY + 20; i++) {
+      expect((await script(token!, 'POST', values(PRACTICE, '案件!A1', ':clear'), {})).status).toBe(403)
+    }
+    expect(lines() - start).toBeLessThanOrEqual(GOOGLE_RELAY_REFUSALS_PER_DAY)
+    expect(lines() - start).toBeGreaterThan(0)
+    const passed = lines()
+    expect((await script(token!, 'GET', values(READ_ONLY, '予算!A1'))).status).toBe(200)
+    expect(lines()).toBe(passed + 1)
   })
 })
