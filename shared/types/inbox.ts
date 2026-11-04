@@ -44,6 +44,12 @@ export interface IncomingMessage {
   /** Subject (mail) or a short title the connector made (chat); ≤ 200 kept. */
   subject?: string | null
   from: IncomingParty
+  /**
+   * Mail: the Sender header's address when it differs from From (an invitation sent "via Google
+   * Calendar" comes From its organizer). Only matched against a connected service's senders
+   * (shared/core/notification-senders.ts); never kept.
+   */
+  senderAddress?: string | null
   to: IncomingParty[]
   cc?: IncomingParty[]
   /** The reporting member sent it (their Sent folder / their own chat message). */

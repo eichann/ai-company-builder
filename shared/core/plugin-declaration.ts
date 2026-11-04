@@ -412,6 +412,12 @@ export interface PluginManifest {
    * written to another (review §5.7).
    */
   accountInfo: PluginEndpoint | null
+  /**
+   * A connector: its service's notification mail senders (`notification_senders`: addresses or
+   * `@domain`, notification-senders.ts), left out of the mail intake while it is installed and on.
+   * Absent: none.
+   */
+  notificationSenders?: string[]
   /** Contract 2, business plugins only (empty / null otherwise). */
   roles: Record<string, PluginRoleDeclaration>
   settings: Record<string, PluginSetting>

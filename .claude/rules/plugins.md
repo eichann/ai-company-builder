@@ -72,7 +72,10 @@ The dependency points one way: **business → connector**. (#372's first cut had
   `operation_scopes`, its `objects` (calls) and its `operations` — generic windows on the service
   (`refresh_deal` read a deal, `update_deal` update a deal's properties, `log_meeting` / `add_note`
   create an engagement on a deal, `create_deal`) with what each needs (`kind`, `object`,
-  `attach_to`, `reaches`, `undo`, `content`, `association_type`, `correlation_property`). The
+  `attach_to`, `reaches`, `undo`, `content`, `association_type`, `correlation_property`), and
+  optionally `notification_senders` (≤ 20 addresses or `@domain`s: the service's own notification
+  mails, left out of the mail intake while the connector is installed, on, unchanged and not
+  stopped — `inbox.md` "Notification mails of connected services"). The
   company's install of it holds the company key (key broker; never shown), the connection and
   account, the relay read scope and the relay's read-only switch. It refuses, naming where each
   belongs now: `types` / `types/`, `maps_to`, an object's `record_type`, an operation's `who` /

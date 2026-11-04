@@ -31,6 +31,7 @@ import {
   type IntakeSettings, type RoutedParty,
 } from '../../shared/core/intake-settings'
 import { normalizeEmail } from '../../shared/core/mail'
+import { BUILTIN_NOTIFICATION_SENDERS, notificationServiceOf, type ConnectedNotifier } from '../../shared/core/notification-senders'
 import { findPrivateScope } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { isDateValue } from '../../shared/core/record-types'
@@ -97,6 +98,13 @@ export interface InboxDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Which connector serves a core role now (services/connector-roles.ts); absent until lane A wires it. */
   roles?: { resolve(companyId: string, role: ConnectorRole, operation?: string | null): Promise<RoleResolution> }
+  /**
+   * Whether the member's own grant of a core connector reads now (Slack: active, its 読む on):
+   * a per-member notifier (notification-senders.ts `perMember`) counts only then. Absent: never.
+   */
+  connectorReadsFor?: (companyId: string, userId: string, connectorId: string) => boolean
+  /** The notification senders that installed, on connector plugins declare (`notification_senders`). Absent: none. */
+  pluginNotifiers?: (companyId: string) => Promise<ConnectedNotifier[]>
 }
 
 /** A message we sent first and wait an answer to (outbound-mail.md "Waiting for their answer"). */
@@ -159,6 +167,7 @@ function readMessage(m: unknown): IncomingMessage | null {
     occurredAt: new Date(m.occurredAt).toISOString(),
     subject: typeof m.subject === 'string' ? m.subject : null,
     from,
+    senderAddress: typeof m.senderAddress === 'string' && m.senderAddress.length <= 320 ? m.senderAddress : null,
     to: list(m.to),
     cc: list(m.cc),
     outgoing: m.outgoing === true,
@@ -518,6 +527,29 @@ export function createInboxService(deps: InboxDeps) {
     return made.record.id
   }
 
+  /**
+   * The connected services whose notification mails the member's mail intake leaves out (owner FB
+   * #18, inbox.md "Notification mails of connected services"): a built-in connector's senders while
+   * it serves the role whose own intake brings the thing in (Slack's only for a member whose grant
+   * reads), and what installed, on connector plugins declare. A failing lookup leaves that one out
+   * (the mail is then taken in as before: never lost).
+   */
+  async function notifiersFor(companyId: string, userId: string): Promise<ConnectedNotifier[]> {
+    const out: ConnectedNotifier[] = []
+    if (deps.roles) {
+      for (const [connectorId, entries] of Object.entries(BUILTIN_NOTIFICATION_SENDERS)) {
+        for (const e of entries) {
+          const r = await deps.roles.resolve(companyId, e.role, e.operation).catch(() => null)
+          if (!r?.ok || r.connectorId !== connectorId) continue
+          if (e.perMember && !deps.connectorReadsFor?.(companyId, userId, connectorId)) continue
+          out.push({ service: e.service, from: e.from, sender: e.sender })
+        }
+      }
+    }
+    if (deps.pluginNotifiers) out.push(...await deps.pluginNotifiers(companyId).catch(() => []))
+    return out
+  }
+
   /** The role's connector for the inbox's channel, or why there is none. */
   async function sourceFor(companyId: string): Promise<InboxSource | null> {
     if (!deps.roles) return null
@@ -568,7 +600,18 @@ export function createInboxService(deps: InboxDeps) {
     if (!Array.isArray(listed) && Date.parse(listed.readFrom) > fromMs) {
       handle.inbox.addGap({ userId, channel: 'email', from: window.from, to: new Date(Date.parse(listed.readFrom)).toISOString(), notedAt: clock.now() })
     }
-    for (const m of messages) receive(companyId, userId, m)
+    // A connected service's notification mail (a Meet note, a calendar invitation, a Slack mention
+    // digest, a plugin service's notice) is not taken in: that service's own intake brings it in.
+    // Decided from From / Sender only; nothing is written, and only counts are logged.
+    const notifiers = messages.length > 0 ? await notifiersFor(companyId, userId) : []
+    const left = new Map<string, number>()
+    for (const m of messages) {
+      const parsed = notifiers.length > 0 ? readMessage(m) : null
+      const service = parsed?.channel === 'email' ? notificationServiceOf({ from: parsed.from.address, sender: parsed.senderAddress }, notifiers) : null
+      if (service) { left.set(service, (left.get(service) ?? 0) + 1); continue }
+      receive(companyId, userId, m)
+    }
+    if (left.size > 0) console.info(`[inbox] notification mails of connected services left out: ${[...left].map(([k, n]) => `${k}=${n}`).join(' ')}`)
     handle.inbox.setCheckedUntil(userId, 'email', new Date(startedMs).toISOString())
     return { read: messages.length, outcome: 'done' }
   }

@@ -11,10 +11,14 @@ import {
   type PluginObject, type PluginOperation, type PluginSearch, type UndoKind,
 } from './plugin-declaration'
 import { checkPluginPathTemplate, EXTERNAL_NAME_RE, isStr, SCOPE_RE, strList, unknownKeys } from './plugin-declaration-rules'
+import { parseNotificationSender } from './notification-senders'
 import { ONTOLOGY_NAME_RE } from './record-types'
 import { isYamlMap, type YamlValue } from './yaml-lite'
 
-export const CONNECTOR_KEYS: readonly string[] = ['service', 'base_url', 'account_info', 'scopes', 'operation_scopes', 'objects', 'operations']
+export const CONNECTOR_KEYS: readonly string[] = ['service', 'base_url', 'account_info', 'scopes', 'operation_scopes', 'objects', 'operations', 'notification_senders']
+
+/** At most this many `notification_senders` entries per connector. */
+export const NOTIFICATION_SENDERS_MAX = 20
 
 /** What a connector refuses, with where it belongs now (owner decision 2026-11-01: a connector knows no business plugin). */
 export const NOT_IN_CONNECTOR: Record<string, string> = {
@@ -182,9 +186,21 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
     else operationScopes[opname] = l
   }
 
+  // The service's own notification mails (owner FB #18, notification-senders.ts): the mail intake
+  // leaves them out while the connector is installed and on. Addresses or `@domain`.
+  let notificationSenders: string[] | null = null
+  if (raw.notification_senders !== undefined) {
+    const list = strList(raw.notification_senders)
+    const parsed = list?.map(parseNotificationSender) ?? null
+    if (!parsed || parsed.length > NOTIFICATION_SENDERS_MAX || parsed.some(e => e === null)) {
+      err(`notification_senders は知らせのメールの送り主（アドレスか「@ドメイン」）の並びで書いてください（${NOTIFICATION_SENDERS_MAX} 個まで）`)
+    } else notificationSenders = [...new Set(parsed as string[])]
+  }
+
   return {
     ...common, role: 'connector', service: raw.service as string, baseUrl, scopes: scopes ?? [], operationScopes,
     types: [], objects, operations, ...(Object.keys(searches).length > 0 ? { searches } : {}), fieldPolicyDefaults: {}, uses: null, accountInfo, ...noFlow(),
+    ...(notificationSenders && notificationSenders.length > 0 ? { notificationSenders } : {}),
   }
 }
 

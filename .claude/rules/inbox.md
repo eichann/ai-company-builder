@@ -7,6 +7,8 @@ paths:
   - "server/src/adapters/sqlite/inbox.ts"
   - "server/src/composition/inbox.ts"
   - "shared/core/intake-settings.ts"
+  - "shared/core/notification-senders.ts"
+  - "server/tests/unit/notification-senders.test.ts"
   - "shared/types/inbox.ts"
   - "server/src/db/schema/inbox.ts"
   - "server/tests/unit/inbox.test.ts"
@@ -53,6 +55,27 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   → **the department's turn** (`unclaimed`, readers of its folder — never a private folder);
   a member only in CC → nothing (`ccOnly: unsure` → 確認待ち for that CC member when they
   reported it). **CC is never told when someone is in To.** Our own sent mail is not intake.
+- **Notification mails of connected services** (owner FB #18, 2026-11-04: Gemini's meeting notes,
+  calendar invitations, Slack's mention mails and HubSpot's notices became tasks a second time).
+  The mail poll (`poll`, before `receive`; `receive` itself is unchanged) leaves out a mail whose
+  From — or Sender, where the entry says so — is a connected service's notification sender
+  (`shared/core/notification-senders.ts` `notificationServiceOf`: whole address, or `@domain` with
+  its subdomains; never a bare domain, so a person at google.com is still taken in). Header facts
+  only (the `format=metadata` read), never the body. Nothing is written (like spam: no record, not
+  `excluded`); one log line per poll with counts by service (`google_meet=1 slack=2`), nothing of a
+  message. Connected (`notifiersFor`, decided per poll):
+  - built-in, listed in one place (`BUILTIN_NOTIFICATION_SENDERS`): Google Calendar —
+    `calendar-notification@google.com` as From or Sender (an invitation comes From its organizer
+    "via Google Calendar") — while the `calendar` role's `read` resolves to `google`; Gemini / Meet —
+    `gemini-notes@`, `meetings-noreply@`, `meet-recordings-noreply@google.com` — while `meetings`
+    resolves to `google`; Slack — `notification@slack.com`, `feedback@slack.com` (not
+    `no-reply@slack.com`: sign-in and account mail) — while `chat`'s `receive` resolves to `slack`
+    **and** the member's own Slack grant reads (active, 読む on, their 受信を読む on: composition's
+    `connectorReadsFor`); without it the mail is how they hear of a mention, so it is taken in;
+  - a connector plugin's declared `notification_senders` (`plugins.md`), while the company has it
+    installed and on, its package unchanged and not stopped (`composition/inbox.ts`
+    `pluginNotifiersOf`). HubSpot's addresses belong in its (private) package's declaration.
+  A failing lookup leaves that service out: the mail is then taken in, never lost.
 - The new interaction: title = subject (≤ 200, 「（件名なし）」 `INBOX_NO_SUBJECT` until the owner's AI
   names it: "The AI's judgement"), fields `occurred_at`, `channel`,
   `counterpart_text` (mail: 「name <address>」; chat: the sender's name only — Slack's `senderName`,
@@ -237,7 +260,10 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
 
 ## Tests
 
-`server/tests/unit/inbox.test.ts` (owner-only and unreadable / unlisted / untold for CC, other
+`server/tests/unit/inbox.test.ts` (notification mails of connected services: each kind left out
+only under its condition — Google's only while Google serves the role, an invitation by its Sender,
+Slack's only for a member whose grant reads, a plugin's only by declaration — a person at
+google.com kept, nothing written, counts only in the log; mutation-checked; owner-only and unreadable / unlisted / untold for CC, other
 members, owner, admin; CC / several To / shared address / internal / free mail / bulk per
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
@@ -255,6 +281,10 @@ gap; companies apart), `server/tests/unit/google-mail-inbox-source.test.ts` (Gma
 oldest first as pointers that `threads.ts` reads, the window's edge, failure = not-connected,
 the limit's `readFrom`), `server/tests/integration/google-inbox.test.ts` (the server clock
 connects a member who allowed 受信を読む and takes only later mail, as `gmail:` pointers, no text),
+`server/tests/unit/notification-senders.test.ts` (address / `@domain` match, Sender only where
+declared, the plugin declaration's `notification_senders`, only an installed / on / unchanged /
+not-stopped connector counts), the Google integration test also delivers a Gemini note and an
+invitation via Google Calendar (left out, every read `format=metadata`, nothing stored),
 `server/tests/unit/intake-core.test.ts` (settings validation and defaults, routing order, the
 window's 7 / 8 days, the versions additive, only `reply_request` lets the AI end it), permission
 matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.test.ts`.

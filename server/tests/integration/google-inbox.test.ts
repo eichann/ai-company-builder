@@ -334,14 +334,36 @@ describe('the server clock reads Gmail into the inbox', () => {
         headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: '佐藤 健 <sato@div.example>', Subject: 'ご相談', 'Message-ID': '<fake-0100@a-corp.example>' },
         text: '本文です。',
       })
+      // Google serves the calendar and meetings roles here: its own notification mails are not taken in
+      // (owner FB #18, inbox.md) — Gemini's notes, and an invitation "via Google Calendar" by its Sender.
+      fake.deliver({
+        id: 'fakemail0101', threadId: 'fakethread0101', account: GOOGLE_SEED.member, labelIds: ['INBOX'], receivedAt: '2026-11-07T00:03:00.000Z',
+        headers: { From: 'Gemini <gemini-notes@google.com>', To: 'sato@div.example', Subject: 'メモ: 定例', 'Message-ID': '<fake-0101@google.com>' },
+        text: '会議のメモ本文です。',
+      })
+      fake.deliver({
+        id: 'fakemail0102', threadId: 'fakethread0102', account: GOOGLE_SEED.member, labelIds: ['INBOX'], receivedAt: '2026-11-07T00:04:00.000Z',
+        headers: {
+          From: '"鈴木 一郎" <suzuki@a-corp.example>', Sender: 'Google Calendar <calendar-notification@google.com>', To: 'sato@div.example',
+          Subject: '招待: 打ち合わせ', 'Message-ID': '<fake-0102@google.com>',
+        },
+        text: '招待の本文です。',
+      })
+      const readsBefore = fake.requests.length
       vi.setSystemTime(new Date('2026-11-07T00:05:00.000Z'))
-      expect(await services.serverClock.runOnce()).toMatchObject({ ran: true, mailRead: 1 })
+      expect(await services.serverClock.runOnce()).toMatchObject({ ran: true, mailRead: 3 })
       const rows = db.prepare('SELECT message_id, source_ref, direction FROM inbox_messages WHERE company_id = ?').all(CO)
       expect(rows).toEqual([{ message_id: '<fake-0100@a-corp.example>', source_ref: 'gmail:fakemail0100', direction: 'in' }])
+      // Told apart by headers alone: every message was read as metadata, no body was fetched.
+      const reads = fake.requests.slice(readsBefore).filter(r => /^\/gmail\/v1\/users\/me\/(messages|threads)\/[^/]+$/.test(r.path))
+      expect(reads.length).toBe(3)
+      expect(reads.every(r => r.search.includes('format=metadata'))).toBe(true)
+      expect(logLines.some(l => l.includes('left out: google_calendar=1 google_meet=1') || l.includes('left out: google_meet=1 google_calendar=1'))).toBe(true)
       // The text is never kept.
       const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(t => t.name)
       const dump = tables.map(t => JSON.stringify(db.prepare(`SELECT * FROM ${t}`).all())).join('\n')
       expect(dump.includes('本文です')).toBe(false)
+      expect(dump.includes('定例') || dump.includes('打ち合わせ')).toBe(false)
     } finally {
       vi.useRealTimers()
     }
