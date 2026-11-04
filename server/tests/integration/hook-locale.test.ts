@@ -133,19 +133,21 @@ describe('pre-receive hook: locale independence', () => {
     })
   }
 
-  // Documents the scope of the check: only A-Z are folded. Full-width and
-  // accented Latin letters do form case pairs on macOS/Windows filesystems,
-  // but the hook does not fold them (it never did in production either).
-  it('does not fold non-ASCII case pairs (full-width, accented Latin)', () => {
-    const { clone } = setup({
-      'README.md': 'hi\n',
-      'docs/Ａ.md': 'full-width upper\n',
-      'docs/ａ.md': 'full-width lower\n',
-      'docs/É.md': 'accented upper\n',
-      'docs/é.md': 'accented lower\n',
-    })
+  // The bytewise check above folds only A-Z. Full-width and accented Latin
+  // letters form case pairs on macOS/Windows filesystems too. The
+  // bytewise rule does not fold them; the disk collision check (diskCollisions)
+  // does, decoding UTF-8 itself, so the answer is the same in every locale.
+  it('refuses a new non-ASCII case pair (full-width, accented Latin) under a UTF-8 locale', () => {
+    const { clone } = setup({ 'README.md': 'hi\n' })
+    // Planted in the index: on a Mac the disk itself would fold each pair into one file.
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: clone, input: 'x\n' }).toString().trim()
+    for (const name of ['docs/Ａ.md', 'docs/ａ.md', 'docs/É.md', 'docs/é.md']) {
+      execFileSync('git', ['update-index', '--add', '--cacheinfo', `100644,${blob},${name}`], { cwd: clone })
+    }
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '--no-verify', '-m', 'pairs'], { cwd: clone })
     const r = push(clone, localeEnv({ LANG: 'en_US.UTF-8' }))
-    expect(r.ok).toBe(true)
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain('[WINPATH_DETECTED]')
   })
 
   // The check above passes on glibc even without the pin (GNU uniq breaks
