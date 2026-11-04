@@ -30,6 +30,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`) |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md`: names, who may change them |
+| `skill-files.ts` | everything under `.claude/skills|agents|commands`: `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
@@ -80,9 +81,9 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
   and `client/shared/sparse-paths.ts` re-export what they used to define; Vite bundles it.
 - Admin: from `admin/src/lib`; its Dockerfile copies `shared/` into the build stage; Turbopack's
   root is the repository (`outputFileTracingRoot`).
-- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` (`server/src/lib/push-check/rules.ts`)
-  stay bytewise twins over git's latin1 bytes by design; the regex is built from the core's name
-  list.
+- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` / `SKILL_DIR_RE` (`server/src/lib/push-check/rules.ts`)
+  stay bytewise twins over git's latin1 bytes by design; the regexes are built from the core's name
+  lists.
 
 ## Parity tests (what can still drift is held together by tests, not review)
 
@@ -91,7 +92,7 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
   `/me/scopes` + `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
   gate, and the push gate must not depend on scope order.
 - `client/tests/rule-parity-names.test.ts` — path keys, department folder names, skill names and
-  AI instruction files on one corpus, against the core and the push checker's twins; the renderer
+  AI instruction files and skill files on one corpus, against the core and the push checker's twins; the renderer
   dialogs must import `shared/core/names.ts`.
 - `server/tests/integration/admin-contract.test.ts` — every endpoint the admin calls, checked
   against `admin/src/lib/api.ts` with the TypeScript compiler (`tests/helpers/type-shape.ts`).

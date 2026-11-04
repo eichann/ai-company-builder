@@ -63,7 +63,9 @@ is missing, the rule files are the complete working instructions.
   for read/write. **Exceptions**: an owner-only record (「持ち主だけ」, `personal_owner`) is
   seen by its owner alone, and a members-only record (「この人たちだけ」, `record_viewers`) by the
   members on its list alone — not by owners, admins or managers either unless listed (`records.md`). Any member can also be a **department manager** (`department_managers`), which
-  allows managing that department's private folders and AI instruction files.
+  allows managing that department's private folders, AI instruction files and skills. **Skill
+  editors** (「Skill を直せる人」, `skill_editors`) may also change skill files, for the whole
+  company or one department.
 
 ## Commands
 

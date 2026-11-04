@@ -43,7 +43,7 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
   except two intended changes, each with its own expectation helper: secrets in intermediate
   commits (`attemptSecretOnlyInIntermediateCommit`) and Codex's project layer
   (`attemptNewlyProtected`: owner/admin identical, other roles rejected with exactly the listed
-  paths). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
+  paths; the skill files rule below goes through the same helper). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
   reserved paths) stay out of that corpus and have their own tests. `hook-locale.test.ts` pushes
   under UTF-8 locales.
 
@@ -69,14 +69,16 @@ forever — the "permanently unable to sync" shape).
   that authenticated the pusher (session via `AccountDirectory.bySessionToken`, membership via the
   access policy, managed folders via `permission-views`) — sets `ACB_PUSHER_ROLE` / `ACB_PUSHER_ID` / `ACB_PUSHER_EMAIL`,
   `ACB_NODE`, and writes a per-request **snapshot** (pusher, scopes, rules, managed folders,
-  reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
+  `skillEditing` (「Skill を直せる人」: `{ everywhere, folders }`), reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
   removed when the request ends; `preparePushCheck` in `lib/git-server`).
 - A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable
   pusher denies every changed path unless writing is open to everyone.
 - The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1`
-  (`internalGitEnv`) and skip only the write check. They are commits built in the bare
+  (`internalGitEnv`) and skip the write check and the skill files rule (a department renamed or
+  deleted by an owner/admin moves the skills in it; `serverPush` needs the marker and no snapshot,
+  so a member's push can never claim it). They are commits built in the bare
   repository and pushed from it to itself (`lib/bare-commit.ts`), so receive-pack runs this hook
-  on them like on any push: every content rule applies. git-http strips both variables from what it
+  on them like on any push: every other content rule applies. git-http strips both variables from what it
   inherits, so a client cannot select either. Local-transport pushes (tests, an operator) carry
   neither and are not write-checked.
 
@@ -99,13 +101,24 @@ Deletions are always allowed except where noted (they are how something gets uns
   permission profiles incl. network and file access, MCP servers, inline hooks), `hooks.json`,
   `rules/` — so the whole folder is protected (added 2026-10-25). Sharing an MCP server is
   legitimate, so the rule restricts *who*. Test: `protected-config-hook.test.ts`.
-- **Skills / subagents / commands with auto-run parts**: `.md` under `.claude/skills/`,
-  `.claude/agents/`, `.claude/commands/` (any depth) may be changed by anyone unless the new blob
-  has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
+- **Skill files** (`[PROTECTED_CONFIG]`, their own sub-list): add / modify / delete / rename of
+  anything under `.claude/skills/`, `.claude/agents/`, `.claude/commands/` (any depth, A–Z
+  case-insensitive, every file type, a file or link at the folder's own path too): owner/admin
+  anywhere; a department manager inside a department they manage; people on
+  「Skill を直せる人」 (`skill_editors`: for the whole company, or one department). A department's
+  list reaches any depth inside its folder, not root-level skills. In a scope repo the path is
+  judged as `<scopePath>/<path>`. Rules: `shared/core/skill-files.ts`. Why (owner decision
+  2026-11-04, audit B-H2): a skill's script reaches every member by sync and runs on their
+  computer under their account and tokens. Being on a list grants no folder access: the write
+  check still applies. Skills already shared keep working; only changes are refused.
+  Test: `skill-files-hook.test.ts`; the list: `skill-editors.test.ts`.
+- **Auto-run parts of those files**: whoever else may edit the file, a change is owner/admin only
+  when the new `.md` blob has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
   flow, escaped, anchored, nested), a body `!` + backtick where the `!` starts a line or follows
   whitespace, a ```` ```! ```` block — or the entry is a symlink. Then owner/admin only, reported
   in the `[PROTECTED_CONFIG]` section (path line, then a reason line). No masking of fenced code
-  (substituted arguments can re-pair backticks). Contents unreadable, or `ACB_NODE` unusable →
+  (substituted arguments can re-pair backticks). A path listed here is not listed again under
+  skill files. Contents unreadable, or `ACB_NODE` unusable →
   every changed path there is rejected for non-admins. Text that is not the syntax (`!important`,
   `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
 - **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —

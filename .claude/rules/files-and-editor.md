@@ -171,6 +171,15 @@ page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillShari
 publish: the `.git/info/exclude` line — or an older app's line in the shared `.gitignore`, which
 publish also removes — that decides whether the next sync shares the skill; a company folder
 without a `.git` folder is refused).
+A member who may not change skill files (`shared/core/skill-files.ts`; `push-check.md`) is told so
+in a sentence before anything is written: `guards.skillRefusal` behind `fs:writeFile`, `fs:createFile`,
+`fs:delete`, `fs:rename` / `fs:move` (both ends), `fs:copy`, a backup restore, 育成中 and
+`privateFolders:reservedPathRefusal` (what the tree, the editor's failed save and the copy dialog
+ask). `skills:publish` asks with `sharing: true`: 公開する is where a private skill would reach the
+server. A skill kept on this computer is otherwise the member's to write, and an empty folder is
+never refused. Unknown authority allows. Tests: `client/tests/skill-file-refusal.test.ts`,
+`client/tests/ipc-fs.test.ts` 「fs and skills handlers…」.
+
 New skill and copy never replace a skill folder that exists (checked first, then main's
 `fs:createFile` / `fs:copy`); a new skill is marked private before anything is written, and
 `skills:makePrivate` refuses (`already_shared`) a folder the index or `origin/main` already has —

@@ -56,6 +56,14 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`) are refused unless the
   member may change them (owner/admin; a manager inside their department), mirroring the push
   checker (`mayChangeInstructionFile`).
+- Skill files (everything under `.claude/skills|agents|commands`, `shared/core/skill-files.ts`) are
+  refused unless the member may change them (`mayChangeSkillFile`, guard reason `skill-file`):
+  owner/admin; a manager inside their department; 「Skill を直せる人」 (`skillEditing` from
+  `/me/capabilities`). Unknown authority or a server without `skillEditing` never blocks; neither
+  `.workspace/`, `.personal/` nor a skill this member keeps private (`getPrivateSkills`: the lines of
+  `.git/info/exclude`) is judged, since none of them is shared. The app's own file operations ask
+  the same rule (`files-and-editor.md`). Tests: `client/tests/write-guard.test.ts`,
+  `client/tests/skill-file-refusal.test.ts`.
 - The company map (`records.md`): `.acb/types/` (type definitions) only for owners/admins
   (unknown authority never blocks; the push checker's rule), guard reason `type-definition`; and
   `decideRecordEdit` refuses Write / Edit / MultiEdit (and the api-key mode's writeFile) that put

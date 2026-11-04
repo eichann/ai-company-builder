@@ -17,7 +17,11 @@ import {
   moveScopeRules,
   moveScopeSubtree,
   removeManagerFromCompany,
+  removeSkillEditorFromCompany,
   replaceDepartmentManagers,
+  replaceSkillEditors,
+  skillEditorPlaces,
+  listSkillEditorIds,
   replaceScopeRules,
   syncCompanyScopes,
   updateRuleAccess,
@@ -56,5 +60,9 @@ export function sqliteScopeRepository(conn: Database.Database, companyId: string
     departmentManagerIds: departmentId => listDepartmentManagerIds(conn, companyId, departmentId),
     replaceDepartmentManagers: (departmentId, userIds, createdBy) => replaceDepartmentManagers(conn, companyId, departmentId, userIds, createdBy),
     removeManagerFromCompany: userId => removeManagerFromCompany(conn, companyId, userId),
+    skillEditorIds: departmentId => listSkillEditorIds(conn, companyId, departmentId),
+    replaceSkillEditors: (departmentId, userIds, createdBy) => replaceSkillEditors(conn, companyId, departmentId, userIds, createdBy),
+    skillEditorPlaces: userId => skillEditorPlaces(conn, companyId, userId),
+    removeSkillEditorFromCompany: userId => removeSkillEditorFromCompany(conn, companyId, userId),
   }
 }

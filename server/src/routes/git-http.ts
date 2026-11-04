@@ -452,6 +452,8 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
       scopes: services.companyScopes.listWithRules(member),
       ...(scopePath !== undefined ? { scopePath } : {}),
       managedFolders,
+      // Skill files: also for the people on 「Skill を直せる人」.
+      skillEditing: services.permissionViews.skillEditing(companyId, userId),
     })
   } catch (err) {
     logError('git-http', 'cannot build the push permission snapshot', err)

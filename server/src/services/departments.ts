@@ -29,6 +29,12 @@ export const INVALID_FOLDER_NAME_ERROR =
 
 const FOLDER_EXISTS_ERROR = 'A folder with this name already exists'
 
+/** 「Skill を直せる人」 (`GET /skill-editors`). */
+export interface SkillEditorsView {
+  company: ManagerView[]
+  departments: Array<{ departmentId: string; editors: ManagerView[] }>
+}
+
 export interface ManagerView {
   userId: string
   name: string | null
@@ -72,6 +78,20 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
   function nextSortOrder(member: Member): number {
     return (departmentsOf(member).maxSortOrder() ?? -1) + 1
+  }
+
+  function skillEditors(member: Member): SkillEditorsView {
+    const scopes = scopesOf(member.companyId)
+    const view = (ids: string[]): ManagerView[] => {
+      const users = accounts.byIds(ids)
+      return ids.map(id => ({ userId: id, name: users.get(id)?.name ?? null, email: users.get(id)?.email ?? null }))
+    }
+    return {
+      company: view(scopes.skillEditorIds(null)),
+      departments: departmentsOf(member).listUnordered()
+        .map(d => ({ departmentId: d.id, editors: view(scopes.skillEditorIds(d.id)) }))
+        .filter(d => d.editors.length > 0),
+    }
   }
 
   function managers(member: Member, departmentId: string): ManagerView[] {
@@ -292,6 +312,28 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       }
       scopesOf(member.companyId).replaceDepartmentManagers(departmentId, unique, member.userId)
       return ok(managers(member, departmentId))
+    },
+
+    /** 「Skill を直せる人」: the whole company's list and each department's that has someone on it. */
+    skillEditors,
+
+    /**
+     * Replace one list (owner/admin acting; `departmentId` null: the whole
+     * company); every one must be a member. A department of another company
+     * is simply not found.
+     */
+    replaceSkillEditors(member: Member, departmentId: string | null, userIds: string[]): Outcome<SkillEditorsView> {
+      if (departmentId !== null && !departmentsOf(member).exists(departmentId)) return refuse('not-found', 'Department not found')
+      const unique = [...new Set(userIds)]
+      if (unique.length > MAX_MANAGERS_PER_DEPARTMENT) {
+        return refuse('bad-request', `A list can have at most ${MAX_MANAGERS_PER_DEPARTMENT} people`)
+      }
+      const notMembers = unique.filter(id => memberships.roleOf(member.companyId, id) === null)
+      if (notMembers.length > 0) {
+        return refuse('bad-request', `Not members of this company: ${notMembers.join(', ')}`)
+      }
+      scopesOf(member.companyId).replaceSkillEditors(departmentId, unique, member.userId)
+      return ok(skillEditors(member))
     },
   }
 }

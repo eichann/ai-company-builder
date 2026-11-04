@@ -21,6 +21,7 @@
  * the equivalence on NFC input.
  */
 import { INSTRUCTION_FILE_NAMES } from '../../../shared/core/instruction-files'
+import { SKILL_FOLDER_NAMES } from '../../../shared/core/skill-files'
 
 export const ZERO_SHA = '0000000000000000000000000000000000000000'
 export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
@@ -151,11 +152,28 @@ export function personalPaths(addedLines: string[]): string[] {
 }
 
 // ----------------------------------------------------------------------------
-// Skills / subagents / slash commands with auto-run parts
+// Skills / subagents / slash commands
 // ----------------------------------------------------------------------------
 
-/** Folder test on byte strings (the content-unavailable fallback lists raw paths). */
-export const AUTORUN_DIR_RE = /(^|\/)\.claude\/(skills|agents|commands)(\/|$)/i
+/**
+ * Folder test on byte strings. The folder names come from
+ * shared/core/skill-files.ts (the app's guards use the same list); they are
+ * ASCII, so this bytewise, ASCII-only `i` match equals the core's comparison.
+ */
+export const SKILL_DIR_RE = new RegExp(`(^|/)\\.claude/(${SKILL_FOLDER_NAMES.join('|')})(/|$)`, 'i')
+
+/**
+ * Everything in those folders, every file type: a skill's script runs on the
+ * computer of every member who uses the skill, so a change is protected like
+ * agent config — with the wider list of who may make it (shared/core/skill-files.ts).
+ * Includes deletions, and both sides of a rename (the lists are --no-renames).
+ */
+export function skillFilePaths(changedLines: string[]): string[] {
+  return sortUnique(changedLines.filter(l => SKILL_DIR_RE.test(l)))
+}
+
+/** The content-unavailable fallback lists raw paths, so its folder test is the same one. */
+export const AUTORUN_DIR_RE = SKILL_DIR_RE
 export const AUTORUN_UNAVAILABLE_REASON = '内容を確認できませんでした'
 
 const AUTORUN_KEYS = ['hooks', 'mcpServers', 'lspServers', 'monitors']
@@ -210,7 +228,6 @@ export interface AutorunTargets {
  * modified. Throws on malformed input (the caller then fails closed).
  */
 export function autorunTargets(raw: Buffer): AutorunTargets {
-  const DIR = /(^|\/)\.claude\/(skills|agents|commands)(\/|$)/i
   const tokens = raw.toString('utf8').split('\0')
   const symlinks = new Set<string>()
   const blobsByPath = new Map<string, Set<string>>()
@@ -224,7 +241,7 @@ export function autorunTargets(raw: Buffer): AutorunTargets {
     const f = meta.slice(parents).split(' ')
     const mode = f[parents]
     const sha = f[2 * parents + 1]
-    if (!DIR.test(path)) continue
+    if (!SKILL_DIR_RE.test(path)) continue
     if (mode === undefined || sha === undefined) throw new Error('bad diff line')
     if (/^0+$/.test(mode) || /^0+$/.test(sha)) continue // deleted
     if (mode === '120000') { symlinks.add(path); continue }

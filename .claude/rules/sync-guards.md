@@ -172,7 +172,8 @@ what git actually sees through the app's `createGit`.
 - Rejection recovery rewrites unpushed commits, never retries or reverts on top (the hook checks
   every commit). `client/tests/protected-config.test.ts`, `client/tests/sync/write-denied.test.ts`,
   scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
-  "[LOCAL_ONLY_PATH] …".
+  "[LOCAL_ONLY_PATH] …". Skill files (scripts, new files, deletions, renames) take the same
+  recovery with their own wording when nothing else was refused (`onlySkillFiles`): `client/tests/sync/skill-files.test.ts`.
 
 ## Remote, sparse checkout and not-downloaded folders
 
