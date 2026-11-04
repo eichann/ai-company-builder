@@ -100,7 +100,7 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
     todo: '未着手', in_progress: '進めている', review: '確かめてもらっている', waiting: '返事待ち', done: '完了',
     awaiting_acceptance: '引き受け待ち', declined: '受けられないと返した', preparing: 'AI が用意している', cancelled: 'アーカイブ済み',
   },
-  meeting: { received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
+  meeting: { arrived: '議事録が届いた', received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
   decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },
   outbound_message: { draft: '下書き', sent: '送った', unknown: '届いたか分からない', discarded: 'やめた（しまった）' },
   approval: {
