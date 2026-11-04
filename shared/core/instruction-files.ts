@@ -15,7 +15,7 @@
  * Pure: no Node, Electron, React, Hono, database or git.
  */
 import { FULL_ACCESS_ROLES } from './permissions'
-import { foldAsciiCase, pathKey } from './paths'
+import { foldAsciiCase, lookalikeKey, pathKey } from './paths'
 
 /**
  * CLAUDE.local.md is personal by convention, but once shared it is loaded like CLAUDE.md for
@@ -25,10 +25,9 @@ export const INSTRUCTION_FILE_NAMES: readonly string[] = ['CLAUDE.md', 'CLAUDE.l
 
 const FOLDED_NAMES = new Set(INSTRUCTION_FILE_NAMES.map(foldAsciiCase))
 
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md at any depth, A–Z case-insensitive. */
+/** CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md at any depth, however a disk could fold the spelling. */
 export function isInstructionFile(repoPath: string): boolean {
-  const name = repoPath.normalize('NFC').split('/').pop() ?? ''
-  return FOLDED_NAMES.has(foldAsciiCase(name))
+  return FOLDED_NAMES.has(lookalikeKey(repoPath).split('/').pop() ?? '')
 }
 
 /**

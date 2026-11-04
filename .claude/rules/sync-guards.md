@@ -174,6 +174,21 @@ what git actually sees through the app's `createGit`.
   scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
   "[LOCAL_ONLY_PATH] …". Skill files (scripts, new files, deletions, renames) take the same
   recovery with their own wording when nothing else was refused (`onlySkillFiles`): `client/tests/sync/skill-files.test.ts`.
+  The recovery compares mode as well as blob id (`sameEntry`): a `chmod +x` alone is refused by the
+  server, and a path taken for unchanged was refused at every sync, holding the member's other work
+  back (also for `[WRITE_DENIED]`).
+- A pull that fails without a rebase, while origin/main holds commits HEAD lacks, ends the sync with
+  `pull_failed` (「サーバーの最新の内容を受け取れなかった…」), nothing moved. It used to go on and report
+  「同期が完了しました」, with the member missing the server's changes for good (a look-alike path on a
+  Mac did this). No origin/main (a company's first push) still goes on. Scenario: 「a pull that fails…」
+  in `skill-files.test.ts`.
+- What running a skill leaves in its own folder (`__pycache__/`, `*.pyc`, `node_modules/`,
+  `package-lock.json`, the desktop's files; `client/shared/skill-leftovers.ts`) stays on each
+  computer: a managed block of `.git/info/exclude`, unstaged if a shared negation re-included it.
+  To the server it is a skill change, which would stop automatic sync at every run. New files only:
+  taking a tracked one out of the index would delete it for everyone. A shared lock file that a
+  member's `npm install` changes still meets the refusal and its recovery. Scenarios in
+  `skill-files.test.ts`.
 
 ## Remote, sparse checkout and not-downloaded folders
 

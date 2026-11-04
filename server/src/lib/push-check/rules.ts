@@ -22,6 +22,7 @@
  */
 import { INSTRUCTION_FILE_NAMES } from '../../../shared/core/instruction-files'
 import { SKILL_FOLDER_NAMES } from '../../../shared/core/skill-files'
+import { diskKey, lookalikeKey, pathKey } from '../../../shared/core/paths'
 
 export const ZERO_SHA = '0000000000000000000000000000000000000000'
 export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
@@ -53,6 +54,21 @@ export function dedupe(lines: string[]): string[] {
   return out
 }
 
+/** UTF-8 text of a byte string. */
+function textOf(bytes: string): string {
+  return Buffer.from(bytes, 'latin1').toString('utf8')
+}
+
+/**
+ * Does this path (a byte string) name something protected by `re`, as spelled
+ * or as a disk or tool could read it? `.claude/ſkills/x`, `.mcp.jſon` and
+ * `.claude/hooKs/x` are other paths to git and to the bytewise match, and the
+ * real ones on a Mac (APFS folds ſ and K). ASCII paths are decided bytewise.
+ */
+export function namesProtected(re: RegExp, line: string): boolean {
+  return re.test(line) || (/[\x80-\xff]/.test(line) && re.test(lookalikeKey(textOf(line))))
+}
+
 // ----------------------------------------------------------------------------
 // Agent-execution config (owner/admin only)
 // ----------------------------------------------------------------------------
@@ -74,7 +90,7 @@ export function dedupe(lines: string[]): string[] {
 export const PROTECTED_RE = /(^|\/)\.mcp\.json$|(^|\/)\.claude$|(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.claude\/hooks(\/|$)|(^|\/)\.codex(\/|$)/i
 
 export function protectedPaths(changedLines: string[]): string[] {
-  return sortUnique(changedLines.filter(l => PROTECTED_RE.test(l)))
+  return sortUnique(changedLines.filter(l => namesProtected(PROTECTED_RE, l)))
 }
 
 /**
@@ -88,7 +104,7 @@ export function protectedPaths(changedLines: string[]): string[] {
 export const RECORD_TYPES_RE = /^\.acb\/types(\/|$)|^\.acb$/i
 
 export function recordTypePaths(changedLines: string[]): string[] {
-  return sortUnique(changedLines.filter(l => RECORD_TYPES_RE.test(l)))
+  return sortUnique(changedLines.filter(l => namesProtected(RECORD_TYPES_RE, l)))
 }
 
 /** A definition file the index reads (`.acb/types/<name>.md`, exact spelling). */
@@ -117,7 +133,7 @@ export const INSTRUCTION_FILE_RE = new RegExp(
 )
 
 export function instructionFilePaths(changedLines: string[]): string[] {
-  return sortUnique(changedLines.filter(l => INSTRUCTION_FILE_RE.test(l)))
+  return sortUnique(changedLines.filter(l => namesProtected(INSTRUCTION_FILE_RE, l)))
 }
 
 // ----------------------------------------------------------------------------
@@ -169,7 +185,7 @@ export const SKILL_DIR_RE = new RegExp(`(^|/)\\.claude/(${SKILL_FOLDER_NAMES.joi
  * Includes deletions, and both sides of a rename (the lists are --no-renames).
  */
 export function skillFilePaths(changedLines: string[]): string[] {
-  return sortUnique(changedLines.filter(l => SKILL_DIR_RE.test(l)))
+  return sortUnique(changedLines.filter(l => namesProtected(SKILL_DIR_RE, l)))
 }
 
 /** The content-unavailable fallback lists raw paths, so its folder test is the same one. */
@@ -241,11 +257,13 @@ export function autorunTargets(raw: Buffer): AutorunTargets {
     const f = meta.slice(parents).split(' ')
     const mode = f[parents]
     const sha = f[2 * parents + 1]
-    if (!SKILL_DIR_RE.test(path)) continue
+    // UTF-8 text here: the same test as namesProtected.
+    const key = lookalikeKey(path)
+    if (!SKILL_DIR_RE.test(path) && !SKILL_DIR_RE.test(key)) continue
     if (mode === undefined || sha === undefined) throw new Error('bad diff line')
     if (/^0+$/.test(mode) || /^0+$/.test(sha)) continue // deleted
     if (mode === '120000') { symlinks.add(path); continue }
-    if (mode === '160000' || !/\.md$/i.test(path)) continue
+    if (mode === '160000' || !/\.md$/i.test(key)) continue
     if (!blobsByPath.has(path)) blobsByPath.set(path, new Set())
     ;(blobsByPath.get(path) as Set<string>).add(sha)
   }
@@ -287,7 +305,7 @@ export function autorunReport(targets: AutorunTargets, contents: Map<string, Buf
  */
 export function autorunUnavailable(rawBytes: string): string[] {
   const lines = rawBytes.replace(/\0/g, '\n').split('\n')
-    .filter(l => !l.startsWith(':') && AUTORUN_DIR_RE.test(l))
+    .filter(l => !l.startsWith(':') && namesProtected(AUTORUN_DIR_RE, l))
   return sortUnique(lines).map(l => `${l}\t${utf8Bytes(AUTORUN_UNAVAILABLE_REASON)}`)
 }
 
@@ -329,6 +347,39 @@ export function windowsPathProblems(treeLines: string[]): string[] {
     if (folded[i] === folded[i - 1] && (i === 1 || folded[i - 2] !== folded[i])) out.push(folded[i] + caseDup)
   }
   return out.filter(l => l.length > 0)
+}
+
+/**
+ * Paths a disk folds onto each other although bytes, NFC and A–Z say two
+ * (shared/core diskKey): `docs/ſecret.md` next to `docs/secret.md`, a new
+ * `ſales/x` next to the folder `sales/`. On a Mac the second replaces the first
+ * or never arrives, and that member's pull stops. Compared at every folder
+ * level; two spellings of one NFC path (a Mac's NFD) are not a collision.
+ *
+ * Only paths this push adds are reported (`addedLines`): the windows check reads
+ * the whole tree, and a pair already in a repository must not stop every
+ * member's push. Same entry shape as the case collisions above.
+ */
+export function diskCollisions(treeLines: string[], addedLines: string[]): string[] {
+  if (addedLines.length === 0) return []
+  const prefixes = (line: string): string[] => {
+    const parts = textOf(line).split('/')
+    return parts.map((_, i) => parts.slice(0, i + 1).join('/'))
+  }
+  // A collision needs a spelling that differs from its key; most trees have none.
+  const folds = (line: string) => /[\x80-\xff]/.test(line) && diskKey(textOf(line)) !== pathKey(textOf(line))
+  if (!treeLines.some(folds)) return []
+  const spellings = new Map<string, Set<string>>()
+  for (const line of treeLines) {
+    for (const p of prefixes(line)) {
+      const key = diskKey(p)
+      const set = spellings.get(key) ?? new Set<string>()
+      set.add(pathKey(p))
+      spellings.set(key, set)
+    }
+  }
+  const caseDup = utf8Bytes(' （大文字小文字のみ異なるパスが複数存在）')
+  return sortUnique(addedLines).filter(l => prefixes(l).some(p => (spellings.get(diskKey(p))?.size ?? 0) > 1)).map(l => l + caseDup)
 }
 
 // ----------------------------------------------------------------------------

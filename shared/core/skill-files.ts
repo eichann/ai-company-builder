@@ -15,14 +15,15 @@
  * else may edit the file: that is the push check's separate rule.
  *
  * The push checker matches git's raw bytes (read as latin1) with a regex built
- * from SKILL_FOLDER_NAMES (server/src/lib/push-check/rules.ts); the names are
- * ASCII, so that bytewise match and isSkillFile agree.
+ * from SKILL_FOLDER_NAMES (server/src/lib/push-check/rules.ts), and non-ASCII
+ * paths also through lookalikeKey, as isSkillFile does: `.claude/ſkills/x` lands
+ * in `.claude/skills/` on a Mac.
  *
  * Pure: no Node, Electron, React, Hono, database or git.
  */
 import { instructionFileInManagedFolder } from './instruction-files'
 import { FULL_ACCESS_ROLES } from './permissions'
-import { pathKey } from './paths'
+import { lookalikeKey } from './paths'
 
 /** The folders of `.claude/` that hold skills, subagents and slash commands. */
 export const SKILL_FOLDER_NAMES: readonly string[] = ['skills', 'agents', 'commands']
@@ -41,7 +42,7 @@ export const NO_SKILL_EDITING: SkillEditing = { everywhere: false, folders: [] }
 
 /** Is `repoPath` inside (or at) a skills / agents / commands folder of `.claude/`? */
 export function isSkillFile(repoPath: string): boolean {
-  return SKILL_PATH_RE.test(pathKey(repoPath))
+  return SKILL_PATH_RE.test(lookalikeKey(repoPath))
 }
 
 /** May someone who manages `managedFolders` and holds `skillEditing` change `path`? Owner/admin are decided before this. */

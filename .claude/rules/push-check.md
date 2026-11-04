@@ -35,7 +35,16 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
 - Git output is handled as byte strings (latin1): matching is bytewise with A–Z-only case
   folding, exactly like the shell tools under `LC_ALL=C`, on every host. The old shell hook
   followed the inherited locale and rejected ordinary Japanese names with `WINPATH_DETECTED` on
-  macOS. Non-ASCII case pairs (`Ａ`/`ａ`) do not fold, as production never did.
+  macOS. Non-ASCII case pairs (`Ａ`/`ａ`) do not fold in those bytewise rules, as production never
+  did; what a disk folds is the next point.
+- **Look-alikes** (2026-11-05, review of B-H2): `.claude/ſkills/x` (U+017F), `.mcp.jſon`,
+  `.claude/hooKs/x` (U+212A) are other paths to git and the bytewise rules, and the real ones on a
+  Mac: APFS folds them. Two keys in `shared/core/paths.ts`: `lookalikeKey` (NFKC + Unicode case
+  folding, default-ignorables gone) for names that are protected — `namesProtected` applies it to
+  agent config, instruction files, type definitions, skill files and the auto-run check, the listed
+  path staying the pushed spelling; `diskKey` (no NFKC: `（1）` and `(1)` are two files) for the write
+  gate's second pass, reserved private paths and `diskCollisions`. `.personal` / `.backups` are not
+  folded: nothing is granted there. Test: `skill-files-hook.test.ts`.
   `foldAsciiCase` / `INSTRUCTION_FILE_RE` in `rules.ts` are bytewise twins of `shared/core`
   (`shared-core.md`).
 - The legacy shell hook stays at `server/tests/fixtures/pre-receive-hook.legacy.sh`;
@@ -76,7 +85,9 @@ forever — the "permanently unable to sync" shape).
 - The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1`
   (`internalGitEnv`) and skip the write check and the skill files rule (a department renamed or
   deleted by an owner/admin moves the skills in it; `serverPush` needs the marker and no snapshot,
-  so a member's push can never claim it). They are commits built in the bare
+  so a member's push can never claim it). The other protected rules still see no role: a department
+  holding `CLAUDE.md`, `.claude/settings.json` or a skill with auto-run parts cannot be renamed or
+  deleted (known gap, not new). They are commits built in the bare
   repository and pushed from it to itself (`lib/bare-commit.ts`), so receive-pack runs this hook
   on them like on any push: every other content rule applies. git-http strips both variables from what it
   inherits, so a client cannot select either. Local-transport pushes (tests, an operator) carry
@@ -119,7 +130,8 @@ Deletions are always allowed except where noted (they are how something gets uns
   in the `[PROTECTED_CONFIG]` section (path line, then a reason line). No masking of fenced code
   (substituted arguments can re-pair backticks). A path listed here is not listed again under
   skill files. Contents unreadable, or `ACB_NODE` unusable →
-  every changed path there is rejected for non-admins. Text that is not the syntax (`!important`,
+  every changed path there is rejected for non-admins. The closing advice names who it is for:
+  taking the part out helps only someone who may change the file. Text that is not the syntax (`!important`,
   `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
 - **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —
   Codex reads it in place of `AGENTS.md` — any depth, case-insensitive): owner/admin anywhere; a department manager inside a department folder they
@@ -149,12 +161,15 @@ Deletions are always allowed except where noted (they are how something gets uns
   (`push-check-performance.test.ts`); `secret-scan-hook.test.ts`.
 - **Write permission** (`[WRITE_DENIED]`): every changed path (adds, edits, deletes, both sides
   of a rename) must pass `resolveAccess(pusher, path).write` (`shared/core/permissions.ts`), also
-  with A–Z folded (macOS/Windows check `Sales/x` out into `sales/`); owner/admin always pass;
+  as a disk folds it (`diskKey`: macOS/Windows check `Sales/x` and `ſales/x` out into `sales/`); owner/admin always pass;
   scopes sorted with `foldScopePaths` so row order never matters. The company repo's check
   ignores private scopes. Test: `write-permission-hook.test.ts`.
 - **Reserved private paths** (`[RESERVED_PATH]`, everyone): see `private-folders.md`.
 - Also checked: Windows-invalid / case-colliding paths (`[WINPATH_DETECTED]`) and gitlinks
-  (`[GITLINK_DETECTED]`).
+  (`[GITLINK_DETECTED]`). The collision check also refuses a path this push adds when a disk folds
+  it, at any folder level, onto another spelling in the tree (`diskCollisions`, same entry shape,
+  everyone included). Only added paths: a pair already in a repository stops nobody; two spellings
+  of one NFC path (a Mac's NFD) are not a collision.
 
 ## Bare repositories (`lib/git-server/index.ts`, `repo-config.ts`)
 

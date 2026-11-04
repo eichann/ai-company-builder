@@ -146,7 +146,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   `^[a-z0-9][a-z0-9_-]*$`. Both rules live in `shared/core/names.ts`.
 - Paths are compared as NFC with only A–Z case-folded (`pathKey` in `shared/core/paths.ts`),
   matching what the push checker does bytewise; use the core helpers rather than ad-hoc
-  `toLowerCase()`.
+  `toLowerCase()`. Where a spelling would land on a Mac is `diskKey`; a protected name is tested
+  with `lookalikeKey`.
 - Log through the existing tagged loggers (`log.warn('Git sync: …')`, `[chat-server] …`), not
   bare `console.log`. Never log session tokens, file contents, the AI-generated commit message, a
   prompt suggestion's text, or (on the server) the paths a member sends to `paths/check`.

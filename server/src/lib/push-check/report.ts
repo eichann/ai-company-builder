@@ -192,7 +192,7 @@ export function renderReport(f: Findings): Buffer | null {
     o.line()
     o.line('プッシュをブロックしました。これらのファイルをサーバーの状態に戻してから')
     o.line('再度同期してください（ACBクライアントの同期ボタンから自動で戻せます）。')
-    if (f.autorun) o.line('スキル等は、自動実行の設定を取り除けば、そのまま共有できます。')
+    if (f.autorun) o.line('スキル等は、変更を認められている人が自動実行の設定を取り除けば、共有できます。')
     o.line('配布が必要な場合は、オーナー・管理者に依頼してください。')
     o.line(SEP)
     o.line()

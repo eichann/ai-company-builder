@@ -209,7 +209,6 @@ export function deleteDepartmentScopes(conn: Conn, companyId: string, department
     if (privateInside.n > 0) throw new Error('A private folder is inside this department; make it public first')
     for (const { id } of ids) deleteScopeAndRules(conn, companyId, id)
     conn.prepare(`DELETE FROM department_managers WHERE department_id = ? AND company_id = ?`).run(departmentId, companyId)
-    conn.prepare(`DELETE FROM skill_editors WHERE department_id = ? AND company_id = ?`).run(departmentId, companyId)
   })()
 }
 
@@ -331,13 +330,11 @@ export function replaceDepartmentManagers(conn: Conn, companyId: string, departm
   })()
 }
 
-/** 「Skill を直せる人」 of a department (null: the whole company), oldest first; only current members. */
+/** 「Skill を直せる人」 of a department (null: the whole company), oldest first. */
 export function listSkillEditorIds(conn: Conn, companyId: string, departmentId: string | null): string[] {
   const rows = conn.prepare(`
-    SELECT se.user_id FROM skill_editors se
-    JOIN memberships m ON m.user_id = se.user_id AND m.company_id = se.company_id
-    WHERE se.company_id = ? AND se.department_id IS ?
-    ORDER BY se.created_at ASC, se.user_id ASC
+    SELECT user_id FROM skill_editors WHERE company_id = ? AND department_id IS ?
+    ORDER BY created_at ASC, user_id ASC
   `).all(companyId, departmentId) as Array<{ user_id: string }>
   return rows.map(r => r.user_id)
 }

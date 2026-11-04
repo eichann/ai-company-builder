@@ -94,6 +94,16 @@ function setup(seed: Record<string, string> = {}): { bare: string; clone: string
   return { bare, clone }
 }
 
+/**
+ * Commit `path` without touching the disk: on a Mac the file system folds these
+ * spellings, as members' disks do, and would write over the seeded file.
+ */
+function plant(clone: string, paths: string[], content = 'evil\n') {
+  const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: clone, input: content }).toString().trim()
+  for (const path of paths) git(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], clone)
+  git(['commit', '-q', '--no-verify', '-m', 'planted'], clone)
+}
+
 /** Same parsing as client/electron/protected-config.ts parseProtectedConfigPaths. */
 function protectedPathsIn(output: string): string[] {
   const lines = output.split('\n').map(l => l.replace(/^remote:\s?/, '').trimEnd())
@@ -266,6 +276,69 @@ describe('who may change a skill\'s files', () => {
     commitAll(clone)
     const r = push(clone, MEMBER)
     expect(protectedPathsIn(r.output)).toEqual(['.claude/skills/x/SKILL.md', '.claude/skills/x/run.py'])
+  })
+
+  it('look-alikes a Mac folds onto a protected path are refused: ſ (U+017F), K (U+212A), full-width, an invisible character', () => {
+    const files = ['.claude/ſkills/report/make.py', '.claude/sKills/report/x.py', '.mcp.jſon', '.claude/hooKs/evil.sh', '.claude/ſettings.json', '.ｃｌａｕｄｅ/commands/c.md', '.cl\u200Daude/agents/a.md', 'x/CLAUDE.md'.replace('A', '\uFF21'), 'ſales/AGENTſ.md']
+    const { bare, clone } = setup()
+    const before = git(['-C', bare, 'rev-parse', 'main'])
+    plant(clone, files)
+    const r = push(clone, MEMBER)
+    expect(r.ok).toBe(false)
+    expect(protectedPathsIn(r.output)).toEqual([...files].sort())
+    expect(git(['-C', bare, 'rev-parse', 'main'])).toBe(before)
+  })
+
+  it('a look-alike hides no auto-run part from someone on the list', () => {
+    const { clone } = setup()
+    plant(clone, ['.claude/ſkills/x/SKILL.md'], '---\nhooks: {}\n---\n')
+    const r = push(clone, { role: 'member', skillEditing: { everywhere: true, folders: [] } })
+    expect(r.ok).toBe(false)
+    expect(protectedPathsIn(r.output)).toEqual(['.claude/ſkills/x/SKILL.md'])
+  })
+
+  it('a look-alike of a read-only folder is that folder, for the write check too', () => {
+    const scopes = [...OPEN_SCOPES, { id: 's', path: 'sales', kind: 'folder', rules: [{ id: 'e', subjectType: 'everyone', subjectId: null, canRead: true, canWrite: false }] }]
+    const { clone } = setup({ 'sales/keep.md': 'k\n' })
+    plant(clone, ['ſales/new.md'])
+    const r = push(clone, { role: 'member', scopes })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain('[WRITE_DENIED]')
+  })
+
+  it('a look-alike of a private folder is that folder: reserved, for everyone', () => {
+    const scopes = [...OPEN_SCOPES, { id: 'p', path: 'secret', kind: 'folder', repoId: 'repo-1', rules: [{ id: 'e', subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false }] }]
+    const { clone } = setup()
+    plant(clone, ['ſecret/x.md'])
+    const r = push(clone, { role: 'owner', scopes })
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain('[RESERVED_PATH]')
+  })
+
+  it('a new path a disk folds onto an existing one stops at the collision check, for owners too; files and folders alike', () => {
+    for (const [seed, added] of [['docs/secret.md', 'docs/ſecret.md'], ['sales/old.md', 'ſales/new.md'], ['docs/ﬁle.md', 'docs/file.md']]) {
+      const { clone } = setup({ [seed]: 'real\n' })
+      plant(clone, [added])
+      const r = push(clone, { role: 'owner' })
+      expect(r.ok, added).toBe(false)
+      expect(r.output).toContain('[WINPATH_DETECTED]')
+      expect(r.output).toContain(added)
+    }
+  })
+
+  it('names that only look alike on paper stay two files; a Mac\'s NFD and an old pair stop nobody', () => {
+    const { clone } = setup({ '資料/見積(1).md': 'a\n', 'ガイド/a.md': 'a\n' })
+    // É.md: with a spelling a disk folds in the tree, the comparison really runs.
+    plant(clone, ['資料/見積（1）.md', 'ｶﾀﾛｸﾞ.md', 'カタログ.md', `${'ガイド'.normalize('NFD')}/b.md`, 'É.md'], 'b\n')
+    const r = push(clone, MEMBER)
+    expect(r.ok, r.output).toBe(true)
+
+    // A pair that reached the repository before this rule: unrelated work goes on.
+    const old = setup()
+    plant(old.clone, ['É.md', 'é.md'], 'x\n')
+    git(['-C', old.bare, 'fetch', '-q', old.clone, '+main:main'])
+    plant(old.clone, ['other.md'], 'o\n')
+    expect(push(old.clone, MEMBER).ok).toBe(true)
   })
 
   it('leaves the rest of .claude and the existing skills alone', () => {

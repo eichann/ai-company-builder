@@ -46,6 +46,7 @@ import {
   autorunTargets,
   autorunUnavailable,
   cleanControl,
+  diskCollisions,
   parseRefUpdates,
   instructionFilePaths,
   localOnlyPaths,
@@ -322,11 +323,14 @@ async function checkTypeChanges(ref: RefUpdate): Promise<string> {
   return captured(out.join('\n'))
 }
 
-async function checkWindowsPaths(newSha: string): Promise<string> {
-  const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', newSha])
+async function checkWindowsPaths(changes: RefChanges): Promise<string> {
+  const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', changes.ref.newSha])
   const all = captured(r.stdout.toString('latin1'))
   if (all.length === 0) return ''
-  return captured(windowsPathProblems(all.split('\n')).join('\n'))
+  const tree = all.split('\n')
+  const added = await changes.nameLists(['--diff-filter=A'])
+  const addedLines = added.ok ? nameListLines(added).filter(l => l.length > 0) : []
+  return captured([...windowsPathProblems(tree), ...diskCollisions(tree, addedLines)].join('\n'))
 }
 
 async function checkGitlinks(ref: RefUpdate): Promise<string> {
@@ -451,7 +455,7 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
     const denied = await checkWrite(changes, ctx.writeGate)
     if (denied) f.writeDenied += denied + '\n'
 
-    const win = await checkWindowsPaths(ref.newSha)
+    const win = await checkWindowsPaths(changes)
     if (win) f.winpaths += win + '\n'
 
     const gitlinks = await checkGitlinks(ref)

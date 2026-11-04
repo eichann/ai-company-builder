@@ -94,4 +94,15 @@ describe('「Skill を直せる人」', () => {
     expect(editing('gone')).toEqual({ everywhere: false, folders: [] })
     expect(db.prepare(`SELECT COUNT(*) AS n FROM skill_editors WHERE user_id = 'gone'`).get()).toEqual({ n: 0 })
   })
+
+  it('a department that goes takes its list with it', async () => {
+    db.prepare(`INSERT INTO departments (id, company_id, name, folder, icon, color, sort_order, is_active, created_at, updated_at) VALUES ('d-gone', ?, '消える', '消える', 'Folder', '#000000', 0, 1, ?, ?)`).run(CO, now, now)
+    await put('d-gone', ['ann'])
+    db.prepare(`DELETE FROM departments WHERE id = 'd-gone'`).run()
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM skill_editors WHERE department_id = 'd-gone'`).get()).toEqual({ n: 0 })
+  })
+
+  it('the database itself refuses a row for another company\'s department', () => {
+    expect(() => db.prepare(`INSERT INTO skill_editors (company_id, department_id, user_id, created_at) VALUES (?, 'd-other', 'ann', ?)`).run(CO, now)).toThrow(/skill_editors\.company_id/)
+  })
 })

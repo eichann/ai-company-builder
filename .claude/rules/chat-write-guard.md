@@ -33,7 +33,7 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   member; `private: true` marks a readable private folder; unreadable ones are omitted.
 - Client: `evaluateWrite` (`shared/core/write-access.ts`, the same code the server uses) decides
   exactly like `resolveAccess` + the push gate: NFC, the deepest listed scope decides, and the
-  A–Z-folded spelling must be writable too. Inside a readable private folder the folder part is
+  spelling a disk folds it to (`diskKey`) must be writable too. Inside a readable private folder the folder part is
   taken in its stored spelling (on a case-insensitive disk `評価/CAFé/x` lands in the clone of
   `評価/café`); of two scopes that differ only in A–Z case, the one sorting first
   (`compareScopePaths`) decides, as the push check does (`foldScopePaths`).

@@ -33,7 +33,7 @@ import {
   type ScopeWithRules,
   type SubjectType,
 } from '../../../shared/core/permissions'
-import { foldAsciiCase, pathKey } from '../../../shared/core/paths'
+import { diskKey, pathKey } from '../../../shared/core/paths'
 import { instructionFileInManagedFolder } from '../../../shared/core/instruction-files'
 import { NO_SKILL_EDITING, skillFileAllowed as skillFileAllowedInCompany, type SkillEditing } from '../../../shared/core/skill-files'
 import { foldScopePaths } from '../../../shared/core/write-access'
@@ -228,10 +228,10 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
   if (pusherWritesEverywhere(scopes, pusher.id, role)) return { kind: 'allow-all' }
 
   const exact: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
-  // macOS and Windows check out "Sales/x.md" into an existing "sales/"
-  // folder, so a path must also be writable when compared without A–Z case
-  // (the bytewise A–Z folding of the case-collision check). Of two scopes
-  // that differ only in A–Z case, the one sorting first decides — the same
+  // macOS and Windows check out "Sales/x.md" and "ſales/x.md" into an existing
+  // "sales/" folder, so a path must also be writable as a disk folds it
+  // (shared/core diskKey). Of two scopes that differ only in case, the one
+  // sorting first decides — the same
   // rule the app's evaluateWrite applies (shared/core/write-access.ts).
   const foldedScopes = foldScopePaths(scopes)
   const folded: PermissionRepository = { getMemberRole: () => role, listScopes: () => foldedScopes }
@@ -239,7 +239,7 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
     kind: 'check',
     canWrite: (path: string) =>
       resolveAccess(companyId, pusher.id, path, exact).write
-      && resolveAccess(companyId, pusher.id, foldAsciiCase(path), folded).write,
+      && resolveAccess(companyId, pusher.id, diskKey(path), folded).write,
   }
 }
 
@@ -258,7 +258,7 @@ function scopeRepoGate(policy: PushPolicy, scopePath: string): WriteGate {
     canWrite: (path: string) => {
       const full = `${scopePath}/${path}`
       return resolveAccess(companyId, pusher.id, full, exact).write
-        && resolveAccess(companyId, pusher.id, foldAsciiCase(full), folded).write
+        && resolveAccess(companyId, pusher.id, diskKey(full), folded).write
     },
   }
 }
