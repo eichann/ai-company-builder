@@ -31,7 +31,7 @@ initDatabase()
     for (const service of new Set(PRACTICE_UPSTREAMS.upstreams.map(u => u.service))) {
       const list = PRACTICE_UPSTREAMS.upstreams.filter(u => u.service === service)
       const t = list[0].target
-      const label = service === 'google' ? 'Google' : 'HubSpot'
+      const label = service === 'google' ? 'Google' : service === 'hubspot' ? 'HubSpot' : service === 'slack' ? 'Slack' : 'つなぎ先'
       console.warn(`Key broker: 練習用の ${label} につながっています — ${service} (${list.map(u => u.host).join(', ')}) → ${t.protocol}//${t.hostname}:${t.port}`)
     }
   } else if (PRACTICE_UPSTREAMS.state === 'ignored') {

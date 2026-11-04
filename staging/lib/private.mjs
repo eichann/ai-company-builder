@@ -30,14 +30,14 @@ export function readPrivateText(spec, rel) {
 }
 
 /**
- * { ok: true, production, lockText } or { ok: false }. `lockText` is the plugins.lock production
+ * { ok: true, production, lockText, portal } or { ok: false }. `lockText` is the plugins.lock production
  * uses (inline lines, or the file a `plugins-lock` line names), '' when none.
  */
 export function loadPrivateConfig(spec) {
   try {
     const cfg = parsePrivateConfig(readPrivateText(spec))
     const lockText = cfg.pluginsLockPath ? readPrivateText(spec, cfg.pluginsLockPath) : cfg.lockLines.join('\n') + (cfg.lockLines.length ? '\n' : '')
-    return { ok: true, production: cfg.production, lockText }
+    return { ok: true, production: cfg.production, lockText, portal: cfg.portal }
   } catch {
     return { ok: false }
   }
