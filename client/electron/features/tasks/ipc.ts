@@ -31,6 +31,7 @@
 
 import { isCalendarDate } from '../../../../shared/core/business-days'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
+import { MESSAGE_TYPE } from '../../../../shared/core/core-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { BundleKindsResult, RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
@@ -355,7 +356,7 @@ export function createTasksApi(deps: TasksDeps) {
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
       const since = new Date(dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).from).toISOString()
-      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions, kinds] = await Promise.all([
+      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, questions, kinds, settled] = await Promise.all([
         call(companyId, 'GET', '/records/my-turn'),
         call(companyId, 'GET', '/records/ai-turn'),
         call(companyId, 'POST', '/records/query', { type: 'task', state: [...OPEN_TASK_STATES], fields: { requested_by: id }, limit: 200 }),
@@ -368,6 +369,8 @@ export function createTasksApi(deps: TasksDeps) {
         call(companyId, 'GET', '/me/minutes/bundle-questions'),
         // What each department makes as its 束ねるもの and their names (records.md "Bundle kinds").
         call(companyId, 'GET', '/records/bundle-kinds'),
+        // 来た連絡 the member closed with 「済んだ」 today (interaction 6's settled_by: never what the AI judged).
+        call(companyId, 'POST', '/records/query', { type: MESSAGE_TYPE, finishedSince: since, fields: { settled_by: id }, limit: 100 }),
       ])
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
@@ -387,7 +390,8 @@ export function createTasksApi(deps: TasksDeps) {
       }
       const ids = (settings?.status === 200 ? (settings.json?.data as { settings?: { taskListDepartmentIds?: unknown } }).settings?.taskListDepartmentIds : null)
       const holidays = holidaysOf(settings)
-      const doneToday = [...done1, ...done2]
+      // An older server (no settled_by yet) refuses the query: nothing settled, the list itself still shows.
+      const doneToday = [...done1, ...done2, ...(records(settled) ?? [])]
       // An older server without the route, or no answer: nothing asks (the list itself still shows).
       const bundleQuestions = questions?.status === 200 ? (questions.json?.data as MeetingBundleQuestions | undefined)?.questions ?? [] : []
       const linked = await bundles(companyId, [...mine, ...ai, ...askedList, ...doneToday])

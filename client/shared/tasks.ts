@@ -5,12 +5,13 @@
  * not read); this only sorts and words it. Pure: main, the renderer and tests import it.
  */
 import { addBusinessDays, addDays, businessDaysBetween, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
-import { argDefaultOf } from '../../shared/core/core-types'
+import { argDefaultOf, MESSAGE_TYPE } from '../../shared/core/core-types'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { parseTagsValue } from '../../shared/core/record-types'
 import { restingTask } from '../../shared/core/turn-timing'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
+import { incomingClose } from './record-details'
 import { stateLabel } from './record-views'
 import { thingName } from './thing-words'
 
@@ -69,9 +70,11 @@ export interface TaskListItem {
    * What the row's ☑ does (task v9, 言葉の決まり 5.): `complete` from any state but 準備中;
    * `request_review` (「終わったので見てもらう」) when the member was asked and 確かめてから; `reopen`
    * (「やり直す」) on a finished one the member asked or checked. Absent: no ☑ (the card decides).
-   * The server still decides each press.
+   * On a 来た連絡 (interaction version 6, owner FB #20): `settle` (「済んだ」) on a 確認待ち message that
+   * is the member's; `undo` (「元に戻す」, the generic undo of ledger entry `version`) on one they
+   * closed so today (`settled_by`). The server still decides each press.
    */
-  check?: { action: 'complete' } | { action: 'request_review'; reviewer: string } | { action: 'reopen' }
+  check?: { action: 'complete' } | { action: 'request_review'; reviewer: string } | { action: 'reopen' } | { action: 'settle' } | { action: 'undo'; version: number }
   /**
    * A task the member asked of someone else, not finished (requested_by = them, assignee another):
    * its row shows 「人に頼んだもの」, not the task's icon, which read as a ticked box (owner 2026-11-02).
@@ -90,6 +93,10 @@ const ASK_TO_CHECK_FROM = new Set(['todo', 'in_progress', 'waiting', 'awaiting_a
 
 /** The ☑ of a task row for the member (task v9 `complete` / `request_review` / `reopen`, who_unless). */
 export function checkOf(r: RecordSummary, me: string): TaskListItem['check'] {
+  if (r.type === MESSAGE_TYPE) {
+    const close = incomingClose(r.state, r.fields, me)
+    return close === 'settle' ? { action: 'settle' } : close === 'settled' ? { action: 'undo', version: r.version } : undefined
+  }
   if (r.type !== 'task' || !r.state) return undefined
   const f = r.fields
   const assignee = f.assignee === me

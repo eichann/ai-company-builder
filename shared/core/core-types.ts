@@ -82,6 +82,9 @@
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
  * implements `outside_event` (its `occurred_at` was there from the start).
+ * Version 6 (owner FB #20, additive): the assignee's 「済んだ」 (`settle`, 確認待ち → handled) and
+ * the field `settled_by` the engine fills with them (`ACTOR_ARGS`); the inbox clears it when the
+ * thread goes on.
  *
  * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
  * of a thing that happened outside implements `outside_event` — `occurred_at`
@@ -190,7 +193,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 5
+version: 6
 implements: [outside_event, request]
 storage: server
 fields:
@@ -210,6 +213,7 @@ fields:
   waiting_on:   { label: 待っているもの, kind: text, source: server }
   due:          { label: 期限, kind: date, source: server }
   intake_reason: { label: 受け取ったわけ, kind: choice, options: [to, multiple_to, shared, cc, bulk, automated], option_labels: { to: 宛先（To）があなた, multiple_to: 宛先（To）が何人も, shared: 共有の受付アドレス, cc: CC だけ, bulk: メルマガ・一斉送信, automated: 自動で送られたもの }, source: server }
+  settled_by:   { label: 済んだとした人, kind: person, source: server }
 links:
   counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: interactions }
   tasks:        { label: 関係するタスク, target: task, cardinality: many }
@@ -224,11 +228,13 @@ actions:
   confirm:      { label: 自分の担当にする, from: [unsure], to: received, who: [assignee], note: optional, hand_to: assignee }
   drop:         { label: やることにしない（自分で決める）, from: [unsure], to: excluded, who: [assignee], note: optional }
   take_up:      { label: やることにする, from: [excluded], to: received, who: [assignee], note: optional, hand_to: assignee }
+  settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
 ---
 # やりとり
 
 外から来たもの（メール・Slack など）の受付票。本文は持たず、要約と元への目印だけを持ちます。
 来た連絡（メール・チャット）は、宛先（To）の人の「持ち主だけ」の記録になります（CC の人には出しません）。「届いた」は AI の番で、AI が返事が要るかを判断して「返事のお願い」を作るか、「やることにしない」にします。決めきれないものは「確認待ち」で担当の人の番、共有の受付アドレスに来たものは「部署の番」で、誰かが引き受けます。
+確認待ちの連絡は、話がもう決着していれば担当が「済んだ」で終わりにでき（今日終わったことに出て、すぐなら取り消せます）、取り込まないなら「やることにしない（自分で決める）」でやることにしなかった一覧に移します。
 `,
   meeting: `---
 label: 会議
@@ -714,6 +720,23 @@ export function argDefaultValue(rule: { businessDays: number }, current: unknown
     if (day > today || (day === today && (current.length === 10 || current.slice(0, 16) > now.slice(0, 16)))) return current
   }
   return addBusinessDays(today, rule.businessDays, companyHolidays)
+}
+
+/**
+ * Arguments the engine fills with the person acting (interaction version 6: `settle`'s `settled_by`,
+ * 「済んだ」, so 今日終わったこと lists what the member closed, never what the AI judged): type →
+ * action → argument names. The app may leave it out; a value naming anyone else is refused. Only the
+ * core's rules (a company's own type file cannot say this).
+ */
+export const ACTOR_ARGS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  interaction: { settle: ['settled_by'] },
+}
+
+/** Whether the engine fills this argument with the person acting (`ACTOR_ARGS`). */
+export function isActorArg(type: string, action: string, arg: string): boolean {
+  const byType = Object.prototype.hasOwnProperty.call(ACTOR_ARGS, type) ? ACTOR_ARGS[type] : undefined
+  const names = byType && Object.prototype.hasOwnProperty.call(byType, action) ? byType[action] : undefined
+  return names?.includes(arg) ?? false
 }
 
 /** The default rule of one argument, or undefined. */

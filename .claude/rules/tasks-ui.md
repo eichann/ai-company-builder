@@ -170,8 +170,16 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   any state but 準備中 (no made-up start), on the member's rows (and a check waiting for them as
   確かめる人), never on what they asked of someone else; asked of them with 確かめてから →
   「終わったので見てもらう」 (`request_review` to the 確かめる人); a finished one they asked or checked →
-  やり直す. The list never states someone's OK; that is the card's.
-  **Checked off (完了にする) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
+  やり直す. The list never states someone's OK; that is the card's. **A 来た連絡** (owner FB #20,
+  interaction v6, `inbox.md` "Core types"; `checkOf` via `incomingClose`, `record-details.ts`): ☐
+  「済んだ」 (`settle`) on a 確認待ち message that is the member's (assignee); main also asks the
+  messages they settled today (`POST /records/query { type: interaction, finishedSince, fields:
+  { settled_by: me } }`; an older server's refusal = none, the list still shows), which sit in
+  今日終わったこと with the green ✓ 「元に戻す」 (`undo` of that entry at the row's version: the server
+  refuses when something changed since). What the AI judged is never there. Tests:
+  `tasks-list.test.ts` (「a 来た連絡: ☑ …」, 「今日終わったこと asks …」), `tasks-list.spec.ts`
+  (「a 来た連絡 to confirm …」).
+  **Checked off (完了にする, or a 来た連絡's 済んだ) here, its tab in the middle closes** (owner FB #15, 2026-11-04;
   `onCompleted` → AppShell `closeTabs([recordTabKey(id)])`, the tidy's path, so 固定 marks and
   named groups follow): only that task's tab (a card holds nothing unsaved), only after the server
   accepted it; not for 見てもらう or やり直す, and やり直す does not reopen it. A press on the card's
@@ -305,7 +313,13 @@ meeting's day: ACB keeps no calendar id to build the event's own link), the summ
 決めたこと / 宿題 apart (its linked decisions and tasks). A 来た連絡: who and where it came from,
 返事が要る, 「要約（本文は Slack にあります）」 — ACB keeps no body — 「Slack で開く」 / 「Gmail で開く」
 (only from a well-formed `slack:<channel>:<ts>` / `gmail:<id>` pointer), and the screen's thread slot
-(`renderSource`: the thread around it and the reply draft). Links out go through `shell:openExternal`.
+(`renderSource`: the thread around it and the reply draft). Beside its title, where a task has 完了
+(owner FB #20, `IncomingActions` in `RecordDetails.tsx`, `IncomingDetailView.close` decided in main
+for the member): on a 確認待ち message that is theirs the main button **［済んだ］** (`settle`) and in
+「…」 **［取り込まない］** (`drop` → やることにしなかった一覧), each at the card's version with
+［取り消す］ after; once they closed it 「済んだ」 and **［元に戻す］** (the undo of that entry). An open
+返事のお願い of it is not ended by ［済んだ］: a line says to press ［もう返した］ there. The ［返事する］
+(AI draft) button is on hold (owner). Test: `record-card.spec.ts` (「a 来た連絡 to confirm …」). Links out go through `shell:openExternal`.
 A **案件・プロジェクト** (any type implementing `bundle`, `bundleDetailOf`): なんのため (`purpose`), 責任者
 (`owner`, else `assignee`), 進み具合 (its やること done of all), its approval requests still waiting as
 the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんなのやること** by whose turn —

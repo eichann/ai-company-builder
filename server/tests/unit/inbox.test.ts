@@ -419,6 +419,51 @@ describe('the AI\'s judgement', () => {
   })
 })
 
+// Owner FB #20 (2026-11-04): a 確認待ち message the member already settled could not be closed.
+describe('「済んだ」 on a 確認待ち message (interaction 6, the assignee only)', () => {
+  const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+  async function unsure() {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'unsure', reason: '誰あてか不明' }))
+    return { first, id: row.id }
+  }
+
+  it('closes it as handled, marked as hers; nobody else — not a non-reader, the owner, her AI — may, and she cannot name someone else', async () => {
+    const { id } = await unsure()
+    // Owner-only: anyone else is told it does not exist (the same answer as a missing record).
+    for (const u of ['u-bob', 'u-owner', 'u-admin']) {
+      const r = await engine.act(m(u), person(u), id, 'settle', { expectedVersion: 2 })
+      expect(r.ok).toBe(false)
+      expect(!r.ok && r.kind).toBe('not-found')
+    }
+    const ai = await engine.act(m('u-alice'), { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1' }, id, 'settle', { expectedVersion: 2 })
+    expect(!ai.ok && ai.body).toMatchObject({ code: 'NOT_ALLOWED' })
+    const other = await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2, args: { settled_by: 'u-bob' } })
+    expect(!other.ok && other.body).toMatchObject({ code: 'BAD_VALUE' })
+    expect(stateOf(id).state).toBe('unsure')
+
+    const done = await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2 })
+    expect(done.ok).toBe(true)
+    expect(stateOf(id).state).toBe('handled')
+    expect(fieldsOf(id).settled_by).toBe('u-alice')
+  })
+
+  it('取り消す right after brings it back to 確認待ち; the thread going on takes the mark away (the AI judges again)', async () => {
+    const { first, id } = await unsure()
+    ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2 }))
+    ok(await engine.undo(m('u-alice'), person('u-alice'), id, { version: 3, expectedVersion: 3 }))
+    expect(stateOf(id).state).toBe('unsure')
+    expect(fieldsOf(id).settled_by ?? null).toBeNull()
+
+    ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 4 }))
+    expect(inbox.receive('a', 'u-alice', mail({ references: [first.messageId] }))).toBe('continued')
+    expect(stateOf(id).state).toBe('received')
+    expect(fieldsOf(id).settled_by ?? null).toBeNull()
+  })
+})
+
 describe('polling through the role, reconnecting', () => {
   it('a first connection starts now; a reconnection reads back at most 7 days, a longer break is a gap its member sees', async () => {
     inbox.connect('a', 'u-alice', 'email')
