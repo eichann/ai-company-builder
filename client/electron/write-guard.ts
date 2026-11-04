@@ -26,6 +26,11 @@
  *   folded) for a member who may not change them: owners/admins anywhere,
  *   department managers inside their own department — the server's push
  *   check enforces the same rule; unknown authority never blocks.
+ * - Skill files (everything under `.claude/skills|agents|commands`, any depth)
+ *   for a member who may not change them: owners/admins, department managers
+ *   inside their department, the people on 「Skill を直せる人」 — the push
+ *   check's rule. A skill this member keeps private (`getPrivateSkills`) is
+ *   never shared, so it is theirs to write. Unknown authority never blocks.
  * - `git clone` (and `gh repo clone`) into the company folder outside
  *   `.workspace/`: an external repository there would be shared with the
  *   whole company (or stop sync as a nested repository).
@@ -47,6 +52,8 @@ import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } fr
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
+import { isSkillFile, mayChangeSkillFile, type SkillEditing } from '../../shared/core/skill-files'
+import { pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { readFileSync } from 'node:fs'
@@ -93,12 +100,16 @@ export interface WriteGuard {
   getInstructionAuthority?: () => InstructionAuthority | undefined
   /** Private folders for the reserved-name and read-only checks (read on every call); undefined = none known. */
   getPrivateFolderView?: () => PrivateFolderView | undefined
+  /** The skills kept on this computer (`<folder>/.claude/skills/<name>/`, read when a skill file is written). */
+  getPrivateSkills?: () => readonly string[]
 }
 
 /** Who may change AI instruction files: the member's role and the folders of the departments they manage. */
 export interface InstructionAuthority {
   role: string
   managedFolders: readonly string[]
+  /** Their place on 「Skill を直せる人」; undefined (a server without it) = skill files are not judged here. */
+  skillEditing?: SkillEditing
 }
 
 // Which files are AI instruction files, and who may change them, is the
@@ -107,7 +118,7 @@ export interface InstructionAuthority {
 export { isInstructionFile, mayChangeInstructionFile }
 
 /** Never shared (the app's scratch area, backups, personal folders): the push check never sees them. */
-function isUnsharedPath(rel: string): boolean {
+export function isUnsharedPath(rel: string): boolean {
   const segments = rel.normalize('NFC').split('/')
   if (segments[0] === '.workspace' || segments[0] === '.backups') return true
   return segments.slice(0, -1).some(s => s.toLowerCase() === '.personal')
@@ -115,6 +126,16 @@ function isUnsharedPath(rel: string): boolean {
 
 export function instructionFileMessage(path: string): string {
   return `このファイル（${path}）はAIへの指示ファイルのため、管理者（部署内は部署の管理役）だけが変更できます。変更が必要な場合は、管理者か部署の管理役に依頼してください。`
+}
+
+export function skillFileMessage(path: string): string {
+  return `このファイル（${path}）はスキルの一部で、使う人のパソコンで動くため、管理者・部署の管理役・「Skill を直せる人」に指定された人だけが変更できます。変更が必要な場合は、管理者に依頼してください。`
+}
+
+/** Is `rel` inside a skill this member keeps on this computer? Such a line is `<folder>/.claude/skills/<name>/`. */
+export function inPrivateSkill(privateSkills: readonly string[], rel: string): boolean {
+  const key = pathKey(rel)
+  return privateSkills.some(line => key.startsWith(pathKey(line)))
 }
 
 export function typeDefinitionMessage(path: string): string {
@@ -159,6 +180,14 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
     const authority = guard.getInstructionAuthority?.()
     if (authority && !mayChangeInstructionFile(authority, rel)) {
       return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: instructionFileMessage(rel), code: 'instruction-file' }
+    }
+  }
+  if (isSkillFile(rel) && !isUnsharedPath(rel)) {
+    const authority = guard.getInstructionAuthority?.()
+    if (authority?.skillEditing
+      && !mayChangeSkillFile({ ...authority, skillEditing: authority.skillEditing }, rel)
+      && !inPrivateSkill(guard.getPrivateSkills?.() ?? [], rel)) {
+      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: skillFileMessage(rel), code: 'skill-file' }
     }
   }
   if (TYPE_DEFINITION_RE.test(rel)) {

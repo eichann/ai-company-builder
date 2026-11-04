@@ -11,6 +11,8 @@ export type SkillToolRuns = ElectronPort<'startTool' | 'stopTool'>
 export type SkillOutbound = ElectronPort<'openExternal'>
 /** Making or changing a skill's files on this computer: new skill, copy, 育成中 mark. */
 export type SkillWrites = ElectronPort<'createDirectory' | 'createFile' | 'writeFile' | 'copyItem' | 'toggleSkillNurturing'>
+/** Why the member may not write this skill path, in a sentence (main decides). */
+export type SkillRefusals = ElectronPort<'reservedPathRefusal'>
 /**
  * Marking a skill private or shared (the company .gitignore): written on this
  * computer, but it decides whether the next sync sends the skill to everyone.
@@ -82,6 +84,11 @@ export function makeSkillPrivate(rootPath: string, skillRelativePath: string, sh
 }
 
 /** One way: the next sync shares the skill with everyone. */
+/** The sentence when writing `target` is refused; null when it is not. */
+export function skillWriteRefusal(target: string, refusals: SkillRefusals = window.electronAPI) {
+  return refusals.reservedPathRefusal(target)
+}
+
 export function publishSkill(rootPath: string, skillRelativePath: string, sharing: SkillSharingWrites = window.electronAPI) {
   return sharing.publishSkill(rootPath, skillRelativePath)
 }

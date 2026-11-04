@@ -162,14 +162,21 @@ export function privateCheckoutRootOf(absPath: string): string | null {
  * read (that folder's own rules apply there).
  */
 export function companyPathOf(absPath: string): { root: string; companyId: string; rel: string } | null {
+  const where = companyFileOf(absPath)
+  if (!where) return null
+  const cache = readPrivateScopesCache(where.root)
+  if (!cache || readableScopeOf([...cache.scopes, ...(cache.pendingPublic ?? [])], where.rel)) return null
+  return where
+}
+
+/** The company checkout an absolute path lies in and its company-relative path, private folders included — or null. */
+export function companyFileOf(absPath: string): { root: string; companyId: string; rel: string } | null {
   const root = privateCheckoutRootOf(path.dirname(path.resolve(absPath)))
   if (!root) return null
   const rel = path.relative(root, path.resolve(absPath)).split(path.sep).join('/')
   if (!rel || rel.startsWith('..')) return null
   const cache = readPrivateScopesCache(root)
-  if (!cache) return null
-  if (readableScopeOf([...cache.scopes, ...(cache.pendingPublic ?? [])], rel)) return null
-  return { root, companyId: cache.companyId, rel }
+  return cache ? { root, companyId: cache.companyId, rel } : null
 }
 
 /** The readable private folder an absolute path lies in, with its company root — or null. */

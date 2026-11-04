@@ -29,8 +29,9 @@ import { editorOverwriteBackupPlan } from '../shared/editor-disk-state'
 import { normalizeReservedPath } from '../../shared/types/private-folders'
 import { pathKey as serverPathKey } from '../../shared/core/paths'
 import { isValidFolderName as coreFolderName, isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../shared/core/names'
-import { instructionFileAllowed } from '../../server/src/lib/push-check/policy'
-import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE } from '../../server/src/lib/push-check/rules'
+import { instructionFileAllowed, skillFileAllowed } from '../../server/src/lib/push-check/policy'
+import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE, SKILL_DIR_RE } from '../../server/src/lib/push-check/rules'
+import { isSkillFile, mayChangeSkillFile } from '../../shared/core/skill-files'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
 
@@ -178,4 +179,28 @@ test('AI instruction files: the chat guard and the push check name the same file
     assert.equal(client, instructionFileAllowed(p, managed), `manager of ${managed.join(', ')} changes ${JSON.stringify(p)}`)
   }
   for (const role of ['owner', 'admin']) assert.equal(mayChangeInstructionFile({ role, managedFolders: [] }, 'CLAUDE.md'), true)
+})
+
+test('skill files: the core and the push checker\'s bytewise regex agree on what is one and who may change it', () => {
+  const files = [
+    '.claude/skills/a/SKILL.md', '.claude/skills/a/make.py', '.claude/agents/x', '.claude/commands/y.md', '.claude/skills', '.claude/commands',
+    '営業部/.claude/skills/a/run.sh', 'a/b/.claude/agents/z.py', '.Claude/Skills/a/x', '.CLAUDE/COMMANDS/y', 'がいど'.normalize('NFD') + '/.claude/skills/x',
+    '.claude/notes.md', '.claude/skillset/x', '.claude/skills.md', 'claude/skills/x', 'x.claude/skills/y', '.claude', 'skills/a.py', '.claude/hooks/x',
+  ]
+  for (const f of files) {
+    assert.equal(isSkillFile(f), SKILL_DIR_RE.test(Buffer.from(f, 'utf8').toString('latin1')), `isSkillFile(${JSON.stringify(f)})`)
+  }
+  const paths = ['.claude/skills/a/x.py', '営業部/.claude/skills/a/x.py', '営業部2/.claude/skills/x', 'dev/.claude/agents/y', 'がいど/.claude/commands/z', 'がいど'.normalize('NFD') + '/.claude/commands/z', '人事/.claude/skills/x']
+  const cases = [
+    { managedFolders: ['営業部'], skillEditing: { everywhere: false, folders: [] } },
+    { managedFolders: [], skillEditing: { everywhere: false, folders: ['Dev', 'がいど'.normalize('NFD')] } },
+    { managedFolders: [], skillEditing: { everywhere: true, folders: [] } },
+    { managedFolders: [], skillEditing: { everywhere: false, folders: [] } },
+  ]
+  for (const c of cases) {
+    for (const p of paths) {
+      assert.equal(mayChangeSkillFile({ role: 'member', ...c }, p), skillFileAllowed(p, c.managedFolders, c.skillEditing), `${JSON.stringify(c)} changes ${JSON.stringify(p)}`)
+    }
+  }
+  for (const role of ['owner', 'admin']) assert.equal(mayChangeSkillFile({ role, managedFolders: [], skillEditing: cases[3].skillEditing }, '.claude/skills/x'), true)
 })

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { fileNameProblem, folderPathProblem, NAME_TAKEN_MESSAGE } from '../../../../shared/file-names'
 import { lastSegment } from '../../../../shared/private-folder-ui'
 import { createDirectory, createEmptyFile, deleteItem, getStats, renameItem, reservedPathRefusal } from '../api'
+import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
@@ -231,10 +232,12 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
     const affectedParents = new Set<string>()
     const failed: string[] = []
+    let refused: string | null = null
 
     for (const p of paths) {
-      const result = await deleteItem(p).catch(() => ({ success: false }))
+      const result: FileOpResult = await deleteItem(p).catch(() => ({ success: false }))
       if (!result.success) failed.push(p)
+      if (result.code === 'refused' && result.error) refused = result.error
       affectedParents.add(parentDir(p))
     }
 
@@ -242,7 +245,8 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
     setSelectedPaths(new Set(failed))
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
     await Promise.all([...affectedParents].map(dir => model.invalidate(dir)))
-    if (failed.length > 0) {
+    if (refused) warn(refused, 8000)
+    else if (failed.length > 0) {
       const names = failed.map(p => `「${p.slice(p.lastIndexOf('/') + 1)}」`).join('、')
       warn(`${names}を削除できませんでした。${failed.length < paths.length ? 'ほかのものは削除しました。' : ''}開いているアプリがあれば閉じてから、もう一度試してください。`, 8000)
     }

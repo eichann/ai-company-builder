@@ -1,8 +1,11 @@
 import { useCallback } from 'react'
 import type { DepartmentConfig } from '../../../types'
+import type { FileOpResult } from '../../../../shared/ipc-contract'
 import type { Skill } from '../model'
-import { copySkill, createSkillDirectory, createSkillFile, makeSkillPrivate, pathExists, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../api'
+import { copySkill, createSkillDirectory, createSkillFile, makeSkillPrivate, pathExists, publishSkill, readSkillFile, setSkillNurturing, skillWriteRefusal, writeSkillFile } from '../api'
 import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
+
+const refusalOf = (result: FileOpResult): string | null => (result.code === 'refused' && result.error ? result.error : null)
 
 interface Options {
   rootPath: string | undefined
@@ -58,6 +61,9 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
 
     try {
       if (await pathExists(destPath)) return { error: skillNameTakenMessage(folderName) }
+      // A copy is shared by the next sync, so it is asked like any change of a skill.
+      const refused = await skillWriteRefusal(destPath)
+      if (refused) return { error: refused }
       if (!await createSkillDirectory(skillsBasePath)) return { error: SKILL_COPY_FAILED }
 
       const copyResult = await copySkill(sourceSkillPath, destPath)
@@ -83,22 +89,25 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
     }
   }, [rootPath, departmentFolder, departmentId, refreshSkills])
 
-  const shareSkill = useCallback(async (skill: Skill) => {
-    if (!rootPath) return
+  /** Both answer the sentence when the member may not do this, or null. */
+  const shareSkill = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!rootPath) return null
     const dept = departments.find(d => d.id === skill.departmentId)
-    if (!dept) return
+    if (!dept) return null
     const skillFolderName = skill.skillPath?.split('/').pop()
-    if (!skillFolderName) return
+    if (!skillFolderName) return null
 
     const skillRelativePath = `${dept.folder}/.claude/skills/${skillFolderName}/`
-    await publishSkill(rootPath, skillRelativePath)
+    const result = await publishSkill(rootPath, skillRelativePath)
     refreshSkills()
+    return refusalOf(result)
   }, [rootPath, departments, refreshSkills])
 
-  const toggleNurturing = useCallback(async (skill: Skill) => {
-    if (!skill.files.skillMd) return
-    await setSkillNurturing(skill.files.skillMd, !skill.isNurturing)
+  const toggleNurturing = useCallback(async (skill: Skill): Promise<string | null> => {
+    if (!skill.files.skillMd) return null
+    const result = await setSkillNurturing(skill.files.skillMd, !skill.isNurturing)
     refreshSkills()
+    return refusalOf(result)
   }, [refreshSkills])
 
   return { createSkill, copySkillHere, shareSkill, toggleNurturing }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { backupBeforeOverwrite, createDirectory, readFile, writeFile } from '../api'
+import { backupBeforeOverwrite, createDirectory, readFile, writeFile, saveRefusal } from '../api'
 import { canAutosave, decideSave, isDirty } from '../../../../shared/editor-disk-state'
 import { registerUnsavedEditsSaver } from '../../../shared/lib/unsavedEdits'
 import type { OpenFile } from './useOpenFiles'
@@ -92,7 +92,7 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
         markSaved()
         return true
       }
-      setError('保存に失敗しました')
+      setError(await saveRefusal(filePath) ?? '保存に失敗しました')
       return false
     } catch {
       setError('保存できませんでした。少し待ってから、もう一度保存してください')

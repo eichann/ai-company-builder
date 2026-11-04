@@ -15,6 +15,7 @@ import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
+  onlySkillFiles,
   parseProtectedConfigPaths,
   protectedConfigMessage,
   restoreProtectedPaths,
@@ -1246,7 +1247,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // member may not edit, or both.
         const refusedWhat = hasProtected && hasWriteDenied
           ? '共有できない'
-          : hasProtected ? '管理者だけが変更できる' : '編集する権限がないフォルダの'
+          : hasProtected ? (onlySkillFiles(protectedFiles) ? '変更できないスキルの' : '管理者だけが変更できる') : '編集する権限がないフォルダの'
 
         // First try keeping every file as the member has it now. The hook
         // checks every commit in the range, so a change the member has since
@@ -1385,7 +1386,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             return {
               success: false,
               error: hasProtected && !hasWriteDenied
-                ? '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。'
+                ? `${refusedWhat}ファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`
                 : `${refusedWhat}ファイルを元に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`,
               errorType: 'push_failed' as const,
               pushFailed: true,
@@ -1396,7 +1397,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
 
         const parts = ['同期完了。']
-        if (hasProtected) parts.push(`管理者だけが変更できるファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
+        if (hasProtected) parts.push(`${onlySkillFiles(revertedProtected) ? '変更できないスキルの' : '管理者だけが変更できる'}ファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
         if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
         if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
         if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)

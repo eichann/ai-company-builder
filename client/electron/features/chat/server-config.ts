@@ -31,6 +31,7 @@ import type { BrokerTokenStore } from '../../services/broker-token-store'
 import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
 import { notDownloadedFolders } from '../../sync/not-downloaded'
+import { readLocalPrivateSkills } from '../../sync/local-ignores'
 import type { WriteAccessStore } from '../../write-access-store'
 import type { ToolApprovals } from '../agent-interactions/ipc'
 import type { ChatHistoryEvents } from '../chat-history/ipc'
@@ -116,6 +117,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         getPrivateFolders: () => deps.privateFolders.readable(companyId),
         getInstructionAuthority: () => deps.privateFolders.authority(companyId),
         getPrivateFolderView: () => deps.privateFolders.guardView(root),
+        getPrivateSkills: () => readLocalPrivateSkills(root),
       }
     },
     getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>

@@ -9,8 +9,10 @@ import path from 'path'
 import { reservedPathMessage } from '../../../../shared/types/private-folders'
 import type { PrivateFoldersApi } from '../../private-folders-api'
 import type { PathChecker } from '../../sync/path-check'
-import { companyPathOf, readPrivateScopesCache, readableScopeOf } from '../../sync/private-folders'
-import type { InstructionAuthority } from '../../write-guard'
+import { companyFileOf, companyPathOf, readPrivateScopesCache, readableScopeOf } from '../../sync/private-folders'
+import { readLocalPrivateSkills } from '../../sync/local-ignores'
+import { inPrivateSkill, isUnsharedPath, skillFileMessage, type InstructionAuthority } from '../../write-guard'
+import { isSkillFile, mayChangeSkillFile } from '../../../../shared/core/skill-files'
 
 export interface PrivateFolderGuardsDeps {
   api: PrivateFoldersApi
@@ -33,6 +35,14 @@ export interface PrivateFolderGuards {
   } | undefined
   /** The server's sentence when creating `absPath` would use a folder name the member may not use; else null. */
   reservedRefusal(absPath: string): Promise<string | null>
+  /**
+   * The sentence when the member may not change the skill file at `absPath`;
+   * else null, also while their authority is unknown (the push check decides).
+   * A skill kept on this computer is theirs, unless it is about to be shared (`sharing`).
+   */
+  skillRefusal(absPath: string, options?: { sharing?: boolean }): Promise<string | null>
+  /** What the app's own file operations ask: the skill rule, then the reserved names. */
+  writeRefusal(absPath: string): Promise<string | null>
 }
 
 function waitAtMost(pending: Promise<void>, timeoutMs: number): Promise<void> {
@@ -52,6 +62,51 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
   const instructionAuthority = new Map<string, InstructionAuthority>()
   const authorityRefreshes = new Map<string, Promise<void>>()
 
+  function refreshAuthority(companyId: string, timeoutMs: number): Promise<void> {
+    let pending = authorityRefreshes.get(companyId)
+    if (!pending) {
+      pending = api.capabilities(companyId)
+        .then(result => {
+          if (!result.success) return
+          if (result.role === 'owner' || result.role === 'admin' || result.managedDepartmentFolders) {
+            instructionAuthority.set(companyId, {
+              role: result.role,
+              managedFolders: result.managedDepartmentFolders ?? [],
+              ...(result.skillEditing ? { skillEditing: result.skillEditing } : {}),
+            })
+          } else instructionAuthority.delete(companyId)
+        })
+        .catch(() => {})
+        .finally(() => authorityRefreshes.delete(companyId))
+      authorityRefreshes.set(companyId, pending)
+    }
+    return waitAtMost(pending, timeoutMs)
+  }
+
+  async function reservedRefusal(absPath: string): Promise<string | null> {
+    if (fs.existsSync(absPath)) return null
+    const where = companyPathOf(absPath)
+    if (!where) return null
+    const folder = await pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
+    if (folder === null) return null
+    console.warn('[fs] Refused a write into a folder name that cannot be used')
+    return reservedPathMessage(folder)
+  }
+
+  async function skillRefusal(absPath: string, options?: { sharing?: boolean }): Promise<string | null> {
+    const where = companyFileOf(absPath)
+    if (!where || !isSkillFile(where.rel) || isUnsharedPath(where.rel)) return null
+    if (!options?.sharing && inPrivateSkill(readLocalPrivateSkills(where.root), where.rel)) return null
+    // Only skill files come this far. A known answer is used at once (an editor
+    // save never waits on the network) and refreshed for the next one.
+    const pending = refreshAuthority(where.companyId, 3000)
+    if (!instructionAuthority.has(where.companyId)) await pending
+    const authority = instructionAuthority.get(where.companyId)
+    if (!authority?.skillEditing || mayChangeSkillFile({ ...authority, skillEditing: authority.skillEditing }, where.rel)) return null
+    console.warn('[fs] Refused a change to a skill file')
+    return skillFileMessage(where.rel)
+  }
+
   return {
     refreshReadable(companyId, timeoutMs) {
       let pending = privateFolderRefreshes.get(companyId)
@@ -65,22 +120,7 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
       return waitAtMost(pending, timeoutMs)
     },
     readable: companyId => readablePrivateFolders.get(companyId),
-    refreshAuthority(companyId, timeoutMs) {
-      let pending = authorityRefreshes.get(companyId)
-      if (!pending) {
-        pending = api.capabilities(companyId)
-          .then(result => {
-            if (!result.success) return
-            if (result.role === 'owner' || result.role === 'admin' || result.managedDepartmentFolders) {
-              instructionAuthority.set(companyId, { role: result.role, managedFolders: result.managedDepartmentFolders ?? [] })
-            } else instructionAuthority.delete(companyId)
-          })
-          .catch(() => {})
-          .finally(() => authorityRefreshes.delete(companyId))
-        authorityRefreshes.set(companyId, pending)
-      }
-      return waitAtMost(pending, timeoutMs)
-    },
+    refreshAuthority,
     authority: companyId => instructionAuthority.get(companyId),
     // Private folders as the chat write guard sees them, from the cached
     // /me/scopes answer sync keeps in the company's .git (no network call).
@@ -107,14 +147,8 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
      * and the server's [RESERVED_PATH] stay the safety net. The message is the
      * server's own wording, naming only what the member typed.
      */
-    async reservedRefusal(absPath) {
-      if (fs.existsSync(absPath)) return null
-      const where = companyPathOf(absPath)
-      if (!where) return null
-      const folder = await pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
-      if (folder === null) return null
-      console.warn('[fs] Refused a write into a folder name that cannot be used')
-      return reservedPathMessage(folder)
-    },
+    reservedRefusal,
+    skillRefusal,
+    writeRefusal: async absPath => await skillRefusal(absPath) ?? await reservedRefusal(absPath),
   }
 }

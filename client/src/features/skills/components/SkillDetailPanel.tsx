@@ -32,8 +32,8 @@ interface SkillDetailPanelProps {
   onExecute: () => void
   onEditFile: (filePath: string) => void
   onOpenTool?: (tool: SkillTool, port: number) => void
-  onPublish?: (skill: Skill) => void
-  onToggleNurturing?: (skill: Skill) => void
+  onPublish?: (skill: Skill) => Promise<string | null>
+  onToggleNurturing?: (skill: Skill) => Promise<string | null>
 }
 
 export function SkillDetailPanel({
@@ -168,14 +168,22 @@ function OverviewTab({
 }: {
   skill: Skill
   onEditFile: (path: string) => void
-  onPublish?: (skill: Skill) => void
-  onToggleNurturing?: (skill: Skill) => void
+  onPublish?: (skill: Skill) => Promise<string | null>
+  onToggleNurturing?: (skill: Skill) => Promise<string | null>
 }) {
   const { t } = useTranslation()
   const [showPublishConfirm, setShowPublishConfirm] = useState(false)
+  // Why the member may not do what they just pressed (a skill file they may not change).
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   return (
     <div className="space-y-6">
+      {refusal && (
+        <div role="alert" className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700 dark:text-amber-400">
+          <Warning size={14} className="flex-shrink-0 mt-0.5" />
+          <span>{refusal}</span>
+        </div>
+      )}
       {/* Sharing Status */}
       <div>
         <h4 className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider mb-2">
@@ -211,7 +219,7 @@ function OverviewTab({
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
-                      onPublish?.(skill)
+                      void onPublish?.(skill).then(setRefusal)
                       setShowPublishConfirm(false)
                     }}
                     className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
@@ -245,7 +253,7 @@ function OverviewTab({
           ステータス
         </h4>
         <button
-          onClick={() => onToggleNurturing?.(skill)}
+          onClick={() => void onToggleNurturing?.(skill).then(setRefusal)}
           className={`
             w-full p-3 rounded-xl border text-left transition-colors
             ${skill.isNurturing

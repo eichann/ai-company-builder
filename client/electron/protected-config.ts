@@ -5,7 +5,8 @@
 // rejects any push in which *some commit* adds, modifies, deletes or renames
 // a protected path (.claude/settings.json, .claude/settings.local.json,
 // .mcp.json, anything under .claude/hooks/ — at any depth) unless the pusher
-// is an owner/admin. Claude Code runs the commands in those files without a
+// is an owner/admin; skill / agent / command files the same way, with more
+// people allowed (shared/core/skill-files.ts). Claude Code runs the commands in those files without a
 // prompt, so a member could otherwise run code on every teammate's machine.
 //
 // The rejected change is already committed locally, so retrying the push can
@@ -26,6 +27,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SimpleGit } from 'simple-git'
+import { isSkillFile } from '../../shared/core/skill-files'
 
 export const PROTECTED_CONFIG_MARKER = '[PROTECTED_CONFIG]'
 
@@ -71,9 +73,20 @@ function parseRejectionPaths(errorMessage: string, marker: string): string[] {
   return paths
 }
 
+/** Everything refused is a skill / agent / command file: more people than admins may change those. */
+export function onlySkillFiles(paths: string[]): boolean {
+  return paths.length > 0 && paths.every(isSkillFile)
+}
+
+export const SKILL_FILES_REASON = 'スキル・エージェント・コマンドのファイルは使う人のパソコンで動くため、管理者・部署の管理役・「Skill を直せる人」に指定された人だけが変更できます（自動実行の設定はオーナー・管理者だけです）。'
+
 /** Plain-words explanation shown to the member (Japanese UI). */
 export function protectedConfigMessage(paths: string[]): string {
   const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  if (onlySkillFiles(paths)) {
+    return `このスキルのファイルは変更できません。\n` +
+      `${SKILL_FILES_REASON}\n\n${list}`
+  }
   return `このファイルは管理者だけが変更できます。\n` +
     `チャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
 }

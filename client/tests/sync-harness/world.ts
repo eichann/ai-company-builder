@@ -117,7 +117,7 @@ export const QUESTIONS = {
   sharedNestedRepo: { title: '共有中のフォルダに、別の場所から取り込んだ情報があります', buttons: { exclude: 0, 'keep-sharing': 1, cancel: 2 } },
   externalNestedRepo: { title: '別の場所から取り込んだフォルダがあります', buttons: { exclude: 0, cancel: 1 } },
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
-  protectedConfig: { title: '管理者だけが変更できるファイル', buttons: { restore: 0, cancel: 1 } },
+  protectedConfig: { title: '管理者だけが変更できるファイル', alsoTitled: '変更できないスキルのファイル', buttons: { restore: 0, cancel: 1 } },
   writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
 } as const
 
@@ -254,6 +254,7 @@ export class World {
   readonly locale: string
   private readonly gitconfig: string
   private scopes: HarnessScope[] = DEFAULT_SCOPES
+  private readonly skillEditing = new Map<string, { everywhere: boolean; folders: string[] }>()
   /** Private folders by scope id (the server's scope repositories). */
   readonly privateFolders = new Map<string, HarnessPrivateFolder>()
   /** Private folders made public (scope id → path); their content may be anywhere now. */
@@ -392,8 +393,14 @@ export class World {
     fs.writeFileSync(file, JSON.stringify({
       version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.allScopes(),
       ...(scopePath ? { scopePath } : {}),
+      ...(this.skillEditing.has(userId) ? { skillEditing: this.skillEditing.get(userId) } : {}),
     }))
     return file
+  }
+
+  /** Put a member on 「Skill を直せる人」 (as git-http's snapshot says it); takes effect at their next push. */
+  setSkillEditing(name: string, editing: { everywhere: boolean; folders: string[] }): void {
+    this.skillEditing.set(`user-${name}`, editing)
   }
 
   /** Replace the company's permission scopes; takes effect at every member's next push. */
@@ -954,7 +961,10 @@ export class Member {
   }
 
   private answer(options: SyncMessageBoxOptions): number {
-    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find(k => QUESTIONS[k].title === options.title)
+    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find((k) => {
+      const q: { title: string; alsoTitled?: string } = QUESTIONS[k]
+      return q.title === options.title || q.alsoTitled === options.title
+    })
     if (!kind) throw new Error(`unexpected dialog: ${options.title}`)
     const answer = this.answers.get(kind)?.shift() ?? (DEFAULT_ANSWERS[kind] as string)
     const buttons = QUESTIONS[kind].buttons as Record<string, number>
