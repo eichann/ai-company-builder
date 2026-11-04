@@ -19,7 +19,6 @@ import { renderMeetingPanel } from '../src/app/meetingCard'
 import { renderRecordBundleField } from '../src/app/recordBundleField'
 import { recordDetailOf } from '../shared/record-details'
 import { summaryView } from '../shared/record-views'
-import { madeOf } from '../electron/features/minutes/meetings'
 import { MEETING_NO_ACCESS_TEXT } from '../shared/minutes-app'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
@@ -58,6 +57,8 @@ const arrivalOf = (m: Meeting): MeetingArrival => ({
   recordId: m.id, title: m.title, version: m.version, meetingAt: m.at, status: m.state as MeetingArrival['status'], attendeeCount: m.members.length,
   by: m.by ? { memberId: m.by, displayName: people[m.by] } : null, byYou: m.by === ME, series: m.series, autoSeries: m.series && autoSeries.has(m.id),
 })
+// What main counts for 「決めたことN・やることの案N」 (electron/features/minutes/meetings.ts, tested there).
+const madeOf = (d: ReturnType<typeof detailOf>) => ({ decisions: d.links.filter(l => l.record.type === 'decision').length, proposals: d.links.filter(l => l.record.type === 'task').length })
 const find = (id: string) => meetings.find(m => m.id === id)!
 const move = (id: string, patch: Partial<Meeting>) => { const m = find(id); before.set(id, { ...m }); Object.assign(m, patch, { version: m.version + 1 }); tell() }
 
