@@ -50,6 +50,7 @@ import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createTaskSettingsService } from './services/task-settings'
+import { replyTarget } from '../shared/core/task-settings'
 import { createWorkSwitches } from './services/work-switches'
 import { slackFeaturesOf } from './services/slack-client'
 
@@ -317,6 +318,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       now: companyNow(shared.clock.nowMs(), DEFAULT_COMPANY_TIME_ZONE),
       holidays: taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
     }),
+    // A task the AI makes from a message gets a due: the message's deadline, else this 目安 (inbox.md).
+    replyGuideline: (companyId, receivedAt) => {
+      const s = taskSettings.settingsOf(companyId)
+      return replyTarget(receivedAt, s.reply, s.companyHolidays.map(h => h.date)).date
+    },
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,

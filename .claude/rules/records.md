@@ -927,6 +927,8 @@ own place). A person's create (session) gets no defaults.
   company); assignee as said, else the member. The default folder is checked like any `folder`
   (`placeFolder`: a private one is refused — never placed company-wide instead); an assignee who
   cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
+- A request made with an origin link to a message (a task's `interaction`) always gets a `due`: the
+  AI's, else the company's reply 目安 (`messageDue`; `inbox.md` "A task from a message").
 - The answer carries `placed: { personal, folder }` (every create's), and the tool adds
   `tellMember` — 「あなただけに見えるやることに入れました（部署に出すときはカードの［部署に出す］から）」 /
   「「コンテンツ」のやることに、<担当>さんの担当で入れました」; the tool's description tells the AI

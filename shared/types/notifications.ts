@@ -40,6 +40,9 @@ export const NOTIFICATION_KINDS = [
   // The inbox (inbox.md): their reply came to a 返事のお願い; a message waits for its owner's 確認.
   'reply_arrived',
   'intake_unsure',
+  // The member's own AI made them a task from a message that came in (owner FB #13): told although
+  // their AI was the actor. An app released before it shows the server's text and lists no switch.
+  'from_message',
   // ── lane B ▲
   // lane C ▼ (reserved: role_unassigned)
   // ── lane C ▲
@@ -71,6 +74,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   // lane B ▼
   reply_arrived: '返事を待っていた連絡に、相手から返事が来た',
   intake_unsure: '来た連絡を誰が受け持つか決めきれず、確かめてほしい',
+  from_message: '来た連絡から、AI があなたのやることを作った',
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
@@ -98,6 +102,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   // lane B ▼
   reply_arrived: true,
   intake_unsure: true,
+  from_message: true,
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
