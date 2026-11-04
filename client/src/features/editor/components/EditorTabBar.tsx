@@ -1,4 +1,6 @@
-import { X } from '@phosphor-icons/react'
+import { useState, type ReactNode } from 'react'
+import { PushPin, X } from '@phosphor-icons/react'
+import { ContextMenu } from '../../../shared/ui/ContextMenu'
 import { FILE_PATHS_DRAG_TYPE, LINK_EFFECT_ALLOWED, startRecordDrag } from '../../../shared/lib/dragTypes'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { RecordIcon } from '../../../shared/ui/ThingIcon'
@@ -19,16 +21,26 @@ interface Props {
   onSelect: (path: string) => void
   onPin?: (path: string) => void
   onClose: (e: React.MouseEvent, path: string) => void
+  /** Pinned (固定) tabs: 「タブを片づける」 leaves them open. */
+  pinnedTabs?: ReadonlySet<string>
+  onTogglePinned?: (key: string) => void
+  /** At the right end, outside the scrolling strip (the tabs' 「…」 menu). */
+  end?: ReactNode
 }
 
 /**
  * One tab per open file or record: a preview tab in italics, a dot while unsaved, the department of
  * a file from elsewhere; a record by its kind's icon and its title (plan A, no 「ファイルではありません」 line).
  */
-export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, recordLooks, onSelect, onPin, onClose }: Props) {
+export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewFilePath, tabLabels, recordLooks, onSelect, onPin, onClose, pinnedTabs, onTogglePinned, end }: Props) {
+  const [menu, setMenu] = useState<{ key: string; x: number; y: number } | null>(null)
   return (
-    <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50 overflow-x-auto">
-      <div className="flex" role="tablist" aria-label="開いているもの">
+    <div className="flex-shrink-0 flex items-center border-b border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">
+      {menu && onTogglePinned && (
+        <ContextMenu position={{ x: menu.x, y: menu.y }} onClose={() => setMenu(null)}
+          items={[{ label: pinnedTabs?.has(menu.key) ? '固定をやめる' : '固定する（片づけても残す）', icon: <PushPin size={14} />, onClick: () => { onTogglePinned(menu.key); setMenu(null) } }]} />
+      )}
+      <div className="flex min-w-0 flex-1 overflow-x-auto" role="tablist" aria-label="開いているもの">
         {openFiles.map((filePath) => {
           const recordId = recordIdOfTab(filePath)
           const look = recordId ? recordLooks?.[recordId] : undefined
@@ -42,6 +54,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
             ? (look ? <RecordIcon record={look} size={14} /> : null)
             : <FileIcon size={14} className="flex-shrink-0" />
           const deptLabel = tabLabels?.[filePath]
+          const pinned = !!pinnedTabs?.has(filePath)
 
           return (
             <div
@@ -49,7 +62,9 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
               role="tab"
               aria-selected={isActive}
               data-tab={recordId ? `record:${recordId}` : 'file'}
+              data-pinned={pinned || undefined}
               onClick={() => onSelect(filePath)}
+              onContextMenu={onTogglePinned ? e => { e.preventDefault(); setMenu({ key: filePath, x: e.clientX, y: e.clientY }) } : undefined}
               // A tab dragged onto a record's 「つながっているもの」 links what it shows (owner decision 2026-11-03).
               draggable
               onDragStart={e => {
@@ -76,6 +91,13 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
                 </span>
               )}
               <span className={`text-xs truncate ${isPreview ? 'italic' : ''} ${deptLabel ? '-ml-1' : ''}`} title={recordId ? (look ? `${thingName(look)}：${look.title}` : undefined) : filePath}>{fileName}</span>
+              {pinned && (
+                <button type="button" aria-label="固定をやめる" title="固定しています（片づけても残ります）。押すと固定をやめます"
+                  onClick={e => { e.stopPropagation(); onTogglePinned?.(filePath) }}
+                  className="flex-shrink-0 rounded p-0.5 text-indigo-500 hover:bg-gray-200 dark:hover:bg-zinc-700">
+                  <PushPin size={11} weight="fill" />
+                </button>
+              )}
               {isModified && (
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
               )}
@@ -93,7 +115,7 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
           )
         })}
       </div>
-
+      {end && <div className="flex flex-shrink-0 items-center px-1">{end}</div>}
     </div>
   )
 }

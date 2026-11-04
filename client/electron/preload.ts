@@ -23,6 +23,7 @@ import type { ArchiveCursor, BundleCreateInput, RecordLinkInput, TaskActInput, T
 import type { DroppedThing } from '../shared/link-drop'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
+import type { AppCommandAnswer } from '../shared/app-commands'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackFeature } from '../shared/slack'
@@ -358,6 +359,8 @@ const api: ElectronAPI = {
   onFileRequestedFromChatWindow: callback => subscribe('chatWindow:fileRequested', callback),
   onCloseRequested: callback => subscribe('app:closeRequested', callback),
   answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
+  onAppCommandRequest: callback => subscribe('appCommand:request', callback),
+  answerAppCommand: (requestId: string, answer: AppCommandAnswer) => invoke('appCommand:respond', requestId, answer),
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   getSlackStatus: (companyId: string) => invoke('slack:status', companyId),

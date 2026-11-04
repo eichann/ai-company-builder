@@ -2,6 +2,10 @@
 paths:
   - "client/shared/commands/**"
   - "client/src/shared/commands/**"
+  - "client/shared/app-commands.ts"
+  - "client/electron/app-commands/**"
+  - "client/electron/features/app-commands/**"
+  - "client/tests/app-commands.test.ts"
 ---
 
 # Commands: named operations, their catalog and shortcuts
@@ -36,8 +40,11 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
   (見せるだけ), `local` (自分の手元だけ, undoable), `outbound` (外に出る・全員に届く — anything that
   sends outside or starts the AI), `admin` (管理者の操作), `never` (渡さない). It decides how the
   command may ever reach the AI (memo E1 「AI から ACB を操作する」).
-- `exposeToAI` defaults to false. Nothing hands commands to the AI yet; do not set it without
-  the owner (a `never` command with it fails to load).
+- `exposeToAI` defaults to false. Only the three tab commands below have it (owner, 2026-11-04);
+  do not set it on another command without the owner. `defineCommands` refuses it on any class
+  but `view` / `local` (outbound and admin need the member's 「はい」 / ACB's confirmation screen,
+  not built) and without an `aiDescription` (what the AI reads, Japanese then English). See
+  "Handed to the AI".
 - `args` is a zod object; `run` checks it at run time and the types check it at compile time
   (`run('file.open', { path })`; a wrong id or argument does not compile).
 - `target: { arg, area }` for a command that acts on one of several instances of an area (a chat
@@ -76,6 +83,9 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `folder.reveal` `{ path }` | view | `AppShell.tsx`: the folder's department, the ファイル tab, the folder revealed in the tree | a folder row of 「つながっているもの」 (`linkRows.tsx`, `tasks-ui.md` "Dropping links") |
 | `files.openToday` ⌘⇧T (app) | local (makes a folder on this computer only; never synced) | `AppShell.tsx`: 今日のフォルダ made when missing, its department's files, the folder revealed in the tree (`tasks-ui.md` "今日のフォルダ") | the shortcut; the file panel header's calendar button calls the same function |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 探す left tab, cursor in its box (live search of what the member half remembers; `records.md` "探す") | the shortcut |
+| `tabs.list` (AI) | view | `features/editor/hooks/useTabTidying.ts` (mounted by `AppShell`): this window's open tabs (title, kind, pinned) and 「片づけたタブ」 by day (`group` = `2026-11-03`, item ids) — titles and kinds only, never paths or contents | the consultation AI (`tabs_list`) |
+| `tabs.tidy` (AI) | local (this computer's screen; undone by `tabs.restore`) | the same: every open tab but the pinned ones and those whose edits cannot be saved goes into 「片づけたタブ」 (`files-and-editor.md` "Tidying the tabs") | the tabs' 「…」 menu ［タブを片づける］; the AI (`tabs_tidy`) |
+| `tabs.restore` `{ group?, items? }` (AI) | local | the same: reopens a day or some items; a file gone stays listed 「見つかりません」 | the AI (`tabs_restore`); the list's buttons call the same function directly |
 | `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
@@ -90,6 +100,30 @@ click on the preview, which has nothing focusable, still focuses it). When a but
 it disappears (preview ⇄ source, closing a tab) the focus returns to the root, or ⌘S / ⌘F would
 stop working until the member clicks the editor again. Its shortcuts do nothing while the focus
 is elsewhere (the file tree, the chat). UI test: `tests/ui/editor-panel.spec.ts`.
+
+## Handed to the AI (the first app commands the AI runs, owner 2026-11-04)
+
+Exactly `tabs.list`, `tabs.tidy`, `tabs.restore`; nothing else is exposed
+(`tests/app-commands.test.ts` 「only tabs.list, tabs.tidy and tabs.restore…」). How they reach the
+agent:
+
+1. `client/shared/app-commands.ts` `aiCommands()` reads them from the catalog; the tool name is
+   the id with `_` (`tabs_list`) on the app's own MCP server `acb_app`, the schema is the
+   catalog's zod `args` (no second definition), the description its `aiDescription`.
+2. `electron/app-commands/tools.ts` `createAppCommandTools` makes the tools for one chat request
+   (`chat-server.ts`, only for an agent that owns its conversation and never in an unattended
+   「AI の番」 step); Claude Code gets them in process, always loaded and allowed without asking
+   (view / local; `tests/claude-tool-search.test.ts`), Codex as a loopback endpoint, like the
+   review tool. The answer is the handler's result as JSON. Labels: `acb-tool-displays.ts`.
+3. The tool only relays: main (`electron/features/app-commands/ipc.ts`) checks the id and the
+   arguments again, refuses a consultation shown in a window of its own (that window has no
+   tabs: 「…メインの画面の相談からだけ扱えます。」), sends `appCommand:request` to the main window
+   only, and accepts `appCommand:respond` only from that window (20 s, then 「画面が応答しませんでした」).
+4. The main window (`src/shared/commands/useAiCommandRequests.ts`, mounted by `AppShell`) runs the
+   command through the same registry as a click, again only an `exposeToAI` id, and answers.
+
+So the AI works only on the tabs of the window that shows the consultation. Tests:
+`tests/app-commands.test.ts`, `tests/ui/tidy-tabs.spec.ts` 「the consultation AI lists…」.
 
 ## Handlers and shortcuts
 

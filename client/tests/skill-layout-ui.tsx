@@ -117,6 +117,9 @@ const fileChanges = emitter<Array<{ type: string; path: string }>>()
 const fileRequests = emitter<{ path: string }>()
 // The consultation's AI changed the task (records:changed): its version and linked files grow.
 const recordsChanged = emitter<{ companyId: string }>()
+// The consultation AI running one of the app's commands here (shared/app-commands.ts), and the answers.
+const appCommandRequests = emitter<{ requestId: string; commandId: string; args: unknown }>()
+const appCommandAnswers = new Map<string, unknown>()
 let taskVersion = 2
 let taskFiles = ['営業部/提案書/A社_提案.md']
 let cardReads = 0
@@ -157,6 +160,10 @@ const api: Partial<ElectronAPI> = {
   readDirectoryTree: async (dir: string, max?: number) => { record('readDirectoryTree', [dir]); return tree(dir, 0, max ?? 2) },
   readDirectory: async (dir: string) => { record('readDirectory', [dir]); return listDir(dir) },
   readFile: async (path: string) => FILES[path] ?? null,
+  // Saving writes the fake disk (the editor's autosave, a tidy saving first).
+  writeFile: async (path: string, content: string) => { record('writeFile', [path, content]); FILES[path] = content; return true },
+  onAppCommandRequest: appCommandRequests.subscribe,
+  answerAppCommand: async (requestId: string, answer: unknown) => { appCommandAnswers.set(requestId, answer) },
   // 探す ⌘K lists the company's files by name (company paths under the folder).
   gitListFiles: async (_root: string, folder: string) => ({ success: true, files: Object.keys(FILES).filter(p => p.startsWith(`${ROOT}/`)).map(p => p.slice(ROOT.length + 1)).filter(p => !folder || p.startsWith(`${folder}/`)) }),
   readFileBinary: async () => null,
@@ -285,6 +292,13 @@ Object.assign(window, {
       recordsChanged.emit({ companyId: COMPANY })
     },
     cardReads: () => cardReads,
+    /** The consultation AI runs an app command (tabs.list / tidy / restore); resolves to the window's answer. */
+    async aiCommand(commandId: string, args: unknown = {}) {
+      const requestId = `r${Math.random()}`
+      appCommandRequests.emit({ requestId, commandId, args })
+      for (let i = 0; i < 100 && !appCommandAnswers.has(requestId); i++) await sleep(20)
+      return appCommandAnswers.get(requestId)
+    },
   },
 })
 

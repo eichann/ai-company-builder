@@ -154,6 +154,10 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   mcp__acb_company_files__company_search: say('会社全体を検索しました', '会社全体を検索しています', '会社全体を {n} 回検索しました', input => shortText(input.query)),
   mcp__acb_company_files__company_read_file: say('会社のファイルを読みました', '会社のファイルを読んでいます', '会社のファイルを {n} 件読みました', input => companyPath(input.path)),
   mcp__acb_company_files__company_list: say('会社のフォルダの中を見ました', '会社のフォルダの中を見ています', '会社のフォルダの中を {n} 回見ました', input => companyPath(input.path)),
+  // The app's commands handed to the AI (app-commands.ts): the middle's tabs.
+  mcp__acb_app__tabs_list: say('タブを見ました', 'タブを見ています', 'タブを {n} 回見ました'),
+  mcp__acb_app__tabs_tidy: say('タブを片づけました', 'タブを片づけています', 'タブを {n} 回片づけました'),
+  mcp__acb_app__tabs_restore: say('片づけたタブを開き直しました', '片づけたタブを開き直しています', '片づけたタブを {n} 回開き直しました'),
   mcp__acb_review__request_review: say('確認をお願いしました', '確認をお願いしています', '確認を {n} 回お願いしました', input => shortText(input.title)),
   // The question is the member's topic, never a URL path.
   mcp__acb_web__web_research: say('Webで調べました', 'Webで調べています', 'Webで {n} 回調べました', input => shortText(input.question)),

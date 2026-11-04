@@ -35,3 +35,10 @@ test('⌘K: skills match by name or slash command and consultations by title, af
   // Nothing typed: still only what is open.
   assert.deepEqual(paletteItems('', [], [], [], { skills, consultations }), [])
 })
+
+test('⌘K: 「片づけたタブ」 is found by its name or the words a member types for it, and not by anything else', () => {
+  const actions = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片付け', 'tab'] }]
+  for (const q of ['タブ', '片づけ', '片付けたタブ', 'Tab']) assert.equal(paletteItems(q, [], [], [], { actions })[0]?.actionId, 'tidiedTabs', q)
+  assert.equal(paletteItems('見積', ['営業/見積.md'], [], [], { actions }).some(i => i.actionId), false)
+  assert.equal(paletteItems('', [], [], [], { actions }).length, 0)
+})

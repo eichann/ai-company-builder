@@ -58,6 +58,8 @@ export interface ChatServerConfigDeps {
   toolApprovals: ToolApprovals
   /** A choice prompt in the window that owns the chat (closed with it). */
   requestInteraction: ChatServerConfig['requestInteraction']
+  /** One of the app's AI commands, run in the main window (features/app-commands/ipc.ts). */
+  runAppCommand?: ChatServerConfig['runAppCommand']
   /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
@@ -185,6 +187,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       deps.chatHistory.changed({ companyId: company, sessionId: id, kind: 'patch' })
     },
     requestInteraction: deps.requestInteraction,
+    runAppCommand: deps.runAppCommand,
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     cancelInteractions: appSessionId => {
       deps.toolApprovals.cancel(appSessionId)

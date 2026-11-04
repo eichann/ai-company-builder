@@ -1,6 +1,7 @@
 contract.events agent-interaction:closed
 contract.events agent-interaction:request
 contract.events app:closeRequested
+contract.events appCommand:request
 contract.events chat-server:info
 contract.events chatHistory:changed
 contract.events chatWindow:changed
@@ -31,6 +32,7 @@ contract.invoke api:createCompany
 contract.invoke api:getCompanies
 contract.invoke api:getDepartments
 contract.invoke app:closeResponse
+contract.invoke appCommand:respond
 contract.invoke appLink:acceptServer
 contract.invoke appLink:dismissServer
 contract.invoke appLink:serverOffer
@@ -307,6 +309,7 @@ contract.type ElectronAPI.acceptAppLinkServer = acceptAppLinkServer: Invoke<'app
 contract.type ElectronAPI.actOnTask = actOnTask: Invoke<'tasks:act'>
 contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
+contract.type ElectronAPI.answerAppCommand = answerAppCommand: Invoke<'appCommand:respond'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
 contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
 contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
@@ -425,6 +428,7 @@ contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFr
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
 contract.type ElectronAPI.onAgentInteraction = onAgentInteraction: Subscribe<'agent-interaction:request'>
 contract.type ElectronAPI.onAgentInteractionClosed = onAgentInteractionClosed: Subscribe<'agent-interaction:closed'>
+contract.type ElectronAPI.onAppCommandRequest = onAppCommandRequest: Subscribe<'appCommand:request'>
 contract.type ElectronAPI.onChatHistoryChanged = onChatHistoryChanged: Subscribe<'chatHistory:changed'>
 contract.type ElectronAPI.onChatServerInfo = onChatServerInfo: Subscribe<'chat-server:info'>
 contract.type ElectronAPI.onChatWindowsChanged = onChatWindowsChanged: Subscribe<'chatWindow:changed'>
@@ -602,6 +606,7 @@ contract.type IpcEventChannels = export interface IpcEventChannels { }
 contract.type IpcEventChannels.'agent-interaction:closed' = 'agent-interaction:closed': [request: AgentInteractionRequest]
 contract.type IpcEventChannels.'agent-interaction:request' = 'agent-interaction:request': [request: AgentInteractionRequest]
 contract.type IpcEventChannels.'app:closeRequested' = 'app:closeRequested': []
+contract.type IpcEventChannels.'appCommand:request' = 'appCommand:request': [request: AppCommandRequest]
 contract.type IpcEventChannels.'chat-server:info' = 'chat-server:info': [info: ChatServerInfo]
 contract.type IpcEventChannels.'chatHistory:changed' = 'chatHistory:changed': [data: ChatHistoryChange]
 contract.type IpcEventChannels.'chatWindow:changed' = 'chatWindow:changed': [change: ChatWindowsChange]
@@ -633,6 +638,7 @@ contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { arg
 contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+contract.type IpcInvokeChannels.'appCommand:respond' = 'appCommand:respond': { args: [requestId: string, answer: AppCommandAnswer]; result: void }
 contract.type IpcInvokeChannels.'appLink:acceptServer' = 'appLink:acceptServer': { args: []; result: SimpleResult }
 contract.type IpcInvokeChannels.'appLink:dismissServer' = 'appLink:dismissServer': { args: []; result: void }
 contract.type IpcInvokeChannels.'appLink:serverOffer' = 'appLink:serverOffer': { args: []; result: { server: string } | null }
@@ -897,6 +903,7 @@ main.handle api:createCompany @ features/auth/ipc.ts (name: string)
 main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
+main.handle appCommand:respond @ features/app-commands/ipc.ts (requestId: string, answer: AppCommandAnswer)
 main.handle appLink:acceptServer @ features/app-link/ipc.ts ()
 main.handle appLink:dismissServer @ features/app-link/ipc.ts ()
 main.handle appLink:serverOffer @ features/app-link/ipc.ts ()
@@ -1079,6 +1086,7 @@ main.on chatHistory:flushSession @ features/chat-history/ipc.ts (companyId: stri
 main.on fs:startDrag @ features/fs/ipc.ts (filePath: string)
 main.send agent-interaction:${event} @ main.ts
 main.send app:closeRequested @ main.ts
+main.send appCommand:request @ features/app-commands/ipc.ts
 main.send chat-server:info @ main.ts
 main.send chatHistory:changed @ features/chat-history/ipc.ts
 main.send chatWindow:changed @ features/chat-windows/ipc.ts
@@ -1103,6 +1111,8 @@ preload addAbsence -> invoke absences:add($0, $1)
 preload addAbsence : (companyId: string, input: AbsenceAddInput) => Promise<AbsenceAddResult>
 preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
 preload addOutboundMailRecipient : (companyId: string, messageId: string, email: string, name?: string | undefined) => Promise<OutboundMailResult>
+preload answerAppCommand -> invoke appCommand:respond($0, $1)
+preload answerAppCommand : (requestId: string, answer: AppCommandAnswer) => Promise<void>
 preload answerCloseRequest -> invoke app:closeResponse($0)
 preload answerCloseRequest : (answer: "ack" | "close" | "stay") => Promise<void>
 preload approveApproval -> invoke approvals:approve($0, $1, $2, $3)
@@ -1339,6 +1349,8 @@ preload onAgentInteraction -> on agent-interaction:request(<fn>) ; removeListene
 preload onAgentInteraction : (callback: (request: AgentInteractionRequest) => void) => () => void
 preload onAgentInteractionClosed -> on agent-interaction:closed(<fn>) ; removeListener agent-interaction:closed(<fn>)
 preload onAgentInteractionClosed : (callback: (request: AgentInteractionRequest) => void) => () => void
+preload onAppCommandRequest -> on appCommand:request(<fn>) ; removeListener appCommand:request(<fn>)
+preload onAppCommandRequest : (callback: (request: AppCommandRequest) => void) => () => void
 preload onChatHistoryChanged -> on chatHistory:changed(<fn>) ; removeListener chatHistory:changed(<fn>)
 preload onChatHistoryChanged : (callback: (data: ChatHistoryChange) => void) => () => void
 preload onChatServerInfo -> on chat-server:info(<fn>) ; removeListener chat-server:info(<fn>)

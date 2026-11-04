@@ -36,8 +36,8 @@ interface SettingsPanelProps {
   initialTab?: TabType
   /** 「自分の鍵」: the service to show first (from the chat's "no key" card). */
   focusService?: string
-  /** 自分の設定's 「今日のフォルダ」 row, composed by the screen (it knows the departments on this PC). */
-  todayFolder?: ReactNode
+  /** 自分の設定's rows the screen composes (「今日のフォルダ」: it knows the departments on this PC; 「前の日のタブを自動で片づける」). */
+  mineRows?: ReactNode
 }
 
 export type TabType = 'mine' | 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
@@ -88,7 +88,7 @@ const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] t
 const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
 const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
 
-export function SettingsPanel({ onClose, initialTab = 'mine', focusService, todayFolder }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, initialTab = 'mine', focusService, mineRows }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
@@ -379,7 +379,7 @@ export function SettingsPanel({ onClose, initialTab = 'mine', focusService, toda
             ) : activeTab === 'mine' ? (
               <>
                 <MySwitchesSection key={currentCompany.id} companyId={currentCompany.id} onOpenGoogle={() => setActiveTab('google')} />
-                {todayFolder && <div className="-mt-3 px-8 pb-8">{todayFolder}</div>}
+                {mineRows && <div className="-mt-3 space-y-3 px-8 pb-8">{mineRows}</div>}
               </>
             ) : activeTab === 'absences' ? (
               <AbsenceSection key={currentCompany.id} companyId={currentCompany.id} />

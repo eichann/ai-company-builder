@@ -38,3 +38,12 @@ export function createDirectory(dirPath: string, writes: EditorWrites = window.e
 export function backupBeforeOverwrite(rootPath: string, filePath: string, writes: EditorWrites = window.electronAPI) {
   return writes.backupBeforeOverwrite(rootPath, filePath)
 }
+
+/** Whether a record a tidied tab points to can still be read (「片づけたタブ」 marks it 「見つかりません」). */
+export type TidiedRecordReads = ElectronPort<'getRecordCard'>
+
+/** false only when the server says the record is gone or not readable; unknown (offline) → true. */
+export async function recordStillThere(companyId: string, recordId: string, reads: TidiedRecordReads = window.electronAPI): Promise<boolean> {
+  const r = await reads.getRecordCard(companyId, recordId).catch(() => null)
+  return !(r && !r.success && r.notFound)
+}

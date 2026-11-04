@@ -1,12 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { MagnifyingGlass } from '@phosphor-icons/react'
+import { Broom, MagnifyingGlass } from '@phosphor-icons/react'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { CALM, THING_NAMES } from '../../../../shared/thing-words'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
 import { getFileIcon } from '../../../shared/ui/fileIcon'
 import { RecordIcon, ThingIcon } from '../../../shared/ui/ThingIcon'
 import { listCompanyFiles, searchRecords } from '../api'
-import { paletteItems, type PaletteConsultation, type PaletteItem, type PaletteRecent, type PaletteSkill } from '../model'
+import { paletteItems, type PaletteConsultation, type PaletteAction, type PaletteItem, type PaletteRecent, type PaletteSkill } from '../model'
 
 interface Props {
   onClose: () => void
@@ -24,13 +24,16 @@ interface Props {
   /** 「AIへの相談」, read once when the window opens; one chosen opens in the chat. */
   loadConsultations?: () => Promise<PaletteConsultation[]>
   onOpenConsultation?: (sessionId: string) => void
+  /** The screen's own lists found by name (「片づけたタブ」), opened by `onAction`. */
+  actions?: readonly PaletteAction[]
+  onAction?: (id: string) => void
 }
 
 /**
  * 探す ⌘K (Windows Ctrl+K; ⌘P too): open anything by its name — やること, 案件, 会議の記録,
  * スキル, AIへの相談, ファイル… — with the same icons as everywhere. Rendered only while open, so it starts empty.
  */
-export function FindPalette({ onClose, rootPath, companyId, departmentFolder, recent, onSelectFile, onOpenRecord, skills, onOpenSkill, loadConsultations, onOpenConsultation }: Props) {
+export function FindPalette({ onClose, rootPath, companyId, departmentFolder, recent, onSelectFile, onOpenRecord, skills, onOpenSkill, loadConsultations, onOpenConsultation, actions, onAction }: Props) {
   const [query, setQuery] = useState('')
   const [files, setFiles] = useState<string[]>([])
   const [consultations, setConsultations] = useState<PaletteConsultation[]>([])
@@ -66,13 +69,14 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
   }
 
   const items = useMemo(
-    () => paletteItems(query, files, records.query === query.trim() ? records.list : [], recent, { skills, consultations }),
-    [query, files, records, recent, skills, consultations],
+    () => paletteItems(query, files, records.query === query.trim() ? records.list : [], recent, { skills, consultations, actions }),
+    [query, files, records, recent, skills, consultations, actions],
   )
   const pick = Math.min(at, Math.max(0, items.length - 1))
   const open = (i: PaletteItem | undefined) => {
     if (!i) return
-    if (i.recordId) onOpenRecord(i.recordId)
+    if (i.actionId) onAction?.(i.actionId)
+    else if (i.recordId) onOpenRecord(i.recordId)
     else if (i.skillId) onOpenSkill?.(i.skillId)
     else if (i.consultationId) onOpenConsultation?.(i.consultationId)
     else if (i.path) onSelectFile(`${rootPath}/${i.path}`)
@@ -109,7 +113,7 @@ export function FindPalette({ onClose, rootPath, companyId, departmentFolder, re
             return (
               <li key={i.key} role="option" aria-selected={n === pick} onMouseEnter={() => setAt(n)} onClick={() => open(i)}
                 className={`flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 ${n === pick ? 'bg-accent/10' : 'hover:bg-gray-50 dark:hover:bg-zinc-800/50'}`}>
-                {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.record ? <RecordIcon record={i.record} size={15} />
+                {FileIc ? <FileIc size={15} className="flex-shrink-0" /> : i.actionId ? <Broom size={15} className="flex-shrink-0 text-gray-500" /> : i.record ? <RecordIcon record={i.record} size={15} />
                   : <ThingIcon kind={i.skillId ? 'skill' : i.consultationId ? 'consultation' : 'other'} size={15} />}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12.5px] text-gray-800 dark:text-zinc-100">{name}</span>

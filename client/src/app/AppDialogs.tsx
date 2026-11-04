@@ -3,7 +3,7 @@ import { NewSkillWizard } from '../features/skills/components/NewSkillWizard'
 import { CopySkillModal } from '../features/skills/components/CopySkillModal'
 import { ToolViewer } from '../features/skills/components/ToolViewer'
 import { FindPalette } from '../features/search/components/FindPalette'
-import type { PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
+import type { PaletteAction, PaletteConsultation, PaletteRecent, PaletteSkill } from '../features/search/model'
 import { BackupHistorySlideOver } from '../features/sync/components/BackupHistorySlideOver'
 import { SettingsPanel } from '../features/settings/components/SettingsPanel'
 import { ConnectToolsScreen } from '../features/settings/components/ConnectToolsScreen'
@@ -35,12 +35,15 @@ interface Props {
   onOpenSkill: (skillId: string) => void
   loadConsultations?: () => Promise<PaletteConsultation[]>
   onOpenConsultation: (sessionId: string) => void
+  /** 探す ⌘K's lists of the screen's own (「片づけたタブ」). */
+  paletteActions?: readonly PaletteAction[]
+  onPaletteAction?: (id: string) => void
   showSettings: boolean
   /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
   settingsFocus: { service?: string; at: number } | null
   onCloseSettings: () => void
-  /** 自分の設定's 「今日のフォルダ」 row. */
-  todayFolderSetting?: ReactNode
+  /** 自分の設定's rows the screen composes (今日のフォルダ, the daily tab tidy). */
+  mineSettings?: ReactNode
   showBackupHistory: boolean
   setShowBackupHistory: Dispatch<SetStateAction<boolean>>
 }
@@ -88,6 +91,8 @@ export function AppDialogs(props: Props) {
             onOpenSkill={props.onOpenSkill}
             loadConsultations={props.loadConsultations}
             onOpenConsultation={props.onOpenConsultation}
+            actions={props.paletteActions}
+            onAction={props.onPaletteAction}
           />
         )}
 
@@ -100,7 +105,7 @@ export function AppDialogs(props: Props) {
             key={settingsFocus?.at ?? 'settings'}
             onClose={onCloseSettings}
             {...(settingsFocus ? { initialTab: 'ownkeys' as const, focusService: settingsFocus.service } : {})}
-            todayFolder={props.todayFolderSetting}
+            mineRows={props.mineSettings}
           />
         )}
 

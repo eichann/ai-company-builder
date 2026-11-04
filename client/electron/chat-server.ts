@@ -3,6 +3,8 @@ import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/too
 import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
+import { createAppCommandTools } from './app-commands/tools'
+import type { AppCommandAnswer } from '../shared/app-commands'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
@@ -53,6 +55,8 @@ import crypto from 'crypto'
 import net from 'net'
 
 export interface ChatServerConfig extends AgentHost {
+  /** Runs one of the app's AI commands in the window showing the consultation (features/app-commands/ipc.ts). */
+  runAppCommand?: (sessionId: string, commandId: string, args: unknown, signal?: AbortSignal) => Promise<AppCommandAnswer>
   /** Where to listen; 0 = any free port (tests running in parallel). Default: the first free port of 3300–3399. */
   listenPort?: number
   createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
@@ -387,6 +391,11 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
+    // The app's commands handed to the AI (commands.md): the tabs of the window that shows this consultation.
+    const runAppCommand = config.runAppCommand
+    const appCommands = !aiTurnStep && connection.ownsConversation && appSessionId && runAppCommand
+      ? createAppCommandTools((commandId, args) => runAppCommand(appSessionId, commandId, args, c.req.raw.signal))
+      : undefined
     // 「もう一方の AI に聞く」 (agents/second-opinion.ts): only the agents the member's own latest
     // message names; the tool does not exist in any other turn. It stops with the turn
     // (the member's stop here, an administrator's once the turn is tracked below).
@@ -517,7 +526,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, appCommands, records, webResearch: webResearch?.tools, secondOpinion, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStep.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
