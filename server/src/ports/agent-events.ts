@@ -57,6 +57,8 @@ export interface AgentEventFilter {
   category?: string
   decision?: string
   conversationId?: string
+  /** Exactly this tool (`broker:google`). */
+  tool?: string
   /** target_text contains it (A–Z case-insensitive). */
   q?: string
   /** Only events whose department, or a file of whose target, lies in one of these root folders (keys). */

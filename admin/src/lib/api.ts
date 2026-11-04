@@ -35,6 +35,7 @@ import {
   departmentStatsSchema,
   effectiveAccessSchema,
   googleSchema,
+  googleRelaySchema,
   importReportSchema,
   inboxSettingsSchema,
   invitationAcceptSchema,
@@ -1183,9 +1184,13 @@ export type {
   GoogleGrantSummary,
   GooglePickerSave,
   GooglePickerView,
+  GoogleRelayAdminView,
+  GoogleRelayMember,
+  GoogleRelayRecord,
+  GoogleRelaySave,
 } from '../../../shared/types/google'
 
-import type { GoogleClientSave, GoogleFeature, GooglePickerSave } from '../../../shared/types/google'
+import type { GoogleClientSave, GoogleFeature, GooglePickerSave, GoogleRelaySave } from '../../../shared/types/google'
 
 export const googleApi = {
   get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/google`, googleSchema),
@@ -1203,6 +1208,14 @@ export const googleApi = {
   /** 「止める」: stops a member's permission (revoked at Google too). */
   stopGrant: (companyId: string, userId: string) =>
     getData(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, googleSchema, { method: 'DELETE' }),
+  /** 「API キー」→「本人の許可で中継する」→ Google (google-connector.md "The relay"). */
+  relay: (companyId: string) => getData(`/api/companies/${enc(companyId)}/google/relay`, googleRelaySchema),
+  /** Services on / off, the per-member daily cap, the company-wide stop (any subset). */
+  saveRelay: (companyId: string, save: GoogleRelaySave) =>
+    getData(`/api/companies/${enc(companyId)}/google/relay`, googleRelaySchema, { method: 'PUT', body: save }),
+  /** One member's relay stopped / resumed (their Google permission stays). */
+  setRelayMemberStopped: (companyId: string, userId: string, stopped: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/google/relay/members/${enc(userId)}`, googleRelaySchema, { method: 'PUT', body: { stopped } }),
 }
 
 // The Slack connection (「つなぎ先」→「Slack」, stage 3 A3, slack-connector.md): shapes from shared/types/slack.ts.

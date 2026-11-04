@@ -17,10 +17,12 @@
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox'] as const
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox', 'sheets'] as const
 /**
  * minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く
- * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`).
+ * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`), sheets = スプレッドシートを中継で使う
+ * (`spreadsheets`: a script's Sheets calls relayed with the member's own permission,
+ * `google-relay.ts`; owner decision 2026-11-04).
  */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
@@ -39,6 +41,12 @@ export const GOOGLE_SCOPE = {
   driveFile: 'https://www.googleapis.com/auth/drive.file',
   /** 受信を読む (the `inbox` feature only): the member's received mail, read when needed, never stored. */
   gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
+  /**
+   * スプレッドシートを中継で使う (the `sheets` feature only): every sheet the member can edit —
+   * no per-file designation (owner decision 2026-11-04); Google refuses the rest, and the relay
+   * never passes a deletion (shared/core/google-relay.ts).
+   */
+  spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
 } as const
 
 /** Scopes ACB never asks for, holds or hands out (owner decisions; `google-connector.md`). */
@@ -61,6 +69,7 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   mail: [GOOGLE_SCOPE.gmailSend],
   drive: [GOOGLE_SCOPE.driveFile],
   inbox: [GOOGLE_SCOPE.gmailReadonly],
+  sheets: [GOOGLE_SCOPE.spreadsheets],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -70,6 +79,7 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...GOOGLE_FEATURE_SCOPES.mail,
   ...GOOGLE_FEATURE_SCOPES.drive,
   ...GOOGLE_FEATURE_SCOPES.inbox,
+  ...GOOGLE_FEATURE_SCOPES.sheets,
 ]
 
 /** Google's short names → the long form it reports. */
@@ -121,12 +131,12 @@ export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
 
 /**
  * Off for a company until its admin turns them on; the others are on until the admin turns them
- * off. Empty since 2026-11-02: 受信を読む (`inbox`) is no longer Google's own company switch — it is
+ * off. 受信を読む (`inbox`) is no longer Google's own company switch since 2026-11-02 — it is
  * the company's 受信を読む (`work-switches.ts`, the task settings' `readIncoming.allowed`, allowed
- * by default, each member starting off), which covers Slack's reading too. `featuresOn` is kept
- * for a feature that needs it again.
+ * by default, each member starting off), which covers Slack's reading too. `sheets` (the relay,
+ * 2026-11-04) is off until the admin ticks スプレッドシート under 「API キー」→「本人の許可で中継する」.
  */
-export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = []
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['sheets']
 
 /**
  * The admin's switches as stored (default-on features turned off, default-off features turned on)
@@ -162,14 +172,18 @@ export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerC
   return GOOGLE_FEATURES.filter(f => googleCompanyFeatureOn(f, company) && (f !== 'drive' || company.pickerConfigured))
 }
 
+/** Features never asked in the one consent: only when the member names them (the relay, 2026-11-04). */
+export const GOOGLE_ASKED_BY_NAME_ONLY: readonly GoogleFeature[] = ['sheets']
+
 /**
  * What one member is offered (「仕事の道具をつなぐ」's one consent, the screen's 「まだ許可していないもの」):
  * the company's features, but 受信を読む only while the member's own 受信を読む is on — the
  * most sensitive scope is never asked of someone who did not turn it on (owner decisions
- * 2026-11-02).
+ * 2026-11-02) — and never `sheets`: the relay is asked only when the member chooses it
+ * (設定 → Google 「スプレッドシートを中継で使う」, by name), like a feature asked when first used.
  */
 export function googleMemberFeatures(companyFeatures: readonly GoogleFeature[], readIncomingOn: boolean): GoogleFeature[] {
-  return companyFeatures.filter(f => f !== 'inbox' || readIncomingOn)
+  return companyFeatures.filter(f => (f !== 'inbox' || readIncomingOn) && !GOOGLE_ASKED_BY_NAME_ONLY.includes(f))
 }
 
 /**
@@ -184,7 +198,7 @@ export function googleFeaturesToAsk(requested: readonly GoogleFeature[], company
 // ---------------------------------------------------------------------------
 // Where Google's APIs live (the server's one Google client maps an API to its host).
 
-export const GOOGLE_APIS = ['calendar', 'meet', 'drive', 'gmail', 'oauth', 'userinfo'] as const
+export const GOOGLE_APIS = ['calendar', 'meet', 'drive', 'gmail', 'sheets', 'oauth', 'userinfo'] as const
 export type GoogleApi = typeof GOOGLE_APIS[number]
 
 export const GOOGLE_API_HOSTS: Record<GoogleApi, string> = {
@@ -192,6 +206,8 @@ export const GOOGLE_API_HOSTS: Record<GoogleApi, string> = {
   drive: 'www.googleapis.com',
   meet: 'meet.googleapis.com',
   gmail: 'gmail.googleapis.com',
+  /** The relay's Sheets calls (google-relay.ts): `/v4/spreadsheets/…`. */
+  sheets: 'sheets.googleapis.com',
   /** POST /token, POST /revoke */
   oauth: 'oauth2.googleapis.com',
   /** GET /oauth2/v3/userinfo */

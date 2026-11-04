@@ -81,6 +81,7 @@ function where(companyId: string, f: AgentEventFilter): { sql: string; params: u
   if (f.category) { clauses.push('category = ?'); params.push(f.category) }
   if (f.decision) { clauses.push('decision = ?'); params.push(f.decision) }
   if (f.conversationId) { clauses.push('conversation_id = ?'); params.push(f.conversationId) }
+  if (f.tool) { clauses.push('tool = ?'); params.push(f.tool) }
   if (f.q) { clauses.push(`target_text LIKE ? ESCAPE '\\'`); params.push(`%${likeLiteral(f.q)}%`) }
   if (f.rootKeys) {
     if (f.rootKeys.length === 0) clauses.push('0')

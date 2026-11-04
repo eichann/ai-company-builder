@@ -11,6 +11,9 @@
  *   PUT    /google/features             { feature, on } — a feature off / on for the whole company (never asked when off)
  *   PUT    /google/picker               { apiKey?, appId } Google Picker (Drive, google-drive.md); appId null removes it
  *   DELETE /google/grants/:userId       stop a member's permission (revoked at Google too)
+ *   GET    /google/relay                「本人の許可で中継する」: services, cap, stop, who allowed, records
+ *   PUT    /google/relay                { services?, capPerMemberPerDay?, stopped? }
+ *   PUT    /google/relay/members/:userId { stopped } — one member's relay
  *
  * Any member (the desktop app's 設定 → Google):
  *   GET    /me/google                   my permission: connected, account, what is allowed
@@ -18,6 +21,7 @@
  *   PUT    /me/google/seen              「あとで」 on 「仕事の道具をつなぐ」: what the company offers now is marked shown
  *   PUT    /me/google/features          { feature, on } — the member turns an allowed feature off / on (受信を読む …)
  *   DELETE /me/google                   「許可をやめる」 (revoked at Google too)
+ *   GET    /me/google/relay             the relay as the member sees it, with their own records
  *
  * No answer ever carries a client secret, a token, a code or a PKCE value.
  * Non-members get 404 like every company route.
@@ -30,7 +34,7 @@ import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
 
 export const googleRoute = new Hono()
-const { googleConnector } = services
+const { googleConnector, googleRelay } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -88,3 +92,13 @@ googleRoute.delete('/me/google', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, await googleConnector.disconnect(member))
 })
+
+// The relay with the member's own permission (google-connector.md "The relay"); the role is checked first.
+googleRoute.get('/google/relay', companyMember, async (c) => answer(c, await googleRelay.adminView(c.var.member)))
+
+googleRoute.put('/google/relay', companyMember, serviceBody, async (c) => answer(c, await googleRelay.save(c.var.member, c.var.body)))
+
+googleRoute.put('/google/relay/members/:userId', companyMember, serviceBody, async (c) =>
+  answer(c, await googleRelay.setMemberStopped(c.var.member, c.req.param('userId'), c.var.body)))
+
+googleRoute.get('/me/google/relay', companyMember, async (c) => answer(c, await googleRelay.my(c.var.member)))

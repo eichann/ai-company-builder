@@ -225,6 +225,12 @@ export async function seedStaging({ base, paths, logger, hubspotKey }) {
     }
     if (!google.enabled) must(await req('PUT', `${api}/google/enabled`, { session: owner, body: { enabled: true } }), 'turn Google on')
   })
+  // The relay with the member's own permission (google-connector.md "The relay"): スプレッドシート on, so
+  // a member can allow it in the app and a script can try the practice sheet 「練習用 係数表」.
+  await once('google-relay', async () => {
+    must(await req('PUT', `${api}/google/relay`, { session: owner, body: { services: { sheets: true } } }), 'turn the Google relay (spreadsheets) on')
+    say('Google の中継（スプレッドシート）をオンにしました（練習用の表「練習用 係数表」）')
+  })
 
   // ------------------------------------------------------------ plugins
   const pluginReport = await setUpPlugins({ req, must, say, notes, api, owner, salesId, userId, state, once })

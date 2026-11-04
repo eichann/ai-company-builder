@@ -168,6 +168,17 @@ export function migrateGoogleCompanyFeatures(conn: Database.Database): void {
 }
 
 /**
+ * The Google relay's settings on the company's Google client (google-connector.md "The relay",
+ * owner decision 2026-11-04): JSON `{ capPerMemberPerDay?, stopped?, stoppedUserIds? }`, `{}` =
+ * the defaults (500 a day, not stopped). Added after the table shipped. Which relay services are
+ * on is the company feature switch (`features_on`), not this column.
+ */
+export function migrateGoogleRelay(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('relay')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN relay TEXT NOT NULL DEFAULT '{}'")
+}
+
+/**
  * connector_grants / oauth_pending for every member-level OAuth provider
  * (member-oauth.md): the provider CHECK lists slack too, and a grant carries
  * features_off. SQLite cannot change a CHECK, so a table made before is
