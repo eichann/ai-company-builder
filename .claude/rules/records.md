@@ -1526,6 +1526,21 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
   `record.open` / `file.open` (`commands.md`), so ← → work (`files-and-editor.md` "Places").
   Generic and without actions: a task opens in the task card with actions instead (`tasks-ui.md`).
 - **A file's 「つながっているもの」**: `linkedToFile` with the open file's company path.
+- **What was shown comes back at once** (owner FB #14, 2026-11-04: 「タブを切り替えるたびに『読み込み中』と
+  出るのがうざい」): the middle shows only the active tab's card, so switching tabs mounts it again.
+  The record card, the task card (`tasks-ui.md`) and a file's 「つながっているもの」 start from what they
+  showed last and read again at once (stale-while-revalidate): `src/shared/lib/shownCache.ts`
+  (`createShownCache`, one per view, ≤ 200 entries, least recently used out) through
+  `src/shared/hooks/useShown.ts`. 「読み込んでいます」 only when nothing was shown before. **Renderer memory
+  only** (never disk, localStorage or main); one company at a time (another company's key never
+  answers), and every cache is forgotten (`forgetAllShown`) when the company changes or the member
+  signs out (`appStore.setCurrentCompany`, which sign-out calls with none). An answer read as gone
+  (`notFound`: deleted or no longer readable) replaces the card and is forgotten; an offline failure
+  keeps what is shown. Freshness: a mounted task card re-reads on `records:changed` as before; any
+  view not mounted is re-read the moment it mounts again, so a stale card shows for one read at most.
+  Tests: `src/shared/lib/shownCache.test.ts` (hit, newer replaces, gone forgotten, company switch and
+  sign-out, the bound), `tests/ui/tasks-layout.spec.ts` 「a task tab switched back to shows its card at
+  once…」 (no 「読み込んでいます」, then the server's newer card).
 
 ## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 

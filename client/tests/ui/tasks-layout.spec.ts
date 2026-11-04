@@ -110,6 +110,35 @@ test('the AI changing the task updates its open card in place: no remount, no lo
   expectNoPageErrors(state)
 })
 
+// Owner FB #14: switching tabs showed 「読み込んでいます」 every time — the card is mounted only while
+// its tab is shown and read from nothing again. Now it comes back with what it showed at once, reads
+// again in the background, and the newer answer replaces it.
+test('a task tab switched back to shows its card at once (no loading) and then updates', async ({ page }) => {
+  const state = await openPreview(page, 'skill-layout', { tasks: '1' })
+  await leftTab(page, /^ファイル$/).click()
+  await page.getByRole('button', { name: 'README.md' }).dblclick()
+  await leftTab(page, /^やること/).click()
+  await page.getByRole('region', { name: 'やることの一覧' }).getByText('A社 提案書を仕上げる').click()
+  const card = page.getByTestId('record-tab')
+  await expect(card.getByText('A社_提案.md').first()).toBeVisible()
+
+  await middleTabs(page).getByRole('tab', { name: /README\.md/ }).click()
+  await expect(card).toHaveCount(0)
+  await page.evaluate(() => (window as unknown as { __acbLayout: { serverLinksFile: (p: string) => void } }).__acbLayout.serverLinksFile('営業部/提案書/見積メモ.md'))
+  await page.evaluate(() => {
+    const w = window as unknown as { __flashed: boolean }
+    w.__flashed = false
+    new MutationObserver(() => { if (document.getElementById('root')!.textContent!.includes('読み込んでいます')) w.__flashed = true })
+      .observe(document.getElementById('root')!, { childList: true, subtree: true, characterData: true })
+  })
+  await middleTabs(page).getByRole('tab', { name: /A社 提案書を仕上げる/ }).click()
+  // At once: the card shown before (the read takes 120 ms), then the server's newer one.
+  await expect(card.getByText('A社_提案.md').first()).toBeVisible({ timeout: 100 })
+  await expect(card.getByText('見積メモ.md').first()).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { __flashed: boolean }).__flashed)).toBe(false)
+  expectNoPageErrors(state)
+})
+
 // Staging, 1440×900 (FB): the left tabs broke their names one character per line in the narrow
 // column; then (#516) showed icons only. Owner 2026-11-02: the names always show. Narrow: the name
 // (11 px, one line) under its icon, every tab inside the column even at its minimum; wide: side by side.

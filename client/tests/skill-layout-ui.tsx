@@ -291,6 +291,11 @@ Object.assign(window, {
       taskFiles = [...taskFiles, path]
       recordsChanged.emit({ companyId: COMPANY })
     },
+    /** Someone changed the task on the server while its tab was not shown (no signal reached this app). */
+    serverLinksFile(path: string) {
+      taskVersion += 1
+      taskFiles = [...taskFiles, path]
+    },
     cardReads: () => cardReads,
     /** The consultation AI runs an app command (tabs.list / tidy / restore); resolves to the window's answer. */
     async aiCommand(commandId: string, args: unknown = {}, companyId: string = COMPANY) {
