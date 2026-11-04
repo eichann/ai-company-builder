@@ -77,6 +77,8 @@ let told: Array<{ companyId: string; userIds: string[]; change?: RecordChange }>
 let n = 0
 let mailbox: Record<string, IncomingMessage[] | 'not-connected'> = {}
 let ready = new Set<string>()
+/** The fake source stops at its limit: only messages from this time on are listed. */
+let cutAt: string | null = null
 let listedSince: string[] = []
 let engine: RecordEngine
 let serviceWriter: ReturnType<typeof createServiceRecordWriter>
@@ -138,6 +140,7 @@ beforeEach(() => {
   told = []
   mailbox = {}
   ready = new Set()
+  cutAt = null
   listedSince = []
   nowMs = Date.parse('2026-11-02T01:00:00.000Z')
   conn = new Database(':memory:')
@@ -178,9 +181,14 @@ beforeEach(() => {
     async listSince(_co, userId, since) {
       listedSince.push(since)
       const box = mailbox[userId] ?? []
-      return box === 'not-connected' ? box : box.filter(x => x.occurredAt >= since)
+      if (box === 'not-connected') return box
+      const listed = box.filter(x => x.occurredAt >= since)
+      return cutAt ? { messages: listed.filter(x => x.occurredAt >= cutAt!), readFrom: cutAt } : listed
     },
-    async ready(_co, userId) { return ready.has(userId) },
+    async ready(_co, userId) {
+      if (userId === 'u-carol') throw new Error('provider down')
+      return ready.has(userId)
+    },
   }
   inbox.registerSource('fakemail', fake)
   company('a')
@@ -411,13 +419,14 @@ describe('polling through the role, reconnecting', () => {
     mailbox['u-alice'] = []
     nowMs = Date.parse('2026-11-05T02:00:00.000Z')
     await inbox.poll('a', 'u-alice')
-    expect(listedSince.at(-1)).toBe('2026-11-02T02:00:00.000Z')
+    // From where it stopped, and 10 minutes before it (never before the connection).
+    expect(listedSince.at(-1)).toBe('2026-11-02T01:50:00.000Z')
     expect(inbox.status(m('u-alice')).gaps).toEqual([])
 
     // Broken for 10 days: 7 days are read, the 3 before are a gap.
     nowMs = Date.parse('2026-11-15T02:00:00.000Z')
     await inbox.poll('a', 'u-alice')
-    expect(listedSince.at(-1)).toBe('2026-11-08T02:00:00.000Z')
+    expect(listedSince.at(-1)).toBe('2026-11-08T01:50:00.000Z')
     expect(inbox.status(m('u-alice')).gaps).toEqual([{ channel: 'email', from: '2026-11-05T02:00:00.000Z', to: '2026-11-08T02:00:00.000Z' }])
     for (const u of ['u-bob', 'u-admin', 'u-owner']) expect(inbox.status(m(u))).toEqual({ connections: [], gaps: [] })
     expect(inbox.status(m('u-alice', 'b'))).toEqual({ connections: [], gaps: [] })
@@ -436,30 +445,51 @@ describe('polling through the role, reconnecting', () => {
     expect(interactions()).toHaveLength(1)
   })
 
-  it('the clock connects a member once the source can read them (from that run on), and no one else', async () => {
+  it('the clock connects a member once the source can read them, from that run on, once', async () => {
     nowMs = Date.parse('2026-11-04T03:00:00.000Z')
     mailbox['u-alice'] = [mail({ occurredAt: '2026-11-04T02:00:00.000Z' })]
     expect(await inbox.pollCompany('a')).toBe(0)
     expect(inbox.status(m('u-alice')).connections).toEqual([])
 
     // Alice granted and turned 受信を読む on: connected now; mail from before is not read back.
+    // Carol's check throws (the provider is down): she is not connected, nobody else is held up.
     ready.add('u-alice')
     expect(await inbox.pollCompany('a')).toBe(0)
-    expect(inbox.status(m('u-alice')).connections).toEqual([{ channel: 'email', connectedAt: '2026-11-04T03:00:00.000Z', checkedUntil: '2026-11-04T03:00:00.000Z' }])
-    for (const u of ['u-bob', 'u-owner']) expect(inbox.status(m(u)).connections).toEqual([])
-    expect(inbox.status(m('u-alice', 'b')).connections).toEqual([])
+    const connected = [{ channel: 'email', connectedAt: '2026-11-04T03:00:00.000Z', checkedUntil: '2026-11-04T03:00:00.000Z' }]
+    expect(inbox.status(m('u-alice')).connections).toEqual(connected)
+    expect(inbox.status(m('u-carol')).connections).toEqual([])
 
     mailbox['u-alice'] = [mail({ occurredAt: '2026-11-04T03:02:00.000Z' })]
     nowMs = Date.parse('2026-11-04T03:05:00.000Z')
     expect(await inbox.pollCompany('a')).toBe(1)
     expect(interactions()).toHaveLength(1)
+    // Already connected: the connection is not made again (its time stays).
+    expect(inbox.status(m('u-alice')).connections[0].connectedAt).toBe('2026-11-04T03:00:00.000Z')
+  })
 
-    // Not ready any more (turned off): the connection and its window stay.
-    ready.delete('u-alice')
-    mailbox['u-alice'] = 'not-connected'
+  it('a mail listed late keeps its earlier time and is still read; one seen before is not taken twice', async () => {
+    nowMs = Date.parse('2026-11-04T03:00:00.000Z')
+    inbox.connect('a', 'u-alice', 'email')
+    const early = mail({ occurredAt: '2026-11-04T03:01:00.000Z' })
+    mailbox['u-alice'] = [early]
+    nowMs = Date.parse('2026-11-04T03:05:00.000Z')
+    await inbox.poll('a', 'u-alice')
+    // Received at 03:04 but listed only after the 03:05 poll.
+    const late = mail({ occurredAt: '2026-11-04T03:04:00.000Z' })
+    mailbox['u-alice'] = [early, late]
     nowMs = Date.parse('2026-11-04T03:10:00.000Z')
-    expect(await inbox.pollCompany('a')).toBe(0)
-    expect(inbox.status(m('u-alice')).connections[0].checkedUntil).toBe('2026-11-04T03:05:00.000Z')
+    await inbox.poll('a', 'u-alice')
+    expect(interactions()).toHaveLength(2)
+  })
+
+  it('the source stopped at its limit: the span it did not reach is an unchecked gap', async () => {
+    nowMs = Date.parse('2026-11-01T00:00:00.000Z')
+    inbox.connect('a', 'u-alice', 'email')
+    mailbox['u-alice'] = [mail({ occurredAt: '2026-11-03T00:00:00.000Z' }), mail({ occurredAt: '2026-11-05T00:00:00.000Z' })]
+    cutAt = '2026-11-04T00:00:00.000Z'
+    nowMs = Date.parse('2026-11-06T00:00:00.000Z')
+    expect(await inbox.poll('a', 'u-alice')).toEqual({ read: 1, outcome: 'done' })
+    expect(inbox.status(m('u-alice')).gaps).toEqual([{ channel: 'email', from: '2026-11-01T00:00:00.000Z', to: '2026-11-04T00:00:00.000Z' }])
   })
 
   it('no connector serving the mail role: nothing is read and the window stays', async () => {

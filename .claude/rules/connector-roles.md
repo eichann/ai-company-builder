@@ -34,7 +34,8 @@ operation), else the admin's choice for the role among the usable ones
 a guess; a chosen connector that is off is not replaced while two remain; a choice is per
 company. An optional capability is asked (`hasRoleCapability`), never assumed. Wired in
 `composition/connectors.ts` (`wireCoreConnectors`, called once from the Google block of
-`composition.ts` before the core services that take the roles); Slack (A3) is registered in
+`composition.ts` before the core services that take the roles; it also returns `inboxSources`,
+the Gmail `InboxSource` by connector id, which `wireInboxLane` registers); Slack (A3) is registered in
 `wireConnectorsLane` (resolution is per call, so a later registration is in time), which also
 builds 「つないでいるサービス」 with both connectors' switches.
 Tests: `server/tests/unit/connector-roles.test.ts`.

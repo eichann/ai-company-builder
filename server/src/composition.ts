@@ -644,7 +644,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       // The content store's retention (records.md "The content store"): reason `retention`, per company.
       expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
       // 来た連絡 (inbox.md): connect members who can be read now, then read each one's new mail.
-      pollInbox: companyId => inboxLane.inbox.pollCompany(companyId),
+      pollInbox: (companyId, between) => inboxLane.inbox.pollCompany(companyId, between),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

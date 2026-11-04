@@ -291,8 +291,9 @@ export const INBOX_POLL_MAX = 1000
  * "Receiving"): the member's received messages since a time, oldest first,
  * as header facts and pointers (`gmail:<id>`, `gmail:<thread id>`) — never
  * the text. Any failure reads as `not-connected`, so the poll keeps its window.
+ * At the limit, the newest are kept and `readFrom` says where they start.
  */
-export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, nowMs: () => number, log: (message: string) => void = m => console.warn(m)): InboxSource {
+export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, nowMs: () => number): InboxSource {
   const party = (a: MailAddress) => ({ address: a.email, name: a.name || null })
   return {
     async listSince(companyId, userId, since) {
@@ -305,13 +306,15 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, 
         found.push(...r.value.messages)
         pageToken = r.value.nextPageToken ?? undefined
       } while (pageToken && found.length < INBOX_POLL_MAX)
-      if (pageToken) log(`[inbox] gmail poll of company ${companyId} stopped at ${INBOX_POLL_MAX} messages`)
-      return found
+      const cut = found.length > INBOX_POLL_MAX || pageToken !== undefined
+      const kept = found.slice(0, INBOX_POLL_MAX)
+      const messages = kept
         // Gmail's `after:` counts whole seconds: what came before the window is left out here.
         .filter((m): m is MailSummary & { from: MailAddress; receivedAt: string } => m.from !== null && m.receivedAt !== null && Date.parse(m.receivedAt) >= afterMs)
         .reverse()
         .map(m => ({
           channel: 'email' as const,
+          // No Message-ID header (rare): Gmail's own id, which differs per mailbox.
           messageId: m.messageIdHeader ?? `gmail:${m.id}`,
           references: m.inReplyTo ? [m.inReplyTo] : [],
           threadRef: `gmail:${m.threadId}`,
@@ -325,6 +328,10 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, 
           bulk: m.bulk,
           automated: m.automated,
         }))
+      if (!cut) return messages
+      // The oldest kept message's time (newest first: the last one listed that has a time).
+      const oldest = kept.map(m => m.receivedAt).filter((t): t is string => t !== null).at(-1) ?? new Date(nowMs()).toISOString()
+      return { messages, readFrom: oldest }
     },
     // Ready = one list call answers now: granted, 受信を読む on, the company's switches on.
     async ready(companyId, userId) {

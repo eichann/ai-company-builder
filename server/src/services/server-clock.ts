@@ -55,8 +55,8 @@ export interface ServerClockDeps {
    * what expired in this company (reason `retention`), the number erased.
    */
   expireContent?: (companyId: string) => number | Promise<number>
-  /** The inbox's poll of this company's mail (inbox.md): the number of messages read. */
-  pollInbox?: (companyId: string) => Promise<number>
+  /** The inbox's poll of this company's mail (inbox.md): the number of messages read; `between` yields between members. */
+  pollInbox?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** Let the event loop serve requests between companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
@@ -126,7 +126,7 @@ export function createServerClock(deps: ServerClockDeps) {
     run.moved += moveWaitOver(companyId)
     run.notices += deps.notifications.sweep(companyId, limits.notices)
     if (deps.expireContent) run.expired += await deps.expireContent(companyId)
-    if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId)
+    if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId, deps.yieldNow)
   }
 
   return {

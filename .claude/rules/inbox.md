@@ -100,13 +100,18 @@ stay listed until finished.
 ## Connections (reconnecting, spec §7-5)
 
 `inbox.connect(companyId, userId, channel)`: a first connection reads from now (no reading
-back); a reconnection keeps `checked_until`. `pollCompany` connects every member the role's
-source reports `ready` (`InboxSource.ready`; Gmail: one list call answers, i.e. granted, their
-受信を読む and the company's switches on) before reading, so a grant becomes a connection within
-one clock run; a member turned off later keeps their connection (their reads are `not-connected`). Each poll
-reads from `checked_until` but at most `BACKFILL_DAYS` (7) back (`pollWindow`); a longer break
-leaves the span before as an **unchecked gap** (`inbox_gaps`), shown in `GET /inbox/status` to
-that member only. `checked_until` moves only after a successful read (`not-connected` / a throw
+back); a reconnection keeps `checked_until`. `pollCompany` first connects every member the
+role's source reports `ready` (`InboxSource.ready`: a read works now; Gmail: granted, their
+受信を読む and the company's switches on — refused locally, no call to Google, otherwise), so a
+grant becomes a connection within one clock run; it is pulled from stored state rather than
+pushed on the grant, because the switches change elsewhere too. A member turned off later keeps
+their connection (their reads are `not-connected`). Each poll reads from `checked_until` but
+at most `BACKFILL_DAYS` (7) back (`pollWindow`), and lists `INBOX_POLL_OVERLAP_MS` (10 min)
+before it, never before the connection unless the window is (mail listed late keeps its
+earlier time; seen ones are `duplicate`); a longer break leaves the span before as an
+**unchecked gap** (`inbox_gaps`), shown in `GET /inbox/status` to that member only. A source
+that stops at its limit answers `{ messages, readFrom }` (Gmail keeps the newest
+`INBOX_POLL_MAX`, 1000): the span before `readFrom` is a gap too, never skipped silently. `checked_until` moves only after a successful read (`not-connected` / a throw
 keeps it). 「過去7日を見直す」 (`POST /inbox/backfill`) moves the member's own window 7 days back;
 messages already seen are not taken twice.
 
@@ -219,7 +224,12 @@ message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is
 the person's; polling: first connection, 7-day read-back, the gap shown to its member
-only, `not-connected` keeps the window, no role → nothing; companies apart),
+only, `not-connected` keeps the window, no role → nothing, connected once when ready (a
+throwing check holds nobody up), the overlap catches mail listed late, a source's limit is a
+gap; companies apart), `server/tests/unit/google-mail-inbox-source.test.ts` (Gmail's pages
+oldest first as pointers that `threads.ts` reads, the window's edge, failure = not-connected,
+the limit's `readFrom`), `server/tests/integration/google-inbox.test.ts` (the server clock
+connects a member who allowed 受信を読む and takes only later mail, as `gmail:` pointers, no text),
 `server/tests/unit/intake-core.test.ts` (settings validation and defaults, routing order, the
 window's 7 / 8 days, the versions additive, only `reply_request` lets the AI end it), permission
 matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.test.ts`.
@@ -229,12 +239,15 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
 - Wired: `roles` = lane A's `connectorRoles`; Slack's signals (`connectorsLane.onSlackSignal`)
   become chat messages through `slackSignalMessage` (`composition/inbox.ts`: ids
   `<channel>:<ts>`, the thread root as reference, no text). Gmail: `googleMailInboxSource`
-  (`services/google-mail.ts`, registered by `wireCoreConnectors` → `wireInboxLane`) lists INBOX
-  since the window (every page, at most `INBOX_POLL_MAX` per poll, oldest first; `messageId` =
-  the Message-ID header else `gmail:<id>`, `references` = In-Reply-To, pointers `gmail:<id>` /
-  `gmail:<thread id>`); the server clock (`server-clock.ts` `pollInbox`) runs `pollCompany` for
-  each company with records on. Not yet: the References header (only In-Reply-To is read) and
-  the member's Sent mail as `outgoing`.
+  (`services/google-mail.ts`, registered by `wireCoreConnectors` → `wireInboxLane`) lists the
+  INBOX label since the window (every page, at most `INBOX_POLL_MAX` per poll, oldest first;
+  `messageId` = the Message-ID header else `gmail:<id>` (differs per mailbox), `references` =
+  In-Reply-To, pointers `gmail:<id>` / `gmail:<thread id>`); the server clock (`server-clock.ts`
+  `pollInbox`) runs `pollCompany` for each company with records on, yielding between members.
+  Not yet: mail a filter files past the inbox (or archived before the next poll) is not seen;
+  Gmail's history API would catch it and drop the time edge. The References header (only
+  In-Reply-To is read), the member's Sent mail as `outgoing`. Each Gmail call of the poll is one
+  AI-action-log line (`google:gmail.messages.*`), like the member's AI reading mail.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (A4).
 - A task's own wait (`WAIT_OVER.task` → `preparing`) runs as lane C's `task-wait-over` step
