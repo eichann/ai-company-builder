@@ -244,6 +244,7 @@ export function applyRecordChanges(records: RecordRepository, input: ApplyInput)
       path,
       folder: null,
       personalOwner: null,
+      members: null,
       title: rec.title,
       summary: rec.summary,
       createdAt: row?.createdAt ?? at,

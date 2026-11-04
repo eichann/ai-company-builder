@@ -51,7 +51,7 @@ import { logError } from '../lib/error-log'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader } from './record-access'
-import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
+import { placeOfRow, type ActorInput, type ServicePlace, type ServiceRecordWriter, type ServiceWriteFailed } from './record-engine'
 import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 import { findMeetingOutput } from './meeting-outputs'
@@ -681,9 +681,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const subject = subjectOf(member.companyId, mail.messageId)
     const domains = [...new Set(recipients.map(emailDomain))].join(', ').slice(0, 500)
     const own = handle.records.byIds([mail.messageId])[0]
-    const place = waiting && own
-      ? (own.personalOwner ? { personalOwner: own.personalOwner } : { folder: own.folder })
-      : { folder: bundle?.folder ?? null }
+    const place = waiting && own ? placeOfRow(own) : { folder: bundle?.folder ?? null }
     const made = writer.create(member.companyId, {
       type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), ...place,
       fields: {
@@ -716,11 +714,17 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
   }
 
-  /** Who may see the draft's record: an owner-only 連絡's reply stays its owner's; else the まとまり's / meeting's / 連絡's folder. */
-  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): { folder: string | null } | { personalOwner: string } {
-    if (ctx.interaction?.personalOwner) return { personalOwner: ctx.interaction.personalOwner }
-    // A mail for someone's own task (持ち主だけ) is theirs alone too.
-    if (!ctx.bundle && !ctx.meeting && ctx.task?.personalOwner) return { personalOwner: ctx.task.personalOwner }
+  /**
+   * Who may see the draft's record: an owner-only or members-only 連絡's / meeting's reply stays
+   * theirs (a members-only meeting's draft is never placed by its まとまり's folder: the
+   * mail carries the meeting); else the まとまり's / meeting's / 連絡's folder.
+   */
+  function placeOf(ctx: { meeting: RecordRow | null; bundle: RecordRow | null; interaction: RecordRow | null; task?: RecordRow | null }): ServicePlace {
+    const restricted = (r: RecordRow | null | undefined) => !!r && (r.personalOwner !== null || r.members !== null)
+    if (restricted(ctx.interaction)) return placeOfRow(ctx.interaction as RecordRow)
+    if (restricted(ctx.meeting)) return placeOfRow(ctx.meeting as RecordRow)
+    // A mail for someone's own task (持ち主だけ, この人たちだけ) is theirs alone too.
+    if (!ctx.bundle && !ctx.meeting && restricted(ctx.task)) return placeOfRow(ctx.task as RecordRow)
     return { folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? ctx.interaction?.folder ?? ctx.task?.folder ?? null }
   }
 

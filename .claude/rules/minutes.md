@@ -327,6 +327,12 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - Not yet: the consultation does not move to the minutes folder's department (the record's folder
   is not in any member-facing answer), so the AI asks where to put decisions when the folder is not
   the current one.
+- Not yet (owner decision 2026-11-04, 会議は「参加した人だけ」): meetings are still placed in the
+  minutes folder. The core now has members-only records (`records.md` "Members-only records"):
+  what is made from a members-only meeting inherits its list, and a service write of such an output
+  that also names a folder is refused (`bad-place`) — so when the Google step makes meetings
+  members-only, the intake, `minutes-review.ts`, the decisions it records and the answer's `folder`
+  must stop passing the minutes folder for them.
 
 ## Tests
 

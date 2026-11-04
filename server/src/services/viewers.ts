@@ -15,6 +15,9 @@
  *   path inside one is answered exactly like a path that does not exist —
  *   asking cannot tell that a folder is private, nor name it.
  *
+ * A members-only record (records.md "Members-only records") is judged by its own list, outside
+ * the per-place cache (every such record has folder null: the cache would mix them up).
+ *
  * Cost: the members' readers are built once per request, and the readers of
  * an item are computed once per set of folders above it (items in the same
  * place share one answer), so a list of 200 rows costs a few evaluations.
@@ -128,6 +131,15 @@ export function createViewersService(deps: ViewersDeps) {
           out.records[row.id] = viewersLabel({
             viewerId: member.userId, readers: [member.userId], ownerOnly: true, companyMembers: members.length,
             privateFolder: null, department: null, fullAccess, nameOf,
+          })
+          continue
+        }
+        // Members-only (records.md "Members-only records"): its own list decides, never the place —
+        // before the per-place cache, which would hand one record's readers to another.
+        if (row.members !== null) {
+          out.records[row.id] = viewersLabel({
+            viewerId: member.userId, readers: readers.filter(r => r.reader.record(row)).map(r => r.userId), ownerOnly: false,
+            companyMembers: members.length, privateFolder: null, department: null, fullAccess, nameOf,
           })
           continue
         }

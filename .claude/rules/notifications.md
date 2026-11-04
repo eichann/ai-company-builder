@@ -188,10 +188,12 @@ carry on. The app never acts on the signal itself: it only asks the server again
 record now**, not only the people named on it — `services/record-signal.ts` (`recordChanged`,
 the engine dep `RecordEngineDeps.recordChanged`, wired in `composition.ts`). Who reads it is
 exactly `recordReader` (`recordReaders` in `services/record-access.ts`): an owner-only record
-reaches its owner alone (owners and admins included in "nobody else"), a private folder's record
+reaches its owner alone (owners and admins included in "nobody else"), a members-only record the
+members on its list alone (an invitation reaches the newly added this way — no notice kind of its
+own; `record-members.test.ts`), a private folder's record
 only its readers, a member closed out of the folder nobody; the channel is per company. Sent on
 every ledger entry the engine and its service / external writers make (create, act, undo, links,
-file links, share; a `quiet` service write sends this signal and no notice), the actor's other
+file links, share, invite; a `quiet` service write sends this signal and no notice), the actor's other
 PCs included. The notices (`notify` with the `RecordChange`) still go to the named people only.
 Cost: only members with an open connection are evaluated (`PushChannel.listeners`), one
 `recordReader` each per change, memberships in one query. The event is unchanged — kind + a fresh

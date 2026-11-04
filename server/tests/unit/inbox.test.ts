@@ -811,6 +811,23 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
     expect(linkOf(rr, 'task')).toBeNull()
   })
 
+  it('a members-only やりとり\'s 返事のお願い stays its members\' (records.md "Members-only records": placed like its 連絡, never company-wide)', () => {
+    const made = serviceWriter.create('a', {
+      type: 'interaction', title: '面談のお礼', members: ['u-alice', 'u-bob'],
+      fields: { occurred_at: TS, channel: 'email', message_id: OURS, source_ref: 'gmail:s1', assignee: 'u-alice', needs_reply: false },
+      actor: { id: 'u-alice', kind: 'human', source: null }, state: 'handled', quiet: true,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    const rr = inbox.awaitOwnMessage({
+      companyId: 'a', userId: 'u-alice', interactionId: made.record.id, channel: 'email', messageId: OURS, sourceRef: 'gmail:s1',
+      occurredAt: TS, waitUntil: '2026-11-05T09:00', title: '面談のお礼', waitingOn: '田中さんからの返事', to: 'tanaka@client.example', taskId: null,
+    })
+    if (!rr) throw new Error('no reply request')
+    expect(handle().records.find(rr)).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice', 'u-bob'] })
+    for (const who of ['u-carol', 'u-admin', 'u-owner']) expect(canRead(who, rr)).toBe(false)
+    expect(canRead('u-bob', rr)).toBe(true)
+  })
+
   it('their reply in the thread: the AI checks it, the sender and the task\'s assignee hear 「返事が来た」; an automatic reply is no reply', () => {
     const { rr } = sentWaiting(task('u-bob'))
     expect(inbox.receive('a', 'u-alice', mail({ references: [OURS], automated: true }))).toBe('continued')

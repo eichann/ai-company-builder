@@ -10,6 +10,7 @@ import { recordReader } from '../record-access'
 import { currentTypes } from '../record-index'
 import { recordSummaries } from '../records'
 import { interfaceLinkMisses } from './links'
+import { MEMBERS_MAX, meetingMembers, withNamedPeople } from './members'
 import { ASSIGNEE_CANNOT_READ } from './refusals'
 import type { RecordChange, RecordEngineDeps } from './types'
 import { checkValue } from './values'
@@ -51,6 +52,13 @@ export interface ServiceCreateInput {
    * named must be that member (no one else can read it).
    */
   personalOwner?: string
+  /**
+   * Members-only (「この人たちだけ」, records.md "Members-only records"): the members who may read
+   * it (each a member of the company, at most 200). Not with `folder` / `personalOwner`; every
+   * person named must be listed. A record linked to a members-only meeting is members-only by
+   * itself (its list and the people named) — then a `folder` is refused (`bad-place`).
+   */
+  members?: readonly string[]
   /**
    * Start in this state instead of the type's initial one: only a state the
    * initial one may move to along `SERVICE_TRANSITIONS` (as if created, then
@@ -94,6 +102,21 @@ export type ServiceWriteFailed = { ok: false; reason: ServiceWriteFailure; detai
 export type ServiceWriteResult = { ok: true; record: RecordSummary; entry: LedgerEntry } | ServiceWriteFailed
 
 const fail = (reason: ServiceWriteFailure, detail?: string): ServiceWriteFailed => ({ ok: false, reason, ...(detail ? { detail } : {}) })
+
+/** Where a record is read (a service's input), as another record's place. */
+export type ServicePlace = { folder: string | null } | { personalOwner: string } | { members: readonly string[] }
+
+/**
+ * The place of `row`, for a record a service makes from it (a reply placed like its 連絡, a
+ * draft like its meeting): owner-only stays its owner's, members-only its members', else its
+ * folder. The one copy — copying `folder` alone would place what came from a members-only
+ * record company-wide (records.md "Members-only records").
+ */
+export function placeOfRow(row: Pick<RecordAccessRow, 'folder' | 'personalOwner' | 'members'>): ServicePlace {
+  if (row.personalOwner !== null) return { personalOwner: row.personalOwner }
+  if (row.members !== null) return { members: row.members }
+  return { folder: row.folder }
+}
 
 /**
  * The engine's entry for the core services of milestone 4 (minutes intake,
@@ -160,6 +183,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const personalOwner = input.personalOwner ?? null
     if (personalOwner !== null && (folder !== null || !deps.isMember(companyId, personalOwner))) return fail('bad-place')
+    let members: string[] | null = null
+    if (input.members !== undefined) {
+      members = [...new Set(input.members)]
+      if (folder !== null || personalOwner !== null || members.length > MEMBERS_MAX || !members.every(m => deps.isMember(companyId, m))) return fail('bad-place')
+    }
     const state = input.state ?? def.initial
     if (input.state !== undefined && input.state !== def.initial && (!def.states.includes(input.state) || !serviceTransitionAllowed(def.name, def.initial, input.state))) {
       return fail('transition-not-allowed')
@@ -173,9 +201,6 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const id = input.id ?? newRecordId(def.name, deps.ids.newToken().slice(0, 16))
     if (!RECORD_ID_RE.test(id) || !id.startsWith(`${def.name}-`)) return fail('bad-value', 'id')
-    // Owner-only only when the calling service says whose (records.md "Owner-only records": the inbox).
-    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner }
-    if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const links: RecordLinkRow[] = []
     for (const [name, targets] of Object.entries(input.links ?? {})) {
       const l = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
@@ -186,9 +211,19 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       }
       if (interfaceLinkMisses(records, l, targets).length > 0) return fail('bad-value', `${name}: records implementing ${l.target}`)
     }
+    // Made from a members-only meeting: members-only too (its list and the people named here),
+    // never placed in a folder — a service passing one is refused (fails closed).
+    const inherited = members === null && personalOwner === null ? meetingMembers(records, links) : null
+    if (inherited !== null) {
+      if (folder !== null) return fail('bad-place')
+      members = withNamedPeople(inherited, def, values)
+    }
+    // Owner-only / members-only only when the calling service says whose (the inbox) or a meeting's list is inherited.
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+    if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
-    return { ok: true as const, records, def, id, title, summary, folder, personalOwner, state, values, links }
+    return { ok: true as const, records, def, id, title, summary, folder, personalOwner, members, state, values, links }
   }
 
   return {
@@ -221,8 +256,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         written = deps.transactions.run(() => {
           records.upsert({
             id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder, personalOwner: p.personalOwner,
-            title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
+            members: p.members, title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
           })
+          if (p.members !== null) records.addMembers(id, p.members, input.actor.id, at)
           records.replaceLinks(id, links)
           if (!records.writeState({ recordId: id, state, fields: JSON.stringify(values), version: 1, updatedAt: at }, 0)) throw new Error('exists')
           records.appendLedger(entry)

@@ -148,7 +148,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
   /** Whether the member may read a folder (where a created record would go). */
   function folderReadable(member: Member, folder: string): boolean {
     const handle = companyData.forCompany(member.companyId)
-    return recordReader(member, handle.scopes.listWithRules()).record({ id: '', type: '', scopeId: null, path: null, folder, personalOwner: null })
+    return recordReader(member, handle.scopes.listWithRules()).record({ id: '', type: '', scopeId: null, path: null, folder, personalOwner: null, members: null })
   }
 
   function valuesOf(companyId: string, recordId: string): { version: number; fields: Record<string, LedgerValue> } {

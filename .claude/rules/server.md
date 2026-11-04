@@ -361,7 +361,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   without departments; a full folder looked empty in the delete warning).
   `departments-list.test.ts`, `department-stats.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
-  (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
+  (`deleteUserRules`, private folders included) and takes them off every members-only record's
+  list (`RecordRepository.forgetMember`, `records.md` "Members-only records"), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
   inheriting.
 - Invitations are single-use (`services/invitations.ts` `signUp`): a sign-up with `X-Invitation-Token`

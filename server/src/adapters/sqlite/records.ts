@@ -20,14 +20,33 @@ import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 import { skillUsesJson } from './skill-uses'
 
+/**
+ * Members-only records (「この人たちだけ」, records.md "Members-only records"): marked by this value
+ * in `personal_owner`, their readers in `record_viewers`. An older server build reads the marker
+ * as an owner id no member has, so it shows the record to nobody (fails closed). It never leaves
+ * this module: rows come out as `personalOwner: null, members: [...]`.
+ */
+const MEMBERS_ONLY = '@members'
+/** The list of a marked row (`alias`: the records table's name in the statement), oldest added first. */
+const membersColumn = (alias: string) => `CASE WHEN ${alias}.personal_owner = '${MEMBERS_ONLY}' THEN (SELECT json_group_array(user_id) FROM
+  (SELECT v.user_id FROM record_viewers v WHERE v.company_id = ${alias}.company_id AND v.record_id = ${alias}.id ORDER BY v.added_at, v.user_id)) END AS members_json`
+const membersOf = (json: string | null): string[] | null => {
+  if (json === null) return null
+  try {
+    const list = JSON.parse(json) as unknown
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
+  } catch { return [] }
+}
+const ownerOf = (personalOwner: string | null) => personalOwner === MEMBERS_ONLY ? null : personalOwner
+
 type Row = {
   id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null
-  title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
+  members_json: string | null; title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
 }
-const COLUMNS = 'id, type, type_version, scope_id, path, folder, personal_owner, title, summary, created_at, updated_at, removed_at'
+const COLUMNS = `id, type, type_version, scope_id, path, folder, personal_owner, ${membersColumn('records')}, title, summary, created_at, updated_at, removed_at`
 const toRecord = (r: Row): RecordRow => ({
-  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner,
-  title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
+  id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner),
+  members: membersOf(r.members_json), title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null; created_by: string | null }
 const toLink = (r: LinkRow): RecordLinkRow => ({ sourceId: r.source_id, name: r.name, position: r.position, targetId: r.target_id, targetPath: r.target_path, createdBy: r.created_by ?? null })
@@ -284,6 +303,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       return resolveRows(rows)
     },
     upsert(row) {
+      if (Array.isArray(row.members) && row.personalOwner) throw new Error('a record is owner-only or members-only, not both')
       const b = contents.batch(row.id, row.type)
       const title = b.put(row.title)
       const summary = b.put(row.summary)
@@ -293,12 +313,24 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         ON CONFLICT(company_id, id) DO UPDATE SET type = excluded.type, type_version = excluded.type_version, scope_id = excluded.scope_id,
           path = excluded.path, folder = excluded.folder, title = excluded.title, summary = excluded.summary,
           updated_at = excluded.updated_at, removed_at = excluded.removed_at
-      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, row.personalOwner, title, summary, row.createdAt, row.updatedAt, row.removedAt)
+      `).run(companyId, row.id, row.type, row.typeVersion, row.scopeId, row.path, row.folder, Array.isArray(row.members) ? MEMBERS_ONLY : row.personalOwner ?? null,
+        title, summary, row.createdAt, row.updatedAt, row.removedAt)
       b.flush(row.updatedAt)
     },
     setPlace(id, place, at) {
       conn.prepare('UPDATE records SET folder = ?, personal_owner = ?, updated_at = ? WHERE company_id = ? AND id = ?')
         .run(place.folder, place.personalOwner, at, companyId, id)
+      // No longer members-only: its list goes (the ledger keeps who was on it).
+      conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND record_id = ?').run(companyId, id)
+    },
+    addMembers(id, userIds, by, at) {
+      const marked = conn.prepare('SELECT 1 FROM records WHERE company_id = ? AND id = ? AND personal_owner = ?').get(companyId, id, MEMBERS_ONLY)
+      if (!marked) return []
+      const add = conn.prepare('INSERT OR IGNORE INTO record_viewers (company_id, record_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?, ?)')
+      return [...new Set(userIds)].filter(userId => add.run(companyId, id, userId, at, by).changes > 0)
+    },
+    forgetMember(userId) {
+      conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND user_id = ?').run(companyId, userId)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)
@@ -459,12 +491,12 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       params.push(limit)
       const extra = where.map(w => ` AND ${w}`).join('')
       return (conn.prepare(`
-        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner FROM records r
+        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner, ${membersColumn('r')} FROM records r
         LEFT JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
         WHERE r.company_id = ? AND r.removed_at IS NULL${extra}
         ORDER BY ${order} LIMIT ?
-      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null }>)
-        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: r.personal_owner }))
+      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null; members_json: string | null }>)
+        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner), members: membersOf(r.members_json) }))
     },
     byIds(ids) {
       if (ids.length === 0) return []

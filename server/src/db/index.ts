@@ -16,7 +16,7 @@ import { migrateNotificationsForUser, notificationSchema } from './schema/notifi
 import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
-import { migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
+import { migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
@@ -38,7 +38,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 export { migrateInvitationClaims } from './schema/company'
 export { migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
-export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources } from './schema/records'
+export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
@@ -108,6 +108,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordLedgerProvenance(conn)
   migrateRecordPersonalOwner(conn)
   migrateRecordLinkCreator(conn)
+  // Members-only records (records.md "Members-only records").
+  migrateRecordViewers(conn)
   migrateAgentEventSandbox(conn)
   // 「もう一方の AI に聞く」: made once, on for the companies that exist then (agents.ts).
   migrateSecondOpinionSetting(conn)
