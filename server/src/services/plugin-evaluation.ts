@@ -159,6 +159,11 @@ export function createPluginEvaluation(deps: Pick<PluginServiceDeps, 'companyDat
     if (!found.pkg.manifest.uses) return { problem: null, active: null }
     const c = await connectorUse(companyId, found, collectingFacts, connectorOverride)
     if (c.problem) return { problem: c.problem, active: null }
+    // A use of only a contract-3 connector's calls maps nothing: there is no record to read a field into.
+    const m = c.use.manifest
+    if (install.mappingVersion === 0 && Object.keys(m.objects).length === 0 && Object.keys(m.operations).length === 0) {
+      return { problem: null, active: activeOf(install, c.install, c.use, { objects: {}, people: {}, policy: {}, approvalBy: {}, closingStages: [] }) }
+    }
     const row = install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
     const parsed = row ? parseForCompany(companyId, c.use, row.text) : null
     if (!parsed?.ok) return { problem: 'mapping-invalid', active: null }

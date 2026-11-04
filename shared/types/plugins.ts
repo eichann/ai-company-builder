@@ -260,9 +260,52 @@ export interface PluginAiOperation {
   createsRecord?: boolean
 }
 
+/** A contract-3 call the member's AI may ask (one tool each; a document's page, list and search are one each). */
+export interface PluginAiCall {
+  name: string
+  /** A document's part; null for a read or a search. */
+  part: 'page' | 'list' | 'search' | null
+  label: string
+  inputs: Array<{ name: string; kind: 'id' | 'text' | 'number' | 'boolean' | 'date'; required: boolean; label: string | null }>
+}
+
 /** The company's running connector plugins, as the member's AI may use them (GET /api/records-ai/plugins). */
 export interface PluginAiTools {
-  plugins: Array<{ id: string; label: string; operations: PluginAiOperation[] }>
+  /** `calls`: absent from an older server, ignored by an older app. */
+  plugins: Array<{ id: string; label: string; operations: PluginAiOperation[]; calls?: PluginAiCall[] }>
+}
+
+/** What came back from one read of a contract-3 call. Only what the declaration's `returns` names. */
+export interface PluginCallAnswer {
+  outcome: 'ok' | 'failed'
+  call: string
+  part: 'page' | 'list' | 'search' | null
+  /** A read or a page: its fields. A value wrapped `{ outsideText, instructionLike }` is outside text. */
+  data: Record<string, unknown> | null
+  /** A list or a search: its entries. */
+  items: Array<Record<string, unknown>> | null
+  /** The next cursor of a list or a search. */
+  next: string | null
+  /** A page: the link to cite. */
+  cite: string | null
+  /** Answer fields nobody declared: left out, counted. */
+  dropped: number
+  /** `failed`: the core's failure class, and the outside's code when it gave one. */
+  failure?: 'temporary' | 'permission' | 'bad-input' | 'unknown-result'
+  code?: string
+}
+
+/** One line of `GET /plugins/:id/access-log`. */
+export interface PluginAccessLogEntry {
+  at: string
+  userId: string
+  actorKind: 'human' | 'ai'
+  call: string
+  refs: Record<string, string>
+  status: string
+  dropped: number
+  conversationId: string | null
+  runId: string | null
 }
 
 /**

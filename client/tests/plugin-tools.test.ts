@@ -16,6 +16,8 @@
  *   before sending `confirm`, and is offered only where reconcile said `recreatable`;
  * - an undo answer that is lost or refused never reads as done; the card
  *   survives a restart (stored with the message);
+ * - a contract-3 call becomes a read tool for any agent, a document one per part,
+ *   and its input goes to the server as declared, cursor apart;
  * - creates (milestone 4): Claude gets `hubspot__log_meeting` /
  *   `hubspot__create_deal`, Codex neither; a create whose answer is unknown
  *   tells the AI never to call it again; APPROVAL_REQUIRED says a person must
@@ -24,7 +26,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
-import { createRecordTools } from '../electron/records/tools'
+import { createRecordTools, pluginCallToolSpecs } from '../electron/records/tools'
 import { createPluginOperationsApi } from '../electron/features/plugin-operations/ipc'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, reconcileResultView, shownValue, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
@@ -324,4 +326,24 @@ test('a new deal needs approval: nothing made, the AI is told a person must appr
   assert.match(cards[0].message, /^作っていません。/)
   assert.equal(cards[0].recordId, '')
   assert.deepEqual(readPluginOperationCard(JSON.parse(JSON.stringify(cards[0]))), cards[0])
+})
+
+test('a contract-3 call is a read tool: one per document part, a plain id only, input and cursor sent apart', () => {
+  const specs = pluginCallToolSpecs({
+    plugins: [{
+      id: 'care', label: '窓口', operations: [], calls: [
+        { name: 'diagnose', part: null, label: '状態を調べる', inputs: [{ name: 'id', kind: 'id', required: true, label: null }] },
+        { name: 'pages', part: 'page', label: '案内', inputs: [{ name: 'id', kind: 'id', required: true, label: null }] },
+        { name: 'pages', part: 'search', label: '案内', inputs: [{ name: 'words', kind: 'text', required: true, label: null }] },
+      ],
+    }],
+  })
+  assert.deepEqual(specs.map(s => s.name), ['care__diagnose', 'care__pages_page', 'care__pages_search'])
+  assert.ok(specs.every(s => s.readOnly))
+  const [diagnose, page, search] = specs
+  assert.equal(diagnose.schema.safeParse({ id: 'a:b' }).success, false)
+  assert.equal(diagnose.schema.safeParse({ id: 'person-1', other: 1 }).success, false)
+  assert.deepEqual(diagnose.request({ id: 'person-1' }), { method: 'POST', path: '/plugins/care/calls/diagnose', body: { input: { id: 'person-1' } } })
+  assert.deepEqual(page.request({ id: 'p' }).body, { part: 'page', input: { id: 'p' } })
+  assert.deepEqual(search.request({ words: 'x', cursor: 'c' }).body, { part: 'search', input: { words: 'x' }, cursor: 'c' })
 })

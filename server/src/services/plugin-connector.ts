@@ -31,6 +31,11 @@
  * Before every attempt — the first, and after every wait — `precheck` is
  * asked again (stops, membership, policy: review §6.5); a refusal there
  * sends nothing.
+ *
+ * A contract-3 connector's declared calls (`callDeclared`, plugins.md "Contract
+ * 3") go the same way, with the key in the header its `auth` names, the actor's
+ * headers, and the pace of its `limits`; an error answer gives only its top-level
+ * `code`, the rest is dropped as above.
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import type { PluginEndpoint, PluginEndpointName } from '../../shared/core/plugins'
@@ -52,6 +57,17 @@ export interface ConnectorCall {
   body?: unknown
 }
 
+/** One contract-3 call: a declared path with `{id}` not yet filled, the query or the body, and who acted. */
+export interface DeclaredCall {
+  method: 'GET' | 'POST'
+  path: string
+  id?: string
+  query?: Record<string, string>
+  body?: unknown
+  /** The member header's value; the address only when the member's own, verified, and the service wants one. */
+  actor: { member: string; email: string | null }
+}
+
 export type ConnectorResult =
   | { ok: true; status: number; body: unknown }
   | {
@@ -69,6 +85,8 @@ export type ConnectorResult =
     status?: number
     /** A fixed word for logs and answers (never a value, key or body). */
     reason: string
+    /** A declared call's error answer: its top-level `code`, a plain word. */
+    code?: string
   }
 
 export interface PluginConnectorDeps {
@@ -89,6 +107,7 @@ const MAX_WAIT_MS = 15_000
 const RETRY_AFTER_CAP_MS = 10_000
 const PER_TEN_SECONDS = 80
 const SEARCH_PER_SECOND = 4
+const ERROR_CODE_RE = /^[A-Za-z0-9_.-]{1,100}$/
 
 async function readBody(body: AsyncIterable<Uint8Array>): Promise<Uint8Array | null> {
   const chunks: Uint8Array[] = []
@@ -114,10 +133,22 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
   /** Recent request times per company × connection (and searches separately). */
   const recent = new Map<string, number[]>()
 
-  async function pace(key: string, isSearch: boolean): Promise<number> {
+  /** Null: the declaration's `limits` would keep this call waiting longer than a read may; nothing is sent. */
+  async function pace(key: string, isSearch: boolean, perMinute: number | null = null): Promise<number | null> {
     let waited = 0
     for (;;) {
       const now = deps.nowMs()
+      if (perMinute !== null) {
+        const minute = (recent.get(`${key}|minute`) ?? []).filter(t => t > now - 60_000)
+        recent.set(`${key}|minute`, minute)
+        if (minute.length >= perMinute) {
+          const wait = minute[0] + 60_000 - now
+          if (waited + wait > MAX_WAIT_MS) return null
+          await deps.sleep(wait)
+          waited += wait
+          continue
+        }
+      }
       const all = (recent.get(key) ?? []).filter(t => t > now - 10_000)
       const searches = (recent.get(`${key}|search`) ?? []).filter(t => t > now - 1_000)
       recent.set(key, all)
@@ -127,6 +158,7 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
       if (wait <= 0) {
         all.push(now)
         if (isSearch) searches.push(now)
+        if (perMinute !== null) recent.get(`${key}|minute`)!.push(now)
         return waited
       }
       await deps.sleep(wait)
@@ -153,6 +185,83 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
     return qs ? `${full}?${qs}` : full
   }
 
+  function declaredPath(plugin: ActivePlugin, call: DeclaredCall): string | null {
+    let path = call.path
+    if (path.includes('{id}')) {
+      if (typeof call.id !== 'string' || !EXTERNAL_ID_RE.test(call.id)) return null
+      path = path.replace('{id}', call.id)
+    } else if (call.id !== undefined) return null
+    const full = `${plugin.manifest.baseUrl.basePath}${path}`
+    if (!checkUpstreamPath(full)) return null
+    const qs = new URLSearchParams(call.query ?? {}).toString()
+    return qs ? `${full}?${qs}` : full
+  }
+
+  /** The attempts of one call: pace, precheck, the key revealed right then, the answer, retries for reads. */
+  async function attempts(companyId: string, plugin: ActivePlugin, r: {
+    method: string; path: string; isRead: boolean; isSearch: boolean; perMinute: number | null; body: unknown
+    credential: { header: string; value: (key: string) => string }; headers: Record<string, string>; errorCodes: boolean
+  }, precheck: () => Promise<string | null>): Promise<ConnectorResult> {
+    const { method, path, isRead, credential } = r
+    const body = r.body === undefined ? null : new TextEncoder().encode(JSON.stringify(r.body))
+    let waitedInAll = 0
+    for (let attempt = 0; ; attempt++) {
+      const paced = await pace(`${companyId}|${plugin.connectorId}|${plugin.connectionId}`, r.isSearch, r.perMinute)
+      if (paced === null) return { ok: false, kind: 'rate-limited', reason: 'rate-limited' }
+      waitedInAll += paced
+      const stop = await precheck()
+      if (stop) return { ok: false, kind: 'not-sent', reason: stop }
+      const key = await deps.reveal(companyId, plugin.keyId)
+      if (!key) return { ok: false, kind: 'not-sent', reason: 'no-key' }
+      const headers: Record<string, string> = { accept: 'application/json', ...r.headers, [credential.header]: credential.value(key), 'accept-encoding': 'identity' }
+      if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = String(body.byteLength) }
+      const controller = new AbortController()
+      const sent = await deps.upstream.send({
+        host: plugin.manifest.baseUrl.host, method, path, headers,
+        body: body ? (async function* () { yield body })() : null,
+        allowPrivateHosts: [], signal: controller.signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
+      })
+      let retryAfterMs: number | null = null
+      let failure: ConnectorResult
+      if (!sent.ok) {
+        const before = BEFORE_SENDING.includes(sent.reason)
+        failure = { ok: false, kind: before || isRead ? 'not-sent' : 'unknown', reason: sent.reason }
+        // Writes are never retried: nothing sent, or perhaps applied (`unknown`).
+        if (!isRead) return failure
+      } else {
+        const { status } = sent.response
+        const bytes = await readBody(sent.response.body).catch(() => null)
+        if (status >= 200 && status < 300) {
+          if (status === 204) return { ok: true, status, body: null }
+          if (!bytes) return isRead ? { ok: false, kind: 'server-error', status, reason: 'unreadable-answer' } : { ok: false, kind: 'unknown', status, reason: 'unreadable-answer' }
+          try {
+            return { ok: true, status, body: bytes.byteLength === 0 ? null : JSON.parse(new TextDecoder().decode(bytes)) as unknown }
+          } catch {
+            return isRead ? { ok: false, kind: 'server-error', status, reason: 'unreadable-answer' } : { ok: false, kind: 'unknown', status, reason: 'unreadable-answer' }
+          }
+        }
+        const code = r.errorCodes && bytes ? errorCodeOf(bytes) : undefined
+        const coded = code ? { code } : {}
+        if (status === 429) {
+          failure = { ok: false, kind: 'rate-limited', status, reason: 'rate-limited', ...coded }
+          const ra = Number(sent.response.headers.find(([n]) => n === 'retry-after')?.[1])
+          if (Number.isFinite(ra) && ra >= 0) retryAfterMs = Math.min(ra * 1000, RETRY_AFTER_CAP_MS)
+        } else if (status >= 500) {
+          failure = { ok: false, kind: 'server-error', status, reason: 'server-error', ...coded }
+        } else {
+          return { ok: false, kind: 'refused', status, reason: status === 401 ? 'key-rejected' : status === 403 ? 'not-permitted' : status === 404 ? 'not-found' : 'refused', ...coded }
+        }
+        // Writes are never retried here (their result may be known to the caller only by re-reading).
+        if (!isRead) return failure
+      }
+      if (attempt >= MAX_RETRIES) return failure
+      const wait = retryAfterMs ?? 1000 * 2 ** attempt
+      if (waitedInAll + wait > MAX_WAIT_MS) return failure
+      await deps.sleep(wait)
+      waitedInAll += wait
+    }
+  }
+
   return {
     /**
      * One declared call. `precheck` runs right before every attempt; a
@@ -162,64 +271,38 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
       const path = pathOf(plugin, call)
       if (!path) return { ok: false, kind: 'not-sent', reason: 'undeclared-call' }
       const method = call.endpoint === 'account_info' ? 'GET' : plugin.manifest.objects[call.object!].endpoints[call.endpoint as PluginEndpointName]!.method
-      const isRead = READ_ENDPOINTS.includes(call.endpoint)
-      const isSearch = call.endpoint === 'search'
       const credential = deps.credential(companyId, plugin.manifest.service)
       if (!credential) return { ok: false, kind: 'not-sent', reason: 'no-credential' }
-      const body = call.body === undefined ? null : new TextEncoder().encode(JSON.stringify(call.body))
-      let waitedInAll = 0
-      for (let attempt = 0; ; attempt++) {
-        waitedInAll += await pace(`${companyId}|${plugin.connectorId}|${plugin.connectionId}`, isSearch)
-        const stop = await precheck()
-        if (stop) return { ok: false, kind: 'not-sent', reason: stop }
-        const key = await deps.reveal(companyId, plugin.keyId)
-        if (!key) return { ok: false, kind: 'not-sent', reason: 'no-key' }
-        const headers: Record<string, string> = { accept: 'application/json', [credential.header]: credential.value(key), 'accept-encoding': 'identity' }
-        if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = String(body.byteLength) }
-        const controller = new AbortController()
-        const sent = await deps.upstream.send({
-          host: plugin.manifest.baseUrl.host, method, path, headers,
-          body: body ? (async function* () { yield body })() : null,
-          allowPrivateHosts: [], signal: controller.signal, headersTimeoutMs: HEADERS_TIMEOUT_MS,
-        })
-        let retryAfterMs: number | null = null
-        let failure: ConnectorResult
-        if (!sent.ok) {
-          const before = BEFORE_SENDING.includes(sent.reason)
-          failure = { ok: false, kind: before || isRead ? 'not-sent' : 'unknown', reason: sent.reason }
-          // Writes are never retried: nothing sent, or perhaps applied (`unknown`).
-          if (!isRead) return failure
-        } else {
-          const { status } = sent.response
-          const bytes = await readBody(sent.response.body).catch(() => null)
-          if (status >= 200 && status < 300) {
-            if (status === 204) return { ok: true, status, body: null }
-            if (!bytes) return isRead ? { ok: false, kind: 'server-error', status, reason: 'unreadable-answer' } : { ok: false, kind: 'unknown', status, reason: 'unreadable-answer' }
-            try {
-              return { ok: true, status, body: bytes.byteLength === 0 ? null : JSON.parse(new TextDecoder().decode(bytes)) as unknown }
-            } catch {
-              return isRead ? { ok: false, kind: 'server-error', status, reason: 'unreadable-answer' } : { ok: false, kind: 'unknown', status, reason: 'unreadable-answer' }
-            }
-          }
-          if (status === 429) {
-            failure = { ok: false, kind: 'rate-limited', status, reason: 'rate-limited' }
-            const ra = Number(sent.response.headers.find(([n]) => n === 'retry-after')?.[1])
-            if (Number.isFinite(ra) && ra >= 0) retryAfterMs = Math.min(ra * 1000, RETRY_AFTER_CAP_MS)
-          } else if (status >= 500) {
-            failure = { ok: false, kind: 'server-error', status, reason: 'server-error' }
-          } else {
-            return { ok: false, kind: 'refused', status, reason: status === 401 ? 'key-rejected' : status === 403 ? 'not-permitted' : status === 404 ? 'not-found' : 'refused' }
-          }
-          // Writes are never retried here (their result may be known to the caller only by re-reading).
-          if (!isRead) return failure
-        }
-        if (attempt >= MAX_RETRIES) return failure
-        const wait = retryAfterMs ?? 1000 * 2 ** attempt
-        if (waitedInAll + wait > MAX_WAIT_MS) return failure
-        await deps.sleep(wait)
-        waitedInAll += wait
-      }
+      return attempts(companyId, plugin, {
+        method, path, isRead: READ_ENDPOINTS.includes(call.endpoint), isSearch: call.endpoint === 'search', perMinute: null, body: call.body,
+        credential, headers: {}, errorCodes: false,
+      }, precheck)
     },
+
+    /** One contract-3 read (`DeclaredCall`): the same way out, with the declaration's `auth`, `actor` and `limits`. */
+    async callDeclared(companyId: string, plugin: ActivePlugin, call: DeclaredCall, precheck: () => Promise<string | null>): Promise<ConnectorResult> {
+      const path = declaredPath(plugin, call)
+      if (!path) return { ok: false, kind: 'not-sent', reason: 'undeclared-call' }
+      const { auth, actor, limits } = plugin.manifest.calling ?? {}
+      if (!auth || !actor) return { ok: false, kind: 'not-sent', reason: 'no-credential' }
+      if (!EXTERNAL_ID_RE.test(call.actor.member)) return { ok: false, kind: 'not-sent', reason: 'bad-actor' }
+      const headers: Record<string, string> = { [actor.memberHeader.toLowerCase()]: call.actor.member }
+      if (actor.emailHeader && call.actor.email) headers[actor.emailHeader.toLowerCase()] = call.actor.email
+      return attempts(companyId, plugin, {
+        method: call.method, path, isRead: true, isSearch: false, perMinute: limits?.perMinute ?? null, body: call.body,
+        credential: { header: auth.header.toLowerCase(), value: key => (auth.format === 'bearer' ? `Bearer ${key}` : key) }, headers, errorCodes: true,
+      }, precheck)
+    },
+  }
+}
+
+/** The top-level `code` of an error answer (plugins.md "Contract 3": one flat shape); anything else of it is dropped. */
+function errorCodeOf(bytes: Uint8Array): string | undefined {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { code?: unknown } | null
+    return typeof parsed?.code === 'string' && ERROR_CODE_RE.test(parsed.code) ? parsed.code : undefined
+  } catch {
+    return undefined
   }
 }
 

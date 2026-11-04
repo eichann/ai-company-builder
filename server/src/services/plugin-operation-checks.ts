@@ -223,6 +223,19 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
   }
 
   /**
+   * The same gate for a contract-3 call (all of them read today): a core step's run may read;
+   * a business plugin's step only its own plugin's declared calls, with `plugin_operations`.
+   */
+  async function callStepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, call: string) {
+    const run = actor.kind === 'ai' ? boundStepOf(companyData.forCompany(member.companyId), member.userId, actor) : null
+    if (run && run !== 'missing' && !parsePluginRunStep(run.step)) return null
+    const bound = await boundStep(member, actor, pluginId)
+    if (bound === null) return null
+    const declared = bound && Object.prototype.hasOwnProperty.call(bound.manifest.calls ?? {}, call)
+    return declared && bound.step.tools.includes('plugin_operations') ? null : notInStep()
+  }
+
+  /**
    * The step a run-bound AI works in, for `pluginId`: null = not a business
    * plugin's step (a consultation, a core step); false = refused (another
    * plugin's, not running, the pinned version stopped).
@@ -314,7 +327,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, approvalStepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, callStepRefusal, approvalStepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

@@ -25,6 +25,7 @@
  *   POST /plugins/:pluginId/create/:operation   a create of a record (create_deal; act) — never auto:
  *        it becomes an approval request (202) that a person approves
  *   GET  /plugins/:pluginId/operations/:operationId
+ *   POST /plugins/:pluginId/calls/:call   a contract-3 connector's read (plugins.md "Contract 3"; a read token is enough: they only read)
  *   GET  /approvals   GET /approvals/:approvalId   approval requests, read only (approvals.md)
  *
  *   POST /outbound-recipients             verified mail recipients of a meeting / まとまり (read; tool mail_recipients)
@@ -168,6 +169,11 @@ recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation'
   }
   // A read changes nothing outside: no key needed.
   return reads ? run() : keyedWrite(c, h, 'plugin-operation', body, run)
+})
+
+recordsAiRoute.post('/plugins/:pluginId/calls/:call', aiReads, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, await services.pluginCalls.read(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('call'), c.var.body))
 })
 
 // Approval requests, read only: the AI lists and shows them (「承認待ちを見せて」); it has no way to approve.

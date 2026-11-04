@@ -5,7 +5,8 @@
  * the member may do on a record is still decided per call (P6).
  */
 import { effectiveFieldPolicy, effectiveOperationPolicy } from '../../shared/core/plugins'
-import type { PluginAiField, PluginAiOperation, PluginAiTools } from '../../shared/types/plugins'
+import type { PluginCall, PluginCallRequest, PluginManifest } from '../../shared/core/plugins'
+import type { PluginAiCall, PluginAiField, PluginAiOperation, PluginAiTools } from '../../shared/types/plugins'
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
@@ -48,10 +49,32 @@ export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'>
 }
 export type PluginRunGate = ReturnType<typeof createPluginRunGate>
 
+const inputsOf = (r: PluginCallRequest): PluginAiCall['inputs'] =>
+  Object.entries(r.inputs).map(([name, i]) => ({ name, kind: i.kind, required: i.required, label: i.label }))
+
+const toolsOfCall = (name: string, c: PluginCall): PluginAiCall[] => {
+  if (c.kind === 'act') return []
+  if (c.kind !== 'document') return [{ name, part: null, label: c.label, inputs: inputsOf(c) }]
+  return ([['page', c.page], ['list', c.list], ['search', c.search]] as const)
+    .flatMap(([part, r]) => (r ? [{ name, part, label: c.label, inputs: inputsOf(r) }] : []))
+}
+
+/** The calls the member's AI may ask now: `mayCall` (the gate's own `who`, bound once); a step's run needs `plugin_operations`. The gate still decides each call. */
+function aiCallsOf(manifest: Pick<PluginManifest, 'calls'>, step: { tools: string[] } | null, mayCall: (who: string[]) => boolean): PluginAiCall[] {
+  if (step && !step.tools.includes('plugin_operations')) return []
+  return Object.entries(manifest.calls ?? {}).filter(([, c]) => mayCall(c.who)).flatMap(([name, c]) => toolsOfCall(name, c))
+}
+
+/** Whether this member's AI passes a call's `who`. Until bound, no call is listed. */
+export type AiCallAccess = (member: Member, pluginId: string, who: string[]) => boolean
+
 export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'> & { evaluation: Pick<PluginEvaluation, 'evaluate'> }) {
   const { companyData, evaluation } = deps
+  let callAccess: AiCallAccess = () => false
 
   return {
+    useCallAccess(f: AiCallAccess) { callAccess = f },
+
     /**
      * GET /api/records-ai/plugins (P7) — the operations of the running business
      * plugins' connector use the member's AI may call (the tool is named by the
@@ -124,7 +147,8 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
           }
           operations.push({ name, label: op.label, kind: op.kind, recordType, decision: op.decision, fields })
         }
-        if (operations.length > 0) out.push({ id: install.pluginId, label: manifest.label, operations })
+        const calls = aiCallsOf(manifest, step, who => callAccess(member, install.pluginId, who))
+        if (operations.length > 0 || calls.length > 0) out.push({ id: install.pluginId, label: manifest.label, operations, ...(calls.length > 0 ? { calls } : {}) })
       }
       return ok({ plugins: out })
     },

@@ -33,6 +33,26 @@ export const pluginSchema = `
       PRIMARY KEY (company_id, plugin_id)
     );
 
+    -- Every read of a contract-3 call (plugins.md "Contract 3"): who, which ids, how it went; never an
+    -- answer. Append-only (the trigger); rows go only when a year old (retention).
+    CREATE TABLE IF NOT EXISTS plugin_access_log (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      call TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      actor_kind TEXT NOT NULL,
+      conversation_id TEXT,
+      run_id TEXT,
+      refs TEXT NOT NULL,
+      status TEXT NOT NULL,
+      dropped INTEGER NOT NULL DEFAULT 0,
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugin_access_log ON plugin_access_log(company_id, plugin_id, at);
+    CREATE TRIGGER IF NOT EXISTS plugin_access_log_no_update BEFORE UPDATE ON plugin_access_log
+    BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
+
     -- The company's mapping (読み替え表), every version kept (restorable).
     CREATE TABLE IF NOT EXISTS plugin_mappings (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

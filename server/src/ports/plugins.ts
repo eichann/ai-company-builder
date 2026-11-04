@@ -172,7 +172,28 @@ export interface PluginReadScopeEntry {
   id: string
 }
 
+/** One read of a contract-3 call (`plugin_access_log`): who, what, which ids, how it went. Never an answer, a search word or a key. */
+export interface PluginAccessLogRow {
+  id: string
+  pluginId: string
+  call: string
+  userId: string
+  actorKind: 'human' | 'ai'
+  conversationId: string | null
+  runId: string | null
+  /** The call's plain id inputs (JSON). */
+  refs: string
+  /** `ok`, or the failure's class. */
+  status: string
+  /** Answer fields nobody declared, dropped. */
+  dropped: number
+  at: string
+}
+
 export interface PluginRepository {
+  /** Adds the row and removes this company's rows older than `keepFrom` (retention). */
+  addAccessLog(row: PluginAccessLogRow, keepFrom: string): void
+  accessLog(pluginId: string, limit: number): PluginAccessLogRow[]
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
   /** Insert or replace the install row and add a history row (one transaction). */

@@ -58,7 +58,7 @@ export interface PortalRequest {
   body: string
 }
 
-type Fault = { status: 429; retryAfter: number } | { status: 500 }
+type Fault = { status: 429; retryAfter: number } | { status: 500 } | { status: 409; code: string }
 
 export function createFakePortal(options: FakePortalOptions = {}) {
   const seed = options.seed ?? defaultPortalSeed()
@@ -105,6 +105,7 @@ export function createFakePortal(options: FakePortalOptions = {}) {
     const fault = faults.shift()
     if (fault?.status === 429) { c.header('Retry-After', String(fault.retryAfter)); return fail(c, 429, 'RATE_LIMITED', '呼び出しが多すぎます') }
     if (fault?.status === 500) return fail(c, 500, 'INTERNAL', '一時的なエラーです')
+    if (fault?.status === 409) return c.json({ code: fault.code, summary: '状態が変わりました' }, 409)
     if (perMinute !== null) {
       const recent = (hits.get(key) ?? []).filter(t => t > now() - 60_000)
       if (recent.length >= perMinute) { c.header('Retry-After', '60'); return fail(c, 429, 'RATE_LIMITED', '呼び出しが多すぎます') }

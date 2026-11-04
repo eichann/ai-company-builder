@@ -82,6 +82,7 @@ import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
 import { createPluginService } from './services/plugins'
+import { createPluginCalls } from './services/plugin-calls'
 import { createPluginConnector } from './services/plugin-connector'
 import { createPluginImportService } from './services/plugin-import'
 import { createPluginOperationService } from './services/plugin-operations'
@@ -396,6 +397,25 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     aiStopped: companyId => agentStops.companyStopped(companyId),
   })
 
+  // A contract-3 connector's reads (plugins.md "Contract 3"), behind the operations' gate; its service gets no relay.
+  const pluginCalls = createPluginCalls({
+    ...shared, plugins, connector: pluginConnector, gate: pluginOperations.gate,
+    aiStopped: companyId => agentStops.companyStopped(companyId),
+    recordAiRead: (companyId, userId, e) => {
+      try {
+        agentEvents.recordServerEvent(companyId, userId, {
+          agent: 'script', tool: `plugin-call:${e.call.slice(0, 80)}`, category: 'broker', ...(e.conversationId ? { conversationId: e.conversationId } : {}),
+          target: { kind: 'broker', service: e.call.split('/')[0], host: e.host, path: e.path.slice(0, 200), ...(e.status !== null ? { status: e.status } : {}) },
+          decision: 'auto-allowed', outcome: e.ok ? 'ok' : 'error',
+        })
+      } catch {
+        console.warn('[plugin-calls] a read could not be recorded')
+      }
+    },
+  })
+  keyBroker.useRelayClosed((companyId, service) => plugins.relayClosed(companyId, service))
+  plugins.useCallAccess((member, pluginId, who) => pluginOperations.gate.mayRunAt(member, { kind: 'ai' }, who, {}, '', { pluginId, recordId: null }))
+
   // Approval requests with fixed content (milestone 4 G6, approvals.md): the service writer and the
   // operations' approval seam are handed to it only; its routes take a session (no AI route approves).
   const fixedPayloads = createFixedPayloads(shared)
@@ -670,6 +690,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     plugins,
     pluginImport,
     pluginOperations,
+    pluginCalls,
     pluginMappingCheck,
     approvals,
     fixedPayloads,

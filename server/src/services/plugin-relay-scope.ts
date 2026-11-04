@@ -4,7 +4,12 @@
  * relay passes no writes (declared searches only) and reads only for members
  * in the connection's read scope. Called by the relay
  * (`services/broker-relay.ts`), the key broker and outbound mail. Reads only.
+ *
+ * A contract-3 connector's service is closed to the relay altogether, reads too
+ * (plugins.md "Contract 3"): its data comes only through the declared calls,
+ * each with its `who` and its line in the access log.
  */
+import { PLUGIN_CONTRACT_V3 } from '../../shared/core/plugins'
 import type { PluginInstallRow } from '../ports/plugins'
 import { recordReader } from './record-access'
 import type { PluginServiceDeps } from './plugin-service-common'
@@ -27,7 +32,20 @@ export function createPluginRelayScope(deps: Pick<PluginServiceDeps, 'companyDat
     return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder, personalOwner: null, members: null }))
   }
 
+  const closedConnector = (companyId: string, install: PluginInstallRow): boolean => {
+    const m = shelf.find(companyId, install.pluginId, install.version)?.pkg.manifest
+    return m?.role === 'connector' && m.contract >= PLUGIN_CONTRACT_V3
+  }
+
   return {
+    /** The service belongs to a contract-3 connector this company may use: no relay, no generic relay service (K9). */
+    relayClosed(companyId: string, service: string): boolean {
+      return shelf.packagesFor(companyId).some(p => p.pkg.manifest.role === 'connector' && p.pkg.manifest.service === service && p.pkg.manifest.contract >= PLUGIN_CONTRACT_V3)
+    },
+
+    /** A contract-3 connector: nothing goes through the relay, so it has no read scope. */
+    closedConnector,
+
     /**
      * The relay's rule for a service a connector manages (plugins.md "The relay and a
      * managed connection"): null = not managed. Writes never pass (declared searches
@@ -35,7 +53,10 @@ export function createPluginRelayScope(deps: Pick<PluginServiceDeps, 'companyDat
      * install of the service must let them in. An empty scope lets nobody in.
      */
     relayPolicy(companyId: string, userId: string, service: string): { searchPaths: string[]; mayRead: boolean; connectionIds: string[] } | null {
-      const managed = companyData.forCompany(companyId).plugins.installs().filter(i => i.service === service && i.managedSince !== null)
+      const installs = companyData.forCompany(companyId).plugins.installs().filter(i => i.service === service)
+      const managed = installs.filter(i => i.managedSince !== null)
+      const closed = installs.filter(i => closedConnector(companyId, i))
+      if (closed.length > 0) return { searchPaths: [], mayRead: false, connectionIds: closed.map(i => i.connectionId) }
       if (managed.length === 0) return null
       const connectionIds = managed.map(i => i.connectionId)
       const role = deps.roleOf(companyId, userId)

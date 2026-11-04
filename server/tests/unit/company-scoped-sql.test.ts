@@ -83,6 +83,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
+  plugin_access_log: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],
   plugin_history: ['adapters/sqlite/plugins.ts'],
   plugin_external_links: ['adapters/sqlite/plugins.ts'],
