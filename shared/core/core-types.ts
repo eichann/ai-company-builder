@@ -82,6 +82,13 @@
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
  * implements `outside_event` (its `occurred_at` was there from the start).
+ * Version 6 (owner FB #20, additive): the assignee's 「済んだ」 (`settle`, 確認待ち → handled) and
+ * the field `settled_by` the engine fills with them (`ACTOR_ARGS`); the inbox clears it when the
+ * thread goes on.
+ * Version 7 (owner FB #19, additive): 「返事のあとを確かめる」 (`replied`) — the member's own reply was seen
+ * (sent from the phone, or in Slack / Gmail itself) and tasks made from the message are still open:
+ * the member's AI checks whether the reply finished them (`finish_reply_check`, `who: [ai]`; the
+ * inbox's reply-check route completes them), or the assignee looks themselves (`check_myself`).
  *
  * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
  * of a thing that happened outside implements `outside_event` — `occurred_at`
@@ -93,7 +100,10 @@
  * `meeting` version 4 drops version 3's まとまり's part (bundle_waiting /
  * bundle_working and their five actions): a まとまり chosen after the reading is
  * only linked; meetings left there are moved back to `read` at startup
- * (`BUNDLE_PART_ENDED_ACTION`).
+ * (`BUNDLE_PART_ENDED_ACTION`). `meeting` version 5 (owner decision 2026-11-04,
+ * meetings for their attendees) adds the initial state `arrived` (議事録が届いた: nobody's
+ * turn); an attendee's ［AI に読ませる］ / ［読まない］ move it (minutes service only).
+ * Meetings made before stay where they are.
  *
  * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
  * the `minutes` type; the 議事録 is the meeting's content, read where it is),
@@ -190,7 +200,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 5
+version: 7
 implements: [outside_event, request]
 storage: server
 fields:
@@ -210,11 +220,12 @@ fields:
   waiting_on:   { label: 待っているもの, kind: text, source: server }
   due:          { label: 期限, kind: date, source: server }
   intake_reason: { label: 受け取ったわけ, kind: choice, options: [to, multiple_to, shared, cc, bulk, automated], option_labels: { to: 宛先（To）があなた, multiple_to: 宛先（To）が何人も, shared: 共有の受付アドレス, cc: CC だけ, bulk: メルマガ・一斉送信, automated: 自動で送られたもの }, source: server }
+  settled_by:   { label: 済んだとした人, kind: person, source: server }
 links:
   counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: interactions }
   tasks:        { label: 関係するタスク, target: task, cardinality: many }
   bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: interactions }
-states: [received, handled, unsure, unclaimed, excluded]
+states: [received, handled, unsure, unclaimed, excluded, replied]
 initial: received
 final: [handled, excluded]
 actions:
@@ -224,15 +235,20 @@ actions:
   confirm:      { label: 自分の担当にする, from: [unsure], to: received, who: [assignee], note: optional, hand_to: assignee }
   drop:         { label: やることにしない（自分で決める）, from: [unsure], to: excluded, who: [assignee], note: optional }
   take_up:      { label: やることにする, from: [excluded], to: received, who: [assignee], note: optional, hand_to: assignee }
+  settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
+  finish_reply_check: { label: 返事のあとを確かめた, from: [replied], to: handled, who: [ai], note: optional }
+  check_myself: { label: 自分で確かめる, from: [replied], to: handled, who: [assignee], note: optional }
 ---
 # やりとり
 
 外から来たもの（メール・Slack など）の受付票。本文は持たず、要約と元への目印だけを持ちます。
 来た連絡（メール・チャット）は、宛先（To）の人の「持ち主だけ」の記録になります（CC の人には出しません）。「届いた」は AI の番で、AI が返事が要るかを判断して「返事のお願い」を作るか、「やることにしない」にします。決めきれないものは「確認待ち」で担当の人の番、共有の受付アドレスに来たものは「部署の番」で、誰かが引き受けます。
+確認待ちの連絡は、話がもう決着していれば担当が「済んだ」で終わりにでき（今日終わったことに出て、すぐなら取り消せます）、取り込まないなら「やることにしない（自分で決める）」でやることにしなかった一覧に移します。
+担当がスマホや Slack・Gmail で自分で返事をしたとき、この連絡から作ったタスクが残っていれば「返事のあとを確かめる」（AI の番）になります。AI が返事でタスクが済んだかを見て、済んでいれば完了にして知らせ（取り消せます）、まだなら「返事は済み」と書き残します。
 `,
   meeting: `---
 label: 会議
-version: 4
+version: 5
 implements: [outside_event]
 storage: server
 fields:
@@ -247,8 +263,8 @@ fields:
 links:
   bundle:         { label: まとまり, interface: bundle, cardinality: one, inverse: meetings }
   counterpart:    { label: 相手, interface: counterpart, cardinality: one, inverse: meetings }
-states: [received, reading, read, skipped, failed]
-initial: received
+states: [arrived, received, reading, read, skipped, failed]
+initial: arrived
 final: [read, skipped]
 actions:
   start_reading:  { label: 議事録を読み始める, from: [received], to: reading, who: [ai] }
@@ -260,7 +276,8 @@ actions:
 # 会議
 
 社内・社外の会議の記録（日時・出席したメンバー・社外の参加者の数）。議事録は会議の中身で、元の文書に置いたまま（本文は持たず、議事録への目印と要約だけを持ちます）。
-「届いた」は AI の番です（AI が議事録を読んで、タスクや決めたことにします）。どの会議を読むかは会社の設定で決まります（最初は社外の人が出た会議だけ）。
+会議の記録を見られるのは、その会議に出たメンバーだけです（会社の持ち主・管理者も、出ていなければ見えません）。カレンダーで非公開にした予定は記録しません。
+「議事録が届いた」は誰の番でもありません。出た人が［AI に読ませる］を押すと、その人の AI の番（「届いた」）になり、AI が議事録を読んで、やることや決めたことにします。［読まない］を押すと、もう誰にも聞きません。
 まとまり（案件など）が決まらないまま読んだ会議は、あとで人がまとまりを選ぶと、そのまとまりにつながります（会議は「読んだ」のまま）。まとまりへの反映は、そのまとまりの業務の手順が受け持ちます。
 `,
   approval: `---
@@ -474,6 +491,10 @@ export const SERVICE_MADE_TYPES: readonly string[] = ['task']
  */
 export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: readonly string[]; to: string }>>> = {
   meeting: [
+    // Meetings for their attendees (minutes.md): ［AI に読ませる］ (also again after 読まない or a failed
+    // reading, by another attendee) and ［読まない］ — the minutes service with the attendee's session.
+    { from: ['arrived', 'skipped'], to: 'received' },
+    { from: ['arrived'], to: 'skipped' },
     { from: ['received'], to: 'reading' },
     { from: ['reading'], to: 'read' },
     { from: ['reading'], to: 'failed' },
@@ -512,6 +533,10 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['handled'], to: 'received' },
     // The member replied in the thread before it was judged (B4): nothing is left to do.
     { from: ['unsure'], to: 'handled' },
+    // The member's own reply was seen and tasks made from the message are open (owner FB #19):
+    // their AI checks them (the reply-check route), then it is handled again.
+    { from: ['handled'], to: 'replied' },
+    { from: ['replied'], to: 'handled' },
   ],
   reply_request: [
     // Their reply came (not an automatic one): the AI checks it against the end condition.
@@ -531,6 +556,10 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
   task: [
     { from: ['waiting'], to: 'preparing' },
     { from: ['waiting'], to: 'todo' },
+    // The member's reply finished a task made from that message (owner FB #19, inbox.md "Tasks made
+    // from that message"): their AI's check through the inbox, which allows only the member's own
+    // task from that message, never one waiting for a check (確かめてから) or another's turn.
+    { from: ['todo', 'in_progress', 'waiting'], to: 'done' },
   ],
 }
 
@@ -638,6 +667,14 @@ export const INBOX_ACTIONS = Object.freeze({
   claimed: 'claim',
   /** An interaction: the thread went on after it was handled. */
   continued: 'continued',
+  /** An interaction: the member's own reply was seen and tasks made from it are open (handled → replied). */
+  replySeen: 'reply_seen',
+  /** An interaction: the member's AI checked those tasks (replied → handled). */
+  replyChecked: 'reply_checked',
+  /** A task: the member's reply finished it (the notice `replied_done`, undone like any entry). */
+  repliedDone: 'replied_done',
+  /** A task: the member replied, but work remains (a note only: 「返事は済み」). */
+  replyNoted: 'reply_noted',
 })
 
 /** The inbox as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
@@ -714,6 +751,23 @@ export function argDefaultValue(rule: { businessDays: number }, current: unknown
     if (day > today || (day === today && (current.length === 10 || current.slice(0, 16) > now.slice(0, 16)))) return current
   }
   return addBusinessDays(today, rule.businessDays, companyHolidays)
+}
+
+/**
+ * Arguments the engine fills with the person acting (interaction version 6: `settle`'s `settled_by`,
+ * 「済んだ」, so 今日終わったこと lists what the member closed, never what the AI judged): type →
+ * action → argument names. The app may leave it out; a value naming anyone else is refused. Only the
+ * core's rules (a company's own type file cannot say this).
+ */
+export const ACTOR_ARGS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  interaction: { settle: ['settled_by'] },
+}
+
+/** Whether the engine fills this argument with the person acting (`ACTOR_ARGS`). */
+export function isActorArg(type: string, action: string, arg: string): boolean {
+  const byType = Object.prototype.hasOwnProperty.call(ACTOR_ARGS, type) ? ACTOR_ARGS[type] : undefined
+  const names = byType && Object.prototype.hasOwnProperty.call(byType, action) ? byType[action] : undefined
+  return names?.includes(arg) ?? false
 }
 
 /** The default rule of one argument, or undefined. */

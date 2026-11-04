@@ -318,11 +318,14 @@ Drive through the role ports (`connector-roles.md`).
 ## Gmail (`services/google-mail.ts`: the role メールを読む・送る)
 
 - **Read** (`inbox`, `gmail.readonly`, off for a company until its admin turns it on; `MailReader`): `listMessages(companyId, userId, { afterMs,
-  pageToken?, max? ≤ 50 })` → `users/me/messages?q=after:<seconds>&labelIds=INBOX`, then each
-  message's `format=metadata` (From, To, Cc, Subject, Date, Message-ID, In-Reply-To, List-Id,
+  pageToken?, max? ≤ 50, label? })` → `users/me/messages?q=after:<seconds>&labelIds=INBOX` (`label: 'sent'`
+  → `labelIds=SENT`: what the member sent, from any device — the inbox's poll lists both, owner FB
+  #19, `inbox.md` "The member's own reply"), then each
+  message's `format=metadata` (From, Sender, To, Cc, Subject, Date, Message-ID, In-Reply-To, References, List-Id,
   List-Unsubscribe, Precedence, Auto-Submitted, X-Autoreply) → `MailSummary` (addresses lower
   case, RFC 2047 subjects decoded, `bulk` = a list / newsletter or the promotions / social /
-  forums category, `automated`); `getMessage` → `format=full`, the first text/plain part (else
+  forums category, `automated`, `sender` — handed to the inbox as `senderAddress` only to tell a
+  connected service's notification mail, `inbox.md`); `getMessage` → `format=full`, the first text/plain part (else
   the HTML's text), decoded by its charset (ISO-2022-JP too), NFC, at most 20,000 characters;
   `getThread` → `users/me/threads/<id>?format=full` (the card's 元のスレッド: the newest 20, 8,000
   characters each).
@@ -399,7 +402,9 @@ the sign-in page). Also `admin/tests/integrations.test.tsx` 「会社で使う�
 the member's own on), never in the one consent while it is off, never while the company does not
 allow it, and nothing wider; only the member's own mailbox, Japanese mail decoded, nothing stored or logged;
 the member's switch refuses the next call before anything leaves while the rest works, survives
-a re-consent; メールを送る off; 「つないでいるサービス」), mutation-checked: the `feature-off` check.
+a re-consent; メールを送る off; 「つないでいるサービス」; a reply sent from the phone — the member's Sent
+mail with In-Reply-To — is listed from the SENT label, read as metadata only, and moves the 返事のお願い,
+its text never stored), mutation-checked: the `feature-off` check, the Sent listing.
 `server/tests/integration/google-connector.test.ts` against the fake Google through the practice
 redirect: who manages the client; a real secret refused in practice mode and one saved earlier
 never sent; the authorization request (PKCE S256, offline, consent only when needed, hd,

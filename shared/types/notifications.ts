@@ -43,9 +43,15 @@ export const NOTIFICATION_KINDS = [
   // The member's own AI made them a task from a message that came in (owner FB #13): told although
   // their AI was the actor. An app released before it shows the server's text and lists no switch.
   'from_message',
+  // The member's own AI completed a task their reply finished (owner FB #19): told although their AI
+  // was the actor, with ［元に戻す］ (the undo of that entry). An app released before it shows the text.
+  'replied_done',
   // ── lane B ▲
   // lane C ▼ (reserved: role_unassigned)
   // ── lane C ▲
+  // A meeting's minutes arrived (minutes.md "Meetings for their attendees"): once per meeting, to
+  // each member on its list. An app released before it shows the server's text and lists no switch.
+  'minutes_arrived',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -75,9 +81,11 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   reply_arrived: '返事を待っていた連絡に、相手から返事が来た',
   intake_unsure: '来た連絡を誰が受け持つか決めきれず、確かめてほしい',
   from_message: '来た連絡から、AI があなたのやることを作った',
+  replied_done: 'あなたが返事をしたので、AI がやることを完了にした',
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
+  minutes_arrived: '出た会議の議事録が届いた',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -103,9 +111,11 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   reply_arrived: true,
   intake_unsure: true,
   from_message: true,
+  replied_done: true,
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
+  minutes_arrived: true,
   others: false,
 }
 

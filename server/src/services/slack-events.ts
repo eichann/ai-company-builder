@@ -10,10 +10,11 @@
  * company's → the switches (operator stop, the app on, the vault) → the
  * event id once (Slack retries) → signals.
  *
- * A signal says only that something for a member arrived (a DM, a mention of
- * them, an @channel / @here / @everyone) and where (channel, ts): **the text
- * is read in memory to find mentions and is never stored, logged or passed
- * on**. Only members with an active Slack grant that reads (`read`, not
+ * A signal says only that something for a member arrived (a DM or a mention of
+ * them) and where (channel, ts), with the sender's display name (`users.info`,
+ * cached a day: slack-names.ts): **the text is read in memory to find mentions
+ * and is never stored, logged or passed on**. An @channel / @here / @everyone
+ * alone is not taken in (owner decision 2026-11-04). Only members with an active Slack grant that reads (`read`, not
  * turned off) get one; the Slack user is matched to the member by the account
  * their grant signed in with. Messages by bots and edits are left out.
  *
@@ -23,6 +24,7 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { Clock } from '../ports/clock'
 import type { SlackDataSource } from '../ports/slack'
 import { slackFeaturesOf, type SlackClient } from './slack-client'
+import type { SlackNames } from './slack-names'
 
 /** Slack ends a request after 3 s and the body is small; anything bigger is not Slack. */
 export const SLACK_EVENT_MAX_BYTES = 1024 * 1024
@@ -31,10 +33,11 @@ const COMPANY_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 const SLACK_USER_RE = /^[UW][A-Z0-9]{2,32}$/
 /** Message subtypes that are a person's new message (others: edits, joins, bots…). */
 const NEW_MESSAGE_SUBTYPES = new Set([undefined, 'thread_broadcast', 'file_share'])
-const BROADCAST_RE = /<!(channel|here|everyone)(\|[^>]*)?>/
+/** How long a signal waits for the sender's name (Slack ends the request after 3 s). */
+export const SLACK_SENDER_NAME_WAIT_MS = 1_500
 
 /** `own`: the member's own message in a DM or a thread (their reply: the inbox ends what it answered, B4). */
-export type SlackSignalKind = 'dm' | 'mention' | 'broadcast' | 'own'
+export type SlackSignalKind = 'dm' | 'mention' | 'own'
 
 /** Something for a member arrived in Slack. Never the text. */
 export interface SlackSignal {
@@ -46,6 +49,8 @@ export interface SlackSignal {
   threadTs: string | null
   /** The sender's Slack user id (to match a person later), null when Slack gave none. */
   senderSlackUserId: string | null
+  /** The sender's display name in Slack (name only, like a mail sender's), null when not known in time. */
+  senderName: string | null
   /** From a channel shared with another organisation (Slack Connect) or a sender of another workspace: an outside message. */
   external: boolean
 }
@@ -69,6 +74,8 @@ export interface SlackEventsDeps {
   readsIncoming(companyId: string, userId: string): boolean
   /** Where signals go (B2's 来た連絡). Must return quickly: Slack waits at most 3 s. */
   onSignal(signal: SlackSignal): void
+  /** The sender's name (slack-names.ts); absent: no names. */
+  names?: Pick<SlackNames, 'nameOf'>
   /** Warnings (reason codes and ids only); default console. */
   log?: Pick<Console, 'warn'>
 }
@@ -92,7 +99,7 @@ export function createSlackEvents(deps: SlackEventsDeps) {
     return deps.isMember(companyId, grant.userId) ? grant.userId : null
   }
 
-  function signalsOf(companyId: string, teamId: string, envelope: Record<string, unknown>): SlackSignal[] {
+  function signalsOf(companyId: string, teamId: string, envelope: Record<string, unknown>): Array<Omit<SlackSignal, 'senderName'>> {
     const event = isObj(envelope.event) ? envelope.event : null
     if (!event || event.type !== 'message') return []
     if (!NEW_MESSAGE_SUBTYPES.has(event.subtype as string | undefined) || event.bot_id !== undefined) return []
@@ -104,11 +111,10 @@ export function createSlackEvents(deps: SlackEventsDeps) {
     const external = event.is_ext_shared_channel === true || (typeof event.user_team === 'string' && event.user_team !== teamId)
     const base = { companyId, channelId, ts, threadTs: str(event.thread_ts), senderSlackUserId: sender, external }
 
-    // Who the event was delivered for (the members whose user grant subscribed): DMs and broadcasts.
+    // Who the event was delivered for (the members whose user grant subscribed): DMs.
     const authorized = (Array.isArray(envelope.authorizations) ? envelope.authorizations : [])
       .filter(isObj).filter(a => a.is_bot !== true && a.team_id === teamId).map(a => str(a.user_id)).filter((u): u is string => !!u)
     const mentioned = [...text.matchAll(/<@([UW][A-Z0-9]{2,32})(\|[^>]*)?>/g)].map(m => m[1])
-    const broadcast = BROADCAST_RE.test(text)
     const isDm = event.channel_type === 'im'
 
     const kinds = new Map<string, SlackSignalKind>()
@@ -118,9 +124,10 @@ export function createSlackEvents(deps: SlackEventsDeps) {
     }
     if (isDm) for (const u of authorized) offer(u, 'dm')
     for (const u of mentioned) offer(u, 'mention')
-    if (broadcast) for (const u of authorized) offer(u, 'broadcast')
+    // An @channel / @here / @everyone alone is not taken in (owner decision 2026-11-04): Slack lists one
+    // authorized member per event, so it reached one member at random.
 
-    const out: SlackSignal[] = []
+    const out: Array<Omit<SlackSignal, 'senderName'>> = []
     const members = new Set<string>()
     // The member's own reply (a DM, or a thread): the inbox matches it to what it answers; never intake.
     const threaded = base.threadTs !== null && base.threadTs !== ts
@@ -136,6 +143,22 @@ export function createSlackEvents(deps: SlackEventsDeps) {
       out.push({ ...base, userId, kind })
     }
     return out
+  }
+
+  /** The sender's name, waited for at most `SLACK_SENDER_NAME_WAIT_MS` (then the signal goes without it). */
+  async function senderNameOf(companyId: string, slackUserId: string, asMember: string): Promise<string | null> {
+    if (!deps.names) return null
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        deps.names.nameOf(companyId, slackUserId, asMember),
+        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), SLACK_SENDER_NAME_WAIT_MS) }),
+      ])
+    } catch {
+      return null
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   return {
@@ -168,9 +191,12 @@ export function createSlackEvents(deps: SlackEventsDeps) {
       if (!store.firstSeen(eventId, now)) return { status: 200 }
       store.pruneSeen(new Date(deps.clock.nowMs() - SEEN_KEEP_MS).toISOString())
 
-      for (const signal of signalsOf(companyId, app.teamId, envelope)) {
+      const found = signalsOf(companyId, app.teamId, envelope)
+      const incoming = found.find(s => s.kind !== 'own')
+      const senderName = incoming && incoming.senderSlackUserId ? await senderNameOf(companyId, incoming.senderSlackUserId, incoming.userId) : null
+      for (const signal of found) {
         try {
-          deps.onSignal(signal)
+          deps.onSignal({ ...signal, senderName: signal.kind === 'own' ? null : senderName })
         } catch {
           log.warn(`[slack] a signal could not be handed on company=${companyId}`)
         }

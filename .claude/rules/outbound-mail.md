@@ -135,7 +135,8 @@ the card without the server keeping it.
   `source_ref` (`threadPointerOf`). Read now with the **viewer's own** permission through the
   roles: `MailReader.getThread` (Gmail `users.threads.get`, the newest 20, 8,000 characters each)
   or `ChatReader.thread` (`ports/chat.ts`; Slack `conversations.replies` with the member's token,
-  `slack-connector.md`). Not readable → `unavailable { reason, text, allow }` (`not-connected` /
+  `slack-connector.md`; its text plain — mentions as `@name` — and drawn as text with only
+  `*bold*` bold). Not readable → `unavailable { reason, text, allow }` (`not-connected` /
   `turned-off` say where to allow it). Also lists the member's own reply drafts to the 連絡.
   **Nothing of a thread is stored or logged** (test: marked texts in no table, no log line).
 - **A reply draft**: `POST /outbound { interactionId, … }` (session or the AI's token). The

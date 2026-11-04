@@ -58,8 +58,11 @@ a plugin can never draw a notice (§2-2).
   `records.md` "Acceptance"), `acceptance_waiting` (the server clock, below), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
-  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`) and `from_message` (below; all three on by default),
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`), `from_message` and `replied_done` (below; all four on by default),
   `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above),
+  `minutes_arrived` (「議事録が届きました：「…」」, on by default: a meeting recorded `arrived`, or
+  attendees joining it while still there, to each member on its list — the minutes service names
+  them; once per meeting and member, `minutes_arrived:<record>`; `minutes.md`),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
@@ -89,6 +92,15 @@ a plugin can never draw a notice (§2-2).
     (`inbox.md` "A task from a message") puts it in this week's 「あなたの番」, whose new item is
     the Mac notification. An app released before it shows the server's text (the watcher keeps
     any kind with a record) and has no switch for it.
+  - `replied_done` 「返事をしたので完了にしました：「…」」 (`repliedDoneOf`, owner FB #19, `inbox.md` "Tasks
+    made from that message"): the member's **own AI** completed their task because their own reply
+    finished it (ledger action `replied_done`, the inbox's reply check through the service writer, which
+    names them in `notify` so they are told although their AI was the actor — the writer's `tell`
+    keeps the actor only then). The bell's row has **［元に戻す］** (`TitleBarNotices`, `undoNoticedChange`
+    → `tasks:undo` of that entry at the notice's version: the server refuses when something changed
+    since); then 「元に戻しました」. Not a person's own completion, not the AI's other actions.
+    Tests: `notifications.test.ts` 「a task the member's reply finished」, `tests/ui/title-bar-notices.spec.ts`
+    (`?undo=1`) — mutation-checked.
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
@@ -179,6 +191,12 @@ compare-and-set and ledger), and writes notices.
 - **Incoming mail**: `pollInbox` — the inbox's `pollCompany` (`inbox.md` "Connections"):
   connects the members the mail source can read, then reads each one's new mail as header facts
   and pointers (never the text), yielding between members; `ClockRun.mailRead` counts them.
+- **Meetings**: `pollMeetings` — the minutes' `pollCompany` (`minutes.md` "Meetings for their
+  attendees"): each member's calendar of the last 3 days with their own grant (a member without a
+  usable one is refused locally), one members-only record per conference, yielding between members;
+  `ClockRun.meetingsFound` counts the records made. Never the minutes' text. Run **after** every
+  company's moves, notices, content and mail (a second pass), so a slow calendar never holds them
+  up; capped per company and run (`minutes.md`). Test: `server-clock.test.ts`.
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
   task is no longer waiting; a notice's dedupe key is already there), so a second run writes
   nothing. A run while one is going returns `ran: false`. Per company and run at most 50 moves

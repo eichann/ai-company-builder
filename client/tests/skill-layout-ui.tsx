@@ -10,6 +10,7 @@
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
 //   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
+//   check     1 = (with tasks=1) each row offers its ☑ 完了にする; the press is recorded (actOnTask)
 //   plugin    1 = one business plugin with a left tab (番組): five tabs in the strip
 //
 // 今日のフォルダ: the member belongs to 開発部 (not downloaded) and 営業部, so it is in 営業部;
@@ -259,6 +260,7 @@ const api: Partial<ElectronAPI> = {
     ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
       id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: i === 0 ? taskVersion : 1, due: null,
       tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
+      ...(params.get('check') === '1' ? { check: { action: 'complete' as const } } : {}),
     })) } }
     : { success: true, data: { available: false, listDepartmentIds: null, items: [] } },
   // ?plugin=1: one plugin's left tab (its screen is not loaded here; only the tab strip is looked at).
@@ -266,6 +268,11 @@ const api: Partial<ElectronAPI> = {
     plugin: { id: 'tv-program', version: '1.0.0' }, label: '番組づくり',
     tab: { label: '番組', icon: 'FilmSlate', entry: 'index.html' }, peek: null, recordSections: [], fileActions: [],
   }] : [] }) as never,
+  // ?check=1: the ☑ on a row (the list reads again; this fake's list does not change).
+  actOnTask: async (companyId: string, recordId: string, input: unknown) => {
+    record('actOnTask', [companyId, recordId, input])
+    return { success: true, recordId }
+  },
   onPluginsChanged: () => () => {},
   onNotificationsChanged: () => () => {},
   onRecordsChanged: recordsChanged.subscribe,

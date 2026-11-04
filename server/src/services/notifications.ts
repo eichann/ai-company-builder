@@ -33,6 +33,7 @@ import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/co
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
 import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, MESSAGE_TYPE, messageOriginLinks, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
 import { restingTask, turnTiming } from '../../shared/core/turn-timing'
+import { MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_TYPE } from '../../shared/core/minutes'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -244,6 +245,16 @@ export function askedOf(userId: string, change: RecordChange, def: TypeDefinitio
 }
 
 /**
+ * 「議事録が届きました」 (minutes.md "Meetings for their attendees"): a meeting recorded in
+ * `arrived`, or attendees joining it while it is still there. The minutes service names the
+ * meeting's people; only those who read it get it (members-only: its list).
+ */
+export function minutesArrivedOf(change: RecordChange): boolean {
+  return change.type === MEETING_TYPE && change.entry.toState === MEETING_ARRIVED_STATE &&
+    (change.entry.action === 'create' || change.entry.action === MEETING_ATTENDEES_ACTION)
+}
+
+/**
  * Whether this entry is the member's own AI giving them a request it made from a message that came
  * in (`from_message`, owner FB #13: the AI turned a mail into the owner's task and nobody was told,
  * since the actor was "the owner"). Narrow on purpose: the AI made the record (its create entry is
@@ -264,6 +275,18 @@ export function fromMessageOf(userId: string, change: RecordChange, def: TypeDef
   if (!made || made.actorKind !== 'ai' || made.actorId !== userId) return false
   const names = messageOriginLinks(def)
   return names.length > 0 && originIds(names).length > 0
+}
+
+/**
+ * Whether this entry is the member's own AI completing their task because their reply finished it
+ * (`replied_done`, owner FB #19; the inbox's reply check, `INBOX_ACTIONS.repliedDone`): their AI is
+ * the actor, they are the assignee, it reached a final state. The notice carries the entry's version,
+ * so the app's ［元に戻す］ undoes exactly it.
+ */
+export function repliedDoneOf(userId: string, change: RecordChange, final: ReadonlySet<string>): boolean {
+  const { entry, fields } = change
+  return entry.action === INBOX_ACTIONS.repliedDone && entry.actorKind === 'ai' && entry.actorId === userId
+    && str(fields.assignee) === userId && entry.toState !== null && final.has(entry.toState)
 }
 
 export function createNotificationService(deps: NotificationServiceDeps) {
@@ -587,6 +610,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `${t}に相手から返事が来ました。AI が終わりの条件と照らし合わせます`
       case 'from_message':
         return `来た連絡から、やることを作りました：${t}`
+      case 'minutes_arrived':
+        return `議事録が届きました：${t}`
+      case 'replied_done':
+        return `返事をしたので完了にしました：${t}`
       case 'intake_unsure':
         return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':
@@ -646,11 +673,20 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         if (!mayRead(userId)) continue
         const asked = askedOf(userId, change, def, ledgerOf)
         const fromMessage = !asked && fromMessageOf(userId, change, def, ledgerOf, originIdsOf)
+        // Their own AI completed what their reply finished (the inbox's reply check, owner FB #19).
+        const repliedDone = !asked && !fromMessage && repliedDoneOf(userId, change, final)
         // Never the actor — except their own AI handing them what someone else asked, or what it
         // made them from a message that came in (they did not do that).
-        if (userId === change.entry.actorId && !((asked || fromMessage) && change.entry.actorKind === 'ai')) continue
-        const kind = asked ? 'asked' : fromMessage ? 'from_message' : noticeKind(userId, change, final)
-        const base = fromMessage
+        if (userId === change.entry.actorId && !((asked || fromMessage || repliedDone) && change.entry.actorKind === 'ai')) continue
+        // A meeting's minutes arrived (minutes.md): once per meeting and member, whoever's calendar found it.
+        const arrived = !asked && !fromMessage && !repliedDone && minutesArrivedOf(change)
+        const kind = asked ? 'asked' : fromMessage ? 'from_message' : repliedDone ? 'replied_done' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
+        const base = arrived
+          ? {
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+            actorKind: change.entry.actorKind, dedupeKey: `minutes_arrived:${change.entry.recordId}`, createdAt: now, readAt: null,
+          }
+          : fromMessage
           ? {
             recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
             actorKind: change.entry.actorKind, dedupeKey: `from_message:${change.entry.recordId}`, createdAt: now, readAt: null,

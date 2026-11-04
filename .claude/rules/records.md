@@ -319,6 +319,9 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
   the company's own holidays skipped: `business-days.ts` `addBusinessDays`; the engine dep
   `companyDay` = the company's now + `TaskSettings.companyHolidays`, composition.ts; without it the
   default zone and no company holidays). `ARG_DEFAULTS` is the core's only: a type file cannot say it.
+  Its sibling **`ACTOR_ARGS`** (`isActorArg`, same file and place): an argument the engine fills with
+  the person acting — today only `interaction` `settle`'s `settled_by` (inbox.md "Core types"); the app
+  may leave it out, a value naming anyone else → 400 `BAD_VALUE`. Core only, like `ARG_DEFAULTS`.
 - When it passes, the server clock gives it back (`WAIT_OVER.task`, `notifications.md` "The server
   clock"), its 経緯 note 「返事の見込み（11/6）を過ぎました」 (`waitOverNote`). **「あなたの番」 marks it**:
   `waitCameBack { waitedSince, overAt }` on a record in `WAIT_OVER[type].personTurn` whose newest state
@@ -847,7 +850,10 @@ owner-only one, before every role or folder rule).
   members-only; a marked record with no rows is read by nobody). `upsert` marks a new row (insert
   only), the caller adds the list with `addMembers` in the same transaction; `setPlace` ends it
   (drops the rows). Asking for a list on an existing row that is not members-only, or `addMembers`
-  on one, throws inside the caller's transaction (never quietly wider). A member removed from the company is taken off every list in the same
+  on one, throws inside the caller's transaction (never quietly wider). The service writer's
+  `transition` takes `addMembers` (a meeting's attendees the calendar added later, `minutes.md`):
+  ledger `place.members` before / after; refused (`bad-place`) on a record that is not members-only
+  or with a non-member. A member removed from the company is taken off every list in the same
   transaction as their rules (`forgetMember`, `services/companies.ts` `removeMember`), so joining
   again starts from nothing.
 - **Create** (`POST /records/item`, the AI's `records_create`): `members: string[]` (≤ 200; the
@@ -1063,9 +1069,13 @@ the one passed (human / ai / external), assignee / next actor / `notify` told (k
 only). Results `{ ok: true, record, entry }` or `{ ok: false, reason }`. Whether that actor may
 do it (the approver approving) is the calling service's rule. A type that is **not**
 service-owned (`task`) changes only along its `SERVICE_TRANSITIONS` rows, state changes only (a
-field-only change → `not-service-owned`): the server clock's 「見込みの日時が過ぎた」 moves (waiting →
+field-only or link change → `not-service-owned`; a note alone that changes nothing is allowed — the
+inbox's 「返事は済み」): the server clock's 「見込みの日時が過ぎた」 moves (waiting →
 preparing / todo, ledger action `wait_over`, actor `CLOCK_ACTOR` = kind `external`, id
-`acb:clock`; `notifications.md` "The server clock").
+`acb:clock`; `notifications.md` "The server clock"), and the inbox's reply check (todo / in_progress /
+waiting → done as the member's AI, owner FB #19, `inbox.md` "Tasks made from that message"). A
+transition whose actor is a member's AI and whose `notify` names that member tells them too (the
+writer otherwise never tells the actor).
 
 ## The state engine (4-3, `services/record-engine.ts`)
 
@@ -1485,7 +1495,9 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
 - **Words and icons** (言葉の決まり, owner 2026-11-02): one plain name and one icon per kind of
   thing, the same on every screen — `client/shared/thing-words.ts` (`thingName`: やること, 議事録を確認する,
   会議の記録, 来た連絡, 送るメールの下書き / 送る Slack の返事 / 送ったもの, 承認のお願い, 返事のお願い; a bundle or
-  a company's type by its own label, never its id; `stateWord` per type; `CALM` for waiting, empty and
+  a company's type by its own label, never its id; `stateWord` per type — every state of every core
+type has a word (来た連絡: 届いた・対応済み・確認待ち・部署の番・やることにしなかった; a task's AI の案;
+test: no raw state of a core type); `CALM` for waiting, empty and
   failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,
   `RecordIcon`, `SourceIcon`, `SeenBy`). No 「型」, category word (やりとり, まとまり) or machine name on a
   member's screen (`tests/thing-words.test.ts`). 「確かめる」 is only a task's checker's word: a

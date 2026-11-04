@@ -24,6 +24,7 @@ import type { RecordTurnAccess } from '../electron/records/api'
 import { createInboxTools } from '../electron/features/inbox/tools'
 import { createTaskWaitTools, taskWaitView } from '../electron/features/ai-turns/task-wait-tools'
 import { taskWaitOverFirstMessage } from '../shared/ai-turn-steps/task-wait-over'
+import { inboxTriageFirstMessage } from '../shared/ai-turn-steps/inbox-triage'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordDetail } from '../../shared/types/records'
 import type { InboxItemView } from '../../shared/types/inbox'
@@ -147,6 +148,14 @@ test('an incoming message (interaction) runs under inbox-triage from the task li
   }
 })
 
+// Owner FB 2026-11-04: a Slack mention's card read 「（件名なし）」. The AI names a message without a subject.
+test('a message without a subject asks the AI for a short title; a message with a subject does not', () => {
+  const none = inboxTriageFirstMessage({ id: 'interaction-aaaaaaaa', title: '（件名なし）' }, 3)
+  assert.ok(/inbox_judge の title に.*60字以内/.test(none), none)
+  const subject = inboxTriageFirstMessage({ id: 'interaction-aaaaaaaa', title: '見積のお願い' }, 3)
+  assert.ok(!subject.includes('inbox_judge の title に'), subject)
+})
+
 test('the inbox tools: the thread through A4\'s one AI route plus what the inbox knows, as outside text; a failed read says why; a read token cannot judge', async () => {
   const calls: Array<{ method: string; path: string; body?: unknown }> = []
   const item: InboxItemView = {
@@ -186,6 +195,28 @@ test('the inbox tools: the thread through A4\'s one AI route plus what the inbox
   assert.match(await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'send', reason: 'x' }), /入力が正しくありません/)
   await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' })
   assert.deepEqual(calls.at(-1), { method: 'POST', path: '/inbox/items/interaction-aaaaaaaa/judgement', body: { expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' } })
+})
+
+// Owner FB #19: the member replied from the phone / in Slack or Gmail; tasks made from the message are checked by their AI.
+test('after the member\'s own reply, a message in 「返事のあとを確かめる」 runs under reply-check with only the thread and the check: it cannot complete, cancel or archive anything else', async () => {
+  assert.equal(aiTurnStepForRecord('interaction-abcdef12', 'replied')?.step, 'reply-check')
+  assert.equal(aiTurnStepForRecord('interaction-abcdef12', 'received')?.step, 'inbox-triage')
+  const queue = aiTurnQueue({ minutes: [], tasks: [item('interaction-aaaaaaaa', 'ai', { state: 'replied' })] })
+  assert.deepEqual(queue.map(q => [q.id, q.state]), [['interaction-aaaaaaaa', 'replied']])
+  for (const name of ['inbox_read', 'inbox_reply_check']) assert.ok(aiTurnStepAllowsRecordTool('reply-check', name), name)
+  for (const name of ['task__complete', 'task__cancel', 'task__dismiss', 'records_create', 'records_get', 'records_query', 'inbox_judge', 'mail_draft_create', 'interaction__finish_reply_check']) {
+    assert.ok(!aiTurnStepAllowsRecordTool('reply-check', name), name)
+  }
+  // The tool: an act token only, posted to the inbox's reply check as given (the server holds the guard).
+  const calls: Array<{ method: string; path: string; body?: unknown }> = []
+  const access = (scope: 'read' | 'act') => ({
+    scope, async call(method: string, path: string, body?: unknown) { calls.push({ method, path, body }); return { interactionId: 'interaction-aaaaaaaa', state: 'handled', tasks: [] } }, async close() {},
+  }) as unknown as RecordTurnAccess
+  assert.ok(!(await createInboxTools(access('read')))!.specs.some(s => s.name === 'inbox_reply_check'))
+  const act = await createInboxTools(access('act'))
+  assert.match(await act!.execute('inbox_reply_check', { recordId: 'interaction-aaaaaaaa', expectedVersion: 3, tasks: [{ taskId: 'task-bbbbbbbb', outcome: 'archive' }] }), /入力が正しくありません/)
+  await act!.execute('inbox_reply_check', { recordId: 'interaction-aaaaaaaa', expectedVersion: 3, tasks: [{ taskId: 'task-bbbbbbbb', outcome: 'done' }] })
+  assert.deepEqual(calls.at(-1), { method: 'POST', path: '/inbox/items/interaction-aaaaaaaa/reply-check', body: { expectedVersion: 3, tasks: [{ taskId: 'task-bbbbbbbb', outcome: 'done' }] } })
 })
 
 test('a 返事のお願い (準備中 / 確かめ中) runs under follow-up with only its own actions: it can end only its own request, never send', () => {

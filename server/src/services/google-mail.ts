@@ -33,7 +33,7 @@ const PAGE_MAX = 50
 const PAGE_DEFAULT = 25
 const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
 const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{1,500}$/
-const METADATA_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
+const METADATA_HEADERS = ['From', 'Sender', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
 const BULK_LABELS = ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS']
 
 export interface GoogleMailDeps {
@@ -111,6 +111,12 @@ function headersOf(payload: unknown): Map<string, string> {
   return out
 }
 
+/** A References header → its message ids (`<…>`), oldest first, at most 50 (the newest). */
+export function messageIdsOf(value: string | null): string[] {
+  if (!value) return []
+  return (value.match(/<[^<>\s]{1,996}>/g) ?? []).slice(-50)
+}
+
 /** One Gmail message resource → the neutral header facts, or null when it has no usable id. */
 export function mailSummaryOf(raw: unknown): MailSummary | null {
   if (!isObj(raw)) return null
@@ -126,12 +132,14 @@ export function mailSummaryOf(raw: unknown): MailSummary | null {
     id,
     threadId,
     from: parseAddressList(h.get('from') ?? null)[0] ?? null,
+    sender: parseAddressList(h.get('sender') ?? null)[0] ?? null,
     to: parseAddressList(h.get('to') ?? null),
     cc: parseAddressList(h.get('cc') ?? null),
     subject: decodeEncodedWords(h.get('subject') ?? '').trim().normalize('NFC'),
     receivedAt: Number.isFinite(internal) && internal > 0 ? new Date(internal).toISOString() : null,
     messageIdHeader: h.get('message-id')?.trim() || null,
     inReplyTo: h.get('in-reply-to')?.trim() || null,
+    references: messageIdsOf(h.get('references') ?? null),
     bulk: h.has('list-id') || h.has('list-unsubscribe') || precedence === 'bulk' || precedence === 'list' || labels.some(l => BULK_LABELS.includes(l)),
     automated: (autoSubmitted !== '' && autoSubmitted !== 'no') || h.has('x-autoreply') || precedence === 'auto_reply',
   }
@@ -212,7 +220,7 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       const after = Math.max(0, Math.floor(query.afterMs / 1000))
       const r = await request(companyId, userId, {
         api: 'gmail', method: 'GET', path: '/gmail/v1/users/me/messages',
-        query: { q: `after:${after}`, labelIds: 'INBOX', maxResults: String(max), ...(query.pageToken ? { pageToken: query.pageToken } : {}) },
+        query: { q: `after:${after}`, labelIds: query.label === 'sent' ? 'SENT' : 'INBOX', maxResults: String(max), ...(query.pageToken ? { pageToken: query.pageToken } : {}) },
         scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.messages.list',
       })
       if (!r.ok) return { ok: false, reason: mailReadReasonOf(r) }
@@ -288,50 +296,73 @@ export const INBOX_POLL_MAX = 1000
 
 /**
  * Gmail as the inbox's source (`ports/inbox.ts` `InboxSource`, inbox.md
- * "Receiving"): the member's received messages since a time, oldest first,
- * as header facts and pointers (`gmail:<id>`, `gmail:<thread id>`) — never
- * the text. Any failure reads as `not-connected`, so the poll keeps its window.
- * At the limit, the newest are kept and `readFrom` says where they start.
+ * "Receiving"): the member's received messages since a time — and the ones they
+ * sent (their Sent label, from any device: a reply from the phone), as
+ * `outgoing` — oldest first, as header facts and pointers (`gmail:<id>`,
+ * `gmail:<thread id>`), never the text. Any failure reads as `not-connected`,
+ * so the poll keeps its window. One cap for both lists: at the limit, the newest
+ * are kept and `readFrom` says where they start (where a cut list stops, too).
  */
 export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, nowMs: () => number): InboxSource {
   const party = (a: MailAddress) => ({ address: a.email, name: a.name || null })
+  async function listAll(companyId: string, userId: string, afterMs: number, label: 'inbox' | 'sent'): Promise<{ found: MailSummary[]; cut: boolean } | null> {
+    const found: MailSummary[] = []
+    let pageToken: string | undefined
+    do {
+      const r = await reader.listMessages(companyId, userId, { afterMs, max: PAGE_MAX, label, ...(pageToken ? { pageToken } : {}) })
+      if (!r.ok) return null
+      found.push(...r.value.messages)
+      pageToken = r.value.nextPageToken ?? undefined
+    } while (pageToken && found.length < INBOX_POLL_MAX)
+    return { found: found.slice(0, INBOX_POLL_MAX), cut: found.length > INBOX_POLL_MAX || pageToken !== undefined }
+  }
+  /** The oldest time among messages listed newest first (the last one that has a time). */
+  const oldestOf = (list: MailSummary[]) => list.map(m => m.receivedAt).filter((t): t is string => t !== null).at(-1) ?? null
   return {
     async listSince(companyId, userId, since) {
       const afterMs = Date.parse(since)
-      const found: MailSummary[] = []
-      let pageToken: string | undefined
-      do {
-        const r = await reader.listMessages(companyId, userId, { afterMs, max: PAGE_MAX, ...(pageToken ? { pageToken } : {}) })
-        if (!r.ok) return 'not-connected'
-        found.push(...r.value.messages)
-        pageToken = r.value.nextPageToken ?? undefined
-      } while (pageToken && found.length < INBOX_POLL_MAX)
-      const cut = found.length > INBOX_POLL_MAX || pageToken !== undefined
-      const kept = found.slice(0, INBOX_POLL_MAX)
+      const received = await listAll(companyId, userId, afterMs, 'inbox')
+      if (!received) return 'not-connected'
+      const sent = await listAll(companyId, userId, afterMs, 'sent')
+      if (!sent) return 'not-connected'
+      // One message once (sent to oneself: it is in both; it is ours).
+      const byId = new Map<string, { m: MailSummary; outgoing: boolean }>()
+      for (const m of sent.found) byId.set(m.id, { m, outgoing: true })
+      for (const m of received.found) if (!byId.has(m.id)) byId.set(m.id, { m, outgoing: false })
+      const all = [...byId.values()].sort((a, b) => Date.parse(b.m.receivedAt ?? '') - Date.parse(a.m.receivedAt ?? '') || 0)
+      // The newest INBOX_POLL_MAX; a list cut at its own limit says where it stops too.
+      const edges: string[] = []
+      for (const l of [received, sent]) if (l.cut) edges.push(oldestOf(l.found) ?? new Date(nowMs()).toISOString())
+      const kept = all.slice(0, INBOX_POLL_MAX)
+      if (all.length > INBOX_POLL_MAX) edges.push(oldestOf(kept.map(k => k.m)) ?? new Date(nowMs()).toISOString())
+      const readFrom = edges.length > 0 ? edges.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b)) : null
       const messages = kept
         // Gmail's `after:` counts whole seconds: what came before the window is left out here.
-        .filter((m): m is MailSummary & { from: MailAddress; receivedAt: string } => m.from !== null && m.receivedAt !== null && Date.parse(m.receivedAt) >= afterMs)
+        .filter((k): k is { m: MailSummary & { from: MailAddress; receivedAt: string }; outgoing: boolean } =>
+          k.m.from !== null && k.m.receivedAt !== null && Date.parse(k.m.receivedAt) >= afterMs
+          && (readFrom === null || Date.parse(k.m.receivedAt) >= Date.parse(readFrom)))
         .reverse()
-        .map(m => ({
+        .map(({ m, outgoing }) => ({
           channel: 'email' as const,
           // No Message-ID header (rare): Gmail's own id, which differs per mailbox.
           messageId: m.messageIdHeader ?? `gmail:${m.id}`,
-          references: m.inReplyTo ? [m.inReplyTo] : [],
+          // Header facts only: References (oldest first), then In-Reply-To.
+          references: [...new Set([...(m.references ?? []), ...(m.inReplyTo ? [m.inReplyTo] : [])])],
           threadRef: `gmail:${m.threadId}`,
           sourceRef: `gmail:${m.id}`,
           occurredAt: m.receivedAt,
           subject: m.subject,
           from: party(m.from),
+          // Only to tell a connected service's notification mail (inbox.md); never kept.
+          senderAddress: m.sender?.email ?? null,
           to: m.to.map(party),
           cc: m.cc.map(party),
-          outgoing: false,
+          // The member sent it (their Sent label): their own reply, never intake.
+          outgoing,
           bulk: m.bulk,
           automated: m.automated,
         }))
-      if (!cut) return messages
-      // The oldest kept message's time (newest first: the last one listed that has a time).
-      const oldest = kept.map(m => m.receivedAt).filter((t): t is string => t !== null).at(-1) ?? new Date(nowMs()).toISOString()
-      return { messages, readFrom: oldest }
+      return readFrom === null ? messages : { messages, readFrom }
     },
     // Ready = one list call answers now: granted, 受信を読む on, the company's switches on.
     async ready(companyId, userId) {

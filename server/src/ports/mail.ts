@@ -24,6 +24,8 @@ export interface MailSummary {
   /** The provider's conversation id (opaque). */
   threadId: string
   from: MailAddress | null
+  /** The `Sender` header (who sent it on From's behalf, e.g. Google Calendar), when present. */
+  sender?: MailAddress | null
   to: MailAddress[]
   cc: MailAddress[]
   subject: string
@@ -33,6 +35,8 @@ export interface MailSummary {
   messageIdHeader: string | null
   /** The `In-Reply-To` header, null when absent. */
   inReplyTo: string | null
+  /** The `References` header's message ids (oldest first), when read. */
+  references?: string[]
   /** A mailing list / newsletter (List-Id, List-Unsubscribe, Precedence bulk/list, or the provider's promotions / social category). */
   bulk: boolean
   /** Sent by a machine (Auto-Submitted other than `no`, an auto-reply). */
@@ -64,6 +68,11 @@ export interface MailListQuery {
   pageToken?: string
   /** At most this many per page (1–50; default 25). */
   max?: number
+  /**
+   * Which of the member's own messages: `inbox` (received, the default) or `sent` (what they sent,
+   * from any device — the inbox notices their own replies: inbox.md "The member's own reply").
+   */
+  label?: 'inbox' | 'sent'
 }
 
 /**
@@ -79,7 +88,7 @@ export interface MailThread {
 }
 
 export interface MailReader {
-  /** The member's own received messages (inbox, newest first), header facts only. */
+  /** The member's own received messages (inbox, newest first; or their sent ones), header facts only. */
   listMessages(companyId: string, userId: string, query: MailListQuery): Promise<MailRead<{ messages: MailSummary[]; nextPageToken: string | null }>>
   /** One of the member's own messages with its text. */
   getMessage(companyId: string, userId: string, messageId: string): Promise<MailRead<MailMessage>>

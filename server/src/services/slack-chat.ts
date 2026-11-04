@@ -7,8 +7,11 @@
  * - `thread`: one thread (`conversations.replies`) the member can see — only
  *   while their 自分あての DM とメンションを読む (`read`) is granted and not
  *   turned off. The newest messages, each cut at a length; names through
- *   `users.info` (a few per thread). Nothing is stored; no text or name is
- *   logged (the client records the method name only).
+ *   `users.info` (a few per thread, cached a day: slack-names.ts). Slack's
+ *   markup becomes plain text (`slackPlainText`: `<@U…>` → `@name`, links →
+ *   their label, `&lt;` → `<`); the app draws it as text, never as HTML.
+ *   Nothing is stored; no text or name is logged (the client records the
+ *   method name only).
  * - `reply`: `chat.postMessage` with `thread_ts`, as the member — only while
  *   返事を送る (`reply`) is granted and not turned off. Never retried: a
  *   lost answer is `unknown`.
@@ -18,6 +21,7 @@ import type { CompanyDataSource } from '../ports/company-data'
 import type { SlackDataSource } from '../ports/slack'
 import type { SlackClient, SlackFeature, SlackResult } from './slack-client'
 import { SLACK_FEATURE_SCOPES, slackFeaturesOf } from './slack-client'
+import type { SlackNames } from './slack-names'
 
 /** At most this many of a thread's newest messages, each at most this long, names for this many senders. */
 export const SLACK_THREAD_MESSAGES_MAX = 30
@@ -29,6 +33,9 @@ export const SLACK_REPLY_MAX = 4_000
 export const SLACK_CHANNEL_RE = /^[CDG][A-Z0-9]{2,30}$/
 export const SLACK_TS_RE = /^\d{9,11}\.\d{1,6}$/
 const USER_RE = /^[UW][A-Z0-9]{2,30}$/
+const MENTION_RE = /<@([UW][A-Z0-9]{2,30})(?:\|([^>]*))?>/g
+/** Slack's own word for a person not looked up (more than the per-thread lookups, or Slack would not say). */
+const UNKNOWN_PERSON = 'Slack の人'
 const TRUNCATED = '\n【長いため、ここから先は省きました】'
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -37,6 +44,36 @@ export interface SlackChatDeps {
   slack: Pick<SlackClient, 'userCall'>
   companyData: CompanyDataSource
   slackData: SlackDataSource
+  names: Pick<SlackNames, 'nameOf'>
+}
+
+/**
+ * A Slack message's text as plain text (https://api.slack.com/reference/surfaces/formatting):
+ * `<@U…>` → `@<name>` (from `names`, else its own label, else 「Slack の人」), `<#C…|general>` →
+ * `#general`, `<!channel>` / `<!here>` / `<!everyone>` → `@channel` / `@here` / `@everyone`,
+ * `<!subteam^S…|@team>` and `<!date^…|fallback>` → their label, `<url|label>` → the label,
+ * `<url>` → the url; then Slack's three escapes (`&lt;` `&gt;` `&amp;`) are undone. The result is
+ * only ever drawn as text (`*bold*` stays for the app to draw: client/shared/threads.ts).
+ */
+export function slackPlainText(text: string, names: ReadonlyMap<string, string | null>): string {
+  return text
+    .replace(/<([^<>]*)>/g, (_all, inner: string) => {
+      const bar = inner.indexOf('|')
+      const target = bar === -1 ? inner : inner.slice(0, bar)
+      const label = bar === -1 ? '' : inner.slice(bar + 1)
+      if (target.startsWith('@')) {
+        const id = target.slice(1)
+        return `@${names.get(id) ?? (label.replace(/^@/, '') || UNKNOWN_PERSON)}`
+      }
+      if (target.startsWith('#')) return `#${label || 'チャンネル'}`
+      if (target.startsWith('!')) {
+        const special = target.slice(1)
+        if (special === 'channel' || special === 'here' || special === 'everyone') return `@${special}`
+        return label || `@${special.split('^')[0]}`
+      }
+      return label || target.replace(/^mailto:/, '')
+    })
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 }
 
 export const isSlackThreadRef = (r: ChatThreadRef) => SLACK_CHANNEL_RE.test(r.channelId) && SLACK_TS_RE.test(r.threadTs)
@@ -89,17 +126,18 @@ export function createSlackChat(deps: SlackChatDeps): ChatReader & ChatSender {
         .filter(isObj)
         .filter(m => typeof m.ts === 'string' && SLACK_TS_RE.test(m.ts) && typeof m.text === 'string')
       const kept = raw.slice(-SLACK_THREAD_MESSAGES_MAX)
-      // Names of the senders (a few per thread; an unknown one stays null and the app says 「Slack の人」).
-      const names = new Map<string, string | null>()
+      // Names of the senders, then of the people mentioned (a few per thread; an unknown one stays
+      // null: the app says 「Slack の人」 for a sender, the text 「@Slack の人」 for a mention).
+      const people: string[] = []
       for (const m of kept) {
         const u = typeof m.user === 'string' && USER_RE.test(m.user) ? m.user : null
-        if (!u || names.has(u) || names.size >= NAMES_MAX) continue
-        const info = await deps.slack.userCall(companyId, userId, { method: 'users.info', params: { user: u }, write: false, operation: 'users.info', scope: 'users:read' })
-        const user = info.ok && isObj(info.json.user) ? info.json.user : null
-        const profile = user && isObj(user.profile) ? user.profile : {}
-        const name = [profile.display_name, profile.real_name, user?.real_name, user?.name].find(n => typeof n === 'string' && n.trim() !== '') as string | undefined
-        names.set(u, name ? name.normalize('NFC').slice(0, 100) : null)
+        if (u && !people.includes(u)) people.push(u)
       }
+      for (const m of kept) {
+        for (const [, u] of (m.text as string).matchAll(MENTION_RE)) if (!people.includes(u)) people.push(u)
+      }
+      const names = new Map<string, string | null>()
+      for (const u of people.slice(0, NAMES_MAX)) names.set(u, await deps.names.nameOf(companyId, u, userId))
       const messages: ChatMessage[] = kept.map(m => {
         const authorId = typeof m.user === 'string' && USER_RE.test(m.user) ? m.user : null
         const seconds = Number(m.ts)
@@ -109,7 +147,7 @@ export function createSlackChat(deps: SlackChatDeps): ChatReader & ChatSender {
           authorName: authorId ? names.get(authorId) ?? null : null,
           mine: authorId !== null && authorId === me,
           at: Number.isFinite(seconds) ? new Date(Math.floor(seconds * 1000)).toISOString() : null,
-          ...cut(m.text as string, SLACK_THREAD_TEXT_MAX),
+          ...cut(slackPlainText(m.text as string, names), SLACK_THREAD_TEXT_MAX),
         }
       })
       return { ok: true, value: { ref, messages, more: raw.length > kept.length || (isObj(r.json) && r.json.has_more === true) } }

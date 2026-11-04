@@ -7,6 +7,8 @@ paths:
   - "server/src/adapters/sqlite/inbox.ts"
   - "server/src/composition/inbox.ts"
   - "shared/core/intake-settings.ts"
+  - "shared/core/notification-senders.ts"
+  - "server/tests/unit/notification-senders.test.ts"
   - "shared/types/inbox.ts"
   - "server/src/db/schema/inbox.ts"
   - "server/tests/unit/inbox.test.ts"
@@ -15,6 +17,7 @@ paths:
   - "client/electron/features/inbox/**"
   - "client/shared/ai-turn-steps/inbox-triage.ts"
   - "client/shared/ai-turn-steps/follow-up.ts"
+  - "client/shared/ai-turn-steps/reply-check.ts"
 ---
 
 # Incoming messages (来た連絡, stage 3, lane B: B2)
@@ -43,6 +46,10 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   than the interaction's owner (an owner-only interaction takes it only when its owner was the
   reporter, in To or in CC; a members-only one only when someone on its list was — for any
   message; otherwise it is routed as new: never told to someone it did not reach).
+  **The reporter's own message** (`outgoing: true`: their Sent mail, their own Slack message) joins
+  only an interaction the reporter reads (owner FB #19): another member's sent mail never moves
+  someone else's records. It is then `skipped` with nothing written — not even its id — so the copy
+  that reached the owner (their inbox, as a member sender) is still taken as before.
 - **Routing a new message** (`shared/core/intake-settings.ts` `routeIncoming`, in this order):
   spam → nothing; internal (sender is a member, or of the company's domains — the settings'
   plus the members' own, never free mail; mail only — a colleague's Slack DM or mention is what
@@ -53,8 +60,31 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   → **the department's turn** (`unclaimed`, readers of its folder — never a private folder);
   a member only in CC → nothing (`ccOnly: unsure` → 確認待ち for that CC member when they
   reported it). **CC is never told when someone is in To.** Our own sent mail is not intake.
-- The new interaction: title = subject (≤ 200, 「（件名なし）」), fields `occurred_at`, `channel`,
-  `counterpart_text`, `source_ref`, `message_id`, `thread_ref`, `from_address`, `to_addresses`,
+- **Notification mails of connected services** (owner FB #18, 2026-11-04: Gemini's meeting notes,
+  calendar invitations, Slack's mention mails and HubSpot's notices became tasks a second time).
+  The mail poll (`poll`, before `receive`; `receive` itself is unchanged) leaves out a mail whose
+  From — or Sender, where the entry says so — is a connected service's notification sender
+  (`shared/core/notification-senders.ts` `notificationServiceOf`: whole address, or `@domain` with
+  its subdomains; never a bare domain, so a person at google.com is still taken in). Header facts
+  only (the `format=metadata` read), never the body. Nothing is written (like spam: no record, not
+  `excluded`); one log line per poll with counts by service (`google_meet=1 slack=2`), nothing of a
+  message. Connected (`notifiersFor`, decided per poll):
+  - built-in, listed in one place (`BUILTIN_NOTIFICATION_SENDERS`): Google Calendar —
+    `calendar-notification@google.com` as From or Sender (an invitation comes From its organizer
+    "via Google Calendar") — while the `calendar` role's `read` resolves to `google`; Gemini / Meet —
+    `gemini-notes@`, `meetings-noreply@`, `meet-recordings-noreply@google.com` — while `meetings`
+    resolves to `google`; Slack — `notification@slack.com`, `feedback@slack.com` (not
+    `no-reply@slack.com`: sign-in and account mail) — while `chat`'s `receive` resolves to `slack`
+    **and** the member's own Slack grant reads (active, 読む on, their 受信を読む on: composition's
+    `connectorReadsFor`); without it the mail is how they hear of a mention, so it is taken in;
+  - a connector plugin's declared `notification_senders` (`plugins.md`), while the company has it
+    installed and on, its package unchanged and not stopped (`composition/inbox.ts`
+    `pluginNotifiersOf`). HubSpot's addresses belong in its (private) package's declaration.
+  A failing lookup leaves that service out: the mail is then taken in, never lost.
+- The new interaction: title = subject (≤ 200, 「（件名なし）」 `INBOX_NO_SUBJECT` until the owner's AI
+  names it: "The AI's judgement"), fields `occurred_at`, `channel`,
+  `counterpart_text` (mail: 「name <address>」; chat: the sender's name only — Slack's `senderName`,
+  `slack-connector.md` "Names" — else none, never a Slack id: the card's 「<name> から」), `source_ref`, `message_id`, `thread_ref`, `from_address`, `to_addresses`,
   `cc_addresses`, `assignee` / `next_actor` (the owner), `intake_reason`; the `counterpart` link
   when 名寄せ (`identity.md` `resolveAddress`, as the owner may see) finds exactly one person, else
   exactly one company. Created by the service writer as `INBOX_ACTOR` (`acb:inbox`, external)
@@ -63,7 +93,12 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
 - **Each message keeps its pointer** (`inbox_messages.source_ref`, B4; null for rows from before
   it): pointers only, for later reads by message.
 - **The member's own reply** (B4). Slack sends the member's own message in a DM or a thread as an
-  `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). A Slack DM is seldom
+  `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). Gmail (owner FB #19:
+  a reply sent from the phone, or in Gmail itself): the poll also lists the member's **Sent** label in
+  the same window (`googleMailInboxSource`: header facts only — Message-ID, In-Reply-To, References,
+  To / CC, date; never the body), each as `outgoing`; one cap for both lists (the newest
+  `INBOX_POLL_MAX`, a cut list's edge a gap like any), a message in both labels once (ours), seen
+  ones `duplicate` by Message-ID. A Slack DM is seldom
   threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
   incoming message of that DM within `DM_REPLY_WINDOW_MS` (3 days; `latestIncoming`), never
   another DM's or older, and only when the member reads it (owner-only: theirs; members-only: they
@@ -128,7 +163,13 @@ state `preparing` (the AI's turn: the reply's draft), `due` = the message's own 
 company's 目安 (`task-settings.ts` `replyTarget`: 翌営業日 / 当日中 + cutoff, holidays),
 `guideline_due` always the 目安 (the app shows 「目安：」 when they are equal), `due_note` the
 sentence it came from, `end_condition`, links `interaction`, `counterpart`, `bundle`; the
-interaction → `handled`. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
+interaction → `handled`. **`title`** (owner FB 2026-11-04: a Slack mention's card read
+「（件名なし）」): with any outcome, the message's title becomes the AI's (one line, ≤ 60,
+`INBOX_AI_TITLE_MAX`) only when it is still 「（件名なし）」 (a chat message, a mail without a subject:
+never over a subject, nor over a title the AI gave on an earlier run) and the interaction is the
+judging member's own (`personal_owner`; a department's message keeps its title). The service
+writer's `retitle` compares-and-sets the title (receipt types only; version and ledger unchanged).
+The triage prompt asks for it when the title is 「（件名なし）」; `reply` also names the 返事のお願い by it. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
 `PERSON_DECIDED`) when a person's 「やることにする」 / 「自分の担当にする」 put it back into
 `received`; `unsure` → 確認待ち. `GET /items/:recordId` (read) answers — for an interaction, or a
 返事のお願い and its interaction — the pointers (channel, `thread_ref`, `source_ref`, the message
@@ -151,6 +192,29 @@ an expense became their task, but with no notice and no due it sat unseen under 
 - **Notice**: the member's own AI making it their turn tells them (`from_message`,
   `notifications.md`), although their AI was the actor.
 
+**Tasks made from that message** (owner FB #19, 2026-11-04: a reply from the phone or in Slack / Gmail
+left its task open). When the member's own reply is seen in the thread (`continueThread`, outgoing,
+the replier being the interaction's assignee, the interaction 対応済み) and tasks made from the message
+are still theirs to do (`replyCheckTasks`: `interaction` link to it, assignee = the member, readable,
+state `todo` / `in_progress` / `waiting`):
+- with their 自動で進める on (`autoRunFor`, composition: `workSwitches` `autoRun`; absent = on) the
+  interaction goes to **「返事のあとを確かめる」** (`replied`, interaction v7, ledger `reply_seen`,
+  quiet) — their AI's turn on their PC (the `reply-check` step below), run when the app opens if it is
+  closed; else each task gets the note 「返事は済み（メールで返信済み）」 (`reply_noted`, a ledger entry
+  changing nothing) and stays the member's.
+- `GET /items/:recordId` answers `replyCheck.tasks` (id, title, state, version, `canComplete` —
+  false for 確かめてから) in that state. `POST /items/:recordId/reply-check { expectedVersion, tasks:
+  [{ taskId, outcome: done | open, note? }] }` (act token, `Idempotency-Key`): **the guard** — only an
+  interaction in `replied` whose assignee is the member (else 409 `NOT_AI_TURN`; unreadable: the
+  missing 404), only tasks `replyCheckTasks` lists (anything else — another's task, one from another
+  message — 409 `NOT_FROM_THIS_REPLY` for the whole request, nothing written), `done` only when
+  `canComplete` (409 `NEEDS_CHECK`). `done` → the task goes to 完了 through the service writer
+  (`SERVICE_TRANSITIONS.task` todo / in_progress / waiting → done; ledger `replied_done`, actor the
+  member's AI, note 「返事をしたので完了にしました」) and the member is told (notice `replied_done`,
+  `notifications.md`) with ［元に戻す］ — the generic undo of that entry (its actor id is theirs); `open`
+  → the note 「返事は済み」 (`reply_noted`). **Completed, never archived** (no cancel, no dismiss),
+  never another's task. Then the interaction → `handled` (`reply_checked`).
+
 **The thread itself** is read through A4's one AI route, `GET /api/records-ai/threads/:recordId`
 (`outbound-mail.md` "Replies": an interaction or a record linking one, read now with the member's
 own permission, a plugin step's run only with the role declared; nothing stored). The PC's
@@ -171,6 +235,16 @@ server's execution run alone picks the PC; left in `received` the run is given b
 side's text not quoted), `reply_request__finish_prep` (`links.prepared` = the draft, a short
 `prep_summary`) and `reply_request__hand_over`. The member checks and sends it from the card. It never sends. Tests: `client/tests/ai-turn-steps.test.ts`,
 `client/tests/ai-turn-claims.test.ts` (no start mark).
+
+## After the member's own reply (`reply-check`)
+
+`client/shared/ai-turn-steps/reply-check.ts`: an `interaction` in `replied` (no start mark; done in
+`handled`). Its only tools: `inbox_read` (the thread with the member's reply, and
+`item.replyCheck.tasks`) and `inbox_reply_check` (`client/electron/features/inbox/tools.ts`, act token
+only). The first message asks for `done` only when the reply itself finished the task (「X を送る」 and
+the reply sends X), `open` when work remains (「経費を承認する」 answered 「今日見ます」), open when
+unsure or the thread cannot be read. Tests: `client/tests/ai-turn-steps.test.ts` (the step, its
+tools, the tool's route).
 
 ## Following up (追いかけ, B5: `follow-up`)
 
@@ -215,6 +289,23 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   states `unsure` (確認待ち), `unclaimed` (部署の番), `excluded` (やることにしなかった, final);
   actions `set_aside` / `ask_person` (`who: [ai]` — `received` is the AI's turn), `confirm`,
   `drop`, `take_up` (the assignee). `SERVICE_TRANSITIONS` rows for the inbox's moves.
+- `interaction` v6 (additive over 5; owner FB #20, 2026-11-04: 「来た連絡で話が決着したらどうする？」 — a
+  確認待ち message could not be closed): **「済んだ」** (`settle`, `unsure` → `handled`, `who:
+  [assignee]`: never the AI, never another reader; a non-reader gets the missing record's 404) and the
+  field `settled_by`, which the engine fills with the person acting (`ACTOR_ARGS`, `records.md`; a
+  value naming anyone else → `BAD_VALUE`). It marks what the member closed, so the app's
+  今日終わったこと lists it (never what the AI judged); the thread going on (`continued`, handled →
+  received) clears it. ［元に戻す］ is the generic undo of that entry (its actor only, nothing changed
+  since); `drop` stays the app's ［取り込まない］. Only from 確認待ち: `received` is the AI's turn (it
+  judges within minutes; a person's close there would race its 返事のお願い), and 部署の番 has no
+  assignee and no screen yet. **An open 返事のお願い is not ended by it** (the engine does no
+  cascades; 「もう返した」 is that record's own action, above): the card says so and points there.
+  Tests: `inbox.test.ts` 「済んだ」 (who, the mark, undo, cleared when the thread goes on —
+  mutation-checked), `intake-core.test.ts` (6 additive over 5: `INTERACTION_V5_TEXT`).
+- `interaction` v7 (additive over 6; owner FB #19): state `replied` 「返事のあとを確かめる」 with the AI's
+  `finish_reply_check` (`who: [ai]`: what makes it 「AI の番」; the reply-check route makes the move as
+  the service) and the assignee's `check_myself` (自分で確かめる: a person's way out); `SERVICE_TRANSITIONS`
+  handled → replied → handled. Tests: `intake-core.test.ts` (7 additive over 6: `INTERACTION_V6_TEXT`).
 - `reply_request` v1 (返事のお願い): implements `request`, `prepared`, `outside_event`; states
   preparing → open → waiting_reply ↔ checking → closed / dropped. v2 (B4, additive): the
   assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here
@@ -229,23 +320,36 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
 
 ## Tests
 
-`server/tests/unit/inbox.test.ts` (owner-only and unreadable / unlisted / untold for CC, other
+`server/tests/unit/inbox.test.ts` (notification mails of connected services: each kind left out
+only under its condition — Google's only while Google serves the role, an invitation by its Sender,
+Slack's only for a member whose grant reads, a plugin's only by declaration — a person at
+google.com kept, nothing written, counts only in the log; mutation-checked; owner-only and unreadable / unlisted / untold for CC, other
 members, owner, admin; CC / several To / shared address / internal / free mail / bulk per
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; a task the AI makes from a message always has a due — the stated one kept,
+「やることにする」 wins; the AI's title only over 「（件名なし）」, only on the judging owner's own
+message, ≤ 60 (mutation-checked); a chat sender by name only; a task the AI makes from a message always has a due — the stated one kept,
 else the 目安 past public and company holidays, none made up for other creates (mutation-checked); B4: the item view is the owner's alone and a reply request answers its
 message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is
-the person's; polling: first connection, 7-day read-back, the gap shown to its member
+the person's; owner FB #19 (mutation-checked): her Sent mail found by the poll moves the 返事のお願い and
+drops its draft, another member's sent mail moves nothing (her own copy still counts), her reply makes
+the tasks from that message her AI's check listing only her own open ones, the reply check refuses
+anything else before writing and never completes a 確かめてから task, `done` completes as her AI with
+her notice and her undo, `open` notes 「返事は済み」, with 自動で進める off the note alone; polling: first connection, 7-day read-back, the gap shown to its member
 only, `not-connected` keeps the window, no role → nothing, connected once when ready (a
 throwing check holds nobody up), the overlap catches mail listed late, a source's limit is a
 gap; companies apart), `server/tests/unit/google-mail-inbox-source.test.ts` (Gmail's pages
 oldest first as pointers that `threads.ts` reads, the window's edge, failure = not-connected,
-the limit's `readFrom`), `server/tests/integration/google-inbox.test.ts` (the server clock
+the limit's `readFrom`; the Sent label as `outgoing` with References, once when in both labels, a
+failing Sent list = not-connected, one cap across both lists), `server/tests/integration/google-inbox.test.ts` (the server clock
 connects a member who allowed 受信を読む and takes only later mail, as `gmail:` pointers, no text),
+`server/tests/unit/notification-senders.test.ts` (address / `@domain` match, Sender only where
+declared, the plugin declaration's `notification_senders`, only an installed / on / unchanged /
+not-stopped connector counts), the Google integration test also delivers a Gemini note and an
+invitation via Google Calendar (left out, every read `format=metadata`, nothing stored),
 `server/tests/unit/intake-core.test.ts` (settings validation and defaults, routing order, the
 window's 7 / 8 days, the versions additive, only `reply_request` lets the AI end it), permission
 matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.test.ts`.
@@ -256,16 +360,17 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   become chat messages through `slackSignalMessage` (`composition/inbox.ts`: ids
   `<channel>:<ts>`, the thread root as reference, no text). Gmail: `googleMailInboxSource`
   (`services/google-mail.ts`, registered by `wireCoreConnectors` → `wireInboxLane`) lists the
-  INBOX label since the window (every page, at most `INBOX_POLL_MAX` per poll, oldest first;
-  `messageId` = the Message-ID header else `gmail:<id>` (differs per mailbox), `references` =
-  In-Reply-To, pointers `gmail:<id>` / `gmail:<thread id>`); the server clock (`server-clock.ts`
+  INBOX and SENT labels since the window (every page, at most `INBOX_POLL_MAX` per poll across
+  both, oldest first; `messageId` = the Message-ID header else `gmail:<id>` (differs per mailbox),
+  `references` = References + In-Reply-To, pointers `gmail:<id>` / `gmail:<thread id>`); the server clock (`server-clock.ts`
   `pollInbox`) runs `pollCompany` for each company with records on, yielding between members.
   Not yet: mail a filter files past the inbox (or archived before the next poll) is not seen;
-  Gmail's history API would catch it and drop the time edge. The References header (only
-  In-Reply-To is read), the member's Sent mail as `outgoing`. Each Gmail call of the poll is one
+  Gmail's history API would catch it and drop the time edge. A Sent mail with neither In-Reply-To
+  nor References (a new mail in the same Gmail thread) is not matched by thread. Each Gmail call of the poll is one
   AI-action-log line (`google:gmail.messages.*`), like the member's AI reading mail.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
-  another To member (moves `personal_owner`), the app's screens (A4).
+  another To member (moves `personal_owner`), the app's screens (A4) beyond the card's ［済んだ］ /
+  ［取り込まない］ (`tasks-ui.md`): 部署の番 and 「やることにしなかった一覧」 have no screen in the app yet.
 - A task's own wait (`WAIT_OVER.task` → `preparing`) runs as lane C's `task-wait-over` step
   (`ai-turns.md` "A task's wait that is over").
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no

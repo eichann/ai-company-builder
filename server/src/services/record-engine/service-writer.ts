@@ -67,6 +67,8 @@ export interface ServiceCreateInput {
   state?: string
   /** Tell nobody (signal the app only): a record made in the AI's turn waits for the AI, not a person. */
   quiet?: boolean
+  /** Also tell these members (besides the assignee and next actor): a meeting's attendees (minutes.md). */
+  notify?: readonly string[]
 }
 
 /** A state change (checked against `SERVICE_TRANSITIONS`) and/or field change of a service-owned record. */
@@ -92,6 +94,12 @@ export interface ServiceTransitionInput {
   notify?: string[]
   /** Tell nobody (signal the app only). */
   quiet?: boolean
+  /**
+   * Add these members to a members-only record's list (records.md "Members-only records": a
+   * meeting's attendees the calendar added later). Kept in the ledger as `place.members` before /
+   * after; refused (`bad-place`) on a record that is not members-only or with a non-member.
+   */
+  addMembers?: readonly string[]
 }
 
 export type ServiceWriteFailure =
@@ -156,11 +164,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     return { values }
   }
 
-  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false) {
+  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false, alsoActor = false) {
     // Every reader hears that it changed (the app refetches); quiet: that signal only, no notice.
     try { deps.recordChanged?.(companyId, change.entry.recordId) } catch { /* the app's own check catches up */ }
     if (quiet) return
-    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
+    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && (alsoActor || u !== actorId)))]
     if (to.length > 0) { try { deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
   }
 
@@ -268,7 +276,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         written = false
       }
       if (!written) return fail('exists')
-      tell(companyId, input.actor.id, [values.assignee, values.next_actor], { type: def.name, entry, fields: values }, input.quiet)
+      tell(companyId, input.actor.id, [values.assignee, values.next_actor, ...(input.notify ?? [])], { type: def.name, entry, fields: values }, input.quiet)
       return { ok: true, record: recordSummaries(records, records.byIds([id])).get(id) as RecordSummary, entry }
     },
 
@@ -277,8 +285,14 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       if (!records.settings().enabled) return fail('records-off')
       const row = RECORD_ID_RE.test(input.recordId) ? records.byIds([input.recordId])[0] : undefined
       if (!row || row.removedAt !== null) return fail('not-found')
-      // Another type (task) only along its listed state changes: the server clock's move (core-types.ts WAIT_OVER).
-      if (!SERVICE_OWNED_TYPES.includes(row.type) && (input.to === null || !Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, row.type))) return fail('not-service-owned')
+      // Another type (task) only along its listed state changes (the server clock's move, core-types.ts
+      // WAIT_OVER; the inbox's reply check) — or a note alone that changes nothing (「返事は済み」):
+      // never a field-only or link change.
+      if (!SERVICE_OWNED_TYPES.includes(row.type)) {
+        if (!Object.prototype.hasOwnProperty.call(SERVICE_TRANSITIONS, row.type)) return fail('not-service-owned')
+        const noteOnly = Object.keys(input.fields ?? {}).length === 0 && input.links === undefined && (input.note ?? '') !== ''
+        if (input.to === null && !noteOnly) return fail('not-service-owned')
+      }
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return fail('type-unknown')
       const s = records.states([row.id])[0]
@@ -315,6 +329,13 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         const after = targets.join(',') || null
         if (before !== after) changes.push({ field: `links.${name}`, before, after })
       }
+      // New members of a members-only record's list (only such a record, only members of the company).
+      const adding = input.addMembers ? [...new Set(input.addMembers)] : []
+      if (input.addMembers && (row.members === null || adding.length > MEMBERS_MAX || !adding.every(m => deps.isMember(companyId, m)))) return fail('bad-place')
+      const joined = row.members !== null ? adding.filter(m => !row.members?.includes(m)) : []
+      if (joined.length > 0) {
+        changes.push({ field: 'place.members', before: (row.members ?? []).join(','), after: [...(row.members ?? []), ...joined].join(',') })
+      }
       const replacedLinks = input.links
         ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))
         : null
@@ -332,12 +353,32 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false
         if (replacedLinks) records.replaceLinks(row.id, replacedLinks)
+        if (joined.length > 0) records.addMembers(row.id, joined, input.actor.id, at)
         records.appendLedger(entry)
         return true
       })
       if (!written) return fail('stale')
-      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet)
+      // A member's own AI acting for them, the service naming them in `notify` (the inbox's reply check,
+      // owner FB #19): they did not do it, so they are told — the notices keep only the kinds meant for it.
+      const alsoActor = input.actor.kind === 'ai' && (input.notify ?? []).includes(input.actor.id)
+      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet, alsoActor)
       return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
+    },
+
+    /**
+     * A received message's title, only while it is still `expected` (compare-and-set): the inbox's
+     * placeholder 「（件名なし）」 replaced by the owner's AI's short title (inbox.md). Only a
+     * service's receipt type (`interaction`); the version and the ledger stay (a title is no field).
+     */
+    retitle(companyId: string, recordId: string, expected: string, title: string): boolean {
+      const records = companyData.forCompany(companyId).records
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId])[0] : undefined
+      if (!row || row.removedAt !== null || !SERVICE_RECEIPT_TYPES.includes(row.type) || row.title !== expected) return false
+      const next = title.normalize('NFC').trim().slice(0, 200)
+      if (next === '') return false
+      deps.transactions.run(() => records.upsert({ ...row, title: next, updatedAt: deps.clock.now() }))
+      try { deps.recordChanged?.(companyId, row.id) } catch { /* the app's own check catches up */ }
+      return true
     },
   }
 }

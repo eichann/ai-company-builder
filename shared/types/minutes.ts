@@ -7,14 +7,18 @@ import type { MeetingIntake } from '../core/minutes'
 
 /** `POST /api/companies/:id/me/minutes/check` — what the member's own calendar showed now. */
 export interface MinutesCheckResult {
-  /** false: nothing was looked up (`reason` says why; e.g. no minutes folder chosen yet). */
+  /**
+   * false: nothing was looked up (`reason` says why). Since meetings need no folder (owner decision
+   * 2026-11-04) the server no longer answers `no-folder` / `folder-unusable`; they stay in the type
+   * for older apps.
+   */
   checked: boolean
   reason?: 'no-folder' | 'folder-unusable'
   /** Plain Japanese for the member when `checked` is false. */
   message?: string
-  /** Meet meetings in the window that the company's setting reads (default: with someone from outside). */
+  /** Meet meetings in the window that are recorded (every one except events marked private). */
   meetings: number
-  /** Meetings the setting does not read (default: only company members — never read further, design §1-2). */
+  /** Meetings not recorded: events marked private in the calendar (never read further). Named before the 2026-11-04 change. */
   internalOnly: number
   /** Meeting records made by this check (ids only). */
   created: string[]
@@ -63,7 +67,10 @@ export interface MinutesText {
   /** The documents' versions as read now (`notes:7,transcript:7`). */
   docVersion: string
   meeting: { title: string; at: string | null }
-  /** The department folder the meeting record lives in (the company's minutes folder): where its decisions go. */
+  /**
+   * The department folder the meeting record lives in, or null: a meeting seen by its attendees only
+   * (every meeting found since 2026-11-04) has none, and its decisions take its list (no folder).
+   */
   folder: string | null
   /** Company members who attended (ids and display names). */
   attendees: Array<{ memberId: string; displayName: string }>
@@ -90,7 +97,9 @@ export interface MinutesLinkBundleResult {
 
 /**
  * `GET|PUT /api/companies/:id/google/minutes-folder` (owner / admin). PUT takes
- * `{ folder?, meetings? }` (at least one).
+ * `{ folder?, meetings?, bundleQuestionDays? }` (at least one). Since 2026-11-04 meetings are seen
+ * by their attendees only: `folder` and `meetings` are still kept and answered for older admin
+ * consoles but change nothing; `bundleQuestionDays` is still used.
  */
 export interface MinutesFolderSetting {
   folder: string | null
@@ -151,4 +160,63 @@ export interface MeetingBundleQuestionState {
 export interface MinutesNoBundleResult {
   recordId: string
   version: number
+}
+
+/**
+ * Meetings for their attendees (owner decision 2026-11-04, minutes.md): one meeting's place in the
+ * task list's banner 「議事録が届きました」, as `GET /api/companies/:id/me/minutes/arrivals` answers it.
+ * Ids, titles, times, counts and the names of the members on its list only — never minutes text.
+ */
+export interface MeetingArrival {
+  recordId: string
+  title: string
+  version: number
+  /** When the meeting took place (ISO), or null. */
+  meetingAt: string | null
+  /**
+   * `arrived`: 「議事録が届きました」, nobody asked the AI yet; `asked`: the AI's turn (not started);
+   * `reading`: the AI is reading; `read`: read (`summary` may say what came of it);
+   * `skipped`: someone chose ［読まない］; `failed`: the AI could not read it.
+   */
+  status: 'arrived' | 'asked' | 'reading' | 'read' | 'skipped' | 'failed'
+  /** Members on the meeting's list (who may see it), the caller included. */
+  attendeeCount: number
+  /** Who asked the AI to read it (its reader), or who chose ［読まない］; null for none. */
+  by: { memberId: string; displayName: string } | null
+  /** The caller is that person. */
+  byYou: boolean
+  /** The meeting is one of a recurring series (「この定例は次から自動で読む」 can be set). */
+  series: boolean
+  /** The caller set this series to be read automatically. */
+  autoSeries: boolean
+}
+
+/**
+ * `GET /api/companies/:id/me/minutes/arrivals` — the caller's meetings that took place in the last
+ * `days` (`MEETING_ARRIVED_DAYS`), newest first. An arrived meeting older than that leaves this
+ * answer (the banner) and stays openable and readable from its card.
+ */
+export interface MeetingArrivals {
+  days: number
+  items: MeetingArrival[]
+}
+
+/** `POST …/me/minutes/item/:recordId/read-request { expectedVersion? }` — ［AI に読ませる］ (any attendee). */
+export interface MeetingReadRequestResult {
+  recordId: string
+  version: number
+  /** Now the AI's turn on the caller's PC (they are its assignee). */
+  state: string
+}
+
+/** `POST …/me/minutes/item/:recordId/skip { expectedVersion? }` — ［読まない］ (any attendee). */
+export interface MeetingSkipResult {
+  recordId: string
+  version: number
+}
+
+/** `PUT …/me/minutes/item/:recordId/auto-series { auto }` — 「この定例は次から自動で読む」 (the caller's own). */
+export interface MeetingAutoSeriesResult {
+  recordId: string
+  autoSeries: boolean
 }

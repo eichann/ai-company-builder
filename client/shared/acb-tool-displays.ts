@@ -90,7 +90,7 @@ const JUDGEMENT_WORDS: Record<string, string> = { reply: '返事が要る', task
 export const CORE_TYPE_LABELS: Readonly<Record<string, string>> = { task: 'タスク', interaction: 'やりとり', meeting: '会議', approval: '承認のお願い', outbound_message: '送るもの', decision: '決めたこと', reply_request: '返事のお願い', project: 'プロジェクト' }
 export const CORE_ACTION_LABELS: Readonly<Record<string, string>> = {
   task__start: '進めている印をつける', task__request_review: '終わったので見てもらう', task__send_back: '差し戻す', task__assign: '担当を替える', task__wait: '返事待ちにする', task__set_due: '期限を変える', task__complete: '完了にする', task__cancel: '中止する', task__reopen: 'やり直す', task__finish_prep: '用意ができた', task__hand_over: '先に渡す', task__take_over: '自分で進める', task__accept: '引き受ける', task__decline: '受けられない', task__set_tags: 'タグを付ける', task__set_wait_until: '見込みの日時を決める', task__set_bundle: 'まとまりに入れる', task__set_when_done: '終わったらを決める', task__set_reviewer: '確かめる人を決める', task__adopt: '足す', task__dismiss: '要らない', task__propose_again: '案に戻す',
-  interaction__handle: '対応済みにする', interaction__set_aside: 'やることにしない', interaction__ask_person: '確認待ちにする', interaction__confirm: '自分の担当にする', interaction__drop: 'やることにしない（自分で決める）', interaction__take_up: 'やることにする',
+  interaction__handle: '対応済みにする', interaction__set_aside: 'やることにしない', interaction__ask_person: '確認待ちにする', interaction__confirm: '自分の担当にする', interaction__drop: 'やることにしない（自分で決める）', interaction__take_up: 'やることにする', interaction__settle: '済んだ', interaction__finish_reply_check: '返事のあとを確かめた', interaction__check_myself: '自分で確かめる',
   meeting__start_reading: '議事録を読み始める', meeting__finish_reading: '議事録を読み終える', meeting__fail_reading: '議事録を読めなかった', meeting__retry: 'もう一度読む', meeting__skip: '読まない',
   decision__confirm: '確かめる', decision__retract: '取り消す', decision__set_exception: '例外（この件だけ）を切り替える',
   reply_request__finish_prep: '用意ができた', reply_request__hand_over: '先に渡す', reply_request__ai_close: 'AI が判断して終わりにする', reply_request__take_over: '自分で進める', reply_request__await_reply: '相手の返事待ちにする', reply_request__resume: '自分の番に戻す', reply_request__close: '終わりにする', reply_request__drop: '返事をしない', reply_request__reopen: 'やり直す', reply_request__replied_elsewhere: 'もう返した', reply_request__set_end_condition: '終わりの条件を決める', reply_request__set_due: '期限を変える', reply_request__set_wait_until: '返事の見込みを決める',
@@ -148,6 +148,8 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   [records('inbox_read')]: say('来た連絡を読みました', '来た連絡を読んでいます', '来た連絡を {n} 件読みました'),
   // The outcome only: the reason may quote the outside message.
   [records('inbox_judge')]: say('来た連絡の判断を残しました', '来た連絡の判断を残しています', '来た連絡の判断を {n} 件残しました', input => JUDGEMENT_WORDS[String(input.outcome)]),
+  // Counts only: the notes may quote the member's reply.
+  [records('inbox_reply_check')]: say('返事のあとのやることを確かめました', '返事のあとのやることを確かめています', '返事のあとのやることを {n} 回確かめました'),
   // The fixed app servers.
   mcp__acb_consultations__search_consultations: say('過去の相談を探しました', '過去の相談を探しています', '過去の相談を {n} 回探しました', input => shortText(input.query)),
   mcp__acb_consultations__read_consultation: say('過去の相談を読みました', '過去の相談を読んでいます', '過去の相談を {n} 件読みました'),

@@ -520,6 +520,7 @@ export function AppShell() {
           activeRecordId={activeRecordId}
           onOpen={id => { const item = taskList.data?.items.find(i => i.id === id); if (item) openListItem(item); else openTab(recordTabKey(id)) }}
           onConsult={consultAbout}
+          onCompleted={id => closeTabs([recordTabKey(id)])}
           askFolder={isCompanyWide ? null : (selectedDept?.folder ?? null)}
           meetingActions={minutes.available ? {
             read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },

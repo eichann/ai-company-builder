@@ -2,7 +2,7 @@
  * The inbox's pure rules (`.claude/rules/inbox.md`): the company's intake
  * settings (shared/core/intake-settings.ts), the routing of one message, the
  * connection window, and the core types the inbox writes
- * (interaction v5, reply_request v1, task v8 in shared/core/core-types.ts).
+ * (interaction v6, reply_request v1, task v8 in shared/core/core-types.ts).
  *
  * Guards: settings validate (free mail is never an internal domain, an
  * address once, a folder required) and default to the owner's decisions;
@@ -16,7 +16,7 @@ import {
 } from '../../../shared/core/intake-settings'
 import { coreTypeDefinitions, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { compareTypeDefinitions, parseTypeFile, type TypeDefinition } from '../../../shared/core/record-types'
-import { INTERACTION_V4_TEXT, REPLY_REQUEST_V1_TEXT, TASK_V7_TEXT } from '../helpers/core-types-before-inbox'
+import { INTERACTION_V4_TEXT, INTERACTION_V5_TEXT, INTERACTION_V6_TEXT, REPLY_REQUEST_V1_TEXT, TASK_V7_TEXT } from '../helpers/core-types-before-inbox'
 
 const def = (name: string) => coreTypeDefinitions().find(d => d.name === name) as TypeDefinition
 const parsed = (name: string, text: string) => {
@@ -90,13 +90,18 @@ describe('the connection window', () => {
 })
 
 describe('the core types the inbox writes', () => {
-  it('interaction 5 and task 8 only add to what was there', () => {
-    for (const [name, before] of [['interaction', INTERACTION_V4_TEXT], ['task', TASK_V7_TEXT]] as const) {
+  it('interaction 5 / 6 / 7 and task 8 only add to what was there', () => {
+    for (const [name, before] of [['interaction', INTERACTION_V4_TEXT], ['interaction', INTERACTION_V5_TEXT], ['interaction', INTERACTION_V6_TEXT], ['task', TASK_V7_TEXT]] as const) {
       const change = compareTypeDefinitions(parsed(name, before), def(name))
       expect(change.breaking).toEqual([])
       expect(change.versionProblem).toBeNull()
     }
-    expect(def('interaction').version).toBe(5)
+    expect(def('interaction').version).toBe(7)
+    // 「返事のあとを確かめる」 (owner FB #19): the AI's turn after the member's own reply, which the assignee may also end.
+    expect(def('interaction').actions.finish_reply_check).toMatchObject({ from: ['replied'], to: 'handled', who: ['ai'] })
+    expect(def('interaction').actions.check_myself).toMatchObject({ from: ['replied'], to: 'handled', who: ['assignee'] })
+    // 「済んだ」 (owner FB #20): the assignee's alone, from 確認待ち, never the AI's.
+    expect(def('interaction').actions.settle).toMatchObject({ from: ['unsure'], to: 'handled', who: ['assignee'] })
     expect(def('interaction').fields.channel.options).toContain('chat')
     expect(def('task').version).toBeGreaterThanOrEqual(8)
     expect(def('task').links.interaction.target).toBe('interaction')

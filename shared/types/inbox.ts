@@ -9,6 +9,10 @@ import type { IntakeSettings } from '../core/intake-settings'
 /** The inbox's channels: mail (the `mail` role) and chat (the `chat` role: Slack DMs and mentions). */
 export type InboxChannel = 'email' | 'chat'
 export const INBOX_CHANNELS: readonly InboxChannel[] = ['email', 'chat']
+/** A message's title while it has no subject (a chat message, a mail without one), until the owner's AI names it. */
+export const INBOX_NO_SUBJECT = '（件名なし）'
+/** The longest title the owner's AI gives a message without a subject. */
+export const INBOX_AI_TITLE_MAX = 60
 
 /** A person or address on a message. A connector that knows the member (Slack) says so. */
 export interface IncomingParty {
@@ -40,6 +44,12 @@ export interface IncomingMessage {
   /** Subject (mail) or a short title the connector made (chat); ≤ 200 kept. */
   subject?: string | null
   from: IncomingParty
+  /**
+   * Mail: the Sender header's address when it differs from From (an invitation sent "via Google
+   * Calendar" comes From its organizer). Only matched against a connected service's senders
+   * (shared/core/notification-senders.ts); never kept.
+   */
+  senderAddress?: string | null
   to: IncomingParty[]
   cc?: IncomingParty[]
   /** The reporting member sent it (their Sent folder / their own chat message). */
@@ -117,7 +127,11 @@ export interface InboxJudgementRequest {
   outcome: 'reply' | 'no_reply' | 'set_aside' | 'unsure' | 'task'
   /** One or two sentences: why (kept in the ledger's note). */
   reason: string
-  /** reply: the title of the 返事のお願い (default: the interaction's). */
+  /**
+   * A short title for the message (≤ 60 kept on the message). It becomes the message's title only
+   * when it has none (「（件名なし）」: chat, a mail without a subject) and is the owner's own
+   * record — never over a subject. reply: also the 返事のお願い's title (default: the message's).
+   */
   title?: string
   /** reply: 終わりの条件 (返事が来れば・日程が決まれば …). */
   endCondition?: string
@@ -175,4 +189,28 @@ export interface InboxItemView {
     endCondition: string | null
     triggerKind: string | null
   }
+  /**
+   * In 「返事のあとを確かめる」 (`replied`, interaction v7, owner FB #19): the member's own reply was seen
+   * and these tasks made from the message are still open — the member's own, from this message. The
+   * AI decides each (`POST …/reply-check`); `canComplete: false` = it waits for a check (確かめてから):
+   * leave it open with a note.
+   */
+  replyCheck?: { tasks: Array<{ id: string; title: string; state: string | null; version: number; canComplete: boolean }> }
+}
+
+/**
+ * The member's AI after their own reply (`POST /api/records-ai/inbox/items/:recordId/reply-check`,
+ * an act token): for each task made from this message, `done` (the reply finished it: completed,
+ * the member told, undone like any entry) or `open` (work remains: a note 「返事は済み」). Only tasks
+ * the item view lists under `replyCheck`; anything else is refused before anything is written.
+ */
+export interface InboxReplyCheckRequest {
+  expectedVersion: number
+  tasks: Array<{ taskId: string; outcome: 'done' | 'open'; note?: string }>
+}
+
+export interface InboxReplyCheckResult {
+  interactionId: string
+  state: string
+  tasks: Array<{ taskId: string; outcome: 'done' | 'open'; ok: boolean; version?: number }>
 }

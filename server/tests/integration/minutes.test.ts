@@ -4,17 +4,17 @@
  * ACB_ALLOW_FAKE_UPSTREAMS=1 + ACB_FAKE_GOOGLE_URL / ACB_FAKE_HUBSPOT_URL), with real routes,
  * services, database, key broker, Google permissions and an imported HubSpot.
  *
- * What it protects (each mutation-checked):
- * - an internal-only meeting is never read: no record, not even its Meet record is looked up;
- * - the same conference found by two members is one record, and the organizer is its assignee;
+ * What it protects (each mutation-checked; meetings for their attendees — the server clock, the
+ * list, ［AI に読ませる］ — are `meeting-attendees.test.ts`):
+ * - every Meet meeting is recorded, internal ones too (owner decision 2026-11-04);
+ * - the same conference found by two members is one record; the attendee who asks the AI to read it is its assignee;
  * - the minutes' text is in no table, log line or answer except the text route itself;
  * - the text route answers only the assignee or an attendee, and another company's record is the
  *   same 404 as a missing one;
  * - the minutes folder: owner/admin only; a private folder (or one inside it) is refused with the
  *   same words as any other wrong place, never naming it;
- * - exactly one open まとまり candidate (a deal) is linked with its 相手; two are not (a person / the AI chooses);
- * - which meetings are read is the company's setting (owner/admin): by default only those with
- *   someone from outside; `all` reads internal ones too;
+ * - no まとまり is linked at intake, also with exactly one candidate (an attendee's choice); its 相手 is;
+ * - the "which meetings" setting is still answered (owner/admin) but no longer gates recording;
  * - Google stopped (the company switch) or no permission → nothing is read; records off → 404.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -222,17 +222,7 @@ afterAll(async () => {
   for (const k of ['BROKER_KEK_FILE', 'PLUGINS_DIR', 'PUBLIC_URL', 'ACB_ALLOW_FAKE_UPSTREAMS', 'ACB_FAKE_GOOGLE_URL', 'ACB_FAKE_HUBSPOT_URL']) delete process.env[k]
 })
 
-describe('the minutes folder', () => {
-  it('without a folder nothing is read, and the answer says why', async () => {
-    at('2026-11-06T09:00:00+09:00')
-    const before = google.requests.length
-    const r = await check('mn-sato')
-    expect(r.status, r.text).toBe(200)
-    expect(r.body.data).toMatchObject({ checked: false, reason: 'no-folder', created: [] })
-    expect(r.body.data.message).toContain('置き場所')
-    expect(google.requests.length).toBe(before)
-  })
-
+describe('the minutes folder (kept for older admin consoles; meetings no longer use it)', () => {
   it('owner/admin only; a private folder or a place inside one is refused with the same words, never naming it', async () => {
     expect((await call('mn-sato', 'PUT', `${C()}/google/minutes-folder`, { folder: '営業部' })).status).toBe(403)
     // 人事部 becomes a private folder (its scope has its own repository); 営業部/極秘 is one inside 営業部.
@@ -261,38 +251,38 @@ describe('the minutes folder', () => {
 let salesId: string
 
 describe('discovery', () => {
-  it('an internal-only meeting creates nothing and its Meet record is never looked up', async () => {
+  it('every meeting is recorded, the internal one too (owner decision 2026-11-04)', async () => {
     at('2026-11-06T09:00:00+09:00')
     // The 顧客 says it is a company (名寄せ matches a company by its domain, identity.md).
     db.prepare("UPDATE record_state SET fields = json_set(fields, '$.counterpart_kind', 'company') WHERE company_id = ? AND record_id IN (SELECT id FROM records WHERE company_id = ? AND type = 'customer')").run(CO, CO)
     google.requests.length = 0
     const r = await check('mn-tanaka')
     expect(r.status, r.text).toBe(200)
-    // Tanaka's calendar on 11/05: the internal 営業定例 and (invited) the sales meeting.
-    expect(r.body.data).toMatchObject({ checked: true, internalOnly: 1, meetings: 1, existing: 0, waiting: 0 })
-    expect(r.body.data.created).toHaveLength(1)
-    salesId = r.body.data.created[0]
+    // Tanaka's calendar on 11/05: the internal 営業定例 and (invited) the sales meeting — both recorded.
+    expect(r.body.data).toMatchObject({ checked: true, internalOnly: 0, meetings: 2, existing: 0, waiting: 0 })
+    expect(r.body.data.created).toHaveLength(2)
     const rows = minutesRows()
-    expect(rows).toHaveLength(1)
-    expect(JSON.stringify(rows)).not.toContain(GOOGLE_SEED.internalConference)
-    expect(JSON.stringify(rows)).not.toContain(GOOGLE_SEED.internalNotesDoc)
-    // Only one Meet search was made (the sales meeting's); the internal meeting's code never left ACB.
-    expect(google.requests.filter(q => q.path === '/v2/conferenceRecords')).toHaveLength(1)
+    expect(rows).toHaveLength(2)
+    salesId = rows.find(row => row.title === '研修導入のご相談（株式会社サンプル）').id
+    expect(google.requests.filter(q => q.path === '/v2/conferenceRecords')).toHaveLength(2)
   })
 
-  it('the same conference found by a second member is the same record; the organizer is its assignee', async () => {
+  it('the same conference found by a second member is the same record; the attendee who asks the AI to read it is its assignee', async () => {
     const r = await check('mn-sato')
     expect(r.status, r.text).toBe(200)
-    expect(r.body.data).toMatchObject({ checked: true, internalOnly: 1, meetings: 1, existing: 1, created: [] })
-    const rows = minutesRows()
-    expect(rows).toHaveLength(1)
+    expect(r.body.data).toMatchObject({ checked: true, internalOnly: 0, meetings: 2, existing: 2, created: [] })
+    expect(minutesRows()).toHaveLength(2)
+    // Nobody's turn until an attendee asks; Sato does (his Google may open the minutes).
+    expect(minutesRows().find(row => row.id === salesId)).toMatchObject({ state: 'arrived', folder: null })
+    const asked = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/read-request`, {})
+    expect(asked.status, asked.text).toBe(200)
+    const rows = minutesRows().filter(row => row.id === salesId)
     const f = JSON.parse(rows[0].fields)
-    // Tanaka found it first; Sato organized it.
     expect(f.assignee).toBe('mn-sato')
     expect(JSON.parse(f.attendees).sort()).toEqual(['mn-sato', 'mn-tanaka'])
     expect(f.external_count).toBe(2)
     expect(f.doc_version).toBe('notes:7,transcript:7')
-    expect(rows[0]).toMatchObject({ state: 'received', folder: '営業部', title: '研修導入のご相談（株式会社サンプル）' })
+    expect(rows[0]).toMatchObject({ state: 'received', folder: null, title: '研修導入のご相談（株式会社サンプル）' })
     // The common outside time (records.md "Outside time"): when the meeting happened, apart from when ACB learned of it.
     expect(typeof f.occurred_at === 'string' && f.occurred_at.length > 0).toBe(true)
     expect(f.occurred_at).toBe(f.meeting_at)
@@ -310,9 +300,9 @@ describe('discovery', () => {
     expect(t.body.data.bundle).toBeNull()
     expect(t.body.data.candidates.map((c: Json) => c.title).sort()).toEqual(['生成AI研修 2期（株式会社サンプル）', '研修導入（株式会社サンプル）'])
     expect(t.body.data.candidates.map((c: Json) => c.typeLabel)).toEqual(['案件', '案件'])
-    // Only the assignee or an admin chooses; only a まとまり (not the 顧客, a 相手).
+    // Only the meeting's people (its list) choose — someone who was not there finds no meeting; only a まとまり (not the 顧客, a 相手).
     const deal = dealIdOf('研修導入（株式会社サンプル）')
-    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(403)
+    expect((await call('mn-yamada', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(404)
     const customerId = (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'customer'").get(CO) as Json).id as string
     const notBundle = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: customerId })
     expect([notBundle.status, notBundle.body.code]).toEqual([400, 'BAD_LINK'])
@@ -325,7 +315,7 @@ describe('discovery', () => {
     expect(t2.body.data.candidates).toEqual([])
   })
 
-  it('exactly one open deal candidate is linked (with its 相手, the customer)', async () => {
+  it('exactly one open deal candidate is not linked at intake either (an attendee\'s choice); its 相手 is', async () => {
     // The follow-up meeting is renamed so its title names one of the two deals.
     google.changeEvent(GOOGLE_SEED.followUpEvent, { summary: '研修導入（株式会社サンプル） 2回目' })
     at('2026-11-13T09:00:00+09:00')
@@ -333,8 +323,10 @@ describe('discovery', () => {
     expect(r.status, r.text).toBe(200)
     expect(r.body.data.created).toHaveLength(1)
     const id = r.body.data.created[0]
-    expect(linkOf(id, 'bundle')).toBe(dealIdOf('研修導入（株式会社サンプル）'))
+    expect(linkOf(id, 'bundle')).toBeNull()
     expect(linkOf(id, 'counterpart')).toBeTruthy()
+    const t = await textOf('mn-sato', id)
+    expect(t.body.data.candidates.map((c: Json) => c.title)).toEqual(['研修導入（株式会社サンプル）'])
   })
 })
 
@@ -345,8 +337,8 @@ describe('the text', () => {
     const d = tanaka.body.data
     expect(d.header).toContain('外から来た文')
     expect(d.footer).toBe('【議事録ここまで】')
-    // Where its decisions go: the minutes folder (a department folder, never a private one).
-    expect(d.folder).toBe('営業部')
+    // Seen by its attendees only: no folder (its decisions take its list).
+    expect(d.folder).toBeNull()
     expect(d.text.startsWith('■ 会議メモ\n会議メモ')).toBe(true)
     expect(d.text).not.toContain('\r')
     expect(d.text).not.toContain('\uFEFF')
@@ -368,8 +360,9 @@ describe('the text', () => {
   })
 
   it('refuses a member who is neither assignee nor attendee, and another company\'s record is the same 404 as a missing one', async () => {
+    // Yamada was not there: the meeting does not exist for him.
     const yamada = await textOf('mn-yamada', salesId)
-    expect([yamada.status, yamada.body.code]).toEqual([403, 'MINUTES_NOT_YOURS'])
+    expect([yamada.status, yamada.body.code]).toEqual([404, 'RECORD_NOT_FOUND'])
     expect(yamada.text).not.toContain('見積')
     // Another company's minutes record, asked for in this company's URL.
     db.prepare('INSERT INTO records (company_id, id, type, path, folder, title, summary, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)')
@@ -399,7 +392,7 @@ describe('the text', () => {
 describe('stuck reading and the switches', () => {
   it('a record 「読んでいる」 for over 30 minutes is reported as stale to its assignee', async () => {
     const token = await tokenFor('mn-sato')
-    const start = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: 2 }, token)
+    const start = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: 3 }, token)
     expect(start.status, start.text).toBe(200)
     expect((await check('mn-sato')).body.data.stale).toEqual([])
     at('2026-11-13T09:31:00+09:00')
@@ -498,29 +491,18 @@ describe('for the thank-you mail (G8)', () => {
   })
 })
 
-describe('which meetings are read (a company setting)', () => {
-  it('only owners/admins change it; the default reads only meetings with someone from outside; `all` reads internal ones too', async () => {
+describe('which meetings are read (a company setting, no longer gating)', () => {
+  it('only owners/admins change it; it is still answered, but every meeting is recorded whatever it says', async () => {
     const got = await call('mn-owner', 'GET', `${C()}/google/minutes-folder`)
     expect(got.body.data.meetings).toBe('external')
     expect((await call('mn-sato', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'all' })).status).toBe(403)
     expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'some' })).status).toBe(400)
-    // Still the default: the internal meeting is not read (not even its Meet record).
-    at('2026-11-06T09:00:00+09:00')
-    google.requests.length = 0
-    const before = await check('mn-tanaka')
-    expect(before.body.data).toMatchObject({ internalOnly: 1, created: [] })
-    expect(google.requests.filter(q => q.path === '/v2/conferenceRecords')).toHaveLength(1)
-
     const set = await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'all' })
     expect(set.status, set.text).toBe(200)
-    // Changing which meetings are read leaves the folder as it was.
     expect(set.body.data).toMatchObject({ meetings: 'all', folder: '営業部' })
-    const after = await check('mn-tanaka')
-    expect(after.status, after.text).toBe(200)
-    expect(after.body.data).toMatchObject({ internalOnly: 0, meetings: 2 })
-    expect(after.body.data.created).toHaveLength(1)
-    const internal = minutesRows().find(r => r.id === after.body.data.created[0]) as Json
-    expect(JSON.parse(internal.fields).external_count).toBe(0)
+    at('2026-11-06T09:00:00+09:00')
+    const r = await check('mn-tanaka')
+    expect(r.body.data).toMatchObject({ internalOnly: 0, meetings: 2, created: [] })
     expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'external' })).status).toBe(200)
   })
 })
@@ -531,11 +513,16 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     expect(r.status, r.text).toBe(200)
     return r.body.data as { days: number; questions: Json[] }
   }
-  const versionOf = async (id: string) => (await call('mn-owner', 'GET', `${C()}/records/item/${id}`)).body.data.record.version as number
+  const versionOf = async (id: string) => (await call('mn-sato', 'GET', `${C()}/records/item/${id}`)).body.data.record.version as number
   async function readWithoutBundle(id: string, user: string) {
     db.prepare("DELETE FROM record_links WHERE company_id = ? AND source_id = ? AND name IN ('bundle', 'counterpart')").run(CO, id)
-    const state = minutesRows().find(r => r.id === id).state
+    let state = minutesRows().find(r => r.id === id).state
     if (state === 'read') return
+    if (state === 'arrived') {
+      // ［AI に読ませる］ first: the presser becomes the assignee.
+      expect((await call(user, 'POST', `${C()}/me/minutes/item/${id}/read-request`, {})).status).toBe(200)
+      state = 'received'
+    }
     const token = await tokenFor(user)
     if (state === 'received') expect((await call(null, 'POST', `/api/records-ai/item/${id}/actions/start_reading`, { expectedVersion: await versionOf(id) }, token)).status).toBe(200)
     const read = await call(null, 'POST', `/api/records-ai/item/${id}/actions/finish_reading`, { expectedVersion: await versionOf(id), args: { summary_text: '要約' } }, token)
@@ -549,7 +536,7 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     const rows = minutesRows()
     followUpId = rows.find(r => r.title.includes('2回目')).id
     internalId = rows.find(r => JSON.parse(r.fields).external_count === 0).id
-    const internalAssignee = JSON.parse(rows.find(r => r.id === internalId).fields).assignee as string
+    const internalAssignee = 'mn-tanaka'
     await readWithoutBundle(salesId, 'mn-sato')
     await readWithoutBundle(followUpId, 'mn-sato')
     await readWithoutBundle(internalId, internalAssignee)
@@ -583,7 +570,8 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     const card = await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)
     expect(card.status, card.text).toBe(200)
     expect(card.body.data).toMatchObject({ recordId: salesId, canChoose: true, noBundle: false })
-    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.canChoose).toBe(false)
+    // Tanaka was there too (on its list): he may choose as well (design §2: the attendees choose).
+    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.canChoose).toBe(true)
     const set = await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { bundleQuestionDays: 30 })
     expect(set.status, set.text).toBe(200)
     expect(set.body.data).toMatchObject({ bundleQuestionDays: 30, folder: '営業部' })
@@ -591,7 +579,8 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
   })
 
   it('「まとまりはない」 closes the question for good: the person\'s choice in the ledger, no state change, no AI turn', async () => {
-    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})).status).toBe(403)
+    // Tanaka was not at the follow-up: it does not exist for him.
+    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, {})).status).toBe(404)
     expect((await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, { extra: 1 })).status).toBe(400)
     const before = await versionOf(followUpId)
     const r = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${followUpId}/no-bundle`, { expectedVersion: before })
@@ -624,8 +613,8 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
     db.prepare("UPDATE record_state SET state = 'lost' WHERE company_id = ? AND record_id = ?").run(CO, other)
     expect(await suggestedOf('mn-sato')).toEqual({ id: deal, title: '研修導入（株式会社サンプル）', typeLabel: '案件' })
     expect((await call('mn-sato', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toMatchObject({ id: deal })
-    // Not the assignee: nothing to choose, nothing suggested.
-    expect((await call('mn-tanaka', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).body.data.suggested).toBeNull()
+    // Someone who was not there: no meeting, nothing suggested.
+    expect((await call('mn-yamada', 'GET', `${C()}/me/minutes/item/${salesId}/bundle-question`)).status).toBe(404)
     // Suggesting changed nothing: no まとまり, still read.
     expect(linkOf(salesId, 'bundle')).toBeNull()
     expect(minutesRows().find(r => r.id === salesId).state).toBe('read')
@@ -645,6 +634,14 @@ describe('「どのまとまりの会議ですか？」 (the server decides what
 })
 
 describe('what a meeting\'s reading makes is made once (FB 29)', () => {
+  // These meetings were made before 2026-11-04 (a department's, not their attendees' only): what
+  // they make keeps their folder, and owners / admins see and merge it.
+  beforeAll(() => {
+    for (const r of minutesRows()) {
+      db.prepare("UPDATE records SET personal_owner = NULL, folder = '営業部' WHERE company_id = ? AND id = ?").run(CO, r.id)
+      db.prepare('DELETE FROM record_viewers WHERE company_id = ? AND record_id = ?').run(CO, r.id)
+    }
+  })
   const TITLE = '修正見積（150万円）を鈴木様へ送付'
   let followUpId: string
   let first: string
@@ -655,6 +652,14 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
   const tasksOf = (meetingId: string) => (db.prepare(`SELECT l.source_id FROM record_links l JOIN record_state s ON s.company_id = l.company_id AND s.record_id = l.source_id
     WHERE l.company_id = ? AND l.name = 'meeting' AND l.target_id = ? AND json_extract(s.fields, '$.task_kind') IS NULL`).all(CO, meetingId) as Json[])
     .map(r => r.source_id as string).filter(id => id.startsWith('task-'))
+
+  it('a meeting made before: its department reads it, but only its people may ask the AI or say 読まない', async () => {
+    expect((await call('mn-yamada', 'GET', `${C()}/records/item/${salesId}`)).status).toBe(200)
+    for (const button of ['read-request', 'skip']) {
+      const r = await call('mn-yamada', 'POST', `${C()}/me/minutes/item/${salesId}/${button}`, {})
+      expect([r.status, r.body.code], button).toEqual([403, 'MINUTES_NOT_YOURS'])
+    }
+  })
 
   it('a second reading reuses the task (same key, or the same title written differently); a different item is still made', async () => {
     followUpId = minutesRows().find(r => r.title.includes('2回目')).id

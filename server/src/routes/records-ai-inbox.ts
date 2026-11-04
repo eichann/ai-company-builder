@@ -8,6 +8,8 @@
  *
  *   GET  /items/:recordId              state, version, what was made for it; a 返事のお願い's purpose (a read token is enough)
  *   POST /items/:recordId/judgement    { expectedVersion, outcome, reason, … } (an act token; Idempotency-Key within a run)
+ *   POST /items/:recordId/reply-check  { expectedVersion, tasks: [{ taskId, outcome: done | open, note? }] } (an act token;
+ *                                      after the member's own reply, owner FB #19 — only their tasks from that message)
  */
 import { Hono } from 'hono'
 import { services } from '../composition'
@@ -31,6 +33,17 @@ recordsAiInboxRoute.post('/items/:recordId/judgement', aiActs, serviceBody, asyn
   return keyedWrite(c, h, 'inbox-judgement', body, async () => {
     const actor = { id: h.member.userId, ...aiActor(h) }
     const r = inbox.judge(h.member, actor, c.req.param('recordId'), body)
+    if (!r.ok) return refusal(c, r)
+    return c.json({ success: true, data: r.value }, 200)
+  })
+})
+
+recordsAiInboxRoute.post('/items/:recordId/reply-check', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
+  return keyedWrite(c, h, 'inbox-reply-check', body, async () => {
+    const actor = { id: h.member.userId, ...aiActor(h) }
+    const r = inbox.replyCheck(h.member, actor, c.req.param('recordId'), body)
     if (!r.ok) return refusal(c, r)
     return c.json({ success: true, data: r.value }, 200)
   })

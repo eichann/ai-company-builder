@@ -193,7 +193,7 @@ beforeAll(async () => {
     isMember: () => true, roleOf: () => 'member', notify: () => {},
   })
   const made = writer.create(CO, {
-    type: 'meeting', title: '商談', folder: '営業部',
+    type: 'meeting', title: '商談', folder: '営業部', state: 'received',
     fields: { assignee: 'm-sato', source_ref: JSON.stringify({ conference: GOOGLE_SEED.salesConference, event: GOOGLE_SEED.salesEvent, docs: [] }), external_count: 2 },
     links: { bundle: [bundleId] }, actor: { id: 'm-sato', kind: 'human', source: null },
   })

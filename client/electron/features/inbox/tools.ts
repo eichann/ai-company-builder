@@ -7,7 +7,7 @@
 import { z } from 'zod'
 import { THREAD_TEXT_FOOTER, THREAD_TEXT_HEADER } from '../../../../shared/core/intake-settings'
 import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../../../shared/core/instruction-like'
-import type { InboxItemView, InboxJudgementResult } from '../../../../shared/types/inbox'
+import type { InboxItemView, InboxJudgementResult, InboxReplyCheckResult } from '../../../../shared/types/inbox'
 import type { ThreadView } from '../../../../shared/types/threads'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
@@ -73,7 +73,7 @@ export async function createInboxTools(access: RecordTurnAccess, signal?: AbortS
         expectedVersion: z.number().int().min(1),
         outcome: z.enum(['reply', 'task', 'no_reply', 'set_aside', 'unsure']),
         reason: z.string().min(1).max(500).describe('判断のわけ（1〜2文）'),
-        title: z.string().max(200).optional().describe('reply: 返事のお願いの名前'),
+        title: z.string().max(200).optional().describe('件名のない連絡（「（件名なし）」）には、何の連絡かが分かる短い名前（60字以内。スレッドにない個人情報は書かない）。件名のある連絡では変わらない。reply: 返事のお願いの名前にもなる'),
         endCondition: z.string().max(2000).optional().describe('reply: 終わりの条件'),
         deadline: z.string().regex(DATE_VALUE).optional().describe('reply: 本文にある締切 YYYY-MM-DD か YYYY-MM-DDTHH:MM'),
         deadlineNote: z.string().max(200).optional().describe('reply: 締切が書いてあった文'),
@@ -85,6 +85,30 @@ export async function createInboxTools(access: RecordTurnAccess, signal?: AbortS
         const { recordId, ...body } = input
         try {
           const r = await access.call('POST', `/inbox/items/${encodeURIComponent(String(recordId))}/judgement`, body, signal) as InboxJudgementResult
+          return json(r)
+        } catch (error) { return refusal(error) ?? json({ error: '記録できませんでした。' }) }
+      },
+    })
+  }
+  if (access.scope === 'act') {
+    specs.push({
+      name: 'inbox_reply_check', readOnly: false,
+      display: recordToolDisplay('inbox_reply_check'),
+      schema: z.object({
+        recordId: z.string().regex(RECORD_ID).describe('「返事のあとを確かめる」の来た連絡（interaction）の id'),
+        expectedVersion: z.number().int().min(1),
+        tasks: z.array(z.object({
+          taskId: z.string().regex(RECORD_ID).describe('inbox_read の答えの item.replyCheck.tasks にあるタスクの id'),
+          outcome: z.enum(['done', 'open']).describe('done＝本人の返事でこのタスクが済んだ（完了にする）／open＝まだ作業が残る（「返事は済み」と書き残す）'),
+          note: z.string().max(500).optional().describe('ひとこと（返事の文は引用しない）'),
+        }).strict()).max(20),
+      }).strict(),
+      description: '本人が自分で返事をしたあと、その連絡から作ったタスクを確かめた結果を記録する。done は完了にして本人に知らせる（本人は取り消せる）、open は「返事は済み」と書き残す。item.replyCheck.tasks にあるタスクだけ。アーカイブはしない。何も送らない。\n' +
+        'After the member\'s own reply: complete the tasks from this message that the reply finished, note the others. Only the listed tasks; sends nothing.',
+      run: async input => {
+        const { recordId, ...body } = input
+        try {
+          const r = await access.call('POST', `/inbox/items/${encodeURIComponent(String(recordId))}/reply-check`, body, signal) as InboxReplyCheckResult
           return json(r)
         } catch (error) { return refusal(error) ?? json({ error: '記録できませんでした。' }) }
       },

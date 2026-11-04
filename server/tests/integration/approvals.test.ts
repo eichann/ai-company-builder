@@ -423,7 +423,7 @@ describe('similar records before a new deal (plugins.md "Similar records")', () 
   /** A sales meeting with a 相手 (as the minutes intake makes it), the member its assignee. */
   function meetingWith(counterpart: string): string {
     const made = writer.create(CO, {
-      type: 'meeting', title: '初回の打ち合わせ', folder: '営業部', fields: { assignee: 'ap-member', external_count: 1 },
+      type: 'meeting', title: '初回の打ち合わせ', folder: '営業部', state: 'received', fields: { assignee: 'ap-member', external_count: 1 },
       links: { counterpart: [counterpart] }, actor: { id: 'ap-member', kind: 'human', source: null },
     })
     expect(made.ok, JSON.stringify(made)).toBe(true)
@@ -439,6 +439,20 @@ describe('similar records before a new deal (plugins.md "Similar records")', () 
     expect(r.status, JSON.stringify(r.body)).toBe(202)
     return r.body.data.approval as Json
   }
+
+  it('from a meeting seen by its attendees only: the request lives in the deal\'s department (its approver reads it) and does not link the meeting', async () => {
+    const made = writer.create(CO, {
+      type: 'meeting', title: '出た人だけの打ち合わせ', members: ['ap-member'], state: 'received', fields: { assignee: 'ap-member', external_count: 1 },
+      links: { counterpart: [customerOf('2000000001')] }, actor: { id: 'google', kind: 'external', source: 'google' },
+    })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    const meetingId = (made as Json).record.id as string
+    const approval = await aiAsksNewDeal(meetingId, '出た人だけの会議からの新規案件')
+    const row = db.prepare('SELECT folder, personal_owner FROM records WHERE company_id = ? AND id = ?').get(CO, approval.id) as Json
+    expect(row.personal_owner).toBeNull()
+    expect(row.folder).toBeTruthy()
+    expect(db.prepare("SELECT 1 FROM record_links WHERE company_id = ? AND source_id = ? AND name = 'meeting'").get(CO, approval.id)).toBeUndefined()
+  })
 
   it('the card shows the 相手\'s deals (its record, the same domain, HubSpot\'s search by that company) — never one the viewer cannot read', async () => {
     const deal1 = recordOf('1000000001'), deal2 = recordOf('1000000002')
