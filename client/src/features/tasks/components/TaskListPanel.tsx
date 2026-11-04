@@ -37,10 +37,15 @@ interface Props {
   askFolder?: string | null
   /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
   onConsult?: (task: { id: string; title: string }) => void
+  /**
+   * A task the member completed with its ☑ here (owner FB #15): AppShell closes its tab in the middle.
+   * Not for 見てもらう or やり直す, nor a press on the card itself (the card stays to show 「完了」).
+   */
+  onCompleted?: (recordId: string) => void
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -66,16 +71,18 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now, deptKind?.name ?? kinds?.core.name), [items, events, mode, now, shownTag, deptKind, kinds])
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
-  const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => {
+  /** True when every step went through. */
+  const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>): Promise<boolean> => {
     setBusy(item.id)
     setMessage(null)
     try {
       let version = item.version
       for (const step of steps) {
         const r = await actOnTask(companyId, item.id, { ...step, expectedVersion: version })
-        if (!r.success) { setMessage(r.error); return }
+        if (!r.success) { setMessage(r.error); return false }
         version += 1
       }
+      return true
     } finally {
       setBusy(null)
       list.reload()
@@ -86,6 +93,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     const c = item.check
     if (!c) return
     if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
+    // Checked off: its tab in the middle goes too (owner FB #15); やり直す does not bring it back.
+    else if (c.action === 'complete') void run(item, [{ action: 'complete' }]).then(ok => { if (ok) onCompleted?.(item.id) })
     else void run(item, [{ action: c.action }])
   }
   // A file, folder, record or consultation dropped on a task row is linked to it (owner decision 2026-11-03).
