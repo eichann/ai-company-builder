@@ -92,6 +92,7 @@ import { createMinutesReview } from './services/minutes-review'
 import { createDecisionService } from './services/decisions'
 import { createCalendarService } from './services/calendar'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
+import { BUILTIN_CONNECTORS } from '../shared/core/builtin-connectors'
 import { createMinutesService } from './services/minutes'
 import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
@@ -234,18 +235,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
   const taskSettings = createTaskSettingsService({ ...repos, ...shared })
   // Each member's own 受信を読む / AI が自動で進める within the company's (自分の設定, tasks.md).
+  const readingConnected = (companyId: string, userId: string) => {
+    const connectors = shared.companyData.forCompany(companyId).connectors
+    const google = connectors.grant('google', userId)
+    const slack = connectors.grant('slack', userId)
+    return {
+      mail: google?.status === 'active' && googleFeaturesOf(google.scopes).includes('inbox'),
+      chat: slack?.status === 'active' && slackFeaturesOf(slack.scopes).includes('read') && !slack.featuresOff.includes('read'),
+    }
+  }
   const workSwitches = createWorkSwitches({
     ...shared,
     settingsOf: companyId => taskSettings.settingsOf(companyId),
-    readingConnected: (companyId, userId) => {
-      const connectors = shared.companyData.forCompany(companyId).connectors
-      const google = connectors.grant('google', userId)
-      const slack = connectors.grant('slack', userId)
-      return {
-        mail: google?.status === 'active' && googleFeaturesOf(google.scopes).includes('inbox'),
-        chat: slack?.status === 'active' && slackFeaturesOf(slack.scopes).includes('read') && !slack.featuresOff.includes('read'),
-      }
-    },
+    readingConnected,
     // The roles are wired below (Google block, Slack in the connectors lane); asked per request only.
     channelsOf: async companyId => {
       const [mail, chat] = await Promise.all([
@@ -623,6 +625,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roles: connectorsLane.connectorRoles,
     onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
     inboxSources: coreConnectors.inboxSources,
+    // Notification mails of connected services (inbox.md): Slack's only for a member whose grant reads.
+    connectorReadsFor: (companyId, userId, connectorId) =>
+      connectorId === BUILTIN_CONNECTORS.slack.id && readingConnected(companyId, userId).chat && readIncoming.on(companyId, userId),
+    pluginShelf,
     bridge: {
       // Lane C's list (built below; called only after construction): what the company's apps may keep now.
       listed: companyId => pluginsLane.pluginDistribution.pluginsFor(companyId),

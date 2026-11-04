@@ -319,10 +319,11 @@ Drive through the role ports (`connector-roles.md`).
 
 - **Read** (`inbox`, `gmail.readonly`, off for a company until its admin turns it on; `MailReader`): `listMessages(companyId, userId, { afterMs,
   pageToken?, max? ≤ 50 })` → `users/me/messages?q=after:<seconds>&labelIds=INBOX`, then each
-  message's `format=metadata` (From, To, Cc, Subject, Date, Message-ID, In-Reply-To, List-Id,
+  message's `format=metadata` (From, Sender, To, Cc, Subject, Date, Message-ID, In-Reply-To, List-Id,
   List-Unsubscribe, Precedence, Auto-Submitted, X-Autoreply) → `MailSummary` (addresses lower
   case, RFC 2047 subjects decoded, `bulk` = a list / newsletter or the promotions / social /
-  forums category, `automated`); `getMessage` → `format=full`, the first text/plain part (else
+  forums category, `automated`, `sender` — handed to the inbox as `senderAddress` only to tell a
+  connected service's notification mail, `inbox.md`); `getMessage` → `format=full`, the first text/plain part (else
   the HTML's text), decoded by its charset (ISO-2022-JP too), NFC, at most 20,000 characters;
   `getThread` → `users/me/threads/<id>?format=full` (the card's 元のスレッド: the newest 20, 8,000
   characters each).

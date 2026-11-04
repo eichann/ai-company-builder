@@ -35,7 +35,7 @@
  *   their reply then sends it to the AI's check and drops the nudge's draft;
  *   the AI is told why it is its turn (draft / follow_up / check_reply).
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { initDatabase } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
@@ -60,6 +60,7 @@ import { defaultTaskSettings, replyTarget } from '../../../shared/core/task-sett
 import { coreTypeDefinitions } from '../../../shared/core/core-types'
 import type { IncomingMessage } from '../../../shared/types/inbox'
 import type { ConnectorRole } from '../../../shared/core/connector-roles'
+import type { ConnectedNotifier } from '../../../shared/core/notification-senders'
 
 const TS = '2026-11-02T00:00:00.000Z'
 const ROLES: Record<string, string> = { 'u-owner': 'owner', 'u-admin': 'admin' }
@@ -84,6 +85,11 @@ let engine: RecordEngine
 let serviceWriter: ReturnType<typeof createServiceRecordWriter>
 /** The company's own days off (task settings), for the reply 目安. */
 let companyHolidays: string[] = []
+let roles: ReturnType<typeof createConnectorRoles>
+/** Members whose own Slack grant reads (the composition's `connectorReadsFor`). */
+let slackReads = new Set<string>()
+/** What installed connector plugins declare (the composition's `pluginNotifiers`). */
+let pluginNotifiers: ConnectedNotifier[] = []
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -140,6 +146,8 @@ function settings(body: Record<string, unknown>, co = 'a') {
 beforeEach(() => {
   n = 0
   companyHolidays = []
+  slackReads = new Set()
+  pluginNotifiers = []
   told = []
   mailbox = {}
   ready = new Set()
@@ -161,7 +169,7 @@ beforeEach(() => {
   serviceWriter = writer
   const identities = createIdentityService({ companyData: source, transactions: sqliteTransactions(conn), clock, ids })
   const choices = new Map<string, string | null>()
-  const roles = createConnectorRoles({
+  roles = createConnectorRoles({
     choices: { choice: (co, role) => choices.get(`${co}:${role}`) ?? null, setChoice: (co, role, c) => { choices.set(`${co}:${role}`, c) } },
     clock,
   })
@@ -173,6 +181,8 @@ beforeEach(() => {
     memberAddresses: () => MEMBERS.map(u => ({ userId: u, email: EMAILS[u] })),
     taskSettings: () => defaultTaskSettings(),
     roles: { resolve: (co, role: ConnectorRole, op) => roles.resolve(co, role, op ?? null) },
+    connectorReadsFor: (_co, userId, connectorId) => connectorId === 'slack' && slackReads.has(userId),
+    pluginNotifiers: async () => pluginNotifiers,
   })
   engine = createRecordEngine({
     companyData: source, transactions: sqliteTransactions(conn), clock, ids,
@@ -980,5 +990,78 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
     await clock(true).runOnce()
     expect(stateOf(rr).state).toBe('preparing')
     expect(ok(inbox.item(m('u-alice'), rr)).request).toMatchObject({ purpose: 'follow_up', waitUntil: '2026-11-05T09:00' })
+  })
+})
+
+describe('notification mails of connected services (owner FB #18)', () => {
+  const MEET = { address: 'gemini-notes@google.com', name: 'Gemini' }
+  const CALENDAR = { address: 'calendar-notification@google.com', name: 'Google カレンダー' }
+  const SLACK = { address: 'notification@slack.com', name: 'ACME（Slack 経由）' }
+  const HUBSPOT = { address: 'noreply@notifications.hubspot.com', name: 'HubSpot' }
+  /** An invitation "via Google Calendar": From its organizer, Sender the calendar. */
+  const invitation = () => mail({ from: { address: 'tanaka@client.example', name: '田中' }, senderAddress: 'calendar-notification@google.com' })
+  const google = () => roles.register({
+    id: 'google', usable: async () => true,
+    servings: [{ role: 'calendar', operations: ['read'], capabilities: [] }, { role: 'meetings', operations: ['read'], capabilities: [] }],
+  })
+  const slack = () => roles.register({ id: 'slack', usable: async () => true, servings: [{ role: 'chat', operations: ['receive', 'reply'], capabilities: [] }] })
+
+  async function pollWith(...messages: IncomingMessage[]) {
+    if (!handle().inbox.connection('u-alice', 'email')) inbox.connect('a', 'u-alice', 'email')
+    // Each poll an hour on, its mail since the last one.
+    nowMs += 60 * 60_000
+    mailbox['u-alice'] = messages.map(x => ({ ...x, occurredAt: new Date(nowMs - 30 * 60_000).toISOString() }))
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'info').mockImplementation((line: string) => { logged.push(line) })
+    try { await inbox.poll('a', 'u-alice') } finally { spy.mockRestore() }
+    return { titles: handle().records.byIds(interactions().map(r => r.id)).map(r => r.title).sort(), logged }
+  }
+
+  it('Google\'s meeting notes and calendar mails (an invitation by its Sender too) are left out while Google serves those roles; nothing is written, counts only are logged', async () => {
+    google()
+    const person = mail({ from: { address: 'sundar@google.com', name: 'A person at Google' }, subject: 'ご相談' })
+    const { titles, logged } = await pollWith(mail({ from: MEET, subject: 'メモ: 定例' }), mail({ from: CALENDAR, subject: '招待: 定例' }), { ...invitation(), subject: '招待: 打ち合わせ' }, person)
+    // A person at google.com is a person: still taken in.
+    expect(titles).toEqual(['ご相談'])
+    expect(handle().inbox.messagesOf(interactions()[0].id)).toHaveLength(1)
+    expect(logged).toEqual(['[inbox] notification mails of connected services left out: google_meet=1 google_calendar=2'])
+    // Counts only: no subject, address or id in the log.
+    expect(logged.join('')).not.toMatch(/定例|打ち合わせ|tanaka|gemini|@/)
+  })
+
+  it('without Google as the connector they are taken in as before', async () => {
+    const { titles, logged } = await pollWith(mail({ from: MEET, subject: 'メモ: 定例' }), { ...invitation(), subject: '招待: 打ち合わせ' })
+    expect(titles).toEqual(['メモ: 定例', '招待: 打ち合わせ'])
+    expect(logged).toEqual([])
+  })
+
+  it('Slack\'s notification mails are left out only for a member whose own Slack grant reads', async () => {
+    slack()
+    // Alice has no reading grant: the mail is how she hears of it — taken in.
+    let r = await pollWith(mail({ from: SLACK, subject: '新しいメンション' }))
+    expect(r.titles).toEqual(['新しいメンション'])
+    slackReads.add('u-alice')
+    r = await pollWith(mail({ from: SLACK, subject: 'もう一つのメンション' }))
+    expect(r.titles).toEqual(['新しいメンション'])
+    expect(r.logged).toEqual(['[inbox] notification mails of connected services left out: slack=1'])
+  })
+
+  it('a Slack grant does not count while Slack is not the company\'s chat connector', async () => {
+    slackReads.add('u-alice')
+    expect((await pollWith(mail({ from: SLACK, subject: '新しいメンション' }))).titles).toEqual(['新しいメンション'])
+  })
+
+  it('a connector plugin\'s declared senders are left out (domain entries cover subdomains), only by declaration', async () => {
+    let r = await pollWith(mail({ from: HUBSPOT, subject: 'タスクの期限' }))
+    expect(r.titles).toEqual(['タスクの期限'])
+    pluginNotifiers = [{ service: 'plugin:hubspot', from: ['@hubspot.com'], sender: [] }]
+    r = await pollWith(mail({ from: HUBSPOT, subject: '取引が更新されました' }), mail({ from: { address: 'sales@nothubspot.com' }, subject: '別の会社' }))
+    expect(r.titles).toEqual(['タスクの期限', '別の会社'])
+    expect(r.logged).toEqual(['[inbox] notification mails of connected services left out: plugin:hubspot=1'])
+  })
+
+  it('a chat message is never matched, and receive() alone (Slack\'s events, our replies) is unchanged', async () => {
+    google()
+    expect(inbox.receive('a', 'u-alice', mail({ from: MEET, subject: '直接' }))).toBe('created')
   })
 })
