@@ -56,3 +56,16 @@ test('a company without Slack shows no Slack button', async ({ page }) => {
   await expect(dialog.getByText('Slack', { exact: true })).toHaveCount(0)
   expectNoPageErrors(state)
 })
+
+test('today\'s calendar is read again as soon as Google is allowed, not at its 10-minute look', async ({ page }) => {
+  const state = await openPreview(page, 'connect-tools', { state: 'first', calendar: '1' })
+  const calendar = page.getByTestId('calendar')
+  await expect(calendar).toHaveText('not-connected')
+  const dialog = page.getByRole('dialog', { name: '仕事の道具をつなぐ' })
+  await dialog.getByRole('button', { name: 'Google でつなぐ' }).click()
+  await expect(dialog.getByRole('status')).toContainText('許可されなかったため使えません', { timeout: 10_000 })
+  await expect(calendar).toHaveText('B社 打ち合わせ')
+  // Mount, then the change; the screen's own repeated reads of the same permission ask no more.
+  expect((await calls(page)).filter(c => c === 'getCalendarToday')).toHaveLength(2)
+  expectNoPageErrors(state)
+})

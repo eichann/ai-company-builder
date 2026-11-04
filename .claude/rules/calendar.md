@@ -69,7 +69,8 @@ Attendee addresses and names never leave `google-calendar.ts`: the answer has a 
   the status only (`calendarErrorText`, `client/shared/calendar.ts`), never the server's text.
   Logged: the status only.
 - Renderer: `client/src/features/tasks/api.ts` `getCalendarToday(companyId, reads)` (port
-  `CalendarReads = ElectronPort<'getCalendarToday'>`), for the task list (S7b): today's meetings mixed into it (`tasks-ui.md`).
+  `CalendarReads = ElectronPort<'getCalendarToday'>`), for the task list (S7b): today's meetings mixed into it (`tasks-ui.md`); read again at once when the app sees the
+  member's Google permission change (`src/shared/lib/googlePermission.ts`).
 
 ## Tests
 
