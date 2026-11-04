@@ -28,6 +28,18 @@ test('the company setting off: nothing starts', () => {
   assert.deepEqual(nextAiTurn(input({ settings: null })), { wait: 'off' })
 })
 
+// Meetings for their attendees (minutes.md): ［AI に読ませる］ is the member's own start, so the meeting
+// they asked for runs while 「自動で進める」 is off — and nothing else does. Settings unknown still runs nothing.
+test('the setting off: a meeting the member asked to be read still starts, nothing else', () => {
+  const asked = { ...A, asked: true as const }
+  const off = { ...ON, enabled: false }
+  assert.deepEqual(nextAiTurn(input({ settings: off, queue: [asked, B] })), { run: asked })
+  assert.deepEqual(nextAiTurn(input({ settings: null, queue: [asked] })), { wait: 'off' })
+  const items = aiTurnItems({ queue: [asked, B], log: freshLog(NOW), wait: 'busy', noticeText: null, running: null, autoOff: true })
+  assert.equal(items.find(i => i.recordId === B.id)?.state, 'not-allowed')
+  assert.equal(items.find(i => i.recordId === asked.id)?.state, 'waiting')
+})
+
 test('Codex (or the API key) never starts an AI turn: the member is told it needs Claude', () => {
   assert.deepEqual(nextAiTurn(input({ agent: 'codex' })), { wait: 'needs-claude' })
   assert.deepEqual(nextAiTurn(input({ agent: 'api-key' })), { wait: 'needs-claude' })

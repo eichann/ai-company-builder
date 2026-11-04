@@ -63,6 +63,9 @@ import { startMinutesReading } from '../features/minutes/startReading'
 import { declineMeetingBundle, skipMinutes } from '../features/minutes/api'
 import { MeetingBundleBar } from '../features/minutes/components/MeetingBundleBar'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
+import { MeetingBanners } from '../features/minutes/components/MeetingBanners'
+import { useMeetingArrivals } from '../features/minutes/hooks/useMeetingArrivals'
+import { renderMeetingPanel } from './meetingCard'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices, useOpenTasksRequest } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
@@ -124,9 +127,12 @@ export function AppShell() {
   // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
   // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
   const pluginTurns = usePluginStepTurns(currentCompany?.id)
+  // 「議事録が届きました」 (meetings for their attendees): the banner on やること; what the member asked to be read runs even with 自動で進める off.
+  const meetings = useMeetingArrivals(currentCompany?.id)
+  const askedMeetings = useMemo(() => new Set(meetings.arrivals.items.filter(m => m.byYou && m.status === 'asked').map(m => m.recordId)), [meetings.arrivals])
   const aiTurns = useMemo(
-    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns }),
-    [minutes.available, minutes.notices, taskList.data, pluginTurns],
+    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns, asked: askedMeetings }),
+    [minutes.available, minutes.notices, taskList.data, pluginTurns, askedMeetings],
   )
   const { isReadOnly } = useWriteAccess()
   // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list) or a meeting's card.
@@ -403,7 +409,8 @@ export function AppShell() {
       : null
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     const readOnly = <div key={recordId}>{meetingBar}<PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
-      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null)}
+      renderMeeting={r => renderMeetingPanel(currentCompany.id, r.id, { members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
@@ -512,6 +519,10 @@ export function AppShell() {
       // No count here: the count of あなたの番 is the title bar's alone (owner 2026-11-02); a dot for what is new.
       dot: leftTab !== 'tasks' && myTurnIds.some(id => !seenTasks.seen.has(id)),
       render: () => currentCompany && rootPath ? (
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {meetings.arrivals.available && <MeetingBanners key={currentCompany.id} companyId={currentCompany.id} items={meetings.arrivals.items} aiTurns={aiTurnItems}
+          onView={m => openTab(recordTabKey(m.id))} onChanged={() => { meetings.reload(); taskList.reload() }} />}
+        <div className="flex min-h-0 flex-1">
         <TaskListPanel
           companyId={currentCompany.id}
           rootPath={rootPath}
@@ -527,6 +538,8 @@ export function AppShell() {
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
           } : undefined}
         />
+        </div>
+        </div>
       ) : null,
     },
     {

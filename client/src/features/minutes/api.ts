@@ -2,7 +2,7 @@
 // small ports, each function taking its port last (default window.electronAPI).
 // Main asks the company server with the member's session; nothing here holds minutes text.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
-import type { MeetingBundleQuestionResult, MinutesNoticesResult } from '../../../shared/minutes-app'
+import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteResult, MeetingPressResult, MinutesNoticesResult } from '../../../shared/minutes-app'
 
 /** Watching a company's received minutes: main checks with the server (start, every 10 minutes) while subscribed. */
 export type MinutesReads = ElectronPort<'watchMinutes' | 'getMinutesNotices' | 'onMinutesChanged'>
@@ -57,4 +57,60 @@ export function declineMeetingBundle(companyId: string, meetingId: string, write
 
 export function linkSuggestedBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleLinkWrites = window.electronAPI) {
   return writes.linkMinutesBundle(companyId, meetingId, bundleId)
+}
+
+// Meetings for their attendees (minutes.md "Meetings for their attendees"): the banner and the card.
+/** The member's meetings of the last days, one meeting for its card, and when they may have changed. */
+export type MeetingReads = ElectronPort<'getMeetingArrivals' | 'getMeetingCardState' | 'onMinutesChanged' | 'onRecordsChanged' | 'onNotificationsChanged'>
+/** ［AI に読ませる］［読まない］ and its 取り消す, 「次から自動で読む」: change the shared meeting (the server tells its people). */
+export type MeetingWrites = ElectronPort<'requestMeetingReading' | 'skipMeetingReading' | 'undoTaskAction' | 'setMeetingAutoSeries'>
+/** ［招待する］: shows the meeting to more members (never undone). */
+export type MeetingInviteWrites = ElectronPort<'inviteToRecord'>
+
+const NO_ARRIVALS: MeetingArrivalsResult = { available: false, items: [] }
+
+export async function getMeetingArrivals(companyId: string, reads: MeetingReads = window.electronAPI): Promise<MeetingArrivalsResult> {
+  return (await reads.getMeetingArrivals(companyId)) ?? NO_ARRIVALS
+}
+
+export async function getMeetingCardState(companyId: string, meetingId: string, reads: MeetingReads = window.electronAPI): Promise<MeetingCardStateResult> {
+  return (await reads.getMeetingCardState(companyId, meetingId)) ?? { success: false, error: '' }
+}
+
+/** The meetings may have changed: the received minutes, the push channel's records signal, or a notice. */
+export function onMeetingsMayHaveChanged(companyId: string, listener: () => void, reads: MeetingReads = window.electronAPI): () => void {
+  const mine = (change: { companyId: string }) => { if (change.companyId === companyId) listener() }
+  const stops = [reads.onMinutesChanged(mine), reads.onRecordsChanged?.(mine), reads.onNotificationsChanged(mine)]
+  return () => { for (const stop of stops) stop?.() }
+}
+
+export async function requestMeetingReading(companyId: string, meetingId: string, expectedVersion: number, writes: MeetingWrites = window.electronAPI): Promise<MeetingPressResult> {
+  return (await writes.requestMeetingReading(companyId, meetingId, expectedVersion)) ?? { success: false, error: 'できませんでした。' }
+}
+
+export async function skipMeetingReading(companyId: string, meetingId: string, expectedVersion: number, writes: MeetingWrites = window.electronAPI): Promise<MeetingPressResult> {
+  return (await writes.skipMeetingReading(companyId, meetingId, expectedVersion)) ?? { success: false, error: 'できませんでした。' }
+}
+
+/** 取り消す right after ［読まない］: the generic undo of that one entry (the server refuses when something changed since). */
+export async function undoMeetingSkip(companyId: string, meetingId: string, version: number, writes: MeetingWrites = window.electronAPI): Promise<string | null> {
+  const r = await writes.undoTaskAction(companyId, meetingId, version, version)
+  return r?.success ? null : (r?.error ?? 'できませんでした。')
+}
+
+export async function setMeetingAutoSeries(companyId: string, meetingId: string, auto: boolean, writes: MeetingWrites = window.electronAPI): Promise<string | null> {
+  const r = await writes.setMeetingAutoSeries(companyId, meetingId, auto)
+  return r?.success ? null : (r?.error ?? 'できませんでした。')
+}
+
+export async function inviteToMeeting(companyId: string, meetingId: string, memberIds: string[], expectedVersion: number, writes: MeetingInviteWrites = window.electronAPI): Promise<MeetingInviteResult> {
+  return (await writes.inviteToRecord(companyId, meetingId, memberIds, expectedVersion)) ?? { success: false, error: 'できませんでした。' }
+}
+
+/** 見られる人 of the 案件 a meeting is about to be linked to (said before the link). */
+export type MeetingLinkReads = ElectronPort<'getViewers'>
+
+export async function bundleViewers(companyId: string, bundleId: string, reads: MeetingLinkReads = window.electronAPI) {
+  const r = await reads.getViewers(companyId, { records: [bundleId] }).catch(() => undefined)
+  return r?.success ? r.answer.records[bundleId] ?? null : null
 }

@@ -98,9 +98,10 @@ export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): bool
 /**
  * The runner's queue: every record waiting for the member's AI whose kind has a step — received
  * minutes from main's check (`listedBy: 'minutes'`), the rest from the task list's 「AI の番」
- * (`turn: 'ai'`).
+ * (`turn: 'ai'`). `asked`: meetings the member asked to be read themselves (they run while
+ * 「自動で進める」 is off too).
  */
-export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[] }): AiTurnCandidate[] {
+export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly QueuedPluginStep[]; asked?: ReadonlySet<string> }): AiTurnCandidate[] {
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
   // lane C ▼
@@ -110,7 +111,7 @@ export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: r
   for (const n of input.minutes) {
     if (aiTurnStepForRecord(n.id, 'received')?.listedBy !== 'minutes' || byPlugin.has(n.id) || seen.has(n.id)) continue
     seen.add(n.id)
-    queue.push({ id: n.id, title: n.title, version: n.version, meetingAt: n.meetingAt, state: 'received' })
+    queue.push({ id: n.id, title: n.title, version: n.version, meetingAt: n.meetingAt, state: 'received', ...(input.asked?.has(n.id) ? { asked: true as const } : {}) })
   }
   for (const r of input.tasks) {
     const step = r.turn === 'ai' ? aiTurnStepForRecord(r.id, r.state) : null

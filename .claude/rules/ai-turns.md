@@ -173,7 +173,9 @@ The execution state lives on the server; the AI still runs only here.
 
 ## The rules (`aiTurns.ts`, per member and company in localStorage `aiTurns:<company>:<user>`)
 
-Checked in this order: setting off → nothing; nothing waiting → nothing; agent without
+Checked in this order: setting off → nothing (except a meeting the member asked to be read
+themselves: the queue's `asked`, from ［AI に読ませる］ or their own 「次から自動で読む」 series, `minutes.md`
+"In the app" — the press is the start; the others' rows still say the setting is off, `autoOff`); nothing waiting → nothing; agent without
 `recordActions` → told 「…Claude Code が必要です」 (Codex never starts one); not signed in → told;
 stopped after N failures → told, with 「もう一度自動で進める」; Claude's usage limit → paused
 until the full window resets (the chat's rate-limit snapshot, `rateLimitsOf('claude-code')`;

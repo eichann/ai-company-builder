@@ -24,9 +24,11 @@ interface Props {
   busy: boolean
   /** Runs `action` on record `id` at `version`; null = done, else the reason in words. */
   onAct: (id: string, action: string, version: number) => Promise<string | null>
+  /** The meeting's own card shows its summary already: only the proposals and decisions here. */
+  onMeetingCard?: boolean
 }
 
-export function MinutesReview({ companyId, review, busy, onAct }: Props) {
+export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = false }: Props) {
   const { result, reload } = useTaskProposals(companyId, review.meetingId)
   const [picking, setPicking] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,11 +47,11 @@ export function MinutesReview({ companyId, review, busy, onAct }: Props) {
   const unconfirmed = review.decisions.filter(d => d.mine && d.state === 'unconfirmed')
   return (
     <>
-      <section aria-label="要約（AI）" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13px] leading-relaxed dark:bg-zinc-800/50">
+      {!onMeetingCard && <section aria-label="要約（AI）" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13px] leading-relaxed dark:bg-zinc-800/50">
         <div className="mb-0.5 text-[11px] text-gray-500">要約（AI）</div>
         <p className="whitespace-pre-wrap">{review.summary ?? 'AI はまだ議事録を読んでいません。'}</p>
         <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-[11.5px] text-accent hover:underline">会議の記録を開く</button>
-      </section>
+      </section>}
 
       <section aria-label="AI のタスクの案">
         <div className="mb-2 flex flex-wrap items-center gap-1.5">

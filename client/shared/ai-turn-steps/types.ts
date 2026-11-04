@@ -20,6 +20,11 @@ export interface AiTurnCandidate {
   pluginStep?: `${string}__${string}`
   /** Its state when queued: picks the step when one kind of record has several (a meeting's reading, its まとまり's part). */
   state?: string | null
+  /**
+   * The member asked for it themselves (［AI に読ませる］ on a meeting, or their own 「次から自動で読む」
+   * series): it runs even while 「自動で進める」 is off — the press is the start (minutes.md).
+   */
+  asked?: true
 }
 
 /**

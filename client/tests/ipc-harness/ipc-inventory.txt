@@ -132,12 +132,18 @@ contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke minutes:arrivals
+contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
 contract.invoke minutes:check
+contract.invoke minutes:invite
 contract.invoke minutes:linkBundle
+contract.invoke minutes:meeting
 contract.invoke minutes:noBundle
 contract.invoke minutes:notices
+contract.invoke minutes:requestReading
 contract.invoke minutes:skip
+contract.invoke minutes:skipReading
 contract.invoke minutes:watch
 contract.invoke notifications:markRead
 contract.invoke notifications:setSetting
@@ -374,7 +380,9 @@ contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleRelay = getGoogleRelay: Invoke<'google:relay'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
+contract.type ElectronAPI.getMeetingArrivals = getMeetingArrivals: Invoke<'minutes:arrivals'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
+contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyDepartments = getMyDepartments: Invoke<'companySetup:myDepartments'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
@@ -414,6 +422,7 @@ contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.gitUnsharedLargeFiles = gitUnsharedLargeFiles: Invoke<'git:unsharedLargeFiles'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
+contract.type ElectronAPI.inviteToRecord = inviteToRecord: Invoke<'minutes:invite'>
 contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFile'>
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.linkRecordToRecord = linkRecordToRecord: Invoke<'tasks:linkRecord'>
@@ -465,6 +474,7 @@ contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
+contract.type ElectronAPI.requestMeetingReading = requestMeetingReading: Invoke<'minutes:requestReading'>
 contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
 contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
@@ -483,6 +493,7 @@ contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invok
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
 contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
+contract.type ElectronAPI.setMeetingAutoSeries = setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
@@ -493,6 +504,7 @@ contract.type ElectronAPI.shareTask = shareTask: Invoke<'tasks:share'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
 contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
+contract.type ElectronAPI.skipMeetingReading = skipMeetingReading: Invoke<'minutes:skipReading'>
 contract.type ElectronAPI.skipMinutes = skipMinutes: Invoke<'minutes:skip'>
 contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git:sparseGetExclusions'>
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
@@ -742,12 +754,18 @@ contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [comp
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
+contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
 contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:invite' = 'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number]; result: MeetingInviteResult }
 contract.type IpcInvokeChannels.'minutes:linkBundle' = 'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:meeting' = 'minutes:meeting': { args: [companyId: string, meetingId: string]; result: MeetingCardStateResult }
 contract.type IpcInvokeChannels.'minutes:noBundle' = 'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
+contract.type IpcInvokeChannels.'minutes:requestReading' = 'minutes:requestReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:skipReading' = 'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'notifications:markRead' = 'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
 contract.type IpcInvokeChannels.'notifications:setSetting' = 'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
@@ -1009,12 +1027,18 @@ main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
+main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:check @ features/minutes/ipc.ts (companyId)
+main.handle minutes:invite @ features/minutes/ipc.ts (companyId, recordId, memberIds, expectedVersion)
 main.handle minutes:linkBundle @ features/minutes/ipc.ts (companyId, minutesId, bundleId)
+main.handle minutes:meeting @ features/minutes/ipc.ts (companyId, meetingId)
 main.handle minutes:noBundle @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
+main.handle minutes:requestReading @ features/minutes/ipc.ts (companyId, meetingId, expectedVersion)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
+main.handle minutes:skipReading @ features/minutes/ipc.ts (companyId, meetingId, expectedVersion)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
 main.handle notifications:markRead @ features/notifications/ipc.ts (companyId, ids)
 main.handle notifications:setSetting @ features/notifications/ipc.ts (companyId, kind, on)
@@ -1245,8 +1269,12 @@ preload getGoogleStatus -> invoke google:status($0)
 preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
+preload getMeetingArrivals -> invoke minutes:arrivals($0)
+preload getMeetingArrivals : (companyId: string) => Promise<MeetingArrivalsResult>
 preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
 preload getMeetingBundleQuestion : (companyId: string, minutesId: string) => Promise<MeetingBundleQuestionResult>
+preload getMeetingCardState -> invoke minutes:meeting($0, $1)
+preload getMeetingCardState : (companyId: string, meetingId: string) => Promise<MeetingCardStateResult>
 preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyDepartments -> invoke companySetup:myDepartments($0)
@@ -1325,6 +1353,8 @@ preload gitUnsharedLargeFiles -> invoke git:unsharedLargeFiles($0)
 preload gitUnsharedLargeFiles : (repoPath: string) => Promise<{ success: boolean; files: string[]; }>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
+preload inviteToRecord -> invoke minutes:invite($0, $1, $2, $3)
+preload inviteToRecord : (companyId: string, recordId: string, memberIds: string[], expectedVersion: number) => Promise<MeetingInviteResult>
 preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
 preload linkFileToTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)
@@ -1427,6 +1457,8 @@ preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
 preload reportChatWindowStatus : (status: ChatWindowStatus) => Promise<boolean>
+preload requestMeetingReading -> invoke minutes:requestReading($0, $1, $2)
+preload requestMeetingReading : (companyId: string, meetingId: string, expectedVersion: number) => Promise<MeetingPressResult>
 preload reservedPathRefusal -> invoke privateFolders:reservedPathRefusal($0)
 preload reservedPathRefusal : (targetPath: string) => Promise<string | null>
 preload resolveOutboundMail -> invoke outboundMail:resolve($0, $1, $2)
@@ -1463,6 +1495,8 @@ preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
 preload setGoogleRelay -> invoke google:setRelay($0, $1)
 preload setGoogleRelay : (companyId: string, on: boolean) => Promise<GoogleRelayResult>
+preload setMeetingAutoSeries -> invoke minutes:autoSeries($0, $1, $2)
+preload setMeetingAutoSeries : (companyId: string, meetingId: string, auto: boolean) => Promise<MinutesActionResult>
 preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
 preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
@@ -1483,6 +1517,8 @@ preload signOut -> invoke auth:signOut()
 preload signOut : () => Promise<SimpleResult>
 preload signUp -> invoke auth:signUp($0, $1, $2)
 preload signUp : (email: string, password: string, name?: string | undefined) => Promise<AuthResult>
+preload skipMeetingReading -> invoke minutes:skipReading($0, $1, $2)
+preload skipMeetingReading : (companyId: string, meetingId: string, expectedVersion: number) => Promise<MeetingPressResult>
 preload skipMinutes -> invoke minutes:skip($0, $1)
 preload skipMinutes : (companyId: string, minutesId: string) => Promise<MinutesActionResult>
 preload sparseGetExclusions -> invoke git:sparseGetExclusions($0)
@@ -1549,4 +1585,3 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
-unmatched.preloadApiUnusedByRenderer getViewers

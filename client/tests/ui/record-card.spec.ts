@@ -156,6 +156,10 @@ test('「新しいプロジェクトにする」: the name from the meeting, its
   await expect(dialog.getByRole('checkbox')).toBeChecked()
   await expect(dialog).toContainText('この会議の宿題（3）も入れる')
   await dialog.getByRole('button', { name: '作る' }).click()
+  // A meeting is seen by its attendees only: who will see part of it is said before anything is made.
+  await expect(page.getByText('プロジェクトにつなぐと、この会議の内容の一部（次のアクションなど）がこのプロジェクトを見られる人に見えます。')).toBeVisible()
+  await expect(page.locator('#opened')).toHaveText('')
+  await page.getByRole('button', { name: 'つなぐ', exact: true }).click()
   await expect(page.locator('#opened')).toHaveText([
     'create project A社 研修導入のお打ち合わせ folder=営業部 counterpart=company-0000ff',
     'linkMeeting meeting-0000aa=project-0000nn',

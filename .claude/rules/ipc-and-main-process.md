@@ -45,7 +45,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
   (minutes:watch / check / notices / skip / linkBundle and the event `minutes:changed`:
-  received minutes checked with the session in main, `minutes.md` "The app"), `record-views`
+  received minutes checked with the session in main, `minutes.md` "The app"; minutes:arrivals /
+  meeting / requestReading / skipReading / autoSeries / invite: meetings for their attendees,
+  `features/minutes/meetings.ts`, `minutes.md` "In the app"), `record-views`
   (recordViews:search / find / findHome / card / forFile / topics: ⌘K and 探す hits, the record card, a file's
   「つながっているもの」 and the やること / 案件 of the member's consultations, read with the session;
   `records.md` "The app's views"),

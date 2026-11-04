@@ -10,6 +10,9 @@
  * reading once by pressing 「読み取る」 (design §9 q6, Anthropic terms §4-7).
  */
 
+import type { MeetingArrival } from '../../shared/types/minutes'
+import type { MinutesReviewView } from './task-card'
+
 /** One received meeting (its minutes) waiting for the member's AI (「AI の番」, state received). */
 export interface MinutesNotice {
   id: string
@@ -40,6 +43,45 @@ export type MeetingBundleQuestionResult =
 export const MINUTES_OFFLINE_TEXT = 'サーバーに接続できないため、いまは議事録を確かめられません（オフラインの可能性があります）。'
 /** The consultation's agent cannot run the minutes' actions (registry `recordActions` false: Codex). */
 export const MINUTES_NEEDS_CLAUDE_TEXT = '議事録の読み取りは Claude Code の相談でできます。'
+
+// ---------------------------------------------------------------------------
+// Meetings for their attendees (minutes.md "Meetings for their attendees", owner decision
+// 2026-11-04): the task list's 「議事録が届きました」 and the meeting card's buttons. Main reads
+// them with the session; ids, titles, times, counts and member names only — never minutes text.
+
+/** One meeting of `GET /me/minutes/arrivals`, with what its reading made (read ones only). */
+export interface MeetingArrivalView extends MeetingArrival {
+  /** 「決めたことN・やることの案N」 (decisions not retracted; tasks from it, the review task left out); null unless read. */
+  made: { decisions: number; proposals: number } | null
+}
+
+/** `minutes:arrivals`: `available` false = an older server (no banner) or records off; nothing is shown then. */
+export interface MeetingArrivalsResult {
+  available: boolean
+  items: MeetingArrivalView[]
+}
+
+/**
+ * `minutes:meeting`: one meeting for its card — its place in the reading (also when it left the
+ * 3-day banner) and, once read, its summary and decisions for the proposals' part.
+ */
+export type MeetingCardStateResult =
+  | { success: true; meeting: MeetingArrivalView; review: MinutesReviewView | null }
+  | { success: false; error: string }
+
+/** ［AI に読ませる］ / ［読まない］: the record's version after it, or why not. */
+export type MeetingPressResult =
+  | { success: true; version: number }
+  /** `noAccess`: the member's Google cannot open the minutes (403 MINUTES_NO_ACCESS) — another attendee may. */
+  | { success: false; error: string; noAccess?: true }
+
+/** ［招待する］ on a members-only record: who was newly added, or why not. */
+export type MeetingInviteResult =
+  | { success: true; added: string[] }
+  | { success: false; error: string }
+
+/** MINUTES_NO_ACCESS in the member's words: the reader rotation (design §4-3). */
+export const MEETING_NO_ACCESS_TEXT = 'あなたの Google では、この会議の議事録を開けません（Google で共有されていません）。ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます。'
 
 /** M/D of an ISO time in the member's clock ('' when unknown). */
 export function monthDay(iso: string | null): string {
@@ -142,4 +184,15 @@ export function bundleChoiceFor(
     id: ctx.id, companyId: ctx.companyId, minutesId: answer.recordId,
     meetingTitle: typeof answer.meeting?.title === 'string' && answer.meeting.title ? answer.meeting.title : '会議', candidates: candidates.slice(0, 20),
   }) ?? null
+}
+
+/**
+ * Linking a meeting to a 案件 shows part of it to that 案件's people (design §2/§5): said before the
+ * link, with the 案件's 見られる人 when known (`ViewersLabel` of `POST …/viewers`).
+ */
+export function meetingLinkSentence(kindName: string, viewers: { kind: string; text: string; count: number } | null): string {
+  const who = !viewers ? `この${kindName}を見られる人`
+    : viewers.kind === 'people' ? `この${kindName}を見られる${viewers.count}人`
+      : viewers.text
+  return `${kindName}につなぐと、この会議の内容の一部（次のアクションなど）が${who}に見えます。`
 }

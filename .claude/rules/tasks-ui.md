@@ -685,6 +685,11 @@ link stays possible (［＋ファイル・フォルダをつなぐ］, ［〇〇
 
 ## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
 
+Since 2026-11-04 (meetings for their attendees, design §4-5) a one-line banner per meeting of the
+last 3 days sits above the list again — 「議事録が届きました」 / 「AI が読んでいます…」 / 「読み終わりました」 —
+from the server's arrivals, with ［AI に読ませる］［読まない］: `minutes.md` "In the app". The rows below
+are unchanged.
+
 - No banner: a received meeting is a row of 「AI の番」 (the server's `ai-turn`), showing the automatic
   runner's state in words and its reason (「AI が進めています」「AI では始められません：…」…), with
   「もう一度」 / 「人に渡す」 when stopped and, while the AI has not started it, 「自分で読み取る」 (a

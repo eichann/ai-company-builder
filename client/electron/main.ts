@@ -56,6 +56,7 @@ import { registerWorkSwitchesIpc } from './features/work-switches/ipc'
 import { registerViewersIpc } from './features/viewers/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createMeetingsApi } from './features/minutes/meetings'
 import { createAiTurnClaims } from './features/ai-turns/claims'
 import { createRunRegistry } from './records/runs'
 import { registerAiTurnsIpc } from './features/ai-turns/ipc'
@@ -257,7 +258,11 @@ const minutes = createMinutesChecker({
   watchSignals: companyId => agentControl.watchSignals(companyId),
 })
 lifecycle.beforeQuit(() => minutes.stop())
-registerMinutesIpc(ipc, minutes)
+registerMinutesIpc(ipc, minutes, createMeetingsApi({
+  baseUrl: getServerApiUrl, cookies: session.cookies,
+  // ［AI に読ませる］ accepted: the runner's queue (received minutes) is read again at once.
+  onReadRequested: companyId => minutes.recordsSignal(companyId),
+}))
 // The title bar's 「あなたの番」 and bell (features/notifications): read with the session here; a Mac
 // notification only for an approval request, a new item in あなたの番 or a fresh notice the server marks (E-27).
 const notices = createNotificationsWatcher({

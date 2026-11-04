@@ -186,7 +186,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
       const text = wait ? aiTurnNoticeText(wait, { log, settings: settings.current?.value ?? null }) : null
       const canResume = wait === 'stopped'
       setNotice(prev => prev.text === text && prev.canResume === canResume ? prev : { text, canResume })
-      const items = aiTurnItems({ queue, log, wait, noticeText: text, running: current && { id: current.recordId, needsYou: current.needsYou } })
+      const items = aiTurnItems({ queue, log, wait, noticeText: text, running: current && { id: current.recordId, needsYou: current.needsYou }, autoOff: settings.current ? !settings.current.value.enabled : false })
       const serialized = JSON.stringify(items)
       if (serialized !== published.current) { published.current = serialized; o.onItems?.({ items, retry, handOver }) }
       if ('run' in decision) {
