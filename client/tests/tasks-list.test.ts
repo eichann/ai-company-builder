@@ -374,3 +374,50 @@ test('a task only the member sees (their AI made it for them) is in their list w
   // Nothing the list asks names a folder: a department tab cannot narrow it.
   assert.equal(asked.some(a => /folder/.test(a)), false)
 })
+
+// Owner FB #20 (interaction version 6): a 確認待ち message that is the member's gets the ☑ 「済んだ」; one
+// they closed today is in 今日終わったこと with 「元に戻す」 (the undo of that entry); one the AI judged
+// or someone else's gets nothing.
+test('a 来た連絡: ☑ 「済んだ」 on the member\'s 確認待ち; 「元に戻す」 on one they closed; nothing on the AI\'s or someone else\'s', () => {
+  const msg = (id: string, state: string, fields: Record<string, string | null>) => rec(id, state, { requested_by: null, ...fields }, { type: 'interaction' })
+  const items = classifyTasks(src({
+    myTurn: [msg('interaction-0001', 'unsure', {})],
+    aiTurn: [msg('interaction-0002', 'received', {})],
+    asked: [msg('interaction-0003', 'unsure', { assignee: 'u-tanaka' })],
+    doneToday: [msg('interaction-0004', 'handled', { settled_by: ME }), msg('interaction-0005', 'handled', { settled_by: 'u-tanaka' })],
+    typeLabels: { task: 'タスク', interaction: '来た連絡' },
+  }))
+  const check = (id: string) => items.find(i => i.id === id)?.check
+  assert.deepEqual(check('interaction-0001'), { action: 'settle' })
+  assert.equal(check('interaction-0002'), undefined)
+  assert.equal(check('interaction-0003'), undefined)
+  assert.deepEqual(check('interaction-0004'), { action: 'undo', version: 3 })
+  assert.equal(items.find(i => i.id === 'interaction-0004')?.turn, 'done')
+  assert.equal(check('interaction-0005'), undefined)
+})
+
+test('今日終わったこと asks for the 来た連絡 the member settled today (settled_by), and an older server that refuses it still lists', async () => {
+  const settled = rec('interaction-0004', 'handled', { requested_by: null, settled_by: ME }, { type: 'interaction', title: '日程のご相談' })
+  for (const status of [200, 400]) {
+    const bodies: unknown[] = []
+    const api = createTasksApi({
+      baseUrl: () => 'https://acb.test', cookies: () => ['session=abc'], log: { warn: () => {} }, now: () => Date.parse('2026-11-05T06:00:00.000Z'),
+      fetch: (async (url: string, init: RequestInit) => {
+        const path = url.replace('https://acb.test', '')
+        const body = init.body ? JSON.parse(String(init.body)) as { type?: string } : undefined
+        if (path === '/api/me') return new Response(JSON.stringify({ data: { id: ME } }), { status: 200 })
+        if (path.endsWith('/records/query')) {
+          bodies.push(body)
+          if (body?.type === 'interaction') return new Response(JSON.stringify(status === 200 ? { data: { records: [settled] } } : { error: 'Unknown field settled_by' }), { status })
+          return new Response(JSON.stringify({ data: { records: [] } }), { status: 200 })
+        }
+        if (path.endsWith('/records/my-turn') || path.endsWith('/records/ai-turn')) return new Response(JSON.stringify({ data: { records: [] } }), { status: 200 })
+        return new Response('{}', { status: 404 })
+      }) as unknown as typeof fetch,
+    })
+    const listed = await api.list('co1')
+    assert.ok(listed.success && listed.data.available)
+    assert.deepEqual(bodies.find(b => (b as { type?: string }).type === 'interaction'), { type: 'interaction', finishedSince: '2026-11-04T15:00:00.000Z', fields: { settled_by: ME }, limit: 100 })
+    assert.deepEqual(listed.data.items.map(i => [i.id, i.turn]), status === 200 ? [['interaction-0004', 'done']] : [])
+  }
+})

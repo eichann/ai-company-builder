@@ -385,11 +385,13 @@ export function createInboxService(deps: InboxDeps) {
       if (moved.ok && r.state !== 'waiting_reply') discardDrafts(companyId, handle, r.id, '相手から返事が来ました')
     }
     if (replies.length > 0) return
-    // Nothing open about it: a handled interaction is the AI's to judge again.
+    // Nothing open about it: a handled interaction is the AI's to judge again — and no longer the
+    // member's 「済んだ」 (`settled_by`, interaction 6: what 今日終わったこと lists).
     const cur = fieldsOf(handle, interaction.id)
     if (cur.state === 'handled' && typeof cur.fields.assignee === 'string') {
       logFailure('continued', deps.writer.transition(companyId, {
         recordId: interaction.id, action: INBOX_ACTIONS.continued, expectedVersion: cur.version, to: 'received', actor: INBOX_ACTOR, note: '', quiet: true,
+        ...(cur.fields.settled_by ? { fields: { settled_by: null } } : {}),
       }))
     }
   }

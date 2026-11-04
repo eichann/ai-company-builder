@@ -54,6 +54,36 @@ test('a 来た連絡 from Slack: its summary (the body stays in Slack), 「Slack
   expectNoPageErrors(state)
 })
 
+// Owner FB #20: a 確認待ち message whose talk was over could not be closed. Catches the main button,
+// the 「…」 item or 元に戻す missing, and a press at another version than the one shown.
+test('a 来た連絡 to confirm: ［済んだ］ closes it (「済んだ」, ［元に戻す］ brings it back); 「…」 ［取り込まない］', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'slack' })
+  const card = page.getByTestId('record-card')
+  await card.getByRole('button', { name: '済んだ', exact: true }).click()
+  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3')
+  await expect(card).toContainText('対応済み')
+  await expect(card.getByRole('button', { name: '済んだ', exact: true })).toHaveCount(0)
+  await card.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#opened')).toHaveText('act interaction-0000bb settle@3\nundo interaction-0000bb 4@4')
+  await expect(card).toContainText('確認待ち')
+
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await page.getByRole('menuitem', { name: /取り込まない/ }).click()
+  await expect(page.locator('#opened')).toContainText('act interaction-0000bb drop@5')
+  await expect(card).toContainText('やることにしなかった')
+  await expect(card.getByRole('button', { name: '済んだ', exact: true })).toHaveCount(0)
+  // Right after, 取り消す takes it back.
+  await card.getByRole('status').getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#opened')).toContainText('undo interaction-0000bb 6@6')
+  await expect(card).toContainText('確認待ち')
+  expectNoPageErrors(state)
+
+  // Its 返事のお願い still open: the member is told to end it there (［済んだ］ never ends another record).
+  const replies = await openPreview(page, 'record-card', { record: 'slack', replies: 'open' })
+  await expect(page.getByTestId('record-card').getByRole('note')).toContainText('［もう返した］')
+  expectNoPageErrors(replies)
+})
+
 test('a 案件: what for, who and how far, the approval request as its card, everyone\'s やること by turn, what the AI did', async ({ page }) => {
   const state = await openPreview(page, 'record-card', { record: 'bundle' })
   const card = page.getByTestId('record-card')

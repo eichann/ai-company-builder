@@ -246,6 +246,19 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   states `unsure` (確認待ち), `unclaimed` (部署の番), `excluded` (やることにしなかった, final);
   actions `set_aside` / `ask_person` (`who: [ai]` — `received` is the AI's turn), `confirm`,
   `drop`, `take_up` (the assignee). `SERVICE_TRANSITIONS` rows for the inbox's moves.
+- `interaction` v6 (additive over 5; owner FB #20, 2026-11-04: 「来た連絡で話が決着したらどうする？」 — a
+  確認待ち message could not be closed): **「済んだ」** (`settle`, `unsure` → `handled`, `who:
+  [assignee]`: never the AI, never another reader; a non-reader gets the missing record's 404) and the
+  field `settled_by`, which the engine fills with the person acting (`ACTOR_ARGS`, `records.md`; a
+  value naming anyone else → `BAD_VALUE`). It marks what the member closed, so the app's
+  今日終わったこと lists it (never what the AI judged); the thread going on (`continued`, handled →
+  received) clears it. ［元に戻す］ is the generic undo of that entry (its actor only, nothing changed
+  since); `drop` stays the app's ［取り込まない］. Only from 確認待ち: `received` is the AI's turn (it
+  judges within minutes; a person's close there would race its 返事のお願い), and 部署の番 has no
+  assignee and no screen yet. **An open 返事のお願い is not ended by it** (the engine does no
+  cascades; 「もう返した」 is that record's own action, above): the card says so and points there.
+  Tests: `inbox.test.ts` 「済んだ」 (who, the mark, undo, cleared when the thread goes on —
+  mutation-checked), `intake-core.test.ts` (6 additive over 5: `INTERACTION_V5_TEXT`).
 - `reply_request` v1 (返事のお願い): implements `request`, `prepared`, `outside_event`; states
   preparing → open → waiting_reply ↔ checking → closed / dropped. v2 (B4, additive): the
   assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here
@@ -304,7 +317,8 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   In-Reply-To is read), the member's Sent mail as `outgoing`. Each Gmail call of the poll is one
   AI-action-log line (`google:gmail.messages.*`), like the member's AI reading mail.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
-  another To member (moves `personal_owner`), the app's screens (A4).
+  another To member (moves `personal_owner`), the app's screens (A4) beyond the card's ［済んだ］ /
+  ［取り込まない］ (`tasks-ui.md`): 部署の番 and 「やることにしなかった一覧」 have no screen in the app yet.
 - A task's own wait (`WAIT_OVER.task` → `preparing`) runs as lane C's `task-wait-over` step
   (`ai-turns.md` "A task's wait that is over").
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no

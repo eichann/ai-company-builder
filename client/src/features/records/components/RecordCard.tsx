@@ -8,11 +8,11 @@ import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { undoRecordChange, unlinkRecord } from '../api'
+import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
 import { linkRows, type NotDownloadedFolderOf } from './linkRows'
-import { IncomingBody, IncomingLine, MeetingBody, MeetingLine, OpenButton } from './RecordDetails'
+import { IncomingActions, IncomingBody, IncomingLine, MeetingBody, MeetingLine, OpenButton } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
 
 interface Props {
@@ -62,6 +62,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const { result, reload } = useRecordCard(companyId, recordId, onLoaded)
   const [notice, setNotice] = useState<{ text: string; undo: { recordId: string; version: number } | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
   const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: result?.success ? result.card.record.typeLabel : '記録', onChanged: reload })
   if (result === null) {
@@ -82,6 +83,25 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     else setError(r.error)
   }
   const card = result.card
+  // A 来た連絡's ［済んだ］ / ［取り込まない］ at the version shown; 取り消す undoes that one entry.
+  const act = async (action: 'settle' | 'drop') => {
+    if (card.version === undefined) return
+    setBusy(true)
+    const r = await actOnRecord(companyId, card.record.id, action, card.version)
+    setBusy(false)
+    if (!r.success) { setError(r.error); return }
+    changed(action === 'settle' ? '済んだにしました' : 'やることにしなかった一覧に移しました', { recordId: card.record.id, version: card.version + 1 })
+  }
+  const unsettle = async () => {
+    if (card.version === undefined) return
+    setBusy(true)
+    await undo({ recordId: card.record.id, version: card.version })
+    setBusy(false)
+  }
+  const incoming = card.detail?.kind === 'incoming' && card.version !== undefined
+    ? <IncomingActions m={card.detail} busy={busy} onAct={a => void act(a)} onUndo={() => void unsettle()}
+      openReplies={card.links.filter(l => l.record?.type === 'reply_request' && !l.record.finished).length} />
+    : null
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
     ? renderBundleField({
@@ -99,13 +119,15 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       </p>
     )}
   </>
-  return <CardBody card={card} rootPath={rootPath} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  return <CardBody card={card} rootPath={rootPath} incoming={incoming} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
 
-function CardBody({ card, rootPath, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
+function CardBody({ card, rootPath, incoming, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
   drop: LinkedDrop
+  /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), beside the title. */
+  incoming: ReactNode
   notDownloadedFolderOf?: NotDownloadedFolderOf
   card: RecordCardView; rootPath: string; sections?: ReactNode; source?: ReactNode; renderApproval?: (approvalId: string) => ReactNode
   consult: ReturnType<typeof consultationLinks>; field: ReactNode; notes: ReactNode; onUnlink: (link: RemovableLink, label: string) => void
@@ -126,7 +148,7 @@ function CardBody({ card, rootPath, sections, source, renderApproval, consult, f
     body = <MeetingBody m={detail} decisions={linked.filter(r => r.thing === 'decision')} homework={linked.filter(r => r.thing === 'task')} />
   } else if (detail?.kind === 'incoming') {
     from = <IncomingLine m={detail} />
-    actions = detail.open && <OpenButton link={detail.open} />
+    actions = <>{incoming}{detail.open && <OpenButton link={detail.open} />}</>
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
     body = <BundleBody b={detail} renderApproval={renderApproval} />

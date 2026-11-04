@@ -3,7 +3,7 @@ import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle } from '../api'
+import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle, undoTaskAction } from '../api'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useCalendarToday } from '../hooks/useCalendarToday'
@@ -38,8 +38,9 @@ interface Props {
   /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
   onConsult?: (task: { id: string; title: string }) => void
   /**
-   * A task the member completed with its ☑ here (owner FB #15): AppShell closes its tab in the middle.
-   * Not for 見てもらう or やり直す, nor a press on the card itself (the card stays to show 「完了」).
+   * A task the member completed with its ☑ here (owner FB #15), or a 来た連絡 they checked as 済んだ
+   * (owner FB #20): AppShell closes its tab in the middle. Not for 見てもらう, やり直す or 元に戻す, nor a
+   * press on the card itself (the card stays to show 「完了」 / 「済んだ」).
    */
   onCompleted?: (recordId: string) => void
 }
@@ -88,13 +89,27 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
       list.reload()
     }
   }
+  const undoOne = async (item: TaskListItem, version: number) => {
+    setBusy(item.id)
+    setMessage(null)
+    try {
+      const r = await undoTaskAction(companyId, item.id, version, item.version)
+      if (!r.success) setMessage(r.error)
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+  }
   // ☑ (task v9): complete from any state but 準備中 — no made-up start; 確かめてから → 見てもらう; done → やり直す.
   const press = (item: TaskListItem) => {
     const c = item.check
     if (!c) return
     if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
-    // Checked off: its tab in the middle goes too (owner FB #15); やり直す does not bring it back.
-    else if (c.action === 'complete') void run(item, [{ action: 'complete' }]).then(ok => { if (ok) onCompleted?.(item.id) })
+    // Checked off (a task's 完了, a 来た連絡's 済んだ — owner FB #20): its tab in the middle goes too
+    // (owner FB #15); やり直す / 元に戻す do not bring it back.
+    else if (c.action === 'complete' || c.action === 'settle') void run(item, [{ action: c.action }]).then(ok => { if (ok) onCompleted?.(item.id) })
+    // A 来た連絡 closed today: 元に戻す is the undo of that 済んだ (the server refuses when something changed since).
+    else if (c.action === 'undo') void undoOne(item, c.version)
     else void run(item, [{ action: c.action }])
   }
   // A file, folder, record or consultation dropped on a task row is linked to it (owner decision 2026-11-03).

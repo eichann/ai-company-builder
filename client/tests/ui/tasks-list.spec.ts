@@ -42,6 +42,20 @@ test('by turn: sections, meetings mixed in, the far future folded, the date view
   expectNoPageErrors(state)
 })
 
+// Owner FB #20: a 来た連絡 in 確認待ち had no box, so a message already settled could not be closed.
+// Catches the box missing, a press at another version, and 元に戻す not offered in 今日終わったこと.
+test('a 来た連絡 to confirm: its ☑ is 「済んだ」, it moves to 今日終わったこと with 「元に戻す」', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  await page.getByRole('region', { name: 'あなたの番' }).getByRole('button', { name: '「日程のご相談」を済んだ' }).click()
+  await expect(page.locator('#acted')).toHaveText('interaction-0001:settle@2')
+  await expect(page.getByRole('region', { name: '今日終わったこと' })).toContainText('日程のご相談')
+  await expect(page.getByRole('region', { name: 'あなたの番' })).not.toContainText('日程のご相談')
+  await page.getByRole('region', { name: '今日終わったこと' }).getByRole('button', { name: '「日程のご相談」を元に戻す' }).click()
+  await expect(page.locator('#acted')).toHaveText('interaction-0001:settle@2,interaction-0001:undo 3@3')
+  await expect(page.getByRole('region', { name: 'あなたの番' })).toContainText('日程のご相談')
+  expectNoPageErrors(state)
+})
+
 test('accepting and finishing from the list; a row opens its card', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   await page.getByRole('region', { name: '引き受け待ち' }).getByRole('button', { name: '引き受ける' }).click()

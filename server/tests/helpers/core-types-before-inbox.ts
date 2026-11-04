@@ -138,3 +138,50 @@ actions:
 「準備中」と「確かめ中」は AI の番です。AI が返事の下書きを用意して担当に渡し、返事が来たとき・こちらが返信したときは、終わりの条件と照らして終わりにするか（「AI が判断して終わりにする」）、相手の返事待ちにするか、担当の番に戻すかを決めます。この型の中でだけ、AI が終わりにできます（やり直せます）。
 期限は、連絡に締切が書いてあればそれ、なければ会社の「返事の目安」です。目安で入れた期限は「目安」と分かるように出します。
 `
+
+/**
+ * interaction version 5 as it was before 「済んだ」 (owner FB #20): version 6 only adds the
+ * assignee's `settle` and its `settled_by` field.
+ */
+export const INTERACTION_V5_TEXT = `---
+label: やりとり
+version: 5
+implements: [outside_event, request]
+storage: server
+fields:
+  occurred_at:  { label: いつ, kind: datetime, source: server }
+  channel:      { label: 経路, kind: choice, options: [email, slack, line, phone, meeting, other, chat], option_labels: { email: メール, slack: Slack, line: LINE, phone: 電話, meeting: 会議, other: そのほか, chat: チャット }, source: server }
+  counterpart_text: { label: 相手（書いてあるまま）, kind: text, source: server }
+  source_ref:   { label: 元への目印, kind: text, source: server }
+  needs_reply:  { label: 返事が要る, kind: boolean, source: server }
+  message_id:   { label: メッセージの印, kind: text, source: server }
+  thread_ref:   { label: スレッドへの目印, kind: text, source: server }
+  from_address: { label: 送り主, kind: text, source: server }
+  to_addresses: { label: 宛先（To）, kind: text, source: server }
+  cc_addresses: { label: CC, kind: text, source: server }
+  requested_by: { label: 頼んだ人, kind: person, source: server }
+  assignee:     { label: 担当, kind: person, source: server }
+  next_actor:   { label: 次に動く人, kind: person, source: server }
+  waiting_on:   { label: 待っているもの, kind: text, source: server }
+  due:          { label: 期限, kind: date, source: server }
+  intake_reason: { label: 受け取ったわけ, kind: choice, options: [to, multiple_to, shared, cc, bulk, automated], option_labels: { to: 宛先（To）があなた, multiple_to: 宛先（To）が何人も, shared: 共有の受付アドレス, cc: CC だけ, bulk: メルマガ・一斉送信, automated: 自動で送られたもの }, source: server }
+links:
+  counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: interactions }
+  tasks:        { label: 関係するタスク, target: task, cardinality: many }
+  bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: interactions }
+states: [received, handled, unsure, unclaimed, excluded]
+initial: received
+final: [handled, excluded]
+actions:
+  handle:       { label: 対応済みにする, from: [received], to: handled, who: [anyone], note: optional }
+  set_aside:    { label: やることにしない, from: [received], to: excluded, who: [ai], note: required }
+  ask_person:   { label: 確認待ちにする, from: [received], to: unsure, who: [ai], note: required, hand_to: assignee }
+  confirm:      { label: 自分の担当にする, from: [unsure], to: received, who: [assignee], note: optional, hand_to: assignee }
+  drop:         { label: やることにしない（自分で決める）, from: [unsure], to: excluded, who: [assignee], note: optional }
+  take_up:      { label: やることにする, from: [excluded], to: received, who: [assignee], note: optional, hand_to: assignee }
+---
+# やりとり
+
+外から来たもの（メール・Slack など）の受付票。本文は持たず、要約と元への目印だけを持ちます。
+来た連絡（メール・チャット）は、宛先（To）の人の「持ち主だけ」の記録になります（CC の人には出しません）。「届いた」は AI の番で、AI が返事が要るかを判断して「返事のお願い」を作るか、「やることにしない」にします。決めきれないものは「確認待ち」で担当の人の番、共有の受付アドレスに来たものは「部署の番」で、誰かが引き受けます。
+`

@@ -2,11 +2,13 @@
 // as its body with 決めたこと and 宿題 apart, the documents to open; a 連絡's summary (ACB keeps no
 // body) with the original one click away.
 import type { ReactNode } from 'react'
-import { CalendarBlank, Microphone, NotePencil } from '@phosphor-icons/react'
+import { CalendarBlank, CheckCircle, Microphone, NotePencil } from '@phosphor-icons/react'
 import type { IncomingDetailView, MeetingDetailView, OpenLink } from '../../../../shared/record-details'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
-import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
+import { NEXT_STEP } from '../../../../shared/thing-words'
+import { MoreMenu } from '../../../shared/ui/MoreMenu'
+import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { SourceIcon, ThingIcon } from '../../../shared/ui/ThingIcon'
 import { openOutside } from '../api'
 
@@ -104,4 +106,38 @@ export function IncomingBody({ m }: { m: IncomingDetailView }) {
       <p className="whitespace-pre-wrap">{m.summary || '（要約はまだありません）'}</p>
     </section>
   )
+}
+
+/**
+ * A 来た連絡's actions (owner FB #20), where a task has its 完了: ［済んだ］ as the one main button and
+ * ［取り込まない］ in 「…」 on a 確認待ち message that is the member's; once they closed it, 「済んだ」 and
+ * ［元に戻す］. An open 返事のお願い of it is its own record: the member is told to end it there.
+ */
+export function IncomingActions({ m, busy, openReplies, onAct, onUndo }: {
+  m: IncomingDetailView
+  busy: boolean
+  /** Its 返事のお願い still open (each ends with its own ［もう返した］). */
+  openReplies: number
+  onAct: (action: 'settle' | 'drop') => void
+  onUndo: () => void
+}) {
+  if (m.close === 'settled') {
+    return <>
+      <Chip tone="green"><CheckCircle size={11} weight="fill" />{NEXT_STEP.settle}</Chip>
+      <button type="button" disabled={busy} onClick={onUndo} className={SMALL_BUTTON}>{NEXT_STEP.unsettle}</button>
+    </>
+  }
+  if (m.close !== 'settle') return null
+  return <>
+    <button type="button" disabled={busy} onClick={() => onAct('settle')} className={MAIN_BUTTON}><CheckCircle size={13} weight="fill" />{NEXT_STEP.settle}</button>
+    <MoreMenu compact items={[{
+      label: NEXT_STEP.dropMessage, hint: 'やることにしなかった一覧に移します。消しません',
+      onClick: () => { if (!busy) onAct('drop') },
+    }]} />
+    {openReplies > 0 && (
+      <p role="note" className="basis-full text-[11.5px] text-amber-700 dark:text-amber-300">
+        この連絡の返事のお願いが残っています。返事が済んでいれば、そちらで［もう返した］を押してください。
+      </p>
+    )}
+  </>
 }

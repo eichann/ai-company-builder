@@ -34,3 +34,10 @@ export function unlinkRecord(companyId: string, link: RemovableLink, changes: Re
 export function undoRecordChange(companyId: string, recordId: string, version: number, changes: RecordLinkChanges = window.electronAPI) {
   return changes.undoTaskAction(companyId, recordId, version, version)
 }
+
+/** A 来た連絡's ［済んだ］ / ［取り込まない］ (owner FB #20): the type's action at the version shown (the server decides). */
+export type RecordActions = ElectronPort<'actOnTask'>
+
+export function actOnRecord(companyId: string, recordId: string, action: string, expectedVersion: number, writes: RecordActions = window.electronAPI) {
+  return writes.actOnTask(companyId, recordId, { action, expectedVersion })
+}

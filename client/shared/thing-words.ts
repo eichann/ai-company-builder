@@ -142,6 +142,12 @@ export const NEXT_STEP = {
   check: '確かめる',
   finishCheck: '確認を終える',
   reopen: 'やり直す',
+  /** A 来た連絡 whose talk is over (owner FB #20): where a task says 完了にする. */
+  settle: '済んだ',
+  /** Taking 「済んだ」 back (the generic undo). */
+  unsettle: '元に戻す',
+  /** A 来た連絡 not taken in (やることにしなかった一覧). */
+  dropMessage: '取り込まない',
 } as const
 
 /** Whose turn it is, for a row's small line: 「あなたの番」「田中さんの番」「相手の番」「AI の番」. */
