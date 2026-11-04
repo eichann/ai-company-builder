@@ -14,7 +14,9 @@
  *    (`notifications.sweep`);
  * 3. erases expired content (the content store's retention, `expireContent`);
  * 4. reads each connected member's new mail into the inbox (`pollInbox`,
- *    inbox.md "Receiving": header facts and pointers, never the text).
+ *    inbox.md "Receiving": header facts and pointers, never the text);
+ * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
+ *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
  *
  * Everything is derived from stored data (no state kept between runs is
  * needed for correctness): running twice changes nothing more — a moved task
@@ -57,6 +59,8 @@ export interface ServerClockDeps {
   expireContent?: (companyId: string) => number | Promise<number>
   /** The inbox's poll of this company's mail (inbox.md): the number of messages read; `between` yields between members. */
   pollInbox?: (companyId: string, between: () => Promise<void>) => Promise<number>
+  /** The minutes' discovery for every member of this company (minutes.md): the meetings recorded; `between` yields between members. */
+  pollMeetings?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** Let the event loop serve requests between companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
@@ -70,6 +74,8 @@ export interface ClockRun {
   notices: number
   expired: number
   mailRead: number
+  /** Meeting records made from members' calendars. */
+  meetingsFound: number
   failedCompanies: number
 }
 
@@ -127,12 +133,13 @@ export function createServerClock(deps: ServerClockDeps) {
     run.notices += deps.notifications.sweep(companyId, limits.notices)
     if (deps.expireContent) run.expired += await deps.expireContent(companyId)
     if (deps.pollInbox) run.mailRead += await deps.pollInbox(companyId, deps.yieldNow)
+    if (deps.pollMeetings) run.meetingsFound += await deps.pollMeetings(companyId, deps.yieldNow)
   }
 
   return {
     /** One pass over every company. A call while a pass is running does nothing (`ran: false`). */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, failedCompanies: 0 }
       if (running) return run
       running = true
       run.ran = true
@@ -150,8 +157,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.mailRead + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },

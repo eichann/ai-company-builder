@@ -93,7 +93,10 @@
  * `meeting` version 4 drops version 3's まとまり's part (bundle_waiting /
  * bundle_working and their five actions): a まとまり chosen after the reading is
  * only linked; meetings left there are moved back to `read` at startup
- * (`BUNDLE_PART_ENDED_ACTION`).
+ * (`BUNDLE_PART_ENDED_ACTION`). `meeting` version 5 (owner decision 2026-11-04,
+ * meetings for their attendees) adds the initial state `arrived` (議事録が届いた: nobody's
+ * turn); an attendee's ［AI に読ませる］ / ［読まない］ move it (minutes service only).
+ * Meetings made before stay where they are.
  *
  * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
  * the `minutes` type; the 議事録 is the meeting's content, read where it is),
@@ -232,7 +235,7 @@ actions:
 `,
   meeting: `---
 label: 会議
-version: 4
+version: 5
 implements: [outside_event]
 storage: server
 fields:
@@ -247,8 +250,8 @@ fields:
 links:
   bundle:         { label: まとまり, interface: bundle, cardinality: one, inverse: meetings }
   counterpart:    { label: 相手, interface: counterpart, cardinality: one, inverse: meetings }
-states: [received, reading, read, skipped, failed]
-initial: received
+states: [arrived, received, reading, read, skipped, failed]
+initial: arrived
 final: [read, skipped]
 actions:
   start_reading:  { label: 議事録を読み始める, from: [received], to: reading, who: [ai] }
@@ -260,7 +263,8 @@ actions:
 # 会議
 
 社内・社外の会議の記録（日時・出席したメンバー・社外の参加者の数）。議事録は会議の中身で、元の文書に置いたまま（本文は持たず、議事録への目印と要約だけを持ちます）。
-「届いた」は AI の番です（AI が議事録を読んで、タスクや決めたことにします）。どの会議を読むかは会社の設定で決まります（最初は社外の人が出た会議だけ）。
+会議の記録を見られるのは、その会議に出たメンバーだけです（会社の持ち主・管理者も、出ていなければ見えません）。カレンダーで非公開にした予定は記録しません。
+「議事録が届いた」は誰の番でもありません。出た人が［AI に読ませる］を押すと、その人の AI の番（「届いた」）になり、AI が議事録を読んで、やることや決めたことにします。［読まない］を押すと、もう誰にも聞きません。
 まとまり（案件など）が決まらないまま読んだ会議は、あとで人がまとまりを選ぶと、そのまとまりにつながります（会議は「読んだ」のまま）。まとまりへの反映は、そのまとまりの業務の手順が受け持ちます。
 `,
   approval: `---
@@ -474,6 +478,10 @@ export const SERVICE_MADE_TYPES: readonly string[] = ['task']
  */
 export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: readonly string[]; to: string }>>> = {
   meeting: [
+    // Meetings for their attendees (minutes.md): ［AI に読ませる］ (also again after 読まない or a failed
+    // reading, by another attendee) and ［読まない］ — the minutes service with the attendee's session.
+    { from: ['arrived', 'skipped'], to: 'received' },
+    { from: ['arrived'], to: 'skipped' },
     { from: ['received'], to: 'reading' },
     { from: ['reading'], to: 'read' },
     { from: ['reading'], to: 'failed' },

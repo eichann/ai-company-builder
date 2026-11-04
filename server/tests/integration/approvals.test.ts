@@ -423,7 +423,7 @@ describe('similar records before a new deal (plugins.md "Similar records")', () 
   /** A sales meeting with a 相手 (as the minutes intake makes it), the member its assignee. */
   function meetingWith(counterpart: string): string {
     const made = writer.create(CO, {
-      type: 'meeting', title: '初回の打ち合わせ', folder: '営業部', fields: { assignee: 'ap-member', external_count: 1 },
+      type: 'meeting', title: '初回の打ち合わせ', folder: '営業部', state: 'received', fields: { assignee: 'ap-member', external_count: 1 },
       links: { counterpart: [counterpart] }, actor: { id: 'ap-member', kind: 'human', source: null },
     })
     expect(made.ok, JSON.stringify(made)).toBe(true)

@@ -130,7 +130,7 @@ function newApproval(co = 'a') {
 
 /** A meeting assigned to `assignee` (as the minutes intake makes them). */
 function newMinutes(assignee: string, folder: string | null = null, co = 'a') {
-  const r = writer.create(co, { type: 'meeting', title: '定例', folder, fields: { assignee, external_count: 2 }, actor: { id: assignee, kind: 'human', source: null } })
+  const r = writer.create(co, { type: 'meeting', title: '定例', folder, state: 'received', fields: { assignee, external_count: 2 }, actor: { id: assignee, kind: 'human', source: null } })
   if (!r.ok) throw new Error(r.reason)
   return r.record
 }

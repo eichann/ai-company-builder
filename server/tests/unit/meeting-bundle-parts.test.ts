@@ -39,7 +39,7 @@ function record(co: string, id: string, type: string, state: string) {
 describe('meeting version 4: the まとまり\'s part is gone', () => {
   it('the core meeting has no bundle_waiting / bundle_working and none of their actions', () => {
     const meeting = coreTypeDefinitions().find(d => d.name === 'meeting')!
-    expect(meeting.version).toBe(4)
+    expect(meeting.version).toBeGreaterThanOrEqual(4)
     expect(meeting.states).not.toContain('bundle_waiting')
     expect(meeting.states).not.toContain('bundle_working')
     expect(Object.keys(meeting.actions).filter(a => a.endsWith('_bundle_work'))).toEqual([])

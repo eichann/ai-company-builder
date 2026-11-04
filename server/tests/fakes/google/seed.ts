@@ -38,6 +38,10 @@ export interface SeedEvent {
   attendees: SeedAttendee[]
   /** The Meet code (`conferenceData.conferenceId`); absent = no Meet. */
   meetingCode?: string
+  /** Calendar visibility (`private` / `confidential` = marked private); absent = default. */
+  visibility?: 'default' | 'public' | 'private' | 'confidential'
+  /** An instance of a recurring event: the series' id. */
+  recurringEventId?: string
 }
 
 export type ArtifactState = 'STARTED' | 'ENDED' | 'FILE_GENERATED'

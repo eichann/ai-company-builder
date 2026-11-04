@@ -84,17 +84,17 @@ beforeAll(() => {
 })
 
 describe('the admin home', () => {
-  it('judges the steps from the company: departments, members, membership, Google, minutes folder, holidays', async () => {
+  it('judges the steps from the company: departments, members, membership, Google, holidays (no minutes folder since 2026-11-04)', async () => {
     const r = await call('ah-owner', 'GET', `${BASE}/home`)
     expect(r.status).toBe(200)
     expect(r.json.data.view).toBe('admin')
-    expect(r.json.data.setup.total).toBe(6)
+    expect(r.json.data.setup.total).toBe(5)
     expect(step(r.json, 'departments').done).toBe(true)
     expect(step(r.json, 'members').done).toBe(true)
     // 人事部 has nobody yet; 人事部 has no 部署の管理役 (recommended only).
     expect(step(r.json, 'department-members')).toMatchObject({ done: false, departmentsWithoutMembers: 1, departmentsWithoutManager: 1 })
     expect(step(r.json, 'google')).toMatchObject({ done: false, byOperator: true })
-    expect(step(r.json, 'minutes-folder').done).toBe(false)
+    expect(r.json.data.setup.steps.map((s: { id: string }) => s.id)).not.toContain('minutes-folder')
     expect(step(r.json, 'holidays').done).toBe(false)
 
     belongs(HR, CO, 'ah-hr')

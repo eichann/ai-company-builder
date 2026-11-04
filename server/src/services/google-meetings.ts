@@ -12,7 +12,7 @@
  * the text goes to the one route that hands it to the member's AI.
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
-import { MINUTES_TEXT_MAX } from '../../shared/core/minutes'
+import { isPrivateEventVisibility, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
 import { MeetingReadFailed as GoogleReadFailed, type MeetArtifactDoc, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { GoogleRequest, GoogleResult } from './google-client'
 
@@ -48,12 +48,18 @@ function eventOf(raw: unknown): MeetEvent | null {
   const attendees: MeetingAttendee[] = []
   for (const a of Array.isArray(raw.attendees) ? raw.attendees : []) {
     if (!isObj(a) || typeof a.email !== 'string' || a.resource === true) continue
-    attendees.push({ email: a.email.toLowerCase(), name: str(a.displayName) ?? '', organizer: a.organizer === true || a.email.toLowerCase() === organizer })
+    attendees.push({
+      email: a.email.toLowerCase(), name: str(a.displayName) ?? '', organizer: a.organizer === true || a.email.toLowerCase() === organizer,
+      declined: a.responseStatus === 'declined',
+    })
   }
-  if (organizer && !attendees.some(a => a.email === organizer)) attendees.push({ email: organizer, name: '', organizer: true })
+  if (organizer && !attendees.some(a => a.email === organizer)) attendees.push({ email: organizer, name: '', organizer: true, declined: false })
+  const series = str(raw.recurringEventId)
   return {
     eventId, title: (str(raw.summary) ?? '').trim(), start: new Date(s).toISOString(), end: new Date(e).toISOString(),
     meetingCode: code, organizer, attendees,
+    private: isPrivateEventVisibility(raw.visibility),
+    series: series && ID_RE.test(series) ? series : null,
   }
 }
 

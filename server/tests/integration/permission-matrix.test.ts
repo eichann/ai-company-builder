@@ -423,15 +423,21 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS),
   r('POST /api/companies/:companyId/me/google/connect', w => ({ path: `${C(w)}/me/google/connect`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('DELETE /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS, 'nothing to stop: answers the member\'s own (empty) state'),
-  // The minutes intake (minutes.md): the folder is owner/admin; a member checks their own calendar
-  // (no folder chosen here: nothing is read) and reads minutes they are the assignee or an attendee of.
+  // The minutes intake (minutes.md): the folder setting is owner/admin; a member checks their own calendar
+  // (Google is not set up here: refused, nothing is read) and reads minutes they are the assignee or an attendee of.
   r('GET /api/companies/:companyId/google/minutes-folder', w => ({ path: `${C(w)}/google/minutes-folder` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/google/minutes-folder', w => ({ path: `${C(w)}/google/minutes-folder`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
-  r('POST /api/companies/:companyId/me/minutes/check', w => ({ path: `${C(w)}/me/minutes/check`, body: {} }), MEMBERS, 'no minutes folder is chosen: the answer says so and nothing is read'),
+  r('POST /api/companies/:companyId/me/minutes/check', w => ({ path: `${C(w)}/me/minutes/check`, body: {} }), [403, 403, 403, 403, 404, 401], 'Google is not set up in this company: GOOGLE_STOPPED, nothing is read (no folder is needed since 2026-11-04)'),
   r('GET /api/companies/:companyId/me/minutes/item/:recordId/text', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/text` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/bundle', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/bundle`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/no-bundle', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/no-bundle`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/me/minutes/item/:recordId/bundle-question', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/bundle-question` }), [404, 404, 404, 404, 404, 401]),
+  // Meetings for their attendees (minutes.md): any member sees their own 「届きました」; the buttons
+  // answer one of a meeting's people only (anyone else: the meeting does not exist — 404).
+  r('GET /api/companies/:companyId/me/minutes/arrivals', w => ({ path: `${C(w)}/me/minutes/arrivals` }), MEMBERS, 'only meetings the member is on the list of'),
+  r('POST /api/companies/:companyId/me/minutes/item/:recordId/read-request', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/read-request`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/minutes/item/:recordId/skip', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/skip`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('PUT /api/companies/:companyId/me/minutes/item/:recordId/auto-series', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/auto-series`, body: { auto: true } }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/me/minutes/bundle-questions', w => ({ path: `${C(w)}/me/minutes/bundle-questions` }), MEMBERS, 'only the member\'s own meetings are answered'),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/bundle', () => ({ path: '/api/records-ai/minutes/meeting-nosuch01/bundle', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -617,6 +623,9 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/text', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/text` }), w => w.other.record, 'minutes-nosuch01'),
   x('POST /api/companies/:companyId/me/minutes/item/:recordId/bundle', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/bundle`, body: { bundleId: id } }), w => w.other.record, 'meeting-nosuch01'),
   x('POST /api/companies/:companyId/me/minutes/item/:recordId/no-bundle', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/no-bundle`, body: {} }), w => w.other.record, 'meeting-nosuch01'),
+  x('POST /api/companies/:companyId/me/minutes/item/:recordId/read-request', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/read-request`, body: {} }), w => w.other.record, 'meeting-nosuch01'),
+  x('POST /api/companies/:companyId/me/minutes/item/:recordId/skip', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/skip`, body: {} }), w => w.other.record, 'meeting-nosuch01'),
+  x('PUT /api/companies/:companyId/me/minutes/item/:recordId/auto-series', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/auto-series`, body: { auto: true } }), w => w.other.record, 'meeting-nosuch01'),
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/bundle-question', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/bundle-question` }), w => w.other.record, 'meeting-nosuch01'),
   x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
   x('PUT /api/companies/:companyId/google/relay/members/:userId', (w, id) => ({ path: `${C(w)}/google/relay/members/${id}`, body: { stopped: true } }), w => w.other.googleGrant, 'pm-nobody'),

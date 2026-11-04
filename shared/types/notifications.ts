@@ -46,6 +46,9 @@ export const NOTIFICATION_KINDS = [
   // ── lane B ▲
   // lane C ▼ (reserved: role_unassigned)
   // ── lane C ▲
+  // A meeting's minutes arrived (minutes.md "Meetings for their attendees"): once per meeting, to
+  // each member on its list. An app released before it shows the server's text and lists no switch.
+  'minutes_arrived',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -78,6 +81,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
+  minutes_arrived: '出た会議の議事録が届いた',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -106,6 +110,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
+  minutes_arrived: true,
   others: false,
 }
 

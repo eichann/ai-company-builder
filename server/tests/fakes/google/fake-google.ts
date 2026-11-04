@@ -56,7 +56,7 @@
  */
 import { createHash, randomBytes } from 'crypto'
 import { Hono, type Context } from 'hono'
-import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile, type SeedMail, type SeedSpreadsheet } from './seed'
+import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedEvent, type SeedDriveFile, type SeedMail, type SeedSpreadsheet } from './seed'
 
 export const FAKE_GOOGLE_SECRET_PREFIX = 'fake-google-secret-'
 export const FAKE_ACCESS_TOKEN_PREFIX = 'ya29.fake-'
@@ -169,6 +169,17 @@ export interface FakeGoogleFaults {
   reset(): void
 }
 
+/** A change someone makes to a calendar event. */
+export interface EventChange {
+  removeAttendee?: string
+  /** Invited later (needsAction). */
+  addAttendee?: string
+  /** This attendee declines. */
+  decline?: string
+  summary?: string
+  visibility?: SeedEvent['visibility']
+}
+
 export interface FakeGoogle {
   app: Hono
   /** Registers an OAuth client; the secret must be a practice one. */
@@ -178,7 +189,7 @@ export interface FakeGoogle {
   /** The person removed the app's access in their Google account: every token of theirs stops working. */
   revokeAllFor(email: string): void
   /** Someone changes a calendar event (removes an attendee, renames it): `updated`, `sequence` and `etag` move. */
-  changeEvent(id: string, change: { removeAttendee?: string; summary?: string }): void
+  changeEvent(id: string, change: EventChange): void
   /** The minutes document is edited: new text (or one appended line), `version` + 1, new `modifiedTime`. */
   changeDoc(id: string, text?: string): void
   /** A Meet artifact moves on (e.g. ENDED → FILE_GENERATED). */
@@ -543,6 +554,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       } : {}),
       reminders: { useDefault: true },
       eventType: 'default',
+      ...(e.visibility ? { visibility: e.visibility } : {}),
+      ...(e.recurringEventId ? { recurringEventId: e.recurringEventId } : {}),
     }
   }
 
@@ -990,10 +1003,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
 
   // ---- outside changes ----
 
-  function changeEvent(id: string, change: { removeAttendee?: string; summary?: string }) {
+  function changeEvent(id: string, change: EventChange) {
     const e = events.find(x => x.id === id)
     if (!e) throw new Error(`fake Google: no event ${id}`)
     if (change.removeAttendee) e.attendees = e.attendees.filter(x => x.email.toLowerCase() !== change.removeAttendee!.toLowerCase())
+    if (change.addAttendee && !e.attendees.some(x => x.email.toLowerCase() === change.addAttendee!.toLowerCase())) e.attendees.push({ email: change.addAttendee, responseStatus: 'needsAction' })
+    if (change.decline) for (const a of e.attendees) if (a.email.toLowerCase() === change.decline.toLowerCase()) a.responseStatus = 'declined'
+    if (change.visibility !== undefined) e.visibility = change.visibility
     if (change.summary !== undefined) e.summary = change.summary
     e.sequence++
     e.updated = Math.max(now(), e.updated + 1)

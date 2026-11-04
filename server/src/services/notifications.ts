@@ -33,6 +33,7 @@ import { aiTurnStates, noTurnStates, type TypeDefinition } from '../../shared/co
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
 import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, MESSAGE_TYPE, messageOriginLinks, WAIT_OVER_ACTION, waitCameBack } from '../../shared/core/core-types'
 import { restingTask, turnTiming } from '../../shared/core/turn-timing'
+import { MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_TYPE } from '../../shared/core/minutes'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -241,6 +242,16 @@ export function askedOf(userId: string, change: RecordChange, def: TypeDefinitio
   }
   const asker = str(fields.requested_by) ?? assignedBy
   return asker === null || asker === userId ? null : { asker, since }
+}
+
+/**
+ * 「議事録が届きました」 (minutes.md "Meetings for their attendees"): a meeting recorded in
+ * `arrived`, or attendees joining it while it is still there. The minutes service names the
+ * meeting's people; only those who read it get it (members-only: its list).
+ */
+export function minutesArrivedOf(change: RecordChange): boolean {
+  return change.type === MEETING_TYPE && change.entry.toState === MEETING_ARRIVED_STATE &&
+    (change.entry.action === 'create' || change.entry.action === MEETING_ATTENDEES_ACTION)
 }
 
 /**
@@ -587,6 +598,8 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `${t}に相手から返事が来ました。AI が終わりの条件と照らし合わせます`
       case 'from_message':
         return `来た連絡から、やることを作りました：${t}`
+      case 'minutes_arrived':
+        return `議事録が届きました：${t}`
       case 'intake_unsure':
         return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':
@@ -649,8 +662,15 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         // Never the actor — except their own AI handing them what someone else asked, or what it
         // made them from a message that came in (they did not do that).
         if (userId === change.entry.actorId && !((asked || fromMessage) && change.entry.actorKind === 'ai')) continue
-        const kind = asked ? 'asked' : fromMessage ? 'from_message' : noticeKind(userId, change, final)
-        const base = fromMessage
+        // A meeting's minutes arrived (minutes.md): once per meeting and member, whoever's calendar found it.
+        const arrived = !asked && !fromMessage && minutesArrivedOf(change)
+        const kind = asked ? 'asked' : fromMessage ? 'from_message' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
+        const base = arrived
+          ? {
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+            actorKind: change.entry.actorKind, dedupeKey: `minutes_arrived:${change.entry.recordId}`, createdAt: now, readAt: null,
+          }
+          : fromMessage
           ? {
             recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
             actorKind: change.entry.actorKind, dedupeKey: `from_message:${change.entry.recordId}`, createdAt: now, readAt: null,

@@ -218,6 +218,23 @@ export function migrateRecordViewers(conn: Database.Database): void {
 }
 
 /**
+ * 「この定例は次から自動で読む」 (minutes.md "Meetings for their attendees", owner decision
+ * 2026-11-04): a member's own choice per recurring series. `series_key` is a digest of the
+ * calendar's series id (no Google id stored here). Additive, idempotent.
+ */
+export function migrateMeetingAutoSeries(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TABLE IF NOT EXISTS meeting_auto_series (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      series_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, series_key)
+    );
+  `)
+}
+
+/**
  * Who made a file link (records.md "Links into .personal/", owner decision 2026-11-03): a link into
  * a `.personal/` folder is shown to that member alone. Additive and nullable: older rows stay unknown.
  */

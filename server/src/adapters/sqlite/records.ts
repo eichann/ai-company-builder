@@ -338,6 +338,15 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     forgetMember(userId) {
       conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+    },
+    meetingAutoSeries(userId) {
+      return (conn.prepare('SELECT series_key FROM meeting_auto_series WHERE company_id = ? AND user_id = ? ORDER BY series_key').all(companyId, userId) as Array<{ series_key: string }>)
+        .map(r => r.series_key)
+    },
+    setMeetingAutoSeries(userId, seriesKey, auto, at) {
+      if (auto) conn.prepare('INSERT OR IGNORE INTO meeting_auto_series (company_id, user_id, series_key, created_at) VALUES (?, ?, ?, ?)').run(companyId, userId, seriesKey, at)
+      else conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ? AND series_key = ?').run(companyId, userId, seriesKey)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)

@@ -185,6 +185,9 @@ export interface RecordRepository {
   addMembers(id: string, userIds: readonly string[], by: string, at: string): string[]
   /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */
   forgetMember(userId: string): void
+  /** The recurring series (digests) a member set to 「自動で読む」 (minutes.md "Meetings for their attendees"). */
+  meetingAutoSeries(userId: string): string[]
+  setMeetingAutoSeries(userId: string, seriesKey: string, auto: boolean, at: string): void
 
   linksFrom(ids: string[]): RecordLinkRow[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */

@@ -3,11 +3,15 @@
  * /api/companies/:companyId. Contract: shared/types/minutes.ts; rules:
  * services/minutes.ts. The member's AI has its twins in routes/records-ai.ts.
  *
- *   GET|PUT /google/minutes-folder          owner/admin: the department folder meetings go to
- *                                            ({ folder?: string | null; never a private folder,
- *                                            meetings?: 'external' | 'all' — which meetings are read })
- *   POST    /me/minutes/check               any member: look at my calendar now (the app calls
- *                                            it at start, every 10 minutes and on a button)
+ *   GET|PUT /google/minutes-folder          owner/admin: kept for older admin consoles ({ folder?,
+ *                                            meetings?, bundleQuestionDays? }); since meetings are seen
+ *                                            by their attendees only, folder and meetings change nothing
+ *   POST    /me/minutes/check               any member: look at my calendar now (older apps call it;
+ *                                            the server clock finds meetings by itself)
+ *   GET     /me/minutes/arrivals            any member: my meetings of the last 3 days (「議事録が届きました」)
+ *   POST    /me/minutes/item/:recordId/read-request  one of the meeting's people: ［AI に読ませる］ { expectedVersion? }
+ *   POST    /me/minutes/item/:recordId/skip          one of the meeting's people: ［読まない］ { expectedVersion? }
+ *   PUT     /me/minutes/item/:recordId/auto-series   one of the meeting's people: { auto } (「この定例は次から自動で読む」, their own)
  *   GET     /me/minutes/item/:recordId/text      the assignee or an attendee: the minutes as outside
  *                                            text, read now from Google with my own permission
  *   POST    /me/minutes/item/:recordId/bundle    the assignee or an admin: { bundleId, expectedVersion? }
@@ -49,6 +53,26 @@ minutesRoute.put('/google/minutes-folder', companyMember, serviceBody, async (c)
 minutesRoute.post('/me/minutes/check', companyMember, async (c) => {
   const member = c.var.member
   return answer(c, await minutes.check(member))
+})
+
+minutesRoute.get('/me/minutes/arrivals', companyMember, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.arrivals(member))
+})
+
+minutesRoute.post('/me/minutes/item/:recordId/read-request', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await minutes.requestReading(member, c.req.param('recordId'), c.var.body))
+})
+
+minutesRoute.post('/me/minutes/item/:recordId/skip', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.skipReading(member, c.req.param('recordId'), c.var.body))
+})
+
+minutesRoute.put('/me/minutes/item/:recordId/auto-series', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, minutes.setAutoSeries(member, c.req.param('recordId'), c.var.body))
 })
 
 minutesRoute.get('/me/minutes/item/:recordId/text', companyMember, async (c) => {
