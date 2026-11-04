@@ -3,7 +3,7 @@
 # AI's turn or by a person; a default procedure a company may replace with its
 # own Skill), ui frames with the bridge version, and where pinned work may move
 # to this version. The real ones (corporate-sales, program-planning) live in
-# their own private repositories (acb-plugin-<id>).
+# their own private repositories.
 id: sample-flow
 label: 見本の営業の流れ
 version: 0.2.0

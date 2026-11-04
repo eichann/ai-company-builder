@@ -1,5 +1,5 @@
 # A fictional CRM shaped like HubSpot, for the public repository's tests
-# (owner decision §6-6: the real HubSpot package lives in acb-connectors).
+# (owner decision §6-6: the real HubSpot package lives in a private repository).
 # A connector only: sample-crm-sales uses it.
 id: sample-crm
 label: 見本の CRM

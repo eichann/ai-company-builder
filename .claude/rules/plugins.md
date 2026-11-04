@@ -503,15 +503,13 @@ Company fields are never dropped. Test: `tests/integration/plugin-distribution.t
 
 The real packages are not in this public repository. Each lives in a **private repository per
 visibility boundary** (who may read it), one folder per version `<id>@<version>/` (exactly what the
-shelf holds) and a tag `<id>@<version>` per published version:
-
-- `eichann/acb-connectors` — connectors (`hubspot@*`), shared by every business plugin;
-- `eichann/acb-plugin-corporate-sales` — 「法人営業」 (`corporate-sales@*`);
-- `eichann/acb-plugin-program-planning` — 「番組企画」 (`program-planning@*`).
-
-A new business plugin gets its own `acb-plugin-<id>` (owner approves merges there). `eichann/acb-plugins`
-(the first, shared one) is archived. A published version's folder never changes; a fix is a new
-version.
+shelf holds) and a tag `<id>@<version>` per published version: one **connectors repository**
+(`hubspot@*`, shared by every business plugin) and **one repository per business plugin**
+(「法人営業」 `corporate-sales@*`, 「番組企画」 `program-planning@*`; a new business plugin gets its own,
+the owner approves merges there). The first, shared repository is archived. A published version's
+folder never changes; a fix is a new version. **Never name these private repositories (or any other
+private location) in this public repository** — code, tests, rules or comments (owner, 2026-11-03);
+examples use `example-org/…`.
 
 The operator fills `PLUGINS_DIR` with `server/src/cli/collect-plugins.ts`
 (`adapters/plugin-collect.ts`), run where `git` and `gh` can read those repositories (not in the api

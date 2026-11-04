@@ -1,0 +1,77 @@
+# The staging kit's stack (staging/README.md). Mirrors the repository's docker-compose.yml —
+# the api runs the code baked into its image on a read-only filesystem, the admin is a
+# production build, no source mounts — with staging-only settings:
+#   - one front door (Caddy) on 127.0.0.1:${ACB_STAGING_PORT}: /api/* → api, the rest → admin,
+#     so PUBLIC_URL is one local origin the server's auth already trusts;
+#   - the practice HubSpot / Google / Slack on this Mac (staging/fakes.ts) through
+#     host.docker.internal (ACB_FAKE_*_URL; never in a production compose file);
+#   - the kit's own data, plugin shelf (read-only) and key-encryption key, all under the kit's
+#     home (~/acb-staging-kit), never this checkout.
+# Run only through staging/kit.mjs, which passes --env-file <home>/secrets/compose.env.
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - AUTH_SECRET=${AUTH_SECRET:?run the kit's setup first}
+      - PUBLIC_URL=${PUBLIC_URL:?run the kit's setup first}
+      - SERVER_HOST=localhost
+      - SERVER_USER=deploy
+      - HOST_REPOS_DIR=/app/data/repos
+      - NODE_OPTIONS=--max-old-space-size=2048
+      - BROKER_KEK_FILE=/run/secrets/broker-kek
+      - BROKER_TOKEN_TTL_MINUTES=30
+      # The practice services need no check against the internet.
+      - BROKER_KEY_CHECK=off
+      - BROKER_DAY_UTC_OFFSET_MINUTES=540
+      - PLUGINS_DIR=/etc/acb/plugins
+      - COMPANY_CREATION_POLICY=operator
+      # Staging only (deployment.md): every HubSpot / Google / Slack request goes to the practice copy.
+      - ACB_ALLOW_FAKE_UPSTREAMS=1
+      - ACB_FAKE_HUBSPOT_URL=http://host.docker.internal:${FAKE_HUBSPOT_PORT}
+      - ACB_FAKE_GOOGLE_URL=http://host.docker.internal:${FAKE_GOOGLE_PORT}
+      - ACB_FAKE_SLACK_URL=http://host.docker.internal:${FAKE_SLACK_PORT}
+    read_only: true
+    volumes:
+      - ${KIT_DATA_DIR}:/app/data
+      - api-tmp:/tmp
+      - ${KIT_KEK_FILE}:/run/secrets/broker-kek:ro
+      - ${KIT_PLUGINS_DIR}:/etc/acb/plugins:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch(\"http://localhost:3001/api/config\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  admin:
+    build:
+      context: ..
+      dockerfile: admin/Dockerfile
+    environment:
+      - API_PROXY_URL=http://api:3001
+      - NODE_OPTIONS=--max-old-space-size=1024
+    depends_on:
+      - api
+
+  front:
+    image: caddy:2.8.4-alpine
+    ports:
+      # Loopback only; host and container ports differ (OrbStack ≤ 2.2.0 drops a loopback
+      # forward when they match).
+      - "127.0.0.1:${ACB_STAGING_PORT}:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    read_only: true
+    tmpfs:
+      - /data
+      - /config
+    depends_on:
+      - api
+      - admin
+
+volumes:
+  api-tmp:

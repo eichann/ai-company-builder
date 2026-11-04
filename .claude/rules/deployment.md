@@ -21,6 +21,8 @@ paths:
   - "server/src/adapters/sqlite/company-archive.ts"
   - "server/tests/integration/company-archive.test.ts"
   - ".env.example"
+  - "staging/**"
+  - "server/tests/unit/staging-kit.test.ts"
 ---
 
 # Deployment, CI and the workspace
@@ -81,6 +83,39 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   so a slow leak restarts cleanly.
 - The self-hosting production compose file is `docs/self-hosting/docker-compose.production.yml`
   (built and smoke-tested by the Docker images workflow).
+
+## Staging kit (`staging/`, README in Japanese there)
+
+A local staging on an FDE's Mac, one command: `pnpm staging:setup|up|down|reset|app|status|remove`
+(after setup also `~/acb-staging-kit/acb-staging <command>`).
+
+- `staging/bootstrap.mjs` keeps the kit's **own checkout** (`~/acb-staging-kit/app`, never the person's
+  working copy) at the version to test, then runs that checkout's `staging/kit.mjs` (so the kit's
+  scripts follow too). With the person's one local setting (`ACB_KIT_PRIVATE=<owner>/<repo>:<path>`
+  or `file:<path>`, env or `~/.acb-staging-kit/config`), the **private kit config** names the main
+  commit production runs (`production <sha>`) and production's `plugins.lock` (inline lines or
+  `plugins-lock <path>`); without it: the public `main`, no plugins, 「追加の部品（非公開）は読み込んでいません」.
+  **Nothing in this repository names a private location or carries a lock line / fingerprint**
+  (owner, 2026-11-03). On every setup / up / app / reset: moved → stop, back up the databases
+  (`backups/`), check out, rebuild images / app, start with the data kept, one line
+  「検証環境を本番と同じ版（M/D）に更新しました」; unreadable / offline → start what is there and say so.
+- **After each production deploy** the operator runs `node staging/mark-production.mjs <commit>`
+  (writes only the `production` line of the private kit config, through `gh`; part of the deploy
+  procedure).
+- `staging/compose.yml` mirrors this compose file (read-only api image, production admin build, no
+  source mounts) plus a Caddy front door on `127.0.0.1:14001` (`/api/*` → api, rest → admin: one
+  origin = `PUBLIC_URL`, so auth needs no extra trusted origin), the practice HubSpot / Google /
+  Slack (`staging/fakes.ts`, on the host, 14010–14012, `ACB_FAKE_*_URL` via `host.docker.internal`),
+  the kit's data, shelf (read-only) and KEK under `~/acb-staging-kit`; project `acb-staging-kit`.
+  Ports / project / home are `ACB_STAGING_*` settings.
+- Secrets (AUTH_SECRET, KEK, the practice HubSpot key, test passwords) are made once, 0600 under
+  `~/acb-staging-kit`, never logged (redacting logger); passwords are shown once after setup.
+  `staging/seed.mjs` makes 検証A社 through the API only (first account = owner, invitations,
+  departments, private folder, records, sample tasks, practice key and Google, plugins + import).
+  The shelf is filled by the server's collector (`staging/shelf.ts`) per repository; one without
+  access is skipped by package name.
+- Test: `server/tests/unit/staging-kit.test.ts` (secrets never printed and never overwritten,
+  ports, private config, the follow-production hook against a local bare repository).
 
 ## One company: export and restore (`server/src/cli/company-archive.ts`)
 
