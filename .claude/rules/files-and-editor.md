@@ -45,6 +45,7 @@ paths:
   - "client/tests/keep-work-ui.*"
   - "client/tests/ui/keep-work.spec.ts"
   - "client/tests/ui/tidy-tabs.spec.ts"
+  - "client/tests/ui/tab-arrangement.spec.ts"
   - "client/src/features/settings/components/TidyTabsSetting.tsx"
 ---
 
@@ -274,6 +275,45 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `tidyTabs.test.ts` (pinned / unsaved kept, cap, once per day, the switch, local per company),
   `tests/ui/tidy-tabs.spec.ts` (tidy → list → restore, missing items, saving first, the daily
   tidy and its notice, the AI's commands).
+- A tidy can take **one kind** (`tabs.tidy { kind }`: a kind chip's menu 「この種類（…）を片づける」, the
+  「…」 for the shown tab's kind) or **one named group** (`{ group }`: id from the chip, or the name
+  the AI read; 「このまとまりを片づける」) — same rules (pinned stay, edits saved first). A named group's
+  tidy keeps `tabGroup: { name, color }` with it; reopening any of its items makes the group again.
+
+## Arranging the tabs (owner 2026-11-04, after the tidy: order, kinds, named groups)
+
+- **One order, shown in runs.** `openFiles` stays the one order (saved as before); the bar shows a
+  stable split of it (`tabArrangement.ts` `arrangeTabs`): **pinned first**, then the member's
+  **named groups** (まとまり, in the order made), then the rest — one run, or, with
+  「種類ごとにまとめる」 on, by kind in a fixed order: ファイル, やること, the bundles (named by the labels
+  of the ones open: 「案件・プロジェクト」, `bundleWords`), 会議の記録, 決めたこと, その他 (a record not
+  read yet, other kinds). A kind group and a named group start with a chip (icon or colour, name,
+  count; press = fold / open, its 「…」 or right-click = menu). A folded group still shows the tab
+  that is open (the chip is ringed): the member always sees where they are. A new tab lands at the
+  end of its run (its kind group when grouped; outside any named group).
+- **Drag inside the bar moves; anywhere else links** (the drop target decides). A tab's drag still
+  carries the record / file data with `effectAllowed: link` (a tab never moves a file in the tree)
+  plus `TAB_DRAG_TYPE` (`dragTypes.ts`); the bar takes it only for its own tab (a ref, not state:
+  changing the dragged element on dragstart can cancel the drag), shows an insertion line
+  (`data-drop-line`) and moves it (`moveTab`). Rules (`canMoveTab`): a pinned tab moves only among
+  the pinned and nothing else enters them; beside a tab of a named group a tab joins it, beside one
+  outside it leaves its group; by kind, a tab stays among its kind. Dropped on a named group's chip
+  it joins at the end (`addToGroup`).
+- **Named groups (Chrome-style)**: a tab's right-click or the 「…」 → 「新しいまとまりに入れる…」 (name +
+  one of six colours, `TabGroupParts.tsx` on `InputDialog`), 「〇〇に入れる」, 「まとまりから外す」; the
+  chip's menu: たたむ / ひらく, 名前と色を変える, このまとまりを片づける, まとまりを解く (tabs stay open). A
+  pinned tab stands with the pinned (its membership is ignored meanwhile). A group with no open tab
+  left is not shown and is dropped on the next change (`pruneGrouping`).
+- **Storage: this Mac only**, per company, localStorage `tabGroups:<company id>` =
+  `{ byKind, collapsedKinds, groups: [{ id, name, color, collapsed? }], members: { <tab key>: <group id> } }`
+  (unreadable parts dropped, `parseGrouping`); beside `editor:<company id>`, so older apps reading that
+  entry are unaffected. The AI's `tabs.list` gives each open tab `kindId` and `tabGroup` (name).
+- Code: `features/editor/tabArrangement.ts` (pure rules + the store), `hooks/useTabArrangement.ts`
+  (mounted by `AppShell`), `components/EditorTabBar.tsx`, `TabGroupParts.tsx`, the 「…」 in
+  `TabTidyingControls.tsx`. Tests: `tabArrangement.test.ts` (runs, moves, joining / leaving,
+  pruning, the store), `tests/ui/tab-arrangement.spec.ts` (reorder + pinned + kept; reorder vs drag
+  out to the consultation on `chat-header-ui.html?tabs=1`; by kind, folding, a kind tidied; named
+  groups made, joined, renamed, tidied and reopened; the AI by kind / group).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 

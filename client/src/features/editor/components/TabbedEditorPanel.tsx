@@ -13,6 +13,7 @@ import { useEditorReview } from '../hooks/useEditorReview'
 import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/useMarkdownView'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
+import type { TabArrangement } from '../hooks/useTabArrangement'
 import { fileTabsOf, recordIdOfTab, type RecordTabLook } from '../editorTabs'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
@@ -41,6 +42,8 @@ interface TabbedEditorPanelProps {
   /** Pinned (固定) tabs and their toggle (「タブを片づける」 leaves them open). */
   pinnedTabs?: ReadonlySet<string>
   onTogglePinned?: (key: string) => void
+  /** How the tabs stand: order by drag, named groups, by kind (`useTabArrangement`). */
+  arrangement?: TabArrangement
   /** At the tabs' right end (the 「…」 menu), also shown with no tab open. */
   tabsEnd?: ReactNode
   /** One line above the tabs (what a tidy did). */
@@ -63,6 +66,7 @@ export function TabbedEditorPanel({
   aside,
   pinnedTabs,
   onTogglePinned,
+  arrangement,
   tabsEnd,
   notice: topNotice,
 }: TabbedEditorPanelProps) {
@@ -180,6 +184,7 @@ export function TabbedEditorPanel({
         onClose={handleCloseTab}
         pinnedTabs={pinnedTabs}
         onTogglePinned={onTogglePinned}
+        arrangement={arrangement}
         end={tabsEnd}
       />
       </div>

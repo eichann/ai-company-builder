@@ -180,3 +180,35 @@ export const CALM = {
 
 /** Who can see it, in plain words: 「あなただけ」 is the one that gets a lock (5b). */
 export const ONLY_YOU = 'あなただけ'
+
+// --- The middle's tabs grouped by kind (「種類ごとにまとめる」, owner 2026-11-04) ---------------
+/** The groups, in the order they stand: files, tasks, bundles (案件／プロジェクト…), meetings, decisions, the rest. */
+export const TAB_KIND_GROUPS = ['file', 'task', 'bundle', 'meeting', 'decision', 'other'] as const
+export type TabKindGroup = typeof TAB_KIND_GROUPS[number]
+
+/** Which group a record's tab stands in (a file's is `file`; a record not read yet, `other`). */
+export function tabKindGroupOf(r: ThingRecord | null | undefined): TabKindGroup {
+  if (!r) return 'other'
+  switch (thingKindOf(r)) {
+    case 'task': case 'minutes_check': return 'task'
+    case 'bundle': return 'bundle'
+    case 'meeting': return 'meeting'
+    case 'decision': return 'decision'
+    default: return 'other'
+  }
+}
+
+/**
+ * A group's name: the core's words, the bundles by the labels of the ones open (「案件・プロジェクト」,
+ * `bundleWords`), and 「その他」 for the rest.
+ */
+export function tabKindGroupName(group: TabKindGroup, bundleTypeLabels: ReadonlyArray<string | null | undefined> = []): string {
+  switch (group) {
+    case 'file': return THING_NAMES.file
+    case 'task': return THING_NAMES.task
+    case 'bundle': return bundleWords(bundleTypeLabels)
+    case 'meeting': return THING_NAMES.meeting
+    case 'decision': return THING_NAMES.decision
+    case 'other': return 'その他'
+  }
+}

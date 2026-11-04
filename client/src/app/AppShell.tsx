@@ -42,6 +42,7 @@ import { PANE_LIMITS } from '../features/workspace/layoutTree'
 import { useEditorPersistence, type RestoredTabs } from '../features/editor/hooks/useEditorPersistence'
 import { useEditorTabs } from '../features/editor/hooks/useEditorTabs'
 import { useTabTidying } from '../features/editor/hooks/useTabTidying'
+import { useTabArrangement } from '../features/editor/hooks/useTabArrangement'
 import { TabTidyingMenu, TabTidyingNotice } from '../features/editor/components/TabTidyingControls'
 import { useAiCommandRequests } from './useAiCommandRequests'
 import { useCompanyWatcher } from '../features/files/hooks/useCompanyWatcher'
@@ -167,6 +168,8 @@ export function AppShell() {
   const tidying = useTabTidying({ companyId: currentCompany?.id, rootPath, openTabs: openFiles, pinnedTabs, setPinnedTabs, recordLooks, closeTabs,
     reopenTabs: keys => { reopenTabs(keys); if (middleHidden.current && keys.length > 0) setLeftTab('files') } })
   tabsRestored.current = tidying.onTabsRestored
+  // Their order by drag, named groups and 「種類ごとにまとめる」 (per company on this Mac).
+  const arrangement = useTabArrangement({ companyId: currentCompany?.id, openTabs: openFiles, setOpenTabs: setOpenFiles, pinned: tidying.pinned, recordLooks })
   useAiCommandRequests() // the consultation AI's app commands (the tabs above) run in this window
   const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
     rootPath: rootPath || '',
@@ -641,8 +644,9 @@ export function AppShell() {
                     : undefined}
                   pinnedTabs={tidying.pinned}
                   onTogglePinned={tidying.togglePinned}
+                  arrangement={arrangement}
                   notice={<TabTidyingNotice tidying={tidying} />}
-                  tabsEnd={<TabTidyingMenu tidying={tidying} activeKey={activeFilePath} />}
+                  tabsEnd={<TabTidyingMenu tidying={tidying} arrangement={arrangement} activeKey={activeFilePath} looks={recordLooks} />}
                 />
               )}
             />

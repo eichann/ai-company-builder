@@ -30,6 +30,13 @@ export function dropEffectAllowed(effectAllowed: string, dropEffect: 'copy' | 'm
   return effectAllowed.toLowerCase().includes(dropEffect)
 }
 
+/**
+ * Added to a drag that starts on a middle tab: the tab bar takes it to reorder (the record or file data
+ * beside it still links it wherever it is dropped). Its value is not read: the bar knows its own tab.
+ */
+export const TAB_DRAG_TYPE = 'application/x-acb-tab'
+export const isTabDrag = (data: Pick<DataTransfer, 'types'>): boolean => Array.from(data.types).includes(TAB_DRAG_TYPE)
+
 /** A record dragged from a list row, a 探す row or its tab in the middle: `{ id, title }` as JSON. */
 export const RECORD_DRAG_TYPE = 'application/x-acb-record'
 /** One of 「AIへの相談」 dragged from the conversation list or 探す: `{ sessionId, title }` as JSON. */

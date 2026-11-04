@@ -70,7 +70,7 @@ export function TidiedTabsDialog({ groups, onClose, onRestore, onRemoveItems, on
                 </div>
                 {tidies.map(g => (
                   <div key={g.id} className="px-1.5 pb-1">
-                    <div className="px-1.5 pt-1.5 text-[10.5px] text-gray-400">{time(g.at)} に{g.auto ? '自動で' : ''}片づけ</div>
+                    <div className="px-1.5 pt-1.5 text-[10.5px] text-gray-400">{time(g.at)} に{g.auto ? '自動で' : ''}片づけ{g.tabGroup && <span data-tidied-group={g.tabGroup.name}>（まとまり「{g.tabGroup.name}」：開き直すとまとまりに戻ります）</span>}</div>
                     <ul>
                       {g.items.map(i => {
                         const gone = missing.has(i.id)

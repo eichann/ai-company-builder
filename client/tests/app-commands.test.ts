@@ -61,6 +61,8 @@ test('a command not handed to the AI, bad arguments or a consultation in its own
   const h = harness()
   assert.deepEqual(await h.runner.run('s1', 'co', 'chat.newConsultation', { message: 'x' }), { ok: false, error: APP_COMMAND_MESSAGES.unknown })
   assert.deepEqual(await h.runner.run('s1', 'co', 'tabs.restore', { group: '昨日' }), { ok: false, error: APP_COMMAND_MESSAGES.badArgs })
+  // tabs.tidy narrows to one of the kind groups only (tabs_list `kindId`).
+  assert.deepEqual(await h.runner.run('s1', 'co', 'tabs.tidy', { kind: 'everything' }), { ok: false, error: APP_COMMAND_MESSAGES.badArgs })
   const own = harness({ ownWindow: true })
   assert.deepEqual(await own.runner.run('s1', 'co', 'tabs.tidy', {}), { ok: false, error: APP_COMMAND_MESSAGES.ownWindow })
   assert.equal(h.sent.length + own.sent.length, 0)

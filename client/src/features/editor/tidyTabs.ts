@@ -4,6 +4,7 @@
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { thingName } from '../../../shared/thing-words'
 import { recordIdOfTab, recordTabKey, type RecordTabLook } from './editorTabs'
+import { GROUP_COLORS, type GroupColor } from './tabArrangement'
 
 /** One tidied tab: a file by its company path, or a record with the look its tab had. */
 export type TidiedItem =
@@ -17,6 +18,8 @@ export interface TidiedGroup {
   day: string
   auto: boolean
   items: TidiedItem[]
+  /** A named group tidied as one (「このまとまりを片づける」): reopening its tabs makes the group again. */
+  tabGroup?: { name: string; color: GroupColor }
 }
 
 /** Kept on this Mac: the last 30 tidies and 500 tabs; older ones drop (the list says so). */
@@ -143,7 +146,9 @@ export function parseGroups(raw: unknown): TidiedGroup[] {
   for (const g of raw as Array<Partial<TidiedGroup> | null>) {
     if (!g || typeof g.id !== 'string' || typeof g.at !== 'string' || typeof g.day !== 'string' || !Array.isArray(g.items)) continue
     const items = g.items.map(parseItem).filter((i): i is TidiedItem => i !== null)
-    if (items.length > 0) out.push({ id: g.id, at: g.at, day: g.day, auto: g.auto === true, items })
+    const tg = g.tabGroup
+    const tabGroup = tg && typeof tg.name === 'string' && tg.name.trim() && GROUP_COLORS.includes(tg.color) ? { name: tg.name.slice(0, 40), color: tg.color } : null
+    if (items.length > 0) out.push({ id: g.id, at: g.at, day: g.day, auto: g.auto === true, items, ...(tabGroup ? { tabGroup } : {}) })
   }
   return out
 }
