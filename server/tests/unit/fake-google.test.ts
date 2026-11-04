@@ -164,6 +164,31 @@ describe('fake Google: OAuth', () => {
 })
 
 describe('fake Google: APIs', () => {
+  it('Sheets: the scope and each spreadsheet\'s editors / readers decide like Google (the relay\'s refusals are real only if these are)', async () => {
+    make()
+    const sheetsToken = (await grant({ scope: `openid email ${GOOGLE_SCOPES.spreadsheets}` })).access_token
+    const calendarOnly = (await grant({ scope: `openid email ${GOOGLE_SCOPES.calendarEventsReadonly}` })).access_token
+    const range = (id: string, r: string, suffix = '') => `/v4/spreadsheets/${id}/values/${encodeURIComponent(r)}${suffix}`
+    // Without the spreadsheets scope: 403 PERMISSION_DENIED.
+    expect((await api(range(S.practiceSheet, '案件!A1:B2'), calendarOnly)).status).toBe(403)
+    const read = await api(range(S.practiceSheet, "'案件'!A1:B2"), sheetsToken)
+    expect(await read.json()).toMatchObject({ range: '案件!A1:B2', values: [['案件番号', '顧客'], ['A-0001', '株式会社サンプル']] })
+    // An editor appends after the last row; a reader of another's sheet reads but cannot write.
+    const appended = await api(`${range(S.practiceSheet, '案件!A:E', ':append')}?valueInputOption=RAW`, sheetsToken, { method: 'POST', body: { values: [['A-0003', 'x']] } })
+    expect(appended.status).toBe(200)
+    expect(fake.spreadsheet(S.practiceSheet)!.sheets[0].rows[3]).toEqual(['A-0003', 'x'])
+    expect((await api(range(S.readOnlySheet, '予算!A1'), sheetsToken)).status).toBe(200)
+    const denied = await api(`${range(S.readOnlySheet, '予算!B2')}?valueInputOption=RAW`, sheetsToken, { method: 'PUT', body: { values: [['1']] } })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ error: { status: 'PERMISSION_DENIED' } })
+    // A write needs valueInputOption (400 like Google); an unknown spreadsheet is 404.
+    expect((await api(range(S.practiceSheet, '案件!A1'), sheetsToken, { method: 'PUT', body: { values: [['1']] } })).status).toBe(400)
+    expect((await api('/v4/spreadsheets/nosuchsheet0000000000', sheetsToken)).status).toBe(404)
+    // Deletions work in the fake, so a relay that let one through would be caught by its tests.
+    expect((await api(`/v4/spreadsheets/${S.practiceSheet}:batchUpdate`, sheetsToken, { method: 'POST', body: { requests: [{ deleteSheet: { sheetId: 1 } }] } })).status).toBe(200)
+    expect(fake.spreadsheet(S.practiceSheet)!.sheets.map(sh => sh.title)).toEqual(['案件'])
+  })
+
   it('a call needing a scope that was not granted is 403 PERMISSION_DENIED; a non-fake bearer is 401', async () => {
     make()
     const t = await grant({ scope: 'openid email' })

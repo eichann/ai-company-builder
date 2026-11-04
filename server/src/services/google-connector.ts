@@ -203,6 +203,9 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
   })
 
   return {
+    /** Why the company cannot use Google now, or null (the relay's view, google-relay.ts). */
+    unavailable: unavailableReason,
+
     /**
      * Whether the company can use Google now (the core connector's `usable`,
      * connector-roles.md): set up, on, the vault on, not stopped by the operator.

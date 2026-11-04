@@ -62,6 +62,8 @@ export const GUARD_REASONS = [
   // The key broker's relay refused a call (K5): no key the member may use for this work, a
   // destination (path / model) the key does not allow, an internal address, a daily cap.
   'key-not-available', 'destination-not-allowed', 'internal-address', 'over-cap',
+  // The Google relay with the member's own permission refused a deletion (google-connector.md "The relay").
+  'no-deletion',
   // The company map (records.md): a type definition (.acb/types/) the member may not change,
   // and state / identity written into a record file instead of through the record tools.
   'type-definition', 'record-file',
@@ -111,6 +113,8 @@ export type ToolTarget =
     kind: 'broker'; service: string; host?: string; path?: string; model?: string; status?: number
     bytesIn?: number; bytesOut?: number; tokensIn?: number; tokensOut?: number; source?: 'company' | 'user'
     connection?: string
+    /** The Google relay: the call (`values.append`, `spreadsheets.batchUpdate`), never its content. */
+    operation?: string
   }
   | { kind: 'none' }
 
@@ -281,8 +285,9 @@ export function parseToolTarget(raw: unknown): ToolTarget | null {
       const status = count(v.status, 999)
       const source = v.source === 'company' || v.source === 'user' ? v.source : undefined
       const connection = text(v.connection, 100, NAME_RE)
+      const operation = text(v.operation, 60, NAME_RE)
       return {
-        kind: 'broker', service, ...(connection ? { connection } : {}),
+        kind: 'broker', service, ...(connection ? { connection } : {}), ...(operation ? { operation } : {}),
         ...(host ? { host } : {}), ...(path ? { path } : {}), ...(model ? { model } : {}),
         ...(status !== undefined ? { status } : {}),
         ...(n(v.bytesIn) !== undefined ? { bytesIn: n(v.bytesIn) } : {}),

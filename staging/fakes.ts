@@ -9,7 +9,8 @@
  *   - HubSpot: the default seed (made-up deals of 株式会社サンプル), the kit's practice key
  *     (read from FAKE_HUBSPOT_KEY_FILE, `pat-fake-…`, never printed);
  *   - Google: the seed's two staff become 検証A社's a-member / a-manager, the Workspace domain
- *     example.invalid, the meetings moved to today so 「議事録を確かめる」 finds them;
+ *     example.invalid, the meetings moved to today so 「議事録を確かめる」 finds them, and the practice
+ *     spreadsheets for the relay (「練習用 係数表」 a-member edits, a budget they may only read);
  *   - Slack: the seed, plus a-member@example.invalid as a member of the workspace.
  * Made-up people and values only. Refuses NODE_ENV=production.
  */

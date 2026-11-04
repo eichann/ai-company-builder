@@ -4,7 +4,7 @@
  * Sealed secrets are stored as their JSON envelope only.
  */
 import type Database from 'better-sqlite3'
-import type { ConnectorChangeRow, ConnectorGrantRow, ConnectorProvider, ConnectorRepository, OAuthClientRow, OAuthPendingRow } from '../../ports/connectors'
+import type { ConnectorChangeRow, ConnectorGrantRow, ConnectorProvider, ConnectorRepository, GoogleRelaySettingsRow, OAuthClientRow, OAuthPendingRow } from '../../ports/connectors'
 import type { SealedSecret } from '../../ports/secret-cipher'
 
 type ClientRow = {
@@ -92,6 +92,29 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       conn.transaction(() => {
         conn.prepare('UPDATE google_oauth_clients SET features_off = ?, features_on = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
           .run(JSON.stringify(switches.featuresOff), JSON.stringify(switches.featuresOn), at, by, companyId)
+        addHistory(change)
+      })()
+    },
+    relaySettings() {
+      const r = conn.prepare('SELECT relay FROM google_oauth_clients WHERE company_id = ?').get(companyId) as { relay: string } | undefined
+      if (!r) return null
+      try {
+        const v = JSON.parse(r.relay) as unknown
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+        const o = v as Record<string, unknown>
+        const out: GoogleRelaySettingsRow = {}
+        if (typeof o.capPerMemberPerDay === 'number') out.capPerMemberPerDay = o.capPerMemberPerDay
+        if (typeof o.stopped === 'boolean') out.stopped = o.stopped
+        if (Array.isArray(o.stoppedUserIds)) out.stoppedUserIds = o.stoppedUserIds.filter((s): s is string => typeof s === 'string')
+        return out
+      } catch {
+        return {}
+      }
+    },
+    setRelaySettings(settings, at, by, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE google_oauth_clients SET relay = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
+          .run(JSON.stringify(settings), at, by, companyId)
         addHistory(change)
       })()
     },

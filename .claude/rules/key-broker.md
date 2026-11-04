@@ -52,6 +52,7 @@ paths:
   - "client/src/features/chat/hooks/useOwnKeyService.ts"
   - "client/tests/broker-key-card-ui.*"
   - "client/tests/ui/broker-key-card.spec.ts"
+  - "server/src/services/google-relay.ts"
 ---
 
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
@@ -329,6 +330,19 @@ the sign-in.
    key are dropped; error bodies (≥ 400, ≤ 1 MB) have the key and the token replaced by
    `[hidden]`. `set-cookie`, `alt-svc` and hop-by-hop headers are dropped.
 - WebSocket (Gemini Live, OpenAI Realtime) is not relayed in stage 1.
+
+## A person relay: Google with the member's own permission (2026-11-04)
+
+`/api/broker/google/…` is not a keyed service: `BrokerRelayDeps.personRelays('google')` hands the
+call (after the token, as `brokerTokens.holder` — live, a member, `google` in the token — and the
+company's AI stop) to `services/google-relay.ts`, which calls Google with that member's own OAuth
+grant (`google-connector.md` "The relay"). No key is resolved, revealed or sent; nothing of this
+file's key swap, destinations, caps or redirects applies. Token issue grants `google` (source
+`user`) while the company offers it (`personRelaysOffered`), so the app's K6 sets
+`ACB_GOOGLE_API_KEY` / `ACB_GOOGLE_BASE_URL` (`<origin>/api/broker/google`); not offered →
+`unknown-service` (nothing set). `PERSON_RELAY_SERVICES` (`shared/core/key-broker.ts`) reserves the
+name: no company key (400 `SERVICE_RESERVED`), no generic service id. The call is recorded by the
+relay's usual `agent_events` line, with `operation`.
 
 ## HubSpot and the read-only relay (milestone 3, P3)
 

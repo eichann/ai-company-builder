@@ -82,6 +82,7 @@ const TYPES: Record<string, string> = {
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
+  GoogleRelay: 'GoogleRelayAdminView',
   Slack: 'SlackAdminView',
   CoreConnectors: 'CoreConnectorsView',
   MinutesFolder: 'MinutesFolderSetting',
@@ -447,6 +448,9 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Google', USERS.owner, 'PUT', `${base}/google/client`, { clientId: '123456789012-contract.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-contract-0000', domain: 'example.com' })
     await expectShape('Google', USERS.owner, 'PUT', `${base}/google/enabled`, { enabled: false })
     await expectShape('Google', USERS.owner, 'PUT', `${base}/google/features`, { feature: 'inbox', on: false })
+    await expectShape('GoogleRelay', USERS.owner, 'GET', `${base}/google/relay`)
+    await expectShape('GoogleRelay', USERS.owner, 'PUT', `${base}/google/relay`, { services: { sheets: true }, capPerMemberPerDay: 300 })
+    await expectShape('GoogleRelay', USERS.owner, 'PUT', `${base}/google/relay/members/${USERS.member}`, { stopped: true })
     // A member's permission as the callback stores it (the admin stops it).
     const { db } = await import('../../src/db')
     db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)

@@ -3,7 +3,7 @@
  * the ONE place in the server that talks to Google — the OAuth token,
  * revoke and userinfo endpoints for the connection (services/google-connector.ts)
  * and every API call made on a member's behalf (`request`: Calendar, Meet and
- * Drive for the minutes, Gmail for mail).
+ * Drive for the minutes, Gmail for mail, Sheets for the relay — google-relay.ts).
  *
  * Every call re-checks every switch, so each stop works from the next call:
  * the operator's stop file (`<PLUGINS_DIR>/stopped` naming `google` or `*`),
@@ -74,6 +74,11 @@ export interface GoogleRequest {
   scope: string
   /** A short name for the record (`calendar.events.list`, `gmail.send`); never content. */
   operation: string
+  /**
+   * The caller files the call's AI-action-log line itself (the relay, google-relay.ts: one line
+   * per relayed call with its conversation, refusals included), so this client adds none.
+   */
+  recordedByCaller?: boolean
 }
 
 export type GoogleResult =
@@ -448,14 +453,14 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         let failure: GoogleResult
         let retryAfterMs: number | null = null
         if (!sent.ok) {
-          deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status: null, ok: false })
+          if (!req.recordedByCaller) deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status: null, ok: false })
           const before = BEFORE_SENDING.includes(sent.reason)
           failure = { ok: false, kind: before || isRead ? 'not-sent' : 'unknown', reason: sent.reason }
           if (!isRead || before) return failure
         } else {
           const { status } = sent.response
           const bytes = await readBody(sent.response.body).catch(() => null)
-          deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status, ok: status >= 200 && status < 300 })
+          if (!req.recordedByCaller) deps.record(companyId, userId, { operation: req.operation, api: req.api, host, status, ok: status >= 200 && status < 300 })
           if (!bytes) return { ok: false, kind: isRead ? 'server-error' : 'unknown', reason: 'answer-too-large', status }
           const json = parseJson(bytes)
           if (status >= 200 && status < 300) {

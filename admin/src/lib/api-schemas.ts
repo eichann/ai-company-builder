@@ -23,7 +23,7 @@ import type {
 import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
 import type { AgentStopView } from '../../../shared/types/agent-stop'
 import type { CoreConnectorsView } from '../../../shared/types/core-connectors'
-import type { GoogleAdminView } from '../../../shared/types/google'
+import type { GoogleAdminView, GoogleRelayAdminView } from '../../../shared/types/google'
 import type { InboxSettingsView } from '../../../shared/types/inbox'
 import type { BrokerView } from '../../../shared/types/key-broker'
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
@@ -339,6 +339,9 @@ export const googleSchema = topLevel<GoogleAdminView>({
   vaultEnabled: bool, configured: bool, clientId: nullableStr, secretLast4: nullableStr, domain: nullableStr,
   enabled: bool, redirectUri: str, practice: bool, operatorStopped: bool, updatedAt: nullableStr,
   updatedBy: nullableStr, grants: list, history: list, picker: obj, featuresOff: list, companyFeatures: list,
+})
+export const googleRelaySchema = topLevel<GoogleRelayAdminView>({
+  available: bool, reason: nullableStr, services: list, capPerMemberPerDay: num, stopped: bool, members: list, records: list,
 })
 export const slackSchema = topLevel<SlackAdminView>({
   vaultEnabled: bool, configured: bool, teamId: nullableStr, clientId: nullableStr, clientSecretLast4: nullableStr,

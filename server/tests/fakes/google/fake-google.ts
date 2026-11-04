@@ -30,6 +30,14 @@
  *                                 GET  /gmail/v1/users/{userId}/messages (q `after:<seconds>`, labelIds, maxResults, pageToken)
  *                                 GET  /gmail/v1/users/{userId}/messages/{id} (format minimal | metadata | full)
  *                                 GET  /gmail/v1/users/{userId}/threads/{id} (format full)
+ *   sheets.googleapis.com         GET  /v4/spreadsheets/{id}, POST /v4/spreadsheets/{id}:batchUpdate,
+ *                                 GET|PUT /v4/spreadsheets/{id}/values/{range}, POST …/values/{range}:append | :clear,
+ *                                 GET /v4/spreadsheets/{id}/values:batchGet, POST …/values:batchUpdate | :batchClear
+ *
+ * Sheets (the relay, google-connector.md "The relay"): each spreadsheet has an owner, editors and
+ * readers; a write by anyone else, or a read by a stranger, is 403 PERMISSION_DENIED (as Google
+ * answers "The caller does not have permission"). Clears and deletes are implemented too, so a
+ * test can prove the relay never sends one (`requests`, `spreadsheet()`).
  *
  * Practice values only, recognisable at a glance: client secrets start with
  * `fake-google-secret-`, access tokens `ya29.fake-`, refresh tokens
@@ -48,7 +56,7 @@
  */
 import { createHash, randomBytes } from 'crypto'
 import { Hono, type Context } from 'hono'
-import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile, type SeedMail } from './seed'
+import { defaultGoogleSeed, type ArtifactState, type GoogleSeed, type SeedArtifact, type SeedDriveFile, type SeedMail, type SeedSpreadsheet } from './seed'
 
 export const FAKE_GOOGLE_SECRET_PREFIX = 'fake-google-secret-'
 export const FAKE_ACCESS_TOKEN_PREFIX = 'ya29.fake-'
@@ -65,6 +73,7 @@ export const GOOGLE_SCOPES = {
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
   driveFile: 'https://www.googleapis.com/auth/drive.file',
   gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
+  spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
 } as const
 
 /** The scopes milestone 4 asks for (design §5-2). */
@@ -81,7 +90,7 @@ const KNOWN_SCOPES = new Set<string>([
   ...Object.values(GOOGLE_SCOPES),
   `${AUTH}calendar`, `${AUTH}calendar.readonly`, `${AUTH}calendar.events`,
   `${AUTH}meetings.space.created`,
-  `${AUTH}drive`, `${AUTH}drive.readonly`,
+  `${AUTH}drive`, `${AUTH}drive.readonly`, `${AUTH}spreadsheets.readonly`,
   `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, `${AUTH}gmail.metadata`, 'https://mail.google.com/',
 ])
 /** Any one of these lets a call through (each method's "Authorization scopes" list). */
@@ -91,6 +100,8 @@ const NEEDS = {
   drive: [GOOGLE_SCOPES.driveMeetReadonly, GOOGLE_SCOPES.driveFile, `${AUTH}drive.readonly`, `${AUTH}drive`],
   gmailSend: [GOOGLE_SCOPES.gmailSend, `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
   gmailRead: [GOOGLE_SCOPES.gmailReadonly, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
+  sheetsRead: [GOOGLE_SCOPES.spreadsheets, `${AUTH}spreadsheets.readonly`, `${AUTH}drive`, `${AUTH}drive.readonly`],
+  sheetsWrite: [GOOGLE_SCOPES.spreadsheets, `${AUTH}drive`],
 }
 /** Drive scopes that reach every file the account can open (not only Meet's). */
 const DRIVE_FULL = new Set([`${AUTH}drive.readonly`, `${AUTH}drive`])
@@ -183,6 +194,8 @@ export interface FakeGoogle {
   driveFile(id: string): { name: string; mimeType: string; parents: string[]; content: Buffer; appProperties: Record<string, string>; createdBy: string | null } | null
   /** Every Drive file the app made (uploads), oldest first. */
   uploads(): Array<{ id: string; name: string; parents: string[]; mimeType: string }>
+  /** A spreadsheet as it is now (null when unknown); for assertions. */
+  spreadsheet(id: string): { title: string; sheets: Array<{ sheetId: number; title: string; rows: unknown[][] }> } | null
 }
 
 interface CodeGrant {
@@ -988,6 +1001,153 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     a.state = state
   }
 
+  // ---- Sheets v4 (the relay) ----
+  type LiveSheet = { sheetId: number; title: string; rows: unknown[][] }
+  type LiveSpreadsheet = Omit<SeedSpreadsheet, 'sheets'> & { sheets: LiveSheet[] }
+  const spreadsheets = new Map<string, LiveSpreadsheet>((seed.spreadsheets ?? []).map(sp => [sp.id, {
+    ...sp, editors: [...sp.editors], readers: [...sp.readers], sheets: sp.sheets.map(sh => ({ ...sh, rows: sh.rows.map(r => [...r]) })),
+  }]))
+  const colIndex = (letters: string) => [...letters].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1
+  const colName = (i: number): string => { let n = i + 1, out = ''; while (n > 0) { const m = (n - 1) % 26; out = String.fromCharCode(65 + m) + out; n = Math.floor((n - 1) / 26) } return out }
+
+  /** An A1 range (`'案件'!A1:C3`, `案件!A:C`, `A1`, `案件`) on a spreadsheet, or 400. */
+  function a1(sp: LiveSpreadsheet, range: string): { sheet: LiveSheet; r1: number; c1: number; r2: number; c2: number } {
+    const bang = range.lastIndexOf('!')
+    let name: string | null = bang < 0 ? null : range.slice(0, bang)
+    let cells = bang < 0 ? range : range.slice(bang + 1)
+    if (bang < 0 && !/^[A-Z]*\d*(:[A-Z]*\d*)?$/.test(range)) { name = range; cells = '' }
+    if (name && name.startsWith("'") && name.endsWith("'")) name = name.slice(1, -1).replace(/''/g, "'")
+    const sheet = name === null ? sp.sheets[0] : sp.sheets.find(sh => sh.title === name)
+    if (!sheet) throw apiError(400, `Unable to parse range: ${range}`, 'badRequest')
+    const m = /^([A-Z]*)(\d*)(?::([A-Z]*)(\d*))?$/.exec(cells)
+    if (!m) throw apiError(400, `Unable to parse range: ${range}`, 'badRequest')
+    const r1 = m[2] ? Number(m[2]) - 1 : 0
+    const c1 = m[1] ? colIndex(m[1]) : 0
+    const single = m[3] === undefined && m[4] === undefined && !!m[1] && !!m[2]
+    const r2 = single ? r1 : m[4] ? Number(m[4]) - 1 : 1_000_000
+    const c2 = single ? c1 : m[3] ? colIndex(m[3]) : 1_000
+    return { sheet, r1, c1, r2, c2 }
+  }
+  const rangeName = (sheet: LiveSheet, r1: number, c1: number, r2: number, c2: number) =>
+    `${sheet.title}!${colName(c1)}${r1 + 1}:${colName(c2)}${r2 + 1}`
+
+  function readValues(sp: LiveSpreadsheet, range: string) {
+    const { sheet, r1, c1, r2, c2 } = a1(sp, range)
+    const rows = sheet.rows.slice(r1, r2 + 1).map(r => r.slice(c1, c2 + 1))
+    while (rows.length && rows[rows.length - 1].every(v => v === '' || v === undefined)) rows.pop()
+    const width = Math.max(0, ...rows.map(r => r.length))
+    return { range: rangeName(sheet, r1, c1, r1 + Math.max(rows.length, 1) - 1, c1 + Math.max(width, 1) - 1), majorDimension: 'ROWS', ...(rows.length ? { values: rows } : {}) }
+  }
+
+  function writeValues(sp: LiveSpreadsheet, range: string, values: unknown) {
+    if (!Array.isArray(values) || !values.every(Array.isArray)) throw apiError(400, 'Invalid values', 'badRequest')
+    const { sheet, r1, c1 } = a1(sp, range)
+    const rows = values as unknown[][]
+    rows.forEach((row, i) => {
+      const target = sheet.rows[r1 + i] ?? (sheet.rows[r1 + i] = [])
+      for (let j = 0; j < c1; j++) if (target[j] === undefined) target[j] = ''
+      row.forEach((v, j) => { target[c1 + j] = v })
+    })
+    for (let i = 0; i < sheet.rows.length; i++) if (!sheet.rows[i]) sheet.rows[i] = []
+    const width = Math.max(1, ...rows.map(r => r.length))
+    return { spreadsheetId: sp.id, updatedRange: rangeName(sheet, r1, c1, r1 + rows.length - 1, c1 + width - 1), updatedRows: rows.length, updatedColumns: width, updatedCells: rows.reduce((n, r) => n + r.length, 0) }
+  }
+
+  function clearValues(sp: LiveSpreadsheet, range: string) {
+    const { sheet, r1, c1, r2, c2 } = a1(sp, range)
+    for (let i = r1; i <= Math.min(r2, sheet.rows.length - 1); i++) for (let j = c1; j <= Math.min(c2, (sheet.rows[i]?.length ?? 0) - 1); j++) sheet.rows[i][j] = ''
+    return { spreadsheetId: sp.id, clearedRange: rangeName(sheet, r1, c1, Math.min(r2, sheet.rows.length), Math.min(c2, 25)) }
+  }
+
+  const sheetsOf = (sp: LiveSpreadsheet) => sp.sheets.map((sh, index) => ({
+    properties: { sheetId: sh.sheetId, title: sh.title, index, sheetType: 'GRID', gridProperties: { rowCount: Math.max(1000, sh.rows.length), columnCount: 26 } },
+  }))
+
+  app.all('/v4/spreadsheets/*', async c => {
+    const write = c.req.method !== 'GET'
+    const a = bearer(c, write ? NEEDS.sheetsWrite : NEEDS.sheetsRead, 'sheets.googleapis.com')
+    const email = a.email.toLowerCase()
+    const seg = c.req.path.split('/').map(decodeURIComponent)
+    const [id, verb] = seg[3].split(':')
+    const sp = spreadsheets.get(id)
+    if (!sp) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    const isEditor = sp.owner.toLowerCase() === email || sp.editors.some(e => e.toLowerCase() === email)
+    const isReader = isEditor || sp.readers.some(e => e.toLowerCase() === email)
+    if (!isReader || (write && !isEditor)) throw apiError(403, 'The caller does not have permission', 'forbidden')
+    const body = write ? await c.req.json().catch(() => ({})) as Record<string, unknown> : {}
+    const valueInput = () => {
+      const opt = c.req.query('valueInputOption') ?? body.valueInputOption
+      if (opt !== 'RAW' && opt !== 'USER_ENTERED') throw apiError(400, "'valueInputOption' is required but not specified", 'badRequest')
+    }
+    if (seg.length === 4) {
+      if (verb === undefined && c.req.method === 'GET') return c.json({ spreadsheetId: sp.id, properties: { title: sp.title, locale: 'ja_JP', timeZone: 'Asia/Tokyo' }, sheets: sheetsOf(sp) })
+      if (verb === 'batchUpdate' && c.req.method === 'POST') {
+        const requests = Array.isArray(body.requests) ? body.requests as Array<Record<string, Record<string, unknown>>> : []
+        const replies: unknown[] = []
+        for (const r of requests) {
+          const [kind] = Object.keys(r)
+          const v = r[kind] ?? {}
+          if (kind === 'deleteSheet') {
+            sp.sheets = sp.sheets.filter(sh => sh.sheetId !== v.sheetId)
+            replies.push({})
+          } else if (kind === 'addSheet') {
+            const title = String((v.properties as { title?: unknown } | undefined)?.title ?? `Sheet${sp.sheets.length + 1}`)
+            const sheetId = Math.max(0, ...sp.sheets.map(sh => sh.sheetId)) + 1
+            sp.sheets.push({ sheetId, title, rows: [] })
+            replies.push({ addSheet: { properties: { sheetId, title, index: sp.sheets.length - 1 } } })
+          } else if (kind === 'insertDimension') {
+            const range = v.range as { sheetId?: number; dimension?: string; startIndex?: number; endIndex?: number } | undefined
+            const sheet = sp.sheets.find(sh => sh.sheetId === range?.sheetId)
+            if (!sheet || range?.dimension !== 'ROWS') throw apiError(400, 'Invalid insertDimension', 'badRequest')
+            sheet.rows.splice(range.startIndex ?? 0, 0, ...Array.from({ length: (range.endIndex ?? 0) - (range.startIndex ?? 0) }, () => [] as unknown[]))
+            replies.push({})
+          } else if (kind === 'deleteDimension') {
+            const range = v.range as { sheetId?: number; startIndex?: number; endIndex?: number } | undefined
+            const sheet = sp.sheets.find(sh => sh.sheetId === range?.sheetId)
+            if (sheet) sheet.rows.splice(range?.startIndex ?? 0, (range?.endIndex ?? 0) - (range?.startIndex ?? 0))
+            replies.push({})
+          } else if (typeof kind === 'string' && kind.length > 0) {
+            replies.push({}) // formatting and the rest: accepted, nothing stored
+          } else {
+            throw apiError(400, 'Invalid requests', 'badRequest')
+          }
+        }
+        return c.json({ spreadsheetId: sp.id, replies })
+      }
+      throw apiError(404, 'Not found', 'notFound')
+    }
+    if (seg.length === 5 && seg[4] === 'values:batchGet' && c.req.method === 'GET') {
+      return c.json({ spreadsheetId: sp.id, valueRanges: c.req.queries('ranges')?.map(r => readValues(sp, r)) ?? [] })
+    }
+    if (seg.length === 5 && seg[4] === 'values:batchUpdate' && c.req.method === 'POST') {
+      valueInput()
+      const data = Array.isArray(body.data) ? body.data as Array<{ range: string; values: unknown }> : []
+      const responses = data.map(d => writeValues(sp, d.range, d.values))
+      return c.json({ spreadsheetId: sp.id, totalUpdatedRows: responses.reduce((n, r) => n + r.updatedRows, 0), totalUpdatedCells: responses.reduce((n, r) => n + r.updatedCells, 0), responses })
+    }
+    if (seg.length === 5 && seg[4] === 'values:batchClear' && c.req.method === 'POST') {
+      const ranges = Array.isArray(body.ranges) ? body.ranges as string[] : []
+      return c.json({ spreadsheetId: sp.id, clearedRanges: ranges.map(r => clearValues(sp, r).clearedRange) })
+    }
+    if (seg.length === 6 && seg[4] === 'values') {
+      const tail = seg[5]
+      if (c.req.method === 'GET') return c.json(readValues(sp, tail))
+      if (c.req.method === 'PUT') { valueInput(); return c.json(writeValues(sp, tail, body.values)) }
+      if (c.req.method === 'POST' && tail.endsWith(':append')) {
+        valueInput()
+        const range = tail.slice(0, -':append'.length)
+        const { sheet } = a1(sp, range)
+        let last = sheet.rows.length - 1
+        while (last >= 0 && (sheet.rows[last] ?? []).every(v => v === '' || v === undefined)) last--
+        const at = `'${sheet.title.replace(/'/g, "''")}'!A${last + 2}`
+        const updates = writeValues(sp, at, body.values)
+        return c.json({ spreadsheetId: sp.id, tableRange: rangeName(sheet, 0, 0, Math.max(last, 0), 4), updates })
+      }
+      if (c.req.method === 'POST' && tail.endsWith(':clear')) return c.json(clearValues(sp, tail.slice(0, -':clear'.length)))
+    }
+    throw apiError(404, 'Not found', 'notFound')
+  })
+
   function revokeAllFor(email: string) {
     for (const r of refreshTokens.values()) if (r.email.toLowerCase() === email.toLowerCase()) revokeRefresh(r.token)
     for (const t of accessTokens.values()) if (t.email.toLowerCase() === email.toLowerCase()) t.live = false
@@ -1073,6 +1233,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     driveFile(id) {
       const f = driveFiles.get(id)
       return f ? { name: f.name, mimeType: f.mimeType, parents: [...f.parents], content: f.content, appProperties: { ...f.appProperties }, createdBy: f.createdBy } : null
+    },
+    spreadsheet(id) {
+      const sp = spreadsheets.get(id)
+      return sp ? { title: sp.title, sheets: sp.sheets.map(sh => ({ sheetId: sh.sheetId, title: sh.title, rows: sh.rows.map(r => [...r]) })) } : null
     },
     uploads() {
       return uploadOrder.map(id => driveFiles.get(id)!).map(f => ({ id: f.id, name: f.name, parents: [...f.parents], mimeType: f.mimeType }))

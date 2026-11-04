@@ -23,6 +23,9 @@
  *   the key travels in (`relayCredentialValue`); the client's copy of that
  *   header is never forwarded, and no header or query value that carries the
  *   token is either.
+ * - A person relay (`google`, services/google-relay.ts) takes the token's member and hands the
+ *   call to that relay, which acts with the member's own permission; nothing of this file's key
+ *   handling applies to it.
  * This file is long because each step is one guard of the same request; it stays whole so
  * the order of the guards reads top to bottom.
  */
@@ -71,6 +74,40 @@ export interface BrokerRelayDeps {
    * managed connection"): null = not managed. Asked on every call.
    */
   managedConnection?: (companyId: string, userId: string, service: string) => ManagedRelayPolicy | null
+  /**
+   * A service relayed with the member's own permission instead of a key (「本人の許可で中継する」:
+   * `google`, services/google-relay.ts), or null. Its calls take the token's member only; no key
+   * is resolved, revealed or sent.
+   */
+  personRelays?: (service: string) => PersonRelay | null
+}
+
+/** One call for a person relay, after the token named its member (and the AI is not stopped). */
+export interface PersonRelayCall {
+  who: BrokerTokenHolder
+  method: string
+  /** What follows /api/broker/<service>, as received (percent-encoded), without the query. */
+  rawPath: string
+  query: URLSearchParams
+  /** Lower-case names. Nothing of them is forwarded by the relay itself. */
+  headers: Array<[string, string]>
+  body: AsyncIterable<Uint8Array> | null
+  signal: AbortSignal
+}
+
+/** A person relay's answer: the upstream's (JSON) or its own refusal, and what the record says. */
+export interface PersonRelayResult {
+  status: number
+  body: Uint8Array
+  refusal?: { code: RelayErrorCode; message: string }
+  host?: string
+  path?: string
+  operation?: string
+  bytesIn: number
+}
+
+export interface PersonRelay {
+  relay(call: PersonRelayCall): Promise<PersonRelayResult>
 }
 
 /** What the relay may still do for a service whose connection a plugin manages. */
@@ -119,6 +156,8 @@ interface CallMeta {
   path?: string
   /** A plugin-managed service: its connection(s), for the log. */
   connection?: string
+  /** A person relay's call (`values.append`), never its content. */
+  operation?: string
   model?: string
   bytesIn: number
   /** The request reached the provider (counted for the caps). */
@@ -131,6 +170,8 @@ export type RelayErrorCode =
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
   | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
   | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED' | 'ACB_KEY_NOT_CHOSEN'
+  // The person relay (google-relay.ts): a deletion, a call it does not pass, no permission of the member, Google off.
+  | 'ACB_DELETE_REFUSED' | 'ACB_NOT_RELAYED' | 'ACB_GOOGLE_NOT_ALLOWED' | 'ACB_GOOGLE_OFF'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
@@ -146,6 +187,10 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
   ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
   ACB_TOO_LARGE: { decision: 'guard-denied' },
+  ACB_DELETE_REFUSED: { decision: 'guard-denied', guardReason: 'no-deletion' },
+  ACB_NOT_RELAYED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_GOOGLE_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'key-not-available' },
+  ACB_GOOGLE_OFF: { decision: 'stopped' },
 }
 
 const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key'] as const
@@ -331,6 +376,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
               ...(meta.host ? { host: meta.host } : {}),
               ...(meta.path ? { path: meta.path.slice(0, 200) } : {}),
               ...(meta.connection ? { connection: meta.connection.slice(0, 100) } : {}),
+              ...(meta.operation ? { operation: meta.operation.slice(0, 60) } : {}),
               ...(meta.model ? { model: meta.model.slice(0, 100) } : {}),
               status: answer.status, bytesIn: meta.bytesIn, bytesOut,
               ...(tokensIn !== undefined ? { tokensIn } : {}),
@@ -405,6 +451,27 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
           : realKey()
       }
       const token = credential.token
+
+      // 1a. A person relay (Google): the token's member, their own permission — no key at all.
+      const person = deps.personRelays?.(req.service) ?? null
+      if (person) {
+        const held = brokerTokens.holder(token, req.service)
+        if (!held.ok) {
+          meta.who = held.who
+          if (held.reason === 'service-not-granted') return jsonError(403, 'ACB_GOOGLE_OFF', 'Google の中継は、いまこの会社で使えません（管理者が「本人の許可で中継する」で選んでいません）。管理者に確かめてください。')
+          return tokenRefusal(held.reason, req.service, req.service)
+        }
+        meta.who = held.who
+        if (deps.companyStopped?.(held.who.companyId)) return jsonError(403, 'ACB_STOPPED', '管理者が AI の利用を一時停止しています。再開されるまで使えません。')
+        const r = await person.relay({ who: held.who, method: req.method, rawPath, query, headers: req.headers, body: req.body, signal: req.signal })
+        meta.host = r.host
+        meta.path = r.path
+        meta.operation = r.operation
+        meta.bytesIn = r.bytesIn
+        if (r.refusal) return jsonError(r.status, r.refusal.code, r.refusal.message)
+        return { status: r.status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body: r.body, grant: null }
+      }
+
       const unknownService = () => jsonError(404, 'ACB_UNKNOWN_SERVICE', `「${req.service}」は ACB の中継先として登録されていません。`, meta.grant ?? null)
       if (!builtin && !isValidBrokerServiceName(req.service)) return unknownService()
       const checked = brokerTokens.validate(token, req.service)

@@ -26,6 +26,7 @@ export const GOOGLE_FEATURE_LABEL: Record<GoogleFeature, string> = {
   mail: 'メールを送る',
   drive: 'Drive で選んだものを読む・置く',
   inbox: '受信を読む',
+  sheets: 'スプレッドシートを中継で使う',
 }
 
 export const GOOGLE_UNAVAILABLE_TEXT: Record<GoogleUnavailableReason, string> = {

@@ -4,6 +4,7 @@
  * secret, a refresh or access token, an authorization code or a PKCE value.
  */
 import type { GoogleFeature } from '../core/google'
+import type { GoogleRelayService, SheetsOperation } from '../core/google-relay'
 
 export type { GoogleFeature } from '../core/google'
 
@@ -30,6 +31,8 @@ export interface GoogleGrantSummary {
 }
 
 export type GoogleChangeAction = 'client' | 'enabled' | 'features' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
+  /** The relay's settings (cap, the company-wide stop) and one member's relay stop. */
+  | 'relay' | 'relay-member'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -148,4 +151,91 @@ export interface GoogleConnectStart {
   /** Open in the system browser. Valid for 10 minutes, once. */
   authorizeUrl: string
   expiresAt: string
+}
+
+// ---------------------------------------------------------------------------
+// The relay with the member's own permission (「本人の許可で中継する」, google-connector.md "The relay").
+
+/** One relayed call as the records show it: who, when, which spreadsheet and range, the result — never cell contents. */
+export interface GoogleRelayRecord {
+  id: string
+  at: string
+  userId: string
+  /** The member's name (the admin's view; the member's own view: their own). */
+  memberName: string | null
+  /** `sheets`. */
+  service: string
+  /** The call (null when it was refused before one was recognised). */
+  operation: SheetsOperation | null
+  /** The spreadsheet (from the path) and the A1 range of a values call. */
+  spreadsheetId: string | null
+  range: string | null
+  /** Google's status, or the relay's own when it refused. */
+  status: number | null
+  /**
+   * ok: Google did it; google-refused: Google answered 4xx (no permission on that sheet, not
+   * found); refused: ACB did not pass it (`reason`); error: Google or the way failed.
+   */
+  result: 'ok' | 'google-refused' | 'refused' | 'error'
+  /** Why ACB refused: deletion / not-relayed / stopped / over-cap / not-allowed (no permission, feature off) / other. */
+  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'other' | null
+}
+
+/** One member in the admin's relay view. */
+export interface GoogleRelayMember {
+  userId: string
+  memberName: string | null
+  memberEmail: string | null
+  /** The member allowed the relay (an active grant holding the service's permission, not turned off by them). */
+  allowed: boolean
+  /** When their Google permission was last given (the grant's creation or update). */
+  allowedAt: string | null
+  /** The admin stopped this member's relay. */
+  stopped: boolean
+  /** Calls counted today (the cap's day). */
+  usedToday: number
+}
+
+/** GET /api/companies/:id/google/relay (owner/admin): 「API キー」→「本人の許可で中継する」→ Google. */
+export interface GoogleRelayAdminView {
+  /** Google is set up and on (else `reason`): without it nothing can be relayed. */
+  available: boolean
+  reason: GoogleUnavailableReason | null
+  /** Each relay service and whether the company turned it on. */
+  services: Array<{ service: GoogleRelayService; on: boolean }>
+  /** Calls per member per day (all services). */
+  capPerMemberPerDay: number
+  /** The company-wide stop. */
+  stopped: boolean
+  /** Members who allowed it, were stopped, or used it today. */
+  members: GoogleRelayMember[]
+  /** The latest relayed calls of everyone (newest first, ≤ 100). */
+  records: GoogleRelayRecord[]
+}
+
+/** PUT /api/companies/:id/google/relay — any subset. */
+export interface GoogleRelaySave {
+  services?: Partial<Record<GoogleRelayService, boolean>>
+  capPerMemberPerDay?: number
+  stopped?: boolean
+}
+
+/** PUT /api/companies/:id/google/relay/members/:userId */
+export interface GoogleRelayMemberSave {
+  stopped: boolean
+}
+
+/** GET /api/companies/:id/me/google/relay (any member: the app's 設定 → Google). */
+export interface MyGoogleRelay {
+  /** Google is usable now (else `reason`). */
+  available: boolean
+  reason: GoogleUnavailableReason | null
+  /** Per relay service: the company offers it, the member allowed it (and has not turned it off). */
+  services: Array<{ service: GoogleRelayService; offered: boolean; allowed: boolean; turnedOff: boolean }>
+  /** The admin stopped the relay for everyone ('company') or for this member ('member'). */
+  stopped: 'company' | 'member' | null
+  capPerDay: number
+  usedToday: number
+  /** The member's own relayed calls (newest first, ≤ 50). */
+  records: GoogleRelayRecord[]
 }

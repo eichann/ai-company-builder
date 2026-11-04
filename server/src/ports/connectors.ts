@@ -31,6 +31,13 @@ export interface OAuthClientRow {
   updatedBy: string
 }
 
+/** The Google relay's settings (google-connector.md "The relay"); absent fields are the defaults. */
+export interface GoogleRelaySettingsRow {
+  capPerMemberPerDay?: number
+  stopped?: boolean
+  stoppedUserIds?: string[]
+}
+
 export interface ConnectorGrantRow {
   userId: string
   provider: ConnectorProvider
@@ -81,6 +88,10 @@ export interface ConnectorRepository {
   setClientEnabled(enabled: boolean, at: string, by: string, change: ConnectorChangeRow): void
   /** The company-level switches (the client must exist). */
   setClientFeatures(switches: { featuresOff: string[]; featuresOn: string[] }, at: string, by: string, change: ConnectorChangeRow): void
+  /** The Google relay's settings on the client ({} when the client exists and nothing was set; null without a client). */
+  relaySettings(): GoogleRelaySettingsRow | null
+  /** Replaces them (the client must exist); the history line in the same transaction. */
+  setRelaySettings(settings: GoogleRelaySettingsRow, at: string, by: string, change: ConnectorChangeRow): void
   /** Google Picker's API key and app id on the client (google-drive.md); null when not registered. */
   picker(): { apiKey: string; appId: string } | null
   /** Sets (or with null, removes) the Picker's registration; the client must exist. */

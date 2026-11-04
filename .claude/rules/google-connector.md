@@ -24,6 +24,9 @@ paths:
   - "client/src/features/settings/hooks/useConnectTools.ts"
   - "client/tests/ui/connect-tools.spec.ts"
   - "admin/tests/integrations.test.tsx"
+  - "shared/core/google-relay.ts"
+  - "server/src/services/google-relay.ts"
+  - "server/tests/integration/google-relay.test.ts"
 ---
 
 # The Google connection (milestone 4 G3: 「Google で許可」)
@@ -74,7 +77,8 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 
 `minutes` (予定と議事録を読む) = `calendar.events.readonly`, `meetings.space.readonly`,
 `drive.meet.readonly`; `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
-= `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; each with `openid email`.
+= `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; `sheets`
+(スプレッドシートを中継で使う) = `spreadsheets` (the relay, below); each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
 `normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeatureOfScope`
 (each feature scope belongs to one feature), `googleFeaturesOff`.
@@ -122,6 +126,74 @@ core connector serving the roles 予定を読む / メールを読む・送る /
   registered Slack. Words: what each connection lets the member do (`TOOL_GOOGLE_TEXT`), no
   OAuth / scope / token.
 
+## The relay with the member's own permission (「本人の許可で中継する」, owner decision 2026-11-04)
+
+A script on the member's PC (anken-sync's coefficient table, …) calls
+`$ACB_GOOGLE_BASE_URL/sheets/v4/spreadsheets/…` with `Authorization: Bearer $ACB_GOOGLE_API_KEY` —
+the key broker's short-lived token (K6, `key-broker.md`: `google` is a granted service once the
+company offers the relay, so released apps already set both variables). The key broker's relay
+(`services/broker-relay.ts`, `personRelays`) takes the token's member (`brokerTokens.holder`: live,
+a member, `google` in the token — nothing the request names) and hands the call to
+`services/google-relay.ts`, which sends it through `googleClient.request` **with that member's own
+grant** — never a key, never a service account — so every switch above applies from the next call.
+
+- **Scope / feature** `sheets` = `spreadsheets`: no per-file designation (any sheet the member can
+  edit; Google refuses the rest). Default off for a company (`GOOGLE_COMPANY_DEFAULT_OFF`): the
+  admin turns it on as a relay service (`PUT /google/relay { services: { sheets } }` writes the
+  company feature switch, history `features`). Never in the one consent (`GOOGLE_ASKED_BY_NAME_ONLY`,
+  `googleMemberFeatures`): asked only when the member names it (`POST /me/google/connect
+  { features: ['sheets'] }`); 「やめる」 = `PUT /me/google/features { feature: 'sheets', on: false }`.
+  The 「会社で使うもの」 list on 「つなぎ先 → Google」 leaves it out (it lives under 「API キー」).
+- **What passes** (`shared/core/google-relay.ts`, the one copy): only `/sheets/…` (else
+  `ACB_NOT_RELAYED`); `parseSheetsCall` — `GET spreadsheets/<id>`, values `get` / `batchGet` /
+  `update` (PUT) / `batchUpdate` / `append`, `POST spreadsheets/<id>:batchUpdate`; **never a
+  deletion**: `values/<range>:clear`, `values:batchClear(ByDataFilter)` and a batchUpdate with any
+  `delete…` / `clear…` request → 403 `ACB_DELETE_REFUSED`; other batchUpdate kinds only from
+  `SHEETS_BATCH_UPDATE_ALLOWED` (insertDimension, insertRange, appendDimension, appendCells,
+  updateCells, repeatCell, autoResizeDimensions, updateDimensionProperties, updateBorders,
+  mergeCells, unmergeCells, addSheet, updateSheetProperties), one kind per request, ≤ 500 — any
+  other kind (sortRange, cutPaste, findReplace, …) → `ACB_NOT_RELAYED`. Query parameters only from
+  `SHEETS_QUERY_ALLOWED` (`key` dropped; `access_token` & co. refused). Method-override headers
+  refused. Nothing of the client's headers is forwarded (the Google client builds its own).
+  Overwriting cells with values (also empty ones) is an edit and passes.
+- **Order, all before anything leaves ACB**: token → the company's AI stop (M2) → path → the
+  company-wide relay stop → this member's relay stop → the company's service switch → the call →
+  query → body (JSON ≤ 10 MB; batchUpdate kinds) → the member's daily cap (default 500, admin
+  1–10000; counted in `broker_usage` under the key id `person-relay:google`, before sending, like
+  the key caps) → `googleClient.request` (operator stop, client on, vault, member, grant, scope,
+  company feature, the member's own 「やめる」). No person is asked (auto + ledger).
+- **Answers**: Google's JSON as is; Google's refusal (403: no edit permission on that sheet, 404)
+  with Google's status in Google's error shape `{ error: { code, status, message } }` (Japanese
+  message, never Google's text); ACB's own refusals in the broker's error shape
+  (`ACB_DELETE_REFUSED`, `ACB_NOT_RELAYED`, `ACB_GOOGLE_NOT_ALLOWED` — 「設定 → Google で…［許可する］」,
+  `ACB_GOOGLE_OFF`, `ACB_STOPPED`, `ACB_OVER_CAP`). A write is never retried; a lost answer → 504.
+- **Records**: one AI-action-log line per call, filed by the broker relay (tool `broker:google`,
+  target `{ kind: 'broker', service: 'google', host: 'sheets.googleapis.com', path: <decoded path,
+  spreadsheet id and range>, operation, status, bytesIn, bytesOut }`, the conversation and
+  department of the token; `googleClient` adds none: `recordedByCaller`). Refusals: deletion →
+  guard-denied `no-deletion`, unlisted → `destination-not-allowed`, no permission →
+  `key-not-available`, cap → `over-cap`, stops / Google off → `stopped`. Never a cell's content.
+- **Admin** (owner/admin): `GET /google/relay` (`GoogleRelayAdminView`: available, services,
+  `capPerMemberPerDay`, `stopped`, members who allowed / were stopped with today's count, the latest
+  100 records); `PUT /google/relay { services?, capPerMemberPerDay?, stopped? }` (history `relay`);
+  `PUT /google/relay/members/:userId { stopped }` (history `relay-member`; another company's member
+  → 404 like an unknown one). Stored as `google_oauth_clients.relay` JSON (`migrateGoogleRelay`).
+  A member stop survives the member's re-consent (it is not on the grant).
+- **Member**: `GET /me/google/relay` (`MyGoogleRelay`: offered / allowed / turned off per service,
+  `stopped: company | member | null`, cap and today's count, their own latest 50 records only).
+- The name `google` is reserved in the key broker (`PERSON_RELAY_SERVICES`): no company key
+  (400 `SERVICE_RESERVED`), no generic service id.
+- Token lifetime: the app renews per chat turn (≥ 10 minutes left, `REFRESH_MARGIN_MS`); one turn
+  longer than what is left gets `ACB_TOKEN_INVALID` (a gap shared with every broker service).
+- Test: `tests/integration/google-relay.test.ts` (each deletion form and unlisted call refused with
+  nothing sent and the sheet unchanged; no permission / 「やめる」 / service off / Google off /
+  company stop / member stop / cap refused with nothing sent; another member's token acts as that
+  member (Google refuses their write to Sato's sheet); another company never reaches a grant here;
+  records for admins and the member's own only; no cell content, broker token or Google token in
+  any table, answer or log line; asked only by name), mutation-checked: the batchUpdate check, its
+  delete and allow-list rules, one kind per request, `values:clear` / `batchClear`, both stops, the
+  cap, the query allow-list, never in the one consent, the records' result.
+
 ## Routes (`routes/google.ts` → `services/google-connector.ts`; `routes/oauth.ts` → `services/member-oauth.ts`)
 
 - Owner/admin, `/api/companies/:id`: `GET /google` (`GoogleAdminView`: configured, client id,
@@ -134,6 +206,7 @@ core connector serving the roles 予定を読む / メールを読む・送る /
   `PUT /google/features { feature, on }` (company-level switch, "One consent");
   `DELETE /google/grants/:userId` (revoke at Google, then `stopped` `admin`; another company's
   member → 404 like a missing one, `CROSS` row). Errors other than the role check are Japanese.
+- Owner/admin and any member: the relay's routes (`/google/relay…`, `/me/google/relay`), above.
 - Any member: `GET /me/google` (`MyGoogle`: available + reason `not-configured` / `off` /
   `vault-off` / `operator-stopped`, connected, status, Google email, features, `featuresOff`, domain, practice);
   `PUT /me/google/features { feature, on }` — the member turns one allowed feature off / on (400
@@ -243,7 +316,10 @@ fake's origin (`host.docker.internal` → `localhost` for the browser); only pra
 saved (client secret `fake-google-secret-…`, 400 `REAL_KEY_ON_PRACTICE`) or sent (`ya29.fake-`,
 `1//fake-`, `4/fake-`; anything else → `practice-real-secret`, nothing sent — also a secret saved
 before the redirect was on). The admin view says `practice` (「練習用の Google につながっています」);
-`index.ts` logs it. The fake: `server/tests/fakes/google/` (`pnpm fake:google`, 127.0.0.1:4011).
+`index.ts` logs it. The fake: `server/tests/fakes/google/` (`pnpm fake:google`, 127.0.0.1:4011);
+its Sheets (`sheets.googleapis.com` is in `GOOGLE_HOSTS`) honour the token's scopes and each
+spreadsheet's editors / readers; the seed (and so the staging kit) has 「練習用 係数表」 and a
+read-only budget, and the kit's seed turns the relay on (`once('google-relay')`).
 
 ## Screens
 
