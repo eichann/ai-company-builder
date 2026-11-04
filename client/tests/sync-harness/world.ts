@@ -754,6 +754,7 @@ export class Member {
   private inFlight = 0
   private pushHooks: Array<() => Promise<void> | void> = []
   private pushFaults: Array<PushFault | null> = []
+  private pullFaults = 0
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
@@ -991,6 +992,12 @@ export class Member {
    * call fails without the server ever seeing it. `skip` pushes of the
    * same sync run normally first (e.g. to hit a re-push after a rejection).
    */
+  /** The next pull fails without starting a rebase, as when git refuses to overwrite a file. */
+  failNextPull(): this {
+    this.pullFaults++
+    return this
+  }
+
   failNextPush(fault: PushFault, options: { times?: number; skip?: number } = {}): this {
     for (let i = 0; i < (options.skip ?? 0); i++) this.pushFaults.push(null)
     for (let i = 0; i < (options.times ?? 1); i++) this.pushFaults.push(fault)
@@ -1001,6 +1008,15 @@ export class Member {
     return new Proxy(git, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver)
+        if (prop === 'pull' && typeof value === 'function') {
+          return async (...args: unknown[]) => {
+            if (this.pullFaults > 0) {
+              this.pullFaults--
+              throw new Error('error: The following untracked working tree files would be overwritten by merge')
+            }
+            return (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+          }
+        }
         if (prop === 'push' && typeof value === 'function') {
           return async (...args: unknown[]) => {
             const hook = this.pushHooks.shift()

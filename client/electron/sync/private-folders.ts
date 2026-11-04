@@ -25,6 +25,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import type { MyPrivateScope, MyScopesResponse } from '../../../shared/types/private-folders'
 import { pathKey } from '../../shared/sparse-paths'
+import { diskKey } from '../../../shared/core/paths'
 import { folderExcludeLines, readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
 
 export type { MyPrivateScope, MyScopesResponse }
@@ -132,12 +133,12 @@ export function writePrivateScopesCache(repoPath: string, cache: PrivateScopesCa
 // ---------------------------------------------------------------------------
 
 function isAtOrUnder(ancestor: string, p: string): boolean {
-  const a = pathKey(ancestor)
-  const k = pathKey(p)
+  const a = diskKey(ancestor)
+  const k = diskKey(p)
   return k === a || k.startsWith(`${a}/`)
 }
 
-/** The readable private folder `relPath` lies in (or is), or null. Compared NFC + A–Z folded. */
+/** The readable private folder `relPath` lies in (or is), or null. Compared as a disk folds it: its clone is what is there. */
 export function readableScopeOf(scopes: readonly MyPrivateScope[], relPath: string): MyPrivateScope | null {
   const p = relPath.normalize('NFC').replace(/\\/g, '/').split('/').filter(Boolean).join('/')
   if (!p) return null

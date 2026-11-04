@@ -91,7 +91,7 @@ export function createMessageBoxSyncDialog(host: MessageBoxHost): SyncDialog {
         message: skillsOnly ? 'このスキルのファイルは変更できません。' : 'このファイルは管理者だけが変更できます。',
         detail: skillsOnly
           ? `${SKILL_FILES_REASON}あなたの変更は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n${choices}\n\n変更が必要な場合は、管理者に依頼してください。`
-          : `次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n${choices}\n\nスキル等は、自動実行の設定（hooks、mcpServers、!\`…\` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。`,
+          : `次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n${choices}\n\nスキル等は、変更を認められている人が自動実行の設定（hooks、mcpServers、!\`…\` など）を取り除けば、共有できます。配布が必要な場合は、管理者に依頼してください。`,
       })
       return response === 1 ? 'cancel' : 'restore'
     },

@@ -30,7 +30,7 @@ import { normalizeReservedPath } from '../../shared/types/private-folders'
 import { pathKey as serverPathKey } from '../../shared/core/paths'
 import { isValidFolderName as coreFolderName, isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../shared/core/names'
 import { instructionFileAllowed, skillFileAllowed } from '../../server/src/lib/push-check/policy'
-import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE, SKILL_DIR_RE } from '../../server/src/lib/push-check/rules'
+import { foldAsciiCase as hookFold, instructionFilePaths, skillFilePaths } from '../../server/src/lib/push-check/rules'
 import { isSkillFile, mayChangeSkillFile } from '../../shared/core/skill-files'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
@@ -166,7 +166,7 @@ test('AI instruction files: the chat guard and the push check name the same file
   ]
   for (const f of files) {
     // The push checker matches git's bytes read as latin1.
-    const server = INSTRUCTION_FILE_RE.test(Buffer.from(f, 'utf8').toString('latin1'))
+    const server = instructionFilePaths([Buffer.from(f, 'utf8').toString('latin1')]).length > 0
     assert.equal(isInstructionFile(f), server, `isInstructionFile(${JSON.stringify(f)})`)
   }
   const managed = ['営業部', 'Dev', 'がいど'.normalize('NFD')]
@@ -185,10 +185,11 @@ test('skill files: the core and the push checker\'s bytewise regex agree on what
   const files = [
     '.claude/skills/a/SKILL.md', '.claude/skills/a/make.py', '.claude/agents/x', '.claude/commands/y.md', '.claude/skills', '.claude/commands',
     '営業部/.claude/skills/a/run.sh', 'a/b/.claude/agents/z.py', '.Claude/Skills/a/x', '.CLAUDE/COMMANDS/y', 'がいど'.normalize('NFD') + '/.claude/skills/x',
+    '.claude/ſkills/x.py', '.claude/sKills/x.py', '.ｃｌａｕｄｅ/agents/y', '.cl\u200Daude/commands/z',
     '.claude/notes.md', '.claude/skillset/x', '.claude/skills.md', 'claude/skills/x', 'x.claude/skills/y', '.claude', 'skills/a.py', '.claude/hooks/x',
   ]
   for (const f of files) {
-    assert.equal(isSkillFile(f), SKILL_DIR_RE.test(Buffer.from(f, 'utf8').toString('latin1')), `isSkillFile(${JSON.stringify(f)})`)
+    assert.equal(isSkillFile(f), skillFilePaths([Buffer.from(f, 'utf8').toString('latin1')]).length > 0, `isSkillFile(${JSON.stringify(f)})`)
   }
   const paths = ['.claude/skills/a/x.py', '営業部/.claude/skills/a/x.py', '営業部2/.claude/skills/x', 'dev/.claude/agents/y', 'がいど/.claude/commands/z', 'がいど'.normalize('NFD') + '/.claude/commands/z', '人事/.claude/skills/x']
   const cases = [

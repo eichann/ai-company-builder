@@ -7,6 +7,7 @@
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { World, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck } from '../sync-harness/invariants'
 
@@ -98,6 +99,70 @@ describe('git:sync skill files', { concurrency: CONCURRENCY }, () => {
     assert.equal(world.serverFile(SCRIPT)?.toString(), MINE)
     ok(await b.sync(), 'b')
     assert.equal(b.readText(SCRIPT), MINE)
+  })
+
+  test('a chmod +x alone is refused like any change: it goes back, the loop ends, other work is shared', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed })
+    const [a] = world.members
+    fs.chmodSync(a.path(SCRIPT), 0o755)
+    a.write('notes.md', 'notes\n')
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.result.restoredProtectedFiles, [SCRIPT])
+    assert.equal(world.serverFile('notes.md')?.toString(), 'notes\n')
+    assert.equal(fs.statSync(a.path(SCRIPT)).mode & 0o111, 0, 'the mode is the server\'s again')
+    assert.equal(a.readText(SCRIPT), V1)
+    assert.deepEqual(ok(await a.sync(), 'a').dialogs, [], 'and the next sync asks nothing')
+    await settleAndCheck(world)
+  })
+
+  test('a chmod +x with nothing else to share also ends: no commit is left behind', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed })
+    const [a] = world.members
+    fs.chmodSync(a.path(SCRIPT), 0o755)
+    ok(await a.sync(), 'a')
+    assert.equal(a.git(['rev-list', '--count', 'origin/main..HEAD']).trim(), '0')
+    await settleAndCheck(world)
+  })
+
+  test('what running a skill leaves in its folder is never shared and asks nothing; automatic sync would otherwise stop', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed })
+    const [a] = world.members
+    a.write('.claude/skills/report/__pycache__/make.cpython-312.pyc', Buffer.from([0, 1, 2, 255]))
+      .write('.claude/skills/report/.DS_Store', Buffer.from([0, 1]))
+      .write('営業部/.claude/skills/x/tools/app/package-lock.json', '{}\n')
+      .write('notes.md', 'notes\n')
+    a.hasWindow = false
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs, [])
+    assert.equal(world.serverFile('notes.md')?.toString(), 'notes\n')
+    assert.equal(world.serverFile('.claude/skills/report/.DS_Store'), null)
+    assert.ok(a.exists('.claude/skills/report/__pycache__/make.cpython-312.pyc'), 'it stays where it was')
+  })
+
+  test('a lock file the company already shares stays tracked: changing it does not delete it for everyone', async t => {
+    const LOCK = '.claude/skills/report/tools/app/package-lock.json'
+    const world = World.create(t, { members: [{ name: 'a' }], seed: { ...seed, [LOCK]: '{"v":1}\n' } })
+    const [a] = world.members
+    world.setSkillEditing('a', { everywhere: true, folders: [] })
+    a.write(LOCK, '{"v":2}\n')
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile(LOCK)?.toString(), '{"v":2}\n')
+  })
+
+  test('a pull that fails is not a finished sync: the member is told, nothing of theirs moved, the next sync catches up', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed })
+    const [a, b] = world.members
+    a.write('from-a.md', 'a\n')
+    ok(await a.sync(), 'a')
+    b.write('from-b.md', 'b\n').failNextPull()
+    const failed = await b.sync()
+    assert.equal(failed.result.success, false)
+    assert.equal(failed.result.errorType, 'pull_failed')
+    assert.match(String(failed.result.error), /受け取れなかった/)
+    assert.equal(b.readText('from-b.md'), 'b\n')
+    ok(await b.sync(), 'b')
+    assert.equal(b.readText('from-a.md'), 'a\n')
+    assert.equal(world.serverFile('from-b.md')?.toString(), 'b\n')
   })
 
   test('a member with an existing skill and no change of it syncs as ever', async t => {

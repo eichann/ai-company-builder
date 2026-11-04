@@ -53,7 +53,7 @@ import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-pa
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 import { isSkillFile, mayChangeSkillFile, type SkillEditing } from '../../shared/core/skill-files'
-import { pathKey } from '../../shared/core/paths'
+import { lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { readFileSync } from 'node:fs'
@@ -190,7 +190,7 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
       return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: skillFileMessage(rel), code: 'skill-file' }
     }
   }
-  if (TYPE_DEFINITION_RE.test(rel)) {
+  if (TYPE_DEFINITION_RE.test(lookalikeKey(rel))) {
     const authority = guard.getInstructionAuthority?.()
     if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
       return { deny: true, path: rel, folder: '.acb/types', message: typeDefinitionMessage(rel), code: 'type-definition' }

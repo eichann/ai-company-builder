@@ -77,9 +77,26 @@ import {
 import type { SyncDeps, SyncDialog } from './types'
 import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
+import { isSkillLeftover, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
+
+const PULL_FAILED_MESSAGE = 'サーバーの最新の内容を受け取れなかったため、同期を完了できませんでした。このPCの変更はそのまま残っています。もう一度同期しても直らないときは、管理者に連絡してください。'
+
+/** Does origin/main, as last fetched, hold commits HEAD does not? False without it (the first push of a company). */
+async function upstreamNotMerged(git: SimpleGit): Promise<boolean> {
+  const upstream = (await git.raw(['rev-parse', '--verify', '--quiet', 'origin/main']).catch(() => '')).trim()
+  if (!upstream) return false
+  // Hashes, not exit codes: simple-git does not reject on a silent non-zero exit.
+  return (await git.raw(['merge-base', upstream, 'HEAD']).catch(() => '')).trim() !== upstream
+}
+
+/** This computer's ignore rule for what running a skill leaves in its folder (.git/info/exclude). */
+const SKILL_LEFTOVER_EXCLUDES: ExcludeBlock = {
+  begin: '# >>> ACB skill leftovers (managed by the app, local only) >>>',
+  end: '# <<< ACB skill leftovers <<<',
+}
 
 /** This computer's ignore rule for the app's temporary save files (.git/info/exclude). */
 const TEMP_SAVE_EXCLUDES: ExcludeBlock = {
@@ -178,13 +195,19 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     const stageAll = async () => {
       try {
         writeExcludeLines(repoPath, TEMP_SAVE_EXCLUDES, [TEMP_SAVE_EXCLUDE_PATTERN])
+        writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, SKILL_LEFTOVER_PATTERNS)
       } catch (excludeError) {
         log.warn('Git sync: Could not write .git/info/exclude (temporary save files):', excludeError)
       }
       await git.raw(['add', '--sparse', '.'])
       const staged = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=AMT']).catch(() => ''))
         .split('\0').filter(Boolean)
-      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f))
+      // A leftover only while new: one the company already has is a tracked file,
+      // and taking it out of the index here would delete it for everyone.
+      const added = staged.some(isSkillLeftover)
+        ? new Set((await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=A']).catch(() => '')).split('\0'))
+        : new Set<string>()
+      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f) || (added.has(f) && isSkillLeftover(f)))
       if (stray.length > 0) {
         log.warn('Git sync: Unstaging local-only paths that reached the index:', stray.length)
         for (let i = 0; i < stray.length; i += 200) {
@@ -743,6 +766,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       if (!rebaseInProgress()) {
         // Not a conflict — e.g. network error or no remote tracking branch
         log.warn('Git sync: Pull failed but no rebase in progress:', pullError)
+        // The fetch saw server changes this pull did not bring in: going on
+        // would report a finished sync while the member misses them. (A push
+        // would be refused anyway.) Nothing of theirs moved.
+        if (await upstreamNotMerged(git)) {
+          return { success: false, errorType: 'pull_failed', error: PULL_FAILED_MESSAGE }
+        }
       } else {
         log.log('Git sync: Pull stopped mid-rebase, resolving conflicts...')
 

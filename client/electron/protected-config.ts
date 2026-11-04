@@ -175,17 +175,28 @@ export interface ProtectedConfigRecoveryResult {
 
 type EntryType = 'blob' | 'tree' | null
 
-async function entryAt(git: SimpleGit, rev: string, file: string): Promise<{ type: EntryType; oid: string | null }> {
+interface TreeEntry { type: EntryType; oid: string | null; mode: string | null }
+
+async function entryAt(git: SimpleGit, rev: string, file: string): Promise<TreeEntry> {
   try {
     // ls-tree on the exact path: one line "<mode> <type> <oid>\t<path>", or nothing.
     const out = (await git.raw(['ls-tree', '-z', rev, '--', file])).split('\0')[0]
-    if (!out) return { type: null, oid: null }
+    if (!out) return { type: null, oid: null, mode: null }
     const [meta] = out.split('\t')
-    const [, type, oid] = meta.split(' ')
-    return { type: type === 'tree' ? 'tree' : 'blob', oid }
+    const [mode, type, oid] = meta.split(' ')
+    return { type: type === 'tree' ? 'tree' : 'blob', oid, mode }
   } catch {
-    return { type: null, oid: null }
+    return { type: null, oid: null, mode: null }
   }
+}
+
+/**
+ * Nothing to put back. The mode counts: the server refuses a `chmod +x` like any
+ * other change of the file, so a path differing only there has to be restored
+ * too, or the same push is refused at every sync.
+ */
+function sameEntry(local: TreeEntry, server: TreeEntry): boolean {
+  return local.type === 'blob' && local.oid === server.oid && local.mode === server.mode
 }
 
 function assertInsideRepo(repoPath: string, file: string): string {
@@ -236,7 +247,7 @@ export async function restoreProtectedPaths(options: {
 
   // Decide per path before touching anything, so an unsupported case aborts
   // with the repository unchanged.
-  const plan: Array<{ file: string; local: { type: EntryType; oid: string | null }; server: { type: EntryType; oid: string | null } }> = []
+  const plan: Array<{ file: string; local: TreeEntry; server: TreeEntry }> = []
   for (const file of paths) {
     const local = await entryAt(git, localHead, file)
     const server = await entryAt(git, upstreamHash, file)
@@ -260,7 +271,7 @@ export async function restoreProtectedPaths(options: {
   const restored: string[] = []
   const removed: string[] = []
   for (const { file, local, server } of plan) {
-    if (local.type === 'blob' && local.oid === server.oid) continue
+    if (sameEntry(local, server)) continue
     // A folder now (e.g. .claude was briefly a symlink in an earlier commit):
     // only an intermediate commit touched this path and squashing drops it.
     // Never check a folder out over the member's work — skills live there.
@@ -290,7 +301,7 @@ export async function restoreProtectedPaths(options: {
 
   // 3. Put each protected path back to the server's version.
   for (const { file, local, server } of plan) {
-    if (local.type === 'tree' || (local.type === 'blob' && local.oid === server.oid)) continue
+    if (local.type === 'tree' || sameEntry(local, server)) continue
     if (local.type === 'blob') {
       await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', file])
       fs.rmSync(fullPaths.get(file)!, { force: true }) // a symlink is removed, not followed
