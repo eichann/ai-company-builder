@@ -39,7 +39,7 @@ import type { ApprovalResult } from './approvals'
 import type { AbsenceAddInput, AbsenceAddResult, AbsenceRemoveResult, AbsencesResult } from './absences'
 import type { WorkSwitch, WorkSwitchesResult } from './work-switches'
 import type { ViewersQuery, ViewersResult } from './viewers'
-import type { MeetingBundleQuestionResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { MeetingArrivalsResult, MeetingBundleQuestionResult, MeetingCardStateResult, MeetingInviteResult, MeetingPressResult, MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { FindHomeResult, FindResult, RecordCardResult, RecordListResult } from './record-views'
 import type { ConsultationTopicsResult } from './consultation-topics'
@@ -561,6 +561,19 @@ export interface IpcInvokeChannels {
   'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** The meeting card's question: may a まとまり be chosen, was 「まとまりはない」 chosen. */
   'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
+  // Meetings for their attendees (minutes.md): the task list's 「議事録が届きました」 and the meeting card.
+  /** The member's meetings of the last 3 days (`available` false: an older server, no banner). */
+  'minutes:arrivals': { args: [companyId: string]; result: MeetingArrivalsResult }
+  /** One meeting for its card: where its reading stands and, once read, its summary and decisions. */
+  'minutes:meeting': { args: [companyId: string, meetingId: string]; result: MeetingCardStateResult }
+  /** ［AI に読ませる］: the AI's turn on this member's PC. */
+  'minutes:requestReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
+  /** ［読まない］ (取り消す: tasks:undo of that entry). */
+  'minutes:skipReading': { args: [companyId: string, meetingId: string, expectedVersion: number]; result: MeetingPressResult }
+  /** 「この定例は次から自動で読む」 (true) / 「次から自動で読まない」 (false): the member's own choice. */
+  'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
+  /** ［招待する］: members added to a members-only record's list (never undone). */
+  'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number]; result: MeetingInviteResult }
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
@@ -987,6 +1000,12 @@ export interface ElectronAPI {
   linkMinutesBundle: Invoke<'minutes:linkBundle'>
   declineMinutesBundle: Invoke<'minutes:noBundle'>
   getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
+  getMeetingArrivals: Invoke<'minutes:arrivals'>
+  getMeetingCardState: Invoke<'minutes:meeting'>
+  requestMeetingReading: Invoke<'minutes:requestReading'>
+  skipMeetingReading: Invoke<'minutes:skipReading'>
+  setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
+  inviteToRecord: Invoke<'minutes:invite'>
   onMinutesChanged: Subscribe<'minutes:changed'>
   // 「AI の番」 run automatically (the main window only).
   getAutoTurnSettings: Invoke<'aiTurns:settings'>

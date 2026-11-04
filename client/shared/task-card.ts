@@ -304,7 +304,8 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   }
 }
 
-function reviewOf(meeting: RecordDetail, me: string): MinutesReviewView {
+/** 「議事録を確認する」 and the meeting card: the meeting's summary and its decisions not retracted (`mine`: theirs to confirm). */
+export function reviewOf(meeting: RecordDetail, me: string): MinutesReviewView {
   const m = meeting.record
   return {
     meetingId: m.id, meetingTitle: m.title || '（名前なし）', summary: str(m.fields.summary_text),
