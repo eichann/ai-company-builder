@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { aiCommands, APP_COMMAND_MESSAGES, appCommandRefusal, appCommandToolName, PRIVATE_TAB_TITLE, redactForAI } from '../shared/app-commands'
+import { aiCommands, APP_COMMAND_MESSAGES, appCommandAnswerOf, appCommandRefusal, appCommandToolName, PRIVATE_TAB_TITLE, redactForAI } from '../shared/app-commands'
 import { defineCommands } from '../shared/commands/define'
 import { createAppCommandTools } from '../electron/app-commands/tools'
 import { registerAppCommandsIpc } from '../electron/features/app-commands/ipc'
@@ -61,9 +61,17 @@ test('a command not handed to the AI, bad arguments or a consultation in its own
   const h = harness()
   assert.deepEqual(await h.runner.run('s1', 'co', 'chat.newConsultation', { message: 'x' }), { ok: false, error: APP_COMMAND_MESSAGES.unknown })
   assert.deepEqual(await h.runner.run('s1', 'co', 'tabs.restore', { group: '昨日' }), { ok: false, error: APP_COMMAND_MESSAGES.badArgs })
+  // tabs.tidy narrows to one of the kind groups only (tabs_list `kindId`).
+  assert.deepEqual(await h.runner.run('s1', 'co', 'tabs.tidy', { kind: 'everything' }), { ok: false, error: APP_COMMAND_MESSAGES.badArgs })
   const own = harness({ ownWindow: true })
   assert.deepEqual(await own.runner.run('s1', 'co', 'tabs.tidy', {}), { ok: false, error: APP_COMMAND_MESSAGES.ownWindow })
   assert.equal(h.sent.length + own.sent.length, 0)
+})
+
+test('a handler that refused (only `error`) answers ok: false with its words; any other result is ok: true', () => {
+  assert.deepEqual(appCommandAnswerOf({ error: 'そのまとまりは見つかりません。' }), { ok: false, error: 'そのまとまりは見つかりません。' })
+  assert.deepEqual(appCommandAnswerOf({ tidied: 0, error: 'x' }), { ok: true, result: { tidied: 0, error: 'x' } })
+  assert.deepEqual(appCommandAnswerOf(undefined), { ok: true, result: null })
 })
 
 test('a window that does not answer lets the AI go on with a message', async () => {

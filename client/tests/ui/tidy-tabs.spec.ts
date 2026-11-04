@@ -107,7 +107,7 @@ test('the consultation AI lists, tidies and restores this window\'s tabs by titl
   const ai = await layout(page)
   const listed = await ai.evaluate(l => l.aiCommand('tabs.list')) as { ok: true; result: { openTabs: Array<Record<string, unknown>> } }
   // Company paths go to main only, which removes them (and private names) before the AI reads them.
-  expect(listed.result.openTabs).toEqual([{ title: '営業の進め方.md', kind: 'ファイル', path: '営業部/営業の進め方.md' }, { title: '備品.md', kind: 'ファイル', path: '総務/備品.md', pinned: true }])
+  expect(listed.result.openTabs).toEqual([{ title: '営業の進め方.md', kind: 'ファイル', path: '営業部/営業の進め方.md', kindId: 'file' }, { title: '備品.md', kind: 'ファイル', path: '総務/備品.md', kindId: 'file', pinned: true }])
   expect(JSON.stringify(listed)).not.toContain(ROOT)
   // A consultation of another company is refused: these tabs stay as they are.
   const other = await ai.evaluate(l => l.aiCommand('tabs.tidy', {}, 'other')) as { ok: boolean; error: string }

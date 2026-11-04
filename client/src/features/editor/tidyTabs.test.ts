@@ -107,3 +107,13 @@ test('a hand-edited or broken saved list is read without what it cannot use', ()
   assert.equal(parsed.length, 1)
   assert.deepEqual(parsed[0].items.map(i => i.id), ['j'])
 })
+
+test('a tidied tab keeps its named group (name, colour) across a restart; a broken group mark is dropped, the tab kept', () => {
+  const item = tidiedItemOf(a, root, {}, { name: '提案準備', color: 'rose' })
+  assert.deepEqual(item.tabGroup, { name: '提案準備', color: 'rose' })
+  const [kept] = parseGroups(JSON.parse(JSON.stringify([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items: [item] }])))
+  assert.deepEqual(kept.items[0].tabGroup, { name: '提案準備', color: 'rose' })
+  const [broken] = parseGroups([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items: [{ ...item, tabGroup: { name: '提案準備', color: 'pink' } }] }])
+  assert.equal(broken.items[0].tabGroup, undefined)
+  assert.equal(broken.items.length, 1)
+})

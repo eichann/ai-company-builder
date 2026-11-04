@@ -83,8 +83,8 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `folder.reveal` `{ path }` | view | `AppShell.tsx`: the folder's department, the ファイル tab, the folder revealed in the tree | a folder row of 「つながっているもの」 (`linkRows.tsx`, `tasks-ui.md` "Dropping links") |
 | `files.openToday` ⌘⇧T (app) | local (makes a folder on this computer only; never synced) | `AppShell.tsx`: 今日のフォルダ made when missing, its department's files, the folder revealed in the tree (`tasks-ui.md` "今日のフォルダ") | the shortcut; the file panel header's calendar button calls the same function |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 探す left tab, cursor in its box (live search of what the member half remembers; `records.md` "探す") | the shortcut |
-| `tabs.list` (AI) | view | `features/editor/hooks/useTabTidying.ts` (mounted by `AppShell`): this window's open tabs (title, kind, pinned) and 「片づけたタブ」 by day (`group` = `2026-11-03`, item ids) — titles and kinds only, never paths or contents | the consultation AI (`tabs_list`) |
-| `tabs.tidy` (AI) | local (this computer's screen; undone by `tabs.restore`) | the same: every open tab but the pinned ones and those whose edits cannot be saved goes into 「片づけたタブ」 (`files-and-editor.md` "Tidying the tabs") | the tabs' 「…」 menu ［タブを片づける］; the AI (`tabs_tidy`) |
+| `tabs.list` (AI) | view | `features/editor/hooks/useTabTidying.ts` (mounted by `AppShell`): this window's open tabs (title, kind, `kindId`, pinned, `tabGroup` = the named group's name) and 「片づけたタブ」 by day (`group` = `2026-11-03`, item ids) — titles and kinds only, never paths or contents | the consultation AI (`tabs_list`) |
+| `tabs.tidy` `{ kind?, group? }` (AI) | local (this computer's screen; undone by `tabs.restore`) | the same: every open tab (or only one kind, `kind` = a `kindId`; or one named group, `group` = its id or name — unknown → an error, nothing closes) but the pinned ones and those whose edits cannot be saved goes into 「片づけたタブ」 (`files-and-editor.md` "Tidying the tabs", "Arranging the tabs") | the tabs' 「…」 menu ［タブを片づける］ and the shown tab's kind; a group chip's menu; the AI (`tabs_tidy`) |
 | `tabs.restore` `{ group?, items? }` (AI) | local | the same: reopens a day or some items; a file gone stays listed 「見つかりません」 | the AI (`tabs_restore`); the list's buttons call the same function directly |
 | `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
@@ -127,7 +127,7 @@ agent:
    only, and accepts `appCommand:respond` only from that window (20 s, then 「画面が応答しませんでした」).
 4. The main window (`src/app/useAiCommandRequests.ts`, mounted by `AppShell`) refuses another
    company's request (`appCommandRefusal`: 「この相談は、いま画面に出ている会社のものではありません…」)
-   and any id not `exposeToAI`, runs the rest through the same registry as a click, and answers.
+   and any id not `exposeToAI`, runs the rest through the same registry as a click, and answers (`appCommandAnswerOf`: a handler result that is only `{ error }` — it refused, nothing was done — goes to the AI as `ok: false` with those words).
 
 So the AI works only on the main window's tabs, and only for its own company. Tests:
 `tests/app-commands.test.ts`, `tests/ui/tidy-tabs.spec.ts` 「the consultation AI lists…」.
