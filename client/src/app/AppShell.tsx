@@ -39,8 +39,11 @@ import { useSplitLayout } from '../features/workspace/hooks/useSplitLayout'
 import { useDepartmentSelection } from '../features/workspace/hooks/useDepartmentSelection'
 import { useDepartmentAvailability } from '../features/workspace/hooks/useDepartmentAvailability'
 import { PANE_LIMITS } from '../features/workspace/layoutTree'
-import { useEditorPersistence } from '../features/editor/hooks/useEditorPersistence'
+import { useEditorPersistence, type RestoredTabs } from '../features/editor/hooks/useEditorPersistence'
 import { useEditorTabs } from '../features/editor/hooks/useEditorTabs'
+import { useTabTidying } from '../features/editor/hooks/useTabTidying'
+import { TabTidyingMenu, TabTidyingNotice } from '../features/editor/components/TabTidyingControls'
+import { useAiCommandRequests } from './useAiCommandRequests'
 import { useCompanyWatcher } from '../features/files/hooks/useCompanyWatcher'
 import { useSkillsTab } from '../features/skills/hooks/useSkillsTab'
 import { useSkillsAutoRefresh } from '../features/skills/hooks/useSkillsAutoRefresh'
@@ -144,8 +147,12 @@ export function AppShell() {
     useDepartmentAvailability(rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
 
   // Open tabs (files and records side by side), the active one and the left tab, saved per company.
-  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks } =
-    useEditorPersistence(currentCompany?.id, DEFAULT_LEFT_PANEL)
+  // Set while a wide left tab (スキル…) covers the middle. The daily tidy hears when a company's tabs are restored (set below).
+  const middleHidden = useRef(false)
+  const tabsRestored = useRef<(companyId: string, tabs: RestoredTabs) => void>(() => {})
+  const onTabsRestored = useCallback((companyId: string, tabs: RestoredTabs) => tabsRestored.current(companyId, tabs), [])
+  const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks, pinnedTabs, setPinnedTabs } =
+    useEditorPersistence(currentCompany?.id, DEFAULT_LEFT_PANEL, onTabsRestored)
   // A record's card tells its title and kind once read: its tab shows them (and after a restart).
   const noteRecordLook = useCallback((id: string, look: RecordTabLook) => {
     setRecordLooks(prev => {
@@ -154,8 +161,13 @@ export function AppShell() {
       return { ...prev, [id]: look }
     })
   }, [setRecordLooks])
-  const { previewFilePath, openFile: handleOpenFile, pinFile: handlePinFile, selectFile: handleSelectOpenFile, closeFile: handleCloseFile } =
+  const { previewFilePath, openFile: handleOpenFile, pinFile: handlePinFile, selectFile: handleSelectOpenFile, closeFile: handleCloseFile, closeTabs, openTabs: reopenTabs } =
     useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActiveFilePath })
+  // 「タブを片づける」 (tabs.tidy / list / restore, also the AI's) and the daily tidy; 固定 tabs stay.
+  const tidying = useTabTidying({ companyId: currentCompany?.id, rootPath, openTabs: openFiles, pinnedTabs, setPinnedTabs, recordLooks, closeTabs,
+    reopenTabs: keys => { reopenTabs(keys); if (middleHidden.current && keys.length > 0) setLeftTab('files') } })
+  tabsRestored.current = tidying.onTabsRestored
+  useAiCommandRequests() // the consultation AI's app commands (the tabs above) run in this window
   const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
     rootPath: rootPath || '',
     departments,
@@ -313,7 +325,6 @@ export function AppShell() {
   })
 
   // The middle (open files and records) is beside the left tab, except while a wide tab (スキル…) covers it.
-  const middleHidden = useRef(false)
   const showMiddle = useCallback(() => { if (middleHidden.current) setLeftTab('files') }, [setLeftTab])
   const handleEditFile = (filePath: string) => {
     setLeftTab('files')
@@ -628,6 +639,10 @@ export function AppShell() {
                   aside={activeFilePath && !activeRecordId && rootPath
                     ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
                     : undefined}
+                  pinnedTabs={tidying.pinned}
+                  onTogglePinned={tidying.togglePinned}
+                  notice={<TabTidyingNotice tidying={tidying} />}
+                  tabsEnd={<TabTidyingMenu tidying={tidying} activeKey={activeFilePath} />}
                 />
               )}
             />
@@ -708,6 +723,7 @@ export function AppShell() {
         onOpenSkill={openSkillFromPalette}
         loadConsultations={loadPaletteConsultations}
         onOpenConsultation={openConsultation}
+        tidying={tidying}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}

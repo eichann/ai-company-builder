@@ -81,6 +81,7 @@ import { servePluginFiles } from './electron-adapter'
 // lane C ▼
 import { createProcedureReader } from './features/ai-turns/procedures'
 import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
+import { registerAppCommandsIpc } from './features/app-commands/ipc'
 // lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -208,6 +209,12 @@ function webContentsById(id: number): WebContents | undefined {
   if (mainWindowHost.isWindow(id)) return mainWindowHost.window()?.webContents
   return chatWindowShell.webContents(id)
 }
+// The app's commands the consultation AI may run (the middle's tabs): only in the main window.
+const appCommands = registerAppCommandsIpc(ipc, {
+  mainWindowId: () => mainWindowHost.window()?.webContents.id,
+  mainWindow: mainWindowHost.port,
+  inOwnWindow: sessionId => chatWindows.windowForSession(sessionId) !== undefined,
+})
 // Conversation events reach every window that may show a conversation.
 const conversationWindows = createBroadcastPort(() => [mainWindowHost.window(), ...chatWindowShell.windows()])
 
@@ -485,6 +492,7 @@ app.whenReady().then(async () => {
       paths: allowedRoots,
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
+      runAppCommand: appCommands.run,
     })
     // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
     const result = await startChatServer({

@@ -147,6 +147,33 @@ export const COMMANDS = defineCommands([
     args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },
   },
   {
+    // The middle's tabs (files and records) of this window, and 「片づけたタブ」 (this Mac only):
+    // titles and kinds, never a file's contents. Handed to the consultation AI (owner, 2026-11-04).
+    id: 'tabs.list', title: '開いているタブと片づけたタブを見る', class: 'view', exposeToAI: true,
+    aiDescription: 'この画面の真ん中で開いているタブ（ファイル・やることなどの記録）と、「片づけたタブ」（日付ごと）の名前と種類を見る。中身は読まない。tabs_restore に渡す日付（group）と項目の id もここで分かる。\n'
+      + 'List the tabs open in the middle of this window (files and records) and the tidied tabs saved on this Mac, by day: titles and kinds only, never contents. Gives the day (`group`) and item ids tabs_restore takes.',
+    args: z.object({}),
+  },
+  {
+    // ［タブを片づける］: every open tab but the pinned ones goes into 「片づけたタブ」 as one group.
+    // Unsaved edits are saved first; a tab that cannot be saved stays open. Undone by tabs.restore.
+    id: 'tabs.tidy', title: 'タブを片づける', class: 'local', exposeToAI: true,
+    aiDescription: 'この画面のタブを片づける：固定したタブ以外を閉じて「片づけたタブ」にしまう（あとで開き直せる）。未保存の編集は先に保存し、保存できないタブは残す。メンバーが片づけを頼んだときだけ使う。\n'
+      + 'Tidy this window\'s tabs: close every tab except the pinned ones and keep them in 「片づけたタブ」 (they can be reopened). Unsaved edits are saved first; a tab that cannot be saved stays open. Use only when the member asks.',
+    args: z.object({}),
+  },
+  {
+    // Reopens tidied tabs: a whole day (`group`, as tabs.list gives it) or some items; reopened ones
+    // leave 「片づけたタブ」, ones whose file or record is gone stay there, marked 「見つかりません」.
+    id: 'tabs.restore', title: '片づけたタブを開き直す', class: 'local', exposeToAI: true,
+    aiDescription: '「片づけたタブ」を開き直す。group にその日の日付（tabs_list の group、例 2026-11-03）を渡すとその日の分を全部、items に項目の id を渡すとそれだけを開く。見つからないものは開かずに知らせる。\n'
+      + 'Reopen tidied tabs: `group` = a day as tabs_list gives it (e.g. 2026-11-03) reopens all of that day; `items` = item ids from tabs_list reopens just those. Items whose file or record is gone are reported, not opened.',
+    args: z.object({
+      group: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('A day of 「片づけたタブ」 (tabs_list `group`)'),
+      items: z.array(z.string().min(1).max(40)).min(1).max(100).optional().describe('Item ids from tabs_list'),
+    }),
+  },
+  {
     // Writes the active tab to this computer; asks first when the file changed on disk. Shared only by sync.
     id: 'editor.save', title: 'ファイルを保存する', class: 'local',
     args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),

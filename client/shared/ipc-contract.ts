@@ -50,6 +50,7 @@ import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
+import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
@@ -682,6 +683,8 @@ export interface IpcInvokeChannels {
   'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
   /** The main window's answer to app:closeRequested: `ack` at once, then `close` or `stay`. */
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+  /** The main window's answer to appCommand:request (only the window asked may answer). */
+  'appCommand:respond': { args: [requestId: string, answer: AppCommandAnswer]; result: void }
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (「Slack で許可」, slack-connector.md): the app holds no token; the sign-in URL stays in main.
@@ -759,6 +762,8 @@ export interface IpcEventChannels {
   'chatWindow:fileRequested': [request: ChatWindowFileRequest]
   /** The member closes the main window or quits: save the open tabs first, then answer app:closeResponse. */
   'app:closeRequested': []
+  /** To the main window only: the consultation AI runs one of the app's commands (shared/app-commands.ts). */
+  'appCommand:request': [request: AppCommandRequest]
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   /** The plugin packages a company lists and this app keeps changed: ask `plugins:screens` again. */
@@ -1050,6 +1055,8 @@ export interface ElectronAPI {
   onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
   onCloseRequested: Subscribe<'app:closeRequested'>
   answerCloseRequest: Invoke<'app:closeResponse'>
+  onAppCommandRequest: Subscribe<'appCommand:request'>
+  answerAppCommand: Invoke<'appCommand:respond'>
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (設定 → Slack): the member's view only, never a token or the sign-in URL.

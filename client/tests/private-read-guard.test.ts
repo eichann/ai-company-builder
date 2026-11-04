@@ -141,6 +141,8 @@ test('after a private read: Bash writes and send-outs, web tools and outside MCP
   assert.equal(decidePrivateWrite(c, s, 'WebSearch', { query: 'x' }, ROOT).ask, true)
   assert.equal(decidePrivateWrite(c, s, 'mcp__slack__post_message', { text: 'x' }, ROOT).ask, true)
   assert.equal(decidePrivateWrite(c, s, 'mcp__acb_company_files__company_read_file', { path: 'a' }, ROOT).ask, false)
+  // The app's tab tools only touch this computer's screen: no 「送る」 question after private reads.
+  assert.equal(decidePrivateWrite(c, s, 'mcp__acb_app__tabs_tidy', {}, ROOT).ask, false)
   assert.equal(decidePrivateWrite(c, s, 'Glob', { pattern: '*' }, ROOT).ask, false)
 })
 

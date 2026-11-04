@@ -44,6 +44,8 @@ paths:
   - "client/tests/file-names.test.ts"
   - "client/tests/keep-work-ui.*"
   - "client/tests/ui/keep-work.spec.ts"
+  - "client/tests/ui/tidy-tabs.spec.ts"
+  - "client/src/features/settings/components/TidyTabsSetting.tsx"
 ---
 
 # File watching, file tree, editor, search
@@ -229,14 +231,49 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   text, save or check the disk. `record.open` / `file.open` open a tab for good, a list row the
   preview tab; ← → go over all tabs. Test: `tests/ui/tasks-layout.spec.ts`, `editorTabs.test.ts`.
 - Open tabs (files and records), the active tab and the left panel tab are saved per company in localStorage
-  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records }` (`records`: the open
+  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab, records, pinned }` (`records`: the open
   record tabs' titles, so they show at once after a restart; a record tab is not checked against
-  the disk)
+  the disk; `pinned`: the tabs pinned 固定, "Tidying the tabs"; missing = none)
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
   (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
   background; any `leftTab` string is kept and one no registered panel has opens the default tab
   (`renderer-structure.md`, panel registry). Existing installs hold this shape:
   keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
+
+## Tidying the tabs (「タブを片づける」, owner decision 2026-11-04, OneTab-style)
+
+- **Pinned (固定)** is its own mark (not the preview tab's 「固定」 on double-click, `pinFile`): a
+  tab's right-click menu or the tabs' 「…」 → 「このタブを固定する」; a pinned tab shows a pin
+  (pressing it unpins). Closing a pinned tab forgets the mark.
+- ［タブを片づける］ (the tabs' 「…」, command `tabs.tidy`, also the AI's): every editor's saver runs
+  first (`saveUnsavedEdits`, as on leaving); a tab still holding edits (changed on disk, the write
+  failed) stays open and the notice names it — **a tidy never loses an edit**. Every other tab
+  but the pinned ones closes and is saved as one group (time, company day, by hand / automatic)
+  in 「片づけたタブ」. A one-line notice above the tabs says what happened (`TidyNoticeBar`).
+- **Daily tidy**: when a company's tabs are restored (`useEditorPersistence` `onRestored`) on a
+  company day (`companyDay`, Japan time like 今日のフォルダ) later than the one remembered, the
+  restored tabs are tidied the same way (`auto`). No day remembered (first open after the update,
+  a new company) → nothing is closed. Once per company day; 設定 → 自分の設定 「前の日のタブを自動で
+  片づける」 (per Mac, on by default) turns it off. The first time it closes something:
+  「毎日、前の日のタブを自動で片づけます（設定でオフにできます）」 with 「片づけたタブを見る」. Only on
+  open: an app left open overnight is not tidied under the member.
+- **「片づけたタブ」** (`components/TidiedTabsDialog.tsx`; from the tabs' 「…」, the notice, ⌘K
+  「片づけたタブ」): sections per company day, newest first, ［全部開き直す］［この日の分を消す］; an item
+  opens alone. Files are kept by company path (they follow a moved company folder); a file gone
+  (checked on this computer) or a record the server answers `notFound` for (first 60, offline =
+  unknown) is greyed 「見つかりません」 and can still be removed. Reopened items leave the list.
+  Cap: the last 30 tidies and 500 tabs, oldest dropped (the list's footer and the tidy notice say so).
+- **Storage: this Mac only** — localStorage `tidiedTabs:<company id>` (groups),
+  `tidiedTabs:lastDay:<company id>`, `acb.tabs.dailyTidy` (`off` when switched off),
+  `acb.tabs.dailyTidyNoticeShown`; nothing reaches the server or another company.
+- Code: `features/editor/tidyTabs.ts` (pure rules + the store, Storage injected),
+  `hooks/useTabTidying.ts` (pinning, the commands, the daily tidy, restoring),
+  `components/TabTidyingControls.tsx` (the 「…」 menu, the notice, the list as `AppShell` /
+  `AppDialogs` place them). The AI's side (another company refused, private names hidden):
+  `commands.md` "Handed to the AI". Tests:
+  `tidyTabs.test.ts` (pinned / unsaved kept, cap, once per day, the switch, local per company),
+  `tests/ui/tidy-tabs.spec.ts` (tidy → list → restore, missing items, saving first, the daily
+  tidy and its notice, the AI's commands).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 

@@ -53,5 +53,24 @@ export function useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActi
     })
   }, [activeFilePath, setOpenFiles, setActiveFilePath])
 
-  return { previewFilePath, openFile, pinFile, selectFile, closeFile }
+  /** Closes several tabs at once (「タブを片づける」); the active one moves to a tab that stays. */
+  const closeTabs = useCallback((keys: readonly string[]) => {
+    const gone = new Set(keys)
+    setPreviewFilePath(prev => prev && gone.has(prev) ? null : prev)
+    setOpenFiles(prev => {
+      const next = prev.filter(k => !gone.has(k))
+      setActiveFilePath(active => active && !gone.has(active) ? active : (next[next.length - 1] ?? null))
+      return next
+    })
+  }, [setOpenFiles, setActiveFilePath])
+
+  /** Opens several tabs for good (片づけたタブ restored), the first one shown. */
+  const openTabs = useCallback((keys: readonly string[]) => {
+    if (keys.length === 0) return
+    setOpenFiles(prev => [...prev, ...keys.filter((k, i) => !prev.includes(k) && keys.indexOf(k) === i)])
+    setPreviewFilePath(prev => prev && keys.includes(prev) ? null : prev)
+    setActiveFilePath(keys[0])
+  }, [setOpenFiles, setActiveFilePath])
+
+  return { previewFilePath, openFile, pinFile, selectFile, closeFile, closeTabs, openTabs }
 }

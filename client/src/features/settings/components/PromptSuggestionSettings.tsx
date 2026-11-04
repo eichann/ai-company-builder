@@ -1,5 +1,5 @@
 import { useId, useState, useSyncExternalStore } from 'react'
-import { SubHeading } from '../../../shared/ui/primitives'
+import { SubHeading, Switch } from '../../../shared/ui/primitives'
 import { promptSuggestionSetting } from '../../../shared/lib/promptSuggestionSetting'
 
 // Settings → 入力候補: whether the chat offers the next instruction as ghost
@@ -22,17 +22,7 @@ export function PromptSuggestionSettings() {
             候補はClaude Codeが返答ごとに作ります（会話の2回目の返答から。思いつかないときは出ません）。そのぶんClaudeの利用枠を少し使うので、不要ならオフにしてください。
           </p>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label="次の質問の候補を表示する"
-          aria-describedby={descriptionId}
-          onClick={toggle}
-          className={`relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-1 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-900 ${enabled ? 'bg-indigo-600 dark:bg-indigo-500' : 'bg-zinc-300 dark:bg-white/20'}`}
-        >
-          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
-        </button>
+        <Switch on={enabled} onToggle={toggle} label="次の質問の候補を表示する" describedBy={descriptionId} />
       </div>
       <p className="text-[12px] text-zinc-500 dark:text-zinc-400">このPCに自動保存されます。Claude Code接続のときだけ表示されます（Codex・APIキー接続では出ません）。</p>
       {error && <p role="alert" className="text-[13px] text-amber-600 dark:text-amber-400">{error}</p>}
