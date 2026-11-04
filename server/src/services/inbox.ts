@@ -408,6 +408,8 @@ export function createInboxService(deps: InboxDeps) {
       // Someone's own interaction takes the other side's message only when it reached its owner
       // (a reply that went to another member alone is not the owner's to hear of).
       if (!outgoing && row.personalOwner !== null && !reporterAndRecipients.has(row.personalOwner)) continue
+      // A members-only one only when it reached someone on its list (never as if it were the company's).
+      if (row.members !== null && !row.members.some(u => reporterAndRecipients.has(u))) continue
       continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
       return 'continued'
     }
@@ -418,7 +420,8 @@ export function createInboxService(deps: InboxDeps) {
       const since = new Date(Date.parse(msg.occurredAt) - DM_REPLY_WINDOW_MS).toISOString()
       const last = dm ? handle.inbox.latestIncoming('chat', `${dm[1]}:`, since, msg.occurredAt) : null
       const row = last ? handle.records.byIds([last.interactionId])[0] : undefined
-      if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)) {
+      if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)
+        && (row.members === null || row.members.includes(reporterId))) {
         continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
         return 'continued'
       }

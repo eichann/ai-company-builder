@@ -152,7 +152,11 @@ beforeEach(() => {
     members: co => (PEOPLE[co] ?? []).map(u => ({ userId: u, email: `${u}@acme.example`, name: NAMES[u] ?? null })),
     meetingAttendees: async () => [{ email: 'tanaka@client.example', name: '田中', organizer: false }],
     bundleContacts: async () => ({ ok: true, contacts: [] }),
-    mail: { senderAccount: async () => ({ ok: false, reason: 'unavailable' }), send: async () => ({ ok: false, kind: 'not-sent', reason: 'x' }) } as never,
+    // Gmail answers that it sent (the real send path runs: hash, sender, recipients, the receipt).
+    mail: {
+      senderAccount: async (_co: string, userId: string) => ({ ok: true, account: `${userId}@acme.example` }),
+      send: async () => ({ ok: true, status: 200, json: { id: `g${tick}`, threadId: `t${tick}` } }),
+    } as never,
     companyIds: () => ['a', 'b'],
   })
   company('a')
@@ -330,6 +334,50 @@ describe('creating one', () => {
     expect(row).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice', 'u-bob'] })
     for (const who of OUTSIDERS) expect(ok(service.query(m(who), { type: 'outbound_message' })).total).toBe(0)
   })
+
+  it('sent without 「返事を待つ」: the やりとり recorded for it keeps the mail’s list, never its まとまり’s folder', async () => {
+    const mt = meeting()
+    const bundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', folder: '営業部' })).record
+    const to = ok(await mail.recipients(m('u-alice'), { meetingId: mt.id, bundleId: bundle.id })).recipients.find(r => r.email === 'tanaka@client.example')!.ref
+    const draft = ok(await mail.create(m('u-alice'), AI, { meetingId: mt.id, bundleId: bundle.id, toRefs: [to], subject: '面談のお礼', body: '本日はありがとうございました。' })).draft
+    expect(ok(await mail.send(m('u-alice'), draft.id, { hash: draft.hash }))).toMatchObject({ outcome: 'sent' })
+    const [receipt] = source.forCompany('a').records.candidates({ types: ['interaction'] }, 10)
+    expect(receipt).toMatchObject({ folder: null, personalOwner: null, members: ['u-alice', 'u-bob'] })
+    for (const who of OUTSIDERS) expect(ok(service.query(m(who), { type: 'interaction' })).total).toBe(0)
+  })
+
+  it('a mail about a members-only やること keeps its list even when the やること is in a まとまり in a folder', async () => {
+    const bundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', folder: '営業部' })).record
+    const task = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '内定の連絡', members: ['u-bob'], links: { bundle: bundle.id } })).record
+    const to = ok(await mail.recipients(m('u-alice'), { taskId: task.id })).recipients.find(r => r.source === 'member')!.ref
+    const draft = ok(await mail.create(m('u-alice'), AI, { taskId: task.id, toRefs: [to], subject: '内定のご連絡', body: 'よろしくお願いします。' })).draft
+    expect(source.forCompany('a').records.byIds([draft.id])[0]).toMatchObject({ folder: null, members: ['u-alice', 'u-bob'] })
+  })
+
+  it('the AI’s records_create with members keeps the list as said (no defaults added)', () => {
+    const t = ok(engine.createByAi(m('u-alice'), AI, { type: 'task', title: '面談の段取り', members: ['u-bob'], defaultFolder: '営業部' }))
+    expect(t.placed).toEqual({ personal: false, folder: null, membersOnly: true })
+    expect(source.forCompany('a').records.find(t.record.id)?.members).toEqual(['u-alice', 'u-bob'])
+  })
+
+  it('from a members-only meeting the AI may narrow the list but not widen it; a person may', () => {
+    const mt = meeting()
+    expect(engine.create(m('u-alice'), AI, { type: 'task', title: 'x', members: ['u-carol'], links: { meeting: mt.id } }))
+      .toMatchObject({ ok: false, body: { code: 'MEMBERS_NOT_IN_MEETING' } })
+    // Named on the task: allowed (they must see their own task).
+    ok(engine.create(m('u-alice'), AI, { type: 'task', title: 'y', members: ['u-carol'], links: { meeting: mt.id }, fields: { assignee: 'u-carol' } }))
+    ok(engine.create(m('u-alice'), AI, { type: 'task', title: 'z', members: [], links: { meeting: mt.id } }))
+    ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'w', members: ['u-carol'], links: { meeting: mt.id } }))
+  })
+
+  it('asking for a list on an existing record that is not members-only fails (never quietly wider)', () => {
+    const records = source.forCompany('a').records
+    const row = { id: 'task-exist0000000000', type: 'task', typeVersion: 12, scopeId: null, path: null, folder: '営業部', personalOwner: null, title: 'x', summary: '', createdAt: TS, updatedAt: TS, removedAt: null }
+    records.upsert({ ...row, members: null })
+    expect(() => records.upsert({ ...row, members: ['u-alice'] })).toThrow()
+    expect(() => records.addMembers(row.id, ['u-alice'], 'u-alice', TS)).toThrow()
+    expect(records.find(row.id)).toMatchObject({ folder: '営業部', members: null })
+  })
 })
 
 describe('inviting (「招待する」)', () => {
@@ -372,6 +420,19 @@ describe('sharing it to a folder (「部署に出す」)', () => {
     for (const who of OUTSIDERS) expect(ok(await service.get(m(who), record.id)).record.version).toBe(3)
     expect(engine.undo(m('u-bob'), HUMAN, record.id, { version: 3, expectedVersion: 3 })).toMatchObject({ ok: false, body: { code: 'NOT_UNDOABLE' } })
     expect(engine.share(m('u-bob'), HUMAN, record.id, { folder: '営業部', expectedVersion: 3 })).toMatchObject({ ok: false, body: { code: 'NOT_PERSONAL' } })
+  })
+
+  it('not to a folder its assignee or reviewer cannot read', () => {
+    // 秘書室: u-bob cannot read it.
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-sec', 'a', '秘書室', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-sec-e', 'a-sec', 'everyone', NULL, 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-sec-b', 'a-sec', 'user', 'u-bob', 0, 0, ?)").run(TS)
+    const a = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'a', members: ['u-bob'], fields: { assignee: 'u-bob' } })).record
+    expect(engine.share(m('u-alice'), HUMAN, a.id, { folder: '秘書室', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'ASSIGNEE_CANNOT_READ' } })
+    const r = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: 'r', members: ['u-bob'], fields: { reviewer: 'u-bob' } })).record
+    expect(engine.share(m('u-alice'), HUMAN, r.id, { folder: '秘書室', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'REVIEWER_CANNOT_READ' } })
+    expect(source.forCompany('a').records.find(a.id)?.members).toEqual(['u-alice', 'u-bob'])
+    ok(engine.share(m('u-alice'), HUMAN, a.id, { folder: '営業部', expectedVersion: 1 }))
   })
 })
 

@@ -33,6 +33,8 @@ export function creating(ctx: EngineContext) {
   function aiPlacement(member: Member, body: unknown): unknown {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) return body
     const { defaultFolder, ...rest } = body as Record<string, unknown>
+    // A list of members says where it goes (records.md "Members-only records"): no defaults added.
+    if (rest.members !== undefined && rest.members !== null) return rest
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
     if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
@@ -176,7 +178,13 @@ export function creating(ctx: EngineContext) {
       }
       // Made from a members-only meeting: members-only too — the meeting's list and the people named
       // here (records.md "Members-only records"); never placed wider by the system.
-      const inherited = members === null && personalOwner === null ? meetingMembers(records, links) : null
+      const meetingList = personalOwner === null ? meetingMembers(records, links) : null
+      // The AI may narrow a meeting's list but not widen it: showing it to others is a person's act.
+      if (meetingList !== null && members !== null && actor.kind === 'ai') {
+        const allowed = new Set(withNamedPeople([member.userId, ...meetingList], def, fields))
+        if (members.some(u => !allowed.has(u))) return bad('会議に出ていない人を、AI が見る人に足すことはできません', 'MEMBERS_NOT_IN_MEETING')
+      }
+      const inherited = members === null ? meetingList : null
       if (inherited !== null) {
         if (folder !== null) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
         if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')

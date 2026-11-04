@@ -41,7 +41,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `duplicate`. **One interaction per thread**: a message whose `references` hold a known message
   joins that interaction (`continued`) — unless it is the other side's message to someone else
   than the interaction's owner (an owner-only interaction takes it only when its owner was the
-  reporter, in To or in CC; otherwise it is routed as new: never told to someone it did not reach).
+  reporter, in To or in CC; a members-only one only when someone on its list was — for any
+  message; otherwise it is routed as new: never told to someone it did not reach).
 - **Routing a new message** (`shared/core/intake-settings.ts` `routeIncoming`, in this order):
   spam → nothing; internal (sender is a member, or of the company's domains — the settings'
   plus the members' own, never free mail; mail only — a colleague's Slack DM or mention is what
@@ -65,7 +66,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). A Slack DM is seldom
   threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
   incoming message of that DM within `DM_REPLY_WINDOW_MS` (3 days; `latestIncoming`), never
-  another DM's or older. When the member's reply is seen: each open reply request moves as below
+  another DM's or older, and only when the member reads it (owner-only: theirs; members-only: they
+  are on the list). When the member's reply is seen: each open reply request moves as below
   with the note 「メールで返信済み」/「チャット（Slack）で返信済み」 and its reply drafts still in
   `draft` — the prepared ones and the card's own replies to that 連絡 (`interaction` link) — are
   **discarded** (never offered to send); an

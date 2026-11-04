@@ -46,9 +46,9 @@ export interface RecordRow {
   /**
    * Members-only record (「この人たちだけ」, records.md "Members-only records"): the members who
    * may see it — nobody else, owners and admins included (an empty list: nobody). null = not
-   * members-only. `upsert` marks a new row members-only (an existing row keeps its place) and the
-   * caller lists its readers with `addMembers` in the same transaction; `setPlace` ends it. Never
-   * set together with `personalOwner`.
+   * members-only. `upsert` marks a new row members-only (an existing row keeps its place; a list
+   * asked for an existing row that is not members-only throws) and the caller lists its readers
+   * with `addMembers` in the same transaction; `setPlace` ends it. Never set together with `personalOwner`.
    */
   members: readonly string[] | null
   title: string
@@ -179,7 +179,8 @@ export interface RecordRepository {
   setPlace(id: string, place: { folder: string | null; personalOwner: string | null }, at: string): void
   /**
    * Add readers to a members-only record (「招待する」, records.md "Members-only records"); a member
-   * already listed is kept as is. Returns the ids newly added. Nothing for a record that is not members-only.
+   * already listed is kept as is. Returns the ids newly added. Throws for a record that is not
+   * members-only (call it inside the transaction that wrote the record or its version).
    */
   addMembers(id: string, userIds: readonly string[], by: string, at: string): string[]
   /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */

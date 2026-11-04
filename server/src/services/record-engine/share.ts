@@ -11,7 +11,7 @@ import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import type { EngineContext } from './context'
 import { membersList } from './members'
-import { bad, conflict } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 
@@ -25,7 +25,7 @@ const STALE = 'ほかの人が先に変えました。最新の状態を見て�
 const listValue = (ids: readonly string[]) => ids.join(',') || null
 
 export function sharing(ctx: EngineContext) {
-  const { deps, transactions, clock, open, placeFolder, stateOf, summaryOf, changed } = ctx
+  const { deps, transactions, clock, open, canRead, placeFolder, stateOf, summaryOf, changed } = ctx
 
   /** The record as the member reads it (else the answer for a record that does not exist). */
   function readable(member: Member, recordId: string) {
@@ -72,6 +72,15 @@ export function sharing(ctx: EngineContext) {
       const folder = placeFolder(member, row.type, b.folder, reader)
       if (typeof folder !== 'string') return folder
       const current = stateOf(records, row, def)
+      // A members-only record's assignee / reviewer may be someone other than the member sharing it:
+      // they must still read it in its new place (as on create; the place is never named).
+      const place = { id: row.id, type: row.type, scopeId: null, path: null, folder, personalOwner: null, members: null }
+      if (typeof current.fields.assignee === 'string' && !canRead(member.companyId, current.fields.assignee, place)) {
+        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
+      }
+      if (typeof current.fields.reviewer === 'string' && !canRead(member.companyId, current.fields.reviewer, place)) {
+        return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
+      }
       if (expected !== current.version) return conflict(STALE, 'VERSION_CONFLICT', { version: current.version })
       const at = clock.now()
       const entry: LedgerEntry = {

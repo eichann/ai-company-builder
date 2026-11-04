@@ -304,6 +304,12 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     upsert(row) {
       if (Array.isArray(row.members) && row.personalOwner) throw new Error('a record is owner-only or members-only, not both')
+      if (Array.isArray(row.members)) {
+        // Members-only is written on insert only: an existing row keeps its place, so asking for a
+        // list on one that is not already members-only would leave it wider than asked (fail closed).
+        const was = conn.prepare('SELECT personal_owner FROM records WHERE company_id = ? AND id = ?').get(companyId, row.id) as { personal_owner: string | null } | undefined
+        if (was && was.personal_owner !== MEMBERS_ONLY) throw new Error('members asked for an existing record that is not members-only')
+      }
       const b = contents.batch(row.id, row.type)
       const title = b.put(row.title)
       const summary = b.put(row.summary)
@@ -325,7 +331,8 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     addMembers(id, userIds, by, at) {
       const marked = conn.prepare('SELECT 1 FROM records WHERE company_id = ? AND id = ? AND personal_owner = ?').get(companyId, id, MEMBERS_ONLY)
-      if (!marked) return []
+      // Never quietly nothing: the caller believes the record is read by a list (fail closed, inside its transaction).
+      if (!marked) throw new Error('not a members-only record')
       const add = conn.prepare('INSERT OR IGNORE INTO record_viewers (company_id, record_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?, ?)')
       return [...new Set(userIds)].filter(userId => add.run(companyId, id, userId, at, by).changes > 0)
     },

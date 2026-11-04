@@ -846,21 +846,28 @@ owner-only one, before every role or folder rule).
   `personalOwner: null, members: [...]` (`RecordRow` / `RecordAccessRow.members`, null = not
   members-only; a marked record with no rows is read by nobody). `upsert` marks a new row (insert
   only), the caller adds the list with `addMembers` in the same transaction; `setPlace` ends it
-  (drops the rows). A member removed from the company is taken off every list in the same
+  (drops the rows). Asking for a list on an existing row that is not members-only, or `addMembers`
+  on one, throws inside the caller's transaction (never quietly wider). A member removed from the company is taken off every list in the same
   transaction as their rules (`forgetMember`, `services/companies.ts` `removeMember`), so joining
   again starts from nothing.
 - **Create** (`POST /records/item`, the AI's `records_create`): `members: string[]` (≤ 200; the
   creator is added). Refused with `personal` / `folder` (400 `MEMBERS_WITH_PLACE`), for a business
   plugin's type (400 `MEMBERS_NOT_FOR_TYPE`), with a non-member (400 `BAD_MEMBER`); an assignee /
   reviewer not listed → `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`. The summary carries
-  `membersOnly: true` (no names); the answer's `placed` adds `membersOnly: true`.
+  `membersOnly: true` (no names); the answer's `placed` adds `membersOnly: true`. The AI's create
+  with `members` gets none of its placement defaults (`aiPlacement`).
 - **Made from a members-only meeting** (`record-engine/members.ts`, used by create and the service
   writer): a record linked to one (any record link whose target is a `meeting` with a list) is
   members-only by itself — the meeting's list (several meetings: who is on all of them) plus the
   creator and every person its fields name (an assignee who was not there must see their own task).
   A `folder` with it is refused (create: 400 `MEMBERS_WITH_PLACE`; service writer: `bad-place`;
   decisions: `DECISION_PLACE_REFUSED`, and `folder` may be left out). The AI's meeting outputs get
-  this too (`aiPlacement` leaves meeting outputs alone).
+  this too (`aiPlacement` leaves meeting outputs alone). With an explicit `members` the AI may only
+  narrow: everyone listed must be on the meeting's list or named by the record (400
+  `MEMBERS_NOT_IN_MEETING`); a person may widen (it is their act). Only meetings are inherited from:
+  a record linking someone's owner-only record stays where it was put (an established pattern,
+  "Owner-only records": the link is hidden from the others); the mail service places by its source
+  instead (below).
 - **Invite** 「招待する」: `POST /records/item/:recordId/members { add, expectedVersion, note? }`
   (contract `InviteRecordMembersRequest`), **session only**. Any listed member (nobody else finds it:
   404 `RECORD_NOT_FOUND`); not members-only → 409 `NOT_MEMBERS_ONLY`; each a member (400
@@ -869,12 +876,17 @@ owner-only one, before every role or folder rule).
   undone** (`place.*`). No notice kind: the `records` signal reaches the added. No removing (not
   built).
 - **Share** 「部署に出す」 (`share`, "Owner-only records"): also from members-only, by any listed
-  member; ledger `place.members` (the list → null) and `place.folder`. The folder's readers then see
+  member; ledger `place.members` (the list → null) and `place.folder`. Its assignee / reviewer must
+  read the folder (400 `ASSIGNEE_CANNOT_READ` / `REVIEWER_CANNOT_READ`). The folder's readers then see
   the record and its 経緯, including who was on the list.
 - **Places copied from a record** go through `placeOfRow` (`record-engine/service-writer.ts`:
-  folder | owner | members) — the mail draft and its sent mail's やりとり (`outbound-mail.ts`; a
-  members-only meeting's or 連絡's draft keeps their list even with a まとまり in a folder) and the
-  inbox's 返事のお願い (`inbox.ts`). Copying `folder` alone would place it company-wide.
+  folder | owner | members) — the mail draft (an owner-only / members-only 連絡, meeting or やること
+  keeps its place whatever the まとまり), the sent mail's やりとり (with or without 「返事を待つ」 when the
+  mail's record is restricted; `outbound-mail.ts`) and the inbox's 返事のお願い (`inbox.ts`). Copying
+  `folder` alone would place it company-wide.
+- **Elsewhere**: the inbox joins a message to a members-only やりとり's thread only when it reached
+  someone on the list (`inbox.md`); a members-only (or owner-only) meeting is not named in the note
+  of its まとまり's step move (`plugin-steps.ts`, 「会議を読んだあと」).
 - 見られる人 (`services/viewers.ts`): judged by its own list before the per-place cache (every such
   record has folder null; the cache would hand one record's readers to another), with the existing
   phrases (「あなただけ」「あなたと〇〇さん」「N人が見られます」…), names only to listed callers.
@@ -885,11 +897,14 @@ owner-only one, before every role or folder rule).
   sort / linkedTo / linkedToFile / 探す / 「あなたの番」 / 「AI の番」 exclude it; links to it refused
   like missing, links from it hidden; `set_bundle`; another company; marked without rows = nobody;
   create refusals; inheritance meeting → task (+ assignee), decision, review task, mail draft;
-  invite and share rules; 見られる人; the push signal; a member leaving; migration twice —
-  mutation-checked: the reader branch, the viewers cache bypass, the `placeOfRow` copies, the
-  inheritance in create and the writer, the writer's folder refusal, `forgetMember`,
-  `NOT_MEMBERS_ONLY`), `inbox.test.ts` (a members-only やりとり's 返事のお願い), permission matrix
-  rows + `CROSS`.
+  invite and share rules (share: assignee / reviewer must read the folder); 見られる人; the push
+  signal; a member leaving; migration twice; a sent mail's やりとり without 「返事を待つ」; a members-only
+  やること's mail in a まとまり; the AI's create with `members`; the AI narrowing only; an existing row
+  never quietly made members-only — mutation-checked: the reader branch, the viewers cache bypass,
+  the `placeOfRow` copies, the inheritance in create and the writer, the writer's folder refusal,
+  `forgetMember`, `NOT_MEMBERS_ONLY`, each fix of the leak review), `inbox.test.ts` (a members-only
+  やりとり's 返事のお願い; its thread and DM only for the listed), `plugin-steps.test.ts` (no meeting
+  named), permission matrix rows + `CROSS`.
 
 ### Where the AI puts a request (owner decision 2026-11-03)
 
