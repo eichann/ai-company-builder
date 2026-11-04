@@ -56,6 +56,18 @@ export function recordReader(member: Member, scopes: ScopeWithRules[]): RecordRe
   }
 }
 
+/**
+ * Which of these members read the record now — `recordReader` per member, once
+ * per call (an owner-only record: its owner alone, without evaluating anyone).
+ * For "who should hear of a change" (services/record-signal.ts).
+ */
+export function recordReaders(
+  companyId: string, row: RecordAccessRow, members: Array<{ userId: string; role: string }>, scopes: ScopeWithRules[],
+): string[] {
+  if (row.personalOwner !== null) return members.some(m => m.userId === row.personalOwner) ? [row.personalOwner] : []
+  return members.filter(m => recordReader({ companyId, userId: m.userId, role: m.role }, scopes).record(row)).map(m => m.userId)
+}
+
 /** May a link from `source` to `target` be shown or followed at all (for anyone)? */
 export function linkAllowed(source: { scopeId: string | null }, target: { scopeId: string | null }): boolean {
   return target.scopeId === null || target.scopeId === source.scopeId

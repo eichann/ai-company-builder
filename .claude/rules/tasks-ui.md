@@ -107,7 +107,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   own consultation AI wrote a record** in this app (a record tool's write the server accepted:
   `RecordToolsOptions.onRecordChanged` → `server-config.ts` `recordsChanged` → main, which also
   asks the title bar's 「あなたの番」 again) and on every `records` push signal (others' changes that
-  reach this member; 「かもしれない運転」). Tests: `client/tests/records-tools.test.ts` (a write tells,
+  reach this member — every change to a record the member reads, named on it or not,
+  `notifications.md` "The push signal"; 「かもしれない運転」). Tests: `client/tests/records-tools.test.ts` (a write tells,
   a look-up or refusal does not), `src/features/tasks/api.test.ts`.
 - **A task only the member sees shows whatever department is on screen**: the list is read per
   company (no folder in any of its requests) and owner-only tasks come in 「あなたの番」 like any
