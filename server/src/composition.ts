@@ -628,6 +628,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     // Notification mails of connected services (inbox.md): Slack's only for a member whose grant reads.
     connectorReadsFor: (companyId, userId, connectorId) =>
       connectorId === BUILTIN_CONNECTORS.slack.id && readingConnected(companyId, userId).chat && readIncoming.on(companyId, userId),
+    // After the member's own reply, tasks from that message are their AI's check only with 自動で進める on (inbox.md).
+    autoRunFor: (companyId, userId) => workSwitches.isOn(companyId, userId, 'autoRun'),
     pluginShelf,
     bridge: {
       // Lane C's list (built below; called only after construction): what the company's apps may keep now.

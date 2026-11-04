@@ -45,6 +45,16 @@ export function getNoticeSettings(companyId: string, reads: NoticesReads = windo
   return reads.getNotificationSettings(companyId)
 }
 
+/**
+ * ［元に戻す］ on a notice about what the member's own AI did for them (`replied_done`: the AI completed
+ * a task their reply finished; inbox.md): the undo of exactly that entry, at its version — the server
+ * refuses when something changed since.
+ */
+export type NoticeUndo = ElectronPort<'undoTaskAction'>
+export function undoNoticedChange(companyId: string, recordId: string, version: number, writes: NoticeUndo = window.electronAPI) {
+  return writes.undoTaskAction(companyId, recordId, version, version)
+}
+
 export function setNoticeSetting(companyId: string, kind: string, on: boolean, writes: NoticesWrites = window.electronAPI) {
   return writes.setNotificationSetting(companyId, kind, on)
 }

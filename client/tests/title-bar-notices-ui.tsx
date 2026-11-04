@@ -5,6 +5,8 @@
 // (the morning's 「今日のあなたの番」: `task list`),
 // the ids marked read in `#read`. `?meetings=1`: a department without the task list, whose meetings
 // (a まとまり to choose, received minutes) the title bar carries; their buttons write `#opened`.
+// `?undo=1`: a notice that the member's AI completed a task their reply finished (`replied_done`),
+// whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -35,10 +37,17 @@ let state: NoticesState = {
 }
 const readIds: string[] = []
 const withMeetings = new URLSearchParams(location.search).get('meetings') === '1'
+if (new URLSearchParams(location.search).get('undo') === '1') {
+  state = { ...state, notices: { ...state.notices, items: [
+    { id: 'n-r', kind: 'replied_done', recordId: 'task-preview05', recordType: 'task', recordTitle: '見積書を送る', version: 7, text: '返事をしたので完了にしました：「見積書を送る」', createdAt: '2026-11-01T07:00:00.000Z', read: true },
+    ...state.notices.items,
+  ] } }
+}
 
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
+  const [undone, setUndone] = useState('')
   installElectronAPI({
     watchNotifications: async () => {},
     getNotificationsState: async () => state,
@@ -51,6 +60,10 @@ function Preview() {
       state = { ...state, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
       setTimeout(() => changed.emit({ companyId }), 0)
       return { success: true }
+    },
+    undoTaskAction: async (_companyId, recordId, version, expectedVersion) => {
+      setUndone(`${recordId}|${version}|${expectedVersion}`)
+      return { success: true, recordId }
     },
   })
   const notices = useNotices('co-preview')
@@ -65,6 +78,7 @@ function Preview() {
       <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} onOpenTasks={() => setOpened('task list')} /></header>
       <pre id="opened">{opened}</pre>
       <pre id="read">{read}</pre>
+      <pre id="undone">{undone}</pre>
     </main>
   )
 }

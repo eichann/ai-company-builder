@@ -369,4 +369,43 @@ describe('the server clock reads Gmail into the inbox', () => {
       vi.useRealTimers()
     }
   })
+
+  it('a reply Sato sent from his phone (his Sent mail, In-Reply-To) is seen by its headers alone and moves the 返事のお願い (owner FB #19)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-07T00:10:00.000Z'))
+    try {
+      const sato = { companyId: CO, userId: 'g-sato', role: 'member' as const }
+      const [row] = db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'interaction'").all(CO) as Array<{ id: string }>
+      const ai = { id: 'g-sato', kind: 'ai' as const, source: 'claude-code', conversationId: null, runId: null }
+      const judged = services.inbox.judge(sato, ai, row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })
+      expect(judged.ok, JSON.stringify(judged)).toBe(true)
+      const rr = judged.value.replyRequestId as string
+      fake.deliver({
+        id: 'fakemail0110', threadId: 'fakethread0100', account: GOOGLE_SEED.member, labelIds: ['SENT'], receivedAt: '2026-11-07T00:12:00.000Z',
+        headers: {
+          From: '佐藤 健 <sato@div.example>', To: '"鈴木 一郎" <suzuki@a-corp.example>', Subject: 'Re: ご相談',
+          'Message-ID': '<phone-0110@div.example>', 'In-Reply-To': '<fake-0100@a-corp.example>', References: '<fake-0100@a-corp.example>',
+        },
+        text: 'スマホからの返事の本文です。',
+      })
+      const readsBefore = fake.requests.length
+      vi.setSystemTime(new Date('2026-11-07T00:15:00.000Z'))
+      expect(await services.serverClock.runOnce()).toMatchObject({ ran: true })
+      const state = db.prepare('SELECT state FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, rr) as Json
+      expect(state.state).toBe('checking')
+      const rows = db.prepare('SELECT message_id, direction FROM inbox_messages WHERE company_id = ? AND interaction_id = ?').all(CO, row.id)
+      expect(rows).toContainEqual({ message_id: '<phone-0110@div.example>', direction: 'out' })
+      // His Sent label was listed; every message read as metadata, never a body.
+      const asked = fake.requests.slice(readsBefore)
+      expect(asked.some(r => r.path === '/gmail/v1/users/me/messages' && r.search.includes('labelIds=SENT'))).toBe(true)
+      const reads = asked.filter(r => /^\/gmail\/v1\/users\/me\/(messages|threads)\/[^/]+$/.test(r.path))
+      expect(reads.length).toBeGreaterThan(0)
+      expect(reads.every(r => r.search.includes('format=metadata'))).toBe(true)
+      const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(t => t.name)
+      const dump = tables.map(t => JSON.stringify(db.prepare(`SELECT * FROM ${t}`).all())).join('\n')
+      expect(dump.includes('スマホからの返事')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

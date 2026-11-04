@@ -28,7 +28,7 @@ import { createPushChannel, type PushChannel } from '../../src/services/push-cha
 import type { Member } from '../../src/services/access'
 import type { PushEvent } from '../../../shared/types/agent-stop'
 import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-types'
-import { INBOX_ACTOR } from '../../../shared/core/core-types'
+import { INBOX_ACTIONS, INBOX_ACTOR } from '../../../shared/core/core-types'
 
 const TS = '2026-11-01T00:00:00.000Z'
 const MEMBERS: Record<string, string[]> = {
@@ -537,5 +537,28 @@ describe('a task from a message (owner FB #13)', () => {
     closeAccounting('u-alice')
     expect(list('u-alice').items).toEqual([])
     expect(JSON.stringify(list('u-alice'))).not.toMatch(/支払い/)
+  })
+})
+
+describe('a task the member\'s reply finished (owner FB #19)', () => {
+  const AI_ACTOR = { kind: 'ai' as const, source: 'claude-code' }
+
+  it('her own AI completing it tells her 「返事をしたので完了にしました」 with the entry to undo; nobody else, and no other AI action of hers', async () => {
+    const msg = message()
+    const t = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '見積書を送る', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    const done = writer.transition('a', {
+      recordId: t.id, action: INBOX_ACTIONS.repliedDone, expectedVersion: 1, to: 'done',
+      actor: { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null }, note: '返事をしたので完了にしました', notify: ['u-alice'],
+    })
+    if (!done.ok) throw new Error(done.reason)
+    expect(ofKind('u-alice', 'replied_done')).toMatchObject([{ recordId: t.id, version: done.entry.version, text: '返事をしたので完了にしました：「見積書を送る」' }])
+    for (const u of ['u-bob', 'u-owner']) expect(list(u).items).toEqual([])
+    // The same move by a person (her own act) is never told to her.
+    const other = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '自分で終えた', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [msg] } })).record
+    ok(await engine.act(m('u-alice'), HUMAN, other.id, 'complete', { expectedVersion: 1 }))
+    // Her AI's other work on a task (a due changed) is not this kind.
+    const third = ok(engine.create(m('u-alice'), HUMAN, { type: 'task', title: '期限だけ', personal: true, fields: { assignee: 'u-alice' } })).record
+    ok(await engine.act(m('u-alice'), AI_ACTOR, third.id, 'set_due', { expectedVersion: 1, args: { due: '2026-11-06' } }))
+    expect(ofKind('u-alice', 'replied_done').map(i => i.recordId)).toEqual([t.id])
   })
 })

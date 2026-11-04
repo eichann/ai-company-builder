@@ -7,6 +7,7 @@ import type { MinutesNotice } from '../minutes-app'
 import type { TaskListItem } from '../tasks'
 import { inboxTriage } from './inbox-triage'
 import { followUp } from './follow-up'
+import { replyCheck } from './reply-check'
 import { minutesReading } from './minutes-reading'
 // lane C ▼
 import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
@@ -22,6 +23,7 @@ const STEPS = [
   // lane B ▼
   inboxTriage,
   followUp,
+  replyCheck,
   // lane B ▲
   // lane C ▼
   taskWaitOver,

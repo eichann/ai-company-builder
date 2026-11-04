@@ -3,7 +3,9 @@
 // notice read (on the server, so the member's other PC agrees) and opens its record; the dot goes
 // once the server says nothing is unread; 「あなたの番」 lists what waits by kind with what to do (I.2);
 // the bell is only what happened (I.1): a meeting waiting for the member is in 「あなたの番」 with its
-// buttons, one the AI is reading in the bell, and the bell's dot is only for unread notices.
+// buttons, one the AI is reading in the bell, and the bell's dot is only for unread notices; a notice
+// that the member's AI completed a task their reply finished offers ［元に戻す］ — the undo of exactly
+// that entry (owner FB #19), and no other notice does.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -77,5 +79,18 @@ test('the bell\'s dot is only for unread notices: a meeting waiting counts in �
   await expect(page.getByRole('button', { name: '起きたこと', exact: true })).toBeVisible()
   await expect(page.getByTestId('notices-unread-dot')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /あなたの番/ })).toContainText('4')
+  expectNoPageErrors(state)
+})
+
+test('「返事をしたので完了にしました」 offers ［元に戻す］: the undo of that entry, at its version; other notices have none', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: '1' })
+  await page.getByRole('button', { name: /^起きたこと/ }).click()
+  const list = page.getByRole('menu', { name: '起きたこと' })
+  await expect(list).toContainText('返事をしたので完了にしました：「見積書を送る」')
+  await expect(list.getByRole('button', { name: '元に戻す' })).toHaveCount(1)
+  await list.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('task-preview05|7|7')
+  await expect(list).toContainText('元に戻しました')
+  await expect(page.locator('#opened')).toHaveText('')
   expectNoPageErrors(state)
 })

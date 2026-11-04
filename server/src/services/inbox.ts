@@ -39,6 +39,7 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import { replyTarget, type TaskSettings } from '../../shared/core/task-settings'
 import {
   INBOX_AI_TITLE_MAX, INBOX_CHANNELS, INBOX_NO_SUBJECT, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
+  type InboxReplyCheckResult,
   type InboxSettingsView, type InboxStatus, type IntakeOutcome, type SetAsideItem, type SetAsideList,
 } from '../../shared/types/inbox'
 import type { RecordSummary } from '../../shared/types/records'
@@ -59,6 +60,8 @@ export const INBOX_NOT_CONNECTED = { error: 'まだつないでいません。�
 export const NOT_AI_TURN = { error: 'この連絡はいま AI の番ではありません', code: 'NOT_AI_TURN' }
 export const PERSON_DECIDED = { error: '人が「やることにする」と決めた連絡です。AI はやることにしないにはできません', code: 'PERSON_DECIDED' }
 export const NOT_UNCLAIMED = { error: 'この連絡はもう誰かが引き受けました', code: 'NOT_UNCLAIMED' }
+export const NOT_FROM_THIS_REPLY = { error: 'この連絡から作った、あなたが担当でまだ終わっていないタスクだけを扱えます', code: 'NOT_FROM_THIS_REPLY' }
+export const NEEDS_CHECK = { error: '「確かめてから」のタスクは、確かめる人の OK で完了します。open にしてください', code: 'NEEDS_CHECK' }
 const VERSION_CONFLICT = { error: 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', code: 'VERSION_CONFLICT' }
 
 /** Limits of what the inbox keeps from a message (no body is ever kept). */
@@ -81,6 +84,14 @@ export const INBOX_LIMITS = {
 const SUBJECT_NONE = INBOX_NO_SUBJECT
 /** The ledger's note when the member's own reply was seen in the thread. */
 const REPLIED_THERE: Record<InboxChannel, string> = { email: 'メールで返信済み', chat: 'チャット（Slack）で返信済み' }
+/** A task the member's reply may have finished (owner FB #19): open, theirs to work on — not 準備中 (the AI's), not waiting for acceptance or a check. */
+const REPLY_CHECK_TASK_STATES = ['todo', 'in_progress', 'waiting']
+/** The note on a task the member's reply did not finish (owner FB #19). */
+export const REPLY_NOTED = '返事は済み'
+/** The note on a task the member's reply finished (the notice `replied_done` says it to them). */
+export const REPLIED_DONE = '返事をしたので完了にしました'
+/** The most tasks one reply check decides. */
+const REPLY_CHECK_MAX = 20
 /** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
 const DM_REPLY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -105,6 +116,12 @@ export interface InboxDeps {
   connectorReadsFor?: (companyId: string, userId: string, connectorId: string) => boolean
   /** The notification senders that installed, on connector plugins declare (`notification_senders`). Absent: none. */
   pluginNotifiers?: (companyId: string) => Promise<ConnectedNotifier[]>
+  /**
+   * Whether the member's own 自動で進める is on (`tasks.md` "Each member's switches"): after their own
+   * reply, tasks made from the message become their AI's check only then (else a note on each).
+   * Absent: on (the company default).
+   */
+  autoRunFor?: (companyId: string, userId: string) => boolean
 }
 
 /** A message we sent first and wait an answer to (outbound-mail.md "Waiting for their answer"). */
@@ -255,6 +272,50 @@ export function createInboxService(deps: InboxDeps) {
     return typeof assignee === 'string' && assignee !== '' ? [assignee] : []
   }
 
+  /**
+   * The tasks the member's own reply may have finished (owner FB #19): made from this message (its
+   * `interaction` link), the member's (assignee), readable by them, open and theirs to work on
+   * (`REPLY_CHECK_TASK_STATES`). Never another's task.
+   */
+  function replyCheckTasks(member: Member, handle: CompanyData, interactionId: string) {
+    const reader = recordReader(member, handle.scopes.listWithRules())
+    const ids = handle.records.candidates({ types: ['task'], link: { name: 'interaction', id: interactionId } }, 50).map(r => r.id)
+    return handle.records.byIds(ids)
+      .filter(r => r.type === 'task' && r.removedAt === null && reader.record(r))
+      .map(r => ({ row: r, ...fieldsOf(handle, r.id) }))
+      .filter(t => t.fields.assignee === member.userId && REPLY_CHECK_TASK_STATES.includes(t.state ?? ''))
+      .map(t => ({ id: t.row.id, title: t.row.title, state: t.state, version: t.version, canComplete: t.fields.when_done !== 'check' }))
+  }
+
+  /**
+   * The member's own reply was seen in the thread (owner FB #19): tasks made from the message that are
+   * still theirs to do become their AI's check — the interaction goes to 「返事のあとを確かめる」
+   * (`replied`, an AI turn on their PC, run when the app opens) — or, with their 自動で進める off,
+   * each gets the note 「返事は済み」 and the member decides. Only the interaction's own assignee's
+   * reply, only from 対応済み.
+   */
+  function afterOwnReply(companyId: string, handle: CompanyData, interactionId: string, replierId: string, channel: InboxChannel): void {
+    const cur = fieldsOf(handle, interactionId)
+    if (cur.state !== 'handled' || cur.fields.assignee !== replierId) return
+    const member = memberOf(companyId, replierId)
+    if (!member) return
+    const tasks = replyCheckTasks(member, handle, interactionId)
+    if (tasks.length === 0) return
+    if (deps.autoRunFor?.(companyId, replierId) ?? true) {
+      logFailure('reply check', deps.writer.transition(companyId, {
+        recordId: interactionId, action: INBOX_ACTIONS.replySeen, expectedVersion: cur.version, to: 'replied',
+        actor: INBOX_ACTOR, note: REPLIED_THERE[channel], quiet: true,
+      }))
+      return
+    }
+    for (const t of tasks) {
+      logFailure('reply noted', deps.writer.transition(companyId, {
+        recordId: t.id, action: INBOX_ACTIONS.replyNoted, expectedVersion: t.version, to: null, actor: INBOX_ACTOR,
+        note: `${REPLY_NOTED}（${REPLIED_THERE[channel]}）`, quiet: true,
+      }))
+    }
+  }
+
   /** The interaction itself, or a 返事のお願い's interaction — both read by the member; else null. */
   function interactionFor(member: Member, handle: CompanyData, recordId: string): RecordRow | null {
     const own = readable(member, recordId, 'interaction')
@@ -282,6 +343,7 @@ export function createInboxService(deps: InboxDeps) {
       replyRequests: requests.filter(r => readableRequests.has(r.id)).map(r => ({ id: r.id, state: r.state })),
       tasks: tasks.map(t => ({ id: t.id, title: t.title })),
       counterpart: counterpart ? { id: counterpart.id, title: counterpart.title } : null,
+      ...(state === 'replied' ? { replyCheck: { tasks: replyCheckTasks(member, handle, row.id) } } : {}),
     }
   }
 
@@ -366,6 +428,8 @@ export function createInboxService(deps: InboxDeps) {
           fields: { needs_reply: false }, actor: INBOX_ACTOR, note: REPLIED_THERE[msg.channel], quiet: true,
         }))
       }
+      // Tasks made from the message: did the reply finish them? (Their AI checks; owner FB #19.)
+      afterOwnReply(companyId, handle, interaction.id, fromMember ?? reporterId, msg.channel)
       return
     }
     // An automatic reply is no reply (spec §7-3).
@@ -415,6 +479,8 @@ export function createInboxService(deps: InboxDeps) {
 
     // A thread the company already has: the same interaction — when it concerns its owner.
     const reporterAndRecipients = new Set([reporterId, ...[...to, ...cc].map(p => p.memberId).filter((m): m is string => !!m)])
+    const reporter = memberOf(companyId, reporterId)
+    const reporterReads = (row: RecordRow) => !!reporter && recordReader(reporter, handle.scopes.listWithRules()).record(row)
     for (const id of handle.inbox.interactionsOf(msg.channel, msg.references ?? [])) {
       const row = handle.records.byIds([id])[0]
       if (!row || row.removedAt !== null || row.type !== 'interaction') continue
@@ -423,6 +489,10 @@ export function createInboxService(deps: InboxDeps) {
       if (!outgoing && row.personalOwner !== null && !reporterAndRecipients.has(row.personalOwner)) continue
       // A members-only one only when it reached someone on its list (never as if it were the company's).
       if (row.members !== null && !row.members.some(u => reporterAndRecipients.has(u))) continue
+      // The reporter's own message (their Sent mail, their own chat message) touches only a record
+      // they read: another member's sent mail never moves someone else's records. Nothing is kept,
+      // so the copy that reached the owner (their inbox) is still taken when it comes.
+      if (msg.outgoing === true && !reporterReads(row)) continue
       continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
       return 'continued'
     }
@@ -843,6 +913,65 @@ export function createInboxService(deps: InboxDeps) {
         deps.writer.retitle(member.companyId, recordId, SUBJECT_NONE, aiTitle)
       }
       return ok({ interactionId: recordId, state: to, replyRequestId, taskId, ...(alreadyReplied ? { alreadyReplied: true } : {}) })
+    },
+
+    /**
+     * The member's AI after their own reply (owner FB #19, records-ai-inbox `reply-check`): each task
+     * made from this message is completed (`done`: the reply finished it; the member is told
+     * 「返事をしたので完了にしました」 and may undo it, the entry being their AI's) or keeps a note
+     * (`open`: 「返事は済み」). Server-side guard: only on an interaction in 「返事のあとを確かめる」 whose
+     * assignee is the member, only the tasks `replyCheckTasks` lists — anything else refuses the
+     * whole request before anything is written. Completes, never archives; then the message is
+     * handled again.
+     */
+    replyCheck(member: Member, actor: ServiceActor, recordId: string, body: unknown): Outcome<InboxReplyCheckResult> {
+      const handle = handleOf(member.companyId)
+      if (!handle.records.settings().enabled) return disabled()
+      const found = readable(member, recordId, 'interaction')
+      if (!found) return notFound()
+      const bad = (error: string) => refuse('bad-request', error, { code: 'BAD_REQUEST' })
+      if (!isObject(body) || !Array.isArray(body.tasks)) return bad('tasks（タスクごとの判断）が要ります')
+      if (typeof body.expectedVersion !== 'number' || !Number.isInteger(body.expectedVersion)) return bad('expectedVersion が要ります')
+      if (body.tasks.length > REPLY_CHECK_MAX) return bad(`一度に決められるのは ${REPLY_CHECK_MAX} 件までです`)
+      const decisions: Array<{ taskId: string; outcome: 'done' | 'open'; note: string }> = []
+      for (const d of body.tasks as unknown[]) {
+        if (!isObject(d) || typeof d.taskId !== 'string' || (d.outcome !== 'done' && d.outcome !== 'open')) return bad('tasks の各項目は { taskId, outcome: done | open } です')
+        const taskId = d.taskId
+        if (decisions.some(x => x.taskId === taskId)) return bad('同じタスクが二度あります')
+        decisions.push({ taskId, outcome: d.outcome, note: typeof d.note === 'string' ? oneLine(d.note, INBOX_LIMITS.reason) : '' })
+      }
+      const cur = fieldsOf(handle, recordId)
+      if (cur.state !== 'replied' || cur.fields.assignee !== member.userId) return refuse('conflict', NOT_AI_TURN.error, { code: NOT_AI_TURN.code })
+      if (body.expectedVersion !== cur.version) return refuse('conflict', VERSION_CONFLICT.error, { code: VERSION_CONFLICT.code, version: cur.version })
+      // The guard: the member's own open tasks from this very message — nothing else, checked before any write.
+      const eligible = new Map(replyCheckTasks(member, handle, recordId).map(t => [t.id, t]))
+      for (const d of decisions) {
+        const t = eligible.get(d.taskId)
+        if (!t) return refuse('conflict', NOT_FROM_THIS_REPLY.error, { code: NOT_FROM_THIS_REPLY.code })
+        if (d.outcome === 'done' && !t.canComplete) return refuse('conflict', NEEDS_CHECK.error, { code: NEEDS_CHECK.code })
+      }
+      const results: InboxReplyCheckResult['tasks'] = []
+      for (const d of decisions) {
+        const t = eligible.get(d.taskId)!
+        const r = d.outcome === 'done'
+          ? deps.writer.transition(member.companyId, {
+            recordId: t.id, action: INBOX_ACTIONS.repliedDone, expectedVersion: t.version, to: 'done', actor,
+            note: d.note ? `${REPLIED_DONE}（${d.note}）` : REPLIED_DONE,
+            // Her own AI did it: she is told (「返事をしたので完了にしました」, with ［元に戻す］).
+            notify: [member.userId],
+          })
+          : deps.writer.transition(member.companyId, {
+            recordId: t.id, action: INBOX_ACTIONS.replyNoted, expectedVersion: t.version, to: null, actor,
+            note: d.note ? `${REPLY_NOTED}（${d.note}）` : REPLY_NOTED, quiet: true,
+          })
+        logFailure('reply check task', r)
+        results.push({ taskId: t.id, outcome: d.outcome, ok: r.ok, ...(r.ok ? { version: r.entry.version } : {}) })
+      }
+      const moved = deps.writer.transition(member.companyId, {
+        recordId, action: INBOX_ACTIONS.replyChecked, expectedVersion: cur.version, to: 'handled', actor, quiet: true,
+      })
+      logFailure('reply checked', moved)
+      return ok({ interactionId: recordId, state: moved.ok ? 'handled' : 'replied', tasks: results })
     },
 
     /** The settings view (GET /inbox-settings): every member reads them; owners and admins change them. */

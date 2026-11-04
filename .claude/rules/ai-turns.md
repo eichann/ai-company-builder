@@ -83,7 +83,9 @@ turns").
   title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
   `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`), `follow-up.ts` (lane B,
   B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
-  start mark, `claimStates`), `task-wait-over.ts` (lane C: a task the clock's 「見込みの日時が過ぎた」 put in 準備中, below). A type with no start mark
+  start mark, `claimStates`), `reply-check.ts` (lane B, owner FB #19: an `interaction` in
+  「返事のあとを確かめる」 after the member's own reply — `inbox_read` and `inbox_reply_check` only,
+  `inbox.md`), `task-wait-over.ts` (lane C: a task the clock's 「見込みの日時が過ぎた」 put in 準備中, below). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).

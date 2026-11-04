@@ -4,7 +4,7 @@ import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS } from '../../../../../sha
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
-import { getNoticeSettings, markNoticesRead, setNoticeSetting } from '../api'
+import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedChange } from '../api'
 
 const ICON_BUTTON = 'relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 const PANEL = 'absolute right-0 top-full z-30 mt-1 w-80 max-h-[70vh] overflow-y-auto rounded-lg border border-gray-200 bg-white text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900'
@@ -39,6 +39,8 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
   const [open, setOpen] = useState<Open>(null)
   const [kinds, setKinds] = useState<Record<string, boolean> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Notices whose change was undone here (「元に戻しました」 instead of the button). */
+  const [undone, setUndone] = useState<ReadonlySet<string>>(new Set())
   const root = useRef<HTMLDivElement>(null)
   useEventListener<MouseEvent>(document, 'mousedown', e => { if (!root.current?.contains(e.target as Node)) setOpen(null) }, { enabled: open !== null })
   useEventListener<KeyboardEvent>(document, 'keydown', e => { if (e.key === 'Escape') setOpen(null) }, { enabled: open !== null })
@@ -67,6 +69,15 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
     </section>
   )
   const toggle = (which: Open) => { setError(null); setOpen(open === which ? null : which) }
+  // What the member's own AI did for them (a task their reply finished): ［元に戻す］ undoes that entry.
+  const undo = async (id: string, recordId: string, version: number) => {
+    setError(null)
+    const r = await undoNoticedChange(companyId, recordId, version)
+    if (r?.success) {
+      setUndone(u => new Set([...u, id]))
+      void markNoticesRead(companyId, [id])
+    } else setError(r?.error ?? '元に戻せませんでした。そのあとに変わったかもしれません。')
+  }
 
   const openSettings = async () => {
     setOpen('settings')
@@ -134,7 +145,8 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
           {notices.items.length === 0
             ? <p className="px-3 py-3 text-gray-500 dark:text-zinc-400">起きたことはまだありません。</p>
             : notices.items.map(item => (
-              <button key={item.id} type="button" role="menuitem" className={ROW}
+              <div key={item.id} className="relative">
+              <button type="button" role="menuitem" className={ROW}
                 onClick={() => {
                   setOpen(null)
                   if (!item.read) void markNoticesRead(companyId, [item.id])
@@ -147,6 +159,17 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                 </span>
                 <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </button>
+              {item.kind === 'replied_done' && (
+                undone.has(item.id)
+                  ? <span className="absolute bottom-2 right-3 text-[11.5px] text-gray-500 dark:text-zinc-400">元に戻しました</span>
+                  : (
+                    <button type="button" className="absolute bottom-1.5 right-3 rounded border border-gray-300 px-2 py-0.5 text-[11.5px] hover:bg-gray-50 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                      onClick={() => void undo(item.id, item.recordId, item.version)}>
+                      元に戻す
+                    </button>
+                  )
+              )}
+              </div>
             ))}
           <button type="button" className="flex w-full items-center gap-1 border-t border-gray-100 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:border-zinc-800 dark:text-zinc-400" onClick={() => void openSettings()}>
             <GearSix size={12} /> 知らせの設定
