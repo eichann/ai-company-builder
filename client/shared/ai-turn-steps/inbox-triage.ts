@@ -6,6 +6,7 @@
  * the card, `outbound-mail.md` "Replies"), nothing to do, やることにしない (with why: 「やることに
  * しなかった一覧」), or 確認待ち for the person. It never sends anything.
  */
+import { INBOX_AI_TITLE_MAX, INBOX_NO_SUBJECT } from '../../../shared/types/inbox'
 import type { AiTurnStepDefinition } from './types'
 
 const TITLE_MAX = 40
@@ -35,6 +36,9 @@ export function inboxTriageFirstMessage(c: { id: string; title: string }, versio
     '   - no_reply：読めば済む（お知らせ・お礼など）。',
     '   - set_aside：やることにしない（営業メール・関係のない連絡など）。',
     '   - unsure：決めきれない（ほかの人あてらしい・本文で別の人が名指し・中身が足りない）。私が確かめます。',
+    ...(c.title === INBOX_NO_SUBJECT
+      ? [`   この連絡には件名がありません。inbox_judge の title に、何の連絡かが一目で分かる短い名前（${INBOX_AI_TITLE_MAX}字以内、飾りのない言葉で。スレッドに書かれていない個人情報は入れない）を必ず入れてください（例：「見積書の送付のお願い」）。`]
+      : []),
     '3. reply のときは、inbox_judge の答えの replyRequestId の返事のお願いに、返事の下書きを用意する：',
     ...replyDraftSteps('返事'),
     '',

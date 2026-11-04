@@ -34,6 +34,8 @@ let data: TaskListData = {
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
     // Asked of someone else: no box, the 「人に頼んだもの」 mark.
     it({ id: 'task-ask001', title: 'セキュリティ資料を送る', turn: 'others', state: 'awaiting_acceptance', waitingFor: '田中さんに頼んだ・引き受け待ち', askedOfOthers: true }),
+    // A 来た連絡 in 確認待ち that is the member's: its ☑ is 「済んだ」 (owner FB #20).
+    it({ id: 'interaction-0001', type: 'interaction', typeLabel: '来た連絡', title: '日程のご相談', turn: 'mine', state: 'unsure', check: { action: 'settle' } }),
     it({ id: 'task-done01', title: '経費の申請', turn: 'done', state: 'done', finishedAt: new Date().toISOString() }),
     it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どの案件・プロジェクトの会議か選んでください', needsBundle: true, bundleGroup: { key: 'g-c', label: 'C社 打ち合わせ' } }),
     // The server suggests the 相手's one open まとまり: 「『…』の会議ですか？」.
@@ -98,11 +100,18 @@ installElectronAPI({
     document.getElementById('acted')!.textContent = acted.join(',')
     return { success: true, recordId }
   },
+  undoTaskAction: async (_companyId, recordId, version, expected) => {
+    acted.push(`${recordId}:undo ${version}@${expected}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
+    data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'mine' as const, state: 'unsure', version: i.version + 1, finishedAt: null, check: { action: 'settle' as const } } : i)) }
+    return { success: true, recordId }
+  },
   actOnTask: async (_companyId, recordId, input) => {
     acted.push(`${recordId}:${input.action}@${input.expectedVersion}${input.args?.reviewer ? `>${input.args.reviewer}` : ''}`)
     document.getElementById('acted')!.textContent = acted.join(',')
     if (input.action === 'accept') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'mine' as const, state: 'todo' } : i)) }
     if (input.action === 'request_review') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'others' as const, state: 'review', waitingFor: '阿部さんの番', check: undefined } : i)) }
+    if (input.action === 'settle') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'handled', version: i.version + 1, finishedAt: new Date().toISOString(), check: { action: 'undo' as const, version: i.version + 1 } } : i)) }
     if (input.action === 'complete') data = { ...data, items: data.items.map(i => (i.id === recordId ? { ...i, turn: 'done' as const, state: 'done', finishedAt: new Date().toISOString(), check: { action: 'reopen' as const } } : i)) }
     return { success: true, recordId }
   },

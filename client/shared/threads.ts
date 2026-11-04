@@ -71,3 +71,28 @@ export function authorLine(m: ThreadMessageView): string {
   if (m.fromName && m.fromAddress) return `${m.fromName} <${m.fromAddress}>`
   return m.fromName ?? m.fromAddress ?? THREAD_WORDS.someone
 }
+
+/** A piece of a chat message's text: plain, or Slack's `*bold*`. Drawn as text only (never as HTML). */
+export interface ChatTextRun { text: string; bold: boolean }
+
+// `*bold*`: no space just inside the stars, on one line (Slack's rule, without its word-boundary
+// rule, which Japanese text has no spaces for).
+const BOLD_RE = /\*([^*\s](?:[^*\n]*[^*\s])?)\*/g
+
+/**
+ * A Slack message's text (already plain on the server: mentions as `@name`, links as labels,
+ * slack-chat.ts `slackPlainText`) cut into runs at Slack's `*bold*`. Everything else stays
+ * literal text — `<`, `&` and tags included: the panel puts runs into the page as text.
+ */
+export function chatTextRuns(text: string): ChatTextRun[] {
+  const runs: ChatTextRun[] = []
+  let at = 0
+  for (const m of text.matchAll(BOLD_RE)) {
+    const start = m.index ?? 0
+    if (start > at) runs.push({ text: text.slice(at, start), bold: false })
+    runs.push({ text: m[1], bold: true })
+    at = start + m[0].length
+  }
+  if (at < text.length) runs.push({ text: text.slice(at), bold: false })
+  return runs
+}

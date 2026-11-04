@@ -24,6 +24,7 @@ import type { RecordTurnAccess } from '../electron/records/api'
 import { createInboxTools } from '../electron/features/inbox/tools'
 import { createTaskWaitTools, taskWaitView } from '../electron/features/ai-turns/task-wait-tools'
 import { taskWaitOverFirstMessage } from '../shared/ai-turn-steps/task-wait-over'
+import { inboxTriageFirstMessage } from '../shared/ai-turn-steps/inbox-triage'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordDetail } from '../../shared/types/records'
 import type { InboxItemView } from '../../shared/types/inbox'
@@ -145,6 +146,14 @@ test('an incoming message (interaction) runs under inbox-triage from the task li
   for (const name of ['records_get', 'records_query', 'interaction__set_aside', 'interaction__handle', 'mail_draft_update', 'mail_draft_show', 'drive_read', 'reply_request__ai_close', 'meeting__finish_reading']) {
     assert.ok(!aiTurnStepAllowsRecordTool('inbox-triage', name), name)
   }
+})
+
+// Owner FB 2026-11-04: a Slack mention's card read 「（件名なし）」. The AI names a message without a subject.
+test('a message without a subject asks the AI for a short title; a message with a subject does not', () => {
+  const none = inboxTriageFirstMessage({ id: 'interaction-aaaaaaaa', title: '（件名なし）' }, 3)
+  assert.ok(/inbox_judge の title に.*60字以内/.test(none), none)
+  const subject = inboxTriageFirstMessage({ id: 'interaction-aaaaaaaa', title: '見積のお願い' }, 3)
+  assert.ok(!subject.includes('inbox_judge の title に'), subject)
 })
 
 test('the inbox tools: the thread through A4\'s one AI route plus what the inbox knows, as outside text; a failed read says why; a read token cannot judge', async () => {

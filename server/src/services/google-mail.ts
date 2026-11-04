@@ -33,7 +33,7 @@ const PAGE_MAX = 50
 const PAGE_DEFAULT = 25
 const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
 const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{1,500}$/
-const METADATA_HEADERS = ['From', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
+const METADATA_HEADERS = ['From', 'Sender', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
 const BULK_LABELS = ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS']
 
 export interface GoogleMailDeps {
@@ -126,6 +126,7 @@ export function mailSummaryOf(raw: unknown): MailSummary | null {
     id,
     threadId,
     from: parseAddressList(h.get('from') ?? null)[0] ?? null,
+    sender: parseAddressList(h.get('sender') ?? null)[0] ?? null,
     to: parseAddressList(h.get('to') ?? null),
     cc: parseAddressList(h.get('cc') ?? null),
     subject: decodeEncodedWords(h.get('subject') ?? '').trim().normalize('NFC'),
@@ -322,6 +323,8 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, 
           occurredAt: m.receivedAt,
           subject: m.subject,
           from: party(m.from),
+          // Only to tell a connected service's notification mail (inbox.md); never kept.
+          senderAddress: m.sender?.email ?? null,
           to: m.to.map(party),
           cc: m.cc.map(party),
           outgoing: false,

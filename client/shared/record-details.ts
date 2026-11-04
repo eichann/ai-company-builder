@@ -32,6 +32,14 @@ export interface IncomingDetailView {
   summary: string
   needsReply: boolean
   open: OpenLink | null
+  /**
+   * What the member does with it here (owner FB #20, interaction version 6): `settle` — a 確認待ち
+   * message that is theirs (assignee): ［済んだ］ (`settle`) as the main button, ［取り込まない］
+   * (`drop`) in 「…」; `settled` — one they closed with ［済んだ］ (`settled_by`): 「済んだ」 and
+   * ［元に戻す］ (the generic undo). null: nothing (the AI's turn, the department's, judged, someone
+   * else's). The server still decides each press.
+   */
+  close: 'settle' | 'settled' | null
 }
 
 /** One of a bundle's やること, by whose turn it is (「みんなのやること」). */
@@ -140,7 +148,16 @@ export function bundleDetailOf(r: Pick<RecordSummary, 'fields'>, linked: RecordS
   }
 }
 
-export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summary'>, people: Record<string, string>): RecordDetailView | null {
+/** A 来た連絡's ［済んだ］ / ［元に戻す］ for `me` (`IncomingDetailView.close`). */
+export function incomingClose(state: string | null, f: RecordSummary['fields'], me: string | null): IncomingDetailView['close'] {
+  if (!me) return null
+  if (state === 'unsure' && f.assignee === me) return 'settle'
+  if (state === 'handled' && f.settled_by === me) return 'settled'
+  return null
+}
+
+/** `me`: the member reading it (a 来た連絡's ［済んだ］ is its assignee's); unknown → nothing to press. */
+export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summary'> & { state?: string | null }, people: Record<string, string>, me: string | null = null): RecordDetailView | null {
   const f = r.fields
   if (r.type === 'meeting') {
     const at = str(f.meeting_at) ?? str(f.occurred_at)
@@ -155,11 +172,14 @@ export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summa
     }
   }
   if (r.type === 'interaction') {
-    const channel = f.channel === 'email' ? 'email' : f.channel === 'slack' ? 'slack' : 'other'
+    // The inbox keeps a Slack message as channel `chat` with a `slack:` pointer (inbox.md).
+    const slack = f.channel === 'slack' || (f.channel === 'chat' && (str(f.source_ref) ?? '').startsWith('slack:'))
+    const channel = f.channel === 'email' ? 'email' : slack ? 'slack' : 'other'
     return {
       kind: 'incoming', channel, at: str(f.occurred_at), from: str(f.counterpart_text) ?? (str(f.from_address)?.includes('@') ? str(f.from_address) : null),
       summary: r.summary, needsReply: f.needs_reply === true || f.needs_reply === 'true',
       open: incomingOpen(f.source_ref),
+      close: incomingClose(r.state ?? null, f, me),
     }
   }
   return null

@@ -34,6 +34,7 @@ import { createSlackChat } from '../services/slack-chat'
 import { createSlackClient } from '../services/slack-client'
 import { createSlackConnector } from '../services/slack-connector'
 import { createSlackEvents, type SlackSignal } from '../services/slack-events'
+import { createSlackNames } from '../services/slack-names'
 import { createSlackNotices } from '../services/slack-notices'
 import { createThreadService } from '../services/threads'
 import type { ReplySent } from '../services/outbound-mail'
@@ -149,9 +150,11 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
   })
   // Slack serves the core role チャットの連絡を受け取る・返す (resolved per call, so registering here is in time).
   deps.core.connectorRoles.register(slackConnector.roleConnector())
+  // Slack users' names (users.info, a day in memory; never a text): a signal's sender, a thread's people.
+  const slackNames = createSlackNames({ slack: slackClient, clock })
   // …and implements it: one thread read on demand, a reply into it (slack-chat.ts; the member's own token).
   deps.core.roleProviders.provide(BUILTIN_CONNECTORS.slack.id, (() => {
-    const chat = createSlackChat({ slack: slackClient, companyData, slackData })
+    const chat = createSlackChat({ slack: slackClient, companyData, slackData, names: slackNames })
     return { chatReader: chat, chatSender: chat }
   })())
 
@@ -163,6 +166,7 @@ export function wireConnectorsLane(deps: ConnectorsLaneDeps) {
     vaultEnabled: () => brokerVault.status().enabled,
     readsIncoming: deps.readsIncoming,
     onSignal: signal => { for (const listen of signalListeners) listen(signal) },
+    names: slackNames,
   })
 
   // 大事な知らせを Slack の DM で (notifications.md `outside`): 「あなたの番」 notices, by the company's bot.

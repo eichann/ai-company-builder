@@ -24,6 +24,8 @@ export interface MailSummary {
   /** The provider's conversation id (opaque). */
   threadId: string
   from: MailAddress | null
+  /** The `Sender` header (who sent it on From's behalf, e.g. Google Calendar), when present. */
+  sender?: MailAddress | null
   to: MailAddress[]
   cc: MailAddress[]
   subject: string

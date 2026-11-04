@@ -12,7 +12,7 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
-import { acceptanceOf, argDefaultOf, argDefaultValue } from '../../../shared/core/core-types'
+import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../../shared/core/core-types'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
@@ -135,6 +135,12 @@ export function acting(ctx: EngineContext) {
       for (const k of Object.keys(rawArgs)) if (!(k in action.args)) return bad(`Unknown argument ${k}`)
       const args: Record<string, LedgerValue> = {}
       for (const [name, kind] of Object.entries(action.args)) {
+        // The person acting (ACTOR_ARGS, interaction 6's settled_by): never someone else.
+        if (isActorArg(row.type, actionName, name)) {
+          if (rawArgs[name] !== undefined && rawArgs[name] !== null && rawArgs[name] !== member.userId) return bad(`${name}: only the person acting`, 'BAD_VALUE')
+          args[name] = member.userId
+          continue
+        }
         // A core default (task version 12: 返事待ち's 見込み, 3 business days) for an app or an AI that gave none.
         const byDefault = rawArgs[name] === undefined || rawArgs[name] === null ? argDefaultOf(row.type, actionName, name) : undefined
         if (byDefault) {

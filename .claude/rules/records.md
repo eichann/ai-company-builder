@@ -319,6 +319,9 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
   the company's own holidays skipped: `business-days.ts` `addBusinessDays`; the engine dep
   `companyDay` = the company's now + `TaskSettings.companyHolidays`, composition.ts; without it the
   default zone and no company holidays). `ARG_DEFAULTS` is the core's only: a type file cannot say it.
+  Its sibling **`ACTOR_ARGS`** (`isActorArg`, same file and place): an argument the engine fills with
+  the person acting — today only `interaction` `settle`'s `settled_by` (inbox.md "Core types"); the app
+  may leave it out, a value naming anyone else → 400 `BAD_VALUE`. Core only, like `ARG_DEFAULTS`.
 - When it passes, the server clock gives it back (`WAIT_OVER.task`, `notifications.md` "The server
   clock"), its 経緯 note 「返事の見込み（11/6）を過ぎました」 (`waitOverNote`). **「あなたの番」 marks it**:
   `waitCameBack { waitedSince, overAt }` on a record in `WAIT_OVER[type].personTurn` whose newest state
@@ -1488,7 +1491,9 @@ Main only reshapes the server's answers — nothing is filtered or added on the 
 - **Words and icons** (言葉の決まり, owner 2026-11-02): one plain name and one icon per kind of
   thing, the same on every screen — `client/shared/thing-words.ts` (`thingName`: やること, 議事録を確認する,
   会議の記録, 来た連絡, 送るメールの下書き / 送る Slack の返事 / 送ったもの, 承認のお願い, 返事のお願い; a bundle or
-  a company's type by its own label, never its id; `stateWord` per type; `CALM` for waiting, empty and
+  a company's type by its own label, never its id; `stateWord` per type — every state of every core
+type has a word (来た連絡: 届いた・対応済み・確認待ち・部署の番・やることにしなかった; a task's AI の案;
+test: no raw state of a core type); `CALM` for waiting, empty and
   failing; `NEXT_STEP`, `turnWords`, `TURN_ASKS`) and `src/shared/ui/ThingIcon.tsx` (`ThingIcon`,
   `RecordIcon`, `SourceIcon`, `SeenBy`). No 「型」, category word (やりとり, まとまり) or machine name on a
   member's screen (`tests/thing-words.test.ts`). 「確かめる」 is only a task's checker's word: a

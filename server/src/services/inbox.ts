@@ -31,13 +31,14 @@ import {
   type IntakeSettings, type RoutedParty,
 } from '../../shared/core/intake-settings'
 import { normalizeEmail } from '../../shared/core/mail'
+import { BUILTIN_NOTIFICATION_SENDERS, notificationServiceOf, type ConnectedNotifier } from '../../shared/core/notification-senders'
 import { findPrivateScope } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { isDateValue } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import { replyTarget, type TaskSettings } from '../../shared/core/task-settings'
 import {
-  INBOX_CHANNELS, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
+  INBOX_AI_TITLE_MAX, INBOX_CHANNELS, INBOX_NO_SUBJECT, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
   type InboxSettingsView, type InboxStatus, type IntakeOutcome, type SetAsideItem, type SetAsideList,
 } from '../../shared/types/inbox'
 import type { RecordSummary } from '../../shared/types/records'
@@ -69,13 +70,15 @@ export const INBOX_LIMITS = {
   /** Addresses kept on the record (To / CC each), the rest only counted. */
   keptAddresses: 20,
   title: 200,
+  /** The AI's short title for a message without a subject (a chat message, a mail with none). */
+  aiTitle: INBOX_AI_TITLE_MAX,
   reason: 500,
   endCondition: 2000,
   deadlineNote: 200,
   setAsideList: 100,
 } as const
 
-const SUBJECT_NONE = '（件名なし）'
+const SUBJECT_NONE = INBOX_NO_SUBJECT
 /** The ledger's note when the member's own reply was seen in the thread. */
 const REPLIED_THERE: Record<InboxChannel, string> = { email: 'メールで返信済み', chat: 'チャット（Slack）で返信済み' }
 /** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
@@ -85,7 +88,7 @@ export interface InboxDeps {
   companyData: CompanyDataSource
   clock: Clock
   ids: IdGenerator
-  writer: Pick<ServiceRecordWriter, 'create' | 'transition'>
+  writer: Pick<ServiceRecordWriter, 'create' | 'transition' | 'retitle'>
   /** 名寄せ (identity.md): the 相手 an address is, as that member may see it. */
   resolveAddress: (member: Member, address: string) => Outcome<{ person: string[]; company: string[] }>
   roleOf: (companyId: string, userId: string) => string | null
@@ -95,6 +98,13 @@ export interface InboxDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Which connector serves a core role now (services/connector-roles.ts); absent until lane A wires it. */
   roles?: { resolve(companyId: string, role: ConnectorRole, operation?: string | null): Promise<RoleResolution> }
+  /**
+   * Whether the member's own grant of a core connector reads now (Slack: active, its 読む on):
+   * a per-member notifier (notification-senders.ts `perMember`) counts only then. Absent: never.
+   */
+  connectorReadsFor?: (companyId: string, userId: string, connectorId: string) => boolean
+  /** The notification senders that installed, on connector plugins declare (`notification_senders`). Absent: none. */
+  pluginNotifiers?: (companyId: string) => Promise<ConnectedNotifier[]>
 }
 
 /** A message we sent first and wait an answer to (outbound-mail.md "Waiting for their answer"). */
@@ -157,6 +167,7 @@ function readMessage(m: unknown): IncomingMessage | null {
     occurredAt: new Date(m.occurredAt).toISOString(),
     subject: typeof m.subject === 'string' ? m.subject : null,
     from,
+    senderAddress: typeof m.senderAddress === 'string' && m.senderAddress.length <= 320 ? m.senderAddress : null,
     to: list(m.to),
     cc: list(m.cc),
     outgoing: m.outgoing === true,
@@ -374,11 +385,13 @@ export function createInboxService(deps: InboxDeps) {
       if (moved.ok && r.state !== 'waiting_reply') discardDrafts(companyId, handle, r.id, '相手から返事が来ました')
     }
     if (replies.length > 0) return
-    // Nothing open about it: a handled interaction is the AI's to judge again.
+    // Nothing open about it: a handled interaction is the AI's to judge again — and no longer the
+    // member's 「済んだ」 (`settled_by`, interaction 6: what 今日終わったこと lists).
     const cur = fieldsOf(handle, interaction.id)
     if (cur.state === 'handled' && typeof cur.fields.assignee === 'string') {
       logFailure('continued', deps.writer.transition(companyId, {
         recordId: interaction.id, action: INBOX_ACTIONS.continued, expectedVersion: cur.version, to: 'received', actor: INBOX_ACTOR, note: '', quiet: true,
+        ...(cur.fields.settled_by ? { fields: { settled_by: null } } : {}),
       }))
     }
   }
@@ -442,7 +455,10 @@ export function createInboxService(deps: InboxDeps) {
     const fields: Record<string, LedgerValue> = {
       occurred_at: msg.occurredAt,
       channel: msg.channel === 'email' ? 'email' : 'chat',
-      counterpart_text: oneLine(msg.from.name ? `${msg.from.name} <${from.address ?? ''}>` : from.address ?? '', 200) || null,
+      // Chat: the sender's name only (the app shows 「<name> から」; a Slack user id says nothing to a member).
+      counterpart_text: msg.channel === 'chat'
+        ? oneLine(msg.from.name ?? '', 200) || null
+        : oneLine(msg.from.name ? `${msg.from.name} <${from.address ?? ''}>` : from.address ?? '', 200) || null,
       source_ref: msg.sourceRef,
       message_id: msg.messageId.slice(0, 500),
       thread_ref: msg.threadRef ?? null,
@@ -513,6 +529,29 @@ export function createInboxService(deps: InboxDeps) {
     return made.record.id
   }
 
+  /**
+   * The connected services whose notification mails the member's mail intake leaves out (owner FB
+   * #18, inbox.md "Notification mails of connected services"): a built-in connector's senders while
+   * it serves the role whose own intake brings the thing in (Slack's only for a member whose grant
+   * reads), and what installed, on connector plugins declare. A failing lookup leaves that one out
+   * (the mail is then taken in as before: never lost).
+   */
+  async function notifiersFor(companyId: string, userId: string): Promise<ConnectedNotifier[]> {
+    const out: ConnectedNotifier[] = []
+    if (deps.roles) {
+      for (const [connectorId, entries] of Object.entries(BUILTIN_NOTIFICATION_SENDERS)) {
+        for (const e of entries) {
+          const r = await deps.roles.resolve(companyId, e.role, e.operation).catch(() => null)
+          if (!r?.ok || r.connectorId !== connectorId) continue
+          if (e.perMember && !deps.connectorReadsFor?.(companyId, userId, connectorId)) continue
+          out.push({ service: e.service, from: e.from, sender: e.sender })
+        }
+      }
+    }
+    if (deps.pluginNotifiers) out.push(...await deps.pluginNotifiers(companyId).catch(() => []))
+    return out
+  }
+
   /** The role's connector for the inbox's channel, or why there is none. */
   async function sourceFor(companyId: string): Promise<InboxSource | null> {
     if (!deps.roles) return null
@@ -563,7 +602,18 @@ export function createInboxService(deps: InboxDeps) {
     if (!Array.isArray(listed) && Date.parse(listed.readFrom) > fromMs) {
       handle.inbox.addGap({ userId, channel: 'email', from: window.from, to: new Date(Date.parse(listed.readFrom)).toISOString(), notedAt: clock.now() })
     }
-    for (const m of messages) receive(companyId, userId, m)
+    // A connected service's notification mail (a Meet note, a calendar invitation, a Slack mention
+    // digest, a plugin service's notice) is not taken in: that service's own intake brings it in.
+    // Decided from From / Sender only; nothing is written, and only counts are logged.
+    const notifiers = messages.length > 0 ? await notifiersFor(companyId, userId) : []
+    const left = new Map<string, number>()
+    for (const m of messages) {
+      const parsed = notifiers.length > 0 ? readMessage(m) : null
+      const service = parsed?.channel === 'email' ? notificationServiceOf({ from: parsed.from.address, sender: parsed.senderAddress }, notifiers) : null
+      if (service) { left.set(service, (left.get(service) ?? 0) + 1); continue }
+      receive(companyId, userId, m)
+    }
+    if (left.size > 0) console.info(`[inbox] notification mails of connected services left out: ${[...left].map(([k, n]) => `${k}=${n}`).join(' ')}`)
     handle.inbox.setCheckedUntil(userId, 'email', new Date(startedMs).toISOString())
     return { read: messages.length, outcome: 'done' }
   }
@@ -787,6 +837,11 @@ export function createInboxService(deps: InboxDeps) {
         quiet: to !== 'unsure',
       })
       if (!moved.ok) return refuse('conflict', VERSION_CONFLICT.error, { code: VERSION_CONFLICT.code })
+      // A message without a subject gets the owner's AI's short title — never over a subject it came with.
+      const aiTitle = title.slice(0, INBOX_LIMITS.aiTitle).trim()
+      if (aiTitle !== '' && found.row.title === SUBJECT_NONE && found.row.personalOwner === member.userId) {
+        deps.writer.retitle(member.companyId, recordId, SUBJECT_NONE, aiTitle)
+      }
       return ok({ interactionId: recordId, state: to, replyRequestId, taskId, ...(alreadyReplied ? { alreadyReplied: true } : {}) })
     },
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { ChatCircleText, CircleNotch, EnvelopeSimple } from '@phosphor-icons/react'
-import { authorLine, THREAD_WORDS, type ThreadMessageView } from '../../../../shared/threads'
+import { authorLine, chatTextRuns, THREAD_WORDS, type ThreadMessageView } from '../../../../shared/threads'
 import { useRecordThread } from '../hooks/useRecordThread'
 import type { ThreadReads } from '../api'
 
@@ -10,7 +10,12 @@ function formatAt(at: string | null): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function Message({ m }: { m: ThreadMessageView }) {
+/** A chat message's text: Slack's `*bold*` drawn bold, the rest as plain text (React escapes it; never HTML). */
+export function ChatText({ text }: { text: string }) {
+  return <>{chatTextRuns(text).map((r, i) => (r.bold ? <strong key={i} className="font-semibold">{r.text}</strong> : <span key={i}>{r.text}</span>))}</>
+}
+
+function Message({ m, chat }: { m: ThreadMessageView; chat: boolean }) {
   return (
     <li className={`rounded-lg p-2 text-xs ${m.mine ? 'bg-blue-50 dark:bg-blue-950/30' : 'bg-gray-50 dark:bg-zinc-900'}`}>
       <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-gray-500 dark:text-zinc-400">
@@ -18,7 +23,7 @@ function Message({ m }: { m: ThreadMessageView }) {
         <span>{formatAt(m.at)}</span>
       </div>
       {m.subject && <p className="mt-0.5 text-[11px] text-gray-600 dark:text-zinc-300">件名：{m.subject}</p>}
-      <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-gray-800 dark:text-zinc-200">{m.text}</pre>
+      <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words font-sans text-gray-800 dark:text-zinc-200">{chat ? <ChatText text={m.text} /> : m.text}</pre>
       {m.truncated && <p className="mt-0.5 text-[11px] text-gray-500">{THREAD_WORDS.truncated}</p>}
     </li>
   )
@@ -49,7 +54,7 @@ export function RecordThreadPanel({ companyId, recordId, renderReply, reads }: {
         ? <p role="status" className="mt-1 text-xs text-gray-600 dark:text-zinc-400">{t.unavailable.text}</p>
         : <>
           {t.more && <p className="mt-1 text-[11px] text-gray-500">{THREAD_WORDS.more}</p>}
-          <ol className="mt-1 space-y-1.5">{t.messages.map(m => <Message key={m.id} m={m} />)}</ol>
+          <ol className="mt-1 space-y-1.5">{t.messages.map(m => <Message key={m.id} m={m} chat={t.channel === 'chat'} />)}</ol>
         </>}
       {t.replies.length > 0 && <div className="mt-2">
         <h4 className="text-xs font-medium text-gray-700 dark:text-zinc-300">{THREAD_WORDS.replies}</h4>

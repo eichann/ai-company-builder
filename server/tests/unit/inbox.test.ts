@@ -35,7 +35,7 @@
  *   their reply then sends it to the AI's check and drops the nudge's draft;
  *   the AI is told why it is its turn (draft / follow_up / check_reply).
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { initDatabase } from '../../src/db'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
@@ -60,6 +60,7 @@ import { defaultTaskSettings, replyTarget } from '../../../shared/core/task-sett
 import { coreTypeDefinitions } from '../../../shared/core/core-types'
 import type { IncomingMessage } from '../../../shared/types/inbox'
 import type { ConnectorRole } from '../../../shared/core/connector-roles'
+import type { ConnectedNotifier } from '../../../shared/core/notification-senders'
 
 const TS = '2026-11-02T00:00:00.000Z'
 const ROLES: Record<string, string> = { 'u-owner': 'owner', 'u-admin': 'admin' }
@@ -84,6 +85,11 @@ let engine: RecordEngine
 let serviceWriter: ReturnType<typeof createServiceRecordWriter>
 /** The company's own days off (task settings), for the reply 目安. */
 let companyHolidays: string[] = []
+let roles: ReturnType<typeof createConnectorRoles>
+/** Members whose own Slack grant reads (the composition's `connectorReadsFor`). */
+let slackReads = new Set<string>()
+/** What installed connector plugins declare (the composition's `pluginNotifiers`). */
+let pluginNotifiers: ConnectedNotifier[] = []
 
 const m = (userId: string, co = 'a'): Member => ({ companyId: co, userId, role: ROLES[userId] ?? 'member' })
 const AI = (userId: string): ServiceActor => ({ id: userId, kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null })
@@ -140,6 +146,8 @@ function settings(body: Record<string, unknown>, co = 'a') {
 beforeEach(() => {
   n = 0
   companyHolidays = []
+  slackReads = new Set()
+  pluginNotifiers = []
   told = []
   mailbox = {}
   ready = new Set()
@@ -161,7 +169,7 @@ beforeEach(() => {
   serviceWriter = writer
   const identities = createIdentityService({ companyData: source, transactions: sqliteTransactions(conn), clock, ids })
   const choices = new Map<string, string | null>()
-  const roles = createConnectorRoles({
+  roles = createConnectorRoles({
     choices: { choice: (co, role) => choices.get(`${co}:${role}`) ?? null, setChoice: (co, role, c) => { choices.set(`${co}:${role}`, c) } },
     clock,
   })
@@ -173,6 +181,8 @@ beforeEach(() => {
     memberAddresses: () => MEMBERS.map(u => ({ userId: u, email: EMAILS[u] })),
     taskSettings: () => defaultTaskSettings(),
     roles: { resolve: (co, role: ConnectorRole, op) => roles.resolve(co, role, op ?? null) },
+    connectorReadsFor: (_co, userId, connectorId) => connectorId === 'slack' && slackReads.has(userId),
+    pluginNotifiers: async () => pluginNotifiers,
   })
   engine = createRecordEngine({
     companyData: source, transactions: sqliteTransactions(conn), clock, ids,
@@ -409,6 +419,51 @@ describe('the AI\'s judgement', () => {
   })
 })
 
+// Owner FB #20 (2026-11-04): a 確認待ち message the member already settled could not be closed.
+describe('「済んだ」 on a 確認待ち message (interaction 6, the assignee only)', () => {
+  const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+  async function unsure() {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'unsure', reason: '誰あてか不明' }))
+    return { first, id: row.id }
+  }
+
+  it('closes it as handled, marked as hers; nobody else — not a non-reader, the owner, her AI — may, and she cannot name someone else', async () => {
+    const { id } = await unsure()
+    // Owner-only: anyone else is told it does not exist (the same answer as a missing record).
+    for (const u of ['u-bob', 'u-owner', 'u-admin']) {
+      const r = await engine.act(m(u), person(u), id, 'settle', { expectedVersion: 2 })
+      expect(r.ok).toBe(false)
+      expect(!r.ok && r.kind).toBe('not-found')
+    }
+    const ai = await engine.act(m('u-alice'), { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1' }, id, 'settle', { expectedVersion: 2 })
+    expect(!ai.ok && ai.body).toMatchObject({ code: 'NOT_ALLOWED' })
+    const other = await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2, args: { settled_by: 'u-bob' } })
+    expect(!other.ok && other.body).toMatchObject({ code: 'BAD_VALUE' })
+    expect(stateOf(id).state).toBe('unsure')
+
+    const done = await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2 })
+    expect(done.ok).toBe(true)
+    expect(stateOf(id).state).toBe('handled')
+    expect(fieldsOf(id).settled_by).toBe('u-alice')
+  })
+
+  it('取り消す right after brings it back to 確認待ち; the thread going on takes the mark away (the AI judges again)', async () => {
+    const { first, id } = await unsure()
+    ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 2 }))
+    ok(await engine.undo(m('u-alice'), person('u-alice'), id, { version: 3, expectedVersion: 3 }))
+    expect(stateOf(id).state).toBe('unsure')
+    expect(fieldsOf(id).settled_by ?? null).toBeNull()
+
+    ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: 4 }))
+    expect(inbox.receive('a', 'u-alice', mail({ references: [first.messageId] }))).toBe('continued')
+    expect(stateOf(id).state).toBe('received')
+    expect(fieldsOf(id).settled_by ?? null).toBeNull()
+  })
+})
+
 describe('polling through the role, reconnecting', () => {
   it('a first connection starts now; a reconnection reads back at most 7 days, a longer break is a gap its member sees', async () => {
     inbox.connect('a', 'u-alice', 'email')
@@ -500,7 +555,7 @@ describe('polling through the role, reconnecting', () => {
   it('no connector serving the mail role: nothing is read and the window stays', async () => {
     const lone = createInboxService({
       companyData: source, clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }, ids: { newId: () => 'x', newToken: () => 'x' },
-      writer: { create: () => { throw new Error('no') }, transition: () => { throw new Error('no') } },
+      writer: { create: () => { throw new Error('no') }, transition: () => { throw new Error('no') }, retitle: () => { throw new Error('no') } },
       resolveAddress: () => ({ ok: true, value: { person: [], company: [] } }), roleOf: () => 'member', memberAddresses: () => [], taskSettings: () => defaultTaskSettings(),
     })
     lone.connect('a', 'u-alice', 'email')
@@ -524,14 +579,79 @@ describe('companies apart', () => {
 
 describe('Slack signals (A3 → the inbox)', () => {
   it('a colleague\'s DM is the member\'s own chat message (chat is not 社内どうし); a thread reply joins it', () => {
-    const sig = { companyId: 'a', userId: 'u-alice', kind: 'dm' as const, channelId: 'D1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U-BOB', external: false }
+    const sig = { companyId: 'a', userId: 'u-alice', kind: 'dm' as const, channelId: 'D1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U0BOB', senderName: '二宮 二郎', external: false }
     expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('created')
     const [row] = interactions()
     expect(row.personalOwner).toBe('u-alice')
-    expect(fieldsOf(row.id)).toMatchObject({ channel: 'chat', source_ref: 'slack:D1:1793581200.000100', occurred_at: '2026-11-02T01:00:00.000Z' })
+    // The sender by name only (the card's 「二宮 二郎 から」), like a mail sender's name; never the Slack id.
+    expect(fieldsOf(row.id)).toMatchObject({ channel: 'chat', source_ref: 'slack:D1:1793581200.000100', occurred_at: '2026-11-02T01:00:00.000Z', counterpart_text: '二宮 二郎' })
     expect(inbox.receive('a', 'u-alice', slackSignalMessage({ ...sig, ts: '1793581260.000200', threadTs: sig.ts }))).toBe('continued')
     expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('duplicate')
     expect(interactions()).toHaveLength(1)
+  })
+
+  it('a sender whose name Slack did not give shows no 「slack:U… から」', () => {
+    const sig = { companyId: 'a', userId: 'u-alice', kind: 'mention' as const, channelId: 'C1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U630QNGDB', senderName: null, external: false }
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('created')
+    expect(fieldsOf(interactions()[0].id).counterpart_text ?? null).toBeNull()
+  })
+})
+
+// Owner FB 2026-11-04: a Slack mention's card read 「（件名なし）」.
+describe('the AI names a message without a subject', () => {
+  const dm = (ts: string) => slackSignalMessage({ companyId: 'a', userId: 'u-alice', kind: 'dm', channelId: 'D1', ts, threadTs: null, senderSlackUserId: 'U0BOB', senderName: '二宮', external: false })
+  const titleOf = (id: string) => handle().records.byIds([id])[0].title
+
+  it('its owner\'s AI sets a short title (≤ 60) on a chat message or a mail with no subject', () => {
+    inbox.receive('a', 'u-alice', dm('1793581200.000100'))
+    const chat = interactions()[0]
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: '連絡だけ', title: `明日の打ち合わせの時間変更\n${'あ'.repeat(80)}` }))
+    expect(titleOf(chat.id)).toBe(`明日の打ち合わせの時間変更 ${'あ'.repeat(46)}`)
+    expect(titleOf(chat.id)).toHaveLength(60)
+
+    inbox.receive('a', 'u-alice', mail({ subject: '' }))
+    const noSubject = interactions().find(r => r.id !== chat.id)!
+    expect(titleOf(noSubject.id)).toBe('（件名なし）')
+    const r = ok(inbox.judge(m('u-alice'), AI('u-alice'), noSubject.id, { expectedVersion: 1, outcome: 'reply', reason: '依頼', title: '請求書の再送のお願い' }))
+    expect(titleOf(noSubject.id)).toBe('請求書の再送のお願い')
+    expect(titleOf(r.replyRequestId!)).toBe('請求書の再送のお願い')
+  })
+
+  it('never over a mail\'s subject, nor a title the AI already gave, nor someone\'s department message', () => {
+    inbox.receive('a', 'u-alice', mail({ subject: '見積のお願い' }))
+    const withSubject = interactions()[0]
+    const r = ok(inbox.judge(m('u-alice'), AI('u-alice'), withSubject.id, { expectedVersion: 1, outcome: 'reply', reason: '依頼', title: '見積' }))
+    expect(titleOf(withSubject.id)).toBe('見積のお願い')
+    expect(titleOf(r.replyRequestId!)).toBe('見積')
+
+    // The thread went on: judged again, the first title stays.
+    inbox.receive('a', 'u-alice', dm('1793581300.000100'))
+    const chat = interactions().find(x => x.id !== withSubject.id)!
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: '連絡だけ', title: '最初の名前' }))
+    expect(titleOf(chat.id)).toBe('最初の名前')
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage({
+      companyId: 'a', userId: 'u-alice', kind: 'dm', channelId: 'D1', ts: '1793581360.000100', threadTs: '1793581300.000100', senderSlackUserId: 'U0BOB', senderName: '二宮', external: false,
+    }))).toBe('continued')
+    expect(stateOf(chat.id).state).toBe('received')
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: stateOf(chat.id).version, outcome: 'no_reply', reason: '続き', title: '二つ目の名前' }))
+    expect(titleOf(chat.id)).toBe('最初の名前')
+
+    // A shared address's message (the department's, not owner-only) keeps its title even when taken.
+    settings({ sharedAddresses: [{ address: 'info@acme.example', folder: '営業部' }] })
+    inbox.receive('a', 'u-alice', mail({ to: [{ address: 'info@acme.example' }], subject: '' }))
+    const shared = interactions().find(x => x.personalOwner === null)!
+    ok(inbox.claim(m('u-bob'), shared.id, { expectedVersion: 1 }))
+    ok(inbox.judge(m('u-bob'), AI('u-bob'), shared.id, { expectedVersion: 2, outcome: 'no_reply', reason: '連絡だけ', title: '部署の名前' }))
+    expect(titleOf(shared.id)).toBe('（件名なし）')
+  })
+
+  it('only the AI judging it in its turn: anyone else\'s judgement is refused and changes nothing', () => {
+    inbox.receive('a', 'u-alice', dm('1793581400.000100'))
+    const chat = interactions()[0]
+    for (const u of ['u-bob', 'u-owner']) {
+      expect(inbox.judge(m(u), AI(u), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: 'x', title: '乗っ取り' }).ok).toBe(false)
+    }
+    expect(titleOf(chat.id)).toBe('（件名なし）')
   })
 })
 
@@ -915,5 +1035,78 @@ describe('we sent first: 返事を待つ (outbound-mail.md "Waiting for their an
     await clock(true).runOnce()
     expect(stateOf(rr).state).toBe('preparing')
     expect(ok(inbox.item(m('u-alice'), rr)).request).toMatchObject({ purpose: 'follow_up', waitUntil: '2026-11-05T09:00' })
+  })
+})
+
+describe('notification mails of connected services (owner FB #18)', () => {
+  const MEET = { address: 'gemini-notes@google.com', name: 'Gemini' }
+  const CALENDAR = { address: 'calendar-notification@google.com', name: 'Google カレンダー' }
+  const SLACK = { address: 'notification@slack.com', name: 'ACME（Slack 経由）' }
+  const HUBSPOT = { address: 'noreply@notifications.hubspot.com', name: 'HubSpot' }
+  /** An invitation "via Google Calendar": From its organizer, Sender the calendar. */
+  const invitation = () => mail({ from: { address: 'tanaka@client.example', name: '田中' }, senderAddress: 'calendar-notification@google.com' })
+  const google = () => roles.register({
+    id: 'google', usable: async () => true,
+    servings: [{ role: 'calendar', operations: ['read'], capabilities: [] }, { role: 'meetings', operations: ['read'], capabilities: [] }],
+  })
+  const slack = () => roles.register({ id: 'slack', usable: async () => true, servings: [{ role: 'chat', operations: ['receive', 'reply'], capabilities: [] }] })
+
+  async function pollWith(...messages: IncomingMessage[]) {
+    if (!handle().inbox.connection('u-alice', 'email')) inbox.connect('a', 'u-alice', 'email')
+    // Each poll an hour on, its mail since the last one.
+    nowMs += 60 * 60_000
+    mailbox['u-alice'] = messages.map(x => ({ ...x, occurredAt: new Date(nowMs - 30 * 60_000).toISOString() }))
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'info').mockImplementation((line: string) => { logged.push(line) })
+    try { await inbox.poll('a', 'u-alice') } finally { spy.mockRestore() }
+    return { titles: handle().records.byIds(interactions().map(r => r.id)).map(r => r.title).sort(), logged }
+  }
+
+  it('Google\'s meeting notes and calendar mails (an invitation by its Sender too) are left out while Google serves those roles; nothing is written, counts only are logged', async () => {
+    google()
+    const person = mail({ from: { address: 'sundar@google.com', name: 'A person at Google' }, subject: 'ご相談' })
+    const { titles, logged } = await pollWith(mail({ from: MEET, subject: 'メモ: 定例' }), mail({ from: CALENDAR, subject: '招待: 定例' }), { ...invitation(), subject: '招待: 打ち合わせ' }, person)
+    // A person at google.com is a person: still taken in.
+    expect(titles).toEqual(['ご相談'])
+    expect(handle().inbox.messagesOf(interactions()[0].id)).toHaveLength(1)
+    expect(logged).toEqual(['[inbox] notification mails of connected services left out: google_meet=1 google_calendar=2'])
+    // Counts only: no subject, address or id in the log.
+    expect(logged.join('')).not.toMatch(/定例|打ち合わせ|tanaka|gemini|@/)
+  })
+
+  it('without Google as the connector they are taken in as before', async () => {
+    const { titles, logged } = await pollWith(mail({ from: MEET, subject: 'メモ: 定例' }), { ...invitation(), subject: '招待: 打ち合わせ' })
+    expect(titles).toEqual(['メモ: 定例', '招待: 打ち合わせ'])
+    expect(logged).toEqual([])
+  })
+
+  it('Slack\'s notification mails are left out only for a member whose own Slack grant reads', async () => {
+    slack()
+    // Alice has no reading grant: the mail is how she hears of it — taken in.
+    let r = await pollWith(mail({ from: SLACK, subject: '新しいメンション' }))
+    expect(r.titles).toEqual(['新しいメンション'])
+    slackReads.add('u-alice')
+    r = await pollWith(mail({ from: SLACK, subject: 'もう一つのメンション' }))
+    expect(r.titles).toEqual(['新しいメンション'])
+    expect(r.logged).toEqual(['[inbox] notification mails of connected services left out: slack=1'])
+  })
+
+  it('a Slack grant does not count while Slack is not the company\'s chat connector', async () => {
+    slackReads.add('u-alice')
+    expect((await pollWith(mail({ from: SLACK, subject: '新しいメンション' }))).titles).toEqual(['新しいメンション'])
+  })
+
+  it('a connector plugin\'s declared senders are left out (domain entries cover subdomains), only by declaration', async () => {
+    let r = await pollWith(mail({ from: HUBSPOT, subject: 'タスクの期限' }))
+    expect(r.titles).toEqual(['タスクの期限'])
+    pluginNotifiers = [{ service: 'plugin:hubspot', from: ['@hubspot.com'], sender: [] }]
+    r = await pollWith(mail({ from: HUBSPOT, subject: '取引が更新されました' }), mail({ from: { address: 'sales@nothubspot.com' }, subject: '別の会社' }))
+    expect(r.titles).toEqual(['タスクの期限', '別の会社'])
+    expect(r.logged).toEqual(['[inbox] notification mails of connected services left out: plugin:hubspot=1'])
+  })
+
+  it('a chat message is never matched, and receive() alone (Slack\'s events, our replies) is unchanged', async () => {
+    google()
+    expect(inbox.receive('a', 'u-alice', mail({ from: MEET, subject: '直接' }))).toBe('created')
   })
 })

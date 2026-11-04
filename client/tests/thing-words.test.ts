@@ -49,6 +49,19 @@ test('the same state word reads per type: a task in review is not an approval wa
   assert.equal(stateWord(null), null)
 })
 
+// Owner FB 2026-11-04: a 来た連絡's chip read 「unsure」. Every state of every core type is in members' words.
+test('every state of every core type has a Japanese word: no raw state on a chip', () => {
+  for (const type of Object.keys(CORE_TYPE_FILES)) {
+    for (const state of def(type).states) {
+      const word = stateWord(state, type)
+      assert.ok(word && word !== state && !/[a-z_]/.test(word), `${type}/${state}: ${word}`)
+    }
+  }
+  assert.equal(stateWord('unsure', 'interaction'), '確認待ち')
+  assert.equal(stateWord('unclaimed', 'interaction'), '部署の番')
+  assert.equal(stateWord('excluded', 'interaction'), 'やることにしなかった')
+})
+
 test('where bundles of several kinds mix, the kinds there are named, each once', () => {
   assert.equal(bundleWords(['案件', '案件']), '案件')
   assert.equal(bundleWords(['案件', 'プロジェクト']), '案件・プロジェクト')

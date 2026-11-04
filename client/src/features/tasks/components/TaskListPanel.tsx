@@ -3,7 +3,7 @@ import { CaretDown, CaretRight, Briefcase } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import { meetingBundleWords, type TaskActInput, type TaskCreateInput, type TaskListData, type TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle } from '../api'
+import { actOnTask, createTask, declineMeetingBundle, linkMeetingBundle, undoTaskAction } from '../api'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useCalendarToday } from '../hooks/useCalendarToday'
@@ -37,10 +37,16 @@ interface Props {
   askFolder?: string | null
   /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
   onConsult?: (task: { id: string; title: string }) => void
+  /**
+   * A task the member completed with its ☑ here (owner FB #15), or a 来た連絡 they checked as 済んだ
+   * (owner FB #20): AppShell closes its tab in the middle. Not for 見てもらう, やり直す or 元に戻す, nor a
+   * press on the card itself (the card stays to show 「完了」 / 「済んだ」).
+   */
+  onCompleted?: (recordId: string) => void
 }
 
 /** The task list tab (やること): the list; an item opens in a tab in the middle (records and files share the tabs). */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecordId = null, onOpen, meetingActions, onConsult, askFolder = null, onCompleted }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -66,16 +72,29 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
   const sections = useMemo(() => listSections(filterByTag(items, shownTag), events, mode, now, deptKind?.name ?? kinds?.core.name), [items, events, mode, now, shownTag, deptKind, kinds])
   const aiOf = (id: string) => aiTurns?.items.find(i => i.recordId === id) ?? null
 
-  const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => {
+  /** True when every step went through. */
+  const run = async (item: TaskListItem, steps: Array<Omit<TaskActInput, 'expectedVersion'>>): Promise<boolean> => {
     setBusy(item.id)
     setMessage(null)
     try {
       let version = item.version
       for (const step of steps) {
         const r = await actOnTask(companyId, item.id, { ...step, expectedVersion: version })
-        if (!r.success) { setMessage(r.error); return }
+        if (!r.success) { setMessage(r.error); return false }
         version += 1
       }
+      return true
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+  }
+  const undoOne = async (item: TaskListItem, version: number) => {
+    setBusy(item.id)
+    setMessage(null)
+    try {
+      const r = await undoTaskAction(companyId, item.id, version, item.version)
+      if (!r.success) setMessage(r.error)
     } finally {
       setBusy(null)
       list.reload()
@@ -86,6 +105,11 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, activeRecord
     const c = item.check
     if (!c) return
     if (c.action === 'request_review') void run(item, [{ action: 'request_review', args: { reviewer: c.reviewer } }])
+    // Checked off (a task's 完了, a 来た連絡's 済んだ — owner FB #20): its tab in the middle goes too
+    // (owner FB #15); やり直す / 元に戻す do not bring it back.
+    else if (c.action === 'complete' || c.action === 'settle') void run(item, [{ action: c.action }]).then(ok => { if (ok) onCompleted?.(item.id) })
+    // A 来た連絡 closed today: 元に戻す is the undo of that 済んだ (the server refuses when something changed since).
+    else if (c.action === 'undo') void undoOne(item, c.version)
     else void run(item, [{ action: c.action }])
   }
   // A file, folder, record or consultation dropped on a task row is linked to it (owner decision 2026-11-03).

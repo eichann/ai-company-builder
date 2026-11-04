@@ -355,6 +355,22 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet)
       return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
     },
+
+    /**
+     * A received message's title, only while it is still `expected` (compare-and-set): the inbox's
+     * placeholder 「（件名なし）」 replaced by the owner's AI's short title (inbox.md). Only a
+     * service's receipt type (`interaction`); the version and the ledger stay (a title is no field).
+     */
+    retitle(companyId: string, recordId: string, expected: string, title: string): boolean {
+      const records = companyData.forCompany(companyId).records
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId])[0] : undefined
+      if (!row || row.removedAt !== null || !SERVICE_RECEIPT_TYPES.includes(row.type) || row.title !== expected) return false
+      const next = title.normalize('NFC').trim().slice(0, 200)
+      if (next === '') return false
+      deps.transactions.run(() => records.upsert({ ...row, title: next, updatedAt: deps.clock.now() }))
+      try { deps.recordChanged?.(companyId, row.id) } catch { /* the app's own check catches up */ }
+      return true
+    },
   }
 }
 

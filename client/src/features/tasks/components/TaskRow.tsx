@@ -25,7 +25,7 @@ interface RowProps {
   ai: AiTurnItemView | null
   busy: boolean
   onOpen: (recordId: string) => void
-  /** The ☑ (`item.check`: 完了にする / 終わったので見てもらう / やり直す); null: not offered here, the card decides. */
+  /** The ☑ (`item.check`: 完了にする / 終わったので見てもらう / やり直す; a 来た連絡's 済んだ / 元に戻す); null: not offered here, the card decides. */
   onFinish: (() => void) | null
   onAccept: (() => void) | null
   onRetry: (() => void) | null
@@ -57,7 +57,10 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
   const when = dueWhen(item.due, now)
   const kind = thingKindOf(item)
   const step = item.turn === 'mine' && !onFinish ? ROW_STEP[kind] : undefined
-  const boxWord = item.check?.action === 'request_review' ? NEXT_STEP.askToCheck : item.check?.action === 'reopen' ? NEXT_STEP.reopen : NEXT_STEP.complete
+  const boxWord = item.check?.action === 'request_review' ? NEXT_STEP.askToCheck : item.check?.action === 'reopen' ? NEXT_STEP.reopen
+    : item.check?.action === 'settle' ? NEXT_STEP.settle : item.check?.action === 'undo' ? NEXT_STEP.unsettle : NEXT_STEP.complete
+  // Finished (a done task's やり直す, a 来た連絡's 元に戻す): the green ✓.
+  const ticked = item.check?.action === 'reopen' || item.check?.action === 'undo'
   const sub: string[] = []
   if (item.waitingFor) sub.push(item.waitingFor)
   else if (item.turn === 'ai' && ai) sub.push(ai.reason ? `${AI_STATE_WORDS[ai.state]}：${ai.reason}` : AI_STATE_WORDS[ai.state])
@@ -86,10 +89,10 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
             : <Robot size={15} className="text-accent" aria-label="AI の番" />)
           : onFinish ? (
             <button type="button" disabled={busy} onClick={onFinish} title={boxWord} aria-label={`「${item.title}」を${boxWord}`}
-              className={`flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border disabled:opacity-40 ${item.check?.action === 'reopen'
+              className={`flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border disabled:opacity-40 ${ticked
                 ? 'border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600'
                 : 'border-gray-400 hover:border-accent hover:bg-accent/10 dark:border-zinc-500'}`}>
-              {item.check?.action === 'reopen' && <Check size={10} weight="bold" />}
+              {ticked && <Check size={10} weight="bold" />}
             </button>
           ) : item.type === 'task' && item.state === 'review' && !done ? (
             <span className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border border-amber-400 bg-amber-100 dark:bg-amber-500/20" aria-label="確かめてもらっています"><Eye size={9} className="text-amber-700" /></span>

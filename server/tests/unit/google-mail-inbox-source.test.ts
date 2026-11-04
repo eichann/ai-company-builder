@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MailListQuery, MailRead, MailSummary } from '../../src/ports/mail'
-import { googleMailInboxSource, INBOX_POLL_MAX } from '../../src/services/google-mail'
+import { googleMailInboxSource, INBOX_POLL_MAX, mailSummaryOf } from '../../src/services/google-mail'
 import { threadPointerOf } from '../../src/services/threads'
 
 function summary(k: number, over: Partial<MailSummary> = {}): MailSummary {
@@ -36,7 +36,7 @@ describe('Gmail as the inbox source', () => {
       expect.objectContaining({ messageId: '<m2@client.example>' }),
       {
         channel: 'email', messageId: '<m3@client.example>', references: ['<m1@acme.example>'], threadRef: 'gmail:t3', sourceRef: 'gmail:g3',
-        occurredAt: '2026-11-04T03:03:00.000Z', subject: '件名 3', from: { address: 'tanaka@client.example', name: '田中' },
+        occurredAt: '2026-11-04T03:03:00.000Z', subject: '件名 3', from: { address: 'tanaka@client.example', name: '田中' }, senderAddress: null,
         to: [{ address: 'alice@acme.example', name: null }], cc: [], outgoing: false, bulk: false, automated: false,
       },
     ])
@@ -44,6 +44,14 @@ describe('Gmail as the inbox source', () => {
     const [one] = got as Array<{ threadRef: string; sourceRef: string }>
     expect(threadPointerOf({ thread_ref: one.threadRef })).toEqual({ kind: 'mail', threadId: 't1', messageId: null })
     expect(threadPointerOf({ source_ref: one.sourceRef })).toEqual({ kind: 'mail', threadId: null, messageId: 'g1' })
+  })
+
+  it('the Sender header is carried (an invitation "via Google Calendar"), asked for in the metadata read', async () => {
+    const got = await googleMailInboxSource(reader([[summary(1, { sender: { email: 'calendar-notification@google.com', name: 'Google Calendar' } })]]), () => 0)
+      .listSince('a', 'u', '2026-11-04T03:00:00.000Z')
+    expect(got).toEqual([expect.objectContaining({ from: { address: 'tanaka@client.example', name: '田中' }, senderAddress: 'calendar-notification@google.com' })])
+    const parsed = mailSummaryOf({ id: 'g1', threadId: 't1', payload: { headers: [{ name: 'From', value: 'Tanaka <tanaka@client.example>' }, { name: 'Sender', value: 'Google Calendar <calendar-notification@google.com>' }] } })
+    expect(parsed?.sender).toEqual({ email: 'calendar-notification@google.com', name: 'Google Calendar' })
   })
 
   it('a failed read is not-connected (the poll keeps its window), and so is not ready', async () => {

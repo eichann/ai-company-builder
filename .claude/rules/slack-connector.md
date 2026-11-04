@@ -5,6 +5,7 @@ paths:
   - "server/src/services/slack-events.ts"
   - "server/src/services/slack-notices.ts"
   - "server/src/services/slack-chat.ts"
+  - "server/src/services/slack-names.ts"
   - "server/src/routes/slack.ts"
   - "server/src/routes/slack-connection.ts"
   - "shared/core/slack.ts"
@@ -102,10 +103,25 @@ counts only when all its scopes are granted (`slackFeaturesOf`).
 
 Registered in `wireConnectorsLane` (`roleProviders.provide('slack', …)`). `thread`: only with
 `read` granted and not off; `conversations.replies` (the history scope of the channel kind), the
-newest 30, each ≤ 8,000 characters, names through `users.info` (≤ 10 per thread), `mine` = the
-Slack user remembered for the grant's address. `reply`: only with `reply` granted and not off;
+newest 30, each ≤ 8,000 characters, names through the cached lookup ("Names" below; ≤ 10 users per
+thread: the authors first, then the people mentioned), `mine` = the Slack user remembered for the
+grant's address. **The text is made plain** (`slackPlainText`, owner FB 2026-11-04): `<@U…>` →
+`@<name>` (else its label, else 「@Slack の人」), `<#C…|x>` → `#x`, `<!channel>` / `<!here>` /
+`<!everyone>` → `@channel` / `@here` / `@everyone`, other `<!…|label>` and `<url|label>` → the
+label, `<url>` → the url, then `&lt;` `&gt;` `&amp;` undone. It is text, never markup: the app's
+元のスレッド draws it as text and only Slack's `*bold*` as bold (`client/shared/threads.ts`
+`chatTextRuns`, `RecordThreadPanel` `ChatText`; `src/features/threads/chat-text.test.ts` with an
+injection attempt). The AI reads the same plain text. `reply`: only with `reply` granted and not off;
 `chat.postMessage { channel, thread_ts, text }` (≤ 4,000), a write: never re-sent. Nothing stored
 or logged (`outbound-mail.md` "Replies").
+
+## Names (`services/slack-names.ts`)
+
+`nameOf(companyId, slackUserId, asMember)`: `users.info` with the member's token (`users:read`
+comes with every grant), else the company's bot; the display name, else the real name, else the
+handle (≤ 100, one line). **Kept in memory only, a day per company + Slack user** (≤ 5,000 names,
+oldest out; a failed lookup is not kept): only the name, never a text, address or anything else of
+the profile. Built once in `wireConnectorsLane` and shared by the events and `slack-chat.ts`.
 
 ## Notice DMs (大事な知らせを Slack の DM で, E-26; `services/slack-notices.ts`)
 
@@ -131,20 +147,23 @@ unknown company → the same empty 401) → JSON → `url_verification` (answer 
 envelope's `team_id` must be the company's (else ignored) → app on, operator stop, vault (a stop
 answers 200 and drops: Slack would retry otherwise) → event id once → signals. Body ≤ 1 MB.
 
-A **signal** (`SlackSignal`: member, kind `dm` / `mention` / `broadcast`, channel, ts, thread,
-sender's Slack id, `external` for Slack Connect or a sender of another workspace) goes to
-`onSignal` (B2). The text is read only in memory: `<@U…>` mentions, `<!channel|here|everyone>`.
-DMs and broadcasts go to the event's `authorizations` (non-bot, same workspace); mentions to the
-mentioned users. The member's **own** message in a DM or a thread reply is a signal `own` for them
+A **signal** (`SlackSignal`: member, kind `dm` / `mention` / `own`, channel, ts, thread,
+sender's Slack id, **the sender's display name** (`senderName`: "Names", looked up with the
+receiving member's token and waited for at most 1.5 s — `SLACK_SENDER_NAME_WAIT_MS` — then null),
+`external` for Slack Connect or a sender of another workspace) goes to `onSignal` (B2). The text is
+read only in memory: `<@U…>` mentions. DMs go to the event's `authorizations` (non-bot, same
+workspace); mentions to the mentioned users. **An @channel / @here / @everyone alone is not taken
+in** (owner decision 2026-11-04: Slack lists one authorization per event, so it reached one member
+at random); one that also names the member, or in their DM, comes as that mention / DM. The member's **own** message in a DM or a thread reply is a signal `own` for them
 (their reply: the inbox ends what it answered, B4). Signals go to the listeners registered with
 `services.onSlackSignal` (lane B's 来た連絡). Left out: bots (`bot_id`), edits and other subtypes,
 the sender themselves (except `own` above),
 members without an active grant that reads (`read` granted and not in `features_off`), members
 whose own 受信を読む is off (`readsIncoming`: within the company's; `tasks.md` "Each member's
-switches"), or no longer members. Slack lists only one authorization per event; reaching every member of a
-broadcast needs `apps.event.authorizations.list`, which takes an **app-level token** (`xapp-`,
+switches"), or no longer members. Taking broadcasts in for every member later needs
+`apps.event.authorizations.list`, which takes an **app-level token** (`xapp-`,
 `authorizations:read`) — a third secret the admin would register — and one call per broadcast
-(paged). Not done in A3 (not cheap): an @channel reaches only the one authorized member today.
+(paged).
 
 ## Screens
 
@@ -192,7 +211,10 @@ companies (grants, admins, signatures, workspaces, Slack accounts, bot), the sig
 becomes a signal, **no secret or message text in any table, answer or log**. Mutation-checked:
 signature, freshness, workspace check (events and sign-in), event-once, grant status, `read`
 feature, sender skip, bot skip, switches, membership, scope, rotation refusal, bot workspace,
-admin role.
+admin role; broadcasts dropped while mentions / DMs stay, the sender's name on the signal (never
+the text), the names' day (renamed after a day, never across companies), the thread's plain text
+(mentions by name, labels, escapes undone). `tests/integration/threads.test.ts`: a mention by
+name through `createServices`.
 `server/tests/integration/slack-notices.test.ts` (real engine, notices and connector): a DM only
 when the record now waits for the member, title only, not for results / final states / an AI turn,
 the member's `notices` switch, no grant, Slack off — mutation-checked (the turn check, the final /
