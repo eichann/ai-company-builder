@@ -22,6 +22,7 @@ paths:
   - "server/src/routes/plugins.ts"
   - "server/tests/unit/plugin-shelf.test.ts"
   - "server/tests/unit/plugin-contract-v2.test.ts"
+  - "server/tests/unit/plugin-contract-v3.test.ts"
   - "server/tests/integration/plugins.test.ts"
   - "server/src/adapters/upstream-practice.ts"
   - "server/src/services/plugin-connector.ts"
@@ -144,7 +145,7 @@ The dependency points one way: **business → connector**. (#372's first cut had
   `parsePluginMapping`, `combineUse`) — the one entry point every package imports; the rules live
   in one module each (`plugin-declaration.ts` the parsed shape, `plugin-declaration-rules.ts`
   forbidden keys / type names / path templates, `plugin-manifest.ts` with
-  `plugin-connector-declaration.ts` / `plugin-business-declaration.ts`, `plugin-package.ts`,
+  `plugin-connector-declaration.ts` / `plugin-business-declaration.ts` / `plugin-call-declaration.ts`, `plugin-package.ts`,
   `plugin-mapping.ts`, `plugin-policies.ts`, `plugin-values.ts`). YAML is the strict `yaml-lite` subset. Keys English,
   `label`s Japanese.
 - **Unknown keys make the whole package unusable**, anywhere (top level, object, endpoint,
@@ -153,7 +154,7 @@ The dependency points one way: **business → connector**. (#372's first cut had
   `tools`, `hooks`), a condition or expression (`when`, `if`, `expression`, `formula`), another
   destination (`url`, `host`, `hosts`, `redirect`), a key value (`key`, `api_key`, `token`,
   `secret`), approval rights (`approve`, `approver`).
-- `contract` must be one of `PLUGIN_CONTRACTS` (1, or 2 — "Contract 2" below); another value →
+- `contract` must be one of `PLUGIN_CONTRACTS` (1, 2 or 3 — "Contract 2", "Contract 3" below); another value →
   not used (0.17's plugin contract). A contract-1 package is read exactly as before.
 - **One destination**: `base_url` through `parseRelayBaseUrl` (https, port 443, exact public host,
   no user / query / fragment). When `service` is a built-in broker service, the host must be one
@@ -165,6 +166,7 @@ The dependency points one way: **business → connector**. (#372's first cut had
   placeholder (exactly once for get / update / archive, never for the others), no `?` / `#`, and
   the relay's own path rule (`shared/core/upstream-path.ts` `checkUpstreamPath`, the same
   function `services/broker-relay.ts` uses): no `//`, `..`, `%2f`, `\`, control characters.
+  A contract-3 connector's `calls` have their own closed rule ("Contract 3"); the fixed calls keep this one.
 - **Operations** (`kind` read / update / create; the connector declares them, the business plugin's
   `operations` adds who and the rules — "Two roles"): `who` (person fields of the record's type or
   `PLUGIN_ACTORS`: `viewer` = anyone who can read the record, `ai` = the member's AI — only on
@@ -314,6 +316,9 @@ upgrade:                                 # where work pinned to an older version
   trusted** — verification (a public key the app carries) comes before packages go to outside
   companies.
 
+- **Contract 3** keeps all of this (`contract >= PLUGIN_CONTRACT_V2` everywhere; flow keys, `ui/`, the
+  signature slot, fingerprint v2 — a contract-1 package keeps v1).
+
 ### Fitting a company the plugin does not quite fit (owner's ladder)
 
 ① **settings** (above) → ② **role assignment** (C3) → ③ **a company Skill as a step's
@@ -332,6 +337,95 @@ another version while on, or turning on, with a conflict → 409 `TYPE_EXTENSION
 `conflicts` (Japanese sentences naming the type), nothing changed; the company (div's FDE) updates
 its `.acb/types/<name>.md` first. The import's `storeBusinessTypes` skips such a type the same way.
 Company fields are never dropped. Test: `tests/integration/plugin-distribution.test.ts` (mutation-checked).
+
+## Contract 3: calls beside operations (declaration only; `plugin-call-declaration.ts`)
+
+For a service that is not HubSpot-shaped. New kinds go in a separate `calls` map beside `operations`, so
+a connector's objects, operations and fixed calls are untouched and **a call never reaches
+`manifest.operations`**: `plugins.aiTools` lists only that map and a released app's `pluginToolSpecs`
+sends any kind it does not know to its update tool (`combineUse` keeps them apart; `kind: act` in
+`operations` is refused). **Nothing runs these yet**: no route, no connector call, no AI tool
+(`PluginAiTools` gets its own `calls` list later). `signature`, `polls` and `events` stay declarations
+until then. Only keys present are parsed into the manifest (`calling`, `calls`, `events`, `polls`, all
+optional), so older packages read exactly as before.
+
+```yaml
+# connector
+contract: 3
+auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
+account_info: { method: GET, path: /account, id_field: account_id }
+actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
+limits: { per_minute: 60 }
+errors: { field: code, map: { STATE_CHANGED: check_wait } }
+result: { path: "/operations/{operation_id}", status_field: status, map: { done: applied, in_progress: pending } }
+calls:
+  diagnose:                # kind: read — GET
+    label: 状態を調べる
+    kind: read
+    path: "/people/{person_ref}/diagnosis"
+    inputs: { person_ref: { kind: id, class: personal } }
+    returns:               # an allow-list: what is not named is not taken
+      name: { class: personal, keep: summary, outside: true }
+      "history/{entry}/note": { class: sensitive, keep: none }
+  pages:                   # kind: document — GET: page (required), list, search; list / search may say items, cursor
+    label: 案内のページ
+    kind: document
+    page: { path: "/pages/{page_ref}", inputs: { page_ref: { kind: id, class: normal } }, returns: { body: { class: normal, keep: pointer } } }
+  resend:                  # kind: act — POST
+    label: もう一度送る
+    kind: act
+    nature: people
+    path: /resend
+    inputs: { person_ref: { kind: id, class: personal } }
+    idempotency: { style: header }
+    undo: none
+events:
+  recovered: { fields: { person_ref: { class: personal, keep: pointer } } }
+signature: { scheme: hmac_sha256_ts_body, header: X-Sample-Signature, timestamp_header: X-Sample-Timestamp, max_age: 5m }
+polls:
+  events: { path: /events, cursor: { param: since, next: next_cursor }, items: events, type_field: type, every: 5m, fields: { … } }
+# business plugin (contract 3)
+calls:
+  diagnose: { who: [role:support, ai] }
+  resend: { who: [role:support, ai], decision: true }
+events:
+  recovered: { type: inquiry, match: person_ref, action: close_by_event }
+```
+
+- **Below contract 3 every new key is refused with the reason** (as the flow keys are); a connector's
+  keys on a business plugin likewise; `calls` / `events` of a business plugin need its `connector`.
+  Unknown keys at every level make the package unusable.
+- **Every value is a closed choice or a plain name** (labels aside): no condition, computation or
+  transformation (owner rule §8-1). `nature`: internal / people / money / irreversible. `class`: normal /
+  personal / sensitive. `keep`: none / pointer / summary. `errors.map` targets: `CALL_FAILURE_KINDS` (refused /
+  retry_later / check_wait / needs_person). `result.map` targets: `CALL_RESULT_STATES` (applied / pending /
+  failed / not_found). Input `kind`: id / text / number / boolean / date. `undo`: none only.
+- **`{name}` relaxes the `{id}`-only rule, for `calls` only** (closed choices; **needs the owner's
+  agreement**): in a path, each placeholder is a whole segment, once, and a required `kind: id` input, so
+  only a plain outside id fills a path; `result`'s path has exactly `{operation_id}`; a poll's none. A
+  `returns` key may be a path, `items/{entry}/name` (at most 6 segments, `{entry}` = each entry): it
+  selects, it computes nothing.
+- **`who` on a call**: `role:<name>` (declared), `admin`, `ai`, with at least one person. Narrower than an
+  operation's on purpose: there is no record, so no person field; `viewer` becomes `anyone`
+  (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI — all refused. `decision: true`
+  only on an act (`combineUse`).
+- **What arrives by itself** (`events`, a poll's `fields`) carries only `class: normal` or `keep: pointer`
+  fields: the content is read by a call, by someone allowed to.
+- **An act**: `idempotency` is required (a lost answer must not double it), and `account_info` with
+  `id_field`, as for any connector that writes. `calls` / `polls` need `auth`. A call may not share an
+  operation's or search's name (one tool name).
+- **Headers**: `auth.header` holds only the key. No other declared header may be it, `Authorization`,
+  `Idempotency-Key`, one another, or one the way out owns (`RESERVED_HEADERS`: `Host`, `Cookie`, the
+  method overrides…).
+- **`combineUse`**: only the calls and events the business plugin declared, each with its `who` /
+  `decision` / reaction; a use of what the connector lacks → `connector-mismatch`, and an event's `match`
+  must be a field of the event and of the event's `type`, its `action` an action of that type
+  (`validatePluginPackage`). The connector's facts travel as `calling`; `polls` only with an event.
+- **A released app** keeps working: `pluginsFor` lists a contract-3 business plugin, the fingerprint
+  matches, and its older `parsePluginManifest` does not know contract 3, so `screensOfPackage` shows
+  no screens for it until the app is updated.
+- Test: `tests/unit/plugin-contract-v3.test.ts` with `fixtures/plugins/sample-portal` and
+  `sample-portal-care` — each guard mutation-checked.
 
 ## Handing packages to the app (plan C2 「配る道」)
 
@@ -1163,7 +1257,7 @@ way out), `tests/integration/plugin-import.test.ts` 「two business plugins on o
 refresh, operations, undeclared operation, similar records) — mutation-checked; integration tests key
 the mapping / import / operations by `sample-sales` and the key / read scope / switch by `sample-hub`
 (`tests/helpers/plugin-packages.ts`).
-Contract 2: `server/tests/unit/plugin-contract-v2.test.ts` with `fixtures/plugins/sample-flow`
+Contract 3: "Contract 3" above. Contract 2: `server/tests/unit/plugin-contract-v2.test.ts` with `fixtures/plugins/sample-flow`
 (roles, settings, both step starts, an overridable procedure, ui, upgrade; contract-1 fixtures read
 as before and every flow key / folder / `role:` refused on them and on connectors; unknown keys at
 every level; conditions, cron, `runs_on`, scripts, outside entries; settings that branch or break

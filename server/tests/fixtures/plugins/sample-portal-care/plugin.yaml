@@ -1,0 +1,16 @@
+# The business plugin using sample-portal: which of its calls it uses, who may,
+# and the event it reacts to (plugins.md "Contract 3").
+id: sample-portal-care
+label: 見本のお問い合わせ
+version: 0.1.0
+kind: official
+contract: 3
+types: [inquiry]
+connector: sample-portal >= 1.0.0
+roles:
+  support: { label: 窓口の担当 }
+calls:
+  diagnose: { who: ["role:support", ai] }
+  resend: { who: ["role:support", ai], decision: true }
+events:
+  recovered: { type: inquiry, match: person_ref, action: close_by_event }

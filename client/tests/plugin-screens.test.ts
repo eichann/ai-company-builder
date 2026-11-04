@@ -45,6 +45,8 @@ test('a package\'s declaration gives the four slots; anything this app cannot sh
     recordSections: [{ type: 'program_plan', label: '構成', entry: 'ui/plan.html' }, { type: 'task', label: '番組のメモ', entry: 'ui/plan.html' }],
     fileActions: [{ label: '企画の資料にする', entry: 'ui/attach.html', kinds: ['pdf', 'markdown'] }],
   })
+  // Contract 3 keeps contract 2's screens.
+  assert.deepEqual(screensOfPackage(REF, MANIFEST.replace('contract: 2', 'contract: 3'), ALL_FILES), s)
   // Another package's name or version than the folder it was kept as.
   assert.equal(screensOfPackage({ ...REF, version: '0.2.0' }, MANIFEST, ALL_FILES), null)
   assert.equal(screensOfPackage({ ...REF, id: 'other' }, MANIFEST, ALL_FILES), null)
