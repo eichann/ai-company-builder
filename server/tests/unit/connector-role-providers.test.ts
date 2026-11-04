@@ -39,7 +39,7 @@ function setup(usable: Record<string, boolean>) {
     } satisfies MailSender,
     meetings: {
       meetEvents: async () => { calls.push(`${id}:meetings`); return [] },
-      event: async () => null, conferenceFor: async () => null, documents: async () => [], docVersion: async () => '1', docText: async () => ({ text: '', truncated: false }),
+      event: async () => null, conferenceFor: async () => null, documents: async () => [], docVersion: async () => '1', docText: async () => ({ text: '', truncated: false }), transcriptText: async () => null,
     } satisfies MeetingRecordsReader,
   })
   for (const id of ['google', 'microsoft365']) roles.register({ id, servings: MAIL_AND_CAL, usable: async () => usable[id] ?? false })

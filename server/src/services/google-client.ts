@@ -36,6 +36,7 @@ import type { Clock } from '../ports/clock'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { BrokerVault } from './broker-vault'
 import { grantSealContext } from './member-oauth'
+import { logError } from '../lib/error-log'
 
 const HEADERS_TIMEOUT_MS = 30_000
 const MAX_READ_RETRIES = 2
@@ -476,6 +477,9 @@ export function createGoogleClient(deps: GoogleClientDeps) {
             continue
           }
           const googleReason = googleReasonOf(json)
+          // Google's short code is the only way to see in production why a call was refused: the action
+          // log keeps the operation and status, the message is never kept (it can quote a file's name).
+          logError('google', 'call refused', undefined, { companyId, operation: req.operation, status, reason: googleReason ?? 'none' })
           if (status === 429) {
             failure = { ok: false, kind: 'rate-limited', reason: 'rate-limited', status, ...(googleReason ? { googleReason } : {}) }
             const ra = Number(sent.response.headers.find(([n]) => n === 'retry-after')?.[1])

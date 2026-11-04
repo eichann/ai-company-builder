@@ -5,7 +5,8 @@
 // member whose Google cannot open the minutes is told another attendee can press it; ［招待する］
 // says what the invited will see and that it cannot be undone before anything is sent; the
 // consultation opens only from the card's button; linking a 案件 says who will see part of it and
-// links only on ［つなぐ］.
+// links only on ［つなぐ］; a first discovery of many meetings shows two one-line rows and 「ほか N 件」,
+// never taking the pane from the list.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -15,8 +16,9 @@ const finish = (page: import('@playwright/test').Page, id: string) =>
 test('read → 「AI が読んでいます…」 → 「読み終わりました」 → ［見る］ opens the card with the proposals', async ({ page }) => {
   const state = await openPreview(page, 'meetings')
   const line = page.locator('[data-banner="meeting-teirei01"]')
-  await expect(line).toContainText('議事録が届きました')
-  await expect(line).toContainText('定例ミーティング（今日 12:00・3人）')
+  await expect(page.getByRole('region', { name: '議事録が届きました' })).toContainText('議事録が届きました')
+  await expect(line).toContainText('定例ミーティング・今日 12:00')
+  await expect(line).not.toContainText('人')
   await line.getByRole('button', { name: 'AI に読ませる' }).click()
   await expect(page.locator('#log')).toHaveText('read meeting-teirei01@1')
   await expect(line).toContainText('AI が読んでいます…')
@@ -31,7 +33,7 @@ test('read → 「AI が読んでいます…」 → 「読み終わりました
   await expect(line).toHaveCount(0)
   const card = page.getByTestId('record-card')
   await expect(card.getByRole('region', { name: 'AI のタスクの案' })).toContainText('11月の勉強会の会場を押さえる')
-  await expect(card).toContainText('参加した人（3人）')
+  await expect(card).toContainText('参加者のうち ACB の人 3人')
   // The one-time offer for a series; ［この定例は次から自動で読む］ is the member's own choice.
   await card.getByRole('button', { name: 'この定例は次から自動で読む' }).click()
   await expect(page.locator('#log')).toContainText('auto meeting-teirei01 true')
@@ -95,5 +97,50 @@ test('the card: ［招待する］ says what the invited see and that it cannot 
   await page.getByRole('button', { name: /B社 研修導入/ }).click()
   await page.getByRole('button', { name: 'つなぐ', exact: true }).click()
   await expect(page.locator('#log')).toContainText('link meeting-teirei01=deal-bsha0001')
+  expectNoPageErrors(state)
+})
+
+test('many meetings at once: two one-line rows, the rest folded in a bounded area, the list always there and scrollable', async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 640 })
+  const state = await openPreview(page, 'meetings', { flood: '12' })
+  const block = page.getByRole('region', { name: '議事録が届きました' })
+  const list = page.getByTestId('task-list')
+  const rows = block.locator('[data-banner]')
+  await expect(rows).toHaveCount(2)
+  // One line each, buttons included, however long the title.
+  await expect(block.getByRole('button', { name: 'ほか 12 件' })).toBeVisible()
+  for (const h of await rows.evaluateAll(els => els.map(e => e.getBoundingClientRect().height))) expect(h).toBeLessThan(32)
+  const pane = (await page.getByRole('complementary', { name: 'やること' }).boundingBox())!
+  const skip = (await rows.first().getByRole('button', { name: '読まない' }).boundingBox())!
+  expect(skip.x + skip.width).toBeLessThanOrEqual(pane.x + pane.width)
+  const scrollsDown = async () => {
+    const box = (await list.boundingBox())!
+    expect(box.height).toBeGreaterThan(page.viewportSize()!.height * 0.5)
+    await list.evaluate(el => { el.scrollTop = 200 })
+    expect(await list.evaluate(el => el.scrollTop)).toBe(200)
+  }
+  await scrollsDown()
+
+  // Opened: the rest scroll inside their own area, and the list keeps its place.
+  await block.getByRole('button', { name: 'ほか 12 件' }).click()
+  const folded = page.getByTestId('meetings-folded')
+  await expect(folded.locator('[data-banner]')).toHaveCount(12)
+  expect(await folded.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+  await scrollsDown()
+  if (process.env.SCREENSHOTS) await page.screenshot({ path: `${process.env.SCREENSHOTS}/meetings-flood.png`, clip: { x: 0, y: 0, width: 320, height: 640 } })
+  // A short window: the block gives way, the list does not.
+  await page.setViewportSize({ width: 1000, height: 400 })
+  await scrollsDown()
+  await page.setViewportSize({ width: 1000, height: 640 })
+
+  // ［まとめて読まない］: the folded ones only, one 元に戻す for them all.
+  await block.getByRole('button', { name: 'まとめて読まない' }).click()
+  await expect(page.getByRole('status')).toContainText('12件を読まないにしました')
+  await expect(rows).toHaveCount(2)
+  await expect(page.locator('#log')).toContainText('skip meeting-flood011@1')
+  await expect(page.locator('#log')).not.toContainText('skip meeting-teirei01')
+  await page.getByRole('button', { name: '元に戻す' }).click()
+  await expect(block.getByRole('button', { name: 'ほか 12 件' })).toBeVisible()
+  await expect(page.locator('#log')).toContainText('undo meeting-flood011 2@2')
   expectNoPageErrors(state)
 })
