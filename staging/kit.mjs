@@ -18,7 +18,7 @@ import path from 'node:path'
 import readline from 'node:readline/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { createLogger, kitPaths, loadAccounts, prepareSecrets, publicUrl, settingsFrom, shortJapaneseDate } from './lib/kit.mjs'
+import { assertKitHome, createLogger, kitPaths, loadAccounts, prepareSecrets, publicUrl, settingsFrom, shortJapaneseDate } from './lib/kit.mjs'
 import { seedStaging } from './seed.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -270,7 +270,7 @@ async function setup() {
   ensureBuilt({ images: true })
   const shelf = refreshShelf()
   await start({ shelfChanged: shelf.changed })
-  const res = await seed({ runImport: false })
+  const res = await seed()
   showNewAccounts(res.created)
   summary()
 }
@@ -294,6 +294,7 @@ function down() {
 }
 
 function wipeData() {
+  assertKitHome(p)
   if (fs.existsSync(p.env)) compose(['down', '-v'])
   stopFakes()
   for (const x of [p.data, p.accounts, p.state, p.userdata, p.folders, p.secrets]) fs.rmSync(x, { recursive: true, force: true })
@@ -356,7 +357,8 @@ async function status() {
 
 async function remove() {
   if (!(await confirm('remove', `検証キットが作ったもの（コンテナ・イメージ・${p.home} のすべて）を消します。`))) return 1
-  if (fs.existsSync(p.env)) compose(['down', '-v', '--rmi', 'all'])
+  assertKitHome(p)
+  if (fs.existsSync(p.env)) compose(['down', '-v', '--rmi', 'local'])
   stopFakes()
   fs.rmSync(p.home, { recursive: true, force: true })
   say('検証キットを消しました。')

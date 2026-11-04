@@ -63,6 +63,16 @@ function fetchCommit(app, branch, sha) {
   }
 }
 
+function hasKit(app, sha) {
+  try { git(['-C', app, 'cat-file', '-e', `${sha}:staging/kit.mjs`]); return true } catch { return false }
+}
+
+/** True when `older` is an ancestor of `newer` (and not the same commit). */
+function isAncestor(app, older, newer) {
+  if (older === newer) return false
+  try { git(['-C', app, 'merge-base', '--is-ancestor', older, newer]); return true } catch { return false }
+}
+
 /** Copy the kit's databases aside before the code under them changes. Returns the folder. */
 export function backupDatabases(paths, fromSha) {
   if (!fs.existsSync(paths.data)) return null
@@ -101,11 +111,18 @@ export function followProduction(s, paths, logger, { stop = stopContainers } = {
   } else {
     const dirty = git(['-C', paths.app, 'status', '--porcelain', '--untracked-files=no'])
     if (dirty) return done(`検証キットの作業コピー（${paths.app}）に変更があるため、更新しませんでした。いまの版のまま起動します。`)
+    // Look before touching anything: the target must carry the kit, or the update would leave
+    // nothing to start (the containers already stopped).
+    try { fetchCommit(paths.app, s.branch, d.to) } catch {
+      return done('新しい版を取ってこられませんでした。いまの版のまま起動します。')
+    }
+    if (!hasKit(paths.app, d.to)) return done(`${what}には検証キットが入っていないため、更新しませんでした。いまの版のまま起動します。`)
+    if (isAncestor(paths.app, d.to, d.from)) logger.log(`注意: ${what}はいまの版より古いため、古い版に戻します。`)
     stop(s.project)
     const backup = backupDatabases(paths, d.from)
     if (backup) logger.log(`データベースを ${backup} に控えました。`)
   }
-  fetchCommit(paths.app, s.branch, d.to)
+  if (d.action === 'clone') fetchCommit(paths.app, s.branch, d.to)
   git(['-C', paths.app, '-c', 'advice.detachedHead=false', 'checkout', '--quiet', '--detach', d.to])
   const date = shortJapaneseDate(git(['-C', paths.app, 'show', '-s', '--format=%cI', 'HEAD']))
   return done(d.action === 'clone' ? `検証キットを${what}（${date}）で用意しました。` : `検証環境を${what}（${date}）に更新しました。`)

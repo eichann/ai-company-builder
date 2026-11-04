@@ -23,6 +23,7 @@ paths:
   - ".env.example"
   - "staging/**"
   - "server/tests/unit/staging-kit.test.ts"
+  - "server/tsconfig.staging.json"
 ---
 
 # Deployment, CI and the workspace
@@ -112,6 +113,15 @@ A local staging on an FDE's Mac, one command: `pnpm staging:setup|up|down|reset|
   `~/acb-staging-kit`, never logged (redacting logger); passwords are shown once after setup.
   `staging/seed.mjs` makes 検証A社 through the API only (first account = owner, invitations,
   departments, private folder, records, sample tasks, practice key and Google, plugins + import).
+  **Each seed step runs once** (`state.json` `done`): up / an update never re-applies it, so what
+  the person changed later (a department, a switch, a plugin version) stands; `reset` starts over.
+  An update moves to the target only when it carries `staging/kit.mjs` (checked before anything
+  stops) and warns when the target is older. `reset` / `remove` delete only a folder holding the
+  kit's marker (`secrets/compose.env` or `built.json`), never `/`, the home folder or a parent;
+  compose projects must start with `acb-staging`; `remove` drops only the kit's built images.
+  `staging/compose.yml` repeats the root file on purpose (ports and mounts cannot be removed by an
+  override; the `ACB_FAKE_*` redirects must never be in the root file) — keep the api settings in
+  step. `staging/*.ts` are typechecked with the server (`server/tsconfig.staging.json`).
   The shelf is filled by the server's collector (`staging/shelf.ts`) per repository; one without
   access is skipped by package name.
 - Test: `server/tests/unit/staging-kit.test.ts` (secrets never printed and never overwritten,

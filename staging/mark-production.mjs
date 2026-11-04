@@ -6,10 +6,13 @@
 //
 // The config's location is the same local setting the kit reads (ACB_KIT_PRIVATE, or
 // ~/.acb-staging-kit/config); this script names no place itself. Only the `production` line is
-// changed; plugin lines stay. Needs write access to that place (`gh` login).
+// changed; plugin lines stay. The write carries the version it read, so a concurrent change is
+// refused rather than overwritten. Needs write access to that place (`gh` login).
 import { execFileSync } from 'node:child_process'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { withProductionCommit, privateSpecFrom } from './lib/kit.mjs'
-import { PrivateConfigError, readPrivateText, writePrivateText } from './lib/private.mjs'
+import { readPrivateForUpdate, writePrivateText } from './lib/private.mjs'
 
 function resolveCommit(arg) {
   if (/^[0-9a-f]{40}$/.test(arg)) return arg
@@ -24,15 +27,14 @@ export function markProduction(arg, env = process.env) {
   const spec = privateSpecFrom(env)
   if (!spec) throw new Error('No private kit config is set (ACB_KIT_PRIVATE or ~/.acb-staging-kit/config).')
   const sha = resolveCommit(arg)
-  let current = ''
-  try { current = readPrivateText(spec) } catch (err) { if (!(err instanceof PrivateConfigError)) throw err }
-  const next = withProductionCommit(current, sha)
-  if (next === current) return { sha, changed: false }
-  writePrivateText(spec, next, `staging kit: production runs ${sha.slice(0, 12)}`)
+  const current = readPrivateForUpdate(spec) // only "not there" is empty; anything else throws
+  const next = withProductionCommit(current.text, sha)
+  if (next === current.text) return { sha, changed: false }
+  writePrivateText(spec, next, `staging kit: production runs ${sha.slice(0, 12)}`, current.sha)
   return { sha, changed: true }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   try {
     if (!process.argv[2]) throw new Error('Usage: node staging/mark-production.mjs <commit>')
     const { sha, changed } = markProduction(process.argv[2])

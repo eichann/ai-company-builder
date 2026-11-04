@@ -8,6 +8,13 @@
 #   - the kit's own data, plugin shelf (read-only) and key-encryption key, all under the kit's
 #     home (~/acb-staging-kit), never this checkout.
 # Run only through staging/kit.mjs, which passes --env-file <home>/secrets/compose.env.
+#
+# Why a second compose file rather than an override of the root one: the root file binds the
+# api and admin to host ports 3001 / 3100, mounts ./data of the checkout, has no plugin shelf
+# and must never carry the staging-only ACB_FAKE_* redirects (deployment.md); compose overrides
+# can add but not remove ports, so the kit keeps its own. Keep the two in step: a new api
+# setting in the root file belongs here too (with a staging value), and the healthcheck and
+# read-only filesystem stay the same.
 services:
   api:
     build:
@@ -24,11 +31,16 @@ services:
       - NODE_OPTIONS=--max-old-space-size=2048
       - BROKER_KEK_FILE=/run/secrets/broker-kek
       - BROKER_TOKEN_TTL_MINUTES=30
+      - BROKER_MAX_REQUEST_MB=100
+      - BROKER_UPSTREAM_TIMEOUT_SECONDS=600
       # The practice services need no check against the internet.
       - BROKER_KEY_CHECK=off
       - BROKER_DAY_UTC_OFFSET_MINUTES=540
       - PLUGINS_DIR=/etc/acb/plugins
+      # Only 検証A社's owner, as the first account of a fresh server, creates a company here.
+      - OPERATOR_USER_IDS=
       - COMPANY_CREATION_POLICY=operator
+      - APP_DOWNLOAD_URL=
       # Staging only (deployment.md): every HubSpot / Google / Slack request goes to the practice copy.
       - ACB_ALLOW_FAKE_UPSTREAMS=1
       - ACB_FAKE_HUBSPOT_URL=http://host.docker.internal:${FAKE_HUBSPOT_PORT}

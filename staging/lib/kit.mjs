@@ -137,7 +137,8 @@ export function settingsFrom(env = process.env) {
     branch: env.ACB_STAGING_BRANCH?.trim() || DEFAULTS.branch,
     private: privateSpecFrom(env),
   }
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(s.project)) throw new Error('ACB_STAGING_PROJECT must be lower-case letters, digits, - or _')
+  // Prefixed, so the kit's `docker compose -p` (down -v, --rmi) can only ever reach its own projects.
+  if (!/^acb-staging[a-z0-9_-]*$/.test(s.project)) throw new Error('ACB_STAGING_PROJECT must start with acb-staging (lower-case letters, digits, - or _)')
   if (!/^[A-Za-z0-9._/-]+$/.test(s.branch) || s.branch.includes('..')) throw new Error('ACB_STAGING_BRANCH is not a branch name')
   const ports = [s.port, s.fakeHubspotPort, s.fakeGooglePort, s.fakeSlackPort]
   if (new Set(ports).size !== ports.length) throw new Error('The staging ports must all differ')
@@ -217,6 +218,20 @@ export function prepareSecrets(s, paths, logger) {
   const created = [[auth, 'AUTH_SECRET'], [kek, '鍵の金庫の鍵（KEK）'], [hub, '練習用 HubSpot の鍵']].filter(([x]) => x.created).map(([, name]) => name)
   if (created.length) logger.log(`新しく作りました（${paths.secrets}、本人だけが読める設定）: ${created.join('・')}`)
   return { created, hubspotKey: hub.value }
+}
+
+/**
+ * Refuse to delete a folder that is not the kit's: it must hold the kit's marker
+ * (secrets/compose.env or built.json) and must not be /, the home folder or a parent of it
+ * (ACB_STAGING_HOME could point anywhere).
+ */
+export function assertKitHome(paths, home = os.homedir()) {
+  const h = path.resolve(paths.home)
+  const user = path.resolve(home)
+  const refuse = why => { throw new Error(`${h} は検証キットのフォルダではないため、消しません（${why}）。`) }
+  if (h === path.parse(h).root) refuse('ルート')
+  if (h === user || user.startsWith(h + path.sep)) refuse('ホームフォルダかその上')
+  if (!fs.existsSync(paths.env) && !fs.existsSync(paths.built)) refuse('キットの印 secrets/compose.env・built.json がない')
 }
 
 export function readEnvFile(file) {

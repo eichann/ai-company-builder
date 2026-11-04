@@ -3,7 +3,8 @@
 // private folder, records on, sample やること, the practice Google and HubSpot, and the business
 // plugins from the shelf (法人営業 with the practice HubSpot, importing its deals = 案件).
 //
-// Idempotent: every step checks what is there first, so setup / up may run it again. Passwords
+// Each step runs once (state.json `done`), so setup / up / an update may run this again without
+// undoing anything the person changed afterwards; a step that failed is tried again. Passwords
 // are new random values written to <home>/accounts.txt (0600) before the sign-up that uses them;
 // they are never logged (the logger redacts them) and printed only once, by kit.mjs, right
 // after setup created them.
@@ -28,7 +29,7 @@ const HUBSPOT_OWNERS = { '75123001': 'member', '75123002': 'manager', '75123003'
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
-export async function seedStaging({ base, paths, logger, hubspotKey, runImport = false }) {
+export async function seedStaging({ base, paths, logger, hubspotKey }) {
   const say = (...a) => logger.log(...a)
   if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(base)) throw new Error(`refusing to seed ${base}: the kit seeds only a server on this Mac`)
   const accounts = loadAccounts(paths.accounts)
@@ -107,63 +108,90 @@ export async function seedStaging({ base, paths, logger, hubspotKey, runImport =
   state.companyId = cid
   saveState()
 
+  // Each set-up step runs once (recorded in state.done) and never again: later runs (up, an update)
+  // must not undo what the person changed in the admin console or the app — a department they
+  // added, a manager they changed, a switch they turned off, a plugin version they chose.
+  state.done ??= {}
+  async function once(key, fn) {
+    if (state.done[key]) return
+    await fn()
+    state.done[key] = true
+    saveState()
+  }
+
   // ------------------------------------------------------------ people
   const sessions = { owner }
-  const members = async () => must(await req('GET', `${api}/members`, { session: owner }), 'list members')
-  for (const person of PEOPLE.slice(1)) {
-    let session = await signIn(person.email)
-    const isMember = (await members()).some(m => m.email === person.email)
-    if (isMember && session) { sessions[person.key] = session; continue }
-    if (isMember) throw new Error(`${person.email} はメンバーですが、${paths.accounts} のパスワードでサインインできません（staging:reset で作り直せます）`)
-    const inv = must(await req('POST', `${api}/invitations`, { session: owner, body: { role: person.invite, expiresInDays: 7 } }), `invite ${person.email}`)
-    if (!session) session = await signUp(person, inv.token)
-    must(await req('POST', `/api/invitations/${inv.token}/accept`, { session }), `accept invitation ${person.email}`)
-    sessions[person.key] = session
-    say(`アカウントを作りました: ${person.email}（${person.role}）`)
-  }
-  const userId = key => sessions[key].user.id
+  state.users ??= {}
+  state.users.owner = owner.user.id
+  await once('people', async () => {
+    const members = async () => must(await req('GET', `${api}/members`, { session: owner }), 'list members')
+    for (const person of PEOPLE.slice(1)) {
+      let session = await signIn(person.email)
+      const isMember = (await members()).some(m => m.email === person.email)
+      if (isMember && session) { sessions[person.key] = session; continue }
+      if (isMember) throw new Error(`${person.email} はメンバーですが、${paths.accounts} のパスワードでサインインできません（staging:reset で作り直せます）`)
+      const inv = must(await req('POST', `${api}/invitations`, { session: owner, body: { role: person.invite, expiresInDays: 7 } }), `invite ${person.email}`)
+      if (!session) session = await signUp(person, inv.token)
+      must(await req('POST', `/api/invitations/${inv.token}/accept`, { session }), `accept invitation ${person.email}`)
+      sessions[person.key] = session
+      say(`アカウントを作りました: ${person.email}（${person.role}）`)
+    }
+    for (const person of PEOPLE) state.users[person.key] = sessions[person.key].user.id
+  })
+  const userId = key => state.users[key]
 
-  // ------------------------------------------------------------ departments
+  // ------------------------------------------------------------ departments (once, at creation)
   const deptBase = `${api}/departments`
-  let depts = must(await req('GET', deptBase, { session: owner }), 'list departments')
-  if (!depts.some(d => d.folder === '営業部')) must(await req('POST', deptBase, { session: owner, body: { name: '営業部', nameEn: 'Sales', folder: '営業部' } }), 'create 営業部')
-  if (!depts.some(d => d.folder === 'サポート部')) must(await req('POST', deptBase, { session: owner, body: { name: 'サポート部', nameEn: 'Support', folder: 'サポート部', icon: 'Headset', color: '#0ea5e9', description: '問い合わせ対応、FAQ管理' } }), 'create サポート部')
-  for (const d of depts) {
-    if (KEEP_DEPARTMENTS.includes(d.folder)) continue
-    must(await req('DELETE', `${deptBase}/${d.id}`, { session: owner }), `delete ${d.folder}`)
-    say(`既定の部署を外しました: ${d.folder}`)
-  }
-  depts = must(await req('GET', deptBase, { session: owner }), 'list departments')
-  const sales = depts.find(d => d.folder === '営業部')
-  state.departments = Object.fromEntries(depts.map(d => [d.folder, d.id]))
-  must(await req('PUT', `${deptBase}/${sales.id}/managers`, { session: owner, body: { userIds: [userId('manager')] } }), 'set 営業部 managers')
+  await once('departments', async () => {
+    const depts = must(await req('GET', deptBase, { session: owner }), 'list departments')
+    if (!depts.some(d => d.folder === '営業部')) must(await req('POST', deptBase, { session: owner, body: { name: '営業部', nameEn: 'Sales', folder: '営業部' } }), 'create 営業部')
+    if (!depts.some(d => d.folder === 'サポート部')) must(await req('POST', deptBase, { session: owner, body: { name: 'サポート部', nameEn: 'Support', folder: 'サポート部', icon: 'Headset', color: '#0ea5e9', description: '問い合わせ対応、FAQ管理' } }), 'create サポート部')
+    // The new company's default departments (empty folders) — never anything made later.
+    for (const d of depts) {
+      if (KEEP_DEPARTMENTS.includes(d.folder)) continue
+      must(await req('DELETE', `${deptBase}/${d.id}`, { session: owner }), `delete ${d.folder}`)
+      say(`既定の部署を外しました: ${d.folder}`)
+    }
+    const now = must(await req('GET', deptBase, { session: owner }), 'list departments')
+    state.departments = Object.fromEntries(now.filter(d => KEEP_DEPARTMENTS.includes(d.folder)).map(d => [d.folder, d.id]))
+  })
+  const salesId = state.departments['営業部']
+  await once('managers', async () => {
+    must(await req('PUT', `${deptBase}/${salesId}/managers`, { session: owner, body: { userIds: [userId('manager')] } }), 'set 営業部 managers')
+  })
 
   // ------------------------------------------------------------ files (git smart-HTTP as the owner)
-  const pushed = pushFiles(`${base}/api/git-http/${cid}.git`, owner.token, {
-    '営業部/顧客リスト.md': '# 顧客リスト（検証A社）\n\n| 顧客 | 担当 |\n|---|---|\n| 株式会社サンプル | メンバー |\n',
-    '営業部/提案テンプレート.md': '# 提案テンプレート\n\n1. 課題\n2. 提案\n3. 費用\n',
-    'サポート部/よくある質問.md': '# よくある質問\n\nQ. ログインできません\nA. パスワードを再設定してください。\n',
+  await once('files', async () => {
+    const pushed = pushFiles(`${base}/api/git-http/${cid}.git`, owner.token, {
+      '営業部/顧客リスト.md': '# 顧客リスト（検証A社）\n\n| 顧客 | 担当 |\n|---|---|\n| 株式会社サンプル | メンバー |\n',
+      '営業部/提案テンプレート.md': '# 提案テンプレート\n\n1. 課題\n2. 提案\n3. 費用\n',
+      'サポート部/よくある質問.md': '# よくある質問\n\nQ. ログインできません\nA. パスワードを再設定してください。\n',
+    })
+    if (pushed) say(`サンプルのファイルを ${pushed} 個置きました`)
   })
-  if (pushed) say(`サンプルのファイルを ${pushed} 個置きました`)
 
   // ------------------------------------------------------------ private folder
-  const pfPath = `${PRIVATE_FOLDER.parent}/${PRIVATE_FOLDER.name}`
-  const pfs = must(await req('GET', `${api}/private-folders`, { session: owner }), 'list private folders')
-  if (!pfs.some(f => f.path === pfPath)) {
-    must(await req('POST', `${api}/private-folders`, {
-      session: owner,
-      body: { parentPath: PRIVATE_FOLDER.parent, name: PRIVATE_FOLDER.name, viewers: [userId('manager')], editors: [userId('manager')], force: true },
-    }), 'create private folder')
-    say(`非公開フォルダを作りました: ${pfPath}（オーナー・管理者・営業部マネージャーだけ）`)
-  }
-  const scope = must(await req('GET', `${api}/me/scopes`, { session: owner }), 'my scopes').scopes.find(x => x.path === pfPath)
-  if (scope) pushFiles(base + scope.clonePath, owner.token, { '見積メモ.md': '# 見積メモ（非公開）\n\nオーナー・管理者と営業部マネージャーだけが読めます。\n' })
+  await once('privateFolder', async () => {
+    const pfPath = `${PRIVATE_FOLDER.parent}/${PRIVATE_FOLDER.name}`
+    const pfs = must(await req('GET', `${api}/private-folders`, { session: owner }), 'list private folders')
+    if (!pfs.some(f => f.path === pfPath)) {
+      must(await req('POST', `${api}/private-folders`, {
+        session: owner,
+        body: { parentPath: PRIVATE_FOLDER.parent, name: PRIVATE_FOLDER.name, viewers: [userId('manager')], editors: [userId('manager')], force: true },
+      }), 'create private folder')
+      say(`非公開フォルダを作りました: ${pfPath}（オーナー・管理者・営業部マネージャーだけ）`)
+    }
+    const scope = must(await req('GET', `${api}/me/scopes`, { session: owner }), 'my scopes').scopes.find(x => x.path === pfPath)
+    if (scope) pushFiles(base + scope.clonePath, owner.token, { '見積メモ.md': '# 見積メモ（非公開）\n\nオーナー・管理者と営業部マネージャーだけが読めます。\n' })
+  })
 
   // ------------------------------------------------------------ records + sample やること
-  must(await req('PUT', `${api}/records/settings`, { session: owner, body: { enabled: true } }), 'turn records on')
-  if (!state.samples) {
-    const task = async (title, assignee, extra = {}) => must(await req('POST', `${api}/records/item`, {
-      session: owner, body: { type: 'task', title, fields: { assignee, requested_by: userId('owner'), ...extra } },
+  await once('records', async () => {
+    must(await req('PUT', `${api}/records/settings`, { session: owner, body: { enabled: true } }), 'turn records on')
+  })
+  await once('samples', async () => {
+    const task = async (title, assignee) => must(await req('POST', `${api}/records/item`, {
+      session: owner, body: { type: 'task', title, fields: { assignee, requested_by: userId('owner') } },
     }), `create task ${title}`)
     await task('株式会社サンプル 見積書を150万円で作り直す', userId('member'))
     await task('株式会社サンプル 導入スケジュール案を送る', userId('member'))
@@ -173,109 +201,113 @@ export async function seedStaging({ base, paths, logger, hubspotKey, runImport =
       body: { type: 'meeting', title: '株式会社サンプル 定例', fields: { meeting_at: new Date(Date.now() - 2 * 3600_000).toISOString(), assignee: userId('member'), attendees: 'メンバー', external_count: 2 } },
     })
     if (meeting.status >= 400) notes.push('会議の見本は作れませんでした（会議は練習用 Google の「議事録を確かめる」から入ります）')
-    state.samples = true
-    saveState()
     say('見本のやることを作りました')
-  }
+  })
 
   // ------------------------------------------------------------ key broker: the practice HubSpot key
-  let broker = must(await req('GET', `${api}/broker`, { session: owner }), 'key page')
-  let hubKey = (broker.keys ?? []).find(k => k.service === 'hubspot' && k.scope === 'company')
-  if (!hubKey) {
+  await once('hubspotKey', async () => {
+    const broker = must(await req('GET', `${api}/broker`, { session: owner }), 'key page')
+    if ((broker.keys ?? []).some(k => k.service === 'hubspot' && k.scope === 'company')) return
     logger.addSecret(hubspotKey)
-    broker = must(await req('POST', `${api}/broker/keys`, {
+    must(await req('POST', `${api}/broker/keys`, {
       session: owner,
       body: { service: 'hubspot', displayName: 'HubSpot（練習用）', secret: hubspotKey, audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] } },
     }), 'register the practice HubSpot key')
-    hubKey = (broker.keys ?? []).find(k => k.service === 'hubspot' && k.scope === 'company')
     say('練習用 HubSpot の鍵を「API キー」に登録しました')
-  }
+  })
 
   // ------------------------------------------------------------ the practice Google
-  const google = must(await req('GET', `${api}/google`, { session: owner }), 'google page')
-  if (!google.configured) {
-    must(await req('PUT', `${api}/google/client`, { session: owner, body: GOOGLE }), 'register the practice Google client')
-    say('練習用 Google を登録しました')
-  }
-  if (!google.enabled) must(await req('PUT', `${api}/google/enabled`, { session: owner, body: { enabled: true } }), 'turn Google on')
+  await once('google', async () => {
+    const google = must(await req('GET', `${api}/google`, { session: owner }), 'google page')
+    if (!google.configured) {
+      must(await req('PUT', `${api}/google/client`, { session: owner, body: GOOGLE }), 'register the practice Google client')
+      say('練習用 Google を登録しました')
+    }
+    if (!google.enabled) must(await req('PUT', `${api}/google/enabled`, { session: owner, body: { enabled: true } }), 'turn Google on')
+  })
 
   // ------------------------------------------------------------ plugins
-  const pluginReport = await setUpPlugins({ req, must, say, notes, api, owner, hubKey, salesId: sales.id, userId, state, saveState, runImport })
+  const pluginReport = await setUpPlugins({ req, must, say, notes, api, owner, salesId, userId, state, once })
 
   saveAccounts(paths.accounts, accounts)
   saveState()
   return { companyId: cid, created, notes, plugins: pluginReport }
 }
 
-async function setUpPlugins({ req, must, say, notes, api, owner, hubKey, salesId, userId, state, saveState, runImport }) {
+/**
+ * The first time the shelf has the plugins: HubSpot (practice key, readable by 営業部, on),
+ * 法人営業 (on, mapping with HubSpot's owners → our people), one import. After that the person's
+ * choices stand; a newer version on the shelf is only mentioned (the admin console switches).
+ */
+async function setUpPlugins({ req, must, say, notes, api, owner, salesId, userId, state, once }) {
   const listed = must(await req('GET', `${api}/plugins`, { session: owner }), 'plugin shelf')
   const items = Array.isArray(listed) ? listed : (listed.plugins ?? [])
   const newest = id => items.find(p => p.id === id)?.versions?.at(-1)?.version ?? null
   const installed = id => items.find(p => p.id === id)?.install ?? null
   const report = { hubspot: newest('hubspot'), corporateSales: newest('corporate-sales'), imported: null }
   if (!report.hubspot && !report.corporateSales) {
-    notes.push('棚にプラグインがないため、法人営業と HubSpot は入れていません')
+    if (!state.done.plugins) notes.push('棚にプラグインがないため、法人営業と HubSpot は入れていません')
+    return report
+  }
+  if (state.done.plugins) {
+    for (const [id, label] of [['hubspot', 'HubSpot'], ['corporate-sales', '法人営業']]) {
+      const cur = installed(id)
+      const top = newest(id)
+      if (cur && top && cur.version !== top) say(`${label} の新しい版 ${top} が棚にあります（いまは ${cur.version}。管理画面の「つなぎ先」で切り替えられます）`)
+    }
     return report
   }
 
-  // 1. The connector (HubSpot) with the practice key; a newer version on the shelf is chosen.
-  if (report.hubspot) {
-    const cur = installed('hubspot')
-    if (!cur || cur.version !== report.hubspot) {
+  await once('plugins', async () => {
+    const broker = must(await req('GET', `${api}/broker`, { session: owner }), 'key page')
+    const hubKey = (broker.keys ?? []).find(k => k.service === 'hubspot' && k.scope === 'company')
+    // 1. The connector (HubSpot) with the practice key.
+    if (report.hubspot && hubKey && !installed('hubspot')) {
       const r = await req('PUT', `${api}/plugins/hubspot`, { session: owner, body: { version: report.hubspot, keyId: hubKey.id } })
       if (r.status < 300) say(`HubSpot ${report.hubspot} を入れました（練習用の鍵）`)
-      else notes.push(`HubSpot ${report.hubspot} に切り替えられませんでした（${r.json?.error ?? r.status}）`)
+      else notes.push(`HubSpot ${report.hubspot} を入れられませんでした（${r.json?.error ?? r.status}）`)
     }
-  }
-  // 2. The business plugin (法人営業): its first install turns it on and sets the starting values.
-  if (report.corporateSales) {
-    const cur = installed('corporate-sales')
-    if (!cur || cur.version !== report.corporateSales) {
+    // 2. The business plugin (法人営業): its first install turns it on and sets the starting values.
+    if (report.corporateSales && !installed('corporate-sales')) {
       const r = await req('PUT', `${api}/plugins/corporate-sales`, { session: owner, body: { version: report.corporateSales, keyId: null } })
       if (r.status < 300) say(`法人営業 ${report.corporateSales} を入れました`)
-      else notes.push(`法人営業 ${report.corporateSales} に切り替えられませんでした（${r.json?.error ?? r.status}）`)
+      else notes.push(`法人営業 ${report.corporateSales} を入れられませんでした（${r.json?.error ?? r.status}）`)
     }
-  }
-  // 3. HubSpot on, readable by 営業部.
-  if (report.hubspot) {
-    if (!state.hubspotReadScope) {
+    // 3. HubSpot readable by 営業部, and on.
+    if (report.hubspot && hubKey) {
       must(await req('PUT', `${api}/plugins/hubspot/read-scope`, { session: owner, body: { departmentIds: [salesId], userIds: [] } }), 'HubSpot read scope = 営業部')
-      state.hubspotReadScope = true
-      saveState()
+      const r = await req('PUT', `${api}/plugins/hubspot/enabled`, { session: owner, body: { enabled: true } })
+      if (r.status >= 300) notes.push(`HubSpot をオンにできませんでした（${r.json?.error ?? r.status}）`)
     }
-    const r = await req('PUT', `${api}/plugins/hubspot/enabled`, { session: owner, body: { enabled: true } })
-    if (r.status >= 300) notes.push(`HubSpot をオンにできませんでした（${r.json?.error ?? r.status}）`)
-  }
-  if (!report.corporateSales) return report
+    if (!report.corporateSales) return
 
-  // 4. 法人営業's mapping: HubSpot's owners → our people, automatic fields acknowledged.
-  const detail = must(await req('GET', `${api}/plugins/corporate-sales`, { session: owner }), 'corporate-sales detail')
-  if (report.hubspot && detail.mapping && !/^people:/m.test(detail.mapping.text)) {
-    const acknowledgeAuto = [...new Set((detail.policies ?? []).filter(p => p.policy === 'auto').map(p => p.field))]
-    const withPeople = addPeople(detail.mapping.text, userId)
-    let r = await req('PUT', `${api}/plugins/corporate-sales/mapping`, { session: owner, body: { text: withPeople, acknowledgeAuto } })
-    if (r.status >= 300) r = await req('PUT', `${api}/plugins/corporate-sales/mapping`, { session: owner, body: { text: detail.mapping.text, acknowledgeAuto } })
-    if (r.status < 300) say('法人営業の読み替え表を保存しました（HubSpot の担当者 → 検証A社の人）')
-    else notes.push(`法人営業の読み替え表を保存できませんでした（${(r.json?.errors ?? [r.json?.error]).join(' / ')}）`)
-  }
-  const on = await req('PUT', `${api}/plugins/corporate-sales/enabled`, { session: owner, body: { enabled: true } })
-  if (on.status >= 300) notes.push(`法人営業をオンにできませんでした（${on.json?.error ?? on.status}）`)
-
-  // 5. Bring the practice HubSpot's deals in as 案件 (first time, or when asked).
-  if (report.hubspot && (runImport || !state.importedAt)) {
-    const r = await req('POST', `${api}/plugins/corporate-sales/import`, { session: owner })
-    if (r.status < 300) {
-      const deal = r.data?.objects?.deal ?? r.data?.report?.objects?.deal ?? null
-      report.imported = deal ? `${deal.seen ?? '?'} 件を読み、${deal.created ?? 0} 件を作成` : (r.data?.status ?? 'ok')
-      say(`練習用 HubSpot から案件を取り込みました（${report.imported}）`)
-      state.importedAt = new Date().toISOString()
-      saveState()
-    } else {
-      notes.push(`練習用 HubSpot からの取り込みができませんでした（${r.json?.error ?? r.status}${r.json?.problem ? ': ' + r.json.problem : ''}）`)
+    // 4. 法人営業's mapping: HubSpot's owners → our people, automatic fields acknowledged.
+    const detail = must(await req('GET', `${api}/plugins/corporate-sales`, { session: owner }), 'corporate-sales detail')
+    if (report.hubspot && detail.mapping && !/^people:/m.test(detail.mapping.text)) {
+      const acknowledgeAuto = [...new Set((detail.policies ?? []).filter(p => p.policy === 'auto').map(p => p.field))]
+      let r = await req('PUT', `${api}/plugins/corporate-sales/mapping`, { session: owner, body: { text: addPeople(detail.mapping.text, userId), acknowledgeAuto } })
+      if (r.status >= 300) r = await req('PUT', `${api}/plugins/corporate-sales/mapping`, { session: owner, body: { text: detail.mapping.text, acknowledgeAuto } })
+      if (r.status < 300) say('法人営業の読み替え表を保存しました（HubSpot の担当者 → 検証A社の人）')
+      else notes.push(`法人営業の読み替え表を保存できませんでした（${(r.json?.errors ?? [r.json?.error]).join(' / ')}）`)
     }
-  }
+    const on = await req('PUT', `${api}/plugins/corporate-sales/enabled`, { session: owner, body: { enabled: true } })
+    if (on.status >= 300) notes.push(`法人営業をオンにできませんでした（${on.json?.error ?? on.status}）`)
+
+    // 5. Bring the practice HubSpot's deals in as 案件, once.
+    if (report.hubspot && hubKey) {
+      const r = await req('POST', `${api}/plugins/corporate-sales/import`, { session: owner })
+      if (r.status < 300) {
+        const deal = r.data?.objects?.deal ?? r.data?.report?.objects?.deal ?? null
+        report.imported = deal ? `${deal.seen ?? '?'} 件を読み、${deal.created ?? 0} 件を作成` : (r.data?.status ?? 'ok')
+        say(`練習用 HubSpot から案件を取り込みました（${report.imported}）`)
+      } else {
+        notes.push(`練習用 HubSpot からの取り込みができませんでした（${r.json?.error ?? r.status}${r.json?.problem ? ': ' + r.json.problem : ''}）`)
+      }
+    }
+  })
   return report
 }
+
 
 /** The recommended mapping + `assignee` from HubSpot's owner and the people table. */
 function addPeople(text, userId) {

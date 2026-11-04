@@ -43,19 +43,42 @@ export function loadPrivateConfig(spec) {
   }
 }
 
-/** Replace the config's text (creating it when missing). */
-export function writePrivateText(spec, text, message) {
+/**
+ * The config's text and version for an update: { text, sha }. Only "not there" (404 / no such
+ * file) counts as empty ({ text: '', sha: null }); any other failure (offline, no access) throws,
+ * so an update never starts from a blank it only assumed.
+ */
+export function readPrivateForUpdate(spec) {
+  if (spec.kind === 'file') {
+    try { return { text: fs.readFileSync(spec.path, 'utf8'), sha: null } } catch (err) {
+      if (err?.code === 'ENOENT') return { text: '', sha: null }
+      throw new PrivateConfigError('could not read the private kit config')
+    }
+  }
+  let out
+  try {
+    out = gh(['api', `repos/${spec.repo}/contents/${spec.path}`])
+  } catch (err) {
+    if (/HTTP 404/.test(String(err?.stderr ?? ''))) return { text: '', sha: null }
+    throw new PrivateConfigError('could not read the private kit config')
+  }
+  const json = JSON.parse(out)
+  return { text: Buffer.from(json.content ?? '', 'base64').toString('utf8'), sha: json.sha }
+}
+
+/**
+ * Replace the config's text. `sha` is the version readPrivateForUpdate read: GitHub refuses the
+ * write when the file changed since (no blind overwrite); null creates the file.
+ */
+export function writePrivateText(spec, text, message, sha) {
   if (spec.kind === 'file') {
     fs.writeFileSync(spec.path, text)
     return
   }
-  const url = `repos/${spec.repo}/contents/${spec.path}`
-  let sha = null
-  try { sha = gh(['api', url, '--jq', '.sha']).trim() || null } catch { /* new file */ }
   const body = JSON.stringify({ message, content: Buffer.from(text).toString('base64'), ...(sha ? { sha } : {}) })
   try {
-    gh(['api', '-X', 'PUT', url, '--input', '-'], body)
+    gh(['api', '-X', 'PUT', `repos/${spec.repo}/contents/${spec.path}`, '--input', '-'], body)
   } catch {
-    throw new PrivateConfigError('could not write the private kit config (do you have write access?)')
+    throw new PrivateConfigError('could not write the private kit config (changed meanwhile, or no write access); run it again')
   }
 }

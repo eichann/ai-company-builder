@@ -75,12 +75,38 @@ describe('settings', () => {
     expect(() => kit.settingsFrom(env({ ACB_STAGING_PORT: '14010' }))).toThrow(/differ/)
     expect(() => kit.settingsFrom(env({ ACB_STAGING_PORT: '80' }))).toThrow(/port/)
   })
+  it('only allow compose projects named acb-staging…, so down -v / --rmi reach nothing else', () => {
+    expect(kit.settingsFrom(env({ ACB_STAGING_PROJECT: 'acb-staging-test' })).project).toBe('acb-staging-test')
+    expect(() => kit.settingsFrom(env({ ACB_STAGING_PROJECT: 'acb' }))).toThrow(/acb-staging/)
+    expect(() => kit.settingsFrom(env({ ACB_STAGING_PROJECT: 'supabase_db' }))).toThrow(/acb-staging/)
+  })
   it('read the private setting from the local config file', () => {
     const cfg = path.join(tmp, 'config')
     fs.writeFileSync(cfg, '# onboarding\nACB_KIT_PRIVATE=example-org/ops:staging/kit.conf\n')
     expect(kit.settingsFrom(env({ ACB_KIT_CONFIG: cfg })).private).toEqual({ kind: 'github', repo: 'example-org/ops', path: 'staging/kit.conf' })
     expect(() => kit.parsePrivateSpec('example-org/ops:../x')).toThrow()
     expect(() => kit.parsePrivateSpec('file:relative')).toThrow()
+  })
+})
+
+describe('deleting (reset / remove)', () => {
+  it('refuses a folder without the kit\'s marker, the home folder, its parents and /', () => {
+    const home = path.join(tmp, 'user')
+    const kitHome = path.join(home, 'acb-staging-kit')
+    fs.mkdirSync(kitHome, { recursive: true })
+    const p = kit.kitPaths(kitHome)
+    expect(() => kit.assertKitHome(p, home)).toThrow(/検証キットのフォルダではない/) // no marker yet
+    fs.mkdirSync(p.secrets, { recursive: true })
+    fs.writeFileSync(p.env, 'x')
+    expect(() => kit.assertKitHome(p, home)).not.toThrow()
+    for (const bad of [home, tmp, '/']) {
+      const q = kit.kitPaths(bad)
+      if (bad !== '/') { // even with a marker
+        fs.mkdirSync(q.secrets, { recursive: true, mode: 0o700 })
+        fs.writeFileSync(q.env, 'x')
+      }
+      expect(() => kit.assertKitHome(q, home)).toThrow()
+    }
   })
 })
 
@@ -99,6 +125,14 @@ describe('private kit config', () => {
     expect(fs.readFileSync(file, 'utf8')).toBe(`production ${next}\nexample-org/connectors hubspot@0.3.0 abc\n`)
     expect(markProduction(next, { ACB_KIT_PRIVATE: `file:${file}` }).changed).toBe(false)
   })
+  it('mark-production starts from empty only when the config is not there, never when it cannot be read', () => {
+    const missing = path.join(tmp, 'new.conf')
+    expect(markProduction('c'.repeat(40), { ACB_KIT_PRIVATE: `file:${missing}` }).changed).toBe(true)
+    expect(kit.parsePrivateConfig(fs.readFileSync(missing, 'utf8')).production).toBe('c'.repeat(40))
+    const unreadable = path.join(tmp, 'dir.conf')
+    fs.mkdirSync(unreadable) // reading a folder fails with something other than "not there"
+    expect(() => markProduction('d'.repeat(40), { ACB_KIT_PRIVATE: `file:${unreadable}` })).toThrow(/could not read/)
+  })
   it('decideUpdate', () => {
     expect(kit.decideUpdate({ localSha: null, remoteSha: sha })).toEqual({ action: 'clone', to: sha })
     expect(kit.decideUpdate({ localSha: sha, remoteSha: sha })).toEqual({ action: 'none' })
@@ -113,17 +147,25 @@ describe('following production (bootstrap.mjs)', () => {
     const work = path.join(tmp, 'work')
     fs.mkdirSync(work)
     git(['init', '-q', '-b', 'main'], work)
-    git(['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'one'], work)
-    const one = git(['rev-parse', 'HEAD'], work)
-    git(['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'two'], work)
-    const two = git(['rev-parse', 'HEAD'], work)
+    const commit = (msg: string) => {
+      git(['add', '-A'], work)
+      git(['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', msg], work)
+      return git(['rev-parse', 'HEAD'], work)
+    }
+    // A version without the kit (an older production commit).
+    fs.writeFileSync(path.join(work, 'README'), 'no kit\n')
+    const nokit = commit('before the kit')
+    fs.mkdirSync(path.join(work, 'staging'))
+    fs.writeFileSync(path.join(work, 'staging', 'kit.mjs'), '// kit\n')
+    const one = commit('one')
+    const two = commit('two')
     const bare = path.join(tmp, 'remote.git')
     git(['clone', '-q', '--bare', work, bare])
-    return { bare, one, two }
+    return { bare, one, two, nokit }
   }
 
   it('checks out the private config\'s commit, then moves with it after backing up the databases', () => {
-    const { bare, one, two } = makeRemote()
+    const { bare, one, two, nokit } = makeRemote()
     const conf = path.join(tmp, 'kit.conf')
     fs.writeFileSync(conf, `production ${one}\nexample-org/connectors hubspot@0.3.0 abc\n`)
     const s = kit.settingsFrom(env({ ACB_STAGING_REMOTE: bare, ACB_KIT_PRIVATE: `file:${conf}` }))
@@ -156,13 +198,27 @@ describe('following production (bootstrap.mjs)', () => {
     expect(fs.readFileSync(path.join(p.backups, backups[0], 'app.sqlite'), 'utf8')).toBe('db')
     expect(fs.readFileSync(path.join(p.data, 'app.sqlite'), 'utf8')).toBe('db') // the data is kept
 
+    // A target without the kit: nothing is stopped or switched.
+    markProduction(nokit, { ACB_KIT_PRIVATE: `file:${conf}` })
+    const noKit = followProduction(s, p, logger, { stop })
+    expect(noKit.note).toMatch(/検証キットが入っていないため、更新しませんでした/)
+    expect(git(['-C', p.app, 'rev-parse', 'HEAD'])).toBe(two)
+    expect(stopped).toBe(1)
+
+    // An older target (a rollback): updated, with a warning.
+    markProduction(one, { ACB_KIT_PRIVATE: `file:${conf}` })
+    lines.length = 0
+    followProduction(s, p, logger, { stop })
+    expect(git(['-C', p.app, 'rev-parse', 'HEAD'])).toBe(one)
+    expect(lines.join('\n')).toMatch(/古い版に戻します/)
+
     // The config cannot be read (offline, no access): keep the version, say so, name no place.
     fs.rmSync(conf)
     const offline = followProduction(s, p, logger, { stop })
     expect(offline.private).toBe('unreadable')
     expect(offline.note).toMatch(/いまの版のまま起動します/)
     expect(offline.note).not.toContain(conf)
-    expect(git(['-C', p.app, 'rev-parse', 'HEAD'])).toBe(two)
+    expect(git(['-C', p.app, 'rev-parse', 'HEAD'])).toBe(one)
   }, 60_000)
 
   it('without the private setting follows the public branch and loads no private parts', () => {
