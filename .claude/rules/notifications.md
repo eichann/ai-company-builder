@@ -60,6 +60,9 @@ a plugin can never draw a notice (§2-2).
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
   (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee), `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`) and `from_message` (below; all three on by default),
   `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above),
+  `minutes_arrived` (「議事録が届きました：「…」」, on by default: a meeting recorded `arrived`, or
+  attendees joining it while still there, to each member on its list — the minutes service names
+  them; once per meeting and member, `minutes_arrived:<record>`; `minutes.md`),
   `asked`, `morning_summary`, `due_tomorrow` (below), `others` (everything else: the AI's
   「用意ができた」 / 「先に渡す」 when it is not a first hand-over, 「自分で進める」 of task v5, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
@@ -179,6 +182,12 @@ compare-and-set and ledger), and writes notices.
 - **Incoming mail**: `pollInbox` — the inbox's `pollCompany` (`inbox.md` "Connections"):
   connects the members the mail source can read, then reads each one's new mail as header facts
   and pointers (never the text), yielding between members; `ClockRun.mailRead` counts them.
+- **Meetings**: `pollMeetings` — the minutes' `pollCompany` (`minutes.md` "Meetings for their
+  attendees"): each member's calendar of the last 3 days with their own grant (a member without a
+  usable one is refused locally), one members-only record per conference, yielding between members;
+  `ClockRun.meetingsFound` counts the records made. Never the minutes' text. Run **after** every
+  company's moves, notices, content and mail (a second pass), so a slow calendar never holds them
+  up; capped per company and run (`minutes.md`). Test: `server-clock.test.ts`.
 - **Safe to run again and after a restart**: everything is derived from stored rows (a moved
   task is no longer waiting; a notice's dedupe key is already there), so a second run writes
   nothing. A run while one is going returns `ran: false`. Per company and run at most 50 moves

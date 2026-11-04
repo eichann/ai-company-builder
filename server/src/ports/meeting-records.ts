@@ -16,6 +16,13 @@ export interface MeetingAttendee {
   /** The provider's display name (may be empty). */
   name: string
   organizer: boolean
+  /** The attendee declined the event: not one of the meeting's people (minutes.md). */
+  declined: boolean
+  /**
+   * On the event's attendee list. False for an organizer the provider names only as the organizer
+   * (kept for the thank-you mail's recipients): not one of the meeting's people.
+   */
+  listed: boolean
 }
 
 export interface MeetEvent {
@@ -28,6 +35,10 @@ export interface MeetEvent {
   meetingCode: string
   organizer: string | null
   attendees: MeetingAttendee[]
+  /** Marked private in the calendar (visibility private / confidential): never recorded. */
+  private: boolean
+  /** The recurring series it is an instance of (the provider's opaque id), or null. */
+  series: string | null
 }
 
 export interface MeetArtifactDoc {

@@ -148,6 +148,17 @@ export interface RecordTurnOpenRow {
   openedAt: string
 }
 
+/** One calendar event as the minutes' discovery knows it (`meeting_events`). */
+export interface MeetingEventRow {
+  eventKey: string
+  recordId: string | null
+  /** Someone's calendar marks it private: never recorded. */
+  private: boolean
+  /** Looks that found no minutes yet, and when to look again. */
+  tries: number
+  nextAt: string | null
+}
+
 export interface RecordRepository {
   settings(): RecordSettingsRow
   setEnabled(enabled: boolean, by: string, at: string): void
@@ -185,6 +196,14 @@ export interface RecordRepository {
   addMembers(id: string, userIds: readonly string[], by: string, at: string): string[]
   /** A member left the company: they are on no members-only record's list any more (re-joining starts from nothing). */
   forgetMember(userId: string): void
+  /** The recurring series (digests) a member set to 「自動で読む」 (minutes.md "Meetings for their attendees"). */
+  meetingAutoSeries(userId: string): string[]
+  setMeetingAutoSeries(userId: string, seriesKey: string, auto: boolean, at: string): void
+  /** What discovery knows of one calendar event (minutes.md): its record, a private mark, the back-off. */
+  meetingEvent(eventKey: string): MeetingEventRow | null
+  setMeetingEvent(eventKey: string, change: Partial<Omit<MeetingEventRow, 'eventKey'>>, at: string): void
+  /** Live records of `type` whose members-only list names the member. */
+  listedRecordIds(userId: string, type: string): string[]
 
   linksFrom(ids: string[]): RecordLinkRow[]
   /** Links whose target is a file at exactly one of `paths` (company paths). */

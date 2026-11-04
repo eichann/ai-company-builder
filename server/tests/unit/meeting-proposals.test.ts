@@ -75,7 +75,7 @@ beforeEach(() => {
     proposesFromMeeting: () => proposes, afterAct: (c, change) => review.afterAct(c, change),
   })
   service = createRecordService({ companyData: source, clock: shared.clock, indexer: { schedule: async () => {} } })
-  const r = writer.create('a', { type: 'meeting', title: '定例', fields: { assignee: 'u-alice', attendees: JSON.stringify(['u-alice', 'u-bob']) }, links: {}, actor: { id: 'u-alice', kind: 'human' } })
+  const r = writer.create('a', { type: 'meeting', title: '定例', state: 'received', fields: { assignee: 'u-alice', attendees: JSON.stringify(['u-alice', 'u-bob']) }, links: {}, actor: { id: 'u-alice', kind: 'human' } })
   if (!r.ok) throw new Error(r.reason)
   meetingId = r.record.id
 })

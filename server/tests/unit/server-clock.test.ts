@@ -66,6 +66,9 @@ function company(id: string) {
   ensureCoreTypes(records, TS)
 }
 
+/** The meetings' poll the clock runs (minutes.md), when a test sets one. */
+let meetingsPoll: ((companyId: string) => Promise<number>) | null = null
+
 function wire(limits?: { moves: number; notices: number }) {
   const shared = {
     companyData: source,
@@ -103,6 +106,7 @@ function wire(limits?: { moves: number; notices: number }) {
     yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     log: () => {},
     ...(limits ? { limits } : {}),
+    ...(meetingsPoll ? { pollMeetings: meetingsPoll } : {}),
   })
 }
 
@@ -203,6 +207,25 @@ describe('the server clock: a wait that is over', () => {
     expect(stateOf(other, 'b').state).toBe('todo')
     await clock.runOnce()
     expect(many.filter(id => stateOf(id, 'a').state === 'todo')).toHaveLength(5)
+  })
+
+  it('meetings are polled after every company’s moves: a slow calendar never holds another company’s work up', async () => {
+    const a = await waitingTask('2026-11-04', 'a')
+    const b = await waitingTask('2026-11-04', 'b')
+    const seen: Array<[string, string | undefined, string | undefined]> = []
+    const stateOf = (co: string, id: string) => source.forCompany(co).records.states([id])[0]?.state
+    meetingsPoll = async (co) => { seen.push([co, stateOf('a', a), stateOf('b', b)]); return co === 'a' ? 2 : 0 }
+    try {
+      wire()
+      nowMs = jst('2026-11-05T09:00')
+      const run = await clock.runOnce()
+      expect(run.meetingsFound).toBe(2)
+      // When company a's meetings are polled, company b's wait has already moved.
+      expect(seen[0][0]).toBe('a')
+      expect(seen[0][2]).not.toBe('waiting')
+    } finally {
+      meetingsPoll = null
+    }
   })
 
   it('a run never overlaps one still going', async () => {

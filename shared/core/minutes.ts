@@ -12,10 +12,11 @@ export const MEETING_TYPE = 'meeting'
 
 /**
  * Which meetings the intake reads (a company setting, owner decision
- * 2026-11-01 night): `external` — only meetings with someone from outside the
- * company (the default, and the rule before the setting existed: internal
- * meetings such as HR talks are never read, not even their Meet record) —
- * or `all` meetings.
+ * 2026-11-01 night): `external` or `all`. Since meetings are found on the server
+ * clock and seen by their attendees only (owner decision 2026-11-04, minutes.md
+ * "Meetings for their attendees") the setting no longer gates recording: every
+ * Meet meeting is recorded except events marked private in the calendar, and the
+ * AI reads one only when an attendee asks. Kept so older admin consoles keep working.
  */
 export const MEETING_INTAKE_CHOICES = ['external', 'all'] as const
 export type MeetingIntake = typeof MEETING_INTAKE_CHOICES[number]
@@ -26,9 +27,29 @@ export function meetingIntakeOf(raw: unknown): MeetingIntake {
   return (MEETING_INTAKE_CHOICES as readonly unknown[]).includes(raw) ? raw as MeetingIntake : DEFAULT_MEETING_INTAKE
 }
 
-/** Is a meeting with this many outside attendees read under the setting? */
-export function meetingIsRead(intake: MeetingIntake, externalAttendees: number): boolean {
-  return intake === 'all' || externalAttendees > 0
+/**
+ * Meetings for their attendees (owner decision 2026-11-04, minutes.md): a meeting record starts in
+ * `arrived` — 「議事録が届きました」, nobody's turn and no AI turn. An attendee's ［AI に読ませる］
+ * makes it the AI's turn on that attendee's PC (`received`, they become its assignee); ［読まない］
+ * ends it (`skipped`, nobody is asked again). Neither is an action of the type: only the minutes
+ * service writes them (the attendee's session).
+ */
+export const MEETING_ARRIVED_STATE = 'arrived'
+/** The ledger action of ［AI に読ませる］ (arrived / skipped / failed → received, the presser its assignee). */
+export const MEETING_READ_REQUEST_ACTION = 'request_reading'
+/** The ledger action of ［読まない］ by an attendee (arrived / received → skipped). */
+export const MEETING_SKIP_ACTION = 'skip'
+/** The ledger action of attendees the calendar added later joining the meeting's list. */
+export const MEETING_ATTENDEES_ACTION = 'attendees_joined'
+/** An arrived meeting is shown as 「届きました」 for this many days after it took place; it stays openable and readable later. */
+export const MEETING_ARRIVED_DAYS = 3
+
+/**
+ * Whether a calendar event is one its people marked private (Google's `visibility` private /
+ * confidential): such a meeting is not recorded at all (owner decision 2026-11-04).
+ */
+export function isPrivateEventVisibility(visibility: unknown): boolean {
+  return visibility === 'private' || visibility === 'confidential'
 }
 
 /**

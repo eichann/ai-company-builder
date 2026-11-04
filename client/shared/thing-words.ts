@@ -104,7 +104,7 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
   interaction: {
     received: '届いた', handled: '対応済み', unsure: '確認待ち', unclaimed: '部署の番', excluded: 'やることにしなかった',
   },
-  meeting: { received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
+  meeting: { arrived: '議事録が届いた', received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
   decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },
   outbound_message: { draft: '下書き', sent: '送った', unknown: '届いたか分からない', discarded: 'やめた（しまった）' },
   approval: {

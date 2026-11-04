@@ -67,6 +67,8 @@ export interface ServiceCreateInput {
   state?: string
   /** Tell nobody (signal the app only): a record made in the AI's turn waits for the AI, not a person. */
   quiet?: boolean
+  /** Also tell these members (besides the assignee and next actor): a meeting's attendees (minutes.md). */
+  notify?: readonly string[]
 }
 
 /** A state change (checked against `SERVICE_TRANSITIONS`) and/or field change of a service-owned record. */
@@ -92,6 +94,12 @@ export interface ServiceTransitionInput {
   notify?: string[]
   /** Tell nobody (signal the app only). */
   quiet?: boolean
+  /**
+   * Add these members to a members-only record's list (records.md "Members-only records": a
+   * meeting's attendees the calendar added later). Kept in the ledger as `place.members` before /
+   * after; refused (`bad-place`) on a record that is not members-only or with a non-member.
+   */
+  addMembers?: readonly string[]
 }
 
 export type ServiceWriteFailure =
@@ -268,7 +276,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         written = false
       }
       if (!written) return fail('exists')
-      tell(companyId, input.actor.id, [values.assignee, values.next_actor], { type: def.name, entry, fields: values }, input.quiet)
+      tell(companyId, input.actor.id, [values.assignee, values.next_actor, ...(input.notify ?? [])], { type: def.name, entry, fields: values }, input.quiet)
       return { ok: true, record: recordSummaries(records, records.byIds([id])).get(id) as RecordSummary, entry }
     },
 
@@ -315,6 +323,13 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         const after = targets.join(',') || null
         if (before !== after) changes.push({ field: `links.${name}`, before, after })
       }
+      // New members of a members-only record's list (only such a record, only members of the company).
+      const adding = input.addMembers ? [...new Set(input.addMembers)] : []
+      if (input.addMembers && (row.members === null || adding.length > MEMBERS_MAX || !adding.every(m => deps.isMember(companyId, m)))) return fail('bad-place')
+      const joined = row.members !== null ? adding.filter(m => !row.members?.includes(m)) : []
+      if (joined.length > 0) {
+        changes.push({ field: 'place.members', before: (row.members ?? []).join(','), after: [...(row.members ?? []), ...joined].join(',') })
+      }
       const replacedLinks = input.links
         ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))
         : null
@@ -332,6 +347,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false
         if (replacedLinks) records.replaceLinks(row.id, replacedLinks)
+        if (joined.length > 0) records.addMembers(row.id, joined, input.actor.id, at)
         records.appendLedger(entry)
         return true
       })

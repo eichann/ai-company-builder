@@ -692,6 +692,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       expireContent: companyId => contentEraser.eraseExpired(companyId, shared.clock.now()).length,
       // 来た連絡 (inbox.md): connect members who can be read now, then read each one's new mail.
       pollInbox: (companyId, between) => inboxLane.inbox.pollCompany(companyId, between),
+      // Meetings found on the members' calendars, seen by their attendees (minutes.md).
+      pollMeetings: (companyId, between) => minutes.pollCompany(companyId, between),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,

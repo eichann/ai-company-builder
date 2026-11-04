@@ -13,6 +13,7 @@ import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
+  MeetingEventRow,
 } from '../../ports/records'
 import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
 import { canonicalTypeJson } from '../../../shared/core/record-types'
@@ -233,6 +234,13 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     const resolve = contents.resolver(rows.flatMap(r => [{ recordId: r.id, value: r.title }, { recordId: r.id, value: r.summary }]))
     return rows.map(r => ({ ...r, title: resolve(r.id, r.title), summary: resolve(r.id, r.summary) }))
   }
+  /** One calendar event as the minutes' discovery knows it (`meeting_events`). */
+  function meetingEventRow(eventKey: string): MeetingEventRow | null {
+    const r = conn.prepare('SELECT event_key, record_id, private, tries, next_at FROM meeting_events WHERE company_id = ? AND event_key = ?').get(companyId, eventKey) as
+      { event_key: string; record_id: string | null; private: number; tries: number; next_at: string | null } | undefined
+    return r ? { eventKey: r.event_key, recordId: r.record_id, private: r.private === 1, tries: r.tries, nextAt: r.next_at } : null
+  }
+
   return {
     settings() {
       const r = conn.prepare('SELECT enabled, updated_at, updated_by FROM record_settings WHERE company_id = ?').get(companyId) as
@@ -338,6 +346,31 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     forgetMember(userId) {
       conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+    },
+    meetingEvent(eventKey) {
+      return meetingEventRow(eventKey)
+    },
+    setMeetingEvent(eventKey, change, at) {
+      const now = meetingEventRow(eventKey) ?? { eventKey, recordId: null, private: false, tries: 0, nextAt: null }
+      const next = { ...now, ...change }
+      conn.prepare(`
+        INSERT INTO meeting_events (company_id, event_key, record_id, private, tries, next_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_id, event_key) DO UPDATE SET record_id = excluded.record_id, private = excluded.private, tries = excluded.tries,
+          next_at = excluded.next_at, updated_at = excluded.updated_at
+      `).run(companyId, eventKey, next.recordId, next.private ? 1 : 0, next.tries, next.nextAt, at)
+    },
+    listedRecordIds(userId, type) {
+      return (conn.prepare(`SELECT v.record_id FROM record_viewers v JOIN records r ON r.company_id = v.company_id AND r.id = v.record_id
+        WHERE v.company_id = ? AND v.user_id = ? AND r.type = ? AND r.removed_at IS NULL`).all(companyId, userId, type) as Array<{ record_id: string }>).map(r => r.record_id)
+    },
+    meetingAutoSeries(userId) {
+      return (conn.prepare('SELECT series_key FROM meeting_auto_series WHERE company_id = ? AND user_id = ? ORDER BY series_key').all(companyId, userId) as Array<{ series_key: string }>)
+        .map(r => r.series_key)
+    },
+    setMeetingAutoSeries(userId, seriesKey, auto, at) {
+      if (auto) conn.prepare('INSERT OR IGNORE INTO meeting_auto_series (company_id, user_id, series_key, created_at) VALUES (?, ?, ?, ?)').run(companyId, userId, seriesKey, at)
+      else conn.prepare('DELETE FROM meeting_auto_series WHERE company_id = ? AND user_id = ? AND series_key = ?').run(companyId, userId, seriesKey)
     },
     markRemoved(id, at) {
       conn.prepare('UPDATE records SET removed_at = ?, updated_at = ? WHERE company_id = ? AND id = ? AND removed_at IS NULL').run(at, at, companyId, id)

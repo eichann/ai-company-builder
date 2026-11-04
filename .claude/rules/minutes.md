@@ -8,6 +8,7 @@ paths:
   - "shared/types/meeting-outputs.ts"
   - "admin/src/app/companies/[[]id]/task-list/meeting-duplicates.tsx"
   - "server/tests/integration/minutes.test.ts"
+  - "server/tests/integration/meeting-attendees.test.ts"
   - "shared/types/minutes.ts"
   - "shared/core/minutes.ts"
   - "shared/core/instruction-like.ts"
@@ -23,7 +24,8 @@ paths:
 # Minutes intake (milestone 4 G7)
 
 After a meeting, Google Meet saves notes (Gemini) and a transcript in the organizer's Drive.
-ACB notices them when the member's app asks, keeps a `meeting` record (会議, server only, no text —
+ACB notices them on the server clock, keeps a `meeting` record (会議, server only, seen by its
+attendees only — "Meetings for their attendees" below — no text —
 the 議事録 is the meeting's content, read where it is; the type was called `minutes` before the
 core interfaces, records.md "Core interfaces"), and hands the text — marked as outside text — to
 the member's normal consultation AI, which makes the outputs with the typed tools.
@@ -36,38 +38,63 @@ access itself: `google-connector.md` (G3).
 
 ## Flow
 
-1. **Discovery** — `POST /api/companies/:id/me/minutes/check` (session). The app calls it at
-   start, every 10 minutes and on a button (q5: no server timer; a closed app finds them next
-   time). Only the member's **own** grant is used (`googleClient.request`, so every Google switch
-   applies from the next call). Steps (`services/minutes.ts` `check`, Google calls in
-   `services/google-meetings.ts`, reached through the role 会議の記録を読む — `ports/meeting-records.ts`,
-   `connector-roles.md`; no usable connector → `GOOGLE_STOPPED`, 予定と議事録を読む turned off by the
-   member → `GOOGLE_NOT_CONNECTED` with its own sentence):
-   - calendar events of the last 3 days → now (`singleEvents`, by start time, ≤ 4 pages);
-   - keep events with a Meet conference (`conferenceData` `hangoutsMeet`) that **the company's
-     setting reads** ("Which meetings" below; default: at least one attendee outside the company's
-     Google domain — the G3 client's `domain`, `isExternalAddress`). A meeting the setting does not
-     read is never read further — not even its Meet record (design §1-2; HR meetings and the like);
-   - the conference record by meeting code near the event's time; its smart notes and transcripts
+1. **Discovery** — on the server clock (every 5 minutes, `pollCompany`, "Meetings for their
+   attendees" below) for every member, and for one member when an older app calls
+   `POST /api/companies/:id/me/minutes/check` (session; same code, plus the stale put-back). Only
+   the member's **own** grant is used (`googleClient.request`, so every Google switch applies from
+   the next call; a member without a usable grant is refused locally, nothing leaves ACB). Steps
+   (`services/minutes.ts` `discover`, Google calls in `services/google-meetings.ts`, reached through
+   the role 会議の記録を読む — `ports/meeting-records.ts`, `connector-roles.md`; no usable connector →
+   `GOOGLE_STOPPED`, 予定と議事録を読む turned off by the member → `GOOGLE_NOT_CONNECTED` with its own
+   sentence):
+   - calendar events of the last 3 days → now (`singleEvents`, ≤ 4 pages), **newest first**, at most 50;
+   - keep events with a Meet conference (`conferenceData` `hangoutsMeet`) **not marked private in
+     anyone's copy** (`visibility` private / confidential): the clock first reads every member's
+     events and marks such an event in `meeting_events` (key = digest of the event id), so no
+     member's run records it — not recorded, its Meet record never looked up, counted
+     `internalOnly` (the field's old name). A meeting recorded before it turned private is kept
+     (nothing deleted) and gets no one added or told any more. A calendar whose *default* is private
+     cannot be told from the events list (not handled). Internal and external meetings alike (owner
+     decision 2026-11-04: what is sensitive only the attendees know; "Which meetings" no longer gates);
+   - **Google calls** (`meeting_events`): an event already recorded is known without a Meet call; a
+     meeting not ended yet is not looked up; no conference / no generated minutes → looked for again
+     after 5, 15, 30, 60, 120, 240 minutes (shared by every attendee's run); at most
+     `MEETING_CALLS_PER_RUN` (300) calls per company and clock run (100 per app check), the rest the
+     next run, a different member first each run; a 429 stops that member until the next run. The
+     clock polls meetings after every company's moves and notices (`server-clock.ts`);
+   - the conference record by meeting code from 15 minutes before the event's start to its end (a
+     reused personal Meet link must not hand one meeting's record to the next); its smart notes and transcripts
      with `FILE_GENERATED` and `docsDestination.document`; each document's Drive `version`;
    - one record per **conference**: id `meeting-<sha256("minutes:" + conference id)[:24]>`, so two
      members (or two calls at once) make one record (`exists` → counted `existing`); a record made
      before the rename keeps its `minutes-<same hash>` id and counts as existing;
-   - assignee (q15): the organizer when they are a member who can read the minutes folder, else
-     the member who found it; attendees = members whose ACB email is on the event.
+   - **members-only** (`records.md` "Members-only records"): the list = attendees on the event's
+     list who are members **by an address Google verified for them** — the `account_email` of their
+     active Google grant (`verifiedMembers`), never the ACB account's email (chosen at sign-up,
+     unverified: someone registered with a colleague's address must not join their meetings) —
+     never one who declined (`responseStatus` declined), never an organizer who is not on the
+     attendee list. Members without a Google grant are not added (an attendee invites them); another
+     address or a mailing list is not matched (design §4-4, later). No member attending → no record.
+   - **one event, one meeting**: only the event a record was made from (`source_ref.event`) is that
+     meeting; another event on the same Meet (a copied event, a reused link) never adds attendees or
+     renames it (`meeting_events` maps only that event to the record).
+     No folder, no assignee: the record starts `arrived` (below).
    Answer `MinutesCheckResult`: `{ checked, reason?, message?, meetings, internalOnly, created:
-   [ids], existing, waiting, stale: [ids] }` — counts and ids only, never text. `stale`: the
-   member's own records in `reading` for > 30 minutes, which the check itself puts back to
+   [ids], existing, waiting, stale: [ids] }` — counts and ids only, never text (`reason` is no longer
+   answered: no folder is needed). `stale`: the
+   member's own records in `reading` for > 30 minutes, which the check (and the clock, for every
+   member, before their discovery) puts back to
    `received` (the type's `retry` through the service writer, actor the server clock
    `CLOCK_ACTOR`: ledger cause `system`, never the member); an older app's `retry` on them finds
    nothing to do.
 2. **まとまり** (mechanical, design §1-2 step 3; whatever its type — the core names no business
    type): unfinished records of any type implementing `bundle` (a 案件, a 企画…) readable by the
-   assignee that link to a 相手 (a record of a type implementing `counterpart`) whose `domain` is an
+   reader that link to a 相手 (a record of a type implementing `counterpart`) whose `domain` is an
    outside attendee's domain; when several, those whose title appears in the meeting title (or the
-   reverse) if any. With no domain match, title matches only. **Exactly one** → linked (`bundle`,
-   and that まとまり's 相手 as `counterpart`); 0 or ≥ 2 → not linked; `candidates` (with each
-   one's `typeLabel`) in the text answer; a person or their AI chooses with
+   reverse) if any. With no domain match, title matches only. **Never linked at intake** (since
+   2026-11-04: linking shows part of the meeting to the まとまり's department — an attendee's choice,
+   design §2/§5); the outside participants' company (名寄せ, with the finder's reading) is still its
+   `counterpart`. `candidates` (with each one's `typeLabel`) in the text answer; a person or their AI chooses with
    `POST …/minutes/…/bundle { bundleId, expectedVersion? }` (assignee or owner/admin; only a
    まとまり the member reads — anything else, missing or unreadable, one 400 `BAD_LINK`; the service
    writer's `links`, ledger `link_bundle`). Nothing is written to the outside system by this.
@@ -165,13 +192,65 @@ meeting's reading makes is made once per meeting and item, decided by the server
 - Test: `server/tests/unit/meeting-proposals.test.ts`; `minutes.test.ts`'s output counts leave the
   review task out.
 
+## Meetings for their attendees (owner decision 2026-11-04, design 会議の記録と「参加した人だけ」の見え方 §2/§4/§5)
+
+- **Seen by its attendees only** (members-only, `records.md`): not the owner, admins or department
+  managers unless they attended; for anyone else the meeting does not exist (404). What is made from
+  it inherits the list (`record-engine/members.ts`): tasks (+ their assignee), decisions, the review
+  task. Attendees the calendar **adds later** join the list on the next discovery (service writer
+  `addMembers`, ledger `attendees_joined` = `MEETING_ATTENDEES_ACTION` by `google`, `place.members`
+  before / after, told while still `arrived`); attendees **removed** stay; who declined never joins.
+  The text, `meetingAttendees` and the buttons judge "one of its people" by the list (also an invited
+  member: Google then decides whether they may open the minutes); the まとまり (`…/bundle`,
+  `…/no-bundle`, `bundle-question`'s `canChoose`) may be chosen by anyone on the list, also while
+  `arrived`. The creation's ledger note is neutral (「カレンダーの予定から見つけました」).
+- **Approvals from such a meeting** (`approvals.ts` `request`): the request lives in the まとまり's
+  folder as before (its approver must read it) and does **not** link the meeting (a link would make it
+  the attendees' only, failing `bad-place`); the meeting stays unseen by the others (the approval's
+  materials name it only to its readers). The basis quote travels with the request: asking is the
+  attendee's own act of showing that part to the department (design §2/§5).
+- **States** (core `meeting` version 5, additive): new initial `arrived` (議事録が届いた) — nobody's
+  turn, no AI turn, no assignee. Meetings made before stay where they are (`received` etc.).
+- **［AI に読ませる］**: `POST /me/minutes/item/:recordId/read-request { expectedVersion? }` (session;
+  one of the meeting's people — on its list, its assignee or `attendees`, else 403
+  `MINUTES_NOT_YOURS`; not readable → 404). From `arrived`, `skipped` or `failed`: first the
+  documents' versions are read with **the presser's own Google** (no text) — not shared with them →
+  403 `MINUTES_NO_ACCESS` 「…ほかの出席者が［AI に読ませる］を押すと、その人の AI が読めます」 and
+  nothing changes (reader rotation, design §4-3); then → `received` with **assignee = the presser**
+  (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
+  the existing reading, `text` with their grant). Same member while it waits for their AI → the same
+  answer, nothing written; `reading` / `read` / someone else's `received` → 409 `MEETING_NOT_WAITING`.
+- **［読まない］**: `POST /me/minutes/item/:recordId/skip { expectedVersion? }` — any of its people
+  from `arrived` / `failed`, the assignee alone from `received` (「今回だけ読まない」); → `skipped`
+  (ledger `skip`, the person as actor, note 「読まない」, quiet): nobody is asked again, the record is
+  kept, `arrivals` says who. A later ［AI に読ませる］ still works. Twice → the first answer.
+- **「この定例は次から自動で読む」**: `PUT /me/minutes/item/:recordId/auto-series { auto }` (one of its
+  people; a meeting of no series → 409 `MEETING_NOT_SERIES`) — the caller's own choice per recurring
+  series (`meeting_auto_series`, key = digest of the calendar's `recurringEventId`, kept in
+  `source_ref.series`). When **that member's** discovery finds a meeting of the series (new, or still
+  `arrived`) it is asked to be read for them as above (actor `CLOCK_ACTOR`, note
+  「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`.
+- **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
+  meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest
+  first: `status` (arrived / asked / reading / read / skipped / failed), `attendeeCount`, `by` (the
+  reader, or who chose 読まない), `byYou`, `series`, `autoSeries`. Older ones leave it and stay openable
+  and readable (the card's ［AI に読ませる］). Ids, titles, times, counts, member names only.
+- **Notice**: each attendee gets `minutes_arrived` 「議事録が届きました：「…」」 once per meeting
+  (`notifications.md`), never a non-attendee.
+- **The minutes folder and "which meetings"** are no longer used: `GET|PUT /google/minutes-folder`
+  still answers and stores them for older admin consoles (harmless); `bundleQuestionDays` is still
+  used. The admin home no longer lists 「議事録の置き場所を選ぶ」; the admin's Google page shows 「会議の
+  記録」 with a note (recorded for their attendees, private events skipped) and only the days setting
+  (`minutes-folder.tsx`, `admin/tests/integrations.test.tsx`). The app's banner comes with the app PR.
+- Tests: `server/tests/integration/meeting-attendees.test.ts` (each mutation-checked).
+
 ## The text
 
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin
 `GET /api/companies/:id/me/minutes/item/:recordId/text` → `MinutesText`: `{ recordId, version (the
 meeting record's version now: the `expectedVersion` of its next action — an unattended run has no
 `records_get`), header:
-MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, folder (the minutes folder: where its decisions go), attendees:
+MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, folder (null for a members-only meeting: its decisions take its list), attendees:
 [{ memberId, displayName }], externalAttendees (count only), bundle: { id, type, typeLabel, title,
 state, fields, version } | null, candidates: [{ id, title, typeLabel }], instructionLike: [{ label, words }] }`.
 
@@ -189,17 +268,21 @@ state, fields, version } | null, candidates: [{ id, title, typeLabel }], instruc
 
 ## What is stored, and what never
 
-Stored (the record, server only, folder = the minutes folder): title = the event's title, fields
+Stored (the record, server only, members-only — its list in `record_viewers`; meetings made before
+2026-11-04 keep the minutes folder): title = the event's title, fields
 `meeting_at` and `occurred_at` (the same start time; `occurred_at` is the common outside time,
-`records.md` "Outside time"), `assignee`, `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
-`source_ref` (JSON of Google ids only: conference, event, documents), `doc_version`
+`records.md` "Outside time"), `assignee` (the reader, once someone asked), `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
+`source_ref` (JSON of Google ids only: conference, event, documents, the recurring series), `doc_version`
 (`notes:7,transcript:7`), `summary_text` (the AI's ≤ 300 at the end); links `bundle`, `counterpart`.
 Ledger actor of the creation: external `google` (note: which member's calendar).
 **Never** stored, logged or answered elsewhere: the notes / transcript text, attendees' email
 addresses and names (they are read again from the calendar when needed), Google's tokens.
 Log nothing about meetings (titles, emails, text): `logError` only, without them.
 
-## The minutes folder (q14)
+## The minutes folder (q14) — no longer used (2026-11-04)
+
+Kept only so older admin consoles keep working; nothing reads it since meetings are seen by their
+attendees.
 
 `GET|PUT /api/companies/:id/google/minutes-folder { folder: string | null }` (owner/admin;
 `record_settings.minutes_folder`, additive column): a department folder (`departments.folders()`)
@@ -215,7 +298,9 @@ usable folders. No folder (or one that stopped being usable) → `check` answers
 organizer, external }]`, read now from the calendar with that member's grant, for the assignee
 or an attendee who may read the record: the "calendar attendee" source of verified recipients.
 
-## Which meetings (a company setting, owner decision 2026-11-01 night)
+## Which meetings (a company setting, owner decision 2026-11-01 night) — no longer gating (2026-11-04)
+
+Still answered and stored; every Meet meeting not marked private is recorded whatever it says.
 
 `GET|PUT /google/minutes-folder` also carries `meetings`: `external` (the default, null stored =
 default: only meetings with someone from outside — today's rule) or `all` (internal meetings
@@ -327,20 +412,23 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - Not yet: the consultation does not move to the minutes folder's department (the record's folder
   is not in any member-facing answer), so the AI asks where to put decisions when the folder is not
   the current one.
-- Not yet (owner decision 2026-11-04, 会議は「参加した人だけ」): meetings are still placed in the
-  minutes folder. The core now has members-only records (`records.md` "Members-only records"):
-  what is made from a members-only meeting inherits its list, and a service write of such an output
-  that also names a folder is refused (`bad-place`) — so when the Google step makes meetings
-  members-only, the intake, `minutes-review.ts`, the decisions it records and the answer's `folder`
-  must stop passing the minutes folder for them.
+- Meetings are members-only since 2026-11-04 ("Meetings for their attendees"): the intake passes no
+  folder, the review task and decisions take the meeting's list, the text answers `folder: null`.
+  The app still finds received minutes in 「AI の番」; the banner and the meeting card's buttons come
+  with the app PR.
 
 ## Tests
 
+`server/tests/integration/meeting-attendees.test.ts` (the clock finds meetings, one members-only
+record per conference, declined / not invited / owner / admin / another company see nothing on any
+route, attendees added later join and are told, a private event is never recorded, ［AI に読ませる］ by
+an attendee only with reader rotation, ［読まない］, the auto series, the 3-day window, no minutes text
+anywhere, the older check and folder route harmless) and
 `server/tests/integration/minutes.test.ts` against the fake Google and the fake HubSpot (practice
-redirect): an internal-only meeting creates nothing and its Meet record is never looked up; one
-record for two members, organizer assignee; two candidates not linked, one linked with its 相手,
-only a まとまり can be chosen (a 顧客 is refused); which meetings are read (owner/admin only, default
-external, `all` reads the internal one); the text only
+redirect): every meeting recorded, internal ones too; one
+record for two members, the presser assignee; no まとまり linked at intake (one or two candidates), its 相手 is,
+only a まとまり can be chosen (a 顧客 is refused); which meetings (owner/admin only, no longer
+gating); a meeting made before: only its people press the buttons; the text only
 for the assignee / attendees, another company's record = missing; no minutes text in any table,
 log line or other answer; the AI's text answer carries the record's version; the folder refusal
 never naming the place; stale reading put back by the server as its clock; an unfinished automatic

@@ -12,7 +12,7 @@
  * the text goes to the one route that hands it to the member's AI.
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
-import { MINUTES_TEXT_MAX } from '../../shared/core/minutes'
+import { isPrivateEventVisibility, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
 import { MeetingReadFailed as GoogleReadFailed, type MeetArtifactDoc, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { GoogleRequest, GoogleResult } from './google-client'
 
@@ -25,8 +25,12 @@ export type { MeetArtifactDoc, MeetEvent, MeetingAttendee } from '../ports/meeti
 const MAX_EVENT_PAGES = 4
 const MEETING_CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/
 const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
-/** A conference counts for an event when it started within this much of the event. */
-const CONFERENCE_SLACK_MS = 3 * 60 * 60 * 1000
+/**
+ * A conference counts for an event when it started from this much before the event's start until
+ * its end (a personal Meet link is reused by back-to-back meetings: a wide window would hand one
+ * meeting's record to another).
+ */
+const CONFERENCE_EARLY_MS = 15 * 60 * 1000
 const TRUNCATED = '\n【長いため、ここから先は省きました】'
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -48,12 +52,18 @@ function eventOf(raw: unknown): MeetEvent | null {
   const attendees: MeetingAttendee[] = []
   for (const a of Array.isArray(raw.attendees) ? raw.attendees : []) {
     if (!isObj(a) || typeof a.email !== 'string' || a.resource === true) continue
-    attendees.push({ email: a.email.toLowerCase(), name: str(a.displayName) ?? '', organizer: a.organizer === true || a.email.toLowerCase() === organizer })
+    attendees.push({
+      email: a.email.toLowerCase(), name: str(a.displayName) ?? '', organizer: a.organizer === true || a.email.toLowerCase() === organizer,
+      declined: a.responseStatus === 'declined', listed: true,
+    })
   }
-  if (organizer && !attendees.some(a => a.email === organizer)) attendees.push({ email: organizer, name: '', organizer: true })
+  if (organizer && !attendees.some(a => a.email === organizer)) attendees.push({ email: organizer, name: '', organizer: true, declined: false, listed: false })
+  const series = str(raw.recurringEventId)
   return {
     eventId, title: (str(raw.summary) ?? '').trim(), start: new Date(s).toISOString(), end: new Date(e).toISOString(),
     meetingCode: code, organizer, attendees,
+    private: isPrivateEventVisibility(raw.visibility),
+    series: series && ID_RE.test(series) ? series : null,
   }
 }
 
@@ -108,8 +118,8 @@ export function createGoogleMeetings(request: GoogleRequester): MeetingRecordsRe
 
     /** The conference record of a Meet code that started near the event (null when none yet). */
     async conferenceFor(companyId: string, userId: string, event: MeetEvent): Promise<string | null> {
-      const from = new Date(Date.parse(event.start) - CONFERENCE_SLACK_MS).toISOString()
-      const to = new Date(Date.parse(event.end) + CONFERENCE_SLACK_MS).toISOString()
+      const from = new Date(Date.parse(event.start) - CONFERENCE_EARLY_MS).toISOString()
+      const to = new Date(Date.parse(event.end)).toISOString()
       const r = await call(companyId, userId, {
         api: 'meet', method: 'GET', path: '/v2/conferenceRecords',
         query: { filter: `space.meeting_code = "${event.meetingCode}" AND start_time >= "${from}" AND start_time <= "${to}"`, pageSize: '10' },

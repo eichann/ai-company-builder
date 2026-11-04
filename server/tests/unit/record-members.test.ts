@@ -324,6 +324,23 @@ describe('creating one', () => {
     expect(source.forCompany('a').records.find(review.record.id)?.members).toEqual(['u-alice', 'u-bob'])
   })
 
+  it('the service writer adds members to a members-only record only (a meeting’s attendees joining later), in its ledger', () => {
+    const actor = { id: 'google', kind: 'external' as const, source: 'google' }
+    const mt = meeting()
+    expect(writer.transition('a', { recordId: mt.id, action: 'attendees_joined', expectedVersion: 1, to: null, addMembers: ['u-stranger'], actor }))
+      .toMatchObject({ ok: false, reason: 'bad-place' })
+    const joined = writer.transition('a', { recordId: mt.id, action: 'attendees_joined', expectedVersion: 1, to: null, addMembers: ['u-carol'], actor })
+    if (!joined.ok) throw new Error(joined.reason)
+    expect(joined.entry.changes).toContainEqual({ field: 'place.members', before: 'u-alice,u-bob', after: 'u-alice,u-bob,u-carol' })
+    expect(source.forCompany('a').records.find(mt.id)?.members).toEqual(['u-alice', 'u-bob', 'u-carol'])
+    // A record that is not members-only is never quietly made one, nor its readers widened.
+    const open = writer.create('a', { type: 'meeting', title: '全体会', folder: '営業部', actor, quiet: true })
+    if (!open.ok) throw new Error(open.reason)
+    expect(writer.transition('a', { recordId: open.record.id, action: 'attendees_joined', expectedVersion: 1, to: null, addMembers: ['u-carol'], actor }))
+      .toMatchObject({ ok: false, reason: 'bad-place' })
+    expect(source.forCompany('a').records.find(open.record.id)?.members).toBeNull()
+  })
+
   it('a mail draft of a members-only meeting stays its members’ — also when its まとまり sits in a folder', async () => {
     const mt = meeting()
     const bundle = ok(engine.create(m('u-alice'), HUMAN, { type: 'effort', title: '採用', folder: '営業部' })).record

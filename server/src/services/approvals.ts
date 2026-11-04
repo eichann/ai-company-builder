@@ -474,11 +474,17 @@ export function createApprovalService(deps: ApprovalDeps) {
       const handle = companyData.forCompany(member.companyId)
       // The basis must be a meeting record the requester may read (else it would point at what they cannot see).
       const meetingId = payload.basis.meetingId
+      let linkMeeting = false
       if (meetingId !== null) {
         const m = RECORD_ID_RE.test(meetingId) ? handle.records.byIds([meetingId])[0] : undefined
         if (!m || m.type !== MEETING_TYPE || m.removedAt !== null || !recordReader(member, handle.scopes.listWithRules()).record(m)) {
           return refuse('bad-request', 'basis.meetingId: a meeting record you can read', { code: 'BAD_LINK' })
         }
+        // A meeting seen by its attendees only (minutes.md): the request lives where its record does
+        // (the まとまり's department, whose approver must read it) and does not link the meeting — a
+        // link would make it the meeting's attendees' only, and the meeting stays unseen by the others.
+        // Asking is the attendee's own act of showing that part to the department (design §2/§5).
+        linkMeeting = m.members === null
       }
       // The `bundle` link holds the record only when its type is a まとまり (a 案件, a 企画…): the core
       // never names a business plugin's type, and an operation on another kind of record still works.
@@ -523,7 +529,7 @@ export function createApprovalService(deps: ApprovalDeps) {
               approver_rule: roleOfSpec(rule) !== null ? 'role' : rule, approver_role: roleOfSpec(rule),
               payload_hash: fixedNow.hash, payload_version: fixedNow.version, reason: proposed,
             },
-            links: { ...(payload.record && isBundle ? { bundle: [payload.record.id] } : {}), ...(meetingId ? { meeting: [meetingId] } : {}) },
+            links: { ...(payload.record && isBundle ? { bundle: [payload.record.id] } : {}), ...(meetingId && linkMeeting ? { meeting: [meetingId] } : {}) },
             actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null, runId: actor.runId ?? null, via: actor.via ?? null },
             note: '承認をお願いしました',
           })

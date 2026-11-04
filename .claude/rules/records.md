@@ -850,7 +850,10 @@ owner-only one, before every role or folder rule).
   members-only; a marked record with no rows is read by nobody). `upsert` marks a new row (insert
   only), the caller adds the list with `addMembers` in the same transaction; `setPlace` ends it
   (drops the rows). Asking for a list on an existing row that is not members-only, or `addMembers`
-  on one, throws inside the caller's transaction (never quietly wider). A member removed from the company is taken off every list in the same
+  on one, throws inside the caller's transaction (never quietly wider). The service writer's
+  `transition` takes `addMembers` (a meeting's attendees the calendar added later, `minutes.md`):
+  ledger `place.members` before / after; refused (`bad-place`) on a record that is not members-only
+  or with a non-member. A member removed from the company is taken off every list in the same
   transaction as their rules (`forgetMember`, `services/companies.ts` `removeMember`), so joining
   again starts from nothing.
 - **Create** (`POST /records/item`, the AI's `records_create`): `members: string[]` (≤ 200; the

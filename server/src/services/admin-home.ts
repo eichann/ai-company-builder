@@ -26,6 +26,7 @@ import { ok, refuse, type Outcome } from './outcome'
 export const HOME_FORBIDDEN = 'Only owners, admins and department managers can view the home'
 export const HOLIDAYS_CHECKED = 'holidays-checked'
 
+/** `minutes-folder` is no longer answered (meetings need no folder since 2026-11-04); kept for older admin consoles' types. */
 export type SetupStepId = 'departments' | 'members' | 'department-members' | 'google' | 'minutes-folder' | 'holidays'
 
 export interface SetupStep {
@@ -93,7 +94,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
       // Every department has someone; a 部署の管理役 is recommended, not required.
       { id: 'department-members', done: departments.length > 0 && withoutMembers === 0, departmentsWithoutMembers: withoutMembers, departmentsWithoutManager: withoutManager },
       { id: 'google', done: await deps.googleUsable(member.companyId), byOperator: true },
-      { id: 'minutes-folder', done: handle.records.minutesFolder() !== null },
+      // No 「議事録の置き場所」 step since meetings are seen by their attendees only (minutes.md, 2026-11-04).
       { id: 'holidays', done: handle.tasks.setupMark(HOLIDAYS_CHECKED) !== null },
     ]
   }
