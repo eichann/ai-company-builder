@@ -183,7 +183,7 @@ export const ONLY_YOU = 'あなただけ'
 
 // --- The middle's tabs grouped by kind (「種類ごとにまとめる」, owner 2026-11-04) ---------------
 /** The groups, in the order they stand: files, tasks, bundles (案件／プロジェクト…), meetings, decisions, the rest. */
-export const TAB_KIND_GROUPS = ['file', 'task', 'bundle', 'meeting', 'decision', 'other'] as const
+export const TAB_KIND_GROUPS = ['file', 'task', 'bundle', 'meeting', 'decision', 'other'] as const satisfies readonly ThingKind[]
 export type TabKindGroup = typeof TAB_KIND_GROUPS[number]
 
 /** Which group a record's tab stands in (a file's is `file`; a record not read yet, `other`). */

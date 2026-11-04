@@ -108,11 +108,12 @@ test('a hand-edited or broken saved list is read without what it cannot use', ()
   assert.deepEqual(parsed[0].items.map(i => i.id), ['j'])
 })
 
-test('a named group\'s tidy keeps its name and colour (reopening makes the group again); a broken one is dropped, its tabs kept', () => {
-  const items = [{ id: 'i', kind: 'file', path: 'a.md', title: 'a.md' }]
-  const [kept] = parseGroups([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items, tabGroup: { name: '提案準備', color: 'rose' } }])
-  assert.deepEqual(kept.tabGroup, { name: '提案準備', color: 'rose' })
-  const [broken] = parseGroups([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items, tabGroup: { name: '提案準備', color: 'pink' } }])
-  assert.equal(broken.tabGroup, undefined)
+test('a tidied tab keeps its named group (name, colour) across a restart; a broken group mark is dropped, the tab kept', () => {
+  const item = tidiedItemOf(a, root, {}, { name: '提案準備', color: 'rose' })
+  assert.deepEqual(item.tabGroup, { name: '提案準備', color: 'rose' })
+  const [kept] = parseGroups(JSON.parse(JSON.stringify([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items: [item] }])))
+  assert.deepEqual(kept.items[0].tabGroup, { name: '提案準備', color: 'rose' })
+  const [broken] = parseGroups([{ id: 'g', at: '2026-11-03T00:00:00Z', day: '2026-11-03', items: [{ ...item, tabGroup: { name: '提案準備', color: 'pink' } }] }])
+  assert.equal(broken.items[0].tabGroup, undefined)
   assert.equal(broken.items.length, 1)
 })

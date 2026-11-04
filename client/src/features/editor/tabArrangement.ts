@@ -3,7 +3,8 @@
 // or by kind when 「種類ごとにまとめる」 is on (ファイル, やること, 案件…, 会議の記録, 決めたこと, その他).
 // The open tabs' one order (`openFiles`) stays the truth: what is shown is a stable split of it, so a
 // new tab lands at the end of its run. Pure except the per company store on this Mac.
-import { bundleWords, TAB_KIND_GROUPS, tabKindGroupName, tabKindGroupOf, type TabKindGroup } from '../../../shared/thing-words'
+import { nameKey } from '../../../../shared/core/paths'
+import { TAB_KIND_GROUPS, tabKindGroupName, tabKindGroupOf, type TabKindGroup } from '../../../shared/thing-words'
 import { recordIdOfTab, type RecordTabLook } from './editorTabs'
 
 type Looks = Readonly<Record<string, RecordTabLook>>
@@ -15,10 +16,8 @@ export function tabGroupOf(key: string, looks: Looks): TabKindGroup {
 }
 
 /** A kind group's name for the tabs in it (bundles by the labels of the ones open: 「案件・プロジェクト」). */
-export function tabGroupName(group: TabKindGroup, keys: readonly string[], looks: Looks): string {
-  if (group !== 'bundle') return tabKindGroupName(group)
-  return bundleWords(keys.map(k => looks[recordIdOfTab(k) ?? '']?.typeLabel))
-}
+export const tabGroupName = (group: TabKindGroup, keys: readonly string[], looks: Looks): string =>
+  tabKindGroupName(group, keys.map(k => looks[recordIdOfTab(k) ?? '']?.typeLabel))
 
 /** The colours a named group can have (one small palette, readable in light and dark). */
 export const GROUP_COLORS = ['blue', 'green', 'amber', 'rose', 'violet', 'teal'] as const
@@ -131,9 +130,44 @@ export function pruneGrouping(grouping: TabGrouping, openTabs: readonly string[]
   return { ...grouping, groups: grouping.groups.filter(g => used.has(g.id)), members }
 }
 
+/** A new named group's id (made by hand or when a tidied group is reopened). */
+export const newGroupId = (): string => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+
+/** Group names compare as the member reads them: width (NFKC), A–Z case and outer spaces ignored. */
+export const groupNameKey = (name: string): string => nameKey(name.normalize('NFKC').trim())
+
+/** Whether another group (not `exceptId`) already has this name. */
+export const groupNameTaken = (groups: readonly NamedTabGroup[], name: string, exceptId?: string): boolean =>
+  groups.some(g => g.id !== exceptId && groupNameKey(g.name) === groupNameKey(name))
+
 /** A short, unused name for a new group (「まとまり 2」). */
 export function nextGroupName(groups: readonly NamedTabGroup[]): string {
-  for (let n = 1; ; n++) if (!groups.some(g => g.name === `まとまり ${n}`)) return `まとまり ${n}`
+  for (let n = 1; ; n++) if (!groupNameTaken(groups, `まとまり ${n}`)) return `まとまり ${n}`
+}
+
+/** The grouping without one named group: its tabs stay open, outside any group. */
+export const withoutGroup = (g: TabGrouping, groupId: string): TabGrouping => ({
+  ...g, groups: g.groups.filter(x => x.id !== groupId), members: Object.fromEntries(Object.entries(g.members).filter(([, id]) => id !== groupId)),
+})
+
+/** A tab's named group as a tidy keeps it (name and colour; the id is not kept). */
+export interface TidiedTabGroup { name: string; color: GroupColor }
+
+/**
+ * Reopened tabs back in the named groups they were tidied from: into the group of that name when
+ * there is one (names are unique), otherwise a new group with the name and colour they had.
+ */
+export function regroup(g: TabGrouping, tabs: ReadonlyArray<{ key: string; group: TidiedTabGroup }>): TabGrouping {
+  let next = g
+  for (const { key, group } of tabs) {
+    let target = next.groups.find(x => groupNameKey(x.name) === groupNameKey(group.name))
+    if (!target) {
+      target = { id: newGroupId(), name: group.name, color: group.color }
+      next = { ...next, groups: [...next.groups, target] }
+    }
+    next = { ...next, members: { ...next.members, [key]: target.id } }
+  }
+  return next
 }
 
 /** A colour no open group has yet, or the palette's next one. */

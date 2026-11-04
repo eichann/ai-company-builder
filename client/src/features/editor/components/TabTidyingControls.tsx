@@ -1,4 +1,4 @@
-import { Broom, FolderSimpleMinus, FolderSimplePlus, PushPin, SquaresFour, Tray } from '@phosphor-icons/react'
+import { Broom, FolderPlus, ListBullets, Minus, PushPin, Tray } from '@phosphor-icons/react'
 import { runCommand } from '../../../shared/commands/commands'
 import { MoreMenu, type MoreMenuItem } from '../../../shared/ui/MoreMenu'
 import type { useTabTidying } from '../hooks/useTabTidying'
@@ -27,7 +27,7 @@ export function TabTidyingMenu({ tidying, arrangement, activeKey, looks }: {
     hint: '固定したタブは片づけても残ります', onClick: () => tidying.togglePinned(activeKey),
   })
   items.push({
-    label: '種類ごとにまとめる', icon: <SquaresFour size={14} />, checked: arrangement.byKind,
+    label: '種類ごとにまとめる', icon: <ListBullets size={14} />, checked: arrangement.byKind,
     hint: 'ファイル・やること・会議の記録などに分けて並べます', onClick: () => arrangement.setByKind(!arrangement.byKind),
   })
   if (activeKey && !pinned) {
@@ -38,8 +38,8 @@ export function TabTidyingMenu({ tidying, arrangement, activeKey, looks }: {
       items.push({ label: `この種類（${name}）を片づける`, icon: <Broom size={14} />, hint: '固定したタブは残ります', onClick: () => { void runCommand('tabs.tidy', { kind }) } })
     }
     items.push(group
-      ? { label: `まとまり「${group.name}」から外す`, icon: <FolderSimpleMinus size={14} />, onClick: () => arrangement.removeFromGroup(activeKey) }
-      : { label: 'このタブを新しいまとまりに入れる', icon: <FolderSimplePlus size={14} />, hint: '名前と色をつけて、タブをまとめておけます', onClick: () => arrangement.askNewGroup(activeKey) })
+      ? { label: `まとまり「${group.name}」から外す`, icon: <Minus size={14} />, onClick: () => arrangement.removeFromGroup(activeKey) }
+      : { label: 'このタブを新しいまとまりに入れる', icon: <FolderPlus size={14} />, hint: '名前と色をつけて、タブをまとめておけます', onClick: () => arrangement.askNewGroup(activeKey) })
   }
   return <MoreMenu compact label="タブの操作" items={items} />
 }

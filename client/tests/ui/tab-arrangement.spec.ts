@@ -138,6 +138,16 @@ test('まとまり: made from a tab, joined by menu and by a drop on its chip, r
   await recordTab(page, 'A社 提案書').click({ button: 'right' })
   await page.getByRole('button', { name: '「提案準備」に入れる' }).click()
   await expect(chip(page, '提案準備')).toContainText('2')
+
+  // A second group of the same name (full-width, spaces around) is refused; the dialog stays open.
+  await fileTab(page, README).click({ button: 'right' })
+  await page.getByRole('button', { name: '新しいまとまりに入れる…' }).click()
+  await page.getByPlaceholder(/まとまりの名前/).fill(' 提案準備　')
+  await page.getByRole('button', { name: '作る' }).click()
+  await expect(page.getByRole('alert')).toHaveText('同じ名前のまとまりがあります。別の名前にしてください。')
+  await shot(page, 'tab-named-group-name-taken')
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  await expect(bar(page).locator('[data-tab-group]')).toHaveCount(1)
   // Dropped on the chip: it joins at the end.
   await drag(page, fileTab(page, SUPPLIES), chip(page, '提案準備'), 'middle')
   await expect(chip(page, '提案準備')).toContainText('3')
@@ -191,23 +201,56 @@ test('まとまり: made from a tab, joined by menu and by a drop on its chip, r
   expectNoPageErrors(state)
 })
 
-test('the AI tidies one kind or one named group; an unknown group is refused and nothing closes', async ({ page }) => {
-  const groups = JSON.stringify({ byKind: false, collapsedKinds: [], groups: [{ id: 'g1', name: '提案準備', color: 'rose' }], members: { [SUPPLIES]: 'g1' } })
-  await openPreview(page, 'skill-layout', { seed: seed([GUIDE, TASK, SUPPLIES, TASK2], {}, { 'tabGroups:demo': groups }) })
+
+const PROPOSAL = (members: Record<string, string>, byKind = false) =>
+  JSON.stringify({ byKind, collapsedKinds: [], groups: [{ id: 'g1', name: '提案準備', color: 'rose' }], members })
+
+test('a kind tidy leaves a tab of that kind standing in a named group (it is under the group\'s chip)', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { seed: seed([GUIDE, TASK, TASK2], {}, { 'tabGroups:demo': PROPOSAL({ [TASK2]: 'g1' }, true) }) })
+  await expect(chip(page, 'やること')).toContainText('1')
+  await chip(page, 'やること').getByRole('button', { name: 'やることの操作' }).click()
+  await page.getByRole('button', { name: 'この種類（やること）を片づける' }).click()
+  await expect(page.locator('[data-tidy-notice]')).toContainText('「やること」のタブを 1 件片づけました。')
+  await expect(recordTab(page, 'A社 提案書')).toHaveCount(0)
+  await expect(recordTab(page, '請求書を送る')).toBeVisible()
+  await expect(chip(page, '提案準備')).toContainText('1')
+})
+
+test('the daily tidy keeps each tab\'s named group: 全部開き直す brings the group back with its name and colour', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { seed: seed([README, GUIDE, TASK], {}, {
+    'tabGroups:demo': PROPOSAL({ [GUIDE]: 'g1', [TASK]: 'g1' }), 'tidiedTabs:lastDay:demo': '2026-01-05',
+  }) })
+  await expect(bar(page).getByRole('tab')).toHaveCount(0)
+  await expect(chip(page, '提案準備')).toHaveCount(0)
+  await page.getByRole('button', { name: '片づけたタブを見る' }).click()
+  const list = page.getByRole('dialog', { name: '片づけたタブ' })
+  await expect(list.locator('[data-tidied-group="提案準備"]')).toBeVisible()
+  await list.getByRole('button', { name: '全部開き直す' }).click()
+  await list.getByRole('button', { name: '閉じる' }).click()
+  await expect(chip(page, '提案準備')).toContainText('2')
+  await expect(chip(page, '提案準備').getByRole('button', { expanded: true })).toHaveClass(/bg-rose-100/)
+  await expect(fileTab(page, README)).toBeVisible()
+})
+
+test('the AI tidies one kind (not the tabs in a named group) or one named group; an unknown group is refused and nothing closes', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { seed: seed([GUIDE, TASK, SUPPLIES, TASK2], {}, { 'tabGroups:demo': PROPOSAL({ [SUPPLIES]: 'g1', [TASK2]: 'g1' }) }) })
   await expect(chip(page, '提案準備')).toBeVisible()
   const ai = await layout(page)
-  const refused = await ai.evaluate(l => l.aiCommand('tabs.tidy', { group: 'ない' })) as { ok: true; result: { error: string } }
-  expect(refused.result.error).toContain('見つかりません')
+  const refused = await ai.evaluate(l => l.aiCommand('tabs.tidy', { group: 'ない' })) as { ok: boolean; error: string }
+  expect(refused).toEqual({ ok: false, error: 'そのまとまりは見つかりません。tabs_list で確かめてください。' })
   await expect(bar(page).getByRole('tab')).toHaveCount(4)
 
   const byKind = await ai.evaluate(l => l.aiCommand('tabs.tidy', { kind: 'task' })) as { ok: true; result: { tidied: number } }
-  expect(byKind.result.tidied).toBe(2)
+  expect(byKind.result.tidied).toBe(1)
   await expect(recordTab(page, 'A社 提案書')).toHaveCount(0)
+  await expect(recordTab(page, '請求書を送る')).toBeVisible()
   await expect(fileTab(page, GUIDE)).toBeVisible()
 
+  // By name, as tabs_list gives it (width and case do not matter).
   const byGroup = await ai.evaluate(l => l.aiCommand('tabs.tidy', { group: '提案準備' })) as { ok: true; result: { tidied: number } }
-  expect(byGroup.result.tidied).toBe(1)
+  expect(byGroup.result.tidied).toBe(2)
   await expect(fileTab(page, SUPPLIES)).toHaveCount(0)
+  await expect(recordTab(page, '請求書を送る')).toHaveCount(0)
   await expect(fileTab(page, GUIDE)).toBeVisible()
   // Another company's consultation is still refused.
   const other = await ai.evaluate(l => l.aiCommand('tabs.tidy', { kind: 'file' }, 'other')) as { ok: boolean }

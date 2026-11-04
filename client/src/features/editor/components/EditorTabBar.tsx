@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { ArrowsInLineHorizontal, Broom, FolderSimplePlus, FolderSimpleMinus, PencilSimple, PushPin, X } from '@phosphor-icons/react'
+import { Broom, CaretDown, CaretRight, FolderPlus, Minus, PencilSimple, PushPin, X } from '@phosphor-icons/react'
 import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu'
 import { FILE_PATHS_DRAG_TYPE, isTabDrag, LINK_EFFECT_ALLOWED, startRecordDrag, TAB_DRAG_TYPE } from '../../../shared/lib/dragTypes'
 import { runCommand } from '../../../shared/commands/commands'
@@ -55,11 +55,11 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
     if (onTogglePinned) items.push({ label: pinnedTabs?.has(key) ? '固定をやめる' : '固定する（片づけても残す）', icon: <PushPin size={14} />, onClick: () => onTogglePinned(key) })
     if (arrangement && !pinnedTabs?.has(key)) {
       const current = arrangement.groupOf(key)
-      items.push({ label: '新しいまとまりに入れる…', icon: <FolderSimplePlus size={14} />, onClick: () => arrangement.askNewGroup(key) })
+      items.push({ label: '新しいまとまりに入れる…', icon: <FolderPlus size={14} />, onClick: () => arrangement.askNewGroup(key) })
       for (const g of arrangement.grouping.groups) {
         if (g.id !== current?.id) items.push({ label: `「${g.name}」に入れる`, icon: <span className={`block h-2.5 w-2.5 rounded-full ${GROUP_COLOR_CLASSES[g.color].swatch}`} />, onClick: () => arrangement.addToGroup(key, g.id) })
       }
-      if (current) items.push({ label: 'まとまりから外す', icon: <FolderSimpleMinus size={14} />, onClick: () => arrangement.removeFromGroup(key) })
+      if (current) items.push({ label: 'まとまりから外す', icon: <Minus size={14} />, onClick: () => arrangement.removeFromGroup(key) })
     }
     return items
   }
@@ -67,13 +67,13 @@ export function EditorTabBar({ openFiles, fileContents, activeFilePath, previewF
   const chipMenu = (section: TabSection, name: string): ContextMenuItem[] => {
     if (!arrangement) return []
     const collapsed = arrangement.isCollapsed(section)
-    const fold = { label: collapsed ? 'ひらく' : 'たたむ', icon: <ArrowsInLineHorizontal size={14} />, onClick: () => arrangement.toggleCollapsed(section.id) }
+    const fold = { label: collapsed ? 'ひらく' : 'たたむ', icon: collapsed ? <CaretRight size={14} /> : <CaretDown size={14} />, onClick: () => arrangement.toggleCollapsed(section.id) }
     const group = section.group
     if (group) return [
       fold,
       { label: '名前と色を変える…', icon: <PencilSimple size={14} />, onClick: () => arrangement.askEditGroup(group) },
       { label: 'このまとまりを片づける', icon: <Broom size={14} />, onClick: () => { void runCommand('tabs.tidy', { group: group.id }) } },
-      { label: 'まとまりを解く', icon: <FolderSimpleMinus size={14} />, onClick: () => arrangement.ungroup(group.id) },
+      { label: 'まとまりを解く', icon: <Minus size={14} />, onClick: () => arrangement.ungroup(group.id) },
     ]
     const kind = section.kind
     return kind ? [fold, { label: `この種類（${name}）を片づける`, icon: <Broom size={14} />, onClick: () => { void runCommand('tabs.tidy', { kind }) } }] : [fold]

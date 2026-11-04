@@ -4,8 +4,10 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { saveUnsavedEdits, unsavedPaths } from '../../../shared/lib/unsavedEdits'
 import { fileExists, recordStillThere } from '../api'
 import type { RecordTabLook } from '../editorTabs'
-import { tabKindGroupName, type TabKindGroup } from '../../../../shared/thing-words'
-import { pruneGrouping, tabGroupingStore, tabGroupName, tabGroupOf, type TabGroupingStore } from '../tabArrangement'
+import type { TabKindGroup } from '../../../../shared/thing-words'
+import {
+  groupNameKey, namedGroupOf, NO_GROUPING, pruneGrouping, regroup, tabGroupingStore, tabGroupName, tabGroupOf, type ArrangeOptions, type TabGroupingStore,
+} from '../tabArrangement'
 import type { RestoredTabs } from './useEditorPersistence'
 import {
   companyDay, dayLabel, groupsByDay, itemKindName, planTidy, tabKeyOf, tidiedItemOf, tidyStore,
@@ -39,7 +41,6 @@ const EMPTY: TidiedGroup[] = []
 
 /** A tab as the AI reads it: title and kind; a file also carries its company path, which main removes (shared/app-commands.ts `redactForAI`). */
 const entryOf = (item: TidiedItem) => ({ title: item.title, kind: itemKindName(item), ...(item.kind === 'file' ? { path: item.path } : {}) })
-const newGroupId = () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
 
 /**
  * 「タブを片づける」 (tidyTabs.ts): the commands `tabs.list` / `tabs.tidy` / `tabs.restore` (the
@@ -57,7 +58,10 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
   const [notice, setNotice] = useState<TidyNotice | null>(null)
   const latest = useLatestRef({ companyId, rootPath: rootPath ?? '', openTabs, pinnedTabs, recordLooks })
 
-  /** Saves every edit first; a tab that still holds unsaved edits stays open (never lost). */
+  /**
+   * Saves every edit first; a tab that still holds unsaved edits stays open (never lost). Each tidied
+   * tab keeps its named group (name, colour) so reopening it puts it back in that group.
+   */
   const tidy = useCallback(async (source?: { companyId: string; tabs: RestoredTabs; auto: true }, scope: TidyScope = {}) => {
     const left = await saveUnsavedEdits()
     const cur = latest.current
@@ -66,28 +70,30 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
     const all = source ? source.tabs.openFiles : cur.openTabs
     const pinned = source ? source.tabs.pinned : cur.pinnedTabs
     const looks = source ? { ...source.tabs.records, ...cur.recordLooks } : cur.recordLooks
-    // One named group (by id, or by the name the AI read) or one kind; a pinned tab stays either way.
-    const named = scope.group ? pruneGrouping(grouping.get(cid), all) : null
-    const tabGroup = named ? named.groups.find(g => g.id === scope.group) ?? named.groups.find(g => g.name === scope.group) : undefined
+    const arrange: ArrangeOptions = { pinned: new Set(pinned), looks, grouping: pruneGrouping(grouping.get(cid), all) }
+    const groups = arrange.grouping.groups
+    // One named group (by id, or by the name the AI read), or one kind: only the tabs under that kind's
+    // chip — a tab in a named group stands under the group's chip, so a kind tidy leaves it.
+    const tabGroup = scope.group ? groups.find(g => g.id === scope.group) ?? groups.find(g => groupNameKey(g.name) === groupNameKey(scope.group!)) : undefined
     if (scope.group && !tabGroup) return { error: 'そのまとまりは見つかりません。tabs_list で確かめてください。' as const }
-    const tabs = tabGroup ? all.filter(k => named!.members[k] === tabGroup.id) : scope.kind ? all.filter(k => tabGroupOf(k, looks) === scope.kind) : all
+    const tabs = tabGroup ? all.filter(k => namedGroupOf(k, arrange)?.id === tabGroup.id)
+      : scope.kind ? all.filter(k => !namedGroupOf(k, arrange) && tabGroupOf(k, looks) === scope.kind) : all
     const plan = planTidy(tabs, pinned, [...left, ...unsavedPaths()])
-    const items = plan.close.map(key => tidiedItemOf(key, cur.rootPath, looks))
+    const items = plan.close.map(key => tidiedItemOf(key, cur.rootPath, looks, namedGroupOf(key, arrange)))
     const at = now()
     const dropped = items.length > 0
-      ? store.add(cid, {
-          id: `g${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: new Date(at).toISOString(), day: companyDay(at), auto: !!source, items,
-          ...(tabGroup ? { tabGroup: { name: tabGroup.name, color: tabGroup.color } } : {}),
-        })
+      ? store.add(cid, { id: `g${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: new Date(at).toISOString(), day: companyDay(at), auto: !!source, items })
       : 0
-    if (plan.close.length > 0) closeTabs(plan.close)
-    // The group goes with its tabs (a tab left for its unsaved edits stays outside any group).
-    if (tabGroup && plan.close.length > 0) grouping.update(cid, g => ({ ...g, groups: g.groups.filter(x => x.id !== tabGroup.id), members: Object.fromEntries(Object.entries(g.members).filter(([, id]) => id !== tabGroup.id)) }))
+    if (plan.close.length > 0) {
+      closeTabs(plan.close)
+      // A group left with no tab goes (its tabs carry its name into 「片づけたタブ」).
+      const closed = new Set(plan.close)
+      grouping.update(cid, g => pruneGrouping(g, all.filter(k => !closed.has(k))))
+    }
     const keptUnsaved = plan.unsaved.map(key => entryOf(tidiedItemOf(key, cur.rootPath, looks)))
-    const what = tabGroup ? `まとまり「${tabGroup.name}」の` : scope.kind ? `「${scope.kind === 'bundle' ? tabGroupName('bundle', tabs, looks) : tabKindGroupName(scope.kind)}」の` : ''
+    const what = tabGroup ? `まとまり「${tabGroup.name}」の` : scope.kind ? `「${tabGroupName(scope.kind, tabs, looks)}」の` : ''
     return { tidied: items.length, keptPinned: plan.pinned.length, keptUnsaved, dropped, group: items.length > 0 ? companyDay(at) : null, what }
   }, [latest, store, grouping, now, closeTabs])
-
   const tidyByHand = useCallback(async (scope: TidyScope = {}) => {
     const r = await tidy(undefined, scope)
     if (!r || 'error' in r) return r
@@ -117,19 +123,10 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
     const opened = items.filter((_, n) => checks[n])
     const missing = items.filter((_, n) => !checks[n])
     reopenTabs(opened.map(i => tabKeyOf(i, cur.rootPath)))
-    // Items of a named group's tidy come back as that group again (one new group per tidy).
-    const cid = cur.companyId
-    for (const g of store.groups(cid)) {
-      const back = g.tabGroup ? opened.filter(i => g.items.some(x => x.id === i.id)) : []
-      if (!g.tabGroup || back.length === 0) continue
-      const id = newGroupId()
-      const { name, color } = g.tabGroup
-      grouping.update(cid, cur2 => ({
-        ...cur2, groups: [...cur2.groups, { id, name, color }],
-        members: { ...cur2.members, ...Object.fromEntries(back.map(i => [tabKeyOf(i, cur.rootPath), id])) },
-      }))
-    }
-    store.removeItems(cid, opened.map(i => i.id))
+    // Back in the named groups they were in (a group of that name, or a new one).
+    const back = opened.flatMap(i => i.tabGroup ? [{ key: tabKeyOf(i, cur.rootPath), group: i.tabGroup }] : [])
+    if (back.length > 0) grouping.update(cur.companyId, g => regroup(g, back))
+    store.removeItems(cur.companyId, opened.map(i => i.id))
     return { opened, missing }
   }, [latest, store, grouping, reopenTabs])
 
@@ -148,11 +145,10 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
   useCommandHandler('tabs.list', () => {
     const cur = latest.current
     const pins = new Set(cur.pinnedTabs)
-    const named = companyId ? pruneGrouping(grouping.get(companyId), cur.openTabs) : null
-    const groupName = (key: string) => (pins.has(key) ? undefined : named?.groups.find(g => g.id === named.members[key])?.name)
+    const arrange: ArrangeOptions = { pinned: pins, looks: cur.recordLooks, grouping: pruneGrouping(companyId ? grouping.get(companyId) : NO_GROUPING, cur.openTabs) }
     return {
       openTabs: cur.openTabs.map(key => {
-        const tabGroup = groupName(key)
+        const tabGroup = namedGroupOf(key, arrange)?.name
         return {
           ...entryOf(tidiedItemOf(key, cur.rootPath, cur.recordLooks)), kindId: tabGroupOf(key, cur.recordLooks),
           ...(pins.has(key) ? { pinned: true } : {}), ...(tabGroup ? { tabGroup } : {}),
@@ -160,7 +156,7 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: saved
       }),
       tidied: groupsByDay(companyId ? store.groups(companyId) : []).map(d => ({
         group: d.day, label: dayLabel(d.day),
-        items: d.groups.flatMap(g => g.items.map(i => ({ id: i.id, ...entryOf(i), ...(g.tabGroup ? { tabGroup: g.tabGroup.name } : {}) }))),
+        items: d.groups.flatMap(g => g.items.map(i => ({ id: i.id, ...entryOf(i), ...(i.tabGroup ? { tabGroup: i.tabGroup.name } : {}) }))),
       })),
     }
   })

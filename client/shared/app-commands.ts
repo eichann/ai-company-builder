@@ -63,6 +63,16 @@ export function redactForAI(value: unknown, hidden: (companyPath: string) => boo
 /** The window's answer: what the command returned (plain data), or why it did not run (Japanese). */
 export type AppCommandAnswer = { ok: true; result: unknown } | { ok: false; error: string }
 
+/**
+ * A handler's result as the window's answer: `{ error }` alone means the handler refused and did
+ * nothing (an unknown group, nothing chosen), so the AI gets `ok: false` with those words.
+ */
+export function appCommandAnswerOf(result: unknown): AppCommandAnswer {
+  const r = result as Record<string, unknown> | null
+  if (r && typeof r === 'object' && !Array.isArray(r) && Object.keys(r).length === 1 && typeof r.error === 'string') return { ok: false, error: r.error }
+  return { ok: true, result: JSON.parse(JSON.stringify(result ?? null)) }
+}
+
 export const APP_COMMAND_MESSAGES = {
   /** A consultation shown in a window of its own: that window has no tabs. */
   ownWindow: 'この相談は別のウィンドウで開いています。タブはメインの画面の相談からだけ扱えます。',

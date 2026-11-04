@@ -1,4 +1,4 @@
-import { APP_COMMAND_MESSAGES, appCommandRefusal, type AppCommandAnswer, type AppCommandRequest } from '../../shared/app-commands'
+import { APP_COMMAND_MESSAGES, appCommandAnswerOf, appCommandRefusal, type AppCommandAnswer, type AppCommandRequest } from '../../shared/app-commands'
 import { CommandError } from '../../shared/commands/registry'
 import { commands } from '../shared/commands/commands'
 import { useIpcEvent } from '../shared/hooks/useIpcEvent'
@@ -17,7 +17,7 @@ export function useAiCommandRequests(): void {
     const refused = appCommandRefusal(request, useAppStore.getState().currentCompany?.id)
     if (refused) { answer({ ok: false, error: refused }); return }
     ;(commands.run as (id: string, args?: unknown) => Promise<unknown>)(request.commandId, request.args ?? {}).then(
-      result => answer({ ok: true, result: JSON.parse(JSON.stringify(result ?? null)) }),
+      result => answer(appCommandAnswerOf(result)),
       error => {
         // The arguments are never logged (commands.md).
         console.warn(`[commands] ${request.commandId} for the AI failed:`, error instanceof CommandError ? error.code : 'error')

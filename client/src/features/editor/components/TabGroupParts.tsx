@@ -1,14 +1,9 @@
 import { useState } from 'react'
-import { CaretDown, CaretRight, DotsThree } from '@phosphor-icons/react'
+import { CaretDown, CaretRight, DotsThreeVertical } from '@phosphor-icons/react'
 import { InputDialog } from '../../../shared/ui/InputDialog'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
-import type { ThingKind } from '../../../../shared/thing-words'
 import { GROUP_COLOR_CLASSES, GROUP_COLOR_NAMES, GROUP_COLORS, type GroupColor, type TabSection } from '../tabArrangement'
 import type { GroupDialog } from '../hooks/useTabArrangement'
-
-const KIND_ICONS: Readonly<Record<NonNullable<TabSection['kind']>, ThingKind>> = {
-  file: 'file', task: 'task', bundle: 'bundle', meeting: 'meeting', decision: 'decision', other: 'other',
-}
 
 interface ChipProps {
   section: TabSection
@@ -34,7 +29,7 @@ export function TabGroupChip({ section, name, typeLabel, collapsed, holdsActive,
       <button type="button" aria-expanded={!collapsed} title={collapsed ? `「${name}」を開く` : `「${name}」をたたむ`}
         onClick={onToggle} onContextMenu={e => { e.preventDefault(); onMenu(e.clientX, e.clientY) }}
         className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${color ? color.chip : 'bg-gray-200/70 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300'} ${holdsActive ? 'ring-1 ring-indigo-400' : ''}`}>
-        {section.kind ? <ThingIcon kind={KIND_ICONS[section.kind]} typeLabel={typeLabel} size={12} label={name} /> : null}
+        {section.kind ? <ThingIcon kind={section.kind} typeLabel={typeLabel} size={12} label={name} /> : null}
         <span className="max-w-[120px] truncate">{name}</span>
         <span className="tabular-nums opacity-70" aria-label={`${section.keys.length}件`}>{section.keys.length}</span>
         <Caret size={9} weight="bold" className="opacity-60" />
@@ -42,7 +37,7 @@ export function TabGroupChip({ section, name, typeLabel, collapsed, holdsActive,
       <button type="button" aria-label={`${name}の操作`} title={`${name}の操作`}
         onClick={e => { const r = e.currentTarget.getBoundingClientRect(); onMenu(r.left, r.bottom + 2) }}
         className="rounded p-0.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-zinc-700">
-        <DotsThree size={12} weight="bold" />
+        <DotsThreeVertical size={12} weight="bold" />
       </button>
     </div>
   )
@@ -54,7 +49,7 @@ export function TabGroupDialog({ dialog, onSave, onCancel }: { dialog: GroupDial
   return (
     <InputDialog isOpen title={dialog.kind === 'new' ? '新しいまとまり' : 'まとまりの名前と色'} placeholder="まとまりの名前（例：提案の準備）"
       defaultValue={dialog.kind === 'new' ? dialog.name : dialog.group.name} confirmText={dialog.kind === 'new' ? '作る' : '変える'}
-      onConfirm={name => onSave(name, color)} onCancel={onCancel}>
+      error={dialog.error} onConfirm={name => onSave(name, color)} onCancel={onCancel}>
       <div role="radiogroup" aria-label="まとまりの色" className="mt-3 flex items-center gap-2">
         <span className="text-xs text-text-secondary">色</span>
         {GROUP_COLORS.map(c => (

@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { recordTabKey, type RecordTabLook } from './editorTabs'
 import {
-  addToGroup, arrangeTabs, canMoveTab, createTabGroupingStore, moveTab, NO_GROUPING, parseGrouping, pruneGrouping, tabGroupName, tabGroupOf,
+  addToGroup, arrangeTabs, canMoveTab, createTabGroupingStore, groupNameTaken, moveTab, nextGroupName, NO_GROUPING, parseGrouping, pruneGrouping, regroup,
+  tabGroupName, tabGroupOf, withoutGroup,
   type ArrangeOptions, type TabGrouping,
 } from './tabArrangement'
 
@@ -74,6 +75,31 @@ test('dropped beside a tab of a named group, a tab joins it; beside one outside,
 test('a group with no open tab left goes, and closed tabs leave their group', () => {
   const grouping: TabGrouping = { ...NO_GROUPING, groups: [proposal, { id: 'g2', name: '別', color: 'blue' }], members: { [a]: 'g1', [b]: 'g2' } }
   assert.deepEqual(pruneGrouping(grouping, [a, c]), { ...grouping, groups: [proposal], members: { [a]: 'g1' } })
+})
+
+test('ungrouping removes the group and only its memberships', () => {
+  const grouping: TabGrouping = { ...NO_GROUPING, byKind: true, groups: [proposal, { id: 'g2', name: '別', color: 'blue' }], members: { [a]: 'g1', [b]: 'g2', [c]: 'g1' } }
+  assert.deepEqual(withoutGroup(grouping, 'g1'), { ...grouping, groups: [{ id: 'g2', name: '別', color: 'blue' }], members: { [b]: 'g2' } })
+})
+
+test('group names are unique as the member reads them (width, A–Z case, outer spaces)', () => {
+  const groups = [proposal, { id: 'g2', name: 'ABC案件', color: 'blue' as const }]
+  assert.equal(groupNameTaken(groups, ' 提案準備 '), true)
+  assert.equal(groupNameTaken(groups, 'ａｂｃ案件'), true)
+  assert.equal(groupNameTaken(groups, '提案準備', 'g1'), false, 'renaming a group to its own name')
+  assert.equal(groupNameTaken(groups, '提案の準備'), false)
+  assert.equal(nextGroupName([{ id: 'x', name: 'まとまり　1', color: 'blue' }]), 'まとまり 2')
+})
+
+test('reopened tabs go back into the group of their name, or a new one with the name and colour they had', () => {
+  const grouping: TabGrouping = { ...NO_GROUPING, groups: [proposal], members: { [a]: 'g1' } }
+  const next = regroup(grouping, [{ key: b, group: { name: '提案準備', color: 'blue' } }, { key: c, group: { name: '請求', color: 'teal' } }, { key: task1, group: { name: '請求', color: 'teal' } }])
+  assert.equal(next.members[b], 'g1')
+  const billing = next.groups.find(g => g.name === '請求')!
+  assert.equal(billing.color, 'teal')
+  assert.equal(next.members[c], billing.id)
+  assert.equal(next.members[task1], billing.id)
+  assert.equal(next.groups.length, 2)
 })
 
 test('the grouping is kept per company on this Mac, and an unreadable entry reads as nothing', () => {

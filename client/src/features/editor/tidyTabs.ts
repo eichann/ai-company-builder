@@ -4,12 +4,15 @@
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
 import { thingName } from '../../../shared/thing-words'
 import { recordIdOfTab, recordTabKey, type RecordTabLook } from './editorTabs'
-import { GROUP_COLORS, type GroupColor } from './tabArrangement'
+import { GROUP_COLORS, type TidiedTabGroup } from './tabArrangement'
 
-/** One tidied tab: a file by its company path, or a record with the look its tab had. */
+/**
+ * One tidied tab: a file by its company path, or a record with the look its tab had; `tabGroup`, the
+ * named group it was in (reopening puts it back in a group of that name).
+ */
 export type TidiedItem =
-  | { id: string; kind: 'file'; path: string; title: string }
-  | { id: string; kind: 'record'; recordId: string; title: string; look?: RecordTabLook }
+  | { id: string; kind: 'file'; path: string; title: string; tabGroup?: TidiedTabGroup }
+  | { id: string; kind: 'record'; recordId: string; title: string; look?: RecordTabLook; tabGroup?: TidiedTabGroup }
 
 /** One tidy: when, on which company day, by hand or the daily automatic one. */
 export interface TidiedGroup {
@@ -18,8 +21,6 @@ export interface TidiedGroup {
   day: string
   auto: boolean
   items: TidiedItem[]
-  /** A named group tidied as one (「このまとまりを片づける」): reopening its tabs makes the group again. */
-  tabGroup?: { name: string; color: GroupColor }
 }
 
 /** Kept on this Mac: the last 30 tidies and 500 tabs; older ones drop (the list says so). */
@@ -59,14 +60,15 @@ function companyPathOf(key: string, rootPath: string): string {
 }
 
 /** A tab as a tidied item: a file by its company path, a record with its look (title, icon). */
-export function tidiedItemOf(key: string, rootPath: string, looks: Readonly<Record<string, RecordTabLook>>): TidiedItem {
+export function tidiedItemOf(key: string, rootPath: string, looks: Readonly<Record<string, RecordTabLook>>, tabGroup?: TidiedTabGroup | null): TidiedItem {
+  const group = tabGroup ? { tabGroup: { name: tabGroup.name, color: tabGroup.color } } : {}
   const recordId = recordIdOfTab(key)
   if (recordId) {
     const look = looks[recordId]
-    return { id: shortId(), kind: 'record', recordId, title: look?.title ?? '記録', ...(look ? { look } : {}) }
+    return { id: shortId(), kind: 'record', recordId, title: look?.title ?? '記録', ...(look ? { look } : {}), ...group }
   }
   const path = companyPathOf(key, rootPath)
-  return { id: shortId(), kind: 'file', path, title: path.split('/').pop() || path }
+  return { id: shortId(), kind: 'file', path, title: path.split('/').pop() || path, ...group }
 }
 
 /** The tab key to open an item again (files under today's company folder). */
@@ -131,10 +133,12 @@ export function dueForDailyTidy(lastDay: string | null, today: string): boolean 
 function parseItem(raw: unknown): TidiedItem | null {
   const i = raw as Partial<TidiedItem> & { path?: unknown; recordId?: unknown; look?: RecordTabLook } | null
   if (!i || typeof i.id !== 'string' || typeof i.title !== 'string') return null
-  if (i.kind === 'file' && typeof i.path === 'string') return { id: i.id, kind: 'file', path: i.path, title: i.title.slice(0, 300) }
+  const tg = i.tabGroup
+  const group = tg && typeof tg.name === 'string' && tg.name.trim() && GROUP_COLORS.includes(tg.color) ? { tabGroup: { name: tg.name.slice(0, 40), color: tg.color } } : {}
+  if (i.kind === 'file' && typeof i.path === 'string') return { id: i.id, kind: 'file', path: i.path, title: i.title.slice(0, 300), ...group }
   if (i.kind === 'record' && typeof i.recordId === 'string') {
     const look = i.look && typeof i.look.title === 'string' && typeof i.look.type === 'string' ? i.look : undefined
-    return { id: i.id, kind: 'record', recordId: i.recordId, title: i.title.slice(0, 300), ...(look ? { look } : {}) }
+    return { id: i.id, kind: 'record', recordId: i.recordId, title: i.title.slice(0, 300), ...(look ? { look } : {}), ...group }
   }
   return null
 }
@@ -146,9 +150,7 @@ export function parseGroups(raw: unknown): TidiedGroup[] {
   for (const g of raw as Array<Partial<TidiedGroup> | null>) {
     if (!g || typeof g.id !== 'string' || typeof g.at !== 'string' || typeof g.day !== 'string' || !Array.isArray(g.items)) continue
     const items = g.items.map(parseItem).filter((i): i is TidiedItem => i !== null)
-    const tg = g.tabGroup
-    const tabGroup = tg && typeof tg.name === 'string' && tg.name.trim() && GROUP_COLORS.includes(tg.color) ? { name: tg.name.slice(0, 40), color: tg.color } : null
-    if (items.length > 0) out.push({ id: g.id, at: g.at, day: g.day, auto: g.auto === true, items, ...(tabGroup ? { tabGroup } : {}) })
+    if (items.length > 0) out.push({ id: g.id, at: g.at, day: g.day, auto: g.auto === true, items })
   }
   return out
 }

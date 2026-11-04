@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState, useSyncExternalStore, type Dispatch, ty
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import type { RecordTabLook } from '../editorTabs'
 import {
-  addToGroup, arrangeTabs, canMoveTab, moveTab, nextGroupColor, nextGroupName, NO_GROUPING, pruneGrouping, tabGroupingStore,
+  addToGroup, arrangeTabs, canMoveTab, groupNameTaken, moveTab, namedGroupOf, newGroupId, nextGroupColor, nextGroupName, NO_GROUPING, pruneGrouping,
+  tabGroupingStore, withoutGroup,
   type ArrangeOptions, type GroupColor, type NamedTabGroup, type TabGrouping, type TabGroupingStore, type TabSection, type TabSectionId,
 } from '../tabArrangement'
 
@@ -15,8 +16,10 @@ interface Options {
   store?: TabGroupingStore
 }
 
-/** The name-and-colour dialog: a new group for a tab, or an existing group's. */
-export type GroupDialog = { kind: 'new'; tabKey: string; name: string; color: GroupColor } | { kind: 'edit'; group: NamedTabGroup }
+/** The name-and-colour dialog: a new group for a tab, or an existing group's; `error` = why the last name was refused. */
+export type GroupDialog = ({ kind: 'new'; tabKey: string; name: string; color: GroupColor } | { kind: 'edit'; group: NamedTabGroup }) & { error?: string }
+
+export const GROUP_NAME_TAKEN = '同じ名前のまとまりがあります。別の名前にしてください。'
 
 /**
  * How the middle's tabs stand (tabArrangement.ts): their order by drag, the member's named groups
@@ -58,27 +61,27 @@ export function useTabArrangement({ companyId, openTabs, setOpenTabs, pinned, re
     reorder: (key: string, target: string, place: 'before' | 'after') => applyMove((o, order) => moveTab(order, key, target, place, o)),
     addToGroup: (key: string, groupId: string) => applyMove((o, order) => addToGroup(order, key, groupId, o)),
     removeFromGroup: (key: string) => update(g => { const members = { ...g.members }; delete members[key]; return { ...g, members } }),
-    groupOf: (key: string): NamedTabGroup | null => {
-      const id = pinned.has(key) ? undefined : grouping.members[key]
-      return id ? grouping.groups.find(g => g.id === id) ?? null : null
-    },
+    groupOf: (key: string): NamedTabGroup | null => namedGroupOf(key, options),
     /** 「まとまりを解く」: the tabs stay open, outside any group. */
-    ungroup: (groupId: string) => update(g => ({
-      ...g, groups: g.groups.filter(x => x.id !== groupId), members: Object.fromEntries(Object.entries(g.members).filter(([, id]) => id !== groupId)),
-    })),
+    ungroup: (groupId: string) => update(g => withoutGroup(g, groupId)),
     dialog,
     askNewGroup: (tabKey: string) => setDialog({ kind: 'new', tabKey, name: nextGroupName(grouping.groups), color: nextGroupColor(grouping.groups) }),
     askEditGroup: (group: NamedTabGroup) => setDialog({ kind: 'edit', group }),
     closeDialog: () => setDialog(null),
-    /** The dialog's answer: a new group with its first tab, or the group renamed / recoloured. */
-    saveDialog: (name: string, color: GroupColor) => {
+    /** The dialog's answer: a new group with its first tab, or the group renamed / recoloured; a name taken keeps the dialog open. */
+    saveDialog: (typed: string, color: GroupColor) => {
       const d = dialog
+      const name = typed.trim().slice(0, 40)
+      if (!d || !name) return
+      if (groupNameTaken(latest.current.options.grouping.groups, name, d.kind === 'edit' ? d.group.id : undefined)) {
+        setDialog(d.kind === 'new' ? { ...d, name: typed, color, error: GROUP_NAME_TAKEN } : { ...d, group: { ...d.group, name: typed, color }, error: GROUP_NAME_TAKEN })
+        return
+      }
       setDialog(null)
-      if (!d || !name.trim()) return
-      if (d.kind === 'edit') { update(g => ({ ...g, groups: g.groups.map(x => x.id === d.group.id ? { ...x, name: name.trim().slice(0, 40), color } : x) })); return }
+      if (d.kind === 'edit') { update(g => ({ ...g, groups: g.groups.map(x => x.id === d.group.id ? { ...x, name, color } : x) })); return }
       if (latest.current.options.pinned.has(d.tabKey)) return
-      const id = `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-      update(g => ({ ...g, groups: [...g.groups, { id, name: name.trim().slice(0, 40), color }], members: { ...g.members, [d.tabKey]: id } }))
+      const id = newGroupId()
+      update(g => ({ ...g, groups: [...g.groups, { id, name, color }], members: { ...g.members, [d.tabKey]: id } }))
     },
   }
 }

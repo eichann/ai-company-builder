@@ -127,7 +127,7 @@ agent:
    only, and accepts `appCommand:respond` only from that window (20 s, then 「画面が応答しませんでした」).
 4. The main window (`src/app/useAiCommandRequests.ts`, mounted by `AppShell`) refuses another
    company's request (`appCommandRefusal`: 「この相談は、いま画面に出ている会社のものではありません…」)
-   and any id not `exposeToAI`, runs the rest through the same registry as a click, and answers.
+   and any id not `exposeToAI`, runs the rest through the same registry as a click, and answers (`appCommandAnswerOf`: a handler result that is only `{ error }` — it refused, nothing was done — goes to the AI as `ok: false` with those words).
 
 So the AI works only on the main window's tabs, and only for its own company. Tests:
 `tests/app-commands.test.ts`, `tests/ui/tidy-tabs.spec.ts` 「the consultation AI lists…」.

@@ -277,8 +277,13 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   tidy and its notice, the AI's commands).
 - A tidy can take **one kind** (`tabs.tidy { kind }`: a kind chip's menu 「この種類（…）を片づける」, the
   「…」 for the shown tab's kind) or **one named group** (`{ group }`: id from the chip, or the name
-  the AI read; 「このまとまりを片づける」) — same rules (pinned stay, edits saved first). A named group's
-  tidy keeps `tabGroup: { name, color }` with it; reopening any of its items makes the group again.
+  the AI read; 「このまとまりを片づける」) — same rules (pinned stay, edits saved first). **A kind tidy takes
+  only the tabs under that kind's chip**: a tab in a named group (unpinned) stands under the group's
+  chip and stays. Unknown group → `{ error }`, which the AI gets as `ok: false` (nothing closes).
+- **Every tidy keeps each tab's named group** (item `tabGroup: { name, color }`; whole, daily, by kind
+  or by group), so reopening puts it back in a group of that name (`regroup`: the open group of that
+  name, else a new one with the colour it had). A group left with no tab goes with the tidy.
+  Without this, the daily tidy (on by default) dissolved every group overnight.
 
 ## Arranging the tabs (owner 2026-11-04, after the tidy: order, kinds, named groups)
 
@@ -303,7 +308,10 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   one of six colours, `TabGroupParts.tsx` on `InputDialog`), 「〇〇に入れる」, 「まとまりから外す」; the
   chip's menu: たたむ / ひらく, 名前と色を変える, このまとまりを片づける, まとまりを解く (tabs stay open). A
   pinned tab stands with the pinned (its membership is ignored meanwhile). A group with no open tab
-  left is not shown and is dropped on the next change (`pruneGrouping`).
+  left is not shown and is dropped on the next change (`pruneGrouping`). **Names are unique** as the
+  member reads them (`groupNameKey`: NFKC, A–Z case, outer spaces): a taken name keeps the dialog
+  open with 「同じ名前のまとまりがあります。別の名前にしてください。」 (the AI's `group` and reopening
+  rely on the name).
 - **Storage: this Mac only**, per company, localStorage `tabGroups:<company id>` =
   `{ byKind, collapsedKinds, groups: [{ id, name, color, collapsed? }], members: { <tab key>: <group id> } }`
   (unreadable parts dropped, `parseGrouping`); beside `editor:<company id>`, so older apps reading that
@@ -311,9 +319,11 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 - Code: `features/editor/tabArrangement.ts` (pure rules + the store), `hooks/useTabArrangement.ts`
   (mounted by `AppShell`), `components/EditorTabBar.tsx`, `TabGroupParts.tsx`, the 「…」 in
   `TabTidyingControls.tsx`. Tests: `tabArrangement.test.ts` (runs, moves, joining / leaving,
-  pruning, the store), `tests/ui/tab-arrangement.spec.ts` (reorder + pinned + kept; reorder vs drag
-  out to the consultation on `chat-header-ui.html?tabs=1`; by kind, folding, a kind tidied; named
-  groups made, joined, renamed, tidied and reopened; the AI by kind / group).
+  pruning, ungrouping, unique names, regrouping, the store), `tidyTabs.test.ts` (an item's group kept),
+  `tests/ui/tab-arrangement.spec.ts` (reorder + pinned + kept; reorder vs drag out to the
+  consultation on `chat-header-ui.html?tabs=1`; by kind, folding, a kind tidied — not a grouped tab of
+  that kind; named groups made, a taken name refused, joined, renamed, tidied and reopened; the daily
+  tidy keeping groups; the AI by kind / group, unknown group `ok: false`).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 
