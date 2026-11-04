@@ -1,0 +1,94 @@
+# A contract-3 connector (plugins.md "Contract 3"): a fictional member portal
+# with no objects or operations of its own, reached through `calls`. Declaration
+# only: nothing runs these yet. sample-portal-care uses it.
+id: sample-portal
+label: 見本のポータル
+version: 1.0.0
+kind: official
+contract: 3
+service: sample-portal
+base_url: https://portal.sample.example/api
+auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
+actor: { member_header: X-Sample-Actor, email_header: X-Sample-Email }
+limits: { per_minute: 60 }
+errors: { map: { STATE_CHANGED: check_wait, BAD_INPUT: refused } }
+result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending, unknown_key: not_found } }
+calls:
+  diagnose:
+    label: 状態を調べる
+    kind: read
+    path: "/people/{id}/diagnosis"
+    inputs:
+      id: { kind: id, class: normal }
+    returns:
+      name: { class: personal, keep: summary, outside: true }
+      status: { class: normal, keep: summary }
+      history:
+        each:
+          note: { class: sensitive, keep: none }
+  find_person:
+    label: メールで人を探す
+    kind: search
+    path: /people/search
+    inputs:
+      email: { kind: text, class: personal }
+    items: people
+    returns:
+      person_ref: { class: normal, keep: pointer }
+  pages:
+    label: 案内のページ
+    kind: document
+    page:
+      path: "/pages/{id}"
+      inputs:
+        id: { kind: id, class: normal }
+      returns:
+        body: { class: normal, keep: pointer }
+    list:
+      path: /pages
+      items: pages
+      cursor: { param: after, next: next_cursor }
+      returns:
+        title: { class: normal, keep: summary }
+    search:
+      path: /pages/search
+      inputs:
+        words: { kind: text, class: normal }
+      items: results
+      returns:
+        title: { class: normal, keep: summary }
+  resend:
+    label: もう一度送る
+    kind: act
+    nature: people
+    path: /resend
+    inputs:
+      person_ref: { kind: id, class: personal }
+      reason: { kind: text, class: normal, required: false, label: 理由 }
+    idempotency: { style: header }
+    undo: none
+  unused_call:
+    label: 業務が使わない呼び出し
+    kind: read
+    path: /status
+    returns:
+      state: { class: normal, keep: none }
+events:
+  recovered:
+    fields:
+      person_ref: { class: personal, keep: pointer }
+      kind: { class: normal, keep: summary }
+  unused_event:
+    fields:
+      person_ref: { class: personal, keep: pointer }
+signature: { scheme: hmac_sha256_ts_body, header: X-Sample-Signature, timestamp_header: X-Sample-Timestamp, max_age: 5m }
+polls:
+  events:
+    path: /events
+    cursor: { param: since, next: next_cursor }
+    items: events
+    type_field: type
+    every: 5m
+    fields:
+      person_ref: { class: personal, keep: pointer }

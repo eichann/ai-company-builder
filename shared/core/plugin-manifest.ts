@@ -5,10 +5,11 @@
  * names a `service`. Type-dependent checks are in `plugin-package.ts`.
  */
 import { BUSINESS_KEYS, NOT_IN_BUSINESS, parseBusiness } from './plugin-business-declaration'
+import { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
 import { CONNECTOR_KEYS, NOT_IN_CONNECTOR, parseConnector } from './plugin-connector-declaration'
 import { FLOW_KEYS, parseFlow } from './plugin-flow-declaration'
 import {
-  PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_ID_RE, PLUGIN_VERSION_RE, type PluginKind, type PluginManifest, type PluginParsed, type PluginRole,
+  PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ID_RE, PLUGIN_VERSION_RE, type PluginKind, type PluginManifest, type PluginParsed, type PluginRole,
 } from './plugin-declaration'
 import { COMPANY_ID_RE, isStr, strList, unknownKeys } from './plugin-declaration-rules'
 import { isYamlMap, parseYamlLite } from './yaml-lite'
@@ -30,9 +31,14 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   const flowReasons: Record<string, string> = Object.fromEntries(FLOW_KEYS.map(k => [k, role === 'connector'
     ? `「${k}」は業務のプラグインだけに書けます（つなぎ先は業務の流れを持ちません）`
     : `「${k}」は contract: ${PLUGIN_CONTRACT_V2} の包みだけに書けます`]))
-  const flowAllowed = role === 'business' && contract === PLUGIN_CONTRACT_V2 ? FLOW_KEYS : []
-  if (role === 'connector') unknownKeys('', raw, [...COMMON_KEYS, ...CONNECTOR_KEYS], err, { ...flowReasons, ...NOT_IN_CONNECTOR })
-  else unknownKeys('', raw, [...COMMON_KEYS, ...BUSINESS_KEYS, ...flowAllowed], err, { ...flowReasons, ...NOT_IN_BUSINESS })
+  const flowAllowed = role === 'business' && contract !== null && contract >= PLUGIN_CONTRACT_V2 ? FLOW_KEYS : []
+  // Contract 3's keys: refused below it with the reason, as the flow keys are; a role's keys never on the other role.
+  const atV3 = contract !== null && contract >= PLUGIN_CONTRACT_V3
+  const v3Reasons: Record<string, string> = Object.fromEntries([...CONNECTOR_V3_KEYS, ...BUSINESS_V3_KEYS].map(k => [k, role === 'business' && !BUSINESS_V3_KEYS.includes(k)
+    ? `「${k}」はつなぎ先のプラグイン（service のあるもの）だけに書けます`
+    : `「${k}」は contract: ${PLUGIN_CONTRACT_V3} の包みだけに書けます`]))
+  if (role === 'connector') unknownKeys('', raw, [...COMMON_KEYS, ...CONNECTOR_KEYS, ...(atV3 ? CONNECTOR_V3_KEYS : [])], err, { ...flowReasons, ...v3Reasons, ...NOT_IN_CONNECTOR })
+  else unknownKeys('', raw, [...COMMON_KEYS, ...BUSINESS_KEYS, ...flowAllowed, ...(atV3 ? BUSINESS_V3_KEYS : [])], err, { ...flowReasons, ...v3Reasons, ...NOT_IN_BUSINESS })
 
   const id = raw.id
   if (typeof id !== 'string' || !PLUGIN_ID_RE.test(id) || id.length > 40) err('id は英小文字・数字・- で書いてください（40文字まで）')

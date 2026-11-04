@@ -19,7 +19,7 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 
 /**
  * The screens of one kept package, from its verified declaration and file
- * list. Only a contract-2 business plugin whose declaration names this package
+ * list. Only a business plugin of contract 2 or later whose declaration names this package
  * (same id and version), declares `ui` with a bridge version this app speaks,
  * and whose every frame entry is a file of the verified package has any;
  * anything else answers null (no slot).
@@ -28,7 +28,7 @@ export function screensOfPackage(ref: PluginPackageRef, manifestText: string, fi
   const parsed = parsePluginManifest(manifestText)
   if (!parsed.ok) return null
   const m = parsed.value
-  if (m.role !== 'business' || m.contract !== PLUGIN_CONTRACT_V2 || !m.ui || m.ui.bridge !== APP_BRIDGE_VERSION) return null
+  if (m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2 || !m.ui || m.ui.bridge !== APP_BRIDGE_VERSION) return null
   if (m.id !== ref.id || m.version !== ref.version) return null
   const ui = m.ui
   const entries = [...(ui.tab ? [ui.tab.entry] : []), ...ui.recordSections.map(s => s.entry), ...ui.fileActions.map(a => a.entry)]

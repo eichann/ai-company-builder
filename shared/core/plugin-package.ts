@@ -6,7 +6,7 @@
 import { coreTypeDefinitions } from './core-types'
 import {
   PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, comparePluginVersions, priorFieldWriters, roleOfWho,
-  type OperationUse, type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
+  type OperationUse, type PluginCall, type PluginEvent, type PluginManifest, type PluginStatePoint, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
   type SimilarRule,
 } from './plugin-declaration'
 import { parsePluginManifest } from './plugin-manifest'
@@ -78,7 +78,7 @@ export function validatePluginPackage(input: {
         }
       }
     }
-    errors.push(...flowProblems(manifest, owned, stepFiles, uiFiles))
+    errors.push(...flowProblems(manifest, owned, stepFiles, uiFiles), ...useProblems(manifest, owned))
   }
   return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned } }
 }
@@ -87,6 +87,26 @@ export function validatePluginPackage(input: {
 function declaredRole(manifest: Pick<PluginManifest, 'roles'>, who: string): boolean {
   const role = roleOfWho(who)
   return role !== null && Object.prototype.hasOwnProperty.call(manifest.roles, role)
+}
+
+/**
+ * Contract 3's checks of a business plugin's use that need its roles and types:
+ * a call's `role:<name>` is declared; an event's `type` is the plugin's or a
+ * core type, `match` one of its fields and `action` one of its actions.
+ */
+function useProblems(manifest: PluginManifest, owned: Record<string, TypeDefinition>): string[] {
+  const errors: string[] = []
+  for (const [name, use] of Object.entries(manifest.uses?.calls ?? {})) {
+    for (const w of use.who) if (roleOfWho(w) !== null && !declaredRole(manifest, w)) errors.push(`呼び出し「${name}」の who「${w}」は、このプラグインの roles にない役割です`)
+  }
+  const core = Object.fromEntries(coreTypeDefinitions().map(t => [t.name, t]))
+  for (const [name, use] of Object.entries(manifest.uses?.events ?? {})) {
+    const t = Object.prototype.hasOwnProperty.call(owned, use.type) ? owned[use.type] : Object.prototype.hasOwnProperty.call(core, use.type) ? core[use.type] : undefined
+    if (!t) { errors.push(`知らせ「${name}」: 型「${use.type}」は、このプラグインの types にも本体の型にもありません`); continue }
+    if (!Object.prototype.hasOwnProperty.call(t.fields, use.match)) errors.push(`知らせ「${name}」の match「${use.match}」は型「${use.type}」の欄ではありません`)
+    if (!Object.prototype.hasOwnProperty.call(t.actions, use.action)) errors.push(`知らせ「${name}」の action「${use.action}」は型「${use.type}」の操作ではありません`)
+  }
+  return errors
 }
 
 /**
@@ -164,6 +184,7 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
     const where = `操作「${opname}」`
     const op = connector.operations[opname]
     if (!op && connector.searches?.[opname]) { errors.push(`${where}は探す操作です。operations ではなく、記録を作る操作の similar の search に書きます`); continue }
+    if (!op && own(connector.calls, opname)) { errors.push(`${where}は呼び出しです。operations ではなく calls に書きます`); continue }
     if (!op) { errors.push(`${where}は「${connector.label}」${connector.version} にありません`); continue }
     const obj = useObject(op.object)!
     const target = op.attachTo ? useObject(op.attachTo) : null
@@ -191,6 +212,21 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
       ...(use.via ? { via: [...use.via] } : {}), ...(similar ? { similar } : {}),
     }
   }
+  // Contract 3: only what the business plugin declared, as for operations; a call never becomes an operation.
+  const calls: Record<string, PluginCall> = {}
+  for (const [name, use] of Object.entries(uses.calls ?? {})) {
+    const call = own(connector.calls, name)
+    if (!call) { errors.push(`呼び出し「${name}」は「${connector.label}」${connector.version} にありません`); continue }
+    if (use.decision && call.kind !== 'act') errors.push(`呼び出し「${name}」: 読む呼び出しは decision にできません`)
+    calls[name] = { ...call, who: [...use.who], decision: use.decision }
+  }
+  const events: Record<string, PluginEvent> = {}
+  for (const [name, use] of Object.entries(uses.events ?? {})) {
+    const event = own(connector.events, name)
+    if (!event) { errors.push(`知らせ「${name}」は「${connector.label}」${connector.version} にありません`); continue }
+    if (!Object.prototype.hasOwnProperty.call(event.fields, use.match)) errors.push(`知らせ「${name}」の match「${use.match}」は「${connector.label}」の知らせの項目にありません`)
+    events[name] = { ...event, use: { ...use } }
+  }
   if (errors.length === 0) {
     for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {
       if (p === 'auto' && priorFieldWriters({ operations }).length > 0) errors.push(`欄「${f}」: 社外の人に届くか、お金が動く書き換えの操作があるため、欄の決まりを「自動」にできません`)
@@ -211,10 +247,16 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
         objects,
         operations,
         accountInfo: connector.accountInfo,
+        ...(connector.calling ? { calling: connector.calling } : {}),
+        ...(Object.keys(calls).length > 0 ? { calls } : {}),
+        ...(Object.keys(events).length > 0 ? { events, ...(connector.polls ? { polls: connector.polls } : {}) } : {}),
       },
     },
   }
 }
+
+const own = <T>(map: Record<string, T> | undefined, key: string): T | undefined =>
+  map && Object.prototype.hasOwnProperty.call(map, key) ? map[key] : undefined
 
 /**
  * A create of a record's `similar`, checked against the connector and the

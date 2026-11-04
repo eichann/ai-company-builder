@@ -34,7 +34,9 @@
  * member's PC — never on the server), `ui` (frames under `ui/`, with the
  * bridge version) and `upgrade`, and to every package the signature slot and
  * fingerprint v2 (`plugin-fingerprint.ts`). `scripts/` is refused. Contract 1
- * packages are read exactly as before.
+ * packages are read exactly as before. Contract 3 (`plugin-call-declaration.ts`)
+ * adds a connector's `calls` beside its `operations`, how it is called and what
+ * the outside tells, and a business plugin's use of them; nothing runs them yet.
  *
  * Owner rules (§8, 2026-10-31):
  * 1. The declaration does not grow into a language: no conditions, loops,
@@ -59,6 +61,7 @@
  *   plugin-manifest.ts               parsePluginManifest (common keys, then the role's part)
  *   plugin-connector-declaration.ts  a connector's part: destination, calls, operations
  *   plugin-business-declaration.ts   a business plugin's part: types, `connector`, its use, field policy defaults
+ *   plugin-call-declaration.ts       contract 3: a connector's calls, how it is called, events, polls; a business plugin's use of them
  *   plugin-flow-declaration.ts       contract 2: a business plugin's roles, steps, ui, upgrade
  *   plugin-settings.ts               contract 2: a business plugin's settings (parameters only), settingValueProblem
  *   plugin-fingerprint.ts            fingerprint v2 and the signature slot (signature.yaml)
@@ -68,13 +71,17 @@
  *   plugin-values.ts                 externalToAcb, acbToExternal
  */
 export {
-  CREATE_CONTENT_SLOTS, FIELD_POLICIES, asksFirst, moneyField, writeAsksFirst, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_ENDPOINTS, ROLE_WHO_PREFIX, roleOfWho, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
+  CREATE_CONTENT_SLOTS, FIELD_POLICIES, asksFirst, moneyField, writeAsksFirst, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, ROLE_WHO_PREFIX, roleOfWho, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
   comparePluginVersions, connectorName, pluginAvailableTo,
   type ConnectorUse, type CreateContentSlot, type FieldPolicy, type OperationKind, type OperationReach, type OperationUse, type PluginEndpoint,
   type PluginEndpointName, type PluginKind, type PluginManifest, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
   PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, SIMILAR_BY, noFlow,
   type PluginSearch, type SimilarBy, type SimilarRule,
   type FlowPart, type PluginSetting,
+  ACTOR_SYSTEM, CALL_ACTORS, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
+  type CallFailureKind, type CallNature, type CallResultState, type CallUse, type DataClass, type EventUse, type KeepRule,
+  type PluginActCall, type PluginCall, type PluginCallInput, type PluginCallListing, type PluginCallRequest, type PluginCalling, type PluginCursor, type PluginDataField,
+  type PluginDocumentCall, type PluginEvent, type PluginPoll, type PluginReadCall, type PluginReturn, type PluginReturnList, type PluginSearchCall,
   type PluginRole, type PluginRoleDeclaration, type PluginStatePoint, type PluginStep, type PluginStepProcedure, type PluginStepProcedurePin, type PluginStepStart, type PluginUi, type PluginUpgrade, type UndoKind,
 } from './plugin-declaration'
 export {
@@ -86,6 +93,7 @@ export {
   type PluginSignature,
 } from './plugin-fingerprint'
 export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
+export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'

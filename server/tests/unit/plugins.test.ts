@@ -125,7 +125,7 @@ describe('a declaration is data only', () => {
   })
 
   it('refuses a contract this build does not know', () => {
-    for (const bad of ['contract: 3', 'contract: 0', 'contract: "2"']) {
+    for (const bad of ['contract: 4', 'contract: 0', 'contract: "2"']) {
       expect(manifestErrors(crmWith('contract: 1', bad)).join()).toContain('contract')
       expect(manifestErrors(salesWith('contract: 1', bad)).join()).toContain('contract')
     }

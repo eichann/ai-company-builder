@@ -49,8 +49,17 @@ export const PLUGIN_CONTRACT = 1
  * `plugin-flow-declaration.ts` holds its rules; the syntax is fixed here once.
  */
 export const PLUGIN_CONTRACT_V2 = 2
+/**
+ * Contract 3 (plugins.md "Contract 3"): contract 2 plus a connector's `calls`
+ * (a map beside `operations`, so a connector's objects, operations and fixed
+ * calls stay as they are), how it is called (`auth`, `actor`, `limits`,
+ * `errors`, `result`), what the outside tells (`events`, `polls`, `signature`)
+ * and a business plugin's use of them (`calls`, `events`). Declaration only:
+ * nothing runs these yet. `plugin-call-declaration.ts` holds its rules.
+ */
+export const PLUGIN_CONTRACT_V3 = 3
 /** The contracts this build understands. A declaration naming another is not used. */
-export const PLUGIN_CONTRACTS: readonly number[] = [PLUGIN_CONTRACT, PLUGIN_CONTRACT_V2]
+export const PLUGIN_CONTRACTS: readonly number[] = [PLUGIN_CONTRACT, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3]
 
 export type PluginKind = 'official' | 'company'
 /**
@@ -186,6 +195,130 @@ export interface SimilarRule {
   search: (PluginSearch & { operation: string }) | null
 }
 
+/** What a call does to the world when it acts: stays in the company, reaches people, moves money, cannot be taken back. */
+export const CALL_NATURES = ['internal', 'people', 'money', 'irreversible'] as const
+export type CallNature = typeof CALL_NATURES[number]
+/** How sensitive a value is. */
+export const DATA_CLASSES = ['normal', 'personal', 'sensitive'] as const
+export type DataClass = typeof DATA_CLASSES[number]
+/** What ACB may keep of a value: nothing, a pointer to it, a summary of it. */
+export const KEEP_RULES = ['none', 'pointer', 'summary'] as const
+export type KeepRule = typeof KEEP_RULES[number]
+/** What a call's input is; an input filling a path placeholder is an `id` (a plain outside id). */
+export const CALL_INPUT_KINDS = ['id', 'text', 'number', 'boolean', 'date'] as const
+export type CallInputKind = typeof CALL_INPUT_KINDS[number]
+/** What an outside error code means to ACB (`errors.map`). */
+export const CALL_FAILURE_KINDS = ['refused', 'retry_later', 'check_wait', 'needs_person'] as const
+export type CallFailureKind = typeof CALL_FAILURE_KINDS[number]
+/** What an outside status means to ACB (`result.map`). */
+export const CALL_RESULT_STATES = ['applied', 'pending', 'failed', 'not_found'] as const
+export type CallResultState = typeof CALL_RESULT_STATES[number]
+export const CALL_AUTH_FORMATS = ['bearer', 'plain'] as const
+export const CALL_AUTH_SLOTS = ['read', 'act'] as const
+export const CALL_SIGNATURE_SCHEMES = ['hmac_sha256_ts_body'] as const
+export const CALL_IDEMPOTENCY_STYLES = ['header'] as const
+/** What the member header says on a run with no member. Fixed: the service conforms. */
+export const ACTOR_SYSTEM = 'system'
+/** Besides `role:<name>`, all a call's `who` may say: there is no record, so no person field and no `viewer`. */
+export const CALL_ACTORS = ['admin', 'ai'] as const
+
+/** A value a call answers with or an event carries. Anything not listed is dropped (`returns` is an allow-list). */
+export interface PluginDataField {
+  dataClass: DataClass
+  keep: KeepRule
+  /** `outside: true`: declared here; its effect comes with the run path. */
+  outside: boolean
+}
+
+export interface PluginCallInput {
+  kind: CallInputKind
+  dataClass: DataClass
+  required: boolean
+  label: string | null
+}
+
+/** A list of entries with fixed fields, one level deep (`each`). */
+export interface PluginReturnList { each: Record<string, PluginDataField> }
+export type PluginReturn = PluginDataField | PluginReturnList
+
+/** One request: a path under `base_url` (`{id}` its only placeholder, filled by the input `id`), its inputs and what is kept of the answer. */
+export interface PluginCallRequest {
+  path: string
+  inputs: Record<string, PluginCallInput>
+  /** A fixed field of the answer → its rule. */
+  returns: Record<string, PluginReturn>
+}
+
+/** Paging of a list, a search or a poll: the query parameter sent and the answer's field holding the next value. */
+export interface PluginCursor { param: string; next: string }
+export interface PluginCallListing extends PluginCallRequest {
+  /** The answer's field holding the entries (null: the answer is the list). */
+  items: string | null
+  cursor: PluginCursor | null
+}
+
+interface PluginCallBase {
+  label: string
+  /** The business plugin's `who`: `role:<name>`, `admin`, `ai`, at least one person. Empty on a connector's own. */
+  who: string[]
+  /** The business plugin's `decision` (act only). False on a connector's own. */
+  decision: boolean
+}
+/** GET: inputs in the query, so all `class: normal`. */
+export interface PluginReadCall extends PluginCallBase, PluginCallRequest { kind: 'read' }
+/** POST, reading only: inputs in the body, the way to look something up by personal data. */
+export interface PluginSearchCall extends PluginCallBase, PluginCallListing { kind: 'search' }
+/** POST: it changes something outside. */
+export interface PluginActCall extends PluginCallBase, PluginCallRequest {
+  kind: 'act'
+  nature: CallNature
+  idempotency: { style: typeof CALL_IDEMPOTENCY_STYLES[number] }
+  undo: 'none'
+}
+/** A document store: `page` and `list` GET, `search` POST. */
+export interface PluginDocumentCall extends PluginCallBase {
+  kind: 'document'
+  page: PluginCallRequest
+  list: PluginCallListing | null
+  search: PluginCallListing | null
+}
+export type PluginCall = PluginReadCall | PluginSearchCall | PluginActCall | PluginDocumentCall
+
+/** How a contract-3 connector is called. Every part is the core's to carry out; a declaration only chooses. */
+export interface PluginCalling {
+  auth: { type: 'company_key'; header: string; format: typeof CALL_AUTH_FORMATS[number]; slots: Array<typeof CALL_AUTH_SLOTS[number]> } | null
+  /** Headers telling the outside who acted; the member header says `ACTOR_SYSTEM` on a run with no member. */
+  actor: { memberHeader: string; emailHeader: string | null } | null
+  limits: { perMinute: number } | null
+  /** The `code` at the top level of an error answer → what it means. */
+  errors: { map: Record<string, CallFailureKind> } | null
+  /** Where the outcome of an act is asked for: `{id}` once. */
+  result: { path: string; statusField: string; map: Record<string, CallResultState> } | null
+  signature: { scheme: typeof CALL_SIGNATURE_SCHEMES[number]; header: string; timestampHeader: string; maxAge: string } | null
+}
+
+/** What the outside can tell ACB happened. `use`: a business plugin's reaction, in a combined use only. */
+export interface PluginEvent {
+  fields: Record<string, PluginDataField>
+  use: EventUse | null
+}
+
+/** Asking the outside what happened since the cursor. */
+export interface PluginPoll {
+  path: string
+  cursor: PluginCursor
+  items: string
+  /** The entries' field naming the event (null: every entry is the same). */
+  typeField: string | null
+  every: string
+  fields: Record<string, PluginDataField>
+}
+
+/** A business plugin's use of a connector's call. */
+export interface CallUse { who: string[]; decision: boolean }
+/** A business plugin's reaction to an event: the type's record whose `match` field equals the event's runs `action`. */
+export interface EventUse { type: string; match: string; action: string }
+
 /** Never runs without a person's approval: it reaches people outside, moves money, or creates a record (統合版: never `ok_from`, never direct). */
 export const asksFirst = (op: Pick<PluginOperation, 'reaches' | 'createsRecord' | 'movesMoney'>): boolean =>
   op.reaches === 'external' || op.movesMoney || op.createsRecord
@@ -230,6 +363,10 @@ export interface ConnectorUse {
   objects: Record<string, { recordType: string | null }>
   /** The connector's operations it uses: only these can run for it, with these people and rules. */
   operations: Record<string, OperationUse>
+  /** Contract 3: the connector's calls it uses (absent: none). Only these are in a combined use. */
+  calls?: Record<string, CallUse>
+  /** Contract 3: the connector's events it reacts to (absent: none). */
+  events?: Record<string, EventUse>
 }
 
 export interface OperationUse {
@@ -399,6 +536,14 @@ export interface PluginManifest {
   operations: Record<string, PluginOperation>
   /** A connector's searches (`kind: search`; absent: none). Never an operation: a business plugin's `similar` names one. */
   searches?: Record<string, PluginSearch>
+  /** Contract 3, a connector and a combined use (absent otherwise, so older packages read exactly as before). */
+  calling?: PluginCalling
+  /** Contract 3: a connector's calls, or the combined use's (those the business plugin declared, with its `who`). Never in `operations`. */
+  calls?: Record<string, PluginCall>
+  /** Contract 3: a connector's events, or the combined use's. */
+  events?: Record<string, PluginEvent>
+  /** Contract 3: a connector's polls; a combined use has them when it reacts to an event. */
+  polls?: Record<string, PluginPoll>
   /** A business plugin's recommended field policies (a connector has none). */
   fieldPolicyDefaults: Record<string, FieldPolicy>
   /** A business plugin: how it uses its connector; null = it works inside ACB only. */
@@ -409,9 +554,10 @@ export interface PluginManifest {
    * The one GET that names the outside account the key belongs to (HubSpot:
    * the portal id). Required when the connector writes (an update or create
    * operation): a connection is bound to one account, and nothing is ever
-   * written to another (review §5.7).
+   * written to another (review §5.7). Contract 3: the answer's fields holding
+   * the account's id and its environment.
    */
-  accountInfo: PluginEndpoint | null
+  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string }) | null
   /**
    * A connector: its service's notification mail senders (`notification_senders`: addresses or
    * `@domain`, notification-senders.ts), left out of the mail intake while it is installed and on.

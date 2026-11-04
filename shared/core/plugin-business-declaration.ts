@@ -6,8 +6,9 @@
  * field policies. It never talks to the outside on its own.
  */
 import { CORE_TYPE_FILES } from './core-types'
+import { parseCallUses, parseEventUses } from './plugin-call-declaration'
 import {
-  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS, SIMILAR_BY,
+  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS, SIMILAR_BY,
   type CommonPart, type ConnectorUse, type FieldPolicy, type OperationUse, type PluginManifest, type SimilarBy,
 } from './plugin-declaration'
 import { strList, typeNameLayerProblem, unknownKeys } from './plugin-declaration-rules'
@@ -42,7 +43,7 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
 
   let uses: ConnectorUse | null = null
   if (raw.connector === undefined) {
-    for (const k of ['objects', 'operations', 'field_policy_defaults']) {
+    for (const k of ['objects', 'operations', 'field_policy_defaults', 'calls', 'events']) {
       if (raw[k] !== undefined) err(`「${k}」は、つなぎ先を使う業務のプラグイン（connector のあるもの）だけに書けます`)
     }
   } else {
@@ -100,8 +101,12 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
       const similar = op.similar === undefined ? undefined : parseSimilar(where, op.similar, err)
       operations[opname] = { who: who ?? [], decision: decision === true, note: note as NoteRule, policy, movesMoney: movesMoney === true, ...(via ? { via } : {}), ...(similar ? { similar } : {}) }
     }
-    if (Object.keys(operations).length === 0 && Object.keys(objects).length === 0) err('connector を書いたら、使う objects か operations を書いてください')
-    if (connector) uses = { connector, objects, operations }
+    const atV3 = common.contract >= PLUGIN_CONTRACT_V3
+    const calls = atV3 ? parseCallUses(raw.calls, err) : {}
+    const events = atV3 ? parseEventUses(raw.events, err) : {}
+    const v3 = { ...(Object.keys(calls).length > 0 ? { calls } : {}), ...(Object.keys(events).length > 0 ? { events } : {}) }
+    if (Object.keys(operations).length === 0 && Object.keys(objects).length === 0 && Object.keys(v3).length === 0) err('connector を書いたら、使う objects か operations を書いてください')
+    if (connector) uses = { connector, objects, operations, ...v3 }
   }
 
   const fieldPolicyDefaults: Record<string, FieldPolicy> = {}
