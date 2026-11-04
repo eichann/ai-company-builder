@@ -1,6 +1,6 @@
 # A HubSpot-shaped connector for the server's tests against the fake HubSpot
-# (milestone 3 P5 / P6; tests/fakes/hubspot). The real package lives in the
-# private acb-connectors repository (owner decision §6-6). HubSpot's dated API
+# (milestone 3 P5 / P6; tests/fakes/hubspot). The real package lives in a
+# private repository (owner decision §6-6). HubSpot's dated API
 # paths (search and pipelines on 2026-09, the rest on 2026-03).
 # A company-wide shared part (owner decision 2026-11-01): it knows no business
 # plugin and no type — sample-sales uses it (`connector: sample-hub >= 0.1.0`).

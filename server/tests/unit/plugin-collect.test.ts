@@ -87,8 +87,8 @@ describe('collect plugins', () => {
 
   it('reads the lock strictly', () => {
     const f = 'b'.repeat(64)
-    expect(parsePluginsLock(`# comment\neichann/acb-connectors hubspot@0.3.0 ${f}  # trailing\n\n`))
-      .toEqual([{ repo: 'eichann/acb-connectors', pkg: 'hubspot@0.3.0', fingerprint: f }])
+    expect(parsePluginsLock(`# comment\nexample-org/connectors hubspot@0.3.0 ${f}  # trailing\n\n`))
+      .toEqual([{ repo: 'example-org/connectors', pkg: 'hubspot@0.3.0', fingerprint: f }])
     expect(() => parsePluginsLock(`r a@1.0.0 ${f}\nr a@1.0.0 ${f}\n`)).toThrow(/listed twice/)
     expect(() => parsePluginsLock(`r ../x@1.0.0 ${f}\n`)).toThrow(/not <id>@<version>/)
     expect(() => parsePluginsLock('r a@1.0.0 ABC\n')).toThrow(/fingerprint/)
