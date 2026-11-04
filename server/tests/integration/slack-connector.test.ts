@@ -8,6 +8,8 @@
  * - one company never reaches another's grants, events or Slack accounts;
  * - an event is taken only with the company's own signature (fresh, exact body);
  * - a member whose own 受信を読む is off gets no signal (work-switches.ts);
+ * - an @channel / @here / @everyone alone is not taken in; a signal carries the sender's name only;
+ * - a thread reads as plain text: mentions by name, links by label, nothing of Slack's markup;
  * - no secret and no message text is ever in a table, an answer or a log line.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -26,6 +28,8 @@ import { createMemberOAuth, type MemberOAuth } from '../../src/services/member-o
 import { createSlackClient, type SlackClient } from '../../src/services/slack-client'
 import { createSlackConnector, type SlackConnector } from '../../src/services/slack-connector'
 import { createSlackEvents, type SlackSignal } from '../../src/services/slack-events'
+import { createSlackNames, SLACK_NAME_TTL_MS, type SlackNames } from '../../src/services/slack-names'
+import { createSlackChat, slackPlainText } from '../../src/services/slack-chat'
 import { createSlackRoute } from '../../src/routes/slack'
 import { createConnectorRoles } from '../../src/services/connector-roles'
 import { createFakeSlack, signEvent, type FakeSlack } from '../fakes/slack/fake-slack'
@@ -48,6 +52,8 @@ let warnings: string[]
 /** `<company>/<user>` whose own 受信を読む is off. */
 let readingOff: Set<string>
 let route: ReturnType<typeof createSlackRoute>
+let names: SlackNames
+let clockMs: number
 
 const member = (companyId: string, userId: string) => ({ companyId, userId, role: ROLES[userId] ?? 'member' })
 
@@ -84,10 +90,12 @@ beforeEach(async () => {
     companyData, slackData, brokerVault, slack: client, memberOAuth: oauth, accounts, clock: systemClock, ids: randomIds,
     redirectUri: () => REDIRECT, eventsUrl: c => `https://acb.example/api/slack/events/${c}`, operatorStopped, isMember,
   })
+  clockMs = Date.now()
+  names = createSlackNames({ slack: client, clock: { nowMs: () => clockMs } })
   const events = createSlackEvents({
     companyData, slackData, slack: client, clock: systemClock, isMember, operatorStopped,
     vaultEnabled: () => brokerVault.status().enabled, readsIncoming: (co, userId) => !readingOff.has(`${co}/${userId}`),
-    onSignal: s => signals.push(s), log: { warn: m => warnings.push(m) },
+    onSignal: s => signals.push(s), log: { warn: m => warnings.push(m) }, names,
   })
   route = createSlackRoute(events)
   await registerApp('c1', 'a1', 0)
@@ -306,7 +314,7 @@ describe('the event receiver: Slack\'s signature', () => {
     expect((await postEvent('c1', body)).status).toBe(200)
     expect((await postEvent('c1', body)).status).toBe(200) // Slack's retry
     expect(signals).toEqual([{
-      companyId: 'c1', userId: 'u1', kind: 'dm', channelId: 'D0ONE', ts: body.event.ts, threadTs: null, senderSlackUserId: 'U0TWO', external: false,
+      companyId: 'c1', userId: 'u1', kind: 'dm', channelId: 'D0ONE', ts: body.event.ts, threadTs: null, senderSlackUserId: 'U0TWO', senderName: '二宮 二郎', external: false,
     }])
   })
 
@@ -355,15 +363,29 @@ describe('the event receiver: what becomes a signal', () => {
     expect((await allow('c1', 'u1', 'U0ONE')).granted).toBe(true)
   })
 
-  it('a DM, a mention and @channel to the member; a plain channel message, the member\'s own and a bot\'s give nothing', async () => {
+  it('a DM and a mention to the member; @channel / @here / @everyone alone, a plain channel message, the member\'s own and a bot\'s give nothing', async () => {
     await postEvent('c1', message('T0DIV', { channel_type: 'im', channel: 'D0ONE' }))
     await postEvent('c1', message('T0DIV', { text: 'see <@U0ONE> here', thread_ts: '17935.1' }))
+    // Owner decision 2026-11-04: broadcasts are not taken in (they reached one authorized member at random).
     await postEvent('c1', message('T0DIV', { text: '<!channel> lunch' }))
+    await postEvent('c1', message('T0DIV', { text: '<!here|here> standup' }))
+    await postEvent('c1', message('T0DIV', { text: '<!everyone> 全社連絡' }))
     await postEvent('c1', message('T0DIV', { text: 'just chatting' }))
     await postEvent('c1', message('T0DIV', { user: 'U0ONE', text: '<!here> me' }))
     await postEvent('c1', message('T0DIV', { bot_id: 'B1', text: '<@U0ONE> build failed' }))
     await postEvent('c1', message('T0DIV', { subtype: 'message_changed', text: '<@U0ONE>' }))
-    expect(signals.map(s => [s.kind, s.threadTs])).toEqual([['dm', null], ['mention', '17935.1'], ['broadcast', null]])
+    // A broadcast that also names the member, or one in their DM, still comes (as the mention / the DM).
+    await postEvent('c1', message('T0DIV', { text: '<!channel> <@U0ONE> 確認お願いします' }))
+    await postEvent('c1', message('T0DIV', { channel_type: 'im', channel: 'D0ONE', text: '<!here> 見て' }))
+    expect(signals.map(s => [s.kind, s.threadTs])).toEqual([['dm', null], ['mention', '17935.1'], ['mention', null], ['dm', null]])
+  })
+
+  it('a signal carries the sender\'s display name (users.info), never the text; an unknown name is null', async () => {
+    await postEvent('c1', message('T0DIV', { text: 'NAME-MARK <@U0ONE> 見積お願いします' }))
+    await postEvent('c1', message('T0DIV', { user: 'U0OUT', text: '<@U0ONE> NAME-MARK' }))
+    expect(signals.map(s => [s.senderSlackUserId, s.senderName])).toEqual([['U0TWO', '二宮 二郎'], ['U0OUT', null]])
+    expect(JSON.stringify(signals)).not.toContain('NAME-MARK')
+    expect(dumpTables()).not.toContain('NAME-MARK')
   })
 
   it('the member\'s own message in a DM or a thread is their reply (`own`, B4); in a channel outside a thread, nothing', async () => {
@@ -400,6 +422,49 @@ describe('the event receiver: what becomes a signal', () => {
       spy.mockRestore()
       spyWarn.mockRestore()
     }
+  })
+})
+
+describe('Slack users\' names', () => {
+  beforeEach(async () => {
+    expect((await allow('c1', 'u1', 'U0ONE')).granted).toBe(true)
+  })
+
+  it('kept a day per company and Slack user: a renamed user shows the new name after a day, another company asks its own Slack', async () => {
+    expect(await names.nameOf('c1', 'U0TWO', 'u1')).toBe('二宮 二郎')
+    fake.seed.users.find(u => u.id === 'U0TWO')!.name = '二宮 次郎'
+    clockMs += SLACK_NAME_TTL_MS - 1000
+    expect(await names.nameOf('c1', 'U0TWO', 'u1')).toBe('二宮 二郎')
+    // c2's workspace has no U0TWO: c1's name is never answered there.
+    expect(await names.nameOf('c2', 'U0TWO', null)).toBeNull()
+    clockMs += 2000
+    expect(await names.nameOf('c1', 'U0TWO', 'u1')).toBe('二宮 次郎')
+  })
+})
+
+describe('a thread as plain text (元のスレッド)', () => {
+  it('mentions by name, links by label, @channel / @here; Slack\'s escapes undone into text, never markup', async () => {
+    expect((await allow('c1', 'u1', 'U0ONE')).granted).toBe(true)
+    fake.seed.threads = [{
+      teamId: 'T0DIV', channel: 'C0GENERAL', ts: '1793500000.000100',
+      messages: [
+        { ts: '1793500000.000100', user: 'U0TWO', text: '<@U0ONE> <!channel> *至急* <https://example.com/q?a=1&amp;b=2|見積書> を見てください' },
+        { ts: '1793500001.000100', user: 'U0ONE', text: '<!here|here> <#C0GENERAL|general> &lt;script&gt;alert(1)&lt;/script&gt; <@U0NOBODY|someone> <mailto:a@b.example>' },
+      ],
+    }]
+    const chat = createSlackChat({ slack: client, companyData: sqliteCompanyData(conn), slackData: sqliteSlackData(conn), names })
+    const r = await chat.thread('c1', 'u1', { channelId: 'C0GENERAL', threadTs: '1793500000.000100' })
+    if (!r.ok) throw new Error(r.reason)
+    expect(r.value.messages.map(m => [m.authorName, m.text])).toEqual([
+      ['二宮 二郎', '@一ノ瀬 一 @channel *至急* 見積書 を見てください'],
+      ['一ノ瀬 一', '@here #general <script>alert(1)</script> @someone a@b.example'],
+    ])
+  })
+
+  it('slackPlainText: a mention by its looked-up name, else its label, else 「Slack の人」; @everyone; a bare link as itself', () => {
+    const known = new Map([['U0TWO', '二宮 二郎']])
+    expect(slackPlainText('<@U0TWO|ninomiya> <@U0ZZZ> <!everyone> <https://x.example/a>', known)).toBe('@二宮 二郎 @Slack の人 @everyone https://x.example/a')
+    expect(slackPlainText('a &amp;lt; b', known)).toBe('a &lt; b')
   })
 })
 

@@ -53,8 +53,10 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   → **the department's turn** (`unclaimed`, readers of its folder — never a private folder);
   a member only in CC → nothing (`ccOnly: unsure` → 確認待ち for that CC member when they
   reported it). **CC is never told when someone is in To.** Our own sent mail is not intake.
-- The new interaction: title = subject (≤ 200, 「（件名なし）」), fields `occurred_at`, `channel`,
-  `counterpart_text`, `source_ref`, `message_id`, `thread_ref`, `from_address`, `to_addresses`,
+- The new interaction: title = subject (≤ 200, 「（件名なし）」 `INBOX_NO_SUBJECT` until the owner's AI
+  names it: "The AI's judgement"), fields `occurred_at`, `channel`,
+  `counterpart_text` (mail: 「name <address>」; chat: the sender's name only — Slack's `senderName`,
+  `slack-connector.md` "Names" — else none, never a Slack id: the card's 「<name> から」), `source_ref`, `message_id`, `thread_ref`, `from_address`, `to_addresses`,
   `cc_addresses`, `assignee` / `next_actor` (the owner), `intake_reason`; the `counterpart` link
   when 名寄せ (`identity.md` `resolveAddress`, as the owner may see) finds exactly one person, else
   exactly one company. Created by the service writer as `INBOX_ACTOR` (`acb:inbox`, external)
@@ -128,7 +130,13 @@ state `preparing` (the AI's turn: the reply's draft), `due` = the message's own 
 company's 目安 (`task-settings.ts` `replyTarget`: 翌営業日 / 当日中 + cutoff, holidays),
 `guideline_due` always the 目安 (the app shows 「目安：」 when they are equal), `due_note` the
 sentence it came from, `end_condition`, links `interaction`, `counterpart`, `bundle`; the
-interaction → `handled`. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
+interaction → `handled`. **`title`** (owner FB 2026-11-04: a Slack mention's card read
+「（件名なし）」): with any outcome, the message's title becomes the AI's (one line, ≤ 60,
+`INBOX_AI_TITLE_MAX`) only when it is still 「（件名なし）」 (a chat message, a mail without a subject:
+never over a subject, nor over a title the AI gave on an earlier run) and the interaction is the
+judging member's own (`personal_owner`; a department's message keeps its title). The service
+writer's `retitle` compares-and-sets the title (receipt types only; version and ledger unchanged).
+The triage prompt asks for it when the title is 「（件名なし）」; `reply` also names the 返事のお願い by it. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
 `PERSON_DECIDED`) when a person's 「やることにする」 / 「自分の担当にする」 put it back into
 `received`; `unsure` → 確認待ち. `GET /items/:recordId` (read) answers — for an interaction, or a
 返事のお願い and its interaction — the pointers (channel, `thread_ref`, `source_ref`, the message
@@ -234,7 +242,8 @@ members, owner, admin; CC / several To / shared address / internal / free mail /
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; a task the AI makes from a message always has a due — the stated one kept,
+「やることにする」 wins; the AI's title only over 「（件名なし）」, only on the judging owner's own
+message, ≤ 60 (mutation-checked); a chat sender by name only; a task the AI makes from a message always has a due — the stated one kept,
 else the 目安 past public and company holidays, none made up for other creates (mutation-checked); B4: the item view is the owner's alone and a reply request answers its
 message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /

@@ -44,6 +44,9 @@ test('a 来た連絡 from Slack: its summary (the body stays in Slack), 「Slack
   await expect(card).toContainText('返事が要る')
   await expect(card.locator('[data-seen]')).toHaveText('あなただけ')
   await expect(card).toContainText('山田 様（C社） から・Slack')
+  // Owner FB 2026-11-04: the state chip read the raw 「unsure」.
+  await expect(card).toContainText('確認待ち')
+  await expect(card).not.toContainText('unsure')
   await expect(card.getByRole('region', { name: '要約' })).toContainText('要約（本文は Slack にあります）先日の打ち合わせ資料')
   await expect(page.getByTestId('thread')).toHaveText('スレッドの前後と返事の下書き：資料送付のお願い')
   await card.getByRole('button', { name: /Slack で開く/ }).click()

@@ -155,7 +155,9 @@ export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summa
     }
   }
   if (r.type === 'interaction') {
-    const channel = f.channel === 'email' ? 'email' : f.channel === 'slack' ? 'slack' : 'other'
+    // The inbox keeps a Slack message as channel `chat` with a `slack:` pointer (inbox.md).
+    const slack = f.channel === 'slack' || (f.channel === 'chat' && (str(f.source_ref) ?? '').startsWith('slack:'))
+    const channel = f.channel === 'email' ? 'email' : slack ? 'slack' : 'other'
     return {
       kind: 'incoming', channel, at: str(f.occurred_at), from: str(f.counterpart_text) ?? (str(f.from_address)?.includes('@') ? str(f.from_address) : null),
       summary: r.summary, needsReply: f.needs_reply === true || f.needs_reply === 'true',

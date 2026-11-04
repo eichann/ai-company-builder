@@ -73,7 +73,7 @@ export async function createInboxTools(access: RecordTurnAccess, signal?: AbortS
         expectedVersion: z.number().int().min(1),
         outcome: z.enum(['reply', 'task', 'no_reply', 'set_aside', 'unsure']),
         reason: z.string().min(1).max(500).describe('判断のわけ（1〜2文）'),
-        title: z.string().max(200).optional().describe('reply: 返事のお願いの名前'),
+        title: z.string().max(200).optional().describe('件名のない連絡（「（件名なし）」）には、何の連絡かが分かる短い名前（60字以内。スレッドにない個人情報は書かない）。件名のある連絡では変わらない。reply: 返事のお願いの名前にもなる'),
         endCondition: z.string().max(2000).optional().describe('reply: 終わりの条件'),
         deadline: z.string().regex(DATE_VALUE).optional().describe('reply: 本文にある締切 YYYY-MM-DD か YYYY-MM-DDTHH:MM'),
         deadlineNote: z.string().max(200).optional().describe('reply: 締切が書いてあった文'),

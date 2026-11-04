@@ -500,7 +500,7 @@ describe('polling through the role, reconnecting', () => {
   it('no connector serving the mail role: nothing is read and the window stays', async () => {
     const lone = createInboxService({
       companyData: source, clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }, ids: { newId: () => 'x', newToken: () => 'x' },
-      writer: { create: () => { throw new Error('no') }, transition: () => { throw new Error('no') } },
+      writer: { create: () => { throw new Error('no') }, transition: () => { throw new Error('no') }, retitle: () => { throw new Error('no') } },
       resolveAddress: () => ({ ok: true, value: { person: [], company: [] } }), roleOf: () => 'member', memberAddresses: () => [], taskSettings: () => defaultTaskSettings(),
     })
     lone.connect('a', 'u-alice', 'email')
@@ -524,14 +524,79 @@ describe('companies apart', () => {
 
 describe('Slack signals (A3 → the inbox)', () => {
   it('a colleague\'s DM is the member\'s own chat message (chat is not 社内どうし); a thread reply joins it', () => {
-    const sig = { companyId: 'a', userId: 'u-alice', kind: 'dm' as const, channelId: 'D1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U-BOB', external: false }
+    const sig = { companyId: 'a', userId: 'u-alice', kind: 'dm' as const, channelId: 'D1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U0BOB', senderName: '二宮 二郎', external: false }
     expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('created')
     const [row] = interactions()
     expect(row.personalOwner).toBe('u-alice')
-    expect(fieldsOf(row.id)).toMatchObject({ channel: 'chat', source_ref: 'slack:D1:1793581200.000100', occurred_at: '2026-11-02T01:00:00.000Z' })
+    // The sender by name only (the card's 「二宮 二郎 から」), like a mail sender's name; never the Slack id.
+    expect(fieldsOf(row.id)).toMatchObject({ channel: 'chat', source_ref: 'slack:D1:1793581200.000100', occurred_at: '2026-11-02T01:00:00.000Z', counterpart_text: '二宮 二郎' })
     expect(inbox.receive('a', 'u-alice', slackSignalMessage({ ...sig, ts: '1793581260.000200', threadTs: sig.ts }))).toBe('continued')
     expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('duplicate')
     expect(interactions()).toHaveLength(1)
+  })
+
+  it('a sender whose name Slack did not give shows no 「slack:U… から」', () => {
+    const sig = { companyId: 'a', userId: 'u-alice', kind: 'mention' as const, channelId: 'C1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U630QNGDB', senderName: null, external: false }
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('created')
+    expect(fieldsOf(interactions()[0].id).counterpart_text ?? null).toBeNull()
+  })
+})
+
+// Owner FB 2026-11-04: a Slack mention's card read 「（件名なし）」.
+describe('the AI names a message without a subject', () => {
+  const dm = (ts: string) => slackSignalMessage({ companyId: 'a', userId: 'u-alice', kind: 'dm', channelId: 'D1', ts, threadTs: null, senderSlackUserId: 'U0BOB', senderName: '二宮', external: false })
+  const titleOf = (id: string) => handle().records.byIds([id])[0].title
+
+  it('its owner\'s AI sets a short title (≤ 60) on a chat message or a mail with no subject', () => {
+    inbox.receive('a', 'u-alice', dm('1793581200.000100'))
+    const chat = interactions()[0]
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: '連絡だけ', title: `明日の打ち合わせの時間変更\n${'あ'.repeat(80)}` }))
+    expect(titleOf(chat.id)).toBe(`明日の打ち合わせの時間変更 ${'あ'.repeat(46)}`)
+    expect(titleOf(chat.id)).toHaveLength(60)
+
+    inbox.receive('a', 'u-alice', mail({ subject: '' }))
+    const noSubject = interactions().find(r => r.id !== chat.id)!
+    expect(titleOf(noSubject.id)).toBe('（件名なし）')
+    const r = ok(inbox.judge(m('u-alice'), AI('u-alice'), noSubject.id, { expectedVersion: 1, outcome: 'reply', reason: '依頼', title: '請求書の再送のお願い' }))
+    expect(titleOf(noSubject.id)).toBe('請求書の再送のお願い')
+    expect(titleOf(r.replyRequestId!)).toBe('請求書の再送のお願い')
+  })
+
+  it('never over a mail\'s subject, nor a title the AI already gave, nor someone\'s department message', () => {
+    inbox.receive('a', 'u-alice', mail({ subject: '見積のお願い' }))
+    const withSubject = interactions()[0]
+    const r = ok(inbox.judge(m('u-alice'), AI('u-alice'), withSubject.id, { expectedVersion: 1, outcome: 'reply', reason: '依頼', title: '見積' }))
+    expect(titleOf(withSubject.id)).toBe('見積のお願い')
+    expect(titleOf(r.replyRequestId!)).toBe('見積')
+
+    // The thread went on: judged again, the first title stays.
+    inbox.receive('a', 'u-alice', dm('1793581300.000100'))
+    const chat = interactions().find(x => x.id !== withSubject.id)!
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: '連絡だけ', title: '最初の名前' }))
+    expect(titleOf(chat.id)).toBe('最初の名前')
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage({
+      companyId: 'a', userId: 'u-alice', kind: 'dm', channelId: 'D1', ts: '1793581360.000100', threadTs: '1793581300.000100', senderSlackUserId: 'U0BOB', senderName: '二宮', external: false,
+    }))).toBe('continued')
+    expect(stateOf(chat.id).state).toBe('received')
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), chat.id, { expectedVersion: stateOf(chat.id).version, outcome: 'no_reply', reason: '続き', title: '二つ目の名前' }))
+    expect(titleOf(chat.id)).toBe('最初の名前')
+
+    // A shared address's message (the department's, not owner-only) keeps its title even when taken.
+    settings({ sharedAddresses: [{ address: 'info@acme.example', folder: '営業部' }] })
+    inbox.receive('a', 'u-alice', mail({ to: [{ address: 'info@acme.example' }], subject: '' }))
+    const shared = interactions().find(x => x.personalOwner === null)!
+    ok(inbox.claim(m('u-bob'), shared.id, { expectedVersion: 1 }))
+    ok(inbox.judge(m('u-bob'), AI('u-bob'), shared.id, { expectedVersion: 2, outcome: 'no_reply', reason: '連絡だけ', title: '部署の名前' }))
+    expect(titleOf(shared.id)).toBe('（件名なし）')
+  })
+
+  it('only the AI judging it in its turn: anyone else\'s judgement is refused and changes nothing', () => {
+    inbox.receive('a', 'u-alice', dm('1793581400.000100'))
+    const chat = interactions()[0]
+    for (const u of ['u-bob', 'u-owner']) {
+      expect(inbox.judge(m(u), AI(u), chat.id, { expectedVersion: 1, outcome: 'no_reply', reason: 'x', title: '乗っ取り' }).ok).toBe(false)
+    }
+    expect(titleOf(chat.id)).toBe('（件名なし）')
   })
 })
 

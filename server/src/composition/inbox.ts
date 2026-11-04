@@ -44,7 +44,7 @@ export interface InboxLaneDeps {
   bridge: PluginBridgeDeps
 }
 
-/** A Slack signal as the inbox's message (chat): ids and pointers only. The member's own message is outgoing. */
+/** A Slack signal as the inbox's message (chat): ids, pointers and the sender's name only. The member's own message is outgoing. */
 export function slackSignalMessage(s: SlackSignal) {
   const own = s.kind === 'own'
   return {
@@ -55,7 +55,7 @@ export function slackSignalMessage(s: SlackSignal) {
     sourceRef: `slack:${s.channelId}:${s.ts}`,
     occurredAt: new Date(Math.floor(Number(s.ts) * 1000)).toISOString(),
     subject: null,
-    from: own ? { address: `slack-member:${s.userId}`, memberId: s.userId } : { address: `slack:${s.senderSlackUserId ?? 'unknown'}` },
+    from: own ? { address: `slack-member:${s.userId}`, memberId: s.userId } : { address: `slack:${s.senderSlackUserId ?? 'unknown'}`, name: s.senderName ?? null },
     to: own ? [] : [{ address: `slack-member:${s.userId}`, memberId: s.userId }],
     cc: [],
     outgoing: own,

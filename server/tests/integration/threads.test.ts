@@ -114,7 +114,7 @@ beforeAll(async () => {
   googleServer = serve({ fetch: google.app.fetch, port: 0, hostname: '127.0.0.1' })
 
   const seed = defaultSlackSeed()
-  seed.users.push({ id: 'U0SATO', email: GOOGLE_SEED.member, teamId: 'T0DIV' }, { id: 'U0TANAKA', email: GOOGLE_SEED.colleague, teamId: 'T0DIV' })
+  seed.users.push({ id: 'U0SATO', email: GOOGLE_SEED.member, teamId: 'T0DIV', name: '佐藤' }, { id: 'U0TANAKA', email: GOOGLE_SEED.colleague, teamId: 'T0DIV' })
   seed.threads = [{ teamId: 'T0DIV', channel: SLACK_CHANNEL, ts: SLACK_ROOT, messages: [{ ts: SLACK_ROOT, user: 'U0ONE', text: `<@U0SATO> ${SLACK_TEXT}` }] }]
   slack = createFakeSlack(seed)
   slackServer = serve({ fetch: slack.app.fetch, port: 0, hostname: '127.0.0.1' })
@@ -218,11 +218,11 @@ describe('元のスレッド: read now, with the viewer\'s own permission, shown
     expect((await person('th-sato', 'PUT', '/me/google/features', { feature: 'inbox', on: true })).status).toBe(200)
   })
 
-  it('the Slack thread, read with the member\'s own token; their message is marked', async () => {
+  it('the Slack thread, read with the member\'s own token, a mention by name; their message is marked', async () => {
     const r = await person('th-sato', 'GET', `/threads/${chatInteraction}`)
     expect(r.status, r.text).toBe(200)
     expect(r.body.data.thread).toMatchObject({ channel: 'chat', unavailable: null })
-    expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual([`<@U0SATO> ${SLACK_TEXT}`])
+    expect(r.body.data.thread.messages.map((m: Json) => m.text)).toEqual([`@佐藤 ${SLACK_TEXT}`])
     expect(r.body.data.thread.messages[0].mine).toBe(false)
     expect((await person('th-tanaka', 'GET', `/threads/${chatInteraction}`)).status).toBe(404)
   })
