@@ -1,4 +1,4 @@
-import { useCallback, useState, useSyncExternalStore } from 'react'
+import { useCallback, useMemo, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { useCommandHandler } from '../../../shared/commands/commands'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { saveUnsavedEdits, unsavedPaths } from '../../../shared/lib/unsavedEdits'
@@ -14,7 +14,9 @@ interface Options {
   companyId: string | undefined
   rootPath: string | undefined
   openTabs: string[]
+  /** The pinned (固定) tabs as saved (useEditorPersistence); one closed meanwhile no longer counts. */
   pinnedTabs: string[]
+  setPinnedTabs: Dispatch<SetStateAction<string[]>>
   recordLooks: Readonly<Record<string, RecordTabLook>>
   closeTabs: (keys: readonly string[]) => void
   reopenTabs: (keys: readonly string[]) => void
@@ -28,11 +30,19 @@ export interface TidyNotice { text: string; at: number }
 export const DAILY_TIDY_NOTICE = '毎日、前の日のタブを自動で片づけます（設定でオフにできます）'
 const EMPTY: TidiedGroup[] = []
 
+/** A tab as the AI reads it: title and kind; a file also carries its company path, which main removes (shared/app-commands.ts `redactForAI`). */
+const entryOf = (item: TidiedItem) => ({ title: item.title, kind: itemKindName(item), ...(item.kind === 'file' ? { path: item.path } : {}) })
+
 /**
  * 「タブを片づける」 (tidyTabs.ts): the commands `tabs.list` / `tabs.tidy` / `tabs.restore` (the
  * button, the AI), the daily tidy when a company's tabs are restored, and 「片づけたタブ」.
  */
-export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs, recordLooks, closeTabs, reopenTabs, store = tidyStore, now = Date.now }: Options) {
+export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs: savedPins, setPinnedTabs, recordLooks, closeTabs, reopenTabs, store = tidyStore, now = Date.now }: Options) {
+  const pinned = useMemo(() => new Set(savedPins.filter(k => openTabs.includes(k))), [savedPins, openTabs])
+  const pinnedTabs = useMemo(() => [...pinned], [pinned])
+  const togglePinned = useCallback((key: string) => setPinnedTabs(prev => prev.includes(key)
+    ? prev.filter(k => k !== key)
+    : [...prev.filter(k => openTabs.includes(k)), key]), [setPinnedTabs, openTabs])
   const groups = useSyncExternalStore(store.subscribe, () => companyId ? store.groups(companyId) : EMPTY)
   const dailyOn = useSyncExternalStore(store.subscribe, store.dailyTidyOn)
   const [listOpen, setListOpen] = useState(false)
@@ -55,8 +65,8 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs, recor
       ? store.add(cid, { id: `g${at.toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: new Date(at).toISOString(), day: companyDay(at), auto: !!source, items })
       : 0
     if (plan.close.length > 0) closeTabs(plan.close)
-    const unsavedTitles = plan.unsaved.map(key => tidiedItemOf(key, cur.rootPath, looks).title)
-    return { tidied: items.length, keptPinned: plan.pinned.length, keptUnsaved: unsavedTitles, dropped, group: items.length > 0 ? companyDay(at) : null }
+    const keptUnsaved = plan.unsaved.map(key => entryOf(tidiedItemOf(key, cur.rootPath, looks)))
+    return { tidied: items.length, keptPinned: plan.pinned.length, keptUnsaved, dropped, group: items.length > 0 ? companyDay(at) : null }
   }, [latest, store, now, closeTabs])
 
   const tidyByHand = useCallback(async () => {
@@ -64,7 +74,7 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs, recor
     if (!r) return null
     const parts = [r.tidied > 0 ? `タブを ${r.tidied} 件片づけました。` : '片づけるタブはありませんでした。']
     if (r.keptPinned > 0) parts.push(`固定した ${r.keptPinned} 件は残しました。`)
-    if (r.keptUnsaved.length > 0) parts.push(`保存できなかった「${r.keptUnsaved.join('」「')}」は開いたままにしました。`)
+    if (r.keptUnsaved.length > 0) parts.push(`保存できなかった「${r.keptUnsaved.map(e => e.title).join('」「')}」は開いたままにしました。`)
     if (r.dropped > 0) parts.push(`古い片づけたタブ ${r.dropped} 件は消えました。`)
     setNotice({ text: parts.join(''), at: now() })
     return r
@@ -104,15 +114,12 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs, recor
   })
   useCommandHandler('tabs.list', () => {
     const cur = latest.current
-    const pinned = new Set(cur.pinnedTabs)
+    const pins = new Set(cur.pinnedTabs)
     return {
-      openTabs: cur.openTabs.map(key => {
-        const item = tidiedItemOf(key, cur.rootPath, cur.recordLooks)
-        return { title: item.title, kind: itemKindName(item), ...(pinned.has(key) ? { pinned: true } : {}) }
-      }),
+      openTabs: cur.openTabs.map(key => ({ ...entryOf(tidiedItemOf(key, cur.rootPath, cur.recordLooks)), ...(pins.has(key) ? { pinned: true } : {}) })),
       tidied: groupsByDay(companyId ? store.groups(companyId) : []).map(d => ({
         group: d.day, label: dayLabel(d.day),
-        items: d.groups.flatMap(g => g.items.map(i => ({ id: i.id, title: i.title, kind: itemKindName(i) }))),
+        items: d.groups.flatMap(g => g.items.map(i => ({ id: i.id, ...entryOf(i) }))),
       })),
     }
   })
@@ -121,10 +128,11 @@ export function useTabTidying({ companyId, rootPath, openTabs, pinnedTabs, recor
     const chosen = itemsOf({ group, items })
     if (chosen.length === 0) return { error: '指定の片づけたタブは見つかりません。tabs_list で確かめてください。' }
     const r = await restore(chosen)
-    return { opened: r.opened.map(i => i.title), notFound: r.missing.map(i => i.title) }
+    return { opened: r.opened.map(entryOf), notFound: r.missing.map(entryOf) }
   })
 
   return {
+    pinned, togglePinned,
     groups, dailyOn, setDailyTidy: store.setDailyTidy,
     listOpen, openList: () => setListOpen(true), closeList: () => setListOpen(false),
     notice, dismissNotice: () => setNotice(null),

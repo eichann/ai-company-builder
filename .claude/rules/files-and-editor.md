@@ -267,7 +267,10 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `tidiedTabs:lastDay:<company id>`, `acb.tabs.dailyTidy` (`off` when switched off),
   `acb.tabs.dailyTidyNoticeShown`; nothing reaches the server or another company.
 - Code: `features/editor/tidyTabs.ts` (pure rules + the store, Storage injected),
-  `hooks/useTabTidying.ts` (the commands, the daily tidy, restoring). Tests:
+  `hooks/useTabTidying.ts` (pinning, the commands, the daily tidy, restoring),
+  `components/TabTidyingControls.tsx` (the 「…」 menu, the notice, the list as `AppShell` /
+  `AppDialogs` place them). The AI's side (another company refused, private names hidden):
+  `commands.md` "Handed to the AI". Tests:
   `tidyTabs.test.ts` (pinned / unsaved kept, cap, once per day, the switch, local per company),
   `tests/ui/tidy-tabs.spec.ts` (tidy → list → restore, missing items, saving first, the daily
   tidy and its notice, the AI's commands).

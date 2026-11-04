@@ -4,7 +4,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
-type Layout = { calls: Array<{ name: string; args: unknown[] }>; aiCommand(id: string, args?: unknown): Promise<unknown> }
+type Layout = { calls: Array<{ name: string; args: unknown[] }>; aiCommand(id: string, args?: unknown, companyId?: string): Promise<unknown> }
 const layout = (page: Page) => page.evaluateHandle(() => (window as unknown as { __acbLayout: Layout }).__acbLayout)
 
 const ROOT = '/Users/demo/会社'
@@ -106,15 +106,20 @@ test('the consultation AI lists, tidies and restores this window\'s tabs by titl
   await expect(tab(page, GUIDE)).toBeVisible()
   const ai = await layout(page)
   const listed = await ai.evaluate(l => l.aiCommand('tabs.list')) as { ok: true; result: { openTabs: Array<Record<string, unknown>> } }
-  expect(listed.result.openTabs).toEqual([{ title: '営業の進め方.md', kind: 'ファイル' }, { title: '備品.md', kind: 'ファイル', pinned: true }])
+  // Company paths go to main only, which removes them (and private names) before the AI reads them.
+  expect(listed.result.openTabs).toEqual([{ title: '営業の進め方.md', kind: 'ファイル', path: '営業部/営業の進め方.md' }, { title: '備品.md', kind: 'ファイル', path: '総務/備品.md', pinned: true }])
   expect(JSON.stringify(listed)).not.toContain(ROOT)
+  // A consultation of another company is refused: these tabs stay as they are.
+  const other = await ai.evaluate(l => l.aiCommand('tabs.tidy', {}, 'other')) as { ok: boolean; error: string }
+  expect(other.ok).toBe(false)
+  await expect(tab(page, GUIDE)).toBeVisible()
 
   const tidied = await ai.evaluate(l => l.aiCommand('tabs.tidy')) as { ok: true; result: { tidied: number; group: string } }
   expect(tidied.result.tidied).toBe(1)
   await expect(tab(page, GUIDE)).toHaveCount(0)
 
-  const restored = await ai.evaluate((l, group) => l.aiCommand('tabs.restore', { group }), tidied.result.group) as { ok: true; result: { opened: string[] } }
-  expect(restored.result.opened).toEqual(['営業の進め方.md'])
+  const restored = await ai.evaluate((l, group) => l.aiCommand('tabs.restore', { group }), tidied.result.group) as { ok: true; result: { opened: Array<{ title: string }> } }
+  expect(restored.result.opened.map((o: { title: string }) => o.title)).toEqual(['営業の進め方.md'])
   await expect(tab(page, GUIDE)).toBeVisible()
   // A command not handed to the AI is refused in the window too.
   const refused = await ai.evaluate(l => l.aiCommand('chat.newConsultation', { message: 'x' })) as { ok: boolean }

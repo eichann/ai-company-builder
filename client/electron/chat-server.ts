@@ -39,7 +39,7 @@ import { createAgentConnection, type AgentHost } from './agents/registry'
 import { AGENTS, isAgentId, type AgentId } from '../shared/agents/registry'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
-import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
+import { forgetPrivateReads, noteCompanyFileResult, privateFolderOfPath, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
@@ -56,7 +56,7 @@ import net from 'net'
 
 export interface ChatServerConfig extends AgentHost {
   /** Runs one of the app's AI commands in the window showing the consultation (features/app-commands/ipc.ts). */
-  runAppCommand?: (sessionId: string, commandId: string, args: unknown, signal?: AbortSignal) => Promise<AppCommandAnswer>
+  runAppCommand?: (sessionId: string, companyId: string, commandId: string, args: unknown, signal?: AbortSignal) => Promise<AppCommandAnswer>
   /** Where to listen; 0 = any free port (tests running in parallel). Default: the first free port of 3300–3399. */
   listenPort?: number
   createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
@@ -391,10 +391,15 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
-    // The app's commands handed to the AI (commands.md): the tabs of the window that shows this consultation.
+    // The app's commands handed to the AI (commands.md): the main window's tabs, only while this
+    // consultation's company is on screen; a private folder's file names only once the consultation read it.
     const runAppCommand = config.runAppCommand
-    const appCommands = !aiTurnStep && connection.ownsConversation && appSessionId && runAppCommand
-      ? createAppCommandTools((commandId, args) => runAppCommand(appSessionId, commandId, args, c.req.raw.signal))
+    const appCommands = !aiTurnStep && connection.ownsConversation && appSessionId && companyId && runAppCommand
+      ? createAppCommandTools((commandId, args) => runAppCommand(appSessionId, companyId, commandId, args, c.req.raw.signal), companyPath => {
+        if (!privateContext) return false
+        const folder = privateFolderOfPath(privateContext, `${privateContext.root}/${companyPath}`)
+        return !!folder && !privateState.folders.has(folder)
+      })
       : undefined
     // 「もう一方の AI に聞く」 (agents/second-opinion.ts): only the agents the member's own latest
     // message names; the tool does not exist in any other turn. It stops with the turn

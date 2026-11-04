@@ -23,8 +23,8 @@ export interface AppCommandsDeps {
 }
 
 export interface AppCommandRunner {
-  /** Runs an AI command for a consultation in the window that shows it; never rejects. */
-  run(sessionId: string, commandId: string, args: unknown, signal?: AbortSignal): Promise<AppCommandAnswer>
+  /** Runs an AI command for a consultation of `companyId` in the main window; never rejects. */
+  run(sessionId: string, companyId: string, commandId: string, args: unknown, signal?: AbortSignal): Promise<AppCommandAnswer>
 }
 
 export function registerAppCommandsIpc(ipc: IpcRegistrar, { mainWindowId, mainWindow, inOwnWindow, timeoutMs = 20_000 }: AppCommandsDeps): AppCommandRunner {
@@ -41,7 +41,8 @@ export function registerAppCommandsIpc(ipc: IpcRegistrar, { mainWindowId, mainWi
   })
 
   return {
-    run(sessionId, commandId, args, signal) {
+    run(sessionId, companyId, commandId, args, signal) {
+      if (typeof companyId !== 'string' || !companyId) return Promise.resolve({ ok: false, error: APP_COMMAND_MESSAGES.otherCompany })
       if (!isAiCommand(commandId)) return Promise.resolve({ ok: false, error: APP_COMMAND_MESSAGES.unknown })
       const def = (COMMANDS as Record<string, CommandDefinition>)[commandId]
       const parsed = def.args.safeParse(args ?? {})
@@ -64,7 +65,7 @@ export function registerAppCommandsIpc(ipc: IpcRegistrar, { mainWindowId, mainWi
         pending.set(requestId, { windowId, resolve: done })
         if (signal?.aborted) { aborted(); return }
         signal?.addEventListener('abort', aborted, { once: true })
-        mainWindow.send('appCommand:request', { requestId, commandId, args: parsed.data })
+        mainWindow.send('appCommand:request', { requestId, companyId, commandId, args: parsed.data })
       })
     },
   }

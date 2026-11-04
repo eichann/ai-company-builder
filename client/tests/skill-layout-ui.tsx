@@ -118,7 +118,7 @@ const fileRequests = emitter<{ path: string }>()
 // The consultation's AI changed the task (records:changed): its version and linked files grow.
 const recordsChanged = emitter<{ companyId: string }>()
 // The consultation AI running one of the app's commands here (shared/app-commands.ts), and the answers.
-const appCommandRequests = emitter<{ requestId: string; commandId: string; args: unknown }>()
+const appCommandRequests = emitter<{ requestId: string; companyId: string; commandId: string; args: unknown }>()
 const appCommandAnswers = new Map<string, unknown>()
 let taskVersion = 2
 let taskFiles = ['営業部/提案書/A社_提案.md']
@@ -293,9 +293,9 @@ Object.assign(window, {
     },
     cardReads: () => cardReads,
     /** The consultation AI runs an app command (tabs.list / tidy / restore); resolves to the window's answer. */
-    async aiCommand(commandId: string, args: unknown = {}) {
+    async aiCommand(commandId: string, args: unknown = {}, companyId: string = COMPANY) {
       const requestId = `r${Math.random()}`
-      appCommandRequests.emit({ requestId, commandId, args })
+      appCommandRequests.emit({ requestId, companyId, commandId, args })
       for (let i = 0; i < 100 && !appCommandAnswers.has(requestId); i++) await sleep(20)
       return appCommandAnswers.get(requestId)
     },

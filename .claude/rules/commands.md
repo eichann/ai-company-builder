@@ -111,18 +111,25 @@ agent:
    the id with `_` (`tabs_list`) on the app's own MCP server `acb_app`, the schema is the
    catalog's zod `args` (no second definition), the description its `aiDescription`.
 2. `electron/app-commands/tools.ts` `createAppCommandTools` makes the tools for one chat request
-   (`chat-server.ts`, only for an agent that owns its conversation and never in an unattended
-   「AI の番」 step); Claude Code gets them in process, always loaded and allowed without asking
+   (`chat-server.ts`, only for an agent that owns its conversation, a consultation with a company,
+   and never in an unattended 「AI の番」 step); Claude Code gets them in process, always loaded and allowed without asking
    (view / local; `tests/claude-tool-search.test.ts`), Codex as a loopback endpoint, like the
-   review tool. The answer is the handler's result as JSON. Labels: `acb-tool-displays.ts`.
+   review tool. The answer is the handler's result as JSON after `redactForAI`: the window adds a
+   file tab's company path only so main can judge it — main removes every path, and a file in a
+   private folder this consultation has not read is shown as 「（非公開のファイル）」 (its name never
+   reaches the AI; `private-folders.md`). We hide rather than mark the folder as read: marking would
+   hand the name over and then ask about every later public write. The tab tools are in the
+   private-read guard's own servers (`APP_MCP_SERVERS`): they send nothing out. Labels:
+   `acb-tool-displays.ts`.
 3. The tool only relays: main (`electron/features/app-commands/ipc.ts`) checks the id and the
-   arguments again, refuses a consultation shown in a window of its own (that window has no
+   arguments again, carries the consultation's `companyId` in the request, refuses a consultation shown in a window of its own (that window has no
    tabs: 「…メインの画面の相談からだけ扱えます。」), sends `appCommand:request` to the main window
    only, and accepts `appCommand:respond` only from that window (20 s, then 「画面が応答しませんでした」).
-4. The main window (`src/shared/commands/useAiCommandRequests.ts`, mounted by `AppShell`) runs the
-   command through the same registry as a click, again only an `exposeToAI` id, and answers.
+4. The main window (`src/app/useAiCommandRequests.ts`, mounted by `AppShell`) refuses another
+   company's request (`appCommandRefusal`: 「この相談は、いま画面に出ている会社のものではありません…」)
+   and any id not `exposeToAI`, runs the rest through the same registry as a click, and answers.
 
-So the AI works only on the tabs of the window that shows the consultation. Tests:
+So the AI works only on the main window's tabs, and only for its own company. Tests:
 `tests/app-commands.test.ts`, `tests/ui/tidy-tabs.spec.ts` 「the consultation AI lists…」.
 
 ## Handlers and shortcuts

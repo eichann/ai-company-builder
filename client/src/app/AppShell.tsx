@@ -1,6 +1,6 @@
 import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks, Broom, PushPin, Tray } from '@phosphor-icons/react'
+import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { useLinkedConsultations } from '../features/chat/recordConsultationsStore'
 import { useConsultationTopics } from '../features/chat/consultationTopicsStore'
@@ -42,11 +42,8 @@ import { PANE_LIMITS } from '../features/workspace/layoutTree'
 import { useEditorPersistence, type RestoredTabs } from '../features/editor/hooks/useEditorPersistence'
 import { useEditorTabs } from '../features/editor/hooks/useEditorTabs'
 import { useTabTidying } from '../features/editor/hooks/useTabTidying'
-import { TidiedTabsDialog } from '../features/editor/components/TidiedTabsDialog'
-import { TidyNoticeBar } from '../features/editor/components/TidyNoticeBar'
-import { TidyTabsSetting } from '../features/settings/components/TidyTabsSetting'
-import { MoreMenu } from '../shared/ui/MoreMenu'
-import { useAiCommandRequests } from '../shared/commands/useAiCommandRequests'
+import { TabTidyingMenu, TabTidyingNotice } from '../features/editor/components/TabTidyingControls'
+import { useAiCommandRequests } from './useAiCommandRequests'
 import { useCompanyWatcher } from '../features/files/hooks/useCompanyWatcher'
 import { useSkillsTab } from '../features/skills/hooks/useSkillsTab'
 import { useSkillsAutoRefresh } from '../features/skills/hooks/useSkillsAutoRefresh'
@@ -103,9 +100,6 @@ const PANE_CLASSES: Record<string, string> = {
 const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
 const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
 
-// 探す ⌘K finds 「片づけたタブ」 by these words too.
-const PALETTE_ACTIONS = [{ id: 'tidiedTabs', title: '片づけたタブ', words: ['タブ', '片づけ', '片付け', 'かたづけ', 'tab'] }]
-
 // The first registered panel opens when nothing (or an id no panel has) is remembered.
 const DEFAULT_LEFT_PANEL = 'skills'
 
@@ -153,9 +147,8 @@ export function AppShell() {
     useDepartmentAvailability(rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
 
   // Open tabs (files and records side by side), the active one and the left tab, saved per company.
-  // Set while a wide left tab (スキル…) covers the middle.
+  // Set while a wide left tab (スキル…) covers the middle. The daily tidy hears when a company's tabs are restored (set below).
   const middleHidden = useRef(false)
-  // The daily tidy hears when a company's tabs are restored (useTabTidying, set below).
   const tabsRestored = useRef<(companyId: string, tabs: RestoredTabs) => void>(() => {})
   const onTabsRestored = useCallback((companyId: string, tabs: RestoredTabs) => tabsRestored.current(companyId, tabs), [])
   const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab, recordLooks, setRecordLooks, pinnedTabs, setPinnedTabs } =
@@ -171,13 +164,10 @@ export function AppShell() {
   const { previewFilePath, openFile: handleOpenFile, pinFile: handlePinFile, selectFile: handleSelectOpenFile, closeFile: handleCloseFile, closeTabs, openTabs: reopenTabs } =
     useEditorTabs({ openFiles, setOpenFiles, activeFilePath, setActiveFilePath })
   // 「タブを片づける」 (tabs.tidy / list / restore, also the AI's) and the daily tidy; 固定 tabs stay.
-  const pinnedSet = useMemo(() => new Set(pinnedTabs.filter(k => openFiles.includes(k))), [pinnedTabs, openFiles])
-  const togglePinned = useCallback((key: string) => setPinnedTabs(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev.filter(k => openFiles.includes(k)), key]), [setPinnedTabs, openFiles])
-  const tidying = useTabTidying({ companyId: currentCompany?.id, rootPath, openTabs: openFiles, pinnedTabs: [...pinnedSet], recordLooks, closeTabs,
+  const tidying = useTabTidying({ companyId: currentCompany?.id, rootPath, openTabs: openFiles, pinnedTabs, setPinnedTabs, recordLooks, closeTabs,
     reopenTabs: keys => { reopenTabs(keys); if (middleHidden.current && keys.length > 0) setLeftTab('files') } })
   tabsRestored.current = tidying.onTabsRestored
-  // The consultation AI's app commands (the tabs above) run in this window.
-  useAiCommandRequests()
+  useAiCommandRequests() // the consultation AI's app commands (the tabs above) run in this window
   const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
     rootPath: rootPath || '',
     departments,
@@ -649,14 +639,10 @@ export function AppShell() {
                   aside={activeFilePath && !activeRecordId && rootPath
                     ? <FileSidePanel companyId={currentCompany?.id} rootPath={rootPath} filePath={activeFilePath} />
                     : undefined}
-                  pinnedTabs={pinnedSet}
-                  onTogglePinned={togglePinned}
-                  notice={tidying.notice && <TidyNoticeBar key={tidying.notice.at} text={tidying.notice.text} onOpenList={() => { tidying.dismissNotice(); tidying.openList() }} onDismiss={tidying.dismissNotice} />}
-                  tabsEnd={<MoreMenu compact label="タブの操作" items={[
-                    { label: 'タブを片づける', icon: <Broom size={14} />, hint: '固定したタブ以外を閉じて「片づけたタブ」にしまいます', onClick: () => { void runCommand('tabs.tidy') } },
-                    { label: '片づけたタブ', icon: <Tray size={14} />, hint: 'しまったタブを開き直せます', onClick: tidying.openList },
-                    ...(activeFilePath ? [{ label: pinnedSet.has(activeFilePath) ? 'このタブの固定をやめる' : 'このタブを固定する', icon: <PushPin size={14} />, hint: '固定したタブは片づけても残ります', onClick: () => togglePinned(activeFilePath) }] : []),
-                  ]} />}
+                  pinnedTabs={tidying.pinned}
+                  onTogglePinned={tidying.togglePinned}
+                  notice={<TabTidyingNotice tidying={tidying} />}
+                  tabsEnd={<TabTidyingMenu tidying={tidying} activeKey={activeFilePath} />}
                 />
               )}
             />
@@ -674,10 +660,6 @@ export function AppShell() {
         )}
       />
 
-      {tidying.listOpen && (
-        <TidiedTabsDialog groups={tidying.groups} onClose={tidying.closeList} onRestore={tidying.restore}
-          onRemoveItems={tidying.removeItems} onRemoveDay={tidying.removeDay} checkMissing={tidying.checkMissing} />
-      )}
       {choosingBundle && currentCompany && (
         <BundleChooser
           companyId={currentCompany.id} meetingTitle={choosingBundle.title} word={bundleWord}
@@ -741,17 +723,13 @@ export function AppShell() {
         onOpenSkill={openSkillFromPalette}
         loadConsultations={loadPaletteConsultations}
         onOpenConsultation={openConsultation}
-        paletteActions={PALETTE_ACTIONS}
-        onPaletteAction={id => { if (id === 'tidiedTabs') tidying.openList() }}
+        tidying={tidying}
         showSettings={showSettings}
         settingsFocus={settingsFocus}
         onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}
-        mineSettings={<>
-          <TodayFolderSetting choices={today.choices} chosenId={today.chosenId} onChoose={today.choose}
-            defaultName={today.defaultDepartment?.name ?? null}
-            chosenMissingName={today.chosenMissing?.name ?? null} folderNow={today.folderNow()} />
-          <TidyTabsSetting on={tidying.dailyOn} onChange={tidying.setDailyTidy} />
-        </>}
+        todayFolderSetting={<TodayFolderSetting choices={today.choices} chosenId={today.chosenId} onChoose={today.choose}
+          defaultName={today.defaultDepartment?.name ?? null}
+          chosenMissingName={today.chosenMissing?.name ?? null} folderNow={today.folderNow()} />}
         showBackupHistory={showBackupHistory}
         setShowBackupHistory={setShowBackupHistory}
       />

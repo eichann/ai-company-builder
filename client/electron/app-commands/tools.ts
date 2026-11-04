@@ -4,10 +4,11 @@
  * local only) becomes a tool on the app's own MCP server `acb_app`, with the catalog's zod args as
  * its schema — no second definition. Given to Claude Code in process (always loaded) and to Codex
  * as a loopback endpoint, like the review tool. The tool only relays: main asks the main window
- * to run the command (features/app-commands/ipc.ts) and hands back its answer as JSON.
+ * to run the command (features/app-commands/ipc.ts) and hands back its answer as JSON, without
+ * file paths and without the names of files in private folders the consultation has not read.
  */
 import { startLoopbackMcp } from '../agents/loopback-mcp'
-import { APP_COMMANDS_SERVER, aiCommands, appCommandToolId, appCommandToolName, type AppCommandAnswer } from '../../shared/app-commands'
+import { APP_COMMANDS_SERVER, aiCommands, appCommandToolId, appCommandToolName, redactForAI, type AppCommandAnswer } from '../../shared/app-commands'
 import type { CommandDefinition } from '../../shared/commands/define'
 
 export { APP_COMMANDS_SERVER } from '../../shared/app-commands'
@@ -27,8 +28,11 @@ export interface AppCommandTools {
   execute(name: string, input: unknown): Promise<string>
 }
 
-/** The tools for one chat request; `run` reaches the window that shows the consultation. */
-export function createAppCommandTools(run: (commandId: string, args: unknown) => Promise<AppCommandAnswer>): AppCommandTools {
+/**
+ * The tools for one chat request; `run` reaches the main window. `hidden(companyPath)`: a file in a
+ * private folder this consultation has not read (its name is not handed over); none by default.
+ */
+export function createAppCommandTools(run: (commandId: string, args: unknown) => Promise<AppCommandAnswer>, hidden: (companyPath: string) => boolean = () => false): AppCommandTools {
   const defs = aiCommands()
   return {
     tools: defs.map(def => ({
@@ -39,7 +43,7 @@ export function createAppCommandTools(run: (commandId: string, args: unknown) =>
       const def = defs.find(d => appCommandToolName(d.id) === name)
       if (!def) return JSON.stringify({ error: 'この道具はありません。' })
       const answer = await run(def.id, input ?? {}).catch((): AppCommandAnswer => ({ ok: false, error: 'できませんでした。' }))
-      return JSON.stringify(answer.ok ? answer.result ?? { ok: true } : { error: answer.error })
+      return JSON.stringify(answer.ok ? redactForAI(answer.result ?? { ok: true }, hidden) : { error: answer.error })
     },
   }
 }
