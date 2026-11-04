@@ -3,7 +3,8 @@
 // the real banner 「議事録が届きました」 on top of やること (MeetingBanners) and the real meeting card
 // (RecordCard with the app's MeetingPanel and 案件 field) over a fake main kept in memory. Synthetic
 // data only. `?viewer=suzuki`: another attendee's screen (阿部 already chose ［読まない］ for 採用面接).
-// `?noaccess=1`: the member's Google cannot open the minutes. `window.__acbMeetings.finish(id)`: the
+// `?noaccess=1`: the member's Google cannot open the minutes. `?flood=N`: a first discovery, N more
+// meetings at once, and a long list below. `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -33,6 +34,10 @@ const meetings: Meeting[] = [
   { id: 'meeting-teirei01', title: '定例ミーティング', at: today(12), state: 'arrived', version: 1, by: null, series: true, members: ['u-abe', 'u-suzuki', 'u-tamura'] },
   { id: 'meeting-mensetu1', title: '採用面接', at: today(10), state: ME === 'u-suzuki' ? 'skipped' : 'arrived', version: ME === 'u-suzuki' ? 2 : 1, by: ME === 'u-suzuki' ? 'u-abe' : null, series: false, members: ['u-abe', 'u-suzuki'] },
 ]
+const flood = Number(params.get('flood') ?? 0)
+for (let n = 0; n < flood; n++) {
+  meetings.push({ id: `meeting-flood${String(n).padStart(3, '0')}`, title: `とても長い名前の部長会議 その${n}（会議室③・オンライン併用）`, at: today(9), state: 'arrived', version: 1, by: null, series: false, members: ['u-abe'] })
+}
 const autoSeries = new Set<string>()
 const before = new Map<string, Meeting>()
 const log: string[] = []
@@ -106,10 +111,16 @@ function Preview() {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <main className="flex min-h-screen bg-white text-gray-900">
-      <aside className="w-[360px] shrink-0 border-r" aria-label="やること">
+      {/* The pane as AppShell lays it out: the block, then the list taking what is left. */}
+      <aside style={{ width: 300 }} className="flex h-screen min-w-0 shrink-0 flex-col border-r" aria-label="やること">
         {arrivals.available && <MeetingBanners companyId="co" items={arrivals.items} aiTurns={null} onView={m => setOpen(m.id)} onChanged={reload} />}
-        <p className="p-3 text-[12px] text-gray-400">（やることの一覧）</p>
-        <pre id="log" className="p-2 text-[10px]" />
+        <div className="flex min-h-0 flex-1">
+          <div data-testid="task-list" className="min-h-0 flex-1 overflow-y-auto">
+            <p className="p-3 text-[12px] text-gray-400">（やることの一覧）</p>
+            <pre id="log" className="p-2 text-[10px]" />
+            {flood > 0 && Array.from({ length: 60 }, (_, n) => <p key={n} className="px-3 py-1.5 text-[12px]">やること {n}</p>)}
+          </div>
+        </div>
       </aside>
       <section className="min-w-0 flex-1">
         {open && <RecordCard key={open} companyId="co" rootPath="/Users/me/company" recordId={open}

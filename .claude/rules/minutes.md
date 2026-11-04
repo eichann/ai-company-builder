@@ -218,10 +218,12 @@ meeting's reading makes is made once per meeting and item, decided by the server
   turn, no AI turn, no assignee. Meetings made before stay where they are (`received` etc.).
 - **［AI に読ませる］**: `POST /me/minutes/item/:recordId/read-request { expectedVersion? }` (session;
   one of the meeting's people — on its list, its assignee or `attendees`, else 403
-  `MINUTES_NOT_YOURS`; not readable → 404). From `arrived`, `skipped` or `failed`: first the
-  documents' versions are read with **the presser's own Google** (no text) — not shared with them →
+  `MINUTES_NOT_YOURS`; not readable → 404). From `arrived`, `skipped` or `failed`: first the reading
+  itself is tried with **the presser's own Google** (`readDocuments`, what `text` does, 200 characters,
+  thrown away: a failure shows at the press, not after a failed AI turn) — not shared with them →
   403 `MINUTES_NO_ACCESS` 「…ほかの出席者が［AI に読ませる］を押すと、その人の AI が読めます」 and
-  nothing changes (reader rotation, design §4-3); then → `received` with **assignee = the presser**
+  nothing changes (reader rotation, design §4-3); shared but nothing readable → the answers of "When
+  Google refuses the text" below, nothing changes; then → `received` with **assignee = the presser**
   (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
   the existing reading, `text` with their grant). Same member while it waits for their AI → the same
   answer, nothing written; `reading` / `read` / someone else's `received` → 409 `MEETING_NOT_WAITING`.
@@ -267,8 +269,15 @@ meeting's reading makes is made once per meeting and item, decided by the server
 - **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
   `meetingBanner`): at the top of やること (AppShell wraps `TaskListPanel`; `useMeetingArrivals`: at
   mount, on `minutes:changed` / `records:changed` / `notifications:changed`, every 2 minutes, after a
-  press). Per meeting: 「議事録が届きました　<title>（今日 12:00・N人）」 ［AI に読ませる］［読まない］
-  (also after a failed reading); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」
+  press). **It never takes the pane** (first discovery brings many meetings at once, 2026-11-05): one
+  block of at most 45% of the pane with the heading 「議事録が届きました」 and `MEETING_ROWS_SHOWN` (2)
+  one-line rows (`meetingRowWords` 「<title>・今日 12:00」, cut with the whole text as the tooltip, small
+  buttons); the rest behind 「ほか N 件」, opened in an area of its own height that scrolls; the list
+  below keeps the rest and scrolls. Opened, ［まとめて読まない］ skips the folded meetings still
+  arrived (`skippableMeetings`), toast 「N件を読まないにしました」 with one 元に戻す for all of them. **No
+  count on a row**: `attendeeCount` is the members ACB matched, not who attended (the card says
+  what it counts). Per meeting: ［AI に読ませる］［読まない］
+  (also after a failed reading, 「前回読めず」); after ［AI に読ませる］ only the line changes to 「AI が読んでいます…」
   — nothing opens; the member's AI reads it as their 「AI の番」 (below) — with ［読まない］ (今回だけ)
   while it waits for their own AI, 「〇〇さんの AI が読んでいます…」 when another attendee pressed it,
   and the runner's reason instead of the spinner when this PC cannot start it (Codex, not signed in,
@@ -288,7 +297,7 @@ meeting's reading makes is made once per meeting and item, decided by the server
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
   一度招待すると、取り消すことはできません。」), once read the proposals and decisions, and once per meeting
   (localStorage `meeting-auto-offered:<company>`) for a series 「この定例は次から自動で読みますか？」. 見られる人:
-  `meetingSeenWords` 「参加した人（N人）・招待した人（N人）」 (another place keeps the server's phrase).
+  `meetingSeenWords` 「参加者のうち ACB の人 N人・招待した人 N人」 (another place keeps the server's phrase).
 - **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): on a meeting, choosing or making a 案件
   first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
   (`meetingLinkSentence` over `viewers:get` of the 案件); nothing is linked or made before ［つなぐ］.
@@ -299,7 +308,8 @@ meeting's reading makes is made once per meeting and item, decided by the server
   words), `src/features/minutes/model.test.ts` (each banner state), `src/features/chat/aiTurns.test.ts`
   (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
   (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
-  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link),
+  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link; `?flood=12`:
+  two rows, the fold's own scroll, the list's height and scroll also in a short window, ［まとめて読まない］ and its 元に戻す),
   `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 
 ## The text
@@ -318,11 +328,46 @@ state, fields, version } | null, candidates: [{ id, title, typeLabel }], instruc
 - Read **now** from Google with the requesting member's own grant: notes first, then the
   transcript, under 「■ 会議メモ」/「■ 文字起こし」; BOM removed, CRLF → LF, NFC; at most
   `MINUTES_TEXT_MAX` characters with a notice. No grant / no access → a clear refusal.
+  (`readDocuments`, shared with ［AI に読ませる］'s try.)
 - `instructionLike`: `findInstructionLikeText` (`shared/core/instruction-like.ts`, the same copy
   「Web で調べる」 uses; it also flags a line addressed to an AI, 「AI へ：…」). A flag, nothing
   removed. The app's tool puts the header above and the footer below the text, then the
   warning and the structured parts (`minutesReadText`, `client/electron/records/tools.ts`).
 - `Cache-Control: no-store`.
+
+### When Google refuses the text (production, 2026-11-05)
+
+Seen: `drive.files.get` answers, `drive.files.export` of the Gemini notes answers 403, for a doc the
+owner can download by hand in every format — so not sharing, not a download limit. `files.export`
+lists `drive.meet.readonly` among its scopes and Google's announcement says the scope reads and
+downloads "files created or edited by Google Meet", but a third party reports Gemini's notes Docs
+fail with it (「The user has not granted the app … read access to the file」, `appNotAuthorizedToFile`)
+while transcripts work. Unconfirmed until the log line below shows Google's reason.
+
+- **The log**: every refused Google call prints `[google] call refused: … companyId= operation= status=
+  reason=` (`google-client.ts`; Google's short code, never its message, which can name the file).
+- **`files.get` refused** → 「共有されていません」 as before. Meet's record is never a way around
+  sharing: it is tried only for a document Drive opened.
+- **One document's export refused** (403/404) does not stop the others: the notes refused, the
+  transcript document is still read; the part refused says so in the text (「■ 会議メモ」
+  「（Google が文章の取り出しを断ったため…）」), so the AI knows it reads only part.
+- **No transcript came through** → Meet's own record (`transcriptText`, `conferenceRecords.transcripts`
+  + `.entries` + `.participants`, `meetings.space.readonly`, already granted; every transcript not
+  `STARTED`, also one without a document; 100 entries a page) under 「■ 文字起こし（Google Meet の記録から）」
+  as `<name>: <words>`. Kept by Google 30 days after the meeting, may differ a little from the
+  document; handed over like the rest, never stored. **Smart notes have no such way**: the Meet API
+  gives their metadata and the document's id only.
+- **Nothing readable** → `textRefusal`, by reason: `exportSizeLimitExceeded` → `MINUTES_TOO_LARGE`;
+  `cannotExportFile` / `cannotDownload…` → `MINUTES_TEXT_REFUSED` (no copying); `appNotAuthorizedToFile`
+  / `insufficientPermissions` / `insufficientScopes` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → the same code
+  (「いま ACB に許可している範囲では」); anything else the same code, generic. Never 「共有されていません」.
+  403 with `rateLimitExceeded` / `userRateLimitExceeded` / `dailyLimitExceeded` → 503 `GOOGLE_UNAVAILABLE`;
+  `domainPolicy` / `accessNotConfigured` / `SERVICE_DISABLED` → `GOOGLE_STOPPED` (these two groups in
+  `googleRefusal`, for `files.get` too). The app passes the server's sentence on (`memberText`).
+- **Not done without the owner**: a wider scope. `drive`, `drive.readonly` are `GOOGLE_NEVER_SCOPES`;
+  `documents.readonly` (Docs API) is not allowed yet either.
+- Tests: `meeting-attendees.test.ts` 「Drive opens the minutes but refuses their text」 (each
+  mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`).
 
 ## What is stored, and what never
 

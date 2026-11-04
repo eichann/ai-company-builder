@@ -24,6 +24,9 @@
  * - 「この定例は次から自動で読む」 is the member's own and asks the AI to read the next meeting of
  *   the series that their discovery finds;
  * - 「届きました」 shows meetings of the last 3 days; older ones stay openable and readable;
+ * - Drive opening the minutes but refusing their text (Gemini's notes): the press says what happened,
+ *   by Google's reason, before any AI turn, and the reason is in the log; the other document and
+ *   Meet's own record of what was said are still read;
  * - nothing of the minutes' text is stored; the older app's check and the folder setting stay harmless.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -71,9 +74,9 @@ const S = GOOGLE_SEED
 const SERIES = 'fakeseries0001'
 const EV = { weekly: 'fakeweekly0001', weeklyNext: 'fakeweekly0002', hr: 'fakehr0001', retro: 'fakeretro0001', talk: 'faketalk0001', copy: 'fakecopy0001' }
 const YAMADA = 'yamada@div.example'
-const DOC = { weekly: 'fake-doc-weekly-0001', weeklyNext: 'fake-doc-weekly-0002', hr: 'fake-doc-hr-0001', retro: 'fake-doc-retro-0001', talk: 'fake-doc-talk-0001' }
+const DOC = { weekly: 'fake-doc-weekly-0001', weeklyNext: 'fake-doc-weekly-0002', hr: 'fake-doc-hr-0001', retro: 'fake-doc-retro-0001', retroTranscript: 'fake-doc-retro-transcript-01', talk: 'fake-doc-talk-0001' }
 /** Lines of the minutes that must never be kept anywhere. */
-const SECRET_LINES = ['来期の採用は2名に絞ることで合意した', '評価面談で本人から退職の相談があった', 'ふりかえりで出た改善点は3つ', '打ち合わせの結論は保留']
+const SECRET_LINES = ['来期の採用は2名に絞ることで合意した', '評価面談で本人から退職の相談があった', 'ふりかえりで出た改善点は3つ', '打ち合わせの結論は保留', 'ふりかえりの文字起こしの一文', '最後に話した振り返りの結論']
 
 function seed(): GoogleSeed {
   const base = defaultGoogleSeed()
@@ -120,7 +123,14 @@ function seed(): GoogleSeed {
       conf('fake-conf-weekly-0001', 'aaa-bbbb-ccc', '2026-11-04T03:00:10.000Z', [S.member, S.colleague, YAMADA], DOC.weekly),
       conf('fake-conf-hr-0001', 'hhh-iiii-jjj', '2026-11-04T01:00:10.000Z', [S.member, S.colleague], DOC.hr),
       conf('fake-conf-mixed-0001', 'mmm-nnnn-ooo', '2026-11-04T02:00:10.000Z', [S.member, S.colleague], DOC.hr),
-      conf('fake-conf-retro-0001', 'rrr-ssss-ttt', '2026-11-04T06:00:10.000Z', [S.member, S.colleague], DOC.retro),
+      {
+        ...conf('fake-conf-retro-0001', 'rrr-ssss-ttt', '2026-11-04T06:00:10.000Z', [S.member, S.colleague], DOC.retro),
+        // More entries than one page of Meet's answer.
+        transcripts: [{ id: 'transcript-retro', state: 'FILE_GENERATED' as const, docId: DOC.retroTranscript, entries: [
+          ...Array.from({ length: 120 }, (_, n) => ({ speaker: '田中 誠', text: `相づち${n}` })),
+          { speaker: '佐藤 健', text: SECRET_LINES[5] },
+        ] }],
+      },
       conf('fake-conf-talk-0001', 'kkk-llll-mmm', '2026-11-04T07:00:10.000Z', [S.member, S.colleague], DOC.talk),
       conf('fake-conf-organized-01', 'ooo-pppp-qqq', '2026-11-04T04:00:10.000Z', [S.member, S.colleague], DOC.talk),
       conf('fake-conf-pending-0001', 'ppp-qqqq-rrr', '2026-11-04T05:00:10.000Z', [S.member, S.colleague], DOC.talk, 'STARTED'),
@@ -132,6 +142,7 @@ function seed(): GoogleSeed {
       doc(DOC.weekly, `会議メモ\n${SECRET_LINES[0]}\n`, [S.member]),
       doc(DOC.hr, `会議メモ\n${SECRET_LINES[1]}\n`, [S.member, S.colleague]),
       doc(DOC.retro, `会議メモ\n${SECRET_LINES[2]}\n`, [S.member, S.colleague]),
+      doc(DOC.retroTranscript, `文字起こし\n${SECRET_LINES[4]}\n`, [S.member, S.colleague]),
       doc(DOC.talk, `会議メモ\n${SECRET_LINES[3]}\n`, [S.member, S.colleague]),
       doc(DOC.weeklyNext, `会議メモ\n${SECRET_LINES[0]}（2回目）\n`, [S.member]),
     ],
@@ -412,6 +423,80 @@ describe('the meeting\'s people', () => {
     const t = await call('ma-yamada', 'GET', `${C()}/me/minutes/item/${organized}/text`)
     // On the list, so not refused as someone else's; the minutes are not shared with Yamada in Google.
     expect([t.status, t.body.code]).toEqual([403, 'MINUTES_NO_ACCESS'])
+  })
+})
+
+describe('Drive opens the minutes but refuses their text (Gemini\'s notes in production)', () => {
+  const press = (id: string) => call('ma-tanaka', 'POST', `${C()}/me/minutes/item/${id}/read-request`, {})
+  const textOf = (id: string) => call('ma-tanaka', 'GET', `${C()}/me/minutes/item/${id}/text`)
+
+  it('the press says what happened, by Google\'s reason, and nothing changes: it was tried, not left to a failed AI turn', async () => {
+    const before = stateOf(organized)
+    for (const [reason, status, code, words] of [
+      ['appNotAuthorizedToFile', 403, 'MINUTES_TEXT_REFUSED', 'いま ACB に許可している範囲'],
+      ['insufficientPermissions', 403, 'MINUTES_TEXT_REFUSED', 'いま ACB に許可している範囲'],
+      ['cannotExportFile', 403, 'MINUTES_TEXT_REFUSED', 'コピーやダウンロードをさせない設定'],
+      ['exportSizeLimitExceeded', 403, 'MINUTES_TOO_LARGE', '大きすぎて'],
+      ['someNewReason', 403, 'MINUTES_TEXT_REFUSED', 'Google が文章の取り出しを断りました'],
+      ['userRateLimitExceeded', 503, 'GOOGLE_UNAVAILABLE', '少し待って'],
+      ['accessNotConfigured', 403, 'GOOGLE_STOPPED', 'Google の管理者'],
+    ] as const) {
+      google.faults.reset()
+      google.faults.refuseExport(DOC.talk, reason)
+      const r = await press(organized)
+      expect([r.status, r.body.code], reason).toEqual([status, code])
+      expect(r.body.error, reason).toContain(words)
+      // It is shared: never the sentence that sends another attendee to press instead.
+      expect(r.body.error, reason).not.toContain('共有されていません')
+      expect(stateOf(organized), reason).toEqual(before)
+      expect(fieldsOf(organized).assignee ?? null, reason).toBeNull()
+    }
+    google.faults.reset()
+  })
+
+  it('Google\'s short reason and the operation are in the server log, without Google\'s message', async () => {
+    google.faults.refuseExport(DOC.talk, 'appNotAuthorizedToFile')
+    logLines.length = 0
+    await textOf(organized)
+    google.faults.reset()
+    const line = logLines.find(l => l.includes('[google] call refused'))
+    expect(line).toContain('operation=drive.files.export status=403 reason=appNotAuthorizedToFile')
+    expect(logLines.join('\n')).not.toContain('has not granted')
+  })
+
+  it('notes refused: the transcript document is still read, and the AI is told the notes were not', async () => {
+    google.faults.refuseExport(DOC.retro)
+    google.requests.length = 0
+    const t = await textOf(retro)
+    google.faults.reset()
+    expect(t.status, t.text).toBe(200)
+    expect(t.body.data.text).toContain(SECRET_LINES[4])
+    expect(t.body.data.text).toContain('■ 会議メモ\n（Google が文章の取り出しを断ったため')
+    expect(t.body.data.text).not.toContain(SECRET_LINES[2])
+    expect(google.requests.some(q => q.path.endsWith('/entries'))).toBe(false)
+  })
+
+  it('both refused: what was said comes from Meet\'s own record, with who said it, every page; the press goes through', async () => {
+    google.faults.refuseExport(DOC.retro)
+    google.faults.refuseExport(DOC.retroTranscript)
+    const t = await textOf(retro)
+    expect(t.status, t.text).toBe(200)
+    expect(t.body.data.text).toContain('■ 文字起こし（Google Meet の記録から）\n田中 誠: 相づち0\n')
+    expect(t.body.data.text).toContain(`佐藤 健: ${SECRET_LINES[5]}`)
+    expect(t.body.data.text).not.toContain('■ 文字起こし\n')
+    const r = await press(retro)
+    google.faults.reset()
+    expect(r.status, r.text).toBe(200)
+    expect(stateOf(retro).state).toBe('received')
+    // Back where the 3-day window's test expects it.
+    expect((await call('ma-tanaka', 'POST', `${C()}/me/minutes/item/${retro}/skip`, {})).status).toBe(200)
+  })
+
+  it('a document Drive does not open stays 「共有されていません」: Meet\'s record is no way around the sharing', async () => {
+    google.requests.length = 0
+    const t = await call('ma-tanaka', 'GET', `${C()}/me/minutes/item/${weekly}/text`)
+    expect([t.status, t.body.code]).toEqual([403, 'MINUTES_NO_ACCESS'])
+    expect(google.requests.some(q => q.path.includes('/transcripts'))).toBe(false)
   })
 })
 

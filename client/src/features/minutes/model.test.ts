@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingArrivalView } from '../../../shared/minutes-app'
-import { madeWords, meetingBanner, meetingPeopleWords, meetingWhen } from './model'
+import { foldMeetings, madeWords, meetingBanner, meetingRowWords, meetingWhen, skippableMeetings, type MeetingBanner } from './model'
 
 const NOW = new Date(2026, 10, 4, 13, 0).getTime()
 const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
@@ -11,8 +11,8 @@ const item = (over: Partial<MeetingArrivalView> = {}): MeetingArrivalView => ({
 })
 const ctx = { closed: false, hidden: false }
 
-test('when and how many, in the member\'s words', () => {
-  assert.equal(meetingPeopleWords(item(), NOW), '今日 12:00・4人')
+test('a row says what and when, and no count: ACB\'s members on a meeting are not how many attended', () => {
+  assert.equal(meetingRowWords(item(), NOW), '定例ミーティング・今日 12:00')
   assert.equal(meetingWhen(new Date(2026, 10, 3, 15, 0).toISOString(), NOW), '昨日 15:00')
   assert.equal(meetingWhen(new Date(2026, 10, 2, 9, 5).toISOString(), NOW), '11/2 9:05')
   assert.equal(madeWords({ decisions: 2, proposals: 3 }), '決めたこと2・やることの案3')
@@ -43,4 +43,15 @@ test('read: shown until the member closes it; ［読まない］: gone for who c
   assert.equal(meetingBanner(item({ status: 'skipped', byYou: true, by: { memberId: 'u1', displayName: '阿部' } }), ctx), null)
   assert.deepEqual(meetingBanner(item({ status: 'skipped', by: { memberId: 'u1', displayName: '阿部' } }), ctx), { kind: 'skipped', by: '阿部' })
   assert.equal(meetingBanner(item(), { ...ctx, hidden: true }), null)
+})
+
+test('two rows at most stay out; ［まとめて読まない］ takes only the folded ones still waiting', () => {
+  const rows = ['arrived', 'arrived', 'arrived', 'reading', 'read'].map((kind, n) => ({
+    n, banner: (kind === 'arrived' ? { kind, failedBefore: false } : kind === 'read' ? { kind } : { kind, auto: false, reader: null, canSkip: true, problem: null }) as MeetingBanner,
+  }))
+  const { shown, folded } = foldMeetings(rows)
+  assert.deepEqual(shown.map(r => r.n), [0, 1])
+  assert.deepEqual(folded.map(r => r.n), [2, 3, 4])
+  assert.deepEqual(skippableMeetings(folded).map(r => r.n), [2])
+  assert.deepEqual(foldMeetings(rows.slice(0, 2)).folded, [])
 })

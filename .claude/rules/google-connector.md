@@ -71,6 +71,8 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 - The **access token** lives only in `google-client.ts`'s memory (per company, member and grant),
   until Google's expiry minus a minute and never more than 1 hour. It is dropped when a grant
   ends, the client or switch changes, or Google answers 401.
+- Every refused Google call logs its operation, status and Google's short reason (`[google] call
+  refused`, never the message): `minutes.md` "When Google refuses the text".
 - Nothing secret is ever answered, logged or stored in plain text (test below). Seals use the
   broker's KEK; without one (`vault-off`) nothing can be registered or used. `rewrapAll` (KEK
   rotation) does not yet re-wrap these rows — `envelopeSecretCipher(current, previous)` keeps

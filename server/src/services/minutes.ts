@@ -126,6 +126,21 @@ export const MINUTES_NOT_YOURS = {
   error: 'この議事録は、担当の人か会議に出た人だけが読めます。',
   code: 'MINUTES_NOT_YOURS',
 }
+/** ［AI に読ませる］ tries this much of the text: enough to prove reading works, nothing is kept. */
+const READ_PROBE_CHARS = 200
+const NOTES_HEADING = '■ 会議メモ'
+const TRANSCRIPT_HEADING = '■ 文字起こし'
+/** Words said in the meeting, read from Meet's record because Drive refused the document. */
+const MEET_RECORD_HEADING = '■ 文字起こし（Google Meet の記録から）'
+const PART_REFUSED_NOTE = '（Google が文章の取り出しを断ったため、ここは読めませんでした）'
+
+const GOOGLE_RETRY_LATER = 'Google から読めませんでした。少し待ってからもう一度お試しください。'
+/** Drive answers its quota with 403 too: that is not a refusal of the member. */
+const GOOGLE_BUSY_REASONS = ['rateLimitExceeded', 'userRateLimitExceeded', 'dailyLimitExceeded', 'RESOURCE_EXHAUSTED']
+const GOOGLE_SETTINGS_REASONS = ['domainPolicy', 'accessNotConfigured', 'SERVICE_DISABLED']
+const ACB_PERMISSION_REASONS = ['appNotAuthorizedToFile', 'insufficientPermissions', 'insufficientScopes', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']
+const NO_COPY_REASONS = ['cannotExportFile', 'cannotDownload', 'cannotDownloadFile', 'cannotDownloadAbusiveFile']
+
 /** ［AI に読ませる］ by an attendee whose Google cannot open the minutes (reader rotation, design §4-3). */
 export const MINUTES_NOT_SHARED_MESSAGE = 'あなたの Google では、この会議の議事録を開けません（Google で共有されていません）。ほかの出席者が［AI に読ませる］を押すと、その人の AI が読めます。'
 
@@ -187,9 +202,38 @@ export function googleRefusal(err: GoogleReadFailed): Refusal {
     }
   }
   if (r.kind === 'refused' && (r.status === 403 || r.status === 404)) {
+    if (GOOGLE_BUSY_REASONS.includes(r.googleReason ?? '')) return refuse('unavailable', GOOGLE_RETRY_LATER, { code: 'GOOGLE_UNAVAILABLE' })
+    if (GOOGLE_SETTINGS_REASONS.includes(r.googleReason ?? '')) {
+      return refuse('forbidden', '会社の Google の設定で、ACB から議事録を読むことが止められています。Google の管理者に伝えてください。', { code: 'GOOGLE_STOPPED' })
+    }
     return refuse('forbidden', MINUTES_NOT_SHARED_MESSAGE, { code: 'MINUTES_NO_ACCESS' })
   }
-  return refuse('unavailable', 'Google から読めませんでした。少し待ってからもう一度お試しください。', { code: 'GOOGLE_UNAVAILABLE' })
+  return refuse('unavailable', GOOGLE_RETRY_LATER, { code: 'GOOGLE_UNAVAILABLE' })
+}
+
+/** Drive opened the document but refused its text, and this is not Google asking to wait or a company-wide stop. */
+function textRefused(err: GoogleReadFailed): boolean {
+  const r = err.result
+  return r.kind === 'refused' && (r.status === 403 || r.status === 404)
+    && !GOOGLE_BUSY_REASONS.includes(r.googleReason ?? '') && !GOOGLE_SETTINGS_REASONS.includes(r.googleReason ?? '')
+}
+
+/**
+ * The minutes are shared with the member (Drive opened them) and Google still refused their text:
+ * what happened, by Google's reason. Never 「共有されていません」, and no one else's press helps.
+ */
+export function textRefusal(err: GoogleReadFailed): Refusal {
+  const reason = err.result.googleReason ?? ''
+  if (reason === 'exportSizeLimitExceeded') {
+    return refuse('forbidden', '議事録が大きすぎて、Google が文章を取り出せませんでした（10MB まで）。Google ドキュメントで開いて読んでください。', { code: 'MINUTES_TOO_LARGE' })
+  }
+  if (NO_COPY_REASONS.includes(reason)) {
+    return refuse('forbidden', 'この議事録は開けますが、コピーやダウンロードをさせない設定のため、Google が文章の取り出しを断りました。会議を開いた人か Google の管理者に確かめてください。', { code: 'MINUTES_TEXT_REFUSED' })
+  }
+  if (ACB_PERMISSION_REASONS.includes(reason)) {
+    return refuse('forbidden', 'この議事録は共有されていて開けますが、いま ACB に許可している範囲では、Google が文章の取り出しを断りました。AI は読めないため、Google ドキュメントで開いて読んでください。会社の管理者にも伝えてください。', { code: 'MINUTES_TEXT_REFUSED' })
+  }
+  return refuse('forbidden', 'この議事録は開けますが、Google が文章の取り出しを断りました。AI は読めないため、Google ドキュメントで開いて読んでください。会社の管理者にも伝えてください。', { code: 'MINUTES_TEXT_REFUSED' })
 }
 
 export function createMinutesService(deps: MinutesServiceDeps) {
@@ -398,26 +442,77 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   const seriesKey = (series: string) => deps.tokenDigest.digest(`meeting-series:${series}`).slice(0, 24)
 
   /**
+   * The minutes' documents as text with the member's own Google permission, at most `max` characters:
+   * what ［AI に読ませる］ tries and what the text answer hands over (minutes.md "The text"). A document
+   * Drive will not open is the member's refusal (not shared). One it opens but whose text it refuses
+   * does not stop the others; when no transcript came through, Meet's own record of what was said
+   * stands in. Nothing readable → why, by Google's reason.
+   */
+  async function readDocuments(companyId: string, userId: string, ref: SourceRef, max: number): Promise<Outcome<{ text: string; truncated: boolean; versions: string[] }>> {
+    const versions: string[] = []
+    let parts: Array<{ kind: 'notes' | 'transcript'; text: string | null }> = []
+    let truncated = false
+    let refused: GoogleReadFailed | null = null
+    let room = max
+    const take = (heading: string, got: { text: string; truncated: boolean }) => {
+      truncated ||= got.truncated
+      room -= heading.length + 2 + got.text.length
+      return `${heading}\n${got.text}`
+    }
+    try {
+      for (const d of ref.docs) {
+        versions.push(`${d.kind}:${await meetings.docVersion(companyId, userId, d.id)}`)
+        if (room <= 0) { truncated = true; continue }
+        const heading = d.kind === 'notes' ? NOTES_HEADING : TRANSCRIPT_HEADING
+        try {
+          const got = await meetings.docText(companyId, userId, d.id, Math.max(0, room - heading.length - 2))
+          parts.push({ kind: d.kind, text: take(heading, got) })
+        } catch (err) {
+          if (!(err instanceof GoogleReadFailed) || !textRefused(err)) throw err
+          refused ??= err
+          parts.push({ kind: d.kind, text: null })
+        }
+      }
+      if (refused && !parts.some(p => p.kind === 'transcript' && p.text !== null) && room > 0) {
+        const got = await meetRecordText(companyId, userId, ref.conference, Math.max(0, room - MEET_RECORD_HEADING.length - 2))
+        if (got) parts = [...parts.filter(p => p.kind !== 'transcript'), { kind: 'transcript', text: take(MEET_RECORD_HEADING, got) }]
+      }
+    } catch (err) {
+      if (err instanceof GoogleReadFailed) return googleRefusal(err)
+      throw err
+    }
+    if (refused && !parts.some(p => p.text !== null)) return textRefusal(refused)
+    const text = parts.map(p => p.text ?? `${p.kind === 'notes' ? NOTES_HEADING : TRANSCRIPT_HEADING}\n${PART_REFUSED_NOTE}`).join('\n\n')
+    return ok({ text, truncated, versions })
+  }
+
+  /** Meet's record of what was said, or null when it holds none or Google refuses this member too. */
+  async function meetRecordText(companyId: string, userId: string, conference: string, max: number): Promise<{ text: string; truncated: boolean } | null> {
+    try {
+      return await meetings.transcriptText(companyId, userId, conference, max)
+    } catch (err) {
+      if (err instanceof GoogleReadFailed && textRefused(err)) return null
+      throw err
+    }
+  }
+
+  /**
    * The meeting becomes the AI's turn on `userId`'s PC (［AI に読ませる］, or their 「自動で読む」
-   * series): first the minutes' documents are opened with that member's own Google permission
-   * (their version read, no text), so a member whose Google is not shared the minutes hears so
-   * at once and another attendee can press instead (design §4-3). Then arrived / skipped / failed
-   * → received with them as the assignee. Quiet: a turn of the AI tells nobody.
+   * series): first the reading itself is tried with that member's own Google permission
+   * (`readDocuments`, a little of the text, thrown away), so a member whose Google cannot read the
+   * minutes hears why at once, not after a failed turn of the AI, and when they are not shared
+   * another attendee can press instead (design §4-3). Then arrived / skipped / failed → received
+   * with them as the assignee. Quiet: a turn of the AI tells nobody.
    */
   async function askToRead(companyId: string, userId: string, recordId: string, expected: number, actor: ServiceActor, note: string): Promise<Outcome<MeetingReadRequestResult>> {
     const records = companyData.forCompany(companyId).records
     const ref = parseRef(fieldsOf(records, recordId).fields.source_ref)
     if (!ref || ref.docs.length === 0) return refuse('conflict', 'この議事録の元の文書が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
-    const versions: string[] = []
-    try {
-      for (const d of ref.docs) versions.push(`${d.kind}:${await meetings.docVersion(companyId, userId, d.id)}`)
-    } catch (err) {
-      if (err instanceof GoogleReadFailed) return googleRefusal(err)
-      throw err
-    }
+    const tried = await readDocuments(companyId, userId, ref, READ_PROBE_CHARS)
+    if (!tried.ok) return tried
     const r = writer.transition(companyId, {
       recordId, action: MEETING_READ_REQUEST_ACTION, expectedVersion: expected, to: 'received',
-      fields: { assignee: userId, doc_version: versions.join(',') }, actor, note, quiet: true,
+      fields: { assignee: userId, doc_version: tried.value.versions.join(',') }, actor, note, quiet: true,
     })
     if (!r.ok) {
       if (r.reason === 'stale') return refuse('conflict', 'ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', { code: 'VERSION_CONFLICT', version: fieldsOf(records, recordId).version })
@@ -770,27 +865,16 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const ref = parseRef(now.fields.source_ref)
       if (!ref || ref.docs.length === 0) return refuse('conflict', 'この議事録の元の文書が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
 
-      const parts: string[] = []
-      const versions: string[] = []
-      let truncated = false
+      const read = await readDocuments(member.companyId, member.userId, ref, MINUTES_TEXT_MAX)
+      if (!read.ok) return read
+      const { text, truncated, versions } = read.value
       let event: MeetEvent | null = null
       try {
-        let room = MINUTES_TEXT_MAX
-        for (const d of ref.docs) {
-          versions.push(`${d.kind}:${await meetings.docVersion(member.companyId, member.userId, d.id)}`)
-          if (room <= 0) { truncated = true; continue }
-          const heading = d.kind === 'notes' ? '■ 会議メモ' : '■ 文字起こし'
-          const got = await meetings.docText(member.companyId, member.userId, d.id, Math.max(0, room - heading.length - 2))
-          truncated ||= got.truncated
-          parts.push(`${heading}\n${got.text}`)
-          room -= heading.length + 2 + got.text.length
-        }
         event = await meetings.event(member.companyId, member.userId, ref.event)
       } catch (err) {
         if (err instanceof GoogleReadFailed) return googleRefusal(err)
         throw err
       }
-      const text = parts.join('\n\n')
 
       const names = new Map(deps.members(member.companyId).map(m => [m.userId, m.name]))
       const linked = handle.records.linksFrom([row.id]).find(l => l.name === 'bundle' && l.targetId)

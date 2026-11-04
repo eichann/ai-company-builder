@@ -21,7 +21,9 @@
  *   www.googleapis.com            GET  /calendar/v3/calendars/{calendarId}/events[/{eventId}]
  *   meet.googleapis.com           GET  /v2/conferenceRecords, /v2/conferenceRecords/{id},
  *                                      /v2/conferenceRecords/{id}/smartNotes[/{noteId}],
- *                                      /v2/conferenceRecords/{id}/transcripts[/{transcriptId}]
+ *                                      /v2/conferenceRecords/{id}/transcripts[/{transcriptId}],
+ *                                      /v2/conferenceRecords/{id}/transcripts/{transcriptId}/entries,
+ *                                      /v2/conferenceRecords/{id}/participants
  *   www.googleapis.com            GET  /drive/v3/files/{fileId}, /drive/v3/files/{fileId}/export
  *                                 GET  /drive/v3/files (appProperties search), /drive/v3/files/{fileId}/permissions
  *                                 POST /upload/drive/v3/files?uploadType=multipart
@@ -168,6 +170,8 @@ export interface FakeGoogleFaults {
   dropAnswerAfterSend(count?: number): void
   /** A refresh that asks for fewer scopes gets every granted one anyway (a Google that ignores `scope`). */
   ignoreRefreshScope: boolean
+  /** Drive opens this document (`files.get`) but refuses its export with 403 and this reason (Gemini's notes in production). */
+  refuseExport(docId: string, reason?: string): void
   reset(): void
 }
 
@@ -297,6 +301,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let failCount = 0
   let failStatus = 500
   let failPrefix: string | null = null
+  const exportRefused = new Map<string, string>()
   let dropCount = 0
   const held = new Set<() => void>()
   const faults: FakeGoogleFaults = {
@@ -305,7 +310,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     failOn(prefix, count = 1, status = 500) { failCount = count; failStatus = status; failPrefix = prefix },
     dropAnswerAfterSend(count = 1) { dropCount = count },
     ignoreRefreshScope: false,
-    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false },
+    refuseExport(docId, reason = 'appNotAuthorizedToFile') { exportRefused.set(docId, reason) },
+    reset() { faults.delayMs = 0; failCount = 0; failPrefix = null; dropCount = 0; faults.ignoreRefreshScope = false; exportRefused.clear() },
   }
 
   const app = new Hono()
@@ -706,6 +712,29 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     })
   }
 
+  const participantId = (speaker: string) => Buffer.from(speaker).toString('base64url')
+  app.get('/v2/conferenceRecords/:id/transcripts/:transcriptId/entries', c => {
+    const conf = visibleConference(c, bearer(c, NEEDS.meet, 'meet.googleapis.com'))
+    const t = conf.transcripts.find(x => x.id === c.req.param('transcriptId'))
+    if (!t) throw meetNotFound()
+    const { slice, next } = pageOf(t.entries ?? [], c, 10)
+    return c.json({
+      ...(slice.length ? { transcriptEntries: slice.map((e, i) => ({
+        name: `conferenceRecords/${conf.id}/transcripts/${t.id}/entries/${i}`, participant: `conferenceRecords/${conf.id}/participants/${participantId(e.speaker)}`, text: e.text, languageCode: 'ja-JP',
+      })) } : {}),
+      ...(next ? { nextPageToken: next } : {}),
+    })
+  })
+  app.get('/v2/conferenceRecords/:id/participants', c => {
+    const conf = visibleConference(c, bearer(c, NEEDS.meet, 'meet.googleapis.com'))
+    const speakers = [...new Set(conf.transcripts.flatMap(t => (t.entries ?? []).map(e => e.speaker)))]
+    const { slice, next } = pageOf(speakers, c, 100)
+    return c.json({
+      ...(slice.length ? { participants: slice.map(s => ({ name: `conferenceRecords/${conf.id}/participants/${participantId(s)}`, signedinUser: { user: 'users/fake', displayName: s } })) } : {}),
+      ...(next ? { nextPageToken: next } : {}),
+    })
+  })
+
   // ---- Drive v3 ----
 
   type LiveDoc = NonNullable<ReturnType<typeof docs.get>>
@@ -861,6 +890,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       return c.body('\uFEFF' + f.content.toString('utf8').replace(/\r?\n/g, '\r\n'), 200, { 'content-type': `${mimeType}; charset=UTF-8` })
     }
     const { d } = visibleDoc(c)
+    const refusal = exportRefused.get(c.req.param('fileId') ?? '')
+    if (refusal) throw apiError(403, 'The user has not granted the app read access to the file.', refusal)
     const mimeType = c.req.query('mimeType')
     if (!mimeType) throw apiError(400, 'Required parameter: mimeType', 'required', { location: 'mimeType', locationType: 'parameter' })
     if (mimeType !== 'text/plain') throw apiError(400, 'The requested conversion is not supported.', 'badRequest')

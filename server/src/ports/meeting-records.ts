@@ -76,4 +76,10 @@ export interface MeetingRecordsReader {
   docVersion(companyId: string, userId: string, docId: string): Promise<string>
   /** A document as plain text, at most `max` characters (with a notice when cut). */
   docText(companyId: string, userId: string, docId: string, max?: number): Promise<{ text: string; truncated: boolean }>
+  /**
+   * What was said in the meeting, read from the meeting's own record instead of a document (speaker:
+   * words, at most `max` characters), or null when the record holds none. For a document the member
+   * opens but whose text the provider refuses to hand over (minutes.md "The text").
+   */
+  transcriptText(companyId: string, userId: string, conferenceId: string, max?: number): Promise<{ text: string; truncated: boolean } | null>
 }
