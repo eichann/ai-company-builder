@@ -140,7 +140,8 @@ function failureKind(result: SyncOutcomeView): string {
  * without repeating its notice).
  */
 export function afterSync(state: AutoSyncState, result: SyncOutcomeView, options: { manual: boolean }): { state: AutoSyncState; showFailure: boolean } {
-  if (result.success) return { state: { ...state, needsMember: false, notified: [] }, showFailure: false }
+  // A success took the colleagues' changes too: nothing waits for an open file any more.
+  if (result.success) return { state: { ...state, needsMember: false, notified: [], openFilesHeld: null }, showFailure: false }
   if (options.manual && isMemberCancel(result)) return { state: { ...state, needsMember: false }, showFailure: true }
   const kind = failureKind(result)
   const seen = state.notified.includes(kind)
