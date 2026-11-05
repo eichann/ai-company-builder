@@ -22,18 +22,29 @@ import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
 /**
+ * The person fields that make a record the member's for an AI-only action (`who: [ai]`): the one it
+ * waits for (`assignee`, `next_actor` — the same rule as 「AI の番」, services/records.ts `aiTurnOf`)
+ * or the one who asked for it (`requested_by`: a task the member's consultation made in 準備中 for a
+ * colleague). Audit B-M4: never another member's or another department's record.
+ */
+export const AI_ONLY_OWNER_FIELDS = ['assignee', 'next_actor', 'requested_by'] as const
+
+/**
  * May `member` (acting as `actor`) do an action whose `who` is this, on a record with these values?
  * `holdsRole(name)`: whether `member` holds the business role `role:<name>` on this record (plan C3,
  * services/plugin-roles.ts); without it a `role:` entry matches no one (fails closed).
+ * `existing`: false only for a record not made yet (a plugin's create), where nobody's record is touched.
  */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean,
-  holdsRole?: (role: string) => boolean): boolean {
+  holdsRole?: (role: string) => boolean, existing = true): boolean {
   // `who: [system]`: only the server's own services (the service writer) — never through here.
   if (isSystemOnly(who)) return false
   if (actor.kind === 'ai' && !who.includes('ai')) return false
   const people = who.filter(w => w !== 'ai')
-  // `ai` alone: any member's AI may do it.
-  if (people.length === 0) return actor.kind === 'ai'
+  // `ai` alone: the member's AI, on a record that is the member's (assignee / next actor / requester).
+  if (people.length === 0) {
+    return actor.kind === 'ai' && (!existing || AI_ONLY_OWNER_FIELDS.some(f => values[f] === member.userId))
+  }
   return people.some(w =>
     w === 'anyone' ||
     (w === 'admin' && FULL_ACCESS_ROLES.has(member.role)) ||

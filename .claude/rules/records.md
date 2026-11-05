@@ -1098,8 +1098,13 @@ clock's, a separate service writing through the service writer: `notifications.m
   refuses it to every member and AI, and no screen (`recordActionChoices`) or AI tool offers it
   (`isSystemOnly`). First use: interaction v8's `left_inbox`. Roles do
   not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
-  member who qualifies on their own (or any member when `who` is `[ai]` alone) — so the AI cannot
-  complete a task. `ok_from` widens `who` for a person who states whose OK it was (above), never
+  member who qualifies on their own — so the AI cannot complete a task. When `who` is `[ai]`
+  alone, only the AI of the record's own people: `assignee`, `next_actor` (the 「AI の番」 rule) or
+  `requested_by` (a task the member's consultation made in 準備中) is the member — never another
+  member's or another department's record, owners and admins included (audit B-M4,
+  `AI_ONLY_OWNER_FIELDS` in `record-engine/act.ts`; a plugin's create, with no record yet, is not
+  limited by it). Tests: `record-task-v5.test.ts` "an AI-only action is the AI of the record's own
+  people only", `inbox.test.ts` "a department message taken by Bob …". `ok_from` widens `who` for a person who states whose OK it was (above), never
   for the AI. Whether it is the AI is decided by the credential (next section), never by the
   request body (an `actor` field there is ignored). `external` is reserved for server-side
   integrations.

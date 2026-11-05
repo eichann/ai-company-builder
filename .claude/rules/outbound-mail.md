@@ -110,7 +110,10 @@ In this order, nothing sent unless all pass:
 7. 2xx → record `sent` (`sent_at`, `provider_message_id` = Gmail's id), the retention clock starts,
    and an `interaction` (やりとり) on the まとまり (`SERVICE_RECEIPT_TYPES`: channel `email`, title /
    summary = subject, `counterpart_text` = recipient **domains** only, `source_ref` `gmail:<id>`,
-   folder = the まとまり's; links `bundle` and, when the まとまり links a 相手, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
+   placed like the mail record itself — the まとまり's folder, else the meeting's / 連絡's / やること's
+   place, owner-only / members-only kept; never wider than the mail, so a department task's mail
+   outside any まとまり is not company-wide (audit B-M2, `outbound-mail.test.ts` "a department
+   task's mail outside any まとまり"); links `bundle` and, when the まとまり links a 相手, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
    `GOOGLE_UNAVAILABLE`). A lost answer or a 5xx → `unknown`
    「届いたか分かりません。Gmail の送信済みを確かめてください。」; ACB does not look in Gmail's sent mail (受信を読む
    reads the inbox only, and only for a member who allowed it), so the person answers `POST …/resolve { sent }`: true → `sent`, false →
@@ -211,8 +214,7 @@ no AI.
 - **After a confirmed send** (or `unknown` → 「送られていた」: the day is kept on the record as
   `reply_wait_until` at `send_unknown`, cleared by 「送られていなかった」): the sent mail's
   `interaction` additionally keeps our Message-ID (`message_id`, `<acb.<send id>@<domain>>`) and
-  the Gmail thread (`thread_ref`), is placed like the mail record (not only the まとまり's folder; a
-  sent mail without 「返事を待つ」 too when its record is owner-only or members-only — never wider
+  the Gmail thread (`thread_ref`), is placed like the mail record (as every receipt: never wider
   than the mail; no record → no receipt),
   is the sender's (`assignee`) and starts `handled` (nobody's turn). Then
   `outboundMail.onAwaitingReply` → `inbox.awaitOwnMessage` (`composition.ts`): our message is

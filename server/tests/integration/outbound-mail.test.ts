@@ -599,6 +599,25 @@ describe('返事を待つ: a new mail we send first waits for their answer (outb
     expect(waitingFor(interaction.id)[0].state).toBe('checking')
   })
 
+  it('a department task\'s mail outside any まとまり: its やりとり stays in that department, never company-wide (audit B-M2)', async () => {
+    const task = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '社内に共有する', folder: '営業部', fields: { assignee: 'm-sato' } })
+    expect(task.status, task.text).toBe(201)
+    const taskId = task.body.data.record.id as string
+    const refs = (await ai(token, 'POST', '/outbound-recipients', { taskId })).body.data.recipients as Json[]
+    const to = refs.find(x => x.source === 'member' && x.email === EMAILS['m-tanaka']).ref
+    const made = await ai(token, 'POST', '/outbound', { taskId, toRefs: [to], subject: `共有 ${Math.random()}`, body: 'ご確認ください。' })
+    expect(made.status, made.text).toBe(201)
+    const d = made.body.data.draft as Json
+    const before = new Set((db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'interaction'").all(CO) as Json[]).map(r => r.id))
+    // Unticked (no 返事を待つ): the receipt is still placed like the mail.
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash })
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    const made2 = (db.prepare("SELECT id, folder FROM records WHERE company_id = ? AND type = 'interaction'").all(CO) as Json[]).filter(x => !before.has(x.id))
+    expect(made2).toHaveLength(1)
+    expect(made2[0].folder).toBe('営業部')
+    expect(made2[0].folder).toBe((db.prepare('SELECT folder FROM records WHERE company_id = ? AND id = ?').get(CO, d.id) as Json).folder)
+  })
+
   it('a lost answer, then 「送られていた」: the waiting chosen at the send starts then', async () => {
     const d = await draft({ expectsReply: true })
     const until = day(3)

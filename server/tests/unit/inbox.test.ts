@@ -282,6 +282,19 @@ describe('who a message belongs to', () => {
     if (!again.ok) expect(again.body.code).toBe('NOT_UNCLAIMED')
   })
 
+  it('a department message taken by Bob: another reader\'s AI cannot set it aside or hand it on (audit B-M4)', async () => {
+    settings({ sharedAddresses: [{ address: 'info@acme.example', folder: '営業部' }] })
+    inbox.receive('a', 'u-alice', mail({ to: [{ address: 'info@acme.example' }] }))
+    const [row] = interactions()
+    ok(inbox.claim(m('u-bob'), row.id, { expectedVersion: 1 }))
+    for (const action of ['set_aside', 'ask_person']) {
+      expect(await engine.act(m('u-alice'), AI('u-alice'), row.id, action, { expectedVersion: 2, note: '不要' })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    }
+    expect(stateOf(row.id).state).toBe('received')
+    // Bob's own AI may.
+    expect(ok(await engine.act(m('u-bob'), AI('u-bob'), row.id, 'set_aside', { expectedVersion: 2, note: '営業メール' })).record.state).toBe('excluded')
+  })
+
   it('a shared address may not name a private folder; only owners and admins change the settings', () => {
     const r = inbox.update(m('u-admin'), { sharedAddresses: [{ address: 'info@acme.example', folder: '経理部' }] })
     expect(r.ok).toBe(false)
