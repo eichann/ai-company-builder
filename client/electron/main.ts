@@ -119,6 +119,8 @@ const claudeCli = createClaudeCli()
 const appPages = createAppPages(__dirname)
 // Set once the consultation windows exist (below): they go with the main window.
 let closeChatWindowsWithMain = () => {}
+// Set once sync is wired (below): closing the window waits for a running sync.
+let syncBeforeClose: { isRunning(): boolean; whenIdle(): Promise<void>; resumeAutomaticRuns(): void } | null = null
 // The main window; closing it first lets the renderer save every open tab.
 const mainWindowHost = createMainWindowHost({
   webPreferences: appPages.webPreferences,
@@ -127,6 +129,7 @@ const mainWindowHost = createMainWindowHost({
   askClose: window => window.send('app:closeRequested'),
   docbaseCookie: () => config.load().docbaseCookie,
   onClosed: () => closeChatWindowsWithMain(),
+  sync: () => syncBeforeClose,
 })
 // Events to the window (features/ports.ts WindowPort).
 const appWindow = mainWindowHost.port
@@ -438,6 +441,7 @@ const { gitSync, activity: syncActivity } = wireSync(ipc, {
   shellEnv,
   aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
 })
+syncBeforeClose = gitSync
 
 // Private folders: the 「新しいフォルダ…」 dialog, the lock icons and the guards
 // the chat and the file operations ask (features/private-folders).

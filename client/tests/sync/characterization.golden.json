@@ -1415,7 +1415,7 @@
         "member": "a",
         "result": {
           "success": true,
-          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。前回の同期が途中で止まっていたため、やり直しました。止まっていた間のファイル（『x.md』）は、やり直す前の内容を .backups に保存しました。",
           "hadConflicts": true,
           "conflictFiles": [
             "x.md"
@@ -1424,10 +1424,15 @@
           "backupPath": "<ROOT>/members/a/.backups/<TS>",
           "restoredFolders": [],
           "ignoredLargeFiles": [],
-          "excludedNestedRepos": []
+          "excludedNestedRepos": [],
+          "recoveredFiles": [
+            "x.md"
+          ],
+          "recoveryBackupPath": "<ROOT>/members/a/.backups/<TS>_before_recovery"
         },
         "dialogs": [],
         "logs": [
+          "warn: Git sync: Kept 1 file(s) before cleaning up a stopped operation",
           "log: Git sync: Detected stale rebase, aborting...",
           "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
@@ -1463,7 +1468,7 @@
         "member": "a",
         "result": {
           "success": true,
-          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。前回の同期が途中で止まっていたため、やり直しました。止まっていた間のファイル（『x.md』）は、やり直す前の内容を .backups に保存しました。",
           "hadConflicts": true,
           "conflictFiles": [
             "x.md"
@@ -1472,10 +1477,15 @@
           "backupPath": "<ROOT>/members/a/.backups/<TS>",
           "restoredFolders": [],
           "ignoredLargeFiles": [],
-          "excludedNestedRepos": []
+          "excludedNestedRepos": [],
+          "recoveredFiles": [
+            "x.md"
+          ],
+          "recoveryBackupPath": "<ROOT>/members/a/.backups/<TS>_before_recovery"
         },
         "dialogs": [],
         "logs": [
+          "warn: Git sync: Kept 1 file(s) before cleaning up a stopped operation",
           "log: Git sync: Detected stale MERGE_HEAD, aborting...",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
@@ -1532,6 +1542,19 @@
             {
               "metadata": {
                 "timestamp": "<TS>",
+                "reason": "before_recovery",
+                "files": [
+                  "x.md"
+                ],
+                "note": "on disk when sync cleaned up an operation that had stopped half-way"
+              },
+              "files": {
+                "x.md": "9ff94f6241a8e1f8c5fcbde82a82c5d989a4a45a"
+              }
+            },
+            {
+              "metadata": {
+                "timestamp": "<TS>",
                 "reason": "conflict",
                 "conflictFiles": [
                   "x.md"
@@ -1541,6 +1564,19 @@
               },
               "files": {
                 "x.md": "c1827f07e114c20547dc6a7296588870a4b5b62c"
+              }
+            },
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "before_recovery",
+                "files": [
+                  "x.md"
+                ],
+                "note": "on disk when sync cleaned up an operation that had stopped half-way"
+              },
+              "files": {
+                "x.md": "988af7b231b6c9d62dfeeac073bdaa4df0dab627"
               }
             }
           ]

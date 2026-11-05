@@ -7,7 +7,7 @@ import { autoSyncSkipReason, type AutoSyncMode, type AutoSyncRendererState, type
 import type { GitSync, GitSyncResult } from './git-sync'
 
 export interface AutoSyncHost {
-  gitSync: Pick<GitSync, 'receive' | 'isRunning'> & ((...args: Parameters<GitSync>) => ReturnType<GitSync>)
+  gitSync: Pick<GitSync, 'receive' | 'isRunning' | 'automaticRunsHeld'> & ((...args: Parameters<GitSync>) => ReturnType<GitSync>)
   /** An AI turn is running in some chat. */
   aiRunning: () => boolean
   /** A download-choice change or private-folder creation in progress. */
@@ -27,7 +27,8 @@ export function rendererState(value: unknown): AutoSyncRendererState {
 export async function runAutoSync(host: AutoSyncHost, repoPath: string, companyId: string, mode: AutoSyncMode, state: unknown): Promise<AutoSyncResult<GitSyncResult>> {
   const reason = autoSyncSkipReason(rendererState(state), {
     aiRunning: host.aiRunning(),
-    syncRunning: host.gitSync.isRunning(),
+    // Closing the app waits for syncs to end: nothing new starts meanwhile.
+    syncRunning: host.gitSync.isRunning() || host.gitSync.automaticRunsHeld(),
     activity: host.activity(),
   })
   if (reason) return { status: 'skipped', reason }

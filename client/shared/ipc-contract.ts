@@ -252,6 +252,28 @@ export interface GitResult {
   // shared, moved to outsideCheckoutBackupPath (.backups/<ts>_outside_checkout)
   outsideCheckoutFiles?: string[]
   outsideCheckoutBackupPath?: string
+  // Files in a folder named like a private folder: not shared, moved to
+  // reservedPathBackupPath (.backups/<ts>_reserved_path)
+  reservedPathFiles?: string[]
+  reservedPathBackupPath?: string
+  // Large files kept on this computer that a teammate shared at the same
+  // path: this computer's versions were copied to largeFileBackupPath
+  largeFileBackupFiles?: string[]
+  largeFileBackupPath?: string
+  // On disk when an operation an earlier sync left half-way was cleaned up:
+  // copied to recoveryBackupPath (.backups/<ts>_before_recovery)
+  recoveredFiles?: string[]
+  recoveryBackupPath?: string
+  // Private folders deleted because the member may no longer read them (no backup)
+  lostPrivateFolders?: string[]
+  // Private folders made public; unsynced edits are in madePublicBackupPath
+  madePublicFolders?: string[]
+  madePublicBackupPath?: string
+  // Private folders whose place held something else: moved to movedAsideBackupPath first
+  movedAsideFolders?: string[]
+  movedAsideBackupPath?: string
+  // One entry per readable private folder this sync handled
+  privateFolders?: Array<{ path: string; success: boolean; setAside?: boolean; backupPath?: string }>
 }
 
 export interface GitPreviewResult {

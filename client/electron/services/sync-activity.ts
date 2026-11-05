@@ -12,6 +12,14 @@ export interface SyncActivity {
   current(): SyncActivityKind | null
 }
 
+/**
+ * Whether git may be working in a company folder outside sync's own lock. A
+ * manual sync does not wait for the AI, whose git holds locks sync knows nothing of.
+ */
+export function gitMayBeRunningElsewhere(activity: Pick<SyncActivity, 'current'>, aiRunning: () => boolean, options: { ownActivity?: boolean } = {}): boolean {
+  return (!options.ownActivity && activity.current() !== null) || aiRunning()
+}
+
 export function createSyncActivity(): SyncActivity {
   const running: SyncActivityKind[] = []
   return {

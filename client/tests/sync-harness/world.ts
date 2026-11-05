@@ -189,6 +189,9 @@ export type SyncFn = ((repoPath: string, companyId: string, commitMessage: strin
   pathChecker?: PathChecker
   receive?: GitSync['receive']
   isRunning?: GitSync['isRunning']
+  whenIdle?: GitSync['whenIdle']
+  resumeAutomaticRuns?: GitSync['resumeAutomaticRuns']
+  automaticRunsHeld?: GitSync['automaticRunsHeld']
 }
 
 /** What the app knows when its timer fires (renderer and main), for Member.autoSync. */
@@ -728,6 +731,14 @@ export class Member {
   readonly dialogHistory: DialogRecord[] = []
   /** Every sync result, across syncs. */
   readonly results: SyncResultView[] = []
+  /** Runs between staging and committing, where the app waits for the commit message. */
+  beforeCommit: (() => void) | null = null
+  /** Fixes the sync's clock (backup folder names); null: the real time. */
+  clock: Date | null = null
+  /** A download-choice change or private-folder setup is running in the app. */
+  otherGitRunning = false
+  /** The next runs are meant to stop with a rebase or lock left in place. */
+  mayLeaveOperation = false
 
   private readonly answers = new Map<QuestionKind, string[]>()
   private readonly sync_: SyncFn
@@ -813,10 +824,11 @@ export class Member {
         cookies: () => host.cookies,
         fetch: host.fetch,
       }),
-      generateCommitMessage: async () => null,
-      now: () => new Date(),
+      generateCommitMessage: async () => { this.beforeCommit?.(); return null },
+      now: () => this.clock ?? new Date(),
       platform: process.platform,
       largeFileThreshold: world.largeFileThreshold,
+      otherGitRunning: options => this.otherGitRunning && !options?.ownActivity,
       log: {
         log: (...args: unknown[]) => this.capture('log', args),
         warn: (...args: unknown[]) => this.capture('warn', args),
@@ -1169,7 +1181,7 @@ export class Member {
     }
     const durationMs = Date.now() - started
     this.results.push(result)
-    if (this.inFlight === 0) this.assertNoOperationInProgress()
+    if (this.inFlight === 0 && !this.mayLeaveOperation) this.assertNoOperationInProgress()
     this.recordCommitted(before)
     return { result, dialogs, logs, durationMs }
   }
@@ -1183,7 +1195,7 @@ export class Member {
     if (!impl.receive || !impl.isRunning) throw new Error('this sync implementation has no automatic sync')
     const before = this.snapshotPending()
     const host = {
-      gitSync: Object.assign((...args: Parameters<GitSync>) => impl(...args), { receive: impl.receive, isRunning: impl.isRunning }),
+      gitSync: Object.assign((...args: Parameters<GitSync>) => impl(...args), { receive: impl.receive, isRunning: impl.isRunning, automaticRunsHeld: impl.automaticRunsHeld ?? (() => false) }),
       aiRunning: () => conditions.aiRunning ?? false,
       activity: () => conditions.activity ?? null,
     }
@@ -1195,12 +1207,24 @@ export class Member {
     this.currentDialogs = []
     this.currentLogs = []
     const answer = await withTimeout(runAutoSync(host, this.dir, 'company', mode, state), this.world.syncTimeoutMs, `${this.name}'s automatic ${mode}`)
-    this.assertNoOperationInProgress()
+    if (!this.mayLeaveOperation) this.assertNoOperationInProgress()
     if (answer.status === 'sent') {
       this.results.push(answer.result)
       this.recordCommitted(before)
     }
     return answer
+  }
+
+  /** Resolves once this member's app runs no sync (what closing the app waits for). */
+  whenIdle(): Promise<void> {
+    const impl = this.sync_
+    if (!impl.whenIdle) throw new Error('this sync implementation cannot be waited for')
+    return impl.whenIdle()
+  }
+
+  /** The member stayed after closing was held. */
+  resumeAutomaticRuns(): void {
+    this.sync_.resumeAutomaticRuns?.()
   }
 
   /** Dialogs shown during the last sync or automatic run. */
