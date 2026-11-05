@@ -2,6 +2,7 @@
 // built by main from the record's fields, which hold pointers only — never the minutes or the
 // message body. Links out go to Google / Slack, where the member's own permission decides. Pure.
 import type { RecordSummary } from '../../shared/types/records'
+import type { TypeDefinition } from '../../shared/core/record-types'
 import type { ViewersLabel } from '../../shared/types/viewers'
 
 export interface OpenLink {
@@ -64,7 +65,20 @@ export interface BundleDetailView {
   pendingApprovals: string[]
 }
 
-export type RecordDetailView = MeetingDetailView | IncomingDetailView | BundleDetailView
+/**
+ * 返事のお願い (owner report 2026-11-05: one sat in 「AI が確かめている」 after the member's reply, with
+ * nothing to press): `close` — its assignee may end it here (［終わりにする］, the type's `close`,
+ * in every open state the server's type allows it from, the AI's turn included). The server still
+ * decides the press.
+ */
+export interface ReplyRequestDetailView {
+  kind: 'reply'
+  close: boolean
+  /** ［もう返した］ (`replied_elsewhere`, in 「…」): a reply ACB cannot see; its drafts are dropped. */
+  repliedElsewhere: boolean
+}
+
+export type RecordDetailView = MeetingDetailView | IncomingDetailView | BundleDetailView | ReplyRequestDetailView
 
 /** Fields each screen already shows in its own place (not repeated under 「ほかの項目」). */
 export const DETAIL_FIELDS: Record<string, ReadonlySet<string>> = {
@@ -157,9 +171,23 @@ export function incomingClose(state: string | null, f: RecordSummary['fields'], 
   return null
 }
 
+/**
+ * A 返事のお願い's action `action` for `me`: its assignee, in a state the type's action (who: the
+ * assignee) starts from — read from the server's definition, so an older server (`close` only from
+ * 返事をする / 返事待ち) shows ［終わりにする］ only there.
+ */
+export function replyRequestMay(action: 'close' | 'replied_elsewhere', state: string | null, f: RecordSummary['fields'], me: string | null, def?: Pick<TypeDefinition, 'actions'>): boolean {
+  const a = def?.actions[action]
+  return !!me && !!state && f.assignee === me && !!a && a.who.includes('assignee') && (a.from ?? []).includes(state)
+}
+
 /** `me`: the member reading it (a 来た連絡's ［済んだ］ is its assignee's); unknown → nothing to press. */
-export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summary'> & { state?: string | null }, people: Record<string, string>, me: string | null = null): RecordDetailView | null {
+export function recordDetailOf(r: Pick<RecordSummary, 'type' | 'fields' | 'summary'> & { state?: string | null }, people: Record<string, string>, me: string | null = null, def?: Pick<TypeDefinition, 'actions'>): RecordDetailView | null {
   const f = r.fields
+  if (r.type === 'reply_request') {
+    const may = (action: 'close' | 'replied_elsewhere') => replyRequestMay(action, r.state ?? null, f, me, def)
+    return { kind: 'reply', close: may('close'), repliedElsewhere: may('replied_elsewhere') }
+  }
   if (r.type === 'meeting') {
     const at = str(f.meeting_at) ?? str(f.occurred_at)
     const assignee = str(f.assignee)

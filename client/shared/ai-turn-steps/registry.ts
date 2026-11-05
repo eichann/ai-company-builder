@@ -117,7 +117,8 @@ export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: r
     const step = r.turn === 'ai' ? aiTurnStepForRecord(r.id, r.state) : null
     if (step?.listedBy !== 'ai-turn' || (step.onlyWaitOver && !r.waitOver) || byPlugin.has(r.id) || seen.has(r.id)) continue
     seen.add(r.id)
-    queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due, state: r.state })
+    const notUrgent = step.dueIsTheAisTurn ? !step.dueIsTheAisTurn({ state: r.state ?? '', waitOver: r.waitOver === true }) : false
+    queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due, state: r.state, ...(notUrgent ? { notUrgent: true as const } : {}) })
   }
   // lane C ▼
   // A business plugin's steps (plugin.ts): the server's list of the member's records at an ai_turn step.

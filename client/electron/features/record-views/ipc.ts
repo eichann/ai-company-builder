@@ -173,7 +173,7 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       const isBundle = def?.implements.includes('bundle') ?? false
       const view = isBundle
         ? bundleDetailOf(detail.record, detail.links.flatMap(l => (l.record ? [l.record] : [])), me, members)
-        : recordDetailOf(detail.record, members, me)
+        : recordDetailOf(detail.record, members, me, def)
       const shownElsewhere = DETAIL_FIELDS[isBundle ? 'bundle' : detail.record.type]
       const runList = runs?.status === 200 ? (runs.json?.data as { runs?: AiRunView[] } | undefined)?.runs ?? [] : []
       const rest = shownElsewhere ? { ...detail.record, fields: Object.fromEntries(Object.entries(detail.record.fields).filter(([k]) => !shownElsewhere.has(k))) } : detail.record
