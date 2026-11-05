@@ -15,6 +15,7 @@
  * 3. erases expired content (the content store's retention, `expireContent`);
  * 4. reads each connected member's new mail into the inbox (`pollInbox`,
  *    inbox.md "Receiving": header facts and pointers, never the text);
+ * 0. looks for suspicious activity (「気になる動き」, `securitySweep`, security-alerts.md), records on or off;
  * 5. finds each member's meetings of the last days on their calendar (`pollMeetings`,
  *    minutes.md "Meetings for their attendees": ids and versions, never the minutes' text).
  *
@@ -61,6 +62,8 @@ export interface ServerClockDeps {
   pollInbox?: (companyId: string, between: () => Promise<void>) => Promise<number>
   /** The minutes' discovery for every member of this company (minutes.md): the meetings recorded; `between` yields between members. */
   pollMeetings?: (companyId: string, between: () => Promise<void>) => Promise<number>
+  /** 「気になる動き」 (security-alerts.md): the alerts written for this company. Runs whether records are on or not. */
+  securitySweep?: (companyId: string) => Promise<number>
   /** Let the event loop serve requests between companies. */
   yieldNow: () => Promise<void>
   log?: (message: string) => void
@@ -76,6 +79,8 @@ export interface ClockRun {
   mailRead: number
   /** Meeting records made from members' calendars. */
   meetingsFound: number
+  /** 「気になる動き」 written. */
+  alerts: number
   failedCompanies: number
 }
 
@@ -127,6 +132,7 @@ export function createServerClock(deps: ServerClockDeps) {
   }
 
   async function runCompany(companyId: string, run: ClockRun) {
+    if (deps.securitySweep) run.alerts += await deps.securitySweep(companyId)
     const handle = deps.companyData.forCompany(companyId)
     if (!handle.records.settings().enabled) return
     run.moved += moveWaitOver(companyId)
@@ -138,7 +144,7 @@ export function createServerClock(deps: ServerClockDeps) {
   return {
     /** One pass over every company. A call while a pass is running does nothing (`ran: false`). */
     async runOnce(): Promise<ClockRun> {
-      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, failedCompanies: 0 }
+      const run: ClockRun = { ran: false, moved: 0, notices: 0, expired: 0, mailRead: 0, meetingsFound: 0, alerts: 0, failedCompanies: 0 }
       if (running) return run
       running = true
       run.ran = true
@@ -168,8 +174,8 @@ export function createServerClock(deps: ServerClockDeps) {
       } finally {
         running = false
       }
-      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.failedCompanies > 0) {
-        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
+      if (run.moved + run.notices + run.expired + run.mailRead + run.meetingsFound + run.alerts + run.failedCompanies > 0) {
+        log(`[server-clock] moved ${run.moved}, notices ${run.notices}, expired ${run.expired}, mail read ${run.mailRead}, meetings ${run.meetingsFound}, alerts ${run.alerts}${run.failedCompanies ? `, ${run.failedCompanies} company(ies) failed` : ''}`)
       }
       return run
     },

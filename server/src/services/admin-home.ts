@@ -14,6 +14,7 @@
  * The one mark set by hand is 「会社の休みを確かめた」 (`holidays-checked`): adding the summer
  * holidays, or saying there is nothing to add, cannot be read from the settings themselves.
  */
+import type { SecurityAlertView } from '../../shared/types/security-alerts'
 import type { AccountDirectory } from '../ports/accounts'
 import type { ClientActivityRepository } from '../ports/client-activity'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -59,6 +60,8 @@ export interface AdminHome {
     meetingDuplicates: number
     /** Business plugins and connectors that are on but cannot run now (owner / admin). */
     stoppedPlugins: Array<{ id: string; label: string; problem: string }>
+    /** 「気になる動き」 of the last 7 days (owner / admin; a manager []; security-alerts.md). */
+    securityAlerts: SecurityAlertView[]
   }
   counts: { members: number; departments: number }
 }
@@ -75,6 +78,8 @@ export interface AdminHomeDeps {
   googleUsable: (companyId: string) => Promise<boolean>
   /** Number of duplicate groups, or null when the list cannot be read (records off). */
   meetingDuplicates: (member: Member) => number | null
+  /** 「気になる動き」 for the home (services/security-alerts.ts `forHome`). */
+  securityAlerts?: (member: Member) => SecurityAlertView[]
   /** Installed plugins that are on and have a problem. */
   stoppedPlugins: (member: Member) => Promise<Array<{ id: string; label: string; problem: string }>>
 }
@@ -127,7 +132,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
         view: 'admin',
         setup: { steps, done: steps.filter(s => s.done).length, total: steps.length },
         departments: [],
-        attention: { ...overview.attention, meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins },
+        attention: { ...overview.attention, meetingDuplicates: deps.meetingDuplicates(member) ?? 0, stoppedPlugins, securityAlerts: deps.securityAlerts?.(member) ?? [] },
         counts,
       })
     }
@@ -138,7 +143,7 @@ export function createAdminHomeService(deps: AdminHomeDeps) {
       view: 'manager',
       setup: null,
       departments,
-      attention: { ...managerAttention(member, departments.map(d => d.id)), meetingDuplicates: 0, stoppedPlugins: [] },
+      attention: { ...managerAttention(member, departments.map(d => d.id)), meetingDuplicates: 0, stoppedPlugins: [], securityAlerts: [] },
       counts,
     })
   }

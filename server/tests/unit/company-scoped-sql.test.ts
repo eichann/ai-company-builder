@@ -116,6 +116,10 @@ const HANDLE_TABLES: Record<string, string[]> = {
   member_work_switches: ['adapters/sqlite/task-settings.ts', 'db/schema/tasks.ts'],
   // 「もう一方の AI に聞く」 (chat-and-agents.md); db/schema/agents.ts: the one-time 'on' for the companies existing when the table is made.
   second_opinion_settings: ['adapters/sqlite/second-opinion.ts', 'db/schema/agents.ts'],
+  // 「気になる動き」 (security-alerts.md).
+  security_alerts: ['adapters/sqlite/security-alerts.ts'],
+  security_alert_settings: ['adapters/sqlite/security-alerts.ts'],
+  member_download_hours: ['adapters/sqlite/security-alerts.ts'],
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // 「仕事の道具をつなぐ」: features already shown to a member (google-connector.md).
@@ -151,6 +155,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
 const HANDLE_FACTORIES = [
   'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
   'sqliteSecondOpinionSettingRepository',
+  'sqliteSecurityAlertRepository',
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲

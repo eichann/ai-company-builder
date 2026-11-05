@@ -7,6 +7,7 @@
 import type { ZodMiniType } from 'zod/mini'
 
 import type { ClientBuild } from '../../../shared/core/client-version'
+import type { SecurityAlertView } from '../../../shared/types/security-alerts'
 import {
   absenceCreatedSchema,
   absenceRemovedSchema,
@@ -19,6 +20,8 @@ import {
   agentStopSchema,
   recordSettingsSchema,
   secondOpinionSchema,
+  securityAlertSettingsSchema,
+  securityAlertsSchema,
   brokerSchema,
   capabilitiesSchema,
   clientActivitiesSchema,
@@ -360,6 +363,8 @@ export interface AdminHome {
     orphanedScopes: OrphanedScopeSummary[]
     meetingDuplicates: number
     stoppedPlugins: Array<{ id: string; label: string; problem: string }>
+    /** 「気になる動き」 of the last 7 days (owner / admin); absent from an older server. */
+    securityAlerts?: SecurityAlertView[]
   }
   counts: { members: number; departments: number }
 }
@@ -770,6 +775,18 @@ export const agentSandboxApi = {
   /** A member's own mode (staged rollout); null = follow the company again. */
   setOverride: (companyId: string, userId: string, mode: AgentSandboxMode | null) =>
     getData(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, agentSandboxSchema, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
+// 「気になる動き」 (security-alerts.md): shapes from shared/types/security-alerts.ts. Owners/admins.
+// ---------------------------------------------------------------------------
+
+export type { SecurityAlertSettings, SecurityAlertView, SecurityAlertsView } from '../../../shared/types/security-alerts'
+
+export const securityAlertsApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/security-alerts`, securityAlertsSchema),
+  setSlackDm: (companyId: string, slackDm: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/security-alerts/settings`, securityAlertSettingsSchema, { method: 'PUT', body: { slackDm } }),
 }
 
 // ---------------------------------------------------------------------------

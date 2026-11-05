@@ -156,7 +156,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
   department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
-  `records.md` "Execution runs").
+  `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
+  members' hourly download counts, the rules' read-only queries; `security-alerts.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -238,6 +239,9 @@ GET  /api/config                                  setup state (no auth)
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
+                              GET /security-alerts, PUT /security-alerts/settings (owner/admin)
+                                                                             security-alerts.ts
+                                                                (気になる動き: security-alerts.md)
                               GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
                               GET /home, PUT /home/holidays-checked           admin-home.ts
                                                                 (管理画面のホーム: "Admin home" below)
@@ -472,8 +476,8 @@ admin console's home (管理画面の見直し 2-1): 「最初にやること」
   2026-11-02); a minutes folder chosen; 「会社の休みを確かめた」. The last is the one mark set by
   hand (`PUT /home/holidays-checked { checked: true }`, owner/admin; table `admin_setup_marks`
   behind the handle's `tasks`; the first time is kept). Attention: the overview's lists
-  (`permission-views.ts`) plus the count of one meeting's outputs made twice and the plugins that
-  are on but cannot run.
+  (`permission-views.ts`) plus the count of one meeting's outputs made twice, the plugins that
+  are on but cannot run, and 「気になる動き」 of the last 7 days (`securityAlerts`, `security-alerts.md`).
 - A department manager who is not an owner / admin: no steps; only the sync and app state of the
   members who belong to the departments they manage. Blocked syncs and orphaned rules are left
   out (their paths may name a private folder the manager does not read). Anyone else 403.
@@ -523,7 +527,7 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 Started once per process by `index.ts` (never by `composition.ts`, which tests import), timers
 unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
 **server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
-clock"). A new time-based job goes into the server clock rather than a timer of its own, and
+clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`). A new time-based job goes into the server clock rather than a timer of its own, and
 keeps its rules: never runs the AI, writes records only through the engine's writers, takes
 each company through its own handle with a per-company limit and a yield between companies,
 refuses to overlap itself, and derives everything from stored rows (a restart or a second run

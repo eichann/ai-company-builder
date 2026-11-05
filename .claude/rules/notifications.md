@@ -190,6 +190,8 @@ compare-and-set and ledger), and writes notices.
   in `SERVICE_TRANSITIONS.task`, and the service writer allows a type that is not service-owned
   only those state changes (never a field-only change). A task someone moved meanwhile is
   `stale` and left alone.
+- **「気になる動き」**: `securitySweep` — every company first, records on or off
+  (`security-alerts.md`); `ClockRun.alerts` counts what it wrote.
 - **Notices**: `notifications.sweep(companyId, limit)` (overdue, stuck AI turns, acceptance
   waiting, 「明日が期限」 and 「今日のあなたの番」, above; at most `limit` members per run for the
   summary, the ones already told today skipped through `usersWithKey`).
