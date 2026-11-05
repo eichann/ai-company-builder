@@ -206,6 +206,28 @@ what git actually sees through the app's `createGit`.
   the shared `.gitignore`; one that still reached the index (a shared `!.*` outranks
   `info/exclude`) is unstaged after the `git add`, like `.backups/`. The file stays on disk
   untouched. Tests: `client/tests/sync/temp-save-files.test.ts`, `client/tests/temp-save-file.test.ts`.
+- Files open in another app (audit C-A4). Office and LibreOffice write a lock file next to an
+  open document (`~$見積.xlsx`, Word's shortened `~$cument.docx`, `.~lock.見積.xlsx#`) and Word
+  saves through `~WRL*.tmp` / `~WRD*.tmp` (`client/shared/office-lock-files.ts`). Shared, they told
+  every teammate 「〇〇が編集中」 and came back at every save: every sync keeps
+  `OFFICE_LOCK_EXCLUDE_PATTERNS` in its own managed block of `.git/info/exclude` (never the shared
+  `.gitignore`) and unstages a **new** one a shared negation re-included (a tracked one an older app
+  shared is left alone: its app deletes it on close and that deletion syncs). The lock file is also
+  the signal that the file is open (`sync/open-files.ts`; readdir of the changed paths' folders
+  only, no process listing; a lock git holds unchanged is a teammate's and does not count). A file
+  origin/main changed and an app has open here is never replaced unasked — the app would save its
+  old in-memory copy over the teammate's version later (Windows Office also holds the file, so the
+  pull could not replace it): the manual sync asks before anything changes (`confirmOpenFiles`,
+  「ほかのアプリで開いているファイルがあります」; default 「同期をやめる」 → `file_open`, message
+  starting 「同期を中止しました。」, nothing committed or replaced; 「閉じたので続ける」 for a lock left by a
+  crash → the normal sync, a local edit goes to `.backups/` as a conflict); no window → stop.
+  「自動で送る」 waits without asking and without `needs_member` (the next run goes through once the
+  file is closed); 「自動で受け取る」 holds that repository back and reports `openFiles`. The same in
+  private folders' clones, read-only ones included. Only files a teammate changed count: a file open
+  here that nobody else changed syncs as always (the everyday case). Not seen: apps that leave no
+  lock file (Numbers, Preview, text editors). The server does not refuse lock files (older apps would
+  be refused at every sync). Scenarios: `client/tests/sync/open-files.test.ts`; unit
+  `client/tests/office-lock-files.test.ts`; notice `src/features/sync/model.test.ts`.
 - Who may change the shared root `.gitignore` — **still an open hole on the server**. The
   settings page's editor (「同期しないファイル」) is offered to owners / admins only
   (`download-choices.md`), and this version of the app no longer writes large-file or

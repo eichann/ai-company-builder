@@ -26,6 +26,12 @@ export interface SyncDialog {
   confirmProtectedConfigRestore(files: string[]): Promise<'restore' | 'cancel'>
   /** The server rejected changes in a folder the member may not edit. */
   confirmWriteDeniedRestore(files: string[]): Promise<'restore' | 'cancel'>
+  /**
+   * Teammates changed files another app (Excel, Word…) has open on this
+   * computer. 'wait' (default): nothing changes, the sync stops; 'continue':
+   * the member says they are closed (a lock file left by a crash), sync goes on.
+   */
+  confirmOpenFiles(files: string[]): Promise<'wait' | 'continue'>
 }
 
 /** Server calls sync makes. Network failures throw; sync logs and moves on. */

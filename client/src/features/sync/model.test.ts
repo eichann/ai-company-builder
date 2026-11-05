@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { GitResult } from '../../../shared/ipc-contract'
-import { autoSyncNoticeFor, syncNoticeFor, syncNoticeHidesItself } from './model'
+import { autoSyncNoticeFor, receiveNoticeFor, syncNoticeFor, syncNoticeHidesItself } from './model'
 
 const result = (fields: Partial<GitResult>): GitResult => ({ success: true, ...fields }) as GitResult
 
@@ -100,4 +100,15 @@ test('a restored department is said whichever notice wins', () => {
     assert.match(notice.message, /部署フォルダを復元しました: 営業部/)
     assert.match(notice.message, /移したファイルがあります/)
   }
+})
+
+test('自動で受け取る names files held back because they are open in another app, once per set of files', () => {
+  const first = receiveNoticeFor({ success: true, received: 0, heldBack: 1, openFiles: ['営業部/見積.xlsx'] }, null)
+  assert.equal(first.notice?.type, 'warning')
+  assert.match(first.notice?.message ?? '', /『営業部\/見積\.xlsx』をほかのアプリで開いたまま/)
+  assert.equal(receiveNoticeFor({ success: true, received: 0, heldBack: 1, openFiles: ['営業部/見積.xlsx'] }, first.key).notice, null, 'not repeated every run')
+  const more = receiveNoticeFor({ success: true, received: 0, heldBack: 1, openFiles: ['営業部/見積.xlsx', '営業部/a.docx'] }, first.key)
+  assert.ok(more.notice, 'a new file is said')
+  const closed = receiveNoticeFor({ success: true, received: 3, heldBack: 0 }, more.key)
+  assert.deepEqual(closed, { notice: null, key: null }, 'closing resets: opening it again later is said again')
 })

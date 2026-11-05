@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { autoSync } from '../api'
-import { autoSyncNoticeFor, type SyncNotice } from '../model'
+import { autoSyncNoticeFor, receiveNoticeFor, type SyncNotice } from '../model'
 import { afterSync, recordRun, runDueNow, syncButtonTitle } from '../autoSyncSchedule'
 import { readAutoSyncState, updateAutoSyncState, useAutoSyncState } from '../autoSyncState'
 import { autoSyncSettings } from '../../../shared/lib/autoSyncSettings'
@@ -42,6 +42,8 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
     const startedAt = Date.now()
     let running = false
     let stopped = false
+    // The open files 「受け取る」 last told the member about (said once per set).
+    let openFilesShown: string | null = null
 
     const tick = async () => {
       const { rootPath: root, companyId: company, isSyncing: busy } = latest.current
@@ -69,6 +71,9 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
         }
         if (answer.status === 'received') {
           updateAutoSyncState(company, s => ({ ...recordRun(s, 'receive', 'ran', now), lastAutoSyncAt: now }))
+          const { notice, key } = receiveNoticeFor(answer.result, openFilesShown)
+          openFilesShown = key
+          if (notice) latest.current.showNotice(notice)
           if (answer.result.received > 0) await latest.current.onSynced()
           return
         }

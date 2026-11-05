@@ -43,6 +43,7 @@ import {
 import { readSparseConfig } from './sparse'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
 import { recoverInterruptedState, recoveryNote } from './interrupted'
+import { openFilesAmong, openFilesStoppedMessage } from './open-files'
 
 export interface PrivatePrep {
   /** The answer in effect for this sync (fresh, or the cached one when the server could not be asked). */
@@ -358,11 +359,13 @@ export function prefixedDialog(dialog: SyncDialog, prefix: string): SyncDialog {
     confirmDeletedFiles: files => dialog.confirmDeletedFiles(p(files)),
     confirmProtectedConfigRestore: files => dialog.confirmProtectedConfigRestore(p(files)),
     confirmWriteDeniedRestore: files => dialog.confirmWriteDeniedRestore(p(files)),
+    confirmOpenFiles: files => dialog.confirmOpenFiles(p(files)),
   }
 }
 
 export interface ReadOnlySyncResult {
   success: boolean
+  openFiles?: string[]
   message?: string
   error?: string
   errorType?: string
@@ -404,6 +407,18 @@ export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope:
     } catch (fetchError) {
       const msg = fetchError instanceof Error ? fetchError.message : String(fetchError)
       return { success: false, errorType: 'network', error: withNote(`サーバーに接続できませんでした。\n${msg}`), ...recovered }
+    }
+    // A file a teammate changed that another app has open waits, as in the
+    // other repositories (./open-files.ts): the reset below would replace it.
+    const head = (await git.raw(['rev-parse', '--verify', '--quiet', 'HEAD']).catch(() => '')).trim()
+    const incoming = head
+      ? (await git.raw(['diff', '--name-only', '-z', '--no-renames', head, 'origin/main']).catch(() => '')).split('\0').filter(Boolean)
+      : []
+    const open = incoming.length > 0 ? await openFilesAmong(git, dir, incoming) : []
+    // The dialog is the folder's own (prefixedDialog): it adds the folder's path itself.
+    if (open.length > 0 && (!deps.dialog.canAsk() || await deps.dialog.confirmOpenFiles(open) !== 'continue')) {
+      const openShown = open.map(f => `${scope.path}/${f}`)
+      return { success: false, errorType: 'file_open', openFiles: openShown, error: withNote(openFilesStoppedMessage(openShown)), ...recovered }
     }
     const changes = await localChangesInClone(git, dir)
     const shown = changes.map(f => `${scope.path}/${f}`)

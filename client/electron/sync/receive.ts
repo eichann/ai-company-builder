@@ -10,7 +10,10 @@
 // - no path the server adds already exists on disk (an ignored file, a
 //   private folder's clone, an excluded nested repository, a file in a
 //   not-downloaded folder): git would overwrite ignored files silently;
-// - no changed path in a not-downloaded folder exists on disk.
+// - no changed path in a not-downloaded folder exists on disk;
+// - no changed path is open in another app (an office lock file next to it,
+//   ./open-files.ts): the app would save its old copy over the new version.
+//   Those paths are reported, so the member hears why.
 // Otherwise the repository is held back unchanged and the next manual sync
 // (with its backups and questions) handles it. `merge --ff-only` itself
 // refuses atomically to overwrite local changes, a second line behind these.
@@ -21,14 +24,15 @@ import type { SimpleGit } from 'simple-git'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
 import { previewChanges } from './preview'
 import { appliedExclusions } from './sparse'
+import { openFilesAmong } from './open-files'
 import type { SyncLogger } from './types'
 
-export type HeldBackReason = 'repository-busy' | 'unpushed' | 'local-changes' | 'in-the-way' | 'refused'
+export type HeldBackReason = 'repository-busy' | 'unpushed' | 'local-changes' | 'in-the-way' | 'refused' | 'file-open'
 
 export type RepoReceiveOutcome =
   | { kind: 'up-to-date' }
   | { kind: 'received'; files: number }
-  | { kind: 'held-back'; reason: HeldBackReason }
+  | { kind: 'held-back'; reason: HeldBackReason; openFiles?: string[] }
   | { kind: 'offline' }
 
 /** `git diff --name-status -z --no-renames` → [status letter, path] pairs. */
@@ -95,6 +99,9 @@ export async function receiveIntoRepo(git: SimpleGit, repoPath: string, log: Syn
       return { kind: 'held-back', reason: 'in-the-way' }
     }
   }
+
+  const open = await openFilesAmong(git, repoPath, changes.map(c => c.path))
+  if (open.length > 0) return { kind: 'held-back', reason: 'file-open', openFiles: open }
 
   try {
     await git.raw(['merge', '--ff-only', '--no-edit', upstream])

@@ -605,6 +605,7 @@ contract.type GitResult.movedAsideBackupPath = movedAsideBackupPath?: string
 contract.type GitResult.movedAsideFolders = movedAsideFolders?: string[]
 contract.type GitResult.nestedRepoBackupFiles = nestedRepoBackupFiles?: string[]
 contract.type GitResult.nestedRepoBackupPath = nestedRepoBackupPath?: string
+contract.type GitResult.openFiles = openFiles?: string[]
 contract.type GitResult.outsideCheckoutBackupPath = outsideCheckoutBackupPath?: string
 contract.type GitResult.outsideCheckoutFiles = outsideCheckoutFiles?: string[]
 contract.type GitResult.personalFiles = personalFiles?: string[]
@@ -914,7 +915,7 @@ contract.type StopToolResult.message = message?: string
 contract.type StopToolResult.success = success: boolean
 contract.type SyncArgs = export type SyncArgs<C extends SyncChannel> = IpcSyncChannels[C]['args']
 contract.type SyncChannel = export type SyncChannel = keyof IpcSyncChannels
-contract.type SyncErrorType = export type SyncErrorType = | 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'unknown' | (string & Record<never, never>)
+contract.type SyncErrorType = export type SyncErrorType = | 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'file_open' | 'unknown' | (string & Record<never, never>)
 contract.type SyncResult = export type SyncResult<C extends SyncChannel> = IpcSyncChannels[C]['result']
 contract.type ToolApprovalRequest = export interface ToolApprovalRequest { }
 contract.type ToolApprovalRequest.appSessionId = appSessionId?: string
