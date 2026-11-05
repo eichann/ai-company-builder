@@ -154,7 +154,7 @@ describe('pre-receive hook: protected agent config', () => {
       '.claude/settings.json': '{}\n',
     })
     writeFile(clone, 'sales/proposal.md', 'draft\n')
-    writeFile(clone, '.claude/notes.md', 'notes\n')
+    writeFile(clone, 'docs/claude/notes.md', 'notes\n') // .claude/<anything> is default-deny: agent-config-hook.test.ts
     writeFile(clone, 'docs/settings.json', '{}\n')
     commitAll(clone, 'normal work')
     const r = pushAs(clone, 'member')
