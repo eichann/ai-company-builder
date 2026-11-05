@@ -6,6 +6,7 @@
  * server's gates (approval for prior fields, a person presses send, fields
  * that are off stay off); this module holds the small shared pieces.
  */
+import { neutralizeOutsideText } from './outside-text'
 
 /** The record type of a meeting (会議); its minutes (議事録) are its content, read where they are. */
 export const MEETING_TYPE = 'meeting'
@@ -98,7 +99,8 @@ export const MINUTES_QUOTE_MAX = 300
 
 /** Text compared for quotes: NFC, line ends and runs of spaces as one space. */
 function comparable(text: string): string {
-  return text.normalize('NFC').replace(/[\s　]+/g, ' ').trim()
+  // The AI saw 【】 as 〔〕 (outside-text.ts): a quote of what it saw matches either way.
+  return neutralizeOutsideText(text.normalize('NFC')).replace(/[\s\u3000]+/g, ' ').trim()
 }
 
 /**

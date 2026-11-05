@@ -46,6 +46,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
 | `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
 | `calendar.ts` | 「今日の予定」: the neutral `CalendarEvent`, `CalendarTodayReason`, `dayWindow` (the company's day), `DEFAULT_COMPANY_TIME_ZONE` (`calendar.md`) |
+| `outside-text.ts` | the one standard for outside text handed to an AI: `wrapOutsideText` (header, text with `【】` → `〔〕`, footer: no source can close its block), `neutralizeOutsideText`, `outsideTextFlags` (instruction-like + `wrapper-spoof`), `outsideBracketsNote`, `outsideTitle` (a subject / title quoted on one line of a prompt). Used by contract-3 answers, inbox threads, minutes, Drive, web research and every 「AI の番」 first message |
 | `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `business-days.ts` | business days: weekends, Japanese public holidays calculated from the law (no network; `LAW_EXCEPTIONS` for year-specific changes), company holidays, `nextBusinessDay` (`tasks.md`) |

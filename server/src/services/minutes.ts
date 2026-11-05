@@ -38,7 +38,8 @@ import {
   MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_READ_REQUEST_ACTION, MEETING_SKIP_ACTION, MEETING_TYPE, meetingAsksBundle,
   meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX,
 } from '../../shared/core/minutes'
-import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
 import { isExternalAddress, emailDomain, normalizeEmail } from '../../shared/core/mail'
 import { foldAsciiCase, nameKey, normalizeRepoPath } from '../../shared/core/paths'
 import { findPrivateScope, FULL_ACCESS_ROLES } from '../../shared/core/permissions'
@@ -904,7 +905,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         recordId: row.id,
         version: now.version,
         header: MINUTES_TEXT_HEADER,
-        text,
+        // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
+        text: neutralizeOutsideText(text),
         footer: MINUTES_TEXT_FOOTER,
         truncated,
         docVersion: versions.join(','),
@@ -915,7 +917,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         bundle,
         candidates,
         noBundle: noBundleChosen(handle, row.id),
-        instructionLike: findInstructionLikeText(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
+        instructionLike: outsideTextFlags(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 

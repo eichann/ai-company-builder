@@ -43,4 +43,6 @@ export const INSTRUCTION_LIKE_WORDS: Record<string, string> = {
   'run-command': 'コマンドを実行させる文',
   'send-files': 'ファイルやデータを送らせる文',
   'credential-request': 'パスワードやキーを求める文',
+  // outside-text.ts: the text spells a block's own marker.
+  'wrapper-spoof': '外から来た文の終わりを装う文',
 }

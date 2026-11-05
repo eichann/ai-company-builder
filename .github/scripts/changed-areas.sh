@@ -90,6 +90,7 @@ PERF=(
   client/shared/agents/ client/shared/chat-history-summary.ts client/shared/sparse-paths.ts client/shared/task-consult.ts
   client/src/features/chat/ client/src/features/files/ client/src/shared/lib/
   ':(glob)client/tsconfig*.json' client/package.json shared/core/paths.ts
+  shared/core/instruction-like.ts shared/core/outside-text.ts
 )
 UNIVERSAL=(client/scripts/universal-git.mjs client/package.json)
 # staging/: the staging kit's helpers, tested by server/tests/unit/staging-kit.test.ts.

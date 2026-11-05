@@ -43,7 +43,10 @@ an M2 stop, logging the reader's own fetches separately, rewriting company skill
   flagged, 【要点】, 【出典】, 【関連リンク（未読）】 when the reader listed any — `splitReaderAnswer`
   reads 「出典:」 and 「関連リンク:」 in either order; `relatedLinksOf`: cleaned like sources,
   refused hosts dropped (`checkWebUrl`), not repeated from the sources, ≤ 10, never counted as
-  sources —, fence lines; a fake fence line inside the content is dropped),
+  sources —, fence lines; a fake fence line inside the content is dropped, indented too, a
+  `===` run left mid-line becomes `＝＝＝`, and the key points' `【】` become `〔〕`
+  (`shared/core/outside-text.ts`), so a page cannot forge 【出典】 or the counted line;
+  flags by `outsideTextFlags`),
   the reader's system prompt (input JSON includes `depth`; prefer official / primary sources
   and open them; never answer from search snippets alone — open ≥ 1–2 pages, ≥ 3 incl. official
   ones for `deep`; say so first when no page could be opened; dig: read the given URLs, follow relevant same-site links —

@@ -113,6 +113,12 @@ turns").
   replacing a record tool or an earlier provider's, a failing one costs only its own; each tool
   declares its plain-Japanese `display`, `chat-ui-and-history.md` 「Tool rows」) reach an
   unattended run only when its step names them. Test: `tests/ai-turn-steps.test.ts`.
+- **Outside text in a first message** (`shared/core/outside-text.ts`, the one standard): a record's
+  title may be a mail's subject, a Slack message or a calendar invite's title, so every step's first
+  message (and `minutesFirstMessage`, `taskConsultFirstMessage`, `taskTopicInstructions`) quotes it
+  with `outsideTitle` — one line, `「」` → `『』` and `【】` → `〔〕` inside, ≤ 200 — and says once
+  (`OUTSIDE_TITLE_NOTE`) that it is data. Never `「${title}」` by hand. Test:
+  `client/tests/outside-text-entry-points.test.ts`.
 
 ## Claiming and settling (main, `electron/features/ai-turns/`)
 
