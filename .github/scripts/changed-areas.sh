@@ -66,7 +66,7 @@ CLIENT=(
 # any client/electron/ change runs it; renderer-only changes do not.
 CLIENT_MAC=(
   client/electron/ client/shared/ client/native/ ':(glob)client/tests/*.swift'
-  client/tests/agent-env.test.ts client/tests/commit-message.test.ts
+  client/tests/agent-env.test.ts client/tests/commit-message.test.ts client/tests/disk-key.test.ts
   client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts
