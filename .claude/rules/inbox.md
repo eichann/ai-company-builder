@@ -355,6 +355,13 @@ tools, the tool's route).
   `links.prepared`), `ai_close` (answered / sent / accepted), `await_reply` (+
   `set_wait_until` for a promise such as 「明日送ります」: the clock follows it up), or `hand_over`
   (still the member's).
+- **The check after a reply** (`check_reply`, owner report 2026-11-05): `item.request.triggerKind` says
+  whose reply it was — `their_reply` (theirs: answered → `ai_close`, a question back → `hand_over` or
+  `await_reply`) or `our_reply` (the member's own, often sent from the card: it met the end condition →
+  `ai_close`; waiting on them → `await_reply`; still the member's → `hand_over`). The first message
+  makes the run end with exactly one of these (unsure or unreadable → `hand_over`): a run that ends
+  with none leaves the request in 確かめ中. The due of a 返事のお願い makes only its first draft urgent
+  (`dueIsTheAisTurn`, `ai-turns.md`): a check or a nudge is never handed to the person early for it.
 - **A promise in the reply** (「明日送ります」, owner decision 2026-11-02): the same reply request goes
   back to 返事待ち with the promised time as `wait_until` — no separate promise-wait record — and
   the clock follows it up like any 返事の見込み.
@@ -410,7 +417,13 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   (`ai_close`, `who: [ai]`, from preparing / checking, `close_reason`); the person's `close`,
   `drop`, `reopen`, `resume` are the assignee's; `await_reply` (assignee or AI). Follow-up on
   `wait_until` is B5. v4 (additive): the origin link `task` (もとのタスク: the やること a mail we sent
-  first came from).
+  first came from). v5 (additive; owner report 2026-11-05: a request sat in 「AI が確かめている」 after the
+  member's reply, with nothing to press): the assignee's 「終わりにする」 (`close`) from **every open state**,
+  準備中 / 確かめ中 — the AI's turn — included. The AI never has it (`who: [assignee]`); a check that was
+  running and writes after the close is refused (its `from` no longer holds, and the version moved).
+  ［取り消す］ is the generic undo of that entry. The record card offers it (`tasks-ui.md` 「A 返事のお願い's
+  card」). Tests: `inbox.test.ts` 「終わりにする」 (who, the AI's late writes refused, undo, 準備中),
+  `intake-core.test.ts` (5 additive over 4) — mutation-checked.
 - `task` v8: link `interaction` (もとの連絡), additive. A promise to wait for uses `waiting` /
   `wait_until` as before.
 - The service writer may now create an owner-only record (`personalOwner`, a member; not with a

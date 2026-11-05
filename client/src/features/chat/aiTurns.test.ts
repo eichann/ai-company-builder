@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../shared/ai-turns'
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
-  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
+  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, movedOn, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
   canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
@@ -193,6 +193,35 @@ test('a record due soon goes to the person early instead of waiting for the AI',
   assert.deepEqual(nextAiTurn(input({ log, queue: [soon, later] })), { run: later })
   // The one the AI already works on is not taken away from it.
   assert.equal(handUrgent(freshLog(NOW), [soon], soon.id, NOW).handed[soon.id], undefined)
+})
+
+// Owner report 2026-11-05: a 返事のお願い in 確かめ中 (the member's reply sent, its due long past) was handed
+// at once and sat in 「AI が確かめている」 with nothing for anyone to press.
+test('a record whose due is not what the AI races (a reply already sent, being checked) is never handed early', () => {
+  const past = new Date(NOW - 24 * 60 * 60_000).toISOString()
+  const checking: AiTurnCandidate = { id: 'reply_request-aaaaaaaa', title: 'x', version: 4, dueAt: past, state: 'checking', notUrgent: true }
+  const log = handUrgent(freshLog(NOW), [checking], null, NOW)
+  assert.equal(log.handed[checking.id], undefined)
+  assert.deepEqual(nextAiTurn(input({ log, queue: [checking] })), { run: checking })
+  // Its first draft (準備中) still is: the due is what that turn races.
+  const drafting: AiTurnCandidate = { ...checking, state: 'preparing', notUrgent: undefined }
+  assert.deepEqual(handUrgent(freshLog(NOW), [drafting], null, NOW).handed[drafting.id], { kind: 'urgent', reason: '期限が近いため、AI の準備を待たずにお渡しします。', state: 'preparing' })
+})
+
+test('handed in one state, back in the queue in another: a new turn of the AI, given back; the same state or the member\'s own hand-off stays', () => {
+  const rr = (state: string, version: number): AiTurnCandidate => ({ id: 'reply_request-bbbbbbbb', title: 'x', version, state })
+  // The draft run ended as her reply moved it on (確かめ中), or it was handed for being due soon.
+  const unfinished = recordOutcome(freshLog(NOW), 'reply_request-bbbbbbbb', 'unfinished', ON, null, 2, 'preparing')
+  assert.equal(unfinished.handed['reply_request-bbbbbbbb'].state, 'preparing')
+  assert.deepEqual(movedOn(unfinished, [rr('preparing', 2)]), [])
+  assert.deepEqual(movedOn(unfinished, [rr('checking', 3)]), ['reply_request-bbbbbbbb'])
+  const urgent = handUrgent(freshLog(NOW), [{ ...rr('preparing', 2), dueAt: new Date(NOW).toISOString() }], null, NOW)
+  assert.deepEqual(movedOn(urgent, [rr('checking', 3)]), ['reply_request-bbbbbbbb'])
+  // Kept across the daily read of the log.
+  assert.deepEqual(movedOn(logForToday(JSON.parse(JSON.stringify(unfinished)), NOW + 86_400_000), [rr('checking', 3)]), ['reply_request-bbbbbbbb'])
+  // 「人に渡す」 is the member's: only 「もう一度」 undoes it. An older build's hand-off (no state) stays too.
+  assert.deepEqual(movedOn(handedOver(freshLog(NOW), 'reply_request-bbbbbbbb', ''), [rr('checking', 3)]), [])
+  assert.deepEqual(movedOn(recordOutcome(freshLog(NOW), 'reply_request-bbbbbbbb', 'unfinished', ON, null, 2), [rr('checking', 3)]), [])
 })
 
 test('a meeting asked for again after the AI could not read it runs again; a hand-off is otherwise kept', () => {

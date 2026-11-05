@@ -9,7 +9,7 @@ import { rateLimitsOf } from '../agentStatusStore'
 import { consultationStatusOf } from '../consultationStatusStore'
 import { claimAiTurn, getAutoTurnSettings, getChatSessionSummaries, patchChatSession, retryAiTurn, settleAiTurn } from '../api'
 import {
-  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday,
+  AI_TURN_PASS_INTERVAL_MS, aiTurnItems, aiTurnNoticeText, askedAgain, canResumeAiTurns, handUrgent, handedOver, logForToday, movedOn,
   nextAiTurn, recordOutcome, recordStarted, resumed, retitledConsultation, retried, usageLimitReached, usagePause, usagePauseLifted,
   type AiTurnLog, type AiTurnOutcome,
 } from '../aiTurns'
@@ -25,6 +25,8 @@ interface Running {
   recordId: string
   /** The record's version in the queue when this run started. */
   version: number
+  /** Its state then (a hand-off remembers it: back in another state, it is another turn — `movedOn`). */
+  state: string | null
   tabId: string
   phase: 'claiming' | 'running'
   since: number
@@ -96,7 +98,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const result: AiTurnSettleResult = await settleAiTurn(o.companyId, run.recordId).catch(() => ({ outcome: 'unknown' }))
     const outcome: AiTurnOutcome = result.outcome === 'done' ? 'done'
       : usageLimitReached(snapshot) ? 'usage-limit' : result.outcome === 'failed' ? 'failed' : 'unfinished'
-    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version))
+    if (settings.current) saveLog(recordOutcome(loadLog(now), run.recordId, outcome, settings.current.value, usagePause(snapshot, now), run.version, run.state))
     running.current = null
     // The run named its record (a message without a subject): the consultation follows, unless the member renamed it.
     if (result.title && run.conversationId) {
@@ -117,7 +119,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const titleFor = (recordTitle: string) => step ? step.consultationTitle({ ...notice, title: recordTitle }) : pluginStepConsultationTitle(recordTitle)
     const title = titleFor(notice.title)
     const tabId = o.openBackgroundTab()
-    const run: Running = { recordId: notice.id, version: notice.version, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, title, titleFor }
+    const run: Running = { recordId: notice.id, version: notice.version, state: notice.state ?? null, tabId, phase: 'claiming', since: now, sawWorking: false, needsYou: false, conversationId: null, title, titleFor }
     running.current = run
     if (!pass.current || now - pass.current.startedAt >= AI_TURN_PASS_INTERVAL_MS) pass.current = { startedAt: now, started: 0 }
     pass.current.started += 1
@@ -197,6 +199,8 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
       const queue = o.queue.filter(n => !taken.current.has(`${n.id}@${n.version}`))
       // Asked for again after a failure: the same as 「もう一度」, without the member pressing twice.
       for (const id of askedAgain(loadLog(now), queue)) await giveBack(id)
+      // Handed in one state and now waiting in another (a 返事のお願い drafted, then her reply came): a new turn.
+      for (const id of movedOn(loadLog(now), queue)) await giveBack(id)
       let log = loadLog(now)
       // Claude's usage pause ends early when Claude says it has room again (a newer snapshot), or when
       // the chosen AI or its sign-in changed here (perhaps another account; a limit hit again pauses again).

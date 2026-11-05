@@ -84,6 +84,29 @@ test('a 来た連絡 to confirm: ［済んだ］ closes it (「済んだ」, ［
   expectNoPageErrors(replies)
 })
 
+// Owner report 2026-11-05: a 返事のお願い sat in 「AI が確かめている」 after the member's reply, with nothing to press.
+test('a 返事のお願い in the AI\'s turn: its person\'s ［終わりにする］ ends it (「終わった」), 取り消す gives it back; 「…」 ［もう返した］', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'reply' })
+  const card = page.getByTestId('record-card')
+  await expect(card).toContainText('AI が確かめている')
+  await card.getByRole('button', { name: '終わりにする' }).click()
+  await expect(page.locator('#opened')).toHaveText('act reply_request-0000c1 close@3')
+  await expect(card).toContainText('終わった')
+  await expect(card.getByRole('button', { name: '終わりにする' })).toHaveCount(0)
+  await card.getByRole('status').getByRole('button', { name: '取り消す' }).click()
+  await expect(page.locator('#opened')).toContainText('undo reply_request-0000c1 4@4')
+  await expect(card).toContainText('AI が確かめている')
+  await card.getByRole('button', { name: 'その他の操作' }).click()
+  await expect(page.getByRole('menuitem', { name: /もう返した/ })).toBeVisible()
+  expectNoPageErrors(state)
+
+  // An older server's type (close only from 返事をする / 返事待ち): no button it would refuse.
+  const older = await openPreview(page, 'record-card', { record: 'reply', type: 'v4' })
+  await expect(page.getByTestId('record-card')).toContainText('AI が確かめている')
+  await expect(page.getByTestId('record-card').getByRole('button', { name: '終わりにする' })).toHaveCount(0)
+  expectNoPageErrors(older)
+})
+
 test('a 案件: what for, who and how far, the approval request as its card, everyone\'s やること by turn, what the AI did', async ({ page }) => {
   const state = await openPreview(page, 'record-card', { record: 'bundle' })
   const card = page.getByTestId('record-card')

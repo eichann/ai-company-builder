@@ -323,6 +323,14 @@ for the member): on a 確認待ち message that is theirs the main button **［�
 ［取り消す］ after; once they closed it 「済んだ」 and **［元に戻す］** (the undo of that entry). An open
 返事のお願い of it is not ended by ［済んだ］: a line says to press ［もう返した］ there. The ［返事する］
 (AI draft) button is on hold (owner). Test: `record-card.spec.ts` (「a 来た連絡 to confirm …」). Links out go through `shell:openExternal`.
+**A 返事のお願い's card** (owner report 2026-11-05: one sat in 「AI が確かめている」 after the member's reply,
+with nothing to press; `ReplyRequestActions`, `ReplyRequestDetailView` from `recordDetailOf` with the
+server's type): for its assignee the main button **［終わりにする］** (`close`, state 「終わった」) in every
+state the server's type allows it from — reply_request v5: every open state, the AI's 準備中 / 確かめ中
+included; an older server's type (返事をする / 返事待ち only) shows it only there — and in 「…」
+**［もう返した］** (`replied_elsewhere`), each at the card's version (refused → the card reads again);
+［取り消す］ after 終わりにする (not after もう返した, whose drafts were put away). Tasks-list rows have no menu
+for it. Test: `record-card.spec.ts` (「a 返事のお願い in the AI's turn …」, `?record=reply`, `&type=v4`).
 A **案件・プロジェクト** (any type implementing `bundle`, `bundleDetailOf`): なんのため (`purpose`), 責任者
 (`owner`, else `assignee`), 進み具合 (its やること done of all), its approval requests still waiting as
 the approval card (`renderApproval`, AppShell's `ApprovalCard`), and **みんなのやること** by whose turn —

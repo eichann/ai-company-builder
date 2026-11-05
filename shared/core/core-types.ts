@@ -77,7 +77,11 @@
  * `outbound_message` v5 adds `expects_reply` (the drafting AI's mark: pre-ticks 「返事を待つ」),
  * `reply_wait_until` (the day the member picked at 確かめて送る) and the link `task` (the やること the
  * mail was drafted for); `reply_request` v4 adds the origin link `task`, and the service writer
- * may create a 返事のお願い straight in 返事待ち (`SERVICE_TRANSITIONS`). Both additive. *
+ * may create a 返事のお願い straight in 返事待ち (`SERVICE_TRANSITIONS`). Both additive.
+ * `reply_request` v5 (owner report 2026-11-05: a request sat in 確かめ中 after the member's reply with
+ * nothing to press): the assignee's 「終わりにする」 (`close`) also from 準備中 / 確かめ中 — the AI's turn —
+ * so the member can always end it; the AI's later writes are refused by state and version. Additive.
+ *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
  * original (0.23-2). Version 3 links `bundle` and `counterpart`. Version 4
@@ -378,7 +382,7 @@ actions:
 `,
   reply_request: `---
 label: 返事のお願い
-version: 4
+version: 5
 implements: [request, prepared, outside_event]
 storage: server
 fields:
@@ -413,7 +417,7 @@ actions:
   take_over:     { label: 自分で進める, from: [preparing, checking], to: open, who: [assignee], note: optional, hand_to: assignee }
   await_reply:   { label: 相手の返事待ちにする, from: [open, checking], to: waiting_reply, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   resume:        { label: 自分の番に戻す, from: [waiting_reply], to: open, who: [assignee], note: optional, hand_to: assignee }
-  close:         { label: 終わりにする, from: [open, waiting_reply], to: closed, who: [assignee], note: optional }
+  close:         { label: 終わりにする, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional }
   drop:          { label: 返事をしない, from: [preparing, open, waiting_reply, checking], to: dropped, who: [assignee], note: required }
   reopen:        { label: やり直す, from: [closed, dropped], to: open, who: [assignee], note: optional, hand_to: assignee }
   replied_elsewhere: { label: もう返した, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional }
@@ -426,6 +430,7 @@ actions:
 来た連絡から生まれる「返事をする」仕事。ふつうのやることとは別の型で、終わりの条件を持ちます（返事が来れば・日程が決まれば など。AI が作るときに入れ、人が直せます）。
 「準備中」と「確かめ中」は AI の番です。AI が返事の下書きを用意して担当に渡し、返事が来たとき・こちらが返信したときは、終わりの条件と照らして終わりにするか（「AI が判断して終わりにする」）、相手の返事待ちにするか、担当の番に戻すかを決めます。この型の中でだけ、AI が終わりにできます（やり直せます）。
 電話や別の経路で返したときなど、ACB から見えない返事は、担当が「もう返した」で終わりにします。
+担当は「終わりにする」で、AI が用意している間や確かめている間でも、いつでも終わりにできます。
 期限は、連絡に締切が書いてあればそれ、なければ会社の「返事の目安」です。目安で入れた期限は「目安」と分かるように出します。
 `,
   project: `---

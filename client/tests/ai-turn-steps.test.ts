@@ -25,6 +25,7 @@ import { createInboxTools } from '../electron/features/inbox/tools'
 import { createTaskWaitTools, taskWaitView } from '../electron/features/ai-turns/task-wait-tools'
 import { taskWaitOverFirstMessage } from '../shared/ai-turn-steps/task-wait-over'
 import { inboxTriageFirstMessage } from '../shared/ai-turn-steps/inbox-triage'
+import { followUpFirstMessage } from '../shared/ai-turn-steps/follow-up'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordDetail } from '../../shared/types/records'
 import type { InboxItemView } from '../../shared/types/inbox'
@@ -229,6 +230,27 @@ test('a 返事のお願い (準備中 / 確かめ中) runs under follow-up with 
   }
   // Several from-states only without a start mark.
   assert.match(checkAiTurnSteps([step({ step: 'x', recordId: /^x-[a-z]{6}$/, claim: { action: 'start_reading', from: ['received', 'reading'] } })]) ?? '', /several from-states/)
+})
+
+// Owner report 2026-11-05: a 返事のお願い in 確かめ中 after the member's reply sat in 「AI が確かめている」.
+test('a 返事のお願い\'s due makes only its first draft urgent: checking a reply or drafting a nudge is never handed early; a task\'s due always counts', () => {
+  const due = '2026-11-01'
+  const queue = aiTurnQueue({ minutes: [], tasks: [
+    item('reply_request-aaaaaaaa', 'ai', { state: 'preparing', due }),
+    item('reply_request-bbbbbbbb', 'ai', { state: 'checking', due }),
+    item('reply_request-cccccccc', 'ai', { state: 'preparing', waitOver: true, due }),
+    item('task-dddddddd', 'ai', { state: 'preparing', waitOver: true, due }),
+  ] })
+  assert.deepEqual(queue.map(q => [q.id, q.notUrgent === true]), [
+    ['reply_request-aaaaaaaa', false], ['reply_request-bbbbbbbb', true], ['reply_request-cccccccc', true], ['task-dddddddd', false],
+  ])
+})
+
+test('the check after a reply says which side replied and always ends with one action (never silently left in 確かめ中)', () => {
+  const m = followUpFirstMessage({ id: 'reply_request-aaaaaaaa', title: 'お見積り' }, 5)
+  assert.match(m, /triggerKind/)
+  assert.match(m, /our_reply：私の返信で終わりの条件を満たした.*reply_request__ai_close/)
+  assert.match(m, /必ずこのどれか 1 つの操作で終えて/)
 })
 
 test('a task whose wait is over runs under task-wait-over only when the clock put it in 準備中; a business plugin\'s step on the same record wins (one claim per record)', () => {

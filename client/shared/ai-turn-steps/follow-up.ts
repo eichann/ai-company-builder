@@ -24,7 +24,10 @@ export function followUpFirstMessage(c: { id: string; title: string }, version: 
     '2. purpose ごとに：',
     '   - draft（返事の下書き）：もとの連絡のスレッドへの返事を下書きする（下の a〜c）。',
     '   - follow_up（返事の見込みを過ぎた）：相手への丁寧な催促を、同じスレッドへの返事として下書きする（下の a〜c）。',
-    '   - check_reply（返事が来た）：返事の中身と終わりの条件（endCondition）を照らす。答えた・送った・引き受けた → reply_request__ai_close（close_reason に使った返事と理由）。質問を返された・確認中 → 私が答える必要があれば reply_request__hand_over、相手の返事を待つなら reply_request__await_reply（waiting_on に待っているもの）。「あとで送ります」「明日返します」など約束があれば、その日を reply_request__set_wait_until で入れてから reply_request__await_reply。自動返信は返事に数えない。',
+    '   - check_reply（スレッドに新しい返信がある）：item.request.triggerKind が their_reply なら相手からの返事、our_reply なら私（こちら）が返信した。どちらも、スレッドの最新の返信と終わりの条件（endCondition）を照らす。',
+    '     - their_reply：答えた・送った・引き受けた → reply_request__ai_close（close_reason に使った返事と理由）。質問を返された・確認中 → 私が答える必要があれば reply_request__hand_over、相手の返事を待つなら reply_request__await_reply（waiting_on に待っているもの）。「あとで送ります」「明日返します」など約束があれば、その日を reply_request__set_wait_until で入れてから reply_request__await_reply。自動返信は返事に数えない。',
+    '     - our_reply：私の返信で終わりの条件を満たした（答えた・送った・断った） → reply_request__ai_close。私が質問した・相手の答えや作業を待つ → reply_request__await_reply（waiting_on に待っているもの）。私がまだ何か返す必要がある → reply_request__hand_over。相手の返事がまだ無いことは、終わりにしない理由になりません。',
+    '     - 決められない・スレッドが読めない → reply_request__hand_over（note にわけ）。check_reply は、必ずこのどれか 1 つの操作で終えてください（何もせずに終えると、私には押すものがないまま「AI が確かめている」に残ります）。',
     '   - none：何もせずに終える。',
     '3. 下書きの作り方（draft / follow_up）：',
     ...replyDraftSteps('返事か催促'),
@@ -45,6 +48,9 @@ export const followUp = {
   // 準備中 and 確かめ中 have no start mark: the server's execution run alone decides which PC runs it.
   claim: { action: null, from: ['preparing', 'checking'] },
   settle: { done: ['open', 'waiting_reply', 'closed'], couldNot: [], closed: ['dropped'], working: 'preparing', putBack: null },
+  // The due is the reply's: it is what the first draft races. Checking a reply already sent, or a
+  // nudge after the wait (the due long past), is never handed early for it (owner report 2026-11-05).
+  dueIsTheAisTurn: r => r.state === 'preparing' && !r.waitOver,
   tools: {
     recordTools: [
       'inbox_read', 'mail_recipients', 'mail_draft_create', 'reply_request__finish_prep', 'reply_request__hand_over', 'reply_request__ai_close',
