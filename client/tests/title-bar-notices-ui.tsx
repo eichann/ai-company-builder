@@ -6,7 +6,8 @@
 // the ids marked read in `#read`. `?meetings=1`: a department without the task list, whose meetings
 // (a まとまり to choose, received minutes) the title bar carries; their buttons write `#opened`.
 // `?undo=1`: a notice that the member's AI completed a task their reply finished (`replied_done`),
-// whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`.
+// whose ［元に戻す］ writes the undo asked for (`<record>|<version>|<expectedVersion>`) to `#undone`;
+// `?undo=mail`: a mail closed because it was archived in Gmail, and one archived there (2026-11-05).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -40,6 +41,13 @@ const withMeetings = new URLSearchParams(location.search).get('meetings') === '1
 if (new URLSearchParams(location.search).get('undo') === '1') {
   state = { ...state, notices: { ...state.notices, items: [
     { id: 'n-r', kind: 'replied_done', recordId: 'task-preview05', recordType: 'task', recordTitle: '見積書を送る', version: 7, text: '返事をしたので完了にしました：「見積書を送る」', createdAt: '2026-11-01T07:00:00.000Z', read: true },
+    ...state.notices.items,
+  ] } }
+}
+if (new URLSearchParams(location.search).get('undo') === 'mail') {
+  state = { ...state, notices: { ...state.notices, items: [
+    { id: 'n-l', kind: 'mail_left_inbox', recordId: 'interaction-preview01', recordType: 'interaction', recordTitle: 'ご相談', version: 4, text: 'Gmail ではアーカイブ済みのため、閉じました：「ご相談」', createdAt: '2026-11-01T07:00:00.000Z', read: true },
+    { id: 'n-a', kind: 'mail_archived', recordId: 'interaction-preview02', recordType: 'interaction', recordTitle: '見積の件', version: 6, text: 'Gmail でもアーカイブしました：「見積の件」', createdAt: '2026-11-01T07:01:00.000Z', read: true },
     ...state.notices.items,
   ] } }
 }

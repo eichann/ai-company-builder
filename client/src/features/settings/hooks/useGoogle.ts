@@ -4,7 +4,7 @@ import { useCallback, useRef, useState } from 'react'
 import { GOOGLE_OPENED_TEXT, type GoogleFeature, type MyGoogle } from '../../../../shared/google'
 import { useInterval } from '../../../shared/hooks/useInterval'
 import { googlePermissionKey } from '../../../shared/lib/googlePermission'
-import { connectGoogle, disconnectGoogle, getGoogleStatus } from '../api'
+import { connectGoogle, disconnectGoogle, getGoogleStatus, setGoogleArchive } from '../api'
 
 const POLL_MS = 3000
 const WAIT_MS = 2 * 60 * 1000
@@ -62,5 +62,16 @@ export function useGoogle(companyId: string) {
     }
   }, [companyId])
 
-  return { loadRef, data, error, message, busy, waiting: waiting !== null, connect, disconnect }
+  /** 「済んだメールを Gmail でもアーカイブする」 ［やめる］ / ［オンにする］: the member's own switch (no consent). */
+  const setArchive = useCallback(async (on: boolean) => {
+    setBusy(true)
+    try {
+      const r = await setGoogleArchive(companyId, on)
+      if (r.success) { setData(r.data); setMessage(null) } else setMessage(r.error)
+    } finally {
+      setBusy(false)
+    }
+  }, [companyId])
+
+  return { loadRef, data, error, message, busy, waiting: waiting !== null, connect, disconnect, setArchive }
 }

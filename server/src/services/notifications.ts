@@ -198,6 +198,10 @@ export function noticeKind(userId: string, change: RecordChange, final: Readonly
   // The inbox (inbox.md): their reply came; a message's owner is asked to decide (確認待ち).
   if (entry.action === INBOX_ACTIONS.replyArrived && entry.actorId === INBOX_ACTOR.id) return 'reply_arrived'
   if (type === 'interaction' && stateChanged && entry.toState === INTAKE_UNSURE_STATE) return 'intake_unsure'
+  // The mailbox (inbox.md "Mail archived in the mailbox"): closed here because it left the inbox there;
+  // archived there because it was closed here. Each with ［元に戻す］.
+  if (type === 'interaction' && entry.actorId === INBOX_ACTOR.id && entry.action === INBOX_ACTIONS.leftInbox) return 'mail_left_inbox'
+  if (type === 'interaction' && entry.actorId === INBOX_ACTOR.id && entry.action === INBOX_ACTIONS.archivedThere) return 'mail_archived'
   if (type === 'approval' && stateChanged && entry.fromState !== null && str(fields.requested_by) === userId) return 'approval_result'
   // What the member asked was accepted (引き受ける, or accepted by itself on a change): the assignee's turn now.
   const acceptance = acceptanceOf(type)
@@ -614,6 +618,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `議事録が届きました：${t}`
       case 'replied_done':
         return `返事をしたので完了にしました：${t}`
+      case 'mail_left_inbox':
+        return `${entry()?.note || 'メールでアーカイブ済み'}のため、閉じました：${t}`
+      case 'mail_archived':
+        return `${entry()?.note || 'メールでもアーカイブしました'}：${t}`
       case 'intake_unsure':
         return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':

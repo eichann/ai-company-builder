@@ -2,7 +2,9 @@
 //   google:status, google:connect, google:disconnect,
 //   google:connectAll and google:markSeen (「仕事の道具をつなぐ」: one consent for what the company offers),
 //   google:relay and google:setRelay (「スプレッドシートを中継で使う」: the member's view and own records,
-//   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay")
+//   and 「やめる」 / turning it back on without a new consent; google-connector.md "The relay"),
+//   google:setArchive (「済んだメールを Gmail でもアーカイブする」: the member's own switch, sends only
+//   `{ feature: 'inbox_archive', on }`; google-connector.md "Archiving in Gmail")
 // The server holds everything (the permission, sealed); the app holds no token
 // at all. google:connect asks the server for the sign-in page's URL and opens
 // it in the system browser itself — the URL (with its one-time state) never
@@ -83,6 +85,16 @@ export function createGoogleApi(deps: GoogleDeps) {
     return relayView(companyId)
   }
 
+  /** 「済んだメールを Gmail でもアーカイブする」 off / back on: the member's own switch only (no consent). */
+  async function setArchive(companyId: string, on: boolean): Promise<GoogleStatusResult> {
+    const r = await send(companyId, 'PUT', '/features', { feature: 'inbox_archive', on })
+    if (!r) return offline
+    const data = (r.json as { data?: unknown } | null)?.data
+    if (r.res.ok && isMyGoogle(data)) return { success: true, data }
+    log.warn(`[google] PUT features: answered ${r.res.status}`)
+    return { success: false, offline: false, error: googleErrorText(r.res.status, r.json) }
+  }
+
   async function openSignIn(companyId: string, body: { features: GoogleFeature[] } | { all: true }): Promise<GoogleConnectResult> {
     const r = await send(companyId, 'POST', '/connect', body)
     if (!r) return offline
@@ -110,6 +122,7 @@ export function createGoogleApi(deps: GoogleDeps) {
     connect: (companyId: string, features: GoogleFeature[]) => openSignIn(companyId, { features }),
     relay: relayView,
     setRelay,
+    setArchive,
   }
 }
 
@@ -143,6 +156,10 @@ export function registerGoogleIpc(ipc: IpcRegistrar, deps: GoogleDeps): ReturnTy
   ipc.handle('google:setRelay', async (_, companyId: string, on: boolean) => {
     if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
     return api.setRelay(companyId, on)
+  })
+  ipc.handle('google:setArchive', async (_, companyId: string, on: boolean) => {
+    if (typeof companyId !== 'string' || !companyId || typeof on !== 'boolean') return invalid
+    return api.setArchive(companyId, on)
   })
   return api
 }

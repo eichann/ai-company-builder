@@ -11,6 +11,7 @@ export const TOOL_GOOGLE_TEXT: Record<GoogleFeature, string> = {
   drive: '選んだ Drive のフォルダに、作った資料を置けます',
   inbox: '届いたメールから、やることを作れます',
   sheets: 'あなたが編集できる表に、AI のスクリプトが読み書きできます（消す操作は通しません）',
+  inbox_archive: 'ACB で済んだメールを、Gmail でもアーカイブします（消したり送ったりはしません）',
 }
 
 export const TOOL_SLACK_TEXT: Record<SlackFeature, string> = {

@@ -13,6 +13,8 @@ paths:
   - "server/src/db/schema/inbox.ts"
   - "server/tests/unit/inbox.test.ts"
   - "server/tests/unit/intake-core.test.ts"
+  - "server/tests/unit/inbox-archive.test.ts"
+  - "server/tests/integration/google-inbox-archive.test.ts"
   - "admin/src/components/advanced/intake-settings.tsx"
   - "client/electron/features/inbox/**"
   - "client/shared/ai-turn-steps/inbox-triage.ts"
@@ -127,6 +129,67 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   `state`; `SERVICE_TRANSITIONS` preparing → waiting_reply for that create only — no service moves
   one there), the sender's, until the picked morning. Their reply / silence then work as above and
   in "Following up", unchanged.
+
+## Mail archived in the mailbox (owner decision 2026-11-05)
+
+Actions on things run automatically, with a notice and ［元に戻す］ (2026-11-04); only what reaches
+people, moves money or cannot be undone is approved first. Both directions use **only the mailbox
+owner's own Google permission**: an interaction counts only when it is someone's own
+(`personal_owner`) and its first message was reported by that same member (`inbox_messages.reporter_id`,
+2026-11-05; `ownMailbox`). A mail read from another member's mailbox (a CC reporter's copy routed to
+the To member), a department's mail and rows from before the column are never closed by a mailbox
+nor archived in one.
+
+- **Gmail → ACB** (`gmail.readonly`, no new permission). After each member's poll (`poll` →
+  `syncLeft`, same 5-minute clock) the source's change log is read from the connection's
+  `left_cursor` (`InboxSource.leftSince`; Gmail: `users.history.list` of `labelRemoved` /
+  `messageDeleted`, at most `HISTORY_PAGES_MAX` (5) pages of 500, the rest on the next poll); without
+  a cursor or with one Gmail no longer keeps (404, about a week) it starts from now (`users.getProfile`)
+  and checks the member's own watched records directly. Watched: their own email interactions in
+  届いた / 確認待ち, or with open work (a task not done / cancelled, a 返事のお願い not closed / dropped),
+  in 届いた / 確認待ち / 対応済み / 返事のあとを確かめる. Of the conversations named, only watched ones
+  are confirmed (`inInbox`: `threads.get?format=minimal`, labels only — no message in INBOX, or gone),
+  at most `LEFT_CHECK_MAX` (20) per member and poll; more are logged as a count and left. The cursor
+  moves only after a successful look.
+  - **Nothing made from it** (no open task, no open 返事のお願い) and in 届いた / 確認待ち → closed:
+    `left_inbox` (interaction v8, `who: [system]`) to 対応済み, actor `INBOX_ACTOR` — never the member;
+    `settled_by` stays empty (「済んだ」 is the person's) — note 「Gmail ではアーカイブ済み」, the owner told
+    (`mail_left_inbox`, `notifications.md`) with ［元に戻す］: the generic undo of that entry, which its
+    assignee may run (`UNDO_BY_ASSIGNEE`, `records.md`). An undone close is not closed again until the
+    thread brings a new message.
+  - **A task or a 返事のお願い still open** → nothing closes; the note 「Gmail ではアーカイブ済み」
+    (`left_inbox_noted`, a ledger entry changing nothing, quiet), once per thread state (people who keep
+    an empty inbox archive mail that still needs work).
+- **ACB → Gmail** (opt-in: `inbox_archive`, `gmail.modify`, `google-connector.md` "Archiving in
+  Gmail"). The engine's `afterAct` (`mailboxFollowUp`) and the reply check start `archiveThere`,
+  which archives the conversation in the owner's own mailbox (`InboxSource.archive`: Gmail
+  `threads.modify` `removeLabelIds: ['INBOX']`) — the source answers `not-allowed` without the
+  permission, the company's switch or the member's own, and nothing is sent. Which closes count, and why:
+  - **The owner's own action into 対応済み / やることにしなかった** — 「済んだ」 (`settle`), 「取り込まない」
+    (`drop`), `handle`, 「自分で確かめる」 (`check_myself`): a person (actor kind `human`) who is the
+    record's owner. The member decided it is done.
+  - **Every task made from it done** (a task reaching 完了 by the engine, or the reply check's
+    `replied_done` by the member's own AI, which has its own notice and undo), the interaction itself
+    closed and no task or 返事のお願い open — the work the mail asked for is over.
+  - **Not**: the AI's judgement (`handled` / `excluded` by the triage AI: the member may not have seen
+    the mail), the member's reply seen in the thread (replying does not archive in Gmail either), the
+    clock or the inbox's own moves, anything with open work, and `left_inbox` itself.
+  - **No loop**: nothing is archived when the ledger has `left_inbox`, `left_inbox_noted` or
+    `archived_there` since the thread's newest message (the mailbox archived it already, or ACB did,
+    or the member put it back).
+  - Done → the note 「Gmail でもアーカイブしました」 (`archived_there`, actor `INBOX_ACTOR`), the owner
+    told (`mail_archived`) with ［元に戻す］: its undo (the assignee's, `UNDO_BY_ASSIGNEE`) reaches the
+    inbox through `afterAct` (also run after an undo), which puts the conversation back
+    (`addLabelIds: ['INBOX']`); when that fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
+    (`unarchive_failed`). Calls run after the action's answer (`whenIdle` in tests).
+- Tests: `server/tests/unit/inbox-archive.test.ts` (close as the inbox with the owner's undo, nobody
+  runs `left_inbox`, task / 返事のお願い → the note once, another member's mailbox never, no cursor →
+  the open records within the limit; ACB → Gmail on settle / drop, not when not allowed, not the AI's
+  judgement nor its `set_aside`, open work, every task done, no loop, never another mailbox) and
+  `server/tests/integration/google-inbox-archive.test.ts` (end to end against the fake Google: the
+  switches, the one Gmail guard, the clock closing what Sato archived with GETs only, Sato's 「済んだ」
+  archiving his thread and not Tanaka's copy, the undo, the member's and the company's switch) —
+  mutation-checked.
 
 ## In the app without mail or chat (owner decision 2026-11-03)
 
@@ -306,6 +369,11 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   `finish_reply_check` (`who: [ai]`: what makes it 「AI の番」; the reply-check route makes the move as
   the service) and the assignee's `check_myself` (自分で確かめる: a person's way out); `SERVICE_TRANSITIONS`
   handled → replied → handled. Tests: `intake-core.test.ts` (7 additive over 6: `INTERACTION_V6_TEXT`).
+- `interaction` v8 (additive over 7; owner decision 2026-11-05): `left_inbox` 「受信トレイから外れた」
+  (届いた / 確認待ち → 対応済み, `who: [system]`: only the inbox, through the service writer — no member,
+  admin or AI; "Mail archived in the mailbox"). Its entry and `archived_there` are undoable by the
+  record's assignee (`UNDO_BY_ASSIGNEE`). Tests: `intake-core.test.ts` (8 additive over 7:
+  `INTERACTION_V7_TEXT`), `inbox-archive.test.ts`.
 - `reply_request` v1 (返事のお願い): implements `request`, `prepared`, `outside_event`; states
   preparing → open → waiting_reply ↔ checking → closed / dropped. v2 (B4, additive): the
   assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here
@@ -364,8 +432,13 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   both, oldest first; `messageId` = the Message-ID header else `gmail:<id>` (differs per mailbox),
   `references` = References + In-Reply-To, pointers `gmail:<id>` / `gmail:<thread id>`); the server clock (`server-clock.ts`
   `pollInbox`) runs `pollCompany` for each company with records on, yielding between members.
-  Not yet: mail a filter files past the inbox (or archived before the next poll) is not seen;
-  Gmail's history API would catch it and drop the time edge. A Sent mail with neither In-Reply-To
+  Not yet: mail a filter files past the inbox (or archived before the next poll) is not seen. The
+  history read that closes archived mail ("Mail archived in the mailbox") could also take it in:
+  `users.history.list` with `historyTypes=messageAdded` from the same cursor names every message
+  added since (also the ones filed past INBOX or archived within the 5 minutes); intake would then
+  read each one's metadata as today, decide by its labels (not SPAM / TRASH; a filter's label, not
+  only INBOX) instead of `labelIds=INBOX`, and keep `checked_until` only as the fallback when the
+  cursor is too old (404) — a wider intake, so not done without the owner (2026-11-05). A Sent mail with neither In-Reply-To
   nor References (a new mail in the same Gmail thread) is not matched by thread. Each Gmail call of the poll is one
   AI-action-log line (`google:gmail.messages.*`), like the member's AI reading mail.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to

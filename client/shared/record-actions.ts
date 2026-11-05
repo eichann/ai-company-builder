@@ -5,7 +5,7 @@
  * (the engine's `who`); this only keeps impossible choices off the screen.
  * Pure (`client/shared`).
  */
-import type { TypeDefinition } from '../../shared/core/record-types'
+import { isSystemOnly, type TypeDefinition } from '../../shared/core/record-types'
 
 export interface RecordActionChoice {
   action: string
@@ -26,5 +26,7 @@ export interface RecordActionChoice {
 export function recordActionChoices(def: TypeDefinition, state: string | null): RecordActionChoice[] {
   return Object.entries(def.actions)
     .filter(([, a]) => a.from === null || (state !== null && a.from.includes(state)))
+    // `who: [system]`: only the server's own services run it — never offered to a person.
+    .filter(([, a]) => !isSystemOnly(a.who))
     .map(([action, a]) => ({ action, title: a.label, noteRequired: a.note === 'required', args: Object.keys(a.args), okFrom: a.okFrom ?? [], links: a.links ?? [] }))
 }

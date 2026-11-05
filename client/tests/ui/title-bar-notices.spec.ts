@@ -5,7 +5,8 @@
 // the bell is only what happened (I.1): a meeting waiting for the member is in 「あなたの番」 with its
 // buttons, one the AI is reading in the bell, and the bell's dot is only for unread notices; a notice
 // that the member's AI completed a task their reply finished offers ［元に戻す］ — the undo of exactly
-// that entry (owner FB #19), and no other notice does.
+// that entry (owner FB #19); so do a mail closed because it was archived in Gmail and one archived
+// there (2026-11-05, `UNDOABLE_NOTIFICATION_KINDS`) — and no other notice does.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -91,6 +92,21 @@ test('「返事をしたので完了にしました」 offers ［元に戻す］
   await list.getByRole('button', { name: '元に戻す' }).click()
   await expect(page.locator('#undone')).toHaveText('task-preview05|7|7')
   await expect(list).toContainText('元に戻しました')
+  await expect(page.locator('#opened')).toHaveText('')
+  expectNoPageErrors(state)
+})
+
+test('mail closed here because it was archived in Gmail, and mail archived there: each offers ［元に戻す］ of exactly its entry', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: 'mail' })
+  await page.getByRole('button', { name: /^起きたこと/ }).click()
+  const list = page.getByRole('menu', { name: '起きたこと' })
+  await expect(list.getByRole('button', { name: '元に戻す' })).toHaveCount(2)
+  const archived = list.locator('div', { hasText: 'Gmail でもアーカイブしました' }).last()
+  await archived.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('interaction-preview02|6|6')
+  const closed = list.locator('div', { hasText: 'Gmail ではアーカイブ済みのため、閉じました' }).last()
+  await closed.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('interaction-preview01|4|4')
   await expect(page.locator('#opened')).toHaveText('')
   expectNoPageErrors(state)
 })

@@ -119,3 +119,25 @@ test('「スプレッドシートを中継で使う」: 「やめる」 sends on
   const odd = harness({ status: 200, body: { data: { available: true } } })
   assert.equal((await odd.api.relay('co1')).success, false)
 })
+
+test('「済んだメールを Gmail でもアーカイブする」: shown only while the company offers it to a connected member; 「やめる」 sends only that switch', async () => {
+  const { googleSectionView } = await import('../shared/google')
+  const base = { available: true, reason: null, connected: true, status: 'active' as const, googleEmail: 'sato@div.example', domain: 'div.example', practice: false, featuresOff: [] as const }
+  // The company does not offer it (its default), or an older server: no card.
+  assert.equal(googleSectionView({ ...base, features: ['minutes', 'inbox'], offeredByName: ['sheets'] }).archive, null)
+  assert.equal(googleSectionView({ ...base, features: ['minutes', 'inbox'] }).archive, null)
+  assert.equal(googleSectionView({ ...base, connected: false, status: null, features: [], offeredByName: ['inbox_archive'] }).archive, null)
+  // Offered: ［許可する］ until allowed; ［やめる］ while on; ［オンにする］ (no consent) when the member turned it off.
+  assert.equal(googleSectionView({ ...base, features: ['minutes', 'inbox'], offeredByName: ['inbox_archive'] }).archive, 'allow')
+  assert.equal(googleSectionView({ ...base, features: ['inbox', 'inbox_archive'], offeredByName: ['inbox_archive'] }).archive, 'on')
+  assert.equal(googleSectionView({ ...base, features: ['inbox', 'inbox_archive'], featuresOff: ['inbox_archive'], offeredByName: ['inbox_archive'] }).archive, 'resume')
+
+  const view = { available: true, reason: null, connected: true, status: 'active', features: ['inbox_archive'], featuresOff: ['inbox_archive'] }
+  const ok = harness({ status: 200, body: { success: true, data: view } })
+  assert.deepEqual(await ok.api.setArchive('co1', false), { success: true, data: view })
+  assert.deepEqual(ok.requests.map(q => [q.method, q.url, q.body]), [['PUT', 'https://acb.test/api/companies/co1/me/google/features', { feature: 'inbox_archive', on: false }]])
+  const refused = harness({ status: 409, body: { error: `server text ${STATE}`, code: 'GOOGLE_FEATURE_NOT_GRANTED' } })
+  const no = await refused.api.setArchive('co1', true)
+  assert.equal(no.success, false)
+  assert.ok(!JSON.stringify(no).includes(STATE))
+})

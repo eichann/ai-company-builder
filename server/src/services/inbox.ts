@@ -92,6 +92,24 @@ export const REPLY_NOTED = '返事は済み'
 export const REPLIED_DONE = '返事をしたので完了にしました'
 /** The most tasks one reply check decides. */
 const REPLY_CHECK_MAX = 20
+/**
+ * Mail that left the mailbox inbox (owner decision 2026-11-05, inbox.md "Mail archived in the
+ * mailbox"): at most this many conversations are checked per member and poll (one read each).
+ */
+export const LEFT_CHECK_MAX = 20
+/** The states a message is closed from when its mail left the inbox (the type's `left_inbox`). */
+const LEFT_CLOSES_FROM = ['received', 'unsure']
+/** The states a message the inbox watches is in: open, or handled with work still open. */
+const LEFT_WATCHED_STATES = ['received', 'unsure', 'handled', 'replied']
+/** A message closed for good (a person's own close here archives the mail there). */
+const CLOSED_STATES = ['handled', 'excluded']
+const TASK_FINAL = ['done', 'cancelled']
+const REPLY_FINAL = ['closed', 'dropped']
+/** The note when the mail left the inbox (「Gmail ではアーカイブ済み」) and when ACB archived it there. */
+export const leftInboxNote = (label: string) => `${label} ではアーカイブ済み`
+export const archivedThereNote = (label: string) => `${label} でもアーカイブしました`
+export const unarchiveFailedNote = (label: string) => `${label} の受信トレイに戻せませんでした`
+const DEFAULT_MAILBOX_LABEL = 'メール'
 /** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
 const DM_REPLY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -396,7 +414,7 @@ export function createInboxService(deps: InboxDeps) {
     const at = clock.now()
     handle.inbox.insertMessage({
       channel: msg.channel, messageId: msg.messageId, interactionId: interaction.id, direction: outgoing ? 'out' : 'in', occurredAt: msg.occurredAt, seenAt: at,
-      sourceRef: msg.sourceRef,
+      sourceRef: msg.sourceRef, reporterId,
     })
     const replies = replyRequestsOf(handle, interaction.id)
     if (outgoing) {
@@ -552,7 +570,7 @@ export function createInboxService(deps: InboxDeps) {
     if (!made.ok) { logFailure('interaction', made); return 'skipped' }
     handle.inbox.insertMessage({
       channel: msg.channel, messageId: msg.messageId, interactionId: made.record.id, direction: 'in', occurredAt: msg.occurredAt, seenAt: clock.now(),
-      sourceRef: msg.sourceRef,
+      sourceRef: msg.sourceRef, reporterId,
     })
     return 'created'
   }
@@ -576,7 +594,7 @@ export function createInboxService(deps: InboxDeps) {
     if (handle.inbox.message(input.channel, input.messageId)) return null
     handle.inbox.insertMessage({
       channel: input.channel, messageId: input.messageId, interactionId: interaction.id, direction: 'out', occurredAt: input.occurredAt, seenAt: clock.now(),
-      sourceRef: input.sourceRef,
+      sourceRef: input.sourceRef, reporterId: userId,
     })
     const links = handle.records.linksFrom([interaction.id])
     const linked = (name: string) => links.filter(l => l.name === name && l.targetId).map(l => l.targetId as string).slice(0, 1)
@@ -620,6 +638,212 @@ export function createInboxService(deps: InboxDeps) {
     }
     if (deps.pluginNotifiers) out.push(...await deps.pluginNotifiers(companyId).catch(() => []))
     return out
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Mail archived in the mailbox (owner decision 2026-11-05, inbox.md "Mail archived in the mailbox").
+
+  /** Archive calls still running (afterAct cannot wait for Google): tests and shutdown wait on them. */
+  const running = new Set<Promise<void>>()
+  const track = (p: Promise<void>) => {
+    const done = p.catch(e => { console.warn(`[inbox] mailbox follow-up failed: ${e instanceof Error ? e.name : 'error'}`) }).finally(() => { running.delete(done) })
+    running.add(done)
+  }
+
+  /**
+   * The mailbox an email interaction's pointer is in, when it is its owner's own: the record is
+   * someone's own (`personal_owner`), its first message was reported by that same member (their
+   * poll read it from their mailbox), and it has a thread pointer. Anything else (a department's
+   * mail, mail read from another member's mailbox, rows from before the reporter was kept): null —
+   * never another member's permission.
+   */
+  function ownMailbox(handle: CompanyData, row: RecordRow): { owner: string; threadRef: string; fields: Record<string, LedgerValue>; state: string | null; version: number } | null {
+    if (row.type !== 'interaction' || row.removedAt !== null || row.personalOwner === null) return null
+    const cur = fieldsOf(handle, row.id)
+    const threadRef = str(cur.fields.thread_ref)
+    if (cur.fields.channel !== 'email' || !threadRef || cur.fields.assignee !== row.personalOwner) return null
+    const first = handle.inbox.messagesOf(row.id).find(m => m.sourceRef !== null && m.sourceRef === cur.fields.source_ref)
+    if (!first || first.reporterId !== row.personalOwner) return null
+    return { owner: row.personalOwner, threadRef, fields: cur.fields, state: cur.state, version: cur.version }
+  }
+
+  /** Work still open about a message: a task made from it not finished, or a 返事のお願い not ended. */
+  function openWork(handle: CompanyData, interactionId: string): { tasks: number; replies: number } {
+    const taskIds = handle.records.candidates({ types: ['task'], link: { name: 'interaction', id: interactionId } }, 50).map(r => r.id)
+    const states = handle.records.byIds(taskIds).filter(r => r.removedAt === null).map(r => fieldsOf(handle, r.id).state ?? '')
+    const replies = replyRequestsOf(handle, interactionId).filter(r => !REPLY_FINAL.includes(r.state ?? '')).length
+    return { tasks: states.filter(st => !TASK_FINAL.includes(st)).length, replies }
+  }
+
+  /** When the newest message of the thread was seen (later entries are about what is there now). */
+  const lastSeenOf = (handle: CompanyData, id: string) => handle.inbox.messagesOf(id).map(m => m.seenAt).sort().at(-1) ?? ''
+
+  /** The member undid an entry with this action since the thread's newest message: they want it as it is. */
+  function undoneSince(handle: CompanyData, id: string, action: string): boolean {
+    const ledger = handle.records.ledger(id)
+    const since = lastSeenOf(handle, id)
+    return ledger.some(e => e.action === 'undo' && e.at >= since && ledger.find(x => x.version === e.reversesVersion)?.action === action)
+  }
+
+  /**
+   * Gmail → ACB: the member's mail left their mailbox inbox (archived, trashed, deleted there). Nothing
+   * was made from it → closed (`left_inbox`, as the inbox — never the member; `settled_by` untouched)
+   * and its owner told with ［元に戻す］; a task or 返事のお願い still open → only the note
+   * 「Gmail ではアーカイブ済み」 (people who keep an empty inbox archive mail that still needs work).
+   */
+  function mailLeftInbox(companyId: string, handle: CompanyData, row: RecordRow, label: string): 'closed' | 'noted' | 'none' {
+    const mine = ownMailbox(handle, row)
+    if (!mine) return 'none'
+    const work = openWork(handle, row.id)
+    const note = leftInboxNote(label)
+    if (work.tasks > 0 || work.replies > 0) {
+      const since = lastSeenOf(handle, row.id)
+      if (handle.records.ledger(row.id).some(e => e.action === INBOX_ACTIONS.leftInboxNoted && e.at >= since)) return 'none'
+      const r = deps.writer.transition(companyId, { recordId: row.id, action: INBOX_ACTIONS.leftInboxNoted, expectedVersion: mine.version, to: null, actor: INBOX_ACTOR, note, quiet: true })
+      logFailure('left inbox noted', r)
+      return r.ok ? 'noted' : 'none'
+    }
+    if (!LEFT_CLOSES_FROM.includes(mine.state ?? '')) return 'none'
+    // The member took a close like this back: it stays open until the thread goes on.
+    if (undoneSince(handle, row.id, INBOX_ACTIONS.leftInbox)) return 'none'
+    const r = deps.writer.transition(companyId, {
+      recordId: row.id, action: INBOX_ACTIONS.leftInbox, expectedVersion: mine.version, to: 'handled', actor: INBOX_ACTOR, note,
+      // Its owner hears it, with ［元に戻す］ (the undo of this entry, UNDO_BY_ASSIGNEE).
+      notify: [mine.owner],
+    })
+    logFailure('left inbox', r)
+    return r.ok ? 'closed' : 'none'
+  }
+
+  /** The member's own email interactions worth checking: what a left inbox would close or note. */
+  function leftWatched(handle: CompanyData, userId: string, threadRefs: string[] | null): Array<{ row: RecordRow; threadRef: string }> {
+    const rows = handle.records.byIds(handle.records.candidates({
+      types: ['interaction'], states: LEFT_WATCHED_STATES,
+      fields: [{ name: 'assignee', values: [userId] }, ...(threadRefs ? [{ name: 'thread_ref', values: threadRefs.slice(0, 500) }] : [])],
+    }, 200).map(r => r.id))
+    const out: Array<{ row: RecordRow; threadRef: string }> = []
+    for (const row of rows) {
+      const mine = ownMailbox(handle, row)
+      if (!mine || mine.owner !== userId) continue
+      const work = openWork(handle, row.id)
+      const open = work.tasks > 0 || work.replies > 0
+      if (!open && !LEFT_CLOSES_FROM.includes(mine.state ?? '')) continue
+      out.push({ row, threadRef: mine.threadRef })
+    }
+    return out
+  }
+
+  /**
+   * One member's look at what left their mailbox inbox (the poll, after reading new mail): the
+   * source's change log since the stored cursor names the conversations; only the member's own
+   * watched records among them are checked (`inInbox`, at most LEFT_CHECK_MAX). Without a cursor (or
+   * one too old) the watched records themselves are checked, newest first, within the same limit.
+   * The cursor moves only after a successful look.
+   */
+  async function syncLeft(companyId: string, userId: string, source: InboxSource): Promise<number> {
+    if (!source.leftSince || !source.inInbox) return 0
+    const handle = handleOf(companyId)
+    const conn = handle.inbox.connection(userId, 'email')
+    if (!conn) return 0
+    const look = await source.leftSince(companyId, userId, conn.leftCursor ?? null).catch(() => 'not-connected' as const)
+    if (look === 'not-connected') return 0
+    const watched = (look.threadRefs === null || look.threadRefs.length > 0) ? leftWatched(handle, userId, look.threadRefs) : []
+    const checked = watched.slice(0, LEFT_CHECK_MAX)
+    if (watched.length > checked.length) console.info(`[inbox] mail left the inbox: ${watched.length - checked.length} more than one look checks were left`)
+    let changed = 0
+    if (checked.length > 0) {
+      const state = await source.inInbox(companyId, userId, [...new Set(checked.map(c => c.threadRef))]).catch(() => 'not-connected' as const)
+      if (state === 'not-connected') return 0
+      for (const c of checked) {
+        if (state[c.threadRef] !== false) continue
+        if (mailLeftInbox(companyId, handle, c.row, source.label ?? DEFAULT_MAILBOX_LABEL) !== 'none') changed++
+      }
+    }
+    handle.inbox.setLeftCursor(userId, 'email', look.cursor)
+    return changed
+  }
+
+  /**
+   * ACB → Gmail (owner decision 2026-11-05, opt-in): a message its owner closed here — their own
+   * 「済んだ」, 「取り込まない」 or another action of theirs into 対応済み / やることにしなかった, or every
+   * task made from it finished — is archived in their own mailbox with their own permission (the
+   * source refuses without it: `not-allowed`, nothing sent). Never when work is still open, never
+   * when the inbox closed it because the mailbox had already archived it (no loop), never twice
+   * for the same thread state, never another member's mailbox.
+   */
+  async function archiveThere(companyId: string, interactionId: string): Promise<void> {
+    const handle = handleOf(companyId)
+    const row = handle.records.byIds([interactionId])[0]
+    if (!row) return
+    const mine = ownMailbox(handle, row)
+    if (!mine || !CLOSED_STATES.includes(mine.state ?? '')) return
+    const work = openWork(handle, interactionId)
+    if (work.tasks > 0 || work.replies > 0) return
+    const ledger = handle.records.ledger(interactionId)
+    const since = lastSeenOf(handle, interactionId)
+    // The mailbox had archived it already (the inbox closed or noted it for that): nothing to do
+    // there — and no loop. Once per thread state: archived since its newest message, or put back.
+    const already = [INBOX_ACTIONS.leftInbox, INBOX_ACTIONS.leftInboxNoted, INBOX_ACTIONS.archivedThere] as string[]
+    if (ledger.some(e => already.includes(e.action) && e.at >= since)) return
+    const source = await sourceFor(companyId)
+    if (!source?.archive) return
+    const done = await source.archive(companyId, mine.owner, mine.threadRef, false)
+    if (done !== 'done') {
+      if (done !== 'not-allowed') console.warn(`[inbox] archiving in the mailbox did not work: ${done}`)
+      return
+    }
+    const now = fieldsOf(handle, interactionId)
+    logFailure('archived there', deps.writer.transition(companyId, {
+      recordId: interactionId, action: INBOX_ACTIONS.archivedThere, expectedVersion: now.version, to: null, actor: INBOX_ACTOR,
+      note: archivedThereNote(source.label ?? DEFAULT_MAILBOX_LABEL),
+      // Its owner hears it, with ［元に戻す］: the undo of this entry puts the mail back (afterAct).
+      notify: [mine.owner],
+    }))
+  }
+
+  /** ［元に戻す］ of 「Gmail でもアーカイブしました」: the conversation back in its owner's mailbox inbox. */
+  async function unarchiveThere(companyId: string, interactionId: string): Promise<void> {
+    const handle = handleOf(companyId)
+    const row = handle.records.byIds([interactionId])[0]
+    const mine = row ? ownMailbox(handle, row) : null
+    const source = mine ? await sourceFor(companyId) : null
+    if (!mine || !source?.archive) return
+    const done = await source.archive(companyId, mine.owner, mine.threadRef, true)
+    if (done === 'done') return
+    console.warn(`[inbox] putting the mail back in the mailbox did not work: ${done}`)
+    const now = fieldsOf(handle, interactionId)
+    logFailure('unarchive failed', deps.writer.transition(companyId, {
+      recordId: interactionId, action: INBOX_ACTIONS.unarchiveFailed, expectedVersion: now.version, to: null, actor: INBOX_ACTOR,
+      note: unarchiveFailedNote(source.label ?? DEFAULT_MAILBOX_LABEL), quiet: true,
+    }))
+  }
+
+  /**
+   * Which closes archive the mail there (afterAct): on an interaction, its owner's own action (a
+   * person — never the AI's judgement, the inbox or the clock) into 対応済み / やることにしなかった;
+   * on a task made from a message, reaching 完了 (its message is then checked: closed, every task
+   * finished, at least one done). The undo of 「…でもアーカイブしました」 puts it back.
+   */
+  function mailboxFollowUp(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null } }): void {
+    const { type, entry } = change
+    const handle = handleOf(companyId)
+    if (type === 'interaction') {
+      if (entry.action === 'undo') {
+        const reversed = handle.records.ledger(entry.recordId).find(e => e.version === entry.reversesVersion)
+        if (reversed?.action === INBOX_ACTIONS.archivedThere) track(unarchiveThere(companyId, entry.recordId))
+        return
+      }
+      const row = handle.records.byIds([entry.recordId])[0]
+      if (!row || entry.actorKind !== 'human' || entry.actorId !== row.personalOwner) return
+      if (entry.toState === null || entry.toState === entry.fromState || !CLOSED_STATES.includes(entry.toState)) return
+      track(archiveThere(companyId, entry.recordId))
+      return
+    }
+    if (type === 'task' && entry.toState === 'done' && entry.fromState !== 'done' && entry.action !== 'undo') {
+      for (const l of handle.records.linksFrom([entry.recordId])) {
+        if (l.name === 'interaction' && l.targetId) track(archiveThere(companyId, l.targetId))
+      }
+    }
   }
 
   /** The role's connector for the inbox's channel, or why there is none. */
@@ -685,6 +909,8 @@ export function createInboxService(deps: InboxDeps) {
     }
     if (left.size > 0) console.info(`[inbox] notification mails of connected services left out: ${[...left].map(([k, n]) => `${k}=${n}`).join(' ')}`)
     handle.inbox.setCheckedUntil(userId, 'email', new Date(startedMs).toISOString())
+    // What left the mailbox inbox since the last look (owner decision 2026-11-05): closed or noted here.
+    await syncLeft(companyId, userId, source).catch(() => 0)
     return { read: messages.length, outcome: 'done' }
   }
 
@@ -716,9 +942,16 @@ export function createInboxService(deps: InboxDeps) {
      * The engine wrote an action (composition.ts `afterAct`): the person's 「もう返した」 (a reply ACB
      * cannot see) drops every reply draft for that 返事のお願い, as a reply seen in the thread does.
      */
-    afterAct(companyId: string, change: { type: string; entry: { recordId: string; action: string } }): void {
+    afterAct(companyId: string, change: { type: string; entry: { recordId: string; action: string; actorId: string; actorKind: string; fromState: string | null; toState: string | null; reversesVersion?: number | null } }): void {
+      // A close by the mailbox's owner archives the mail there too, when they allowed it (2026-11-05).
+      try { mailboxFollowUp(companyId, change) } catch { /* the action stands */ }
       if (change.type !== 'reply_request' || change.entry.action !== 'replied_elsewhere') return
       discardDrafts(companyId, handleOf(companyId), change.entry.recordId, 'ほかの経路で返信済み（もう返した）', true)
+    },
+
+    /** The mailbox follow-ups still running (archive / put back): tests wait for them. */
+    async whenIdle(): Promise<void> {
+      while (running.size > 0) await Promise.all([...running])
     },
 
     connect,
@@ -971,6 +1204,8 @@ export function createInboxService(deps: InboxDeps) {
         recordId, action: INBOX_ACTIONS.replyChecked, expectedVersion: cur.version, to: 'handled', actor, quiet: true,
       })
       logFailure('reply checked', moved)
+      // Every task from it finished by the reply: the mail is archived there too, when its owner allowed it.
+      if (moved.ok && results.some(r => r.outcome === 'done' && r.ok)) track(archiveThere(member.companyId, recordId))
       return ok({ interactionId: recordId, state: moved.ok ? 'handled' : 'replied', tasks: results })
     },
 

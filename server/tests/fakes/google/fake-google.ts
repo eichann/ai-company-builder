@@ -31,7 +31,12 @@
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
  *                                 GET  /gmail/v1/users/{userId}/messages (q `after:<seconds>`, labelIds, maxResults, pageToken)
  *                                 GET  /gmail/v1/users/{userId}/messages/{id} (format minimal | metadata | full)
- *                                 GET  /gmail/v1/users/{userId}/threads/{id} (format full)
+ *                                 GET  /gmail/v1/users/{userId}/threads/{id} (format full | minimal)
+ *                                 GET  /gmail/v1/users/{userId}/profile (historyId)
+ *                                 GET  /gmail/v1/users/{userId}/history (startHistoryId, historyTypes, pageToken, maxResults;
+ *                                      404 for a start older than the kept history)
+ *                                 POST /gmail/v1/users/{userId}/threads/{id}/modify, …/messages/{id}/modify (gmail.modify)
+ *                                 POST /gmail/v1/users/{userId}/threads/{id}/trash (gmail.modify; ACB never calls it)
  *   sheets.googleapis.com         GET  /v4/spreadsheets/{id}, POST /v4/spreadsheets/{id}:batchUpdate,
  *                                 GET|PUT /v4/spreadsheets/{id}/values/{range}, POST …/values/{range}:append | :clear,
  *                                 GET /v4/spreadsheets/{id}/values:batchGet, POST …/values:batchUpdate | :batchClear
@@ -103,6 +108,7 @@ const NEEDS = {
   drive: [GOOGLE_SCOPES.driveMeetReadonly, GOOGLE_SCOPES.driveFile, `${AUTH}drive.readonly`, `${AUTH}drive`],
   gmailSend: [GOOGLE_SCOPES.gmailSend, `${AUTH}gmail.compose`, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
   gmailRead: [GOOGLE_SCOPES.gmailReadonly, `${AUTH}gmail.modify`, 'https://mail.google.com/'],
+  gmailModify: [`${AUTH}gmail.modify`, 'https://mail.google.com/'],
   docs: [GOOGLE_SCOPES.documentsReadonly, `${AUTH}documents`, `${AUTH}drive`, `${AUTH}drive.readonly`],
   sheetsRead: [GOOGLE_SCOPES.spreadsheets, `${AUTH}spreadsheets.readonly`, `${AUTH}drive`, `${AUTH}drive.readonly`],
   sheetsWrite: [GOOGLE_SCOPES.spreadsheets, `${AUTH}drive`],
@@ -210,6 +216,14 @@ export interface FakeGoogle {
   sent: SentMessage[]
   /** A mail arrives in an account's Gmail (受信を読む). */
   deliver(mail: SeedMail): void
+  /** The person archives a conversation in Gmail itself (its INBOX label off; a history entry). */
+  archiveInGmail(account: string, threadId: string): void
+  /** The person deletes a conversation in Gmail for good (a history entry). */
+  deleteInGmail(account: string, threadId: string): void
+  /** The labels of a conversation's messages now (for assertions), oldest first. */
+  threadLabels(account: string, threadId: string): string[][]
+  /** Gmail forgets the history before now: an older `startHistoryId` is answered 404. */
+  expireHistory(): void
   /** A document's current version (null when unknown); for assertions. */
   doc(id: string): { text: string; version: number; modifiedTime: string } | null
   /** Live refresh tokens of an account (for the 100-per-account limit). */
@@ -1034,7 +1048,81 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     return c.json({ ...base, payload: { partId: '', mimeType: 'multipart/alternative', filename: '', headers: allHeaders, body: { size: 0 }, parts } })
   })
 
-  // One conversation of the token's own mailbox, oldest first (users.threads.get, format full).
+  // Gmail's history (users.history.list): label removals and deletions, per mailbox, ids growing.
+  let historySeq = 1000
+  let historyKeptFrom = 0
+  const history: Array<{ id: number; account: string; kind: 'labelRemoved' | 'labelAdded' | 'messageDeleted'; messageId: string; threadId: string; labelIds: string[] }> = []
+  function changeLabels(account: string, threadId: string, add: string[], remove: string[]) {
+    for (const m of mails.filter(x => x.threadId === threadId && x.account.toLowerCase() === account.toLowerCase())) {
+      const removed = remove.filter(l => m.labelIds.includes(l))
+      const added = add.filter(l => !m.labelIds.includes(l))
+      m.labelIds = [...m.labelIds.filter(l => !removed.includes(l)), ...added]
+      if (removed.length > 0) history.push({ id: ++historySeq, account: m.account.toLowerCase(), kind: 'labelRemoved', messageId: m.id, threadId, labelIds: removed })
+      if (added.length > 0) history.push({ id: ++historySeq, account: m.account.toLowerCase(), kind: 'labelAdded', messageId: m.id, threadId, labelIds: added })
+    }
+  }
+  function deleteThread(account: string, threadId: string) {
+    for (let i = mails.length - 1; i >= 0; i--) {
+      const m = mails[i]
+      if (m.threadId !== threadId || m.account.toLowerCase() !== account.toLowerCase()) continue
+      mails.splice(i, 1)
+      history.push({ id: ++historySeq, account: account.toLowerCase(), kind: 'messageDeleted', messageId: m.id, threadId, labelIds: [] })
+    }
+  }
+
+  app.get('/gmail/v1/users/:userId/profile', c => {
+    const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    return c.json({ emailAddress: a.email, messagesTotal: mails.filter(m => m.account.toLowerCase() === box).length, threadsTotal: 0, historyId: String(historySeq) })
+  })
+
+  app.get('/gmail/v1/users/:userId/history', c => {
+    const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    const start = Number(c.req.query('startHistoryId') ?? '')
+    if (!Number.isInteger(start) || start <= 0) throw apiError(400, 'Invalid startHistoryId', 'invalidArgument')
+    if (start < historyKeptFrom) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    const types = c.req.queries('historyTypes') ?? []
+    const max = Math.min(Math.max(Number(c.req.query('maxResults') ?? '100') || 100, 1), 500)
+    const from = Number(c.req.query('pageToken') ?? '0') || 0
+    const found = history.filter(h => h.account === box && h.id > start && (types.length === 0 || types.includes(h.kind)))
+    const page = found.slice(from, from + max)
+    return c.json({
+      ...(page.length > 0 ? {
+        history: page.map(h => ({
+          id: String(h.id),
+          messages: [{ id: h.messageId, threadId: h.threadId }],
+          ...(h.kind === 'labelRemoved' ? { labelsRemoved: [{ message: { id: h.messageId, threadId: h.threadId }, labelIds: h.labelIds }] } : {}),
+          ...(h.kind === 'labelAdded' ? { labelsAdded: [{ message: { id: h.messageId, threadId: h.threadId }, labelIds: h.labelIds }] } : {}),
+          ...(h.kind === 'messageDeleted' ? { messagesDeleted: [{ message: { id: h.messageId, threadId: h.threadId } }] } : {}),
+        })),
+      } : {}),
+      ...(from + max < found.length ? { nextPageToken: String(from + max) } : {}),
+      historyId: String(historySeq),
+    })
+  })
+
+  // Labels of a conversation (gmail.modify): what ACB's archive and its ［元に戻す］ do.
+  for (const kind of ['threads', 'messages'] as const) {
+    app.post(`/gmail/v1/users/:userId/${kind}/:id/modify`, async c => {
+      const a = bearer(c, NEEDS.gmailModify, 'gmail.googleapis.com')
+      const box = mailboxOf(c, a)
+      const id = c.req.param('id')
+      const target = mails.find(m => m.account.toLowerCase() === box && (kind === 'threads' ? m.threadId === id : m.id === id))
+      if (!target) throw apiError(404, 'Requested entity was not found.', 'notFound')
+      const body = await c.req.json().catch(() => ({})) as { addLabelIds?: string[]; removeLabelIds?: string[] }
+      changeLabels(box, target.threadId, body.addLabelIds ?? [], body.removeLabelIds ?? [])
+      return c.json({ id, ...(kind === 'messages' ? { threadId: target.threadId, labelIds: target.labelIds } : {}) })
+    })
+  }
+  app.post('/gmail/v1/users/:userId/threads/:id/trash', c => {
+    const a = bearer(c, NEEDS.gmailModify, 'gmail.googleapis.com')
+    const box = mailboxOf(c, a)
+    changeLabels(box, c.req.param('id'), ['TRASH'], ['INBOX'])
+    return c.json({ id: c.req.param('id') })
+  })
+
+  // One conversation of the token's own mailbox, oldest first (users.threads.get, format full | minimal).
   app.get('/gmail/v1/users/:userId/threads/:id', async c => {
     const a = bearer(c, NEEDS.gmailRead, 'gmail.googleapis.com')
     const box = mailboxOf(c, a)
@@ -1042,6 +1130,9 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       .filter(x => x.threadId === c.req.param('id') && x.account.toLowerCase() === box)
       .sort((x, y) => Date.parse(x.receivedAt) - Date.parse(y.receivedAt))
     if (inThread.length === 0) throw apiError(404, 'Requested entity was not found.', 'notFound')
+    if (c.req.query('format') === 'minimal') {
+      return c.json({ id: c.req.param('id'), historyId: String(historySeq), messages: inThread.map(m => ({ id: m.id, threadId: m.threadId, labelIds: m.labelIds })) })
+    }
     const messages: unknown[] = []
     for (const m of inThread) {
       const res = await app.request(`/gmail/v1/users/me/messages/${m.id}?format=full`, { headers: { authorization: c.req.header('authorization') ?? '' } })
@@ -1341,6 +1432,13 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     },
     signIn,
     deliver(mail) { mails.push({ ...mail, headers: { ...mail.headers }, labelIds: [...mail.labelIds] }) },
+    archiveInGmail(account, threadId) { changeLabels(account, threadId, [], ['INBOX']) },
+    deleteInGmail(account, threadId) { deleteThread(account, threadId) },
+    threadLabels(account, threadId) {
+      return mails.filter(m => m.threadId === threadId && m.account.toLowerCase() === account.toLowerCase())
+        .sort((x, y) => Date.parse(x.receivedAt) - Date.parse(y.receivedAt)).map(m => [...m.labelIds])
+    },
+    expireHistory() { historyKeptFrom = historySeq + 1 },
     revokeAllFor,
     changeEvent,
     changeDoc,

@@ -27,7 +27,7 @@ import { migrateGoogleCompanyFeatures, migrateGoogleRelay } from './schema/conne
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
-import { inboxSchema, migrateInboxMessageSourceRef } from './schema/inbox'
+import { inboxSchema, migrateInboxArchiveColumns, migrateInboxMessageSourceRef } from './schema/inbox'
 import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 // lane B ▲
 // lane C ▼
@@ -149,6 +149,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)
+  migrateInboxArchiveColumns(conn)
   // The plugin screen a ledger entry came through (plugin-frame.md, B6).
   migrateRecordLedgerVia(conn)
   // lane B ▲

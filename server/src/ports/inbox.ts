@@ -19,6 +19,12 @@ export interface InboxMessageRow {
   seenAt: string
   /** The connector's opaque pointer to the message (null for rows made before B4). */
   sourceRef: string | null
+  /**
+   * Whose mailbox the pointer is in (the member whose poll or events reported it; null for rows
+   * made before 2026-11-05): a mail pointer is read, archived and put back only with that member's
+   * own permission (inbox.md "Mail archived in the mailbox").
+   */
+  reporterId?: string | null
 }
 
 export interface InboxConnectionRow {
@@ -26,6 +32,8 @@ export interface InboxConnectionRow {
   channel: InboxChannel
   connectedAt: string
   checkedUntil: string
+  /** Where the source's change log was last read (`InboxSource.leftSince`; null: not yet). */
+  leftCursor?: string | null
 }
 
 export interface InboxGapRow {
@@ -56,6 +64,7 @@ export interface InboxRepository {
   /** Adds the connection or replaces its times. */
   putConnection(row: InboxConnectionRow): void
   setCheckedUntil(userId: string, channel: InboxChannel, at: string): void
+  setLeftCursor(userId: string, channel: InboxChannel, cursor: string | null): void
   addGap(row: InboxGapRow): void
   gaps(userId: string): InboxGapRow[]
 }
@@ -78,4 +87,21 @@ export interface InboxSource {
    * reading (a first connection starts then).
    */
   ready?(companyId: string, userId: string): Promise<boolean>
+  /** The mailbox as members call it (「Gmail」): the inbox's notes say 「Gmail ではアーカイブ済み」. */
+  label?: string
+  /**
+   * Conversations (`threadRef`s) that may have left the member's inbox since `cursor` — archived,
+   * trashed or deleted there — and the cursor to start from next time. `threadRefs: null` when there
+   * was no cursor or it is too old: the caller then asks `inInbox` for the records it watches.
+   * Read with the member's own read permission; `not-connected` keeps the cursor.
+   */
+  leftSince?(companyId: string, userId: string, cursor: string | null): Promise<{ cursor: string; threadRefs: string[] | null } | 'not-connected'>
+  /** Whether each conversation still has a message in the member's inbox (false: archived, trashed, gone; left out: unknown). */
+  inInbox?(companyId: string, userId: string, threadRefs: string[]): Promise<Record<string, boolean> | 'not-connected'>
+  /**
+   * The conversation taken out of the member's own inbox, or put back (`back`), with their own
+   * permission to do so (owner decision 2026-11-05) — `not-allowed` when they have not allowed it
+   * (or turned it off, or the company did): nothing is sent then.
+   */
+  archive?(companyId: string, userId: string, threadRef: string, back: boolean): Promise<'done' | 'not-allowed' | 'not-found' | 'failed'>
 }

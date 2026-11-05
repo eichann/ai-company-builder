@@ -5,18 +5,19 @@
 import type Database from 'better-sqlite3'
 import type { InboxChannel, InboxConnectionRow, InboxGapRow, InboxMessageRow, InboxRepository } from '../../ports/inbox'
 
-type MessageRow = { channel: string; message_id: string; interaction_id: string; direction: string; occurred_at: string; seen_at: string; source_ref: string | null }
-type ConnectionRow = { user_id: string; channel: string; connected_at: string; checked_until: string }
+type MessageRow = { channel: string; message_id: string; interaction_id: string; direction: string; occurred_at: string; seen_at: string; source_ref: string | null; reporter_id: string | null }
+type ConnectionRow = { user_id: string; channel: string; connected_at: string; checked_until: string; left_cursor: string | null }
 type GapRow = { user_id: string; channel: string; gap_from: string; gap_to: string; noted_at: string }
 
-const MESSAGE_COLS = 'channel, message_id, interaction_id, direction, occurred_at, seen_at, source_ref'
+const MESSAGE_COLS = 'channel, message_id, interaction_id, direction, occurred_at, seen_at, source_ref, reporter_id'
 const CONNECTION_COLS = 'user_id, channel, connected_at, checked_until'
+const CONNECTION_READ_COLS = `${CONNECTION_COLS}, left_cursor`
 const message = (r: MessageRow): InboxMessageRow => ({
   channel: r.channel as InboxChannel, messageId: r.message_id, interactionId: r.interaction_id,
-  direction: r.direction as 'in' | 'out', occurredAt: r.occurred_at, seenAt: r.seen_at, sourceRef: r.source_ref ?? null,
+  direction: r.direction as 'in' | 'out', occurredAt: r.occurred_at, seenAt: r.seen_at, sourceRef: r.source_ref ?? null, reporterId: r.reporter_id ?? null,
 })
 const connection = (r: ConnectionRow): InboxConnectionRow => ({
-  userId: r.user_id, channel: r.channel as InboxChannel, connectedAt: r.connected_at, checkedUntil: r.checked_until,
+  userId: r.user_id, channel: r.channel as InboxChannel, connectedAt: r.connected_at, checkedUntil: r.checked_until, leftCursor: r.left_cursor ?? null,
 })
 const gap = (r: GapRow): InboxGapRow => ({ userId: r.user_id, channel: r.channel as InboxChannel, from: r.gap_from, to: r.gap_to, notedAt: r.noted_at })
 
@@ -56,22 +57,22 @@ export function sqliteInboxRepository(conn: Database.Database, companyId: string
       return r ? message(r) : null
     },
     insertMessage(row) {
-      const r = conn.prepare(`INSERT OR IGNORE INTO inbox_messages (company_id, ${MESSAGE_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(companyId, row.channel, row.messageId, row.interactionId, row.direction, row.occurredAt, row.seenAt, row.sourceRef)
+      const r = conn.prepare(`INSERT OR IGNORE INTO inbox_messages (company_id, ${MESSAGE_COLS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, row.channel, row.messageId, row.interactionId, row.direction, row.occurredAt, row.seenAt, row.sourceRef, row.reporterId ?? null)
       return r.changes === 1
     },
 
     connection(userId, channel) {
-      const r = conn.prepare(`SELECT ${CONNECTION_COLS} FROM inbox_connections WHERE company_id = ? AND user_id = ? AND channel = ?`)
+      const r = conn.prepare(`SELECT ${CONNECTION_READ_COLS} FROM inbox_connections WHERE company_id = ? AND user_id = ? AND channel = ?`)
         .get(companyId, userId, channel) as ConnectionRow | undefined
       return r ? connection(r) : null
     },
     connections(userId) {
-      return (conn.prepare(`SELECT ${CONNECTION_COLS} FROM inbox_connections WHERE company_id = ? AND user_id = ? ORDER BY channel`)
+      return (conn.prepare(`SELECT ${CONNECTION_READ_COLS} FROM inbox_connections WHERE company_id = ? AND user_id = ? ORDER BY channel`)
         .all(companyId, userId) as ConnectionRow[]).map(connection)
     },
     connected(channel) {
-      return (conn.prepare(`SELECT ${CONNECTION_COLS} FROM inbox_connections WHERE company_id = ? AND channel = ? ORDER BY user_id`)
+      return (conn.prepare(`SELECT ${CONNECTION_READ_COLS} FROM inbox_connections WHERE company_id = ? AND channel = ? ORDER BY user_id`)
         .all(companyId, channel) as ConnectionRow[]).map(connection)
     },
     putConnection(row) {
@@ -81,6 +82,9 @@ export function sqliteInboxRepository(conn: Database.Database, companyId: string
     },
     setCheckedUntil(userId, channel, at) {
       conn.prepare('UPDATE inbox_connections SET checked_until = ? WHERE company_id = ? AND user_id = ? AND channel = ?').run(at, companyId, userId, channel)
+    },
+    setLeftCursor(userId, channel, cursor) {
+      conn.prepare('UPDATE inbox_connections SET left_cursor = ? WHERE company_id = ? AND user_id = ? AND channel = ?').run(cursor, companyId, userId, channel)
     },
     addGap(row) {
       conn.prepare('INSERT INTO inbox_gaps (company_id, user_id, channel, gap_from, gap_to, noted_at) VALUES (?, ?, ?, ?, ?, ?)')

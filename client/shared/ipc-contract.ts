@@ -738,6 +738,8 @@ export interface IpcInvokeChannels {
   // 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): the member's view and own records; 「やめる」 / back on.
   'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
   'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
+  // 「済んだメールを Gmail でもアーカイブする」 (google-connector.md "Archiving in Gmail"): the member's own switch, back on without a consent.
+  'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
@@ -1113,6 +1115,7 @@ export interface ElectronAPI {
   markGoogleSeen: Invoke<'google:markSeen'>
   getGoogleRelay: Invoke<'google:relay'>
   setGoogleRelay: Invoke<'google:setRelay'>
+  setGoogleArchive: Invoke<'google:setArchive'>
   markSlackSeen: Invoke<'slack:markSeen'>
   getRecordThread: Invoke<'threads:get'>
   callPluginBridge: Invoke<'plugins:bridge'>
