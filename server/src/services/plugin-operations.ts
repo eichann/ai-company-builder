@@ -294,6 +294,8 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     /** Business roles in an operation's `who` (plan C3): bound once by the plugins lane. */
     useRoles: checks.useRoles,
     usePinnedSteps: checks.usePinnedSteps,
+    /** What a contract-3 call shares with an operation (services/plugin-calls.ts). */
+    gate: { callStepRefusal: checks.callStepRefusal, mayRunAt: checks.mayRunAt, precheckFor: checks.precheckFor },
   }
   return service
 }

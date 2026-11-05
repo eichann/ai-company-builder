@@ -67,6 +67,8 @@ export const GUARD_REASONS = [
   // The company map (records.md): a type definition (.acb/types/) the member may not change,
   // and state / identity written into a record file instead of through the record tools.
   'type-definition', 'record-file',
+  // A skill / agent / command file the member may not change (shared/core/skill-files.ts).
+  'skill-file',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 

@@ -1,4 +1,5 @@
 /** Reversing an earlier ledger entry with a new one (records.md "The state engine"). */
+import { undoableByAssignee } from '../../../shared/core/core-types'
 import { FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { replayRecordState, type LedgerEntry, type LedgerValue } from '../../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../../shared/core/records'
@@ -38,10 +39,13 @@ export function undoing(ctx: EngineContext) {
       if (target.action === 'create' || target.action === 'undo' || target.changes.some(c => c.field.startsWith('place.'))) {
         return bad('This change cannot be undone', 'NOT_UNDOABLE')
       }
-      if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
       const latest = ledger.length > 0 ? ledger[ledger.length - 1].version : 0
-      if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       const now = replayRecordState(ledger, latest)
+      // The system's own entries its assignee may take back (UNDO_BY_ASSIGNEE: the inbox closing a mail
+      // that left the mailbox inbox, or taking it out there — each told with ［元に戻す］).
+      const assigneeMay = undoableByAssignee(row.type, target, now.fields.assignee, member.userId)
+      if (target.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role) && !assigneeMay) return refuse('forbidden', '自分の変更か、管理者だけが取り消せます', { code: 'NOT_ALLOWED' })
+      if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       // `links.<name>` changes (a file linked, the meeting's まとまり) are compared with and restored to
       // the link rows themselves: a rename the indexer followed changed them without an entry.
       const def = currentTypes(records).get(row.type)?.definition
@@ -88,6 +92,8 @@ export function undoing(ctx: EngineContext) {
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
       tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
+      // The services' follow-up of an undo (the inbox puts a mail back in the mailbox inbox).
+      try { ctx.deps.afterAct?.(member.companyId, { type: row.type, entry, fields: nextFields }) } catch { /* the undo stands */ }
       return ok({ record: summaryOf(records, row.id), entry })
     },
   }

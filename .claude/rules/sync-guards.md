@@ -59,6 +59,58 @@ what git actually sees through the app's `createGit`.
   wake together. Scenario: "concurrent sync clicks are serialized…".
 - Rebase detection uses the `rebase-merge` / `rebase-apply` directories, not `REBASE_HEAD`
   (a ref that lingers after a finished rebase). Scenario: "stale rebase and stale merge…".
+- A sync that stopped half-way (the app quit or crashed, git was killed) leaves conflict markers
+  people then edit, even commit on, and the clean-up discards that. `recoverInterruptedState`
+  (`sync/interrupted.ts`, also for read-only private folders) first leaves a live operation alone:
+  `otherGitRunning` or a git in the folder (an orphan after a quit can still finish) stops with
+  `locked` and `REPOSITORY_BUSY_MESSAGE`. Otherwise it pins HEAD and the branch under
+  `refs/acb-recovery/<folder>/` and copies everything the clean-up can take to a **new**
+  `<ts>_before_recovery/` per try (`planCopies`): tracked and conflicted files that differ; versions
+  only git holds (staged, then changed or removed on disk: `<file>.staged-version`; commits made
+  during the stop, found with `rev-list --cherry-pick` so replayed picks and teammates' changes are
+  not copied: `<file>.committed-version` when the name is taken); and whatever sits at a path of a
+  version it returns to and git does not track, ignored files included, as a file, as a whole
+  folder where that version has a file, or as a file where it has a folder. Any other untracked
+  file stays on disk untouched, so copying it would only fill the disk. A copy never replaces an
+  earlier one (`COPYFILE_EXCL`, `wx`): an abort or reset that fails can leave files half rewritten,
+  and reusing the folder once replaced the member's text with reset output. Only file contents are
+  copied from git (`cat-file -t`; at a version the path can be a folder). A plan can hold a file and
+  a folder of one name (`doc` and `doc/new.md`, ordinary work where a file became a folder): the one
+  that does not fit goes under `_same-name-<n>/` (`placeCopy`) instead of stopping sync for good. A failed copy aborts
+  nothing, leaves no half folder and names the file (`recoveryBackupFailedMessage`; the disk only
+  for ENOSPC / EDQUOT); a state git cannot read stops (`RECOVERY_UNREADABLE_MESSAGE`), it never
+  means "nothing at risk"; a path whose folder became a file (ENOTDIR) is simply gone. A folder with
+  its own `.git` where that version has a file stops before anything happens
+  (`nestedRepoInTheWayMessage`, the way out is in the sentence): the reset would wipe it, `.git`
+  included. Members cannot repair a repository, so once the copy exists the clean-up gets through:
+  git refuses `--abort` when a staged file was edited (`Entry not uptodate`) or its state is
+  unreadable, and `forceCleanUp` then goes back to the branch with `reset --hard` and removes the
+  state. If even that fails sync stops (`RECOVERY_FAILED_MESSAGE`, never commits on top).
+  `.git/acb-recovery-pending.json` lists the copies not yet reported: it is for telling only (the
+  next run, also one that finds the state gone, reports them with the first folder, which holds what
+  the member really had, and says how many folders there are); nothing is ever copied by it. A
+  `refs/acb-recovery/<folder>/` ref goes when its folder does (`pruneRecoveryRefs`, each repository's
+  own run).
+- Closing or quitting during a sync asks first and defaults to waiting (`services/close-guard.ts`,
+  `ipc-and-main-process.md`): a sync cut off half-way is what the guard above cleans up. While it
+  waits no automatic run starts (`whenIdle` holds them, `resumeAutomaticRuns` when the member stays),
+  so timers cannot extend the wait; the renderer saves again before the window goes.
+- Leftover locks stopped every sync and the automatic receive for good. Holding the repository's
+  sync lock, `clearStaleLocks` removes `index.lock`, `HEAD.lock`, `ORIG_HEAD.lock`,
+  `refs/heads/main.lock` and `refs/remotes/origin/main.lock` when all of them are older than `INDEX_LOCK_STALE_MS` (6 min: past the
+  5-min watchdog, so a silent app git is dead by then) and nothing may be using them:
+  `SyncDeps.otherGitRunning` (download choices, private-folder setup, an AI turn:
+  `gitMayBeRunningElsewhere`, a manual sync does not wait for the AI; `applyPrivateFolderChoices`
+  runs inside the download-choice change, so that mark does not count there, `ownActivity`) and a git process with its cwd
+  in the folder (`sync/live-git.ts`, lsof: a timeout or error is "unknown" and keeps the lock; only a
+  computer without lsof, and Windows, cannot be asked; a git in a nested repository works on that one
+  and does not count; a git started with GIT_DIR from elsewhere or a folder name lsof escapes is not
+  seen). A git that never ends has no way out but the sentence: it tells the member to restart the
+  computer after a while, then to contact an administrator. The age is measured against a file
+  just touched in `.git`, so both times come from one clock (sleep, a network drive's skew). A lock
+  that may be live stays: `locked` and `REPOSITORY_BUSY_MESSAGE` (receive: held back). Any failure
+  about a lock mid-run ends in a sentence too (`lockFailureMessage`; `cannot lock ref` / `could not
+  lock config file` do not say "wait"). Scenarios: "a leftover index.lock" in `interrupted.test.ts`.
 - Conflict resolution is a loop: a rebase pauses on every conflicting pick; the old single
   round fell back to `rebase --skip` and dropped commits. Scenario: "several conflicting picks
   in one rebase are all resolved, no commit is dropped".
@@ -67,6 +119,9 @@ what git actually sees through the app's `createGit`.
 - Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts`,
   `sync/conflicts.ts`): `checkout --ours` fails atomically on a modify/delete (`DU`) entry, which
   once left a pilot member permanently unable to sync. Scenario: "modify/delete conflict (DU)…".
+- A conflict copy that cannot be written stops the sync with the rebase undone; it once read as
+  "nothing to save", and the server's version replaced the member's without a copy. Scenarios: "a
+  conflict backup that fails" in `interrupted.test.ts`.
 - Binary-safe backups via `cat-file` into a Buffer, with the `:3:` and earlier-version fallbacks
   (`sync.md`). Scenarios: "binary conflict…", "a conflicted edit is backed up even when a later
   unpushed commit renamed the file", "an earlier conflicted version is backed up…".
@@ -172,7 +227,31 @@ what git actually sees through the app's `createGit`.
 - Rejection recovery rewrites unpushed commits, never retries or reverts on top (the hook checks
   every commit). `client/tests/protected-config.test.ts`, `client/tests/sync/write-denied.test.ts`,
   scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
-  "[LOCAL_ONLY_PATH] …".
+  "[LOCAL_ONLY_PATH] …". Skill files (scripts, new files, deletions, renames) take the same
+  recovery with their own wording when nothing else was refused (`onlySkillFiles`): `client/tests/sync/skill-files.test.ts`.
+  The recovery compares mode as well as blob id (`sameEntry`): a `chmod +x` alone is refused by the
+  server, and a path taken for unchanged was refused at every sync, holding the member's other work
+  back (also for `[WRITE_DENIED]`).
+- A pull that fails without a rebase, while origin/main holds commits HEAD lacks, ends the sync with
+  `pull_failed` (「サーバーの最新の内容を受け取れなかった…」), nothing moved. It used to go on and report
+  「同期が完了しました」, with the member missing the server's changes for good (a look-alike path on a
+  Mac did this). No origin/main (a company's first push) still goes on. Scenario: 「a pull that fails…」
+  in `skill-files.test.ts`.
+- What running a skill leaves in its own folder (`client/shared/skill-leftovers.ts`) stays on each
+  computer: a managed block of `.git/info/exclude`, unstaged if a shared negation re-included it.
+  To the server it is a skill change, which would stop automatic sync at every run. Leftovers
+  (`__pycache__/`, `*.pyc`, `node_modules/`, virtual environments, caches, a tool's
+  `.tool-output.log`, the desktop's files) for everyone; artifacts (`package-lock.json`, `dist/` and
+  `build/` under `tools/`) only for someone who may not share that skill, from
+  `getSkillSharing` (`/me/capabilities`): a skill with a screen ships them, and a rebuilt `dist/`
+  must not leave a page pointing at an unshared asset. Ignored rather than untracked, so a shared
+  copy can still arrive over the member's own. New files only: taking a tracked one out of the
+  index would delete it for everyone. Unknown authority keeps the last block. A shared lock file
+  that a member's `npm install` changes still meets the refusal and its recovery. Scenarios in
+  `skill-files.test.ts`.
+- `[WINPATH_DETECTED]` ends the sync with `path_name` and a sentence naming the file (`winPathMessage`),
+  no `PENDING_PUSH`: a retry could only be refused the same way. The member's other work waits for the
+  rename; nothing is moved. Scenario: 「a name the server refuses…」 in `skill-files.test.ts`.
 
 ## Remote, sparse checkout and not-downloaded folders
 

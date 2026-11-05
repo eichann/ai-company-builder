@@ -127,6 +127,7 @@ contract.invoke google:connectAll
 contract.invoke google:disconnect
 contract.invoke google:markSeen
 contract.invoke google:relay
+contract.invoke google:setArchive
 contract.invoke google:setRelay
 contract.invoke google:status
 contract.invoke handoff:complete
@@ -492,6 +493,7 @@ contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundM
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setGoogleArchive = setGoogleArchive: Invoke<'google:setArchive'>
 contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRelay'>
 contract.type ElectronAPI.setMeetingAutoSeries = setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
@@ -540,7 +542,7 @@ contract.type FileChangeEvent = export interface FileChangeEvent { }
 contract.type FileChangeEvent.path = path: string
 contract.type FileChangeEvent.type = type: string
 contract.type FileOpResult = export interface FileOpResult extends SimpleResult { }
-contract.type FileOpResult.code = code?: 'name_taken'
+contract.type FileOpResult.code = code?: 'name_taken' | 'refused'
 contract.type FileStats = export interface FileStats { }
 contract.type FileStats.ctime = ctime: string
 contract.type FileStats.isDirectory = isDirectory: boolean
@@ -593,16 +595,28 @@ contract.type GitResult.errorType = errorType?: SyncErrorType
 contract.type GitResult.excludedNestedRepos = excludedNestedRepos?: string[]
 contract.type GitResult.hadConflicts = hadConflicts?: boolean
 contract.type GitResult.ignoredLargeFiles = ignoredLargeFiles?: string[]
+contract.type GitResult.largeFileBackupFiles = largeFileBackupFiles?: string[]
+contract.type GitResult.largeFileBackupPath = largeFileBackupPath?: string
+contract.type GitResult.lostPrivateFolders = lostPrivateFolders?: string[]
+contract.type GitResult.madePublicBackupPath = madePublicBackupPath?: string
+contract.type GitResult.madePublicFolders = madePublicFolders?: string[]
 contract.type GitResult.message = message?: string
+contract.type GitResult.movedAsideBackupPath = movedAsideBackupPath?: string
+contract.type GitResult.movedAsideFolders = movedAsideFolders?: string[]
 contract.type GitResult.nestedRepoBackupFiles = nestedRepoBackupFiles?: string[]
 contract.type GitResult.nestedRepoBackupPath = nestedRepoBackupPath?: string
 contract.type GitResult.outsideCheckoutBackupPath = outsideCheckoutBackupPath?: string
 contract.type GitResult.outsideCheckoutFiles = outsideCheckoutFiles?: string[]
 contract.type GitResult.personalFiles = personalFiles?: string[]
+contract.type GitResult.privateFolders = privateFolders?: Array<{ path: string; success: boolean; setAside?: boolean; backupPath?: string }>
 contract.type GitResult.protectedBackupPath = protectedBackupPath?: string
 contract.type GitResult.protectedFiles = protectedFiles?: string[]
 contract.type GitResult.pushFailed = pushFailed?: boolean
+contract.type GitResult.recoveredFiles = recoveredFiles?: string[]
+contract.type GitResult.recoveryBackupPath = recoveryBackupPath?: string
 contract.type GitResult.remoteUrl = remoteUrl?: string
+contract.type GitResult.reservedPathBackupPath = reservedPathBackupPath?: string
+contract.type GitResult.reservedPathFiles = reservedPathFiles?: string[]
 contract.type GitResult.restoredFolders = restoredFolders?: string[]
 contract.type GitResult.restoredProtectedFiles = restoredProtectedFiles?: string[]
 contract.type GitResult.restoredWriteDeniedFiles = restoredWriteDeniedFiles?: string[]
@@ -712,7 +726,7 @@ contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: 
 contract.type IpcInvokeChannels.'fs:copy' = 'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:createDirectory' = 'fs:createDirectory': { args: [path: string]; result: boolean }
 contract.type IpcInvokeChannels.'fs:createFile' = 'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
-contract.type IpcInvokeChannels.'fs:delete' = 'fs:delete': { args: [path: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'fs:delete' = 'fs:delete': { args: [path: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:exists' = 'fs:exists': { args: [path: string]; result: boolean }
 contract.type IpcInvokeChannels.'fs:move' = 'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
 contract.type IpcInvokeChannels.'fs:moveFromExternal' = 'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
@@ -749,6 +763,7 @@ contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { arg
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:relay' = 'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
+contract.type IpcInvokeChannels.'google:setArchive' = 'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:setRelay' = 'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
@@ -799,8 +814,8 @@ contract.type IpcInvokeChannels.'recordViews:topics' = 'recordViews:topics': { a
 contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
-contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
-contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: FileOpResult }
 contract.type IpcInvokeChannels.'slack:connect' = 'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
 contract.type IpcInvokeChannels.'slack:disconnect' = 'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'slack:markSeen' = 'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
@@ -1022,6 +1037,7 @@ main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
 main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:relay @ features/google/ipc.ts (companyId: string)
+main.handle google:setArchive @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:setRelay @ features/google/ipc.ts (companyId: string, on: boolean)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
@@ -1168,7 +1184,7 @@ preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
-preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox" | "sheets")[]) => Promise<GoogleConnectResult>
+preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox" | "sheets" | "inbox_archive")[]) => Promise<GoogleConnectResult>
 preload connectGoogleAll -> invoke google:connectAll($0)
 preload connectGoogleAll : (companyId: string) => Promise<GoogleConnectResult>
 preload connectSlack -> invoke slack:connect($0, $1)
@@ -1192,7 +1208,7 @@ preload declineMinutesBundle : (companyId: string, minutesId: string) => Promise
 preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)
 preload deleteChatSession : (companyId: string, sessionId: string) => Promise<boolean>
 preload deleteItem -> invoke fs:delete($0)
-preload deleteItem : (path: string) => Promise<SimpleResult>
+preload deleteItem : (path: string) => Promise<FileOpResult>
 preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
 preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
 preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
@@ -1434,7 +1450,7 @@ preload openFileInMainWindow : (filePath: string) => Promise<ChatWindowOpenFileR
 preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
 preload publishSkill -> invoke skills:publish($0, $1)
-preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult>
+preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<FileOpResult>
 preload readDirectory -> invoke fs:readDirectory($0)
 preload readDirectory : (path: string) => Promise<DirectoryEntry[]>
 preload readDirectoryTree -> invoke fs:readDirectoryTree($0, $1)
@@ -1493,6 +1509,8 @@ preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setGoogleArchive -> invoke google:setArchive($0, $1)
+preload setGoogleArchive : (companyId: string, on: boolean) => Promise<GoogleStatusResult>
 preload setGoogleRelay -> invoke google:setRelay($0, $1)
 preload setGoogleRelay : (companyId: string, on: boolean) => Promise<GoogleRelayResult>
 preload setMeetingAutoSeries -> invoke minutes:autoSeries($0, $1, $2)
@@ -1538,7 +1556,7 @@ preload stopTool : (toolPath: string) => Promise<StopToolResult>
 preload suggestTaskTags -> invoke tasks:suggestTags($0, $1, $2)
 preload suggestTaskTags : (companyId: string, title: string, tagsInUse: string[]) => Promise<TagSuggestions>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
-preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
+preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<FileOpResult>
 preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)
 preload undoPluginOperation : (companyId: string, pluginId: string, operationId: string, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload undoTaskAction -> invoke tasks:undo($0, $1, $2, $3)

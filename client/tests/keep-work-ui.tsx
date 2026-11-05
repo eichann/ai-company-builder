@@ -67,6 +67,8 @@ installElectronAPI({
   createDirectory: async p => { calls.push(['createDirectory', p]); return true },
   createFile: async p => { calls.push(['createFile', p]); return { success: true } },
   copyItem: async (from, to) => { calls.push(['copyItem', from, to]); return { success: true } },
+  // ?refuse-skills=1: a member who may not share skills.
+  reservedPathRefusal: async () => (new URLSearchParams(location.search).has('refuse-skills') ? 'スキルは変更できません' : null),
   readFile: async () => '---\nname: 提案書\ndescription: 提案書を作る\n---\n',
   writeFile: async p => { calls.push(['writeFile', p]); return true },
   listSkills: async (_root, folder) => ({
@@ -79,7 +81,7 @@ installElectronAPI({
 })
 
 function PreviewView() {
-  const sync = useSync({ rootPath: ROOT, companyId: 'demo', onSynced: async () => {} })
+  const sync = useSync({ rootPath: ROOT, companyId: 'demo', userId: 'u1', onSynced: async () => {} })
   return (
     <div className="p-6">
       <button onClick={() => { void sync.handlePreview() }} className="px-3 py-1.5 rounded bg-accent text-white text-sm">変更を確認</button>

@@ -89,6 +89,7 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'over-cap': 'API キーの1日の上限',
   'no-deletion': '消す操作（中継では通さない）',
   'type-definition': '記録の型の定義（管理者だけ）',
+  'skill-file': 'スキルのファイル（直せる人だけ）',
   'record-file': '記録のファイルの状態・id の書き換え',
 }
 

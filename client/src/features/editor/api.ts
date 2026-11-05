@@ -10,6 +10,8 @@ export type EditorReads = ElectronPort<'readFile' | 'readFileBinary' | 'exists'>
  * disk version kept in the backups before overwriting a change made elsewhere.
  */
 export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backupBeforeOverwrite'>
+/** Why a save was refused, in a sentence for the member (a skill file they may not change, …). */
+export type EditorRefusals = ElectronPort<'reservedPathRefusal'>
 
 /** The file's text, or null when it is gone. */
 export function readFile(filePath: string, reads: EditorReads = window.electronAPI) {
@@ -28,6 +30,15 @@ export function readFileBinary(filePath: string, reads: EditorReads = window.ele
 /** True when written. */
 export function writeFile(filePath: string, content: string, writes: EditorWrites = window.electronAPI) {
   return writes.writeFile(filePath, content)
+}
+
+/** The sentence for a save that failed; null when it failed for another reason, or the question could not be asked. */
+export async function saveRefusal(filePath: string, refusals: EditorRefusals = window.electronAPI): Promise<string | null> {
+  try {
+    return await refusals.reservedPathRefusal(filePath)
+  } catch {
+    return null
+  }
 }
 
 export function createDirectory(dirPath: string, writes: EditorWrites = window.electronAPI) {

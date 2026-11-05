@@ -37,7 +37,7 @@ import { db, initDatabase } from '../../src/db'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/adapters/sqlite/permission-store'
 import { resolveAccess } from '../../shared/core/permissions'
-import { supportsWriteDeniedRecovery, WRITE_DENIED_RECOVERY_COMMIT_DATE } from '../../src/lib/client-version'
+import { supportsWriteDeniedRecovery, WRITE_DENIED_RECOVERY_COMMIT_DATE, SKILL_FILE_RECOVERY_COMMIT_DATE, skillFileRuleApplies } from '../../src/lib/client-version'
 import { membersLosingWrite } from '../../src/lib/write-loss'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
@@ -138,6 +138,17 @@ beforeEach(() => {
   db.prepare(`DELETE FROM scope_rules WHERE scope_id IN (SELECT id FROM scopes WHERE company_id = ?)`).run(CO)
   db.prepare(`DELETE FROM scopes WHERE company_id = ? AND kind = 'folder'`).run(CO)
   replaceScopeRules(db, CO, '', [everyone(true)], 'og-owner')
+})
+
+describe('skillFileRuleApplies', () => {
+  it('lets only a build that announces itself as old through: no header or an unreadable one is checked', () => {
+    expect(skillFileRuleApplies(`0.0.1+1234567.${SKILL_FILE_RECOVERY_COMMIT_DATE}`)).toBe(true)
+    expect(skillFileRuleApplies('0.0.1+1234567.20261101000000')).toBe(false)
+    expect(skillFileRuleApplies(null)).toBe(true)
+    expect(skillFileRuleApplies(undefined)).toBe(true)
+    expect(skillFileRuleApplies('nonsense')).toBe(true)
+    expect(skillFileRuleApplies('0.0.1')).toBe(true)
+  })
 })
 
 describe('supportsWriteDeniedRecovery', () => {

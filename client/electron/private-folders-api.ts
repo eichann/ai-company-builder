@@ -13,6 +13,15 @@ import type {
   MyPrivateFolder,
   PrivateFolderCreateContext,
 } from '../shared/private-folder-ui'
+import type { SkillEditing } from '../../shared/core/skill-files'
+
+/** The answer's `skillEditing`; undefined from a server without it, or in any other shape (not judged here then). */
+function readSkillEditing(value: unknown): SkillEditing | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { everywhere, folders } = value as { everywhere?: unknown; folders?: unknown }
+  if (typeof everywhere !== 'boolean' || !Array.isArray(folders) || !folders.every(f => typeof f === 'string')) return undefined
+  return { everywhere, folders: (folders as string[]).map(f => f.normalize('NFC')) }
+}
 
 export interface PrivateFoldersApiDeps {
   baseUrl: () => string
@@ -29,7 +38,7 @@ export interface PrivateFoldersApi {
   createContext(companyId: string, parentPath: string): Promise<{ success: true; context: PrivateFolderCreateContext } | { success: false; offline: boolean; error: string }>
   create(companyId: string, input: CreatePrivateFolderRequest): Promise<CreatePrivateFolderResult>
   /** GET /me/capabilities: role and managed departments (folders from servers that send them). */
-  capabilities(companyId: string): Promise<{ success: true; role: string; managedDepartmentFolders?: string[] } | { success: false; offline: boolean; error: string }>
+  capabilities(companyId: string): Promise<{ success: true; role: string; managedDepartmentFolders?: string[]; skillEditing?: SkillEditing } | { success: false; offline: boolean; error: string }>
 }
 
 const OFFLINE = 'サーバーに接続できませんでした。'
@@ -106,11 +115,12 @@ export function createPrivateFoldersApi(deps: PrivateFoldersApiDeps): PrivateFol
     async capabilities(companyId) {
       if (!deps.baseUrl()) return { success: false, offline: true, error: OFFLINE }
       try {
-        const caps = await getData<{ role: string; managedDepartmentFolders?: unknown }>(companyId, '/me/capabilities')
+        const caps = await getData<{ role: string; managedDepartmentFolders?: unknown; skillEditing?: unknown }>(companyId, '/me/capabilities')
         const folders = Array.isArray(caps.managedDepartmentFolders) && caps.managedDepartmentFolders.every(f => typeof f === 'string')
           ? (caps.managedDepartmentFolders as string[]).map(f => f.normalize('NFC'))
           : undefined
-        return { success: true, role: caps.role, ...(folders ? { managedDepartmentFolders: folders } : {}) }
+        const skillEditing = readSkillEditing(caps.skillEditing)
+        return { success: true, role: caps.role, ...(folders ? { managedDepartmentFolders: folders } : {}), ...(skillEditing ? { skillEditing } : {}) }
       } catch (err) {
         return failure(err)
       }

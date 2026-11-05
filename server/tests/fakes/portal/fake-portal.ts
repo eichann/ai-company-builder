@@ -58,7 +58,7 @@ export interface PortalRequest {
   body: string
 }
 
-type Fault = { status: 429; retryAfter: number } | { status: 500 }
+type Fault = { status: 429; retryAfter: number } | { status: 500 } | { status: 409; code: string }
 
 export function createFakePortal(options: FakePortalOptions = {}) {
   const seed = options.seed ?? defaultPortalSeed()
@@ -70,6 +70,7 @@ export function createFakePortal(options: FakePortalOptions = {}) {
   const faults: Fault[] = []
   const hits = new Map<string, number[]>()
   let extra: { name: string; value: string } | null = null
+  let account: { accountId: string; environment: string } = { accountId: options.accountId ?? 'sample-account', environment: options.environment ?? 'staging' }
 
   const aliases = Object.entries(options.aliases ?? {}).map(([from, to]) => ({
     from: new RegExp(`^${from.split('{id}').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('([^/]+)')}$`),
@@ -105,6 +106,7 @@ export function createFakePortal(options: FakePortalOptions = {}) {
     const fault = faults.shift()
     if (fault?.status === 429) { c.header('Retry-After', String(fault.retryAfter)); return fail(c, 429, 'RATE_LIMITED', '呼び出しが多すぎます') }
     if (fault?.status === 500) return fail(c, 500, 'INTERNAL', '一時的なエラーです')
+    if (fault?.status === 409) return c.json({ code: fault.code, summary: '状態が変わりました' }, 409)
     if (perMinute !== null) {
       const recent = (hits.get(key) ?? []).filter(t => t > now() - 60_000)
       if (recent.length >= perMinute) { c.header('Retry-After', '60'); return fail(c, 429, 'RATE_LIMITED', '呼び出しが多すぎます') }
@@ -114,7 +116,7 @@ export function createFakePortal(options: FakePortalOptions = {}) {
   })
   const validId = (c: Context) => ID_RE.test(c.req.param('id') ?? '')
 
-  api.get('/account', c => answer(c, { account_id: options.accountId ?? 'sample-account', environment: options.environment ?? 'staging' }))
+  api.get('/account', c => answer(c, { account_id: account.accountId, environment: account.environment }))
 
   api.get('/people/search', c => { c.header('Allow', 'POST'); return fail(c, 405, 'METHOD_NOT_ALLOWED', '検索は POST です') })
   api.post('/people/search', async c => {
@@ -182,6 +184,8 @@ export function createFakePortal(options: FakePortalOptions = {}) {
   function failNext(fault: Fault) { faults.push(fault) }
   function extraField(name: string, value: string) { extra = { name, value } }
   function clearFaults() { faults.length = 0; extra = null }
+  /** What `/account` says from now on: the key was swapped for another account's or environment's. */
+  function setAccount(next: { accountId?: string; environment?: string }) { account = { ...account, ...next } }
 
   return {
     app,
@@ -195,6 +199,7 @@ export function createFakePortal(options: FakePortalOptions = {}) {
     /** Every answer also carries this field, which nobody declared. */
     extraField,
     clearFaults,
+    setAccount,
     requests: (): readonly PortalRequest[] => requests,
   }
 }

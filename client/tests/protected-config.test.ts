@@ -41,8 +41,8 @@ function write(root: string, rel: string, content: string | Buffer) {
 }
 
 /** simple-git configured like the app's createGit (no editor, no local hooks). */
-function memberGit(dir: string): SimpleGit {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', GIT_TERMINAL_PROMPT: '0' }
+function memberGit(dir: string, extraEnv: Record<string, string> = {}): SimpleGit {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', GIT_TERMINAL_PROMPT: '0', ...extraEnv }
   delete env.ACB_PUSHER_ROLE
   return simpleGit(dir, { config: ['core.hooksPath=/dev/null', 'core.quotePath=false'] }).env(env)
 }
@@ -285,7 +285,7 @@ test('new skill with hooks → rejected (reason line ignored by the parser) → 
   const { bare, member } = setupServer(t)
   const git = memberGit(member)
   write(member, '.claude/skills/report/SKILL.md', HOOKED_SKILL)
-  write(member, '.claude/skills/report/template.md', '# テンプレート\n')
+  write(member, '営業部/テンプレート.md', '# テンプレート\n')
   write(member, '営業部/週報.md', 'w\n')
   await git.raw(['add', '--sparse', '.'])
   await git.commit('sync')
@@ -306,16 +306,22 @@ test('new skill with hooks → rejected (reason line ignored by the parser) → 
   await git.push('origin', 'main')
 
   assert.equal(sh(['show', 'main:営業部/週報.md'], bare), 'w\n')
-  assert.equal(sh(['show', 'main:.claude/skills/report/template.md'], bare), '# テンプレート\n')
+  assert.equal(sh(['show', 'main:営業部/テンプレート.md'], bare), '# テンプレート\n')
   assert.throws(() => sh(['cat-file', '-e', 'main:.claude/skills/report/SKILL.md'], bare))
   // Not lost: the member's file is in .backups/, byte for byte.
   assert.equal(fs.existsSync(path.join(member, '.claude/skills/report/SKILL.md')), false)
   assert.equal(fs.readFileSync(path.join(backupPath, '.claude/skills/report/SKILL.md'), 'utf-8'), HOOKED_SKILL)
 })
 
-test('member removes the hooks after a rejection → squashing alone gets the final skill shared', async t => {
+test('someone on the list removes the hooks after a rejection → squashing alone gets the final skill shared', async t => {
   const { bare, member } = setupServer(t)
-  const git = memberGit(member)
+  const policy = `${member}-policy.json`
+  fs.writeFileSync(policy, JSON.stringify({
+    version: 1, companyId: 'company', pusher: { id: 'editor', role: 'member' },
+    scopes: [{ id: 'root', path: '', kind: 'folder', rules: [{ id: 'r', subjectType: 'everyone', subjectId: null, canRead: true, canWrite: true }] }],
+    skillEditing: { everywhere: true, folders: [] },
+  }))
+  const git = memberGit(member, { ACB_PUSH_POLICY: policy })
   write(member, '.claude/skills/report/SKILL.md', HOOKED_SKILL)
   await git.raw(['add', '--sparse', '.'])
   await git.commit('sync 1')

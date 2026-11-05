@@ -3,7 +3,7 @@
 //
 // Server (the authority): the push gate a member's push meets
 // (server/src/lib/push-check/policy.ts writeGateFor = resolveAccess() as
-// spelled AND with A–Z folded), the [RESERVED_PATH] check for the company
+// spelled AND as a disk folds it), the [RESERVED_PATH] check for the company
 // repository, and the scope repository's gate for a readable private folder.
 //
 // Client: what the chat write guard decides from what the server sends it —
@@ -41,7 +41,7 @@ import {
 } from '../../server/src/lib/push-check/policy'
 import { canWriteInPrivateFolder } from '../../server/src/lib/private-folders'
 import { isPathUsable } from '../../shared/core/reserved-paths'
-import { pathKey as serverPathKey } from '../../shared/core/paths'
+import { diskKey as serverPathKey } from '../../shared/core/paths'
 import { normalizeReservedPath, type MyPrivateScope } from '../../shared/types/private-folders'
 import { type WriteAccess } from '../shared/write-access'
 import { checkWritePath, decideReservedWrite, type WriteGuard } from '../electron/write-guard'

@@ -19,6 +19,12 @@ export interface InboxMessageRow {
   seenAt: string
   /** The connector's opaque pointer to the message (null for rows made before B4). */
   sourceRef: string | null
+  /**
+   * Whose mailbox the pointer is in (the member whose poll or events reported it; null for rows
+   * made before 2026-11-05): a mail pointer is read, archived and put back only with that member's
+   * own permission (inbox.md "Mail archived in the mailbox").
+   */
+  reporterId?: string | null
 }
 
 export interface InboxConnectionRow {
@@ -26,6 +32,8 @@ export interface InboxConnectionRow {
   channel: InboxChannel
   connectedAt: string
   checkedUntil: string
+  /** Where the source's change log was last read (`InboxSource.leftSince`; null: not yet). */
+  leftCursor?: string | null
 }
 
 export interface InboxGapRow {
@@ -56,6 +64,10 @@ export interface InboxRepository {
   /** Adds the connection or replaces its times. */
   putConnection(row: InboxConnectionRow): void
   setCheckedUntil(userId: string, channel: InboxChannel, at: string): void
+  setLeftCursor(userId: string, channel: InboxChannel, cursor: string | null): void
+  /** The pointers ACB took out of the mailbox inbox with one `archived_there` entry (its version): what its undo puts back. */
+  putArchived(interactionId: string, entryVersion: number, sourceRefs: string[]): void
+  archived(interactionId: string, entryVersion: number): string[] | null
   addGap(row: InboxGapRow): void
   gaps(userId: string): InboxGapRow[]
 }
@@ -78,4 +90,25 @@ export interface InboxSource {
    * reading (a first connection starts then).
    */
   ready?(companyId: string, userId: string): Promise<boolean>
+  /** The mailbox as members call it (「Gmail」): the inbox's notes say 「Gmail ではアーカイブ済み」. */
+  label?: string
+  /**
+   * Conversations (`threadRef`s) that may have left the member's inbox since `cursor` — archived,
+   * trashed or deleted there — and the cursor to start from next time. `threadRefs: null` when there
+   * was no cursor or it is too old: the caller then asks `inInbox` for the records it watches.
+   * Read with the member's own read permission; `not-connected` keeps the cursor.
+   */
+  leftSince?(companyId: string, userId: string, cursor: string | null): Promise<{ cursor: string; threadRefs: string[] | null } | 'not-connected'>
+  /** Whether each conversation still has a message in the member's inbox (false: archived, trashed, gone; left out: unknown). */
+  inInbox?(companyId: string, userId: string, threadRefs: string[]): Promise<Record<string, boolean> | 'not-connected'>
+  /**
+   * These messages (`sourceRef`s ACB took in from the member's own mailbox) taken out of their inbox,
+   * or put back (`back`), with their own permission to do so (owner decision 2026-11-05) — never the
+   * whole conversation, so a message ACB has not read yet stays where it is. Taking out changes only
+   * a message in the inbox now (one the member archived themselves, or never in it, is left alone).
+   * `changed`: the pointers actually changed, in the order given — also when it stopped partway;
+   * `stop`: why it stopped before the end (`not-allowed`: no permission, or a switch turned off —
+   * nothing more is sent; `failed`: Google refused or did not answer), null when it went through.
+   */
+  archive?(companyId: string, userId: string, sourceRefs: string[], back: boolean): Promise<{ changed: string[]; stop: 'not-allowed' | 'failed' | null }>
 }

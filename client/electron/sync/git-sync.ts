@@ -15,6 +15,10 @@ import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
+  onlySkillFiles,
+  parseWinPathFiles,
+  winPathMessage,
+  WINPATH_MARKER,
   parseProtectedConfigPaths,
   protectedConfigMessage,
   restoreProtectedPaths,
@@ -74,16 +78,40 @@ import {
   syncReadOnlyScope,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
-import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
+import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
+import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
+import { clearStaleLocks, isDiskFull, lockFailureMessage, pruneRecoveryRefs, recoverInterruptedState, recoveryNote, REPOSITORY_BUSY_MESSAGE, type KeptBeforeRecovery } from './interrupted'
+
+const PULL_FAILED_MESSAGE = 'サーバーの最新の内容を受け取れなかったため、同期を完了できませんでした。このPCの変更はそのまま残っています。もう一度同期しても直らないときは、管理者に連絡してください。'
+
+/** Does origin/main, as last fetched, hold commits HEAD does not? False without it (the first push of a company). */
+async function upstreamNotMerged(git: SimpleGit): Promise<boolean> {
+  const upstream = (await git.raw(['rev-parse', '--verify', '--quiet', 'origin/main']).catch(() => '')).trim()
+  if (!upstream) return false
+  // Hashes, not exit codes: simple-git does not reject on a silent non-zero exit.
+  return (await git.raw(['merge-base', upstream, 'HEAD']).catch(() => '')).trim() !== upstream
+}
+
+/** This computer's ignore rule for what running a skill leaves in its folder (.git/info/exclude). */
+const SKILL_LEFTOVER_EXCLUDES: ExcludeBlock = {
+  begin: '# >>> ACB skill leftovers (managed by the app, local only) >>>',
+  end: '# <<< ACB skill leftovers <<<',
+}
 
 /** This computer's ignore rule for the app's temporary save files (.git/info/exclude). */
 const TEMP_SAVE_EXCLUDES: ExcludeBlock = {
   begin: '# >>> ACB temporary save files (managed by the app, local only) >>>',
   end: '# <<< ACB temporary save files <<<',
+}
+
+/** The member's version of a conflicted file could not be saved: the rebase was undone, nothing was replaced. */
+function conflictBackupFailedMessage(error: unknown): string {
+  const stopped = '競合したファイルのバックアップを保存できなかったため、同期を中止しました。変更はこのPCに残っています。'
+  return isDiskFull(error) ? `${stopped}ディスクの空きを増やしてから、もう一度同期してください。` : `${stopped}もう一度同期しても直らないときは、管理者に連絡してください。`
 }
 
 export type { SyncDeps, SyncDialog, SyncServerApi, SyncLogger } from './types'
@@ -115,6 +143,8 @@ interface SyncSideEffects {
   /** This computer's versions of files in excluded nested repositories, backed up before a teammate's same-path files replaced them. */
   nestedRepoOverwrite?: NestedRepoOverwriteResult | null
   largeFileOverwrite?: NestedRepoOverwriteResult | null
+  /** What was on disk when an operation an earlier run left half-way was cleaned up. */
+  beforeRecovery?: KeptBeforeRecovery | null
 }
 
 /**
@@ -177,13 +207,22 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     const stageAll = async () => {
       try {
         writeExcludeLines(repoPath, TEMP_SAVE_EXCLUDES, [TEMP_SAVE_EXCLUDE_PATTERN])
+        // Unknown (offline, an older server): the block stays as the last known answer left it.
+        const sharing = await deps.api.getSkillSharing(companyId).catch(() => null)
+        if (sharing) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, skillExcludeLines(sharing, opts.backupPrefix ?? ''))
+        else if (readExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES).length === 0) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, SKILL_LEFTOVER_PATTERNS)
       } catch (excludeError) {
         log.warn('Git sync: Could not write .git/info/exclude (temporary save files):', excludeError)
       }
       await git.raw(['add', '--sparse', '.'])
       const staged = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=AMT']).catch(() => ''))
         .split('\0').filter(Boolean)
-      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f))
+      // A leftover only while new: one the company already has is a tracked file,
+      // and taking it out of the index here would delete it for everyone.
+      const added = staged.some(isSkillLeftover)
+        ? new Set((await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=A']).catch(() => '')).split('\0'))
+        : new Set<string>()
+      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f) || (added.has(f) && isSkillLeftover(f)))
       if (stray.length > 0) {
         log.warn('Git sync: Unstaging local-only paths that reached the index:', stray.length)
         for (let i = 0; i < stray.length; i += 200) {
@@ -206,35 +245,56 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       log.warn('Git sync: Could not check the partial clone config:', promisorError)
     }
 
-    // Recover from stale rebase/merge state (e.g., app crashed mid-sync).
-    // A rebase in progress is signalled by the rebase-merge / rebase-apply
-    // directory — REBASE_HEAD is just a ref that can linger after a rebase
-    // finished, so it must not be used as the indicator (WP-3.1).
-    const gitDir = path.join(repoPath, '.git')
-    const rebaseInProgress = () =>
-      fs.existsSync(path.join(gitDir, 'rebase-merge')) || fs.existsSync(path.join(gitDir, 'rebase-apply'))
-    if (rebaseInProgress()) {
-      log.log('Git sync: Detected stale rebase, aborting...')
-      try {
-        await git.rebase(['--abort'])
-      } catch (abortError) {
-        log.warn('Git sync: Failed to abort rebase:', abortError)
-      }
-    }
-    for (const stateFile of ['MERGE_HEAD', 'CHERRY_PICK_HEAD']) {
-      if (fs.existsSync(path.join(gitDir, stateFile))) {
-        log.log(`Git sync: Detected stale ${stateFile}, aborting...`)
+    // Clean up old backups (older than 30 days) — async to avoid blocking UI
+    // (once per sync: the company run; private folders share their backups).
+    // Before the recovery below: on a full disk its copy needs this space.
+    if (!isScope) {
+      const RETENTION_DAYS = 30
+      const cutoff = deps.now().getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000
+      for (const dir of [backupsDir, privateBackupsDir(repoPath)]) {
+        if (!fs.existsSync(dir)) continue
         try {
-          if (stateFile === 'MERGE_HEAD') {
-            await git.merge(['--abort'])
-          } else {
-            await git.raw(['cherry-pick', '--abort'])
+          const backupFolders = await fs.promises.readdir(dir)
+          for (const folder of backupFolders) {
+            const folderPath = path.join(dir, folder)
+            try {
+              const stat = await fs.promises.stat(folderPath)
+              if (stat.isDirectory() && stat.mtimeMs < cutoff) {
+                await fs.promises.rm(folderPath, { recursive: true, force: true })
+                log.log(`Git sync: Deleted old backup: ${folder}`)
+              }
+            } catch { /* skip inaccessible folders */ }
           }
-        } catch (abortError) {
-          log.warn(`Git sync: Failed to abort ${stateFile}:`, abortError)
+        } catch (cleanupError) {
+          log.warn('Git sync: Backup cleanup failed:', cleanupError)
         }
       }
     }
+
+    await pruneRecoveryRefs(git, backupsDir, log).catch((pruneError: unknown) => log.warn('Git sync: Could not prune recovery refs:', pruneError))
+
+    // Recover from a rebase / merge an earlier run left half-way (the app quit
+    // or crashed, git was killed): files edited since then are kept first
+    // (./interrupted.ts); if they cannot be, nothing is cleaned up.
+    const gitDir = path.join(repoPath, '.git')
+    const rebaseInProgress = () =>
+      fs.existsSync(path.join(gitDir, 'rebase-merge')) || fs.existsSync(path.join(gitDir, 'rebase-apply'))
+    const recovery = await recoverInterruptedState({
+      git, repoPath,
+      backupPath: `${path.join(backupsDir, timestamp)}_before_recovery`,
+      backupPrefix: opts.backupPrefix,
+      skip: file => isUnderAny(localOnly, file),
+      otherGitRunning: deps.otherGitRunning?.() ?? false,
+      now: deps.now(),
+      log,
+    })
+    if (!recovery.ok) {
+      return {
+        success: false, errorType: recovery.errorType, error: recovery.error,
+        ...(recovery.kept ? { recoveredFiles: recovery.kept.files, recoveryBackupPath: recovery.kept.backupPath } : {}),
+      }
+    }
+    effects.beforeRecovery = recovery.kept
 
     // .gitignore files merge line by line (union) instead of "server wins",
     // so lines sync added — nested-repo / large-file exclusions, essential
@@ -245,28 +305,6 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       if (ensureGitignoreUnionMerge(gitDir)) log.log('Git sync: Declared .gitignore merge=union in .git/info/attributes')
     } catch (attributesError) {
       log.warn('Git sync: Could not declare .gitignore merge=union:', attributesError)
-    }
-
-    // Clean up old backups (older than 30 days) — async to avoid blocking UI
-    // (once per sync: the company run; private folders share its .backups/).
-    if (!isScope && fs.existsSync(backupsDir)) {
-      const RETENTION_DAYS = 30
-      const cutoff = deps.now().getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000
-      try {
-        const backupFolders = await fs.promises.readdir(backupsDir)
-        for (const folder of backupFolders) {
-          const folderPath = path.join(backupsDir, folder)
-          try {
-            const stat = await fs.promises.stat(folderPath)
-            if (stat.isDirectory() && stat.mtimeMs < cutoff) {
-              await fs.promises.rm(folderPath, { recursive: true, force: true })
-              log.log(`Git sync: Deleted old backup: ${folder}`)
-            }
-          } catch { /* skip inaccessible folders */ }
-        }
-      } catch (cleanupError) {
-        log.warn('Git sync: Backup cleanup failed:', cleanupError)
-      }
     }
 
     // Retry pending push from previous failed sync
@@ -742,6 +780,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       if (!rebaseInProgress()) {
         // Not a conflict — e.g. network error or no remote tracking branch
         log.warn('Git sync: Pull failed but no rebase in progress:', pullError)
+        // The fetch saw server changes this pull did not bring in: going on
+        // would report a finished sync while the member misses them. (A push
+        // would be refused anyway.) Nothing of theirs moved.
+        if (await upstreamNotMerged(git)) {
+          return { success: false, errorType: 'pull_failed', error: PULL_FAILED_MESSAGE }
+        }
       } else {
         log.log('Git sync: Pull stopped mid-rebase, resolving conflicts...')
 
@@ -791,14 +835,13 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             const destPath = path.join(backupPath, backupPrefix, file)
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             for (const spec of [`${localHash}:${file}`, `:3:${file}`]) {
-              try {
-                const content = await catFile(spec)
-                fs.writeFileSync(destPath, content)
-                markSaved(file, content)
-                break
-              } catch {
-                // Not there (e.g. a file only the server side has) — try the next source.
-              }
+              // Not there (e.g. a file only the server side has): try the next
+              // source. A write that fails is not this: it stops the sync.
+              const content = await catFile(spec).catch(() => null)
+              if (!content) continue
+              fs.writeFileSync(destPath, content)
+              markSaved(file, content)
+              break
             }
           }
           writeBackupMetadata()
@@ -824,15 +867,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           if (replaced.length === 0) return
           const roundPath = `${backupPath}_${round}`
           for (const { file, oid } of replaced) {
-            try {
-              const content = await catFile(oid)
-              const destPath = path.join(roundPath, backupPrefix, file)
-              fs.mkdirSync(path.dirname(destPath), { recursive: true })
-              fs.writeFileSync(destPath, content)
-              markSaved(file, content)
-            } catch {
-              // Unreadable object — nothing more to save for this path.
-            }
+            const content = await catFile(oid).catch(() => null)
+            if (!content) continue // unreadable object: nothing more to save for this path
+            const destPath = path.join(roundPath, backupPrefix, file)
+            fs.mkdirSync(path.dirname(destPath), { recursive: true })
+            fs.writeFileSync(destPath, content)
+            markSaved(file, content)
           }
           fs.writeFileSync(
             path.join(roundPath, '_metadata.json'),
@@ -875,8 +915,16 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             // a. Backup local versions (works for server-deleted files too:
             // the content is read out of localHash, not the worktree), then
             // b. adopt whatever the server decided, c. mark resolved.
-            await backupConflictFiles(newConflicts)
-            await backupReplacedVersions(round)
+            try {
+              await backupConflictFiles(newConflicts)
+              await backupReplacedVersions(round)
+            } catch (backupError) {
+              // Nothing may be replaced without its copy. The local work is
+              // committed, so undoing this sync's own rebase keeps all of it.
+              log.error('Git sync: Could not back up conflicted files, aborting rebase:', backupError)
+              await git.rebase(['--abort']).catch(() => { /* best effort: the next sync cleans up */ })
+              return { success: false, errorType: 'conflict', error: conflictBackupFailedMessage(backupError) }
+            }
             try {
               // Never hand every conflicted path to a single `checkout --ours`:
               // one modify/delete conflict makes that call fail atomically and
@@ -1246,7 +1294,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // member may not edit, or both.
         const refusedWhat = hasProtected && hasWriteDenied
           ? '共有できない'
-          : hasProtected ? '管理者だけが変更できる' : '編集する権限がないフォルダの'
+          : hasProtected ? (onlySkillFiles(protectedFiles) ? '変更できないスキルの' : '管理者だけが変更できる') : '編集する権限がないフォルダの'
 
         // First try keeping every file as the member has it now. The hook
         // checks every commit in the range, so a change the member has since
@@ -1385,7 +1433,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             return {
               success: false,
               error: hasProtected && !hasWriteDenied
-                ? '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。'
+                ? `${refusedWhat}ファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`
                 : `${refusedWhat}ファイルを元に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`,
               errorType: 'push_failed' as const,
               pushFailed: true,
@@ -1396,7 +1444,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
 
         const parts = ['同期完了。']
-        if (hasProtected) parts.push(`管理者だけが変更できるファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
+        if (hasProtected) parts.push(`${onlySkillFiles(revertedProtected) ? '変更できないスキルの' : '管理者だけが変更できる'}ファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
         if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
         if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
         if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
@@ -1495,6 +1543,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             excludedNestedRepos: newlyExcludedNestedRepos
           }
         }
+      } else if (pushErrorMsg.includes(WINPATH_MARKER)) {
+        // The name decides, so a retry would be refused the same way: no
+        // PENDING_PUSH, and the member is told which file.
+        log.warn('Git sync: Push rejected — a name other computers cannot hold')
+        return { success: false, errorType: 'path_name', error: winPathMessage(parseWinPathFiles(pushErrorMsg)) }
       } else {
         log.error('Git sync: Push to main failed:', pushErrorMsg)
         // Try master branch if main fails
@@ -1573,6 +1626,9 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     log.error('Git sync error:', error)
     const errorMsg = error instanceof Error ? error.message : 'Unknown error'
     // Classify error type for UI
+    // Another git appeared mid-run (the check before the run found nothing).
+    const lockFailure = lockFailureMessage(errorMsg)
+    if (lockFailure) return { success: false, error: lockFailure, errorType: 'locked' }
     let errorType = 'unknown'
     if (errorMsg.includes('Could not resolve host') || errorMsg.includes('unable to access') || errorMsg.includes('network')) {
       errorType = 'network'
@@ -1580,8 +1636,6 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       errorType = 'auth'
     } else if (errorMsg.includes('CONFLICT') || errorMsg.includes('conflict') || errorMsg.includes('rebase')) {
       errorType = 'conflict'
-    } else if (errorMsg.includes('lock') || errorMsg.includes('index.lock')) {
-      errorType = 'locked'
     }
     return { success: false, error: errorMsg, errorType }
   }
@@ -1599,6 +1653,10 @@ export interface PrivateFolderSyncReport {
   cloned?: boolean
   /** Not downloaded on this computer (settings): its clone was synced one last time and removed. */
   removed?: boolean
+  /** Sync set something of the member's aside here (a conflict's version, a recovery copy): worth a lasting notice. */
+  setAside?: boolean
+  /** Where that was kept. */
+  backupPath?: string
 }
 
 export type GitSyncResult = Awaited<ReturnType<typeof runSync>> & {
@@ -1620,6 +1678,15 @@ export type GitSyncResult = Awaited<ReturnType<typeof runSync>> & {
   madePublicBackupPath?: string
   /** Private folders downloaded for the first time during this sync. */
   newPrivateFolders?: string[]
+  /** Private folders whose place held something else: moved to movedAsideBackupPath first. */
+  movedAsideFolders?: string[]
+  movedAsideBackupPath?: string
+  /** Large files kept on this computer that a teammate shared at the same path; this computer's versions are in largeFileBackupPath. */
+  largeFileBackupFiles?: string[]
+  largeFileBackupPath?: string
+  /** On disk when an operation an earlier run left half-way was cleaned up; copied to recoveryBackupPath. */
+  recoveredFiles?: string[]
+  recoveryBackupPath?: string
 }
 
 type RunResult = Awaited<ReturnType<typeof runSync>>
@@ -1644,6 +1711,11 @@ function withNotes(result: GitSyncResult | RunResult, notes: string[], fields: P
 function withSideEffects(result: RunResult, effects: SyncSideEffects): GitSyncResult {
   const notes: string[] = []
   const fields: Partial<GitSyncResult> = {}
+  const recovered = effects.beforeRecovery
+  if (recovered) {
+    notes.push(recoveryNote(recovered))
+    Object.assign(fields, { recoveredFiles: recovered.files, recoveryBackupPath: recovered.backupPath })
+  }
   const held = effects.outsideCheckout
   if (held) {
     notes.push(outsideCheckoutMessage(held))
@@ -1655,7 +1727,10 @@ function withSideEffects(result: RunResult, effects: SyncSideEffects): GitSyncRe
     Object.assign(fields, { nestedRepoBackupFiles: overwritten.files, nestedRepoBackupPath: overwritten.backupPath })
   }
   const largeOverwritten = effects.largeFileOverwrite
-  if (largeOverwritten) notes.push(largeFileOverwriteMessage(largeOverwritten))
+  if (largeOverwritten) {
+    notes.push(largeFileOverwriteMessage(largeOverwritten))
+    Object.assign(fields, { largeFileBackupFiles: largeOverwritten.files, largeFileBackupPath: largeOverwritten.backupPath })
+  }
   const reserved = effects.reserved
   if (reserved && reserved.files.length > 0) {
     notes.push(reservedPathNote(reserved))
@@ -1707,6 +1782,12 @@ export interface GitSync {
   receive(repoPath: string, companyId: string): Promise<ReceiveResult>
   /** A sync, receive or private-folder change holds a repository lock right now. */
   isRunning(): boolean
+  /** Resolves once nothing holds a repository lock (closing the app waits for this). New automatic runs wait from now on, so timers cannot extend it. */
+  whenIdle(): Promise<void>
+  /** The member stayed after all: automatic runs go on. */
+  resumeAutomaticRuns(): void
+  /** whenIdle() is holding automatic runs back. */
+  automaticRunsHeld(): boolean
   /**
    * Apply the member's download choices for private folders now (settings
    * panel): download a folder that is no longer excluded, and remove the
@@ -1753,7 +1834,16 @@ export function createGitSync(deps: SyncDeps): GitSync {
     }
   }
 
+  // Under the repository's own lock, so no sync or receive of it is running.
+  const lockState = (repoPath: string, d: SyncDeps = deps) => clearStaleLocks(repoPath, {
+    otherGitRunning: d.otherGitRunning?.() ?? false,
+    log: d.log,
+  })
+  let automaticHeld = false
+  const repositoryBusy = { success: false, errorType: 'locked', error: REPOSITORY_BUSY_MESSAGE } as GitSyncResult
+
   const runOne = async (runDeps: SyncDeps, repoPath: string, companyId: string, commitMessage: string, opts: RunOptions): Promise<GitSyncResult> => {
+    if (await lockState(repoPath, runDeps) === 'busy') return repositoryBusy
     const effects: SyncSideEffects = { outsideCheckout: null, reserved: null }
     return withSideEffects(await runSync(runDeps, repoPath, companyId, commitMessage, effects, opts), effects)
   }
@@ -1766,25 +1856,28 @@ export function createGitSync(deps: SyncDeps): GitSync {
         ? await runOne(scopeDeps, dir, companyId, commitMessage, {
             kind: 'scope', backupsDir: privateBackupsDir(repoPath), backupPrefix: scope.path,
           })
-        : await syncReadOnlyScope(scopeDeps, repoPath, scope, dir)
-      const view = r as { success: boolean; message?: string; error?: string; errorType?: string }
+        : await lockState(dir, d) === 'busy' ? repositoryBusy : await syncReadOnlyScope(scopeDeps, repoPath, scope, dir)
+      const view = r as { success: boolean; message?: string; error?: string; errorType?: string; recoveredFiles?: string[]; recoveryBackupPath?: string; backupPath?: string; outsideCheckoutBackupPath?: string; writeDeniedBackupPath?: string }
       // A private folder's backups are kept inside .git (privateBackupsDir),
       // not in .backups/: say so in the shared wording.
       const where = (text?: string) => text?.replace(/\.backups\/?/g, '非公開フォルダのバックアップ')
-      return { path: scope.path, success: view.success, message: where(view.message), error: where(view.error), errorType: view.errorType }
+      // Anything but the plain success message is something sync did to the member's files.
+      const setAside = !!view.recoveredFiles?.length || (view.success && !!view.message && view.message !== '同期が完了しました')
+      const backupPath = view.recoveryBackupPath ?? view.backupPath ?? view.outsideCheckoutBackupPath ?? view.writeDeniedBackupPath
+      return { path: scope.path, success: view.success, message: where(view.message), error: where(view.error), errorType: view.errorType, setAside, backupPath }
     })
 
   /** Place every readable private folder and sync (or retire) each clone. */
   const syncPrivateFolders = async (d: SyncDeps, repoPath: string, companyId: string, commitMessage: string, scopes: MyPrivateScope[], options: { syncEach: boolean }) => {
     const reports: PrivateFolderSyncReport[] = []
-    const movedAside: string[] = []
+    const movedAside: Array<{ folder: string; backupPath: string }> = []
     for (const placement of await placePrivateFolders(d, repoPath, scopes)) {
       const { scope } = placement
       if (placement.kind === 'failed') {
         reports.push({ path: scope.path, success: false, errorType: 'network', error: `非公開フォルダをダウンロードできませんでした。\n${placement.error}` })
         continue
       }
-      if (placement.movedAside) movedAside.push(scope.path)
+      if (placement.movedAside) movedAside.push({ folder: scope.path, backupPath: placement.movedAside })
       if (placement.kind === 'excluded') {
         if (!placement.clone) continue
         // Left out in settings: push its edits first, then remove it.
@@ -1837,7 +1930,11 @@ export function createGitSync(deps: SyncDeps): GitSync {
         notes.push(newPrivateFolderMessage(cloned))
         fields.newPrivateFolders = cloned
       }
-      if (movedAside.length > 0) notes.push(existingFolderMovedMessage(movedAside))
+      if (movedAside.length > 0) {
+        fields.movedAsideFolders = movedAside.map(m => m.folder)
+        fields.movedAsideBackupPath = movedAside[0].backupPath
+        notes.push(existingFolderMovedMessage(fields.movedAsideFolders))
+      }
       for (const r of reports) {
         if (r.success && r.message && r.message !== '同期が完了しました') notes.push(`『${r.path}』: ${r.message}`)
       }
@@ -1873,12 +1970,19 @@ export function createGitSync(deps: SyncDeps): GitSync {
   sync.applyPrivateFolderChoices = (repoPath, companyId) => locked(repoPath, async () => {
     const cache = readPrivateScopesCache(repoPath)
     if (!cache || cache.companyId !== companyId || cache.scopes.length === 0) return []
-    return (await syncPrivateFolders(deps, repoPath, companyId, 'Sync from AI Company Builder', cache.scopes, { syncEach: false })).reports
+    // Called from inside the download-choice change: its own mark says nothing about these clones.
+    const own: SyncDeps = { ...deps, otherGitRunning: () => deps.otherGitRunning?.({ ownActivity: true }) ?? false }
+    return (await syncPrivateFolders(own, repoPath, companyId, 'Sync from AI Company Builder', cache.scopes, { syncEach: false })).reports
   })
 
   sync.receive = async (repoPath, companyId) => {
     const outcomes: RepoReceiveOutcome[] = []
-    const company = await locked(repoPath, () => receiveIntoRepo(deps.createGit(repoPath), repoPath, deps.log))
+    // A leftover lock goes first; one that may be in use holds the repository back.
+    const receiveOne = (dir: string) => locked(dir, async () => {
+      await lockState(dir)
+      return receiveIntoRepo(deps.createGit(dir), dir, deps.log)
+    })
+    const company = await receiveOne(repoPath)
     if (company.kind === 'offline') return { success: false, received: 0, heldBack: 0, offline: true }
     outcomes.push(company)
     // Each readable private folder already on this computer (nothing is
@@ -1890,7 +1994,7 @@ export function createGitSync(deps: SyncDeps): GitSync {
         if (isNotDownloaded(notDownloaded, scope.path)) continue
         const dir = safeScopeDir(repoPath, scope.path)
         if (!dir || await cloneStateOf(deps.createGit, dir, scope) !== 'clone') continue
-        outcomes.push(await locked(dir, () => receiveIntoRepo(deps.createGit(dir), dir, deps.log)))
+        outcomes.push(await receiveOne(dir))
       }
     }
     const received = outcomes.reduce((n, o) => n + (o.kind === 'received' ? o.files : 0), 0)
@@ -1900,6 +2004,15 @@ export function createGitSync(deps: SyncDeps): GitSync {
   }
 
   sync.isRunning = () => syncLocks.size > 0
+
+  sync.resumeAutomaticRuns = () => { automaticHeld = false }
+
+  sync.automaticRunsHeld = () => automaticHeld
+
+  sync.whenIdle = async () => {
+    automaticHeld = true
+    while (syncLocks.size > 0) await Promise.allSettled([...syncLocks.values()])
+  }
 
   sync.pathChecker = pathChecker
 

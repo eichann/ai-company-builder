@@ -5,6 +5,7 @@
  * reads (contract, actors, the fixed endpoints, `available_to`). Parsing is in
  * `plugin-manifest.ts`; the overview and owner rules are in `plugins.ts`.
  */
+import { AI_RUN_FAILURE_CLASSES, type AiRunFailureClass } from './ai-runs'
 import { isMoneyField, type ActionVia, type NoteRule, type TypeDefinition } from './record-types'
 
 /**
@@ -204,12 +205,14 @@ export type DataClass = typeof DATA_CLASSES[number]
 /** What ACB may keep of a value: nothing, a pointer to it, a summary of it. */
 export const KEEP_RULES = ['none', 'pointer', 'summary'] as const
 export type KeepRule = typeof KEEP_RULES[number]
+/** A plain outside id: what fills `{id}`, and the only shape of a value the access log keeps. No `:`, `/`, `.`, `@` or space. */
+export const EXTERNAL_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 /** What a call's input is; an input filling a path placeholder is an `id` (a plain outside id). */
 export const CALL_INPUT_KINDS = ['id', 'text', 'number', 'boolean', 'date'] as const
 export type CallInputKind = typeof CALL_INPUT_KINDS[number]
-/** What an outside error code means to ACB (`errors.map`). */
-export const CALL_FAILURE_KINDS = ['refused', 'retry_later', 'check_wait', 'needs_person'] as const
-export type CallFailureKind = typeof CALL_FAILURE_KINDS[number]
+/** What an outside error code means to ACB (`errors.map`): the core's own failure classes, each with its place to go (`failureDestination`). */
+export const CALL_FAILURE_KINDS = AI_RUN_FAILURE_CLASSES
+export type CallFailureKind = AiRunFailureClass
 /** What an outside status means to ACB (`result.map`). */
 export const CALL_RESULT_STATES = ['applied', 'pending', 'failed', 'not_found'] as const
 export type CallResultState = typeof CALL_RESULT_STATES[number]
@@ -226,7 +229,7 @@ export const CALL_ACTORS = ['admin', 'ai'] as const
 export interface PluginDataField {
   dataClass: DataClass
   keep: KeepRule
-  /** `outside: true`: declared here; its effect comes with the run path. */
+  /** Text someone outside wrote: handed on wrapped as outside text, never as an instruction. A personal or sensitive string is wrapped whatever this says. */
   outside: boolean
 }
 
@@ -281,6 +284,8 @@ export interface PluginDocumentCall extends PluginCallBase {
   page: PluginCallRequest
   list: PluginCallListing | null
   search: PluginCallListing | null
+  /** The field of `page`'s answer holding the link to cite (a https URL on the declared host); null: none. */
+  cite: string | null
 }
 export type PluginCall = PluginReadCall | PluginSearchCall | PluginActCall | PluginDocumentCall
 
@@ -557,7 +562,8 @@ export interface PluginManifest {
    * written to another (review §5.7). Contract 3: the answer's fields holding
    * the account's id and its environment.
    */
-  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string }) | null
+  /** `expectedEnvironment`: the environment a contract-3 connector's key must report; a call reads only when it is stated (plugins.md "Contract 3"). */
+  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string; expectedEnvironment?: string }) | null
   /**
    * A connector: its service's notification mail senders (`notification_senders`: addresses or
    * `@domain`, notification-senders.ts), left out of the mail intake while it is installed and on.

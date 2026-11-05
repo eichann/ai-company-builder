@@ -17,6 +17,11 @@
  * (bytewise, locale-independent; client/tests/rule-parity-names.test.ts pins
  * the equivalence and the NFD difference).
  *
+ * That key is for naming a place in rules and rows. Two wider keys answer what
+ * a file system or a tool may make of a spelling, for refusing what would land
+ * somewhere else: diskKey (the Unicode case folding of APFS / NTFS) and
+ * lookalikeKey (also compatibility forms, for names that are protected).
+ *
  * Pure: no Node, Electron, React, Hono, database or git.
  */
 
@@ -43,6 +48,31 @@ export function normalizeRepoPath(raw: string): string | null {
  */
 export function pathKey(path: string): string {
   return foldAsciiCase(path.normalize('NFC').split('/').filter(s => s.length > 0).join('/'))
+}
+
+const DEFAULT_IGNORABLE_RE = /\p{Default_Ignorable_Code_Point}/gu
+/**
+ * Where a spelling lands on a case-insensitive disk: pathKey, then Unicode full
+ * case folding (ſ → s, K (Kelvin) → k, ß and ẞ → ss, É → é, ﬁ → fi).
+ * `.claude/ſkills/x` is `.claude/skills/x` on a Mac, though git and pathKey see
+ * two paths. Held to what APFS does (client/tests/disk-key.test.ts walks every
+ * cased character on the Mac runners): `（1）` and `(1)`, half-width kana, ı and
+ * i, and spellings that differ by a variation selector or joiner (⭐️ / ⭐,
+ * 葛󠄀城 / 葛城) stay two files. Over-folding refuses ordinary names.
+ */
+export function diskKey(path: string): string {
+  // Each piece on its own: JavaScript upper-cases ı to I, a disk does not.
+  return pathKey(path).split('ı').map(s => s.toLowerCase().toUpperCase().toLowerCase().normalize('NFC')).join('ı')
+}
+
+/**
+ * For testing a path against names that are protected, where a false refusal
+ * of `.ｃｌａｕｄｅ/` costs nothing: diskKey over compatibility forms (NFKC:
+ * full-width letters, ligatures) and without default-ignorable characters
+ * (HFS+ and tools skip them). Not for telling two files apart.
+ */
+export function lookalikeKey(path: string): string {
+  return diskKey(path.normalize('NFKC').replace(DEFAULT_IGNORABLE_RE, ''))
 }
 
 /**

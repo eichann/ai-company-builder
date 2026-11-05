@@ -19,13 +19,13 @@ export interface BackupsDeps {
   paths: PathGuard
   shell: Pick<DesktopShell, 'openPath'>
   /** The server's sentence when `absPath` is at a folder name the member may not use; null to allow. */
-  reservedRefusal: (absPath: string) => Promise<string | null>
+  writeRefusal: (absPath: string) => Promise<string | null>
 }
 
 /** Shown when the current version could not be kept: the restore did not run. */
 export const RESTORE_KEEP_FAILED = '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。'
 
-export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, reservedRefusal }: BackupsDeps): void {
+export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, writeRefusal }: BackupsDeps): void {
   // Get backup history
   ipc.handle('backup:list', async (_, unsafeRepoPath: string) => {
     try {
@@ -125,7 +125,7 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, reservedRe
       paths.validate(destPath)
 
       // Same refusals as every other write (files-and-editor.md).
-      const refused = notDownloadedRefusal(destPath) ?? await reservedRefusal(destPath)
+      const refused = notDownloadedRefusal(destPath) ?? await writeRefusal(destPath)
       if (refused) return { success: false, error: refused }
 
       // What is there now is the member's work too: keep it before replacing it.

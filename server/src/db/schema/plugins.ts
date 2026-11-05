@@ -33,6 +33,41 @@ export const pluginSchema = `
       PRIMARY KEY (company_id, plugin_id)
     );
 
+    -- Every read of a contract-3 call (plugins.md "Contract 3"): who, which ids, how it went; never an
+    -- answer. Append-only (the triggers); a row goes only when a year old (retention), or with its company
+    -- (the cascade removes the company first, so the row's company is gone by then).
+    CREATE TABLE IF NOT EXISTS plugin_access_log (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      call TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      actor_kind TEXT NOT NULL,
+      conversation_id TEXT,
+      run_id TEXT,
+      refs TEXT NOT NULL,
+      status TEXT NOT NULL,
+      dropped INTEGER NOT NULL DEFAULT 0,
+      at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugin_access_log ON plugin_access_log(company_id, plugin_id, at);
+    CREATE TRIGGER IF NOT EXISTS plugin_access_log_no_update BEFORE UPDATE ON plugin_access_log
+    BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS plugin_access_log_no_delete BEFORE DELETE ON plugin_access_log
+    WHEN OLD.at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days') AND EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
+    BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
+
+    -- Reads refused for a member's share of a call's pace (plugins.md "Contract 3"): a count per member and
+    -- hour, nothing else, so a looping AI shows without a log row per refusal. Gone after a year.
+    CREATE TABLE IF NOT EXISTS plugin_call_paced (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      hour TEXT NOT NULL,
+      count INTEGER NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, user_id, hour)
+    );
+
     -- The company's mapping (読み替え表), every version kept (restorable).
     CREATE TABLE IF NOT EXISTS plugin_mappings (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

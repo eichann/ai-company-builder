@@ -8,12 +8,13 @@
  * (server/src/lib/push-check). POST …/paths/check answers the same question
  * for a member ahead of time without naming anything (isPathUsable).
  *
- * Paths are compared as pathKey()s (NFC + A–Z folded, paths.ts).
+ * Paths are compared as diskKey()s (paths.ts): a private folder's clone sits at
+ * its path on readers' disks, so what a disk folds onto it is at it.
  *
  * Pure: no Node, Electron, React, Hono, database or git.
  */
 import { canReadPrivateScope, type ScopeWithRules } from './permissions'
-import { isSameOrAncestorPath, pathKey } from './paths'
+import { diskKey, isSameOrAncestorPath } from './paths'
 
 /**
  * The reserved folder `path` (UTF-8, as pushed or typed) is at or under —
@@ -23,9 +24,9 @@ import { isSameOrAncestorPath, pathKey } from './paths'
 export function reservedPrefixOf(path: string, reserved: string[]): string | null {
   if (reserved.length === 0) return null
   const segments = path.split('/')
-  const key = pathKey(path).split('/')
+  const key = diskKey(path).split('/')
   for (const r of reserved) {
-    const rs = r.split('/')
+    const rs = diskKey(r).split('/')
     if (rs.length > key.length) continue
     if (rs.every((seg, i) => seg === key[i])) return segments.slice(0, rs.length).join('/')
   }
@@ -40,9 +41,9 @@ export function reservedPrefixOf(path: string, reserved: string[]): string | nul
  */
 export function reservedAncestorOf(path: string, reserved: string[]): string | null {
   if (reserved.length === 0) return null
-  const key = pathKey(path)
+  const key = diskKey(path)
   if (key === '') return null
-  return reserved.some(r => r.startsWith(`${key}/`)) ? path : null
+  return reserved.some(r => diskKey(r).startsWith(`${key}/`)) ? path : null
 }
 
 /**
@@ -66,11 +67,11 @@ export function isPathUsable(
   path: string,
   options: { asFile?: boolean } = {},
 ): boolean {
-  const key = pathKey(path)
+  const key = diskKey(path)
   let usable = true
   for (const s of scopes) {
     if (s.repoId === null) continue
-    const folder = pathKey(s.path)
+    const folder = diskKey(s.path)
     const inside = isSameOrAncestorPath(folder, key)
     const readable = canReadPrivateScope(s, userId, role)
     if (inside && !readable) usable = false

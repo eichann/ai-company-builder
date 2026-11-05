@@ -156,6 +156,8 @@ function withCheck(view: BrokerView, service: string, check: BrokerKeyCheckResul
 export function createKeyBrokerService(deps: KeyBrokerDeps) {
   const { brokerKeys, brokerVault, memberships, companyData, accounts, clock, ids } = deps
   const checkKey: BrokerKeyChecker = deps.checkKey ?? (async () => null)
+  /** A contract-3 connector's service or host (plugins.md "Contract 3"): bound once by composition; it gets no generic relay. */
+  let relayClosed: (companyId: string, service: string, host: string) => boolean = () => false
 
   /**
    * Staging (practice upstreams): while the service's connections go to its
@@ -652,6 +654,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       return chosenKey(serviceSettings(companyId).get(service), service, rows)?.id ?? null
     },
 
+    useRelayClosed(f: (companyId: string, service: string, host: string) => boolean) { relayClosed = f },
+
     /** The relay forwards only reads for this service (the company's switch). */
     relayReadOnly(companyId: string, service: string): boolean {
       return serviceSettings(companyId).get(service)?.readOnly ?? false
@@ -672,6 +676,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
       const def = parseBrokerRelayDefinition(body)
       if ('error' in def) return refuse('bad-request', def.error)
+      if (relayClosed(member.companyId, service, def.value.host)) return refuse('conflict', 'このサービスは、つなぎ先のプラグインの決まった呼び出しからだけ使えます（中継には登録できません）', { code: 'SERVICE_CLOSED_TO_RELAY' })
       if (body.category !== undefined && !has(BROKER_SERVICE_CATEGORIES, body.category)) return refuse('bad-request', 'category must be person, tool or system')
       const stored = serviceSettings(member.companyId).get(service)
       const before = relayOf(stored)

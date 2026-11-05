@@ -51,7 +51,7 @@ export interface ScopeRepository {
   syncCompanyScopes(): void
   /** A department folder was renamed: its scope and every scope under it move (rules stay attached). */
   moveScopeSubtree(fromPath: string, toPath: string): void
-  /** A department was deleted: its scope subtree, their rules and its managers go. */
+  /** A department was deleted: its scope subtree, their rules and its managers go (its skill editors by the foreign key). */
   deleteDepartmentScopes(departmentId: string, folder: string): void
   /** Remove every rule naming the user (private folders included). Returns how many. */
   deleteUserRules(userId: string): number
@@ -61,4 +61,15 @@ export interface ScopeRepository {
   replaceDepartmentManagers(departmentId: string, userIds: string[], createdBy: string): void
   /** The user manages no department of the company any more. */
   removeManagerFromCompany(userId: string): void
+  /** 「Skill を直せる人」 of a department (null: the whole company), oldest first. */
+  skillEditorIds(departmentId: string | null): string[]
+  /** Replace that list (kept rows keep their created_at/by). */
+  replaceSkillEditors(departmentId: string | null, userIds: string[], createdBy: string): void
+  /** Where the user is named: the whole company, and the ids of departments. */
+  skillEditorPlaces(userId: string): { everywhere: boolean; departmentIds: string[] }
+  /** The user is on no list of the company any more. */
+  removeSkillEditorFromCompany(userId: string): void
+  /** 「全員が直せる」: off unless an owner/admin turned it on. */
+  skillEditingOpen(): boolean
+  setSkillEditingOpen(open: boolean, updatedBy: string): void
 }

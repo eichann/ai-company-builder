@@ -137,6 +137,12 @@ export function connectGoogle(companyId: string, features: GoogleFeature[], outb
 }
 
 /** 「スプレッドシートを中継で使う」: the member's view and own records; 「やめる」 / back on (no consent). */
+/** 「済んだメールを Gmail でもアーカイブする」 off / back on (the member's own switch; no consent). */
+export type GoogleArchivePort = ElectronPort<'setGoogleArchive'>
+export function setGoogleArchive(companyId: string, on: boolean, port: GoogleArchivePort = window.electronAPI) {
+  return port.setGoogleArchive(companyId, on)
+}
+
 export type GoogleRelayPort = ElectronPort<'getGoogleRelay' | 'setGoogleRelay'>
 
 export function getGoogleRelay(companyId: string, port: GoogleRelayPort = window.electronAPI) {

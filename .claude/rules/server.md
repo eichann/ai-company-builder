@@ -225,6 +225,8 @@ GET  /api/config                                  setup state (no auth)
                               POST /permissions/scopes/:scopeId/move,
                               GET /permissions/effective, /permissions/folders,
                               GET /push-rejections                            permission-rules.ts
+                              GET|PUT /skill-editors, PUT /skill-editors/everyone (owner/admin)
+                                                                             skill-editors.ts
                               /private-folders…, /me/private-folders, /me/scopes,
                               POST /paths/check                               private-folders.ts
                               POST|GET /agent-events, /agent-events/summary,
@@ -388,7 +390,14 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   outdated-app guard `guardWrite` — mutation + write-loss check in one `transactions.run`,
   rolled back by throwing, 409 `OUTDATED_CLIENTS`). With the default seed (`everyone: read + write` on the company
   scope) nothing is restricted. Managers (`departments/:id/managers`) may manage their
-  departments' private folders and instruction files.
+  departments' private folders and instruction files, and the skill files in their departments.
+- 「Skill を直せる人」 (`skill_editors`, `department_id` NULL = the whole company; `ScopeRepository`,
+  `departments.replaceSkillEditors`, `permissionViews.skillEditing`): who else may change skill
+  files (`push-check.md`). Owner/admin keep the lists (`GET|PUT /skill-editors`, admin 「フォルダ」);
+  they reach the push snapshot and `/me/capabilities` as `skillEditing { everywhere, folders }`.
+  No folder access by itself. 「全員が直せる」 (`skill_editing_settings`, owner decision 2026-11-05,
+  off by default) answers `everywhere` for every member; the lists are kept. A department's rows follow its id through a rename and go with it;
+  leaving the company removes the person's rows.
 - Words (owner decision 2026-11-02): a department manager (`department_managers`) is
   **「部署の管理役」** on every screen, message and server sentence (admin console, app, push-check
   report, errors). 「責任者」 means only the owner of a 案件・プロジェクト (a type's `owner` field), and a

@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, INTERFACES, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
+import { actionWho, INTERFACES, isSystemOnly, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -28,6 +28,8 @@ import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, pr
  */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean,
   holdsRole?: (role: string) => boolean): boolean {
+  // `who: [system]`: only the server's own services (the service writer) — never through here.
+  if (isSystemOnly(who)) return false
   if (actor.kind === 'ai' && !who.includes('ai')) return false
   const people = who.filter(w => w !== 'ai')
   // `ai` alone: any member's AI may do it.

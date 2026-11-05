@@ -9,10 +9,10 @@ contract: 3
 service: sample-portal
 base_url: https://portal.sample.example/api
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
-account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment, expected_environment: staging }
 actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }
 limits: { per_minute: 60 }
-errors: { map: { STATE_CHANGED: check_wait, BAD_INPUT: refused } }
+errors: { map: { STATE_CHANGED: unknown-result, INVALID_INPUT: bad-input, SCOPE_REQUIRED: permission, RATE_LIMITED: temporary } }
 result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending, unknown_key: not_found } }
 calls:
   diagnose:
@@ -22,34 +22,57 @@ calls:
     inputs:
       id: { kind: id, class: normal }
     returns:
+      person_ref: { class: normal, keep: pointer }
       name: { class: personal, keep: summary, outside: true }
-      status: { class: normal, keep: summary }
-      history:
+      checked_at: { class: normal, keep: none }
+      findings:
         each:
-          note: { class: sensitive, keep: none }
+          code: { class: normal, keep: summary }
+          summary: { class: normal, keep: summary }
   find_person:
     label: メールで人を探す
     kind: search
     path: /people/search
     inputs:
       email: { kind: text, class: personal }
-    items: people
+      person_hint: { kind: id, class: personal, required: false }
+    items: results
     returns:
       person_ref: { class: normal, keep: pointer }
+      name: { class: personal, keep: summary, outside: true }
+      email_masked: { class: personal, keep: none }
+  mail:
+    label: 送ったメールの本文
+    kind: read
+    path: "/people/{id}/mail"
+    inputs:
+      id: { kind: id, class: normal }
+      include_body: { kind: number, class: normal, required: false }
+      since: { kind: date, class: normal, required: false }
+    returns:
+      mails:
+        each:
+          id: { class: normal, keep: pointer }
+          subject: { class: personal, keep: summary, outside: true }
+          body: { class: sensitive, keep: none, outside: true }
   pages:
     label: 案内のページ
     kind: document
+    cite: viewer_url
     page:
       path: "/pages/{id}"
       inputs:
         id: { kind: id, class: normal }
       returns:
-        body: { class: normal, keep: pointer }
+        title: { class: normal, keep: summary }
+        markdown: { class: normal, keep: pointer }
+        viewer_url: { class: normal, keep: pointer }
     list:
       path: /pages
       items: pages
       cursor: { param: after, next: next_cursor }
       returns:
+        id: { class: normal, keep: pointer }
         title: { class: normal, keep: summary }
     search:
       path: /pages/search

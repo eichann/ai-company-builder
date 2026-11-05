@@ -52,6 +52,7 @@ import { skillCommands } from '../features/skills/model'
 import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownload'
 import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
+import { forgetNotices } from '../features/sync/lastingNotice'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
 import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
@@ -249,7 +250,8 @@ export function AppShell() {
     if (!isCompanyWide) void refreshCompanySkills()
     refreshFileVersions()
   }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
-  const sync = useSync({ rootPath, companyId: currentCompany?.id, onSynced: handleSynced })
+  const signedInUserId = useAuthStore(s => s.user?.id)
+  const sync = useSync({ rootPath, companyId: currentCompany?.id, userId: signedInUserId, onSynced: handleSynced })
 
   // Signing out closes this screen: every open tab is saved first (useSaveBeforeLeaving).
   const leaving = useSaveBeforeLeaving()
@@ -258,10 +260,11 @@ export function AppShell() {
     if (!await leaving.confirmLeave()) return
     try {
       await signOut()
+      if (signedInUserId) forgetNotices(signedInUserId)
     } catch (error) {
       console.error('Logout failed:', error)
     }
-  }, [leaving, signOut])
+  }, [leaving, signOut, signedInUserId])
   const { handleSync } = sync
 
   // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
@@ -271,6 +274,7 @@ export function AppShell() {
     isSyncing: sync.isSyncing,
     setIsSyncing: sync.setIsSyncing,
     showNotice: sync.setSyncNotification,
+    keepNoticeFor: sync.keepNoticeFor,
     onSynced: handleSynced,
   })
   const handlePrivateFolderCreated = useCallback(() => { void handleSync() }, [handleSync])

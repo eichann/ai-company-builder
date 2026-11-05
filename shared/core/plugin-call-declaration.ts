@@ -211,7 +211,7 @@ function parseCall(name: string, raw: YamlValue, err: Err): PluginCall | null {
     return request && { ...base, kind: 'act', ...request, nature: raw.nature, idempotency: { style: idem.style }, undo: 'none' }
   }
   if (raw.kind === 'document') {
-    unknownKeys(`${where}: `, raw, ['label', 'kind', 'page', 'list', 'search'], err)
+    unknownKeys(`${where}: `, raw, ['label', 'kind', 'page', 'list', 'search', 'cite'], err)
     const rawPage = raw.page
     if (!isYamlMap(rawPage)) { err(`${where}に page（1ページを読む道）を書いてください`); return null }
     unknownKeys(`${where}の page: `, rawPage, ['path', 'inputs', 'returns'], err)
@@ -219,7 +219,8 @@ function parseCall(name: string, raw: YamlValue, err: Err): PluginCall | null {
     if (page && Object.keys(page.returns).length === 0) err(`${where}の page に returns（受け取る項目）を書いてください`)
     const list = parseListing(`${where}の list`, raw.list, 'query', err)
     const search = parseListing(`${where}の search`, raw.search, 'body', err)
-    return page && { ...base, kind: 'document', page, list, search }
+    if (raw.cite !== undefined && (!fieldName(raw.cite) || !page || !Object.prototype.hasOwnProperty.call(page.returns, raw.cite))) err(`${where}の cite は page の returns にある項目名です`)
+    return page && { ...base, kind: 'document', page, list, search, cite: fieldName(raw.cite) ? raw.cite : null }
   }
   err(`${where}の kind は read / search / act / document です`)
   return null

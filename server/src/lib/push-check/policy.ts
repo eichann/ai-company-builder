@@ -33,8 +33,9 @@ import {
   type ScopeWithRules,
   type SubjectType,
 } from '../../../shared/core/permissions'
-import { foldAsciiCase, pathKey } from '../../../shared/core/paths'
+import { diskKey, pathKey } from '../../../shared/core/paths'
 import { instructionFileInManagedFolder } from '../../../shared/core/instruction-files'
+import { NO_SKILL_EDITING, skillFileAllowed as skillFileAllowedInCompany, type SkillEditing } from '../../../shared/core/skill-files'
 import { foldScopePaths } from '../../../shared/core/write-access'
 import { reservedAncestorOf, reservedPrefixOf } from '../../../shared/core/reserved-paths'
 
@@ -58,6 +59,14 @@ export interface PushPolicy {
    * Absent = none.
    */
   managedFolders?: string[]
+  /**
+   * The pusher's place on 「Skill を直せる人」: they may change skill files
+   * for the whole company, or inside these department folders (NFC company
+   * paths). Absent = nowhere.
+   */
+  skillEditing?: SkillEditing
+  /** The pusher's app predates the skill files rule (lib/client-version.ts): not applied to this push. */
+  appPredatesSkillRule?: boolean
 }
 
 export type WriteGate =
@@ -129,6 +138,13 @@ export function parsePushPolicy(text: string): PushPolicy {
     if (!Array.isArray(d.managedFolders) || !d.managedFolders.every(f => typeof f === 'string' && f !== '')) invalid('managedFolders')
     managedFolders = d.managedFolders as string[]
   }
+  let skillEditing: SkillEditing | undefined
+  if (d.skillEditing !== undefined) {
+    const s = d.skillEditing as Record<string, unknown> | null
+    if (typeof s !== 'object' || s === null || typeof s.everywhere !== 'boolean'
+      || !Array.isArray(s.folders) || !s.folders.every(f => typeof f === 'string' && f !== '')) invalid('skillEditing')
+    skillEditing = { everywhere: s.everywhere as boolean, folders: s.folders as string[] }
+  }
   return {
     version: PUSH_POLICY_VERSION,
     companyId: d.companyId as string,
@@ -136,6 +152,8 @@ export function parsePushPolicy(text: string): PushPolicy {
     scopes,
     ...(scopePath !== undefined ? { scopePath } : {}),
     ...(managedFolders !== undefined ? { managedFolders } : {}),
+    ...(skillEditing !== undefined ? { skillEditing } : {}),
+    ...(d.appPredatesSkillRule === true ? { appPredatesSkillRule: true } : {}),
   }
 }
 
@@ -148,6 +166,16 @@ export function parsePushPolicy(text: string): PushPolicy {
  */
 export function instructionFileAllowed(path: string, managedFolders: string[], scopePath?: string): boolean {
   return instructionFileInManagedFolder(scopePath !== undefined ? `${scopePath}/${path}` : path, managedFolders)
+}
+
+/**
+ * May the pusher change the skill / subagent / command file at `path` (as
+ * pushed, UTF-8; relative to `scopePath` in a scope repository)? Named for the
+ * whole company, or the path lies inside a department they manage or are named
+ * for (shared/core/skill-files.ts). Owner/admin are decided before this is asked.
+ */
+export function skillFileAllowed(path: string, managedFolders: string[], skillEditing: SkillEditing = NO_SKILL_EDITING, scopePath?: string): boolean {
+  return skillFileAllowedInCompany(scopePath !== undefined ? `${scopePath}/${path}` : path, managedFolders, skillEditing)
 }
 
 // The reserved-path comparisons live in shared/core/reserved-paths.ts (the
@@ -203,10 +231,10 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
   if (pusherWritesEverywhere(scopes, pusher.id, role)) return { kind: 'allow-all' }
 
   const exact: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
-  // macOS and Windows check out "Sales/x.md" into an existing "sales/"
-  // folder, so a path must also be writable when compared without A–Z case
-  // (the bytewise A–Z folding of the case-collision check). Of two scopes
-  // that differ only in A–Z case, the one sorting first decides — the same
+  // macOS and Windows check out "Sales/x.md" and "ſales/x.md" into an existing
+  // "sales/" folder, so a path must also be writable as a disk folds it
+  // (shared/core diskKey). Of two scopes that differ only in case, the one
+  // sorting first decides — the same
   // rule the app's evaluateWrite applies (shared/core/write-access.ts).
   const foldedScopes = foldScopePaths(scopes)
   const folded: PermissionRepository = { getMemberRole: () => role, listScopes: () => foldedScopes }
@@ -214,7 +242,7 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
     kind: 'check',
     canWrite: (path: string) =>
       resolveAccess(companyId, pusher.id, path, exact).write
-      && resolveAccess(companyId, pusher.id, foldAsciiCase(path), folded).write,
+      && resolveAccess(companyId, pusher.id, diskKey(path), folded).write,
   }
 }
 
@@ -233,7 +261,7 @@ function scopeRepoGate(policy: PushPolicy, scopePath: string): WriteGate {
     canWrite: (path: string) => {
       const full = `${scopePath}/${path}`
       return resolveAccess(companyId, pusher.id, full, exact).write
-        && resolveAccess(companyId, pusher.id, foldAsciiCase(full), folded).write
+        && resolveAccess(companyId, pusher.id, diskKey(full), folded).write
     },
   }
 }

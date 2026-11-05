@@ -119,6 +119,8 @@ const claudeCli = createClaudeCli()
 const appPages = createAppPages(__dirname)
 // Set once the consultation windows exist (below): they go with the main window.
 let closeChatWindowsWithMain = () => {}
+// Set once sync is wired (below): closing the window waits for a running sync.
+let syncBeforeClose: { isRunning(): boolean; whenIdle(): Promise<void>; resumeAutomaticRuns(): void } | null = null
 // The main window; closing it first lets the renderer save every open tab.
 const mainWindowHost = createMainWindowHost({
   webPreferences: appPages.webPreferences,
@@ -127,6 +129,7 @@ const mainWindowHost = createMainWindowHost({
   askClose: window => window.send('app:closeRequested'),
   docbaseCookie: () => config.load().docbaseCookie,
   onClosed: () => closeChatWindowsWithMain(),
+  sync: () => syncBeforeClose,
 })
 // Events to the window (features/ports.ts WindowPort).
 const appWindow = mainWindowHost.port
@@ -416,12 +419,6 @@ registerAuthIpc(ipc, {
   onSignedIn: () => agentControl.eventSender.sessionStarted(),
 })
 
-// Skills (features/skills).
-const skills = registerSkillsIpc(ipc, {
-  paths: allowedRoots,
-  isShared: (rootPath, relFolder) => skillIsShared(appGit.create(rootPath, { GIT_NO_LAZY_FETCH: '1' }), relFolder),
-})
-
 // The sync button, automatic sync and the history views (features/sync, features/git-history).
 const { gitSync, activity: syncActivity } = wireSync(ipc, {
   paths: allowedRoots,
@@ -438,16 +435,25 @@ const { gitSync, activity: syncActivity } = wireSync(ipc, {
   shellEnv,
   aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
 })
+syncBeforeClose = gitSync
 
 // Private folders: the 「新しいフォルダ…」 dialog, the lock icons and the guards
 // the chat and the file operations ask (features/private-folders).
 const privateFolderGuards = wirePrivateFolders(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, pathChecker: gitSync.pathChecker, activity: syncActivity })
+
+// Skills (features/skills).
+const skills = registerSkillsIpc(ipc, {
+  paths: allowedRoots,
+  isShared: (rootPath, relFolder) => skillIsShared(appGit.create(rootPath, { GIT_NO_LAZY_FETCH: '1' }), relFolder),
+  skillRefusal: (absPath, options) => privateFolderGuards.skillRefusal(absPath, options),
+})
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {
   paths: allowedRoots,
   shell: desktopShell,
   window: appWindow,
+  writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath),
   reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath),
   // A skill the AI (or anything else) created, changed or removed is scanned
   // afresh by the next skills:list.
@@ -460,7 +466,7 @@ lifecycle.beforeQuit(() => files.closeWatchers())
 registerCompanySetupIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, userDataDir, home: () => app.getPath('home') })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
-registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath) })
+registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, writeRefusal: absPath => privateFolderGuards.writeRefusal(absPath) })
 
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the

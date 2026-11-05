@@ -42,6 +42,31 @@ export const permissionSchema = `
       PRIMARY KEY (department_id, user_id)
     );
 
+    -- 「Skill を直せる人」: who may change skill / agent / command files besides
+    -- owners, admins and a department's managers (shared/core/skill-files.ts).
+    -- department_id NULL: the whole company. Grants no folder access by itself.
+    CREATE TABLE IF NOT EXISTS skill_editors (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      department_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      created_by TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_editors_company ON skill_editors(company_id, user_id) WHERE department_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_editors_department ON skill_editors(company_id, department_id, user_id) WHERE department_id IS NOT NULL;
+    CREATE TRIGGER IF NOT EXISTS skill_editors_company_insert BEFORE INSERT ON skill_editors
+    WHEN NEW.department_id IS NOT NULL AND NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
+    BEGIN SELECT RAISE(ABORT, 'skill_editors.company_id must be the company of its department'); END;
+
+    -- 「全員が直せる」: one switch per company. No row, or everyone = 0: only the people above.
+    -- Everyone with write access then may change skill files; auto-run parts stay owner/admin.
+    CREATE TABLE IF NOT EXISTS skill_editing_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      everyone INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
     -- Pushes the pre-receive hook rejected (lib/push-rejections.ts).
     -- paths: JSON array of strings, capped.
     CREATE TABLE IF NOT EXISTS push_rejections (

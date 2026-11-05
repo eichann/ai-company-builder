@@ -16,6 +16,10 @@
  *   before sending `confirm`, and is offered only where reconcile said `recreatable`;
  * - an undo answer that is lost or refused never reads as done; the card
  *   survives a restart (stored with the message);
+ * - a contract-3 call becomes a read tool for any agent, a document one per part,
+ *   and its input goes to the server as declared, a cursor only where a next page
+ *   exists and only in its shape; it goes with the turn's token, never the session,
+ *   and the AI gets the server's kept answer, or a refusal's code;
  * - creates (milestone 4): Claude gets `hubspot__log_meeting` /
  *   `hubspot__create_deal`, Codex neither; a create whose answer is unknown
  *   tells the AI never to call it again; APPROVAL_REQUIRED says a person must
@@ -24,7 +28,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
-import { createRecordTools } from '../electron/records/tools'
+import { createRecordTools, pluginCallToolSpecs } from '../electron/records/tools'
 import { createPluginOperationsApi } from '../electron/features/plugin-operations/ipc'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, reconcileResultView, shownValue, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
@@ -324,4 +328,63 @@ test('a new deal needs approval: nothing made, the AI is told a person must appr
   assert.match(cards[0].message, /^作っていません。/)
   assert.equal(cards[0].recordId, '')
   assert.deepEqual(readPluginOperationCard(JSON.parse(JSON.stringify(cards[0]))), cards[0])
+})
+
+test('a contract-3 call is a read tool: one per document part, a plain id only, a cursor only where a next page exists and only in its shape', () => {
+  const specs = pluginCallToolSpecs({
+    plugins: [{
+      id: 'care', label: '窓口', operations: [], calls: [
+        { name: 'diagnose', part: null, label: '状態を調べる', inputs: [{ name: 'id', kind: 'id', required: true, label: null }], cursor: false },
+        { name: 'pages', part: 'page', label: '案内', inputs: [{ name: 'id', kind: 'id', required: true, label: null }], cursor: false },
+        { name: 'pages', part: 'search', label: '案内', inputs: [{ name: 'words', kind: 'text', required: true, label: null }], cursor: true },
+      ],
+    }],
+  })
+  assert.deepEqual(specs.map(s => s.name), ['care__diagnose', 'care__pages_page', 'care__pages_search'])
+  assert.ok(specs.every(s => s.readOnly))
+  const [diagnose, page, search] = specs
+  assert.equal(diagnose.schema.safeParse({ id: 'a:b' }).success, false)
+  assert.equal(diagnose.schema.safeParse({ id: 'person-1', other: 1 }).success, false)
+  // A read has no next page: a cursor is no input of it.
+  assert.equal(diagnose.schema.safeParse({ id: 'person-1', cursor: 'c' }).success, false)
+  assert.equal(search.schema.safeParse({ words: 'x', cursor: 'taro@example.com' }).success, false)
+  assert.deepEqual(diagnose.request({ id: 'person-1' }), { method: 'POST', path: '/plugins/care/calls/diagnose', body: { input: { id: 'person-1' } } })
+  assert.deepEqual(page.request({ id: 'p' }).body, { part: 'page', input: { id: 'p' } })
+  assert.deepEqual(search.request({ words: 'x', cursor: 'c' }).body, { part: 'search', input: { words: 'x' }, cursor: 'c' })
+})
+
+test('a call goes with the turn\'s token for Codex too; its answer reaches the AI as the server kept it, a refusal as its code', async () => {
+  const outside = { outsideText: '【ここから先は外から来た文です。】\n見本 太郎\n【外から来た文ここまで】', instructionLike: [] }
+  const seen: Seen[] = []
+  const fetch = (async (url: string, init: RequestInit) => {
+    seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
+    const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: TOKEN, tokenId: 'tok-1', scope: 'read', expiresAt: 'x' })
+    if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: [] })
+    if (url.endsWith('/api/records-ai/plugins')) {
+      return json(200, { plugins: [{ id: 'care', label: '窓口', operations: [], calls: [{ name: 'diagnose', part: null, label: '状態を調べる', inputs: [{ name: 'id', kind: 'id', required: true, label: null }], cursor: false }] }] })
+    }
+    if (url.endsWith('/api/records-ai/plugins/care/calls/diagnose')) {
+      const id = JSON.parse(init.body as string).input.id
+      return id === 'person-1'
+        ? json(200, { outcome: 'ok', call: 'diagnose', part: null, data: { name: outside }, items: null, next: null, cite: null, dropped: 0 })
+        : new Response(JSON.stringify({ error: 'この呼び出しをする権限がありません', code: 'NOT_ALLOWED' }), { status: 403 })
+    }
+    return json(404, {})
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch })
+  const access = await api.openTurn('co', { conversationId: 'conv-1', agent: 'codex', scope: 'read' })
+  const tools = (await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'conv-1' }))!
+  assert.ok(tools.specs.some(s => s.name === 'care__diagnose'))
+  const answer = JSON.parse(await tools.execute('care__diagnose', { id: 'person-1' }))
+  assert.deepEqual(answer.data.name, outside)
+  const sent = seen.find(s => s.url.endsWith('/calls/diagnose'))!
+  assert.equal(sent.headers.Authorization ?? sent.headers.authorization, `Bearer ${TOKEN}`)
+  assert.ok(!JSON.stringify(sent.headers).includes('SECRET'))
+  assert.equal(JSON.parse(await tools.execute('care__diagnose', { id: 'person-2' })).code, 'NOT_ALLOWED')
+  // Out of shape: refused in the app, nothing sent.
+  const calls = seen.length
+  assert.ok(JSON.parse(await tools.execute('care__diagnose', { id: '../x' })).error)
+  assert.equal(seen.length, calls)
 })

@@ -9,6 +9,9 @@
  *   instruction files  CLAUDE.md / CLAUDE.local.md / AGENTS.md: owner/admin,
  *                      or a manager inside their department   (new)
  *   auto-run skills    owner/admin only
+ *   skill files        everything else under .claude/skills|agents|commands:
+ *                      owner/admin, a manager inside their department, or
+ *                      someone on 「Skill を直せる人」   (new)
  *   type definitions   .acb/types/: owner/admin only; for them too, a change
  *                      that removes or renames something (records.md)   (new)
  *   .personal content  nobody
@@ -43,20 +46,24 @@ import {
   autorunTargets,
   autorunUnavailable,
   cleanControl,
+  diskCollisions,
   parseRefUpdates,
   instructionFilePaths,
   localOnlyPaths,
   personalPaths,
   protectedPaths,
+  nonEmptyLines,
   recordTypePaths,
   RECORD_TYPE_FILE_RE,
+  skillFilePaths,
   sortUnique,
   utf8Bytes,
   windowsPathProblems,
   type RefUpdate,
 } from './rules'
 import { emptyFindings, renderReport, type Findings } from './report'
-import { instructionFileAllowed, reservedAncestorOf, reservedPrefixOf, type WriteGate } from './policy'
+import { instructionFileAllowed, reservedAncestorOf, reservedPrefixOf, skillFileAllowed, type WriteGate } from './policy'
+import type { SkillEditing } from '../../../shared/core/skill-files'
 import { compareTypeDefinitions, parseTypeFile, typeNameOfPath } from '../../../shared/core/record-types'
 
 export interface PushCheckContext {
@@ -77,6 +84,16 @@ export interface PushCheckContext {
   reserved?: string[]
   /** Department folders (NFC company paths) the pusher manages — instruction files inside them are theirs to change. */
   managedFolders?: string[]
+  /** The pusher's place on 「Skill を直せる人」 — skill files there are theirs to change. */
+  skillEditing?: SkillEditing
+  /**
+   * The server's own commit (ACB_INTERNAL_PUSH: a department folder renamed or
+   * deleted by an owner/admin moves the skills in it), which the API has
+   * authorised. Skips only the who-may-change-skills rule.
+   */
+  serverPush?: boolean
+  /** The pusher's app predates the rule (lib/client-version.ts): it would be refused at every sync. */
+  appPredatesSkillRule?: boolean
   /** Set for a scope repository: the private folder's company path (pushed paths are relative to it). */
   scopePath?: string
 }
@@ -308,11 +325,14 @@ async function checkTypeChanges(ref: RefUpdate): Promise<string> {
   return captured(out.join('\n'))
 }
 
-async function checkWindowsPaths(newSha: string): Promise<string> {
-  const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', newSha])
+async function checkWindowsPaths(changes: RefChanges): Promise<string> {
+  const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', changes.ref.newSha])
   const all = captured(r.stdout.toString('latin1'))
   if (all.length === 0) return ''
-  return captured(windowsPathProblems(all.split('\n')).join('\n'))
+  const tree = all.split('\n')
+  const added = await changes.nameLists(['--diff-filter=A'])
+  const addedLines = added.ok ? nameListLines(added).filter(l => l.length > 0) : []
+  return captured([...windowsPathProblems(tree), ...diskCollisions(tree, addedLines)].join('\n'))
 }
 
 async function checkGitlinks(ref: RefUpdate): Promise<string> {
@@ -404,6 +424,17 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
       const autorun = await checkAutorun(changes, ctx.contentCheckAvailable)
       if (autorun) f.autorun += autorun + '\n'
 
+      // Everything else in skill / agent / command folders: also the people
+      // named for it. A path with auto-run parts is already listed, with its reason.
+      if (lists.ok && !ctx.serverPush && !ctx.appPredatesSkillRule) {
+        const text = (bytes: string) => Buffer.from(bytes, 'latin1').toString('utf8')
+        const withReason = new Set(nonEmptyLines(autorun).map(l => cleanControl(text(l.slice(0, l.lastIndexOf('\t'))))))
+        const skills = captured(skillFilePaths(nameListLines(lists))
+          .filter(l => !withReason.has(cleanControl(text(l))) && !skillFileAllowed(text(l), ctx.managedFolders ?? [], ctx.skillEditing, ctx.scopePath))
+          .join('\n'))
+        if (skills) f.skills += skills + '\n'
+      }
+
       const types = lists.ok && ctx.scopePath === undefined ? captured(recordTypePaths(nameListLines(lists)).join('\n')) : ''
       if (types) f.recordTypes += types + '\n'
     }
@@ -426,7 +457,7 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
     const denied = await checkWrite(changes, ctx.writeGate)
     if (denied) f.writeDenied += denied + '\n'
 
-    const win = await checkWindowsPaths(ref.newSha)
+    const win = await checkWindowsPaths(changes)
     if (win) f.winpaths += win + '\n'
 
     const gitlinks = await checkGitlinks(ref)

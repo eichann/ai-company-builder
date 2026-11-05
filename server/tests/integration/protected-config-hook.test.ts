@@ -147,14 +147,13 @@ describe('pre-receive hook: protected agent config', () => {
 
   // Skills are not path-protected; only their auto-run parts are
   // (skill-autorun-hook.test.ts).
-  it('accepts member pushes that do not touch protected paths — skills included', () => {
+  it('accepts member pushes that do not touch protected paths', () => {
     const { clone } = setup({
       'README.md': 'hi\n',
       '.mcp.json': '{"mcpServers":{"playwright":{}}}\n',
       '.claude/settings.json': '{}\n',
     })
     writeFile(clone, 'sales/proposal.md', 'draft\n')
-    writeFile(clone, '.claude/skills/report/SKILL.md', '---\nname: report\n---\n')
     writeFile(clone, '.claude/notes.md', 'notes\n')
     writeFile(clone, 'docs/settings.json', '{}\n')
     commitAll(clone, 'normal work')

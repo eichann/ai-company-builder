@@ -25,6 +25,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import type { MyPrivateScope, MyScopesResponse } from '../../../shared/types/private-folders'
 import { pathKey } from '../../shared/sparse-paths'
+import { diskKey } from '../../../shared/core/paths'
 import { folderExcludeLines, readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
 
 export type { MyPrivateScope, MyScopesResponse }
@@ -132,12 +133,12 @@ export function writePrivateScopesCache(repoPath: string, cache: PrivateScopesCa
 // ---------------------------------------------------------------------------
 
 function isAtOrUnder(ancestor: string, p: string): boolean {
-  const a = pathKey(ancestor)
-  const k = pathKey(p)
+  const a = diskKey(ancestor)
+  const k = diskKey(p)
   return k === a || k.startsWith(`${a}/`)
 }
 
-/** The readable private folder `relPath` lies in (or is), or null. Compared NFC + A–Z folded. */
+/** The readable private folder `relPath` lies in (or is), or null. Compared as a disk folds it: its clone is what is there. */
 export function readableScopeOf(scopes: readonly MyPrivateScope[], relPath: string): MyPrivateScope | null {
   const p = relPath.normalize('NFC').replace(/\\/g, '/').split('/').filter(Boolean).join('/')
   if (!p) return null
@@ -162,14 +163,21 @@ export function privateCheckoutRootOf(absPath: string): string | null {
  * read (that folder's own rules apply there).
  */
 export function companyPathOf(absPath: string): { root: string; companyId: string; rel: string } | null {
+  const where = companyFileOf(absPath)
+  if (!where) return null
+  const cache = readPrivateScopesCache(where.root)
+  if (!cache || readableScopeOf([...cache.scopes, ...(cache.pendingPublic ?? [])], where.rel)) return null
+  return where
+}
+
+/** The company checkout an absolute path lies in and its company-relative path, private folders included — or null. */
+export function companyFileOf(absPath: string): { root: string; companyId: string; rel: string } | null {
   const root = privateCheckoutRootOf(path.dirname(path.resolve(absPath)))
   if (!root) return null
   const rel = path.relative(root, path.resolve(absPath)).split(path.sep).join('/')
   if (!rel || rel.startsWith('..')) return null
   const cache = readPrivateScopesCache(root)
-  if (!cache) return null
-  if (readableScopeOf([...cache.scopes, ...(cache.pendingPublic ?? [])], rel)) return null
-  return { root, companyId: cache.companyId, rel }
+  return cache ? { root, companyId: cache.companyId, rel } : null
 }
 
 /** The readable private folder an absolute path lies in, with its company root — or null. */

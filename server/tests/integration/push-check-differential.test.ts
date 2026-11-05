@@ -169,6 +169,12 @@ interface Attempt {
   stdin?: string
 }
 
+// The one explanation line reworded on purpose (not a marker or a path line): taking the
+// auto-run part out does not help someone who may not change skills at all.
+const latin1 = (s: string) => Buffer.from(s, 'utf8').toString('latin1')
+const OLD_AUTORUN_ADVICE = latin1('スキル等は、自動実行の設定を取り除けば、そのまま共有できます。')
+const NEW_AUTORUN_ADVICE = latin1('スキル等は、変更を認められている人が自動実行の設定を取り除けば、共有できます。')
+
 let compared = 0
 /** Markers the legacy hook printed across the corpus (the corpus must exercise every rule). */
 const seen = new Set<string>()
@@ -184,7 +190,7 @@ function attempt(repo: Repo, a: Attempt, envs = ROLE_ENVS): void {
     timings.next.push(next.ms)
     const what = `${a.label} [${label}]`
     expect({ what, status: next.status, stdout: next.stdout, stderr: next.stderr })
-      .toEqual({ what, status: legacy.status, stdout: legacy.stdout, stderr: legacy.stderr })
+      .toEqual({ what, status: legacy.status, stdout: legacy.stdout, stderr: legacy.stderr.replace(OLD_AUTORUN_ADVICE, NEW_AUTORUN_ADVICE) })
     compared++
     for (const m of legacy.stderr.matchAll(/\[([A-Z_]+)\]/g)) seen.add(m[1])
     if (legacy.stderr.includes(Buffer.from('確認できませんでした').toString('latin1'))) seen.add('UNABLE_TO_CHECK')
@@ -223,14 +229,15 @@ function attemptSecretOnlyInIntermediateCommit(repo: Repo, a: Attempt, expectedE
 /**
  * The second intended difference: paths the legacy hook did not protect and
  * the push checker does — Codex's project layer (`.codex/` at any depth, a
- * file or symlink named `.codex`). Owner/admin runs must still match the
+ * file or symlink named `.codex`) and every file of `.claude/skills|agents|commands`
+ * (skill-files-hook.test.ts). Owner/admin runs must still match the
  * legacy hook byte for byte (both accept); every other role is rejected
  * with a PROTECTED_CONFIG section listing exactly `expectedEntries`, where
  * the legacy hook accepted. Never applied.
  */
-function attemptNewlyProtected(repo: Repo, a: Attempt, expectedEntries: string[]): void {
+function attemptNewlyProtected(repo: Repo, a: Attempt, expectedEntries: string[], envs = ROLE_ENVS): void {
   const stdin = a.updates.map(([ref, sha]) => `${repo.ref(ref)} ${sha} ${ref}\n`).join('')
-  for (const { label, env } of ROLE_ENVS) {
+  for (const { label, env } of envs) {
     const legacy = runHook(legacyHook, repo.bare, stdin, env)
     const next = runHook(newHook, repo.bare, stdin, env)
     const what = `${a.label} [${label}]`
@@ -280,8 +287,6 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
       ['README.md', 'hi\n'],
       ['.mcp.json', '{"v":1}\n'],
       ['営業部/.personal/.gitignore', '*\n!.gitignore\n'],
-      ['.claude/skills/old/SKILL.md', '---\nname: old\n---\nplain\n'],
-      ['.claude/skills/hooked/SKILL.md', '---\nhooks: {}\n---\n'],
       ['docs/a.md', 'a\n'],
     ])
     const c0 = repo.commit(base, [])
@@ -305,20 +310,31 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
       '.claude/commands/c.MD': 'run !`date` now\n',
       '.claude/skills/d/SKILL.md': 'intro\n```!\nls\n```\n',
       '.claude/skills/e/SKILL.md': '﻿---\n{lspServers: 1, monitors: 2}\n---\n',
-      '.claude/skills/f/SKILL.md': '---\nname: f\ndescription: mentions hooks and !important\n---\nif ! grep x; then :; fi\n`!` ok\n',
       '.claude/skills/g/link': { mode: '120000', content: '../../elsewhere' },
-      '.claude/skills/h/script.sh': '!`date`\n',
-      '.claude/skills/hooked/SKILL.md': null,
       [bytesPath(Buffer.from('.claude/skills/caf\xe9/SKILL.md', 'latin1'))]: '---\nhooks: 1\n---\n',
       '.claude/skills/tab\there/SKILL.md': '!`x`\n',
     })
-    attempt(repo, { label: 'auto-run parts in skills/agents/commands, symlink, deletion, odd names', updates: [['refs/heads/main', repo.commit(t3, [c0])]] })
+    attempt(repo, { label: 'auto-run parts in skills/agents/commands, symlink, odd names', updates: [['refs/heads/main', repo.commit(t3, [c0])]] })
+    // Back to the base: from there the next attempts' net diffs would delete these skills,
+    // which is the rule the legacy hook never had.
+    repo.setRef('refs/heads/main', c0)
+
+    // Everything else in those folders: the legacy hook let it through.
+    const t3b = tree(base, {
+      '.claude/skills/f/SKILL.md': '---\nname: f\ndescription: mentions hooks and !important\n---\nif ! grep x; then :; fi\n`!` ok\n',
+      '.claude/skills/h/script.sh': '!`date`\n',
+    })
+    attemptNewlyProtected(repo, { label: 'skill files without auto-run parts (added, a script)', updates: [['refs/heads/main', repo.commit(t3b, [c0])]] },
+      ['.claude/skills/f/SKILL.md', '.claude/skills/h/script.sh'],
+      // Without a runnable node the legacy hook refused these too, as content it could not read.
+      ROLE_ENVS.filter(e => e.env.ACB_NODE !== '/nonexistent/node'))
 
     // Intermediate commit has hooks, the tip removed them again: still rejected (every commit counts).
     const t4a = tree(base, { '.claude/skills/i/SKILL.md': '---\nhooks: []\n---\n' })
     const c4a = repo.commit(t4a, [c0])
     const t4b = tree(base, { '.claude/skills/i/SKILL.md': '---\nname: i\n---\n' })
     attempt(repo, { label: 'auto-run part only in an intermediate commit', updates: [['refs/heads/main', repo.commit(t4b, [c4a])]] })
+    repo.setRef('refs/heads/main', c0)
 
     const t5 = tree(base, {
       '.personal/a.txt': 'p\n',
@@ -374,7 +390,6 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
       'CON': '1', 'con.txt': '1', 'aux/x.md': '1', 'Com1.log': '1', 'lpt9': '1', 'console.md': '1', 'xnul': '1',
       'tab\tname.md': '1', 'new\nline.md': '1', 'ctrl\x01.md': '1',
       'README.MD': 'dup\n', 'Docs/A.md': '1', 'docs/a.md': '1', 'docs/A.md': '1',
-      'Ａ.md': '1', 'ａ.md': '1', 'É.md': '1', 'é.md': '1',
       [bytesPath(Buffer.from('lat\xe9n.md', 'latin1'))]: '1',
       [bytesPath(Buffer.from('LAT\xe9N.md', 'latin1'))]: '1',
     })

@@ -6,12 +6,52 @@ export interface SyncNotice {
   message: string
   /** Where sync kept the member's version (offered as 「フォルダを開く」 / 「履歴を見る」). */
   backupPath?: string
+  /** About work that stopped being where it was: no later notice replaces it unseen (lastingNotice.ts). */
+  mustSee?: boolean
 }
 
-/** The notice for a finished sync; the first thing sync had to set aside wins. */
+const some = (list: readonly unknown[] | undefined) => !!list && list.length > 0
+
+/** Where the member's files went, or what they lost, in ways the plain sync message would hide. */
+function movedSomething(result: GitResult): boolean {
+  return some(result.recoveredFiles) ||
+    some(result.lostPrivateFolders) ||
+    some(result.reservedPathFiles) ||
+    !!result.madePublicBackupPath ||
+    some(result.movedAsideFolders) ||
+    some(result.nestedRepoBackupFiles) ||
+    some(result.largeFileBackupFiles) ||
+    !!result.privateFolders?.some(folder => folder.setAside)
+}
+
+function movedTo(result: GitResult): string | undefined {
+  return result.recoveryBackupPath ||
+    result.reservedPathBackupPath ||
+    result.madePublicBackupPath ||
+    result.movedAsideBackupPath ||
+    result.nestedRepoBackupPath ||
+    result.largeFileBackupPath ||
+    result.privateFolders?.find(folder => folder.setAside && folder.backupPath)?.backupPath ||
+    result.backupPath
+}
+
+/** The notice for a finished sync; a restored department is said whichever notice it is. */
 export function syncNoticeFor(result: GitResult): SyncNotice {
+  const notice = { ...noticeFor(result), ...(some(result.recoveredFiles) ? { mustSee: true } : {}) }
+  const restored = result.restoredFolders ?? []
+  if (!result.success || restored.length === 0 || notice.message.includes('部署フォルダを復元しました')) return notice
+  return { ...notice, type: 'warning', message: `${notice.message}\n部署フォルダを復元しました: ${restored.join(', ')}` }
+}
+
+/** The first thing sync had to set aside wins. */
+function noticeFor(result: GitResult): SyncNotice {
   if (!result.success) {
-    return { type: 'error', message: result.error || '同期に失敗しました' }
+    const backupPath = movedTo(result)
+    return { type: 'error', message: result.error || '同期に失敗しました', ...(backupPath ? { backupPath } : {}) }
+  }
+  if (movedSomething(result)) {
+    // Every one of these writes its sentence into the message (git-sync.ts withNotes).
+    return { type: 'warning', message: result.message || '同期しましたが、移動したファイルがあります。バックアップの履歴を確認してください。', backupPath: movedTo(result) }
   }
   if (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) {
     // Protected agent config was put back to the server's version
@@ -76,16 +116,29 @@ export function syncNoticeFor(result: GitResult): SyncNotice {
   }
 }
 
+/** Sync did something to the member's files that they have to hear about. */
+function setSomethingAside(result: GitResult): boolean {
+  return !!result.hadConflicts ||
+    movedSomething(result) ||
+    some(result.restoredProtectedFiles) ||
+    some(result.restoredWriteDeniedFiles) ||
+    some(result.untrackedPersonalFiles) ||
+    some(result.outsideCheckoutFiles) ||
+    some(result.restoredFolders) ||
+    some(result.ignoredLargeFiles) ||
+    some(result.excludedNestedRepos)
+}
+
 /** A clean success hides itself after 3 s; anything sync set aside stays until dismissed. */
 export function syncNoticeHidesItself(result: GitResult): boolean {
-  const hasWarnings = result.hadConflicts ||
-    (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
-    (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) ||
-    (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) ||
-    (result.outsideCheckoutFiles && result.outsideCheckoutFiles.length > 0) ||
-    (result.nestedRepoBackupFiles && result.nestedRepoBackupFiles.length > 0) ||
-    (result.restoredFolders && result.restoredFolders.length > 0) ||
-    (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
-    (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)
-  return !!result.success && !hasWarnings
+  return !!result.success && !setSomethingAside(result)
+}
+
+/**
+ * What an automatic send shows: a plain success nothing, a failure once per
+ * kind (`showFailure`), and whatever sync set aside always, also on a failed
+ * run: nobody pressed anything, so this notice is the only way to hear of it.
+ */
+export function autoSyncNoticeFor(result: GitResult, showFailure: boolean): SyncNotice | null {
+  return setSomethingAside(result) || (!result.success && showFailure) ? syncNoticeFor(result) : null
 }

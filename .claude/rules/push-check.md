@@ -35,7 +35,18 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
 - Git output is handled as byte strings (latin1): matching is bytewise with A–Z-only case
   folding, exactly like the shell tools under `LC_ALL=C`, on every host. The old shell hook
   followed the inherited locale and rejected ordinary Japanese names with `WINPATH_DETECTED` on
-  macOS. Non-ASCII case pairs (`Ａ`/`ａ`) do not fold, as production never did.
+  macOS. Non-ASCII case pairs (`Ａ`/`ａ`) do not fold in those bytewise rules, as production never
+  did; what a disk folds is the next point.
+- **Look-alikes** (2026-11-05, review of B-H2): `.claude/ſkills/x` (U+017F), `.mcp.jſon`,
+  `.claude/hooKs/x` (U+212A) are other paths to git and the bytewise rules, and the real ones on a
+  Mac: APFS folds them. Two keys in `shared/core/paths.ts`: `lookalikeKey` (NFKC + Unicode case
+  folding, default-ignorables gone) for names that are protected — `namesProtected` applies it to
+  agent config, instruction files, type definitions, skill files and the auto-run check, the listed
+  path staying the pushed spelling; `diskKey` (what APFS does and nothing more: `（1）` / `(1)`, ı / i, ⭐️ / ⭐ and 葛󠄀城 /
+  葛城 stay two files; `client/tests/disk-key.test.ts` walks every cased character on a Mac) for the
+  write gate's second pass, reserved private paths and `diskCollisions`. Over-folding refuses
+  ordinary names and stops a member's sync. `.personal` / `.backups` are not
+  folded: nothing is granted there. Test: `skill-files-hook.test.ts`.
   `foldAsciiCase` / `INSTRUCTION_FILE_RE` in `rules.ts` are bytewise twins of `shared/core`
   (`shared-core.md`).
 - The legacy shell hook stays at `server/tests/fixtures/pre-receive-hook.legacy.sh`;
@@ -43,7 +54,7 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
   except two intended changes, each with its own expectation helper: secrets in intermediate
   commits (`attemptSecretOnlyInIntermediateCommit`) and Codex's project layer
   (`attemptNewlyProtected`: owner/admin identical, other roles rejected with exactly the listed
-  paths). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
+  paths; the skill files rule below goes through the same helper). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
   reserved paths) stay out of that corpus and have their own tests. `hook-locale.test.ts` pushes
   under UTF-8 locales.
 
@@ -69,14 +80,18 @@ forever — the "permanently unable to sync" shape).
   that authenticated the pusher (session via `AccountDirectory.bySessionToken`, membership via the
   access policy, managed folders via `permission-views`) — sets `ACB_PUSHER_ROLE` / `ACB_PUSHER_ID` / `ACB_PUSHER_EMAIL`,
   `ACB_NODE`, and writes a per-request **snapshot** (pusher, scopes, rules, managed folders,
-  reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
+  `skillEditing` (「Skill を直せる人」: `{ everywhere, folders }`), reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
   removed when the request ends; `preparePushCheck` in `lib/git-server`).
 - A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable
   pusher denies every changed path unless writing is open to everyone.
 - The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1`
-  (`internalGitEnv`) and skip only the write check. They are commits built in the bare
+  (`internalGitEnv`) and skip the write check and the skill files rule (a department renamed or
+  deleted by an owner/admin moves the skills in it; `serverPush` needs the marker and no snapshot,
+  so a member's push can never claim it). The other protected rules still see no role: a department
+  holding `CLAUDE.md`, `.claude/settings.json` or a skill with auto-run parts cannot be renamed or
+  deleted (known gap, not new). They are commits built in the bare
   repository and pushed from it to itself (`lib/bare-commit.ts`), so receive-pack runs this hook
-  on them like on any push: every content rule applies. git-http strips both variables from what it
+  on them like on any push: every other content rule applies. git-http strips both variables from what it
   inherits, so a client cannot select either. Local-transport pushes (tests, an operator) carry
   neither and are not write-checked.
 
@@ -99,14 +114,33 @@ Deletions are always allowed except where noted (they are how something gets uns
   permission profiles incl. network and file access, MCP servers, inline hooks), `hooks.json`,
   `rules/` — so the whole folder is protected (added 2026-10-25). Sharing an MCP server is
   legitimate, so the rule restricts *who*. Test: `protected-config-hook.test.ts`.
-- **Skills / subagents / commands with auto-run parts**: `.md` under `.claude/skills/`,
-  `.claude/agents/`, `.claude/commands/` (any depth) may be changed by anyone unless the new blob
-  has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
+- **Skill files** (`[PROTECTED_CONFIG]`, their own sub-list): add / modify / delete / rename of
+  anything under `.claude/skills/`, `.claude/agents/`, `.claude/commands/` (any depth, A–Z
+  case-insensitive, every file type, a file or link at the folder's own path too): owner/admin
+  anywhere; a department manager inside a department they manage; people on
+  「Skill を直せる人」 (`skill_editors`: for the whole company, or one department), or everyone with
+  write access while the company's one switch 「全員が直せる」 is on (`skill_editing_settings`, off by
+  default; the snapshot then says `everywhere`). A department's
+  list reaches any depth inside its folder, not root-level skills. In a scope repo the path is
+  judged as `<scopePath>/<path>`. Rules: `shared/core/skill-files.ts`. Why (owner decision
+  2026-11-04, audit B-H2): a skill's script reaches every member by sync and runs on their
+  computer under their account and tokens. Being on a list grants no folder access: the write
+  check still applies. Skills already shared keep working; only changes are refused. Rollout: a
+  build that says it predates the app's recovery (`skillFileRuleApplies`, `lib/client-version.ts`;
+  `appPredatesSkillRule` in the snapshot) is not refused by this rule, since it would loop on a
+  `chmod +x` or a `.pyc`. No header or an unreadable one is checked, so a plain `git push` never
+  skips it. The hole stays open for such builds until they update; drop the gate when none is left
+  in `client_activity`.
+  Test: `skill-files-hook.test.ts`; the list: `skill-editors.test.ts`.
+- **Auto-run parts of those files**: whoever else may edit the file, a change is owner/admin only
+  when the new `.md` blob has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
   flow, escaped, anchored, nested), a body `!` + backtick where the `!` starts a line or follows
   whitespace, a ```` ```! ```` block — or the entry is a symlink. Then owner/admin only, reported
   in the `[PROTECTED_CONFIG]` section (path line, then a reason line). No masking of fenced code
-  (substituted arguments can re-pair backticks). Contents unreadable, or `ACB_NODE` unusable →
-  every changed path there is rejected for non-admins. Text that is not the syntax (`!important`,
+  (substituted arguments can re-pair backticks). A path listed here is not listed again under
+  skill files. Contents unreadable, or `ACB_NODE` unusable →
+  every changed path there is rejected for non-admins. The closing advice names who it is for:
+  taking the part out helps only someone who may change the file. Text that is not the syntax (`!important`,
   `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
 - **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —
   Codex reads it in place of `AGENTS.md` — any depth, case-insensitive): owner/admin anywhere; a department manager inside a department folder they
@@ -136,12 +170,16 @@ Deletions are always allowed except where noted (they are how something gets uns
   (`push-check-performance.test.ts`); `secret-scan-hook.test.ts`.
 - **Write permission** (`[WRITE_DENIED]`): every changed path (adds, edits, deletes, both sides
   of a rename) must pass `resolveAccess(pusher, path).write` (`shared/core/permissions.ts`), also
-  with A–Z folded (macOS/Windows check `Sales/x` out into `sales/`); owner/admin always pass;
+  as a disk folds it (`diskKey`: macOS/Windows check `Sales/x` and `ſales/x` out into `sales/`); owner/admin always pass;
   scopes sorted with `foldScopePaths` so row order never matters. The company repo's check
   ignores private scopes. Test: `write-permission-hook.test.ts`.
 - **Reserved private paths** (`[RESERVED_PATH]`, everyone): see `private-folders.md`.
 - Also checked: Windows-invalid / case-colliding paths (`[WINPATH_DETECTED]`) and gitlinks
-  (`[GITLINK_DETECTED]`).
+  (`[GITLINK_DETECTED]`). The collision check also refuses a path this push adds when a disk folds
+  it, at any folder level, onto another spelling in the tree (`diskCollisions`, same entry shape,
+  everyone included). Only when the added path itself creates the pair: a pair already in a
+  repository stops nobody, a new file inside a folder of one included; two spellings of one NFC path
+  (a Mac's NFD) are not a collision. The app names the file (`winPathMessage`, `path_name`).
 
 ## Bare repositories (`lib/git-server/index.ts`, `repo-config.ts`)
 

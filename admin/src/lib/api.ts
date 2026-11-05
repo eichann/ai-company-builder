@@ -43,6 +43,7 @@ import {
   invitationValidateSchema,
   makePublicSchema,
   managersSchema,
+  skillEditorsSchema,
   memberAbsencesSchema,
   memberRoleSchema,
   membersSchema,
@@ -924,6 +925,28 @@ export interface DepartmentManager {
   userId: string
   name: string | null
   email: string | null
+}
+
+/** 「Skill を直せる人」: the whole company's list and each department's that has someone on it. */
+export interface SkillEditors {
+  /** 「全員が直せる」: everyone with write access; the lists are kept and count again when it goes off. */
+  everyone: boolean
+  company: DepartmentManager[]
+  departments: Array<{ departmentId: string; editors: DepartmentManager[] }>
+}
+
+export const skillEditorsApi = {
+  get: (companyId: string) => getData(`/api/companies/${enc(companyId)}/skill-editors`, skillEditorsSchema),
+
+  setEveryone: (companyId: string, everyone: boolean) =>
+    getData(`/api/companies/${enc(companyId)}/skill-editors/everyone`, skillEditorsSchema, { method: 'PUT', body: { everyone } }),
+
+  /** Replace one list; `departmentId` null: the whole company. */
+  set: (companyId: string, departmentId: string | null, userIds: string[]) =>
+    getData(`/api/companies/${enc(companyId)}/skill-editors`, skillEditorsSchema, {
+      method: 'PUT',
+      body: { departmentId, userIds },
+    }),
 }
 
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`

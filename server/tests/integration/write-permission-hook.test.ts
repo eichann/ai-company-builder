@@ -60,12 +60,13 @@ function commitAll(clone: string, message: string) {
 const remoteHead = () => git(['-C', bare, 'rev-parse', 'main']).trim()
 
 /** Push HEAD to main over HTTP as `user` (async: the server runs in this process). */
-function httpPush(clone: string, user: User): Promise<{ ok: boolean; output: string }> {
+function httpPush(clone: string, user: User, clientVersion?: string): Promise<{ ok: boolean; output: string }> {
   const url = baseUrl.replace('http://', `http://git:tok-${user}@`)
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   for (const k of Object.keys(env)) if (k.startsWith('ACB_')) delete env[k]
   return new Promise((resolve) => {
-    const p = spawn('git', ['push', url, 'HEAD:main'], { cwd: clone, env })
+    const header = clientVersion ? ['-c', `http.extraHeader=X-ACB-Client-Version: ${clientVersion}`] : []
+    const p = spawn('git', [...header, 'push', url, 'HEAD:main'], { cwd: clone, env })
     let output = ''
     p.stdout.on('data', (d: Buffer) => { output += d.toString() })
     p.stderr.on('data', (d: Buffer) => { output += d.toString() })
@@ -177,6 +178,22 @@ describe('write permission on push (git-http → hook → push checker)', () => 
     const r = await httpPush(clone, 'member')
     expect(r.output).not.toContain('WRITE_DENIED')
     expect(r.ok).toBe(true)
+  })
+
+  it('skill files through git-http: a member is refused, an app that says it is old is not, a name on the list is', async () => {
+    const change = (n: number) => {
+      const clone = freshClone()
+      writeFile(clone, '.claude/skills/report/make.py', `v${n}\n`)
+      commitAll(clone, 'script')
+      return clone
+    }
+    const refused = await httpPush(change(1), 'member')
+    expect(refused.ok).toBe(false)
+    expect(refused.output).toContain('[PROTECTED_CONFIG]')
+    expect((await httpPush(change(1), 'member', '0.0.1+1234567.20261101000000')).ok).toBe(true)
+    db.prepare(`INSERT INTO skill_editors (company_id, department_id, user_id, created_at) VALUES (?, NULL, 'u-member', ?)`).run(companyId, new Date().toISOString())
+    expect((await httpPush(change(2), 'member')).ok).toBe(true)
+    db.prepare(`DELETE FROM skill_editors WHERE company_id = ?`).run(companyId)
   })
 
   describe('with sales read-only for everyone (manager has a user rule)', () => {

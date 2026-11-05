@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Bell, GearSix } from '@phosphor-icons/react'
-import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS } from '../../../../../shared/types/notifications'
+import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS, UNDOABLE_NOTIFICATION_KINDS } from '../../../../../shared/types/notifications'
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
@@ -159,7 +159,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                 </span>
                 <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </button>
-              {item.kind === 'replied_done' && (
+              {UNDOABLE_NOTIFICATION_KINDS.includes(item.kind) && (
                 undone.has(item.id)
                   ? <span className="absolute bottom-2 right-3 text-[11.5px] text-gray-500 dark:text-zinc-400">元に戻しました</span>
                   : (

@@ -172,7 +172,35 @@ export interface PluginReadScopeEntry {
   id: string
 }
 
+/** One read of a contract-3 call (`plugin_access_log`): who, what, which ids, how it went. Never an answer, a search word or a key. */
+export interface PluginAccessLogRow {
+  id: string
+  pluginId: string
+  call: string
+  userId: string
+  actorKind: 'human' | 'ai'
+  conversationId: string | null
+  runId: string | null
+  /** JSON `{ input, returned, more }`: the call's plain id inputs, the ids of the entries handed on, how many past the limit. */
+  refs: string
+  /** `ok`, the failure's class, or `stopped` (stopped after a first attempt went out). */
+  status: string
+  /** Answer fields nobody declared, dropped. */
+  dropped: number
+  at: string
+}
+
 export interface PluginRepository {
+  addAccessLog(row: PluginAccessLogRow): void
+  /** Newest first; `before`: only rows after that one in this order. */
+  accessLog(pluginId: string, limit: number, before: { at: string; id: string } | null): PluginAccessLogRow[]
+  /** Removes this company's rows older than `keepFrom` (retention); how many went. */
+  pruneAccessLog(keepFrom: string): number
+  /** One more paced refusal of `userId` in `hour` (`YYYY-MM-DDTHH`). */
+  countPaced(pluginId: string, userId: string, hour: string): void
+  /** The paced counts from `fromHour` on, newest first. */
+  paced(pluginId: string, fromHour: string): Array<{ userId: string; hour: string; count: number }>
+  prunePaced(beforeHour: string): void
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
   /** Insert or replace the install row and add a history row (one transaction). */

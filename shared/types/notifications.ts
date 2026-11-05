@@ -46,6 +46,11 @@ export const NOTIFICATION_KINDS = [
   // The member's own AI completed a task their reply finished (owner FB #19): told although their AI
   // was the actor, with ［元に戻す］ (the undo of that entry). An app released before it shows the text.
   'replied_done',
+  // Mail and the mailbox (owner decision 2026-11-05, inbox.md "Mail archived in the mailbox"): a mail
+  // archived in Gmail closed its 来た連絡 here; a 来た連絡 closed here archived its mail in Gmail. Both
+  // with ［元に戻す］. An app released before it shows the server's text, without the button.
+  'mail_left_inbox',
+  'mail_archived',
   // ── lane B ▲
   // lane C ▼ (reserved: role_unassigned)
   // ── lane C ▲
@@ -82,6 +87,8 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   intake_unsure: '来た連絡を誰が受け持つか決めきれず、確かめてほしい',
   from_message: '来た連絡から、AI があなたのやることを作った',
   replied_done: 'あなたが返事をしたので、AI がやることを完了にした',
+  mail_left_inbox: 'Gmail でアーカイブしたメールを、ACB でも閉じた',
+  mail_archived: 'ACB で済んだメールを、Gmail でもアーカイブした',
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
@@ -112,6 +119,8 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   intake_unsure: true,
   from_message: true,
   replied_done: true,
+  mail_left_inbox: true,
+  mail_archived: true,
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
@@ -123,6 +132,14 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
  * The kinds about no single record: `recordId`, `recordType` and `recordTitle`
  * are '' (the morning summary opens the task list).
  */
+/**
+ * Notices whose row offers ［元に戻す］: the undo of exactly the entry they tell of (the server refuses
+ * when something changed since). `replied_done`: the member's own AI completed their task;
+ * `mail_left_inbox` / `mail_archived`: the inbox closed a mail / archived it in the mailbox (its
+ * assignee may undo those: `UNDO_BY_ASSIGNEE`).
+ */
+export const UNDOABLE_NOTIFICATION_KINDS: readonly NotificationKind[] = ['replied_done', 'mail_left_inbox', 'mail_archived']
+
 export const RECORDLESS_NOTIFICATION_KINDS: readonly NotificationKind[] = ['morning_summary']
 
 /** One notice as the member's app shows it. */

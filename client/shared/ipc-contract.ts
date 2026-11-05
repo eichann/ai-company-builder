@@ -153,7 +153,8 @@ export interface SimpleResult {
  * `error` is then a plain Japanese sentence for the member.
  */
 export interface FileOpResult extends SimpleResult {
-  code?: 'name_taken'
+  /** `refused`: `error` is the sentence to show as it is (a skill file the member may not change, …). */
+  code?: 'name_taken' | 'refused'
 }
 
 /**
@@ -252,6 +253,28 @@ export interface GitResult {
   // shared, moved to outsideCheckoutBackupPath (.backups/<ts>_outside_checkout)
   outsideCheckoutFiles?: string[]
   outsideCheckoutBackupPath?: string
+  // Files in a folder named like a private folder: not shared, moved to
+  // reservedPathBackupPath (.backups/<ts>_reserved_path)
+  reservedPathFiles?: string[]
+  reservedPathBackupPath?: string
+  // Large files kept on this computer that a teammate shared at the same
+  // path: this computer's versions were copied to largeFileBackupPath
+  largeFileBackupFiles?: string[]
+  largeFileBackupPath?: string
+  // On disk when an operation an earlier sync left half-way was cleaned up:
+  // copied to recoveryBackupPath (.backups/<ts>_before_recovery)
+  recoveredFiles?: string[]
+  recoveryBackupPath?: string
+  // Private folders deleted because the member may no longer read them (no backup)
+  lostPrivateFolders?: string[]
+  // Private folders made public; unsynced edits are in madePublicBackupPath
+  madePublicFolders?: string[]
+  madePublicBackupPath?: string
+  // Private folders whose place held something else: moved to movedAsideBackupPath first
+  movedAsideFolders?: string[]
+  movedAsideBackupPath?: string
+  // One entry per readable private folder this sync handled
+  privateFolders?: Array<{ path: string; success: boolean; setAside?: boolean; backupPath?: string }>
 }
 
 export interface GitPreviewResult {
@@ -456,7 +479,7 @@ export interface IpcInvokeChannels {
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
-  'fs:delete': { args: [path: string]; result: SimpleResult }
+  'fs:delete': { args: [path: string]; result: FileOpResult }
   'fs:rename': { args: [oldPath: string, newPath: string]; result: FileOpResult & { newPath?: string } }
   'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
   'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
@@ -642,9 +665,9 @@ export interface IpcInvokeChannels {
 
   // Skills and their tools (web apps)
   'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
-  'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
+  'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
   'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
-  'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+  'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: FileOpResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
   'shell:openExternal': { args: [url: string]; result: SimpleResult }
@@ -716,6 +739,8 @@ export interface IpcInvokeChannels {
   // 「スプレッドシートを中継で使う」 (google-connector.md "The relay"): the member's view and own records; 「やめる」 / back on.
   'google:relay': { args: [companyId: string]; result: GoogleRelayResult }
   'google:setRelay': { args: [companyId: string, on: boolean]; result: GoogleRelayResult }
+  // 「済んだメールを Gmail でもアーカイブする」 (google-connector.md "Archiving in Gmail"): the member's own switch, back on without a consent.
+  'google:setArchive': { args: [companyId: string, on: boolean]; result: GoogleStatusResult }
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
@@ -1091,6 +1116,7 @@ export interface ElectronAPI {
   markGoogleSeen: Invoke<'google:markSeen'>
   getGoogleRelay: Invoke<'google:relay'>
   setGoogleRelay: Invoke<'google:setRelay'>
+  setGoogleArchive: Invoke<'google:setArchive'>
   markSlackSeen: Invoke<'slack:markSeen'>
   getRecordThread: Invoke<'threads:get'>
   callPluginBridge: Invoke<'plugins:bridge'>

@@ -5,6 +5,7 @@
 import type { SimpleGit } from 'simple-git'
 import type { MyScopesResponse } from '../../../shared/types/private-folders'
 import type { PathCheckResult } from './path-check'
+import type { SkillSharing } from '../../shared/skill-leftovers'
 
 /** The questions sync asks the member. */
 export interface SyncDialog {
@@ -49,6 +50,11 @@ export interface SyncServerApi {
    * folder the member cannot read). null when there is no usable answer.
    */
   checkPaths(companyId: string, paths: string[]): Promise<PathCheckResult[] | null>
+  /**
+   * GET /api/companies/:companyId/me/capabilities → who may share which skills.
+   * null when there is no usable answer (an older server, other errors).
+   */
+  getSkillSharing(companyId: string): Promise<SkillSharing | null>
 }
 
 export type SyncLogger = Pick<Console, 'log' | 'warn' | 'error'>
@@ -65,6 +71,8 @@ export interface SyncDeps {
   /** Decides whether a failed pull is a transient Windows file lock. */
   platform: NodeJS.Platform
   log: SyncLogger
+  /** The app's long git outside sync's lock (download choices, private-folder setup) or an AI turn is running: a lock on disk may be theirs. `ownActivity`: the caller runs inside that activity, so only the AI counts. */
+  otherGitRunning?(options?: { ownActivity?: boolean }): boolean
   /** Bytes above which a file is auto-ignored (step 4). Default 100 MB; tests lower it. */
   largeFileThreshold?: number
 }

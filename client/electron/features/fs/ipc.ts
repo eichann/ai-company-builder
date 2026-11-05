@@ -1,8 +1,8 @@
 // The company folder on disk, for the file tree and the editor. Every path
 // from the renderer goes through the allowed-roots check (paths.validate);
-// writes are refused inside a folder not downloaded on this computer and at
-// a folder name the member may not use (a private folder they cannot read),
-// and a new file, rename, move or copy never replaces what is already there.
+// writes are refused inside a folder not downloaded on this computer, at a
+// folder name the member may not use (a private folder they cannot read) and
+// on a skill file they may not change, and a new file, rename, move or copy never replaces what is already there.
 //   dialog:selectDirectory, fs:* (fs:startDrag is a send), fs:watch /
 //   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite
 
@@ -22,9 +22,12 @@ export interface FsDeps {
   shell: Pick<DesktopShell, 'selectDirectory' | 'startDrag'>
   window: WindowPort
   /**
-   * The server's sentence when creating `absPath` would use a folder name the
-   * member may not use (a private folder they cannot read); null to allow.
+   * The sentence when changing `absPath` is refused: a folder name the member
+   * may not use (a private folder they cannot read), a skill file they may not
+   * change; null to allow.
    */
+  writeRefusal: (absPath: string) => Promise<string | null>
+  /** The folder-name half alone: creating an empty folder. */
   reservedRefusal: (absPath: string) => Promise<string | null>
   /** Watcher batches, before they reach the window (the skills cache drops stale scans). */
   onFileChanges?: (changes: FileChange[]) => void
@@ -40,7 +43,7 @@ const TAKEN: FileOpResult = { success: false, error: NAME_TAKEN_MESSAGE, code: '
 const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 
 export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
-  const { paths, shell, reservedRefusal } = deps
+  const { paths, shell, writeRefusal, reservedRefusal } = deps
   const watchers = createCompanyWatchers(changes => {
     deps.onFileChanges?.(changes)
     deps.window.send('fs:changes', changes)
@@ -132,7 +135,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
   ipc.handle('fs:writeFile', async (_, filePath: string, content: string) => {
     try {
       const safePath = paths.validate(filePath)
-      if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
+      if (notDownloadedRefusal(safePath) || await writeRefusal(safePath)) return false
       await fs.promises.writeFile(safePath, content, 'utf-8')
       return true
     } catch {
@@ -145,7 +148,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
   ipc.handle('fs:createFile', async (_, filePath: string, content: string) => {
     try {
       const safePath = paths.validate(filePath)
-      const refused = notDownloadedRefusal(safePath) ?? await reservedRefusal(safePath)
+      const refused = notDownloadedRefusal(safePath) ?? await writeRefusal(safePath)
       if (refused) return { success: false, error: refused }
       await fs.promises.writeFile(safePath, typeof content === 'string' ? content : '', { encoding: 'utf-8', flag: 'wx' })
       return { success: true }
@@ -171,6 +174,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
   ipc.handle('fs:createDirectory', async (_, dirPath: string) => {
     try {
       const safePath = paths.validate(dirPath)
+      // An empty folder is never shared, so the skill rule has nothing to say here.
       if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
       await fs.promises.mkdir(safePath, { recursive: true })
       return true
@@ -194,6 +198,8 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     try {
       // The entry itself: deleting a link removes the link, never its target.
       const safePath = paths.validate(targetPath, { followFinal: false })
+      const refused = await writeRefusal(safePath)
+      if (refused) return { success: false, error: refused, code: 'refused' as const }
       const stat = await fs.promises.lstat(safePath)
       if (stat.isDirectory()) {
         await fs.promises.rm(safePath, { recursive: true })
@@ -211,7 +217,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     try {
       const safeOld = paths.validate(oldPath, { followFinal: false })
       const safeNew = paths.validate(newPath)
-      const refused = notDownloadedRefusal(safeNew) ?? await reservedRefusal(safeNew)
+      const refused = notDownloadedRefusal(safeNew) ?? await writeRefusal(safeOld) ?? await writeRefusal(safeNew)
       if (refused) return { success: false, error: refused }
       if (!isAtomicSaveRename(safeOld, safeNew) && await nameTaken(safeNew, safeOld)) return TAKEN
       await fs.promises.rename(safeOld, safeNew)
@@ -226,7 +232,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     try {
       const safeSrc = paths.validate(sourcePath, { followFinal: false })
       const safeDest = paths.validate(destinationPath)
-      const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
+      const refused = notDownloadedRefusal(safeDest) ?? await writeRefusal(safeSrc) ?? await writeRefusal(safeDest)
       if (refused) return { success: false, error: refused }
       if (await nameTaken(safeDest, safeSrc)) return TAKEN
       await fs.promises.rename(safeSrc, safeDest)
@@ -242,7 +248,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     try {
       const safeDest = paths.validate(destinationPath)
       const resolved = path.resolve(sourcePath)
-      const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
+      const refused = notDownloadedRefusal(safeDest) ?? await writeRefusal(safeDest)
       if (refused) return { success: false, error: refused }
       if (await nameTaken(safeDest)) return TAKEN
 
@@ -274,7 +280,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     try {
       const safeSrc = paths.validate(sourcePath)
       const safeDest = paths.validate(destinationPath)
-      const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
+      const refused = notDownloadedRefusal(safeDest) ?? await writeRefusal(safeDest)
       if (refused) return { success: false, error: refused }
       if (await nameTaken(safeDest)) return TAKEN
       const stat = await fs.promises.stat(safeSrc)

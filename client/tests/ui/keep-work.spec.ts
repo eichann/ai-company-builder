@@ -112,6 +112,15 @@ test('a new skill with a free name is made private, then created; the wizard clo
   expect(made.at(-1)).toBe('createFile')
 })
 
+test('someone who may not share a skill still gets the copy: kept on this computer, marked before anything is written', async ({ page }) => {
+  await openPreview(page, 'keep-work', { view: 'skills', 'refuse-skills': '1' })
+  await page.getByRole('button', { name: 'スキルをコピー' }).click()
+  await page.getByRole('button', { name: /面接メモ/ }).click()
+  await page.getByPlaceholder('skill-folder-name').fill('my-memo')
+  await page.getByRole('button', { name: 'コピーして作成' }).click()
+  await expect.poll(async () => (await calls(page)).map(c => c[0]).filter(n => n === 'makeSkillPrivate' || n === 'copyItem')).toEqual(['makeSkillPrivate', 'copyItem'])
+})
+
 test('copying onto a folder name that is taken is refused in the modal; nothing is copied', async ({ page }) => {
   await openPreview(page, 'keep-work', { view: 'skills' })
   await page.getByRole('button', { name: 'スキルをコピー' }).click()

@@ -159,7 +159,7 @@ export function createPluginService(deps: PluginServiceDeps) {
     const deptsOf = new Map(businessIds.map(id => [id, businessDepartmentIds(member.companyId, id, repo.install(id)?.mappingVersion ?? 0)]))
     const connector = repo.install(connectorId)
     const departmentIds = [...new Set([...deptsOf.values()].flat())]
-    if (connector && !isBusinessInstall(member.companyId, connector) && departmentIds.length > 0
+    if (connector && !isBusinessInstall(member.companyId, connector) && !relayScope.closedConnector(member.companyId, connector) && departmentIds.length > 0
       && repo.readScope(connectorId, connector.connectionId).length === 0) {
       repo.setReadScope(connectorId, connector.connectionId, departmentIds.map(id => ({ type: 'department' as const, id })), at, member.userId,
         history(connectorId, 'read-scope', member.userId, at, { connectionId: connector.connectionId, departmentIds, userIds: [], from: 'starting-values' }))
@@ -331,7 +331,7 @@ export function createPluginService(deps: PluginServiceDeps) {
         const evaluated = await evaluate(member.companyId, row)
         if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
         // Who may read through the relay must be decided: a forgotten setting never opens it to everyone.
-        if (repo.readScope(pluginId, install.connectionId).length === 0) {
+        if (!relayScope.closedConnector(member.companyId, row) && repo.readScope(pluginId, install.connectionId).length === 0) {
           return refuse('conflict', '先に「中継で読める人」（部署かメンバー）を決めてください', { code: 'READ_SCOPE_REQUIRED' })
         }
         repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version }))

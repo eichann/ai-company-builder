@@ -171,6 +171,16 @@ page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillShari
 publish: the `.git/info/exclude` line — or an older app's line in the shared `.gitignore`, which
 publish also removes — that decides whether the next sync shares the skill; a company folder
 without a `.git` folder is refused).
+A member who may not change skill files (`shared/core/skill-files.ts`; `push-check.md`) is told so
+in a sentence before anything is written: `guards.skillRefusal` behind `fs:writeFile`, `fs:createFile`,
+`fs:delete`, `fs:rename` / `fs:move` (both ends), `fs:copy`, a backup restore, 育成中 and
+`privateFolders:reservedPathRefusal` (what the tree, the editor's failed save and the copy dialog
+ask). `skills:publish` asks with `sharing: true`: 公開する is where a private skill would reach the
+server. A skill kept on this computer is otherwise the member's to write, and an empty folder is
+never refused. 「他からコピー」 by someone who may not share keeps the copy on this computer
+(`useSkillActions`): the way to change and try a shared skill before asking for it to be shared. Unknown authority allows. Tests: `client/tests/skill-file-refusal.test.ts`,
+`client/tests/ipc-fs.test.ts` 「fs and skills handlers…」.
+
 New skill and copy never replace a skill folder that exists (checked first, then main's
 `fs:createFile` / `fs:copy`); a new skill is marked private before anything is written, and
 `skills:makePrivate` refuses (`already_shared`) a folder the index or `origin/main` already has —
@@ -202,8 +212,10 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   window go through it. Closing / quitting: main holds the window's close and asks the renderer
   (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`
   (mounted next to `App` on every screen) answers `app:closeResponse` `ack` at once, then
-  `close` or `stay`; no `ack` within 3 s → it closes anyway. A quit held this way quits after
-  `close`. Tests: `tests/close-guard.test.ts`, `tests/ui/editor-panel.spec.ts` 「closing the window
+  `close` or `stay`; no `ack` within 3 s → it goes on anyway. A quit held this way quits after
+  `close`. Either way, with a sync running the member is then asked and the window may wait for it;
+  the renderer is asked to save once more after the wait, because typing goes on meanwhile
+  (`ipc-and-main-process.md`, "closing during a sync"). Tests: `tests/close-guard.test.ts`, `tests/ui/editor-panel.spec.ts` 「closing the window
   saves every tab…」 / 「a tab that cannot be saved…」, `tests/ui/skill-layout.spec.ts` 「ログアウト…」.
 - `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
   (each tab's text, loading, the watcher: follow the disk / mark external / missing),

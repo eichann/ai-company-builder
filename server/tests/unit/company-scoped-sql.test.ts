@@ -83,6 +83,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   consultation_skill_uses: ['adapters/sqlite/skill-uses.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
+  plugin_access_log: ['adapters/sqlite/plugins.ts'],
+  plugin_call_paced: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],
   plugin_history: ['adapters/sqlite/plugins.ts'],
   plugin_external_links: ['adapters/sqlite/plugins.ts'],
@@ -132,6 +134,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   inbox_messages: ['adapters/sqlite/inbox.ts'],
   inbox_connections: ['adapters/sqlite/inbox.ts'],
   inbox_gaps: ['adapters/sqlite/inbox.ts'],
+  inbox_archived: ['adapters/sqlite/inbox.ts'],
   // lane B ▲
   // lane C ▼
   // A plugin step's pins and the company's Skill per step (plugin-steps.md).

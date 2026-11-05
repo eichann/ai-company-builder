@@ -41,13 +41,19 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
   rendered by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), clock and
   logger are injected (`sync/types.ts` `SyncDeps`). `features/sync/wire.ts` wires the real
   implementations into `git:sync` (`features/sync/ipc.ts`); the app's git comes from `services/app-git.ts`.
-- Helpers: `conflicts.ts`, `nested-repos.ts`, `large-files.ts`, `gitignore-merge.ts`,
+- Helpers: `interrupted.ts`, `conflicts.ts`, `nested-repos.ts`, `large-files.ts`, `gitignore-merge.ts`,
   `sparse.ts`, `first-setup.ts`, `outside-checkout.ts`, `not-downloaded.ts`, `remote.ts`,
   `push-landed.ts`, `preview.ts`, `../protected-config.ts` (rejection recovery); private folders:
   `private-folders.ts`, `private-sync.ts`, `path-check.ts`, `reserved-path.ts`.
 - Renderer: 「サーバーと同期」 / 「変更を確認」 in `src/features/sync/hooks/useSync.ts`; which notice the
   member gets in `model.ts` (anything sync set aside is a warning with its backup that stays until
-  dismissed; only a clean sync hides itself — `model.test.ts`); the notice in
+  dismissed: also a private folder that left this computer, files in a reserved name, work moved on a
+  private-folder change, a conflict inside a private folder, a recovery copy, whether the sync was
+  manual or automatic; only a clean sync hides itself — `model.test.ts`). Such a notice is kept on
+  this PC per account and company until dismissed and shown again at the next launch; sign-out
+  removes it; a later warning joins a recovery notice (`mustSee`) instead of replacing it, and a
+  notice of a company no longer on the screen waits for that company (`lastingNotice.ts`, written
+  before anything slow: the window may be closing, waiting only for this sync); the notice in
   `components/SyncNotification.tsx`.
 - Automatic sync: see "Automatic sync" below (`sync/receive.ts`, `sync/auto-sync.ts`,
   `sync/auto-message.ts`; renderer `hooks/useAutoSync.ts`, `autoSyncSchedule.ts`).
@@ -64,9 +70,13 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 ## Steps (per repository)
 
 ```
-0    serialize per repository (syncLocks)
-1    repair a partial clone's lost promisor config (remote.ts); recover stale rebase / merge /
-     cherry-pick state; write `.gitignore merge=union` into .git/info/attributes (idempotent)
+0    serialize per repository (syncLocks); leftover lock files (index, HEAD, ORIG_HEAD, main,
+     origin/main) are removed, one that may be in use stops this repository with `locked` (interrupted.ts)
+1    repair a partial clone's lost promisor config (remote.ts); prune backups older than 30 days
+     (both places); recover stale rebase / merge / cherry-pick state unless something may still be
+     working there, whatever the clean-up can take copied to a new .backups/<ts>_before_recovery/
+     first, commits pinned under refs/acb-recovery/ (interrupted.ts); write `.gitignore merge=union`
+     into .git/info/attributes (idempotent)
 2    retry a PENDING_PUSH left by a failed sync
 3    ensure .gitignore essentials: .backups/, .workspace/, node_modules/, .env*,
      **/.personal/* + !**/.personal/.gitignore
@@ -131,6 +141,9 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   untracking, the protected-config restore). Both were found by the harness: without them the
   same pick failed on every sync. After the rebase, gitlinks of excluded nested repos are
   untracked again (one extra commit; a backstop, the server refuses gitlinks anyway).
+- A conflict copy that cannot be written stops the sync: the rebase is undone (the local work is
+  committed, so all of it stays) and the member reads 「競合したファイルのバックアップを保存できなかった
+  ため…」. Only a version git does not have counts as nothing to save.
 - Back up with `git cat-file -p <localHash>:<file>` into a Buffer (`binaryCatFile`), never
   `git show` (a string corrupts pptx/png). Fallbacks: `:3:<file>` when the file is gone at
   `localHash`; an *earlier* local version that a pick replaces goes to
@@ -185,12 +198,17 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   `nested_repo_overwrite`, `repos`, `files`: this computer's version of files in a locally
   excluded nested repo that a teammate shared at the same path), `_large_file/` (reason
   `large_file_overwrite`, `files`: a large file kept on this computer that a teammate shared at
-  the same path).
+  the same path), `_before_recovery/` (reason `before_recovery`, `files`: what was on disk when
+  sync cleaned up an operation an earlier run left half-way; conflict markers included, the
+  member decides what to put back; `<file>.staged-version` / `.committed-version` are versions only
+  git held; `_same-name-<n>/` holds what shared a name with a file or folder in the copy; a member's
+  own root `_metadata.json` is kept as `_metadata (member).json`).
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
-  `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.
+  `_outside_checkout`, `_before_recovery`), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
-  are pruned at the start of each sync.
+  are pruned in both places at the start of each sync, before the recovery copy (a full disk gets
+  its space back first).
 - 復元 (`backup:restore`) and 「元に戻す」 (`git:revertFile`, added / modified) first keep the file
   on disk with `features/backups/keep-current.ts` (the private backups for a private folder or a
   nested repository); if that fails nothing changes
@@ -217,7 +235,8 @@ both only while the app is open:
   and each readable private folder's existing clone (never clones, removes or hands over one).
   It never commits, pushes, stashes, moves or backs up anything. The member's uncommitted work
   stays as it is; the repository is **held back** (unchanged, the next manual sync handles it)
-  when a rebase / merge / `index.lock` is present, there are unpushed commits, any path the
+  when a rebase / merge / a lock that may be in use is present (leftover ones are removed first, as
+  in step 0), there are unpushed commits, any path the
   server changed is also changed locally (edited, staged, deleted, new), a path the server adds
   already exists on disk (an ignored file, a private clone, an excluded nested repository — git
   overwrites ignored files silently) or a folder on its way is a file / link, or a changed path in
@@ -234,7 +253,8 @@ both only while the app is open:
   「自動で送る途中で、確認が必要なことがありました。…「サーバーと同期」ボタンを押して続けてください。」.
 - `git:autoSync` (`features/sync/ipc.ts` → `sync/auto-sync.ts` `runAutoSync`) has the last word;
   `autoSyncSkipReason` (`client/shared/auto-sync.ts`) skips silently when the last sync needs the
-  member, offline, a sync / receive / private-folder sync holds a lock (`gitSync.isRunning`), a
+  member, offline, a sync / receive / private-folder sync holds a lock (`gitSync.isRunning`), closing
+  the app waits for one (`automaticRunsHeld`), a
   download-choice change or private-folder creation runs (`services/sync-activity.ts`), the
   editor has unsaved edits (`src/shared/lib/unsavedEdits.ts`, published by the editor's `features/editor/hooks/useOpenFiles.ts`), or a chat
   turn is running (`chat-turns.ts` `runningCount`). Malformed renderer state counts as "wait".
@@ -250,8 +270,8 @@ both only while the app is open:
   is "not now" (owner, 2026-10-30): it sets no stop and lifts one, so automatic sync resumes at
   its next scheduled run (a send still facing the question stops there again, its notice not
   repeated) and the failure kinds already shown. A failed automatic send shows the
-  manual sync's notice once per kind until a sync succeeds; a successful one is silent unless sync
-  set something aside (the same warning a manual sync shows). The sync button's tooltip shows
+  manual sync's notice once per kind until a sync succeeds; a successful one is silent. Whatever
+  sync set aside is shown on either (`autoSyncNoticeFor`, the same notice a manual sync shows). The sync button's tooltip shows
   「最後の自動同期: M/D HH:MM」 or that automatic sync waits for the button.
 - Scenarios: `client/tests/sync/auto-sync.test.ts`; schedule: `src/features/sync/autoSyncSchedule.test.ts`;
   settings page: `tests/ui/download-folders.spec.ts` 「自動同期」.

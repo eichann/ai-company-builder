@@ -62,6 +62,7 @@
  *   plugin-connector-declaration.ts  a connector's part: destination, calls, operations
  *   plugin-business-declaration.ts   a business plugin's part: types, `connector`, its use, field policy defaults
  *   plugin-call-declaration.ts       contract 3: a connector's calls, how it is called, events, polls; a business plugin's use of them
+ *   plugin-call-answer.ts            contract 3: what is kept of a call's answer (the `returns` allow-list, outside text)
  *   plugin-flow-declaration.ts       contract 2: a business plugin's roles, steps, ui, upgrade
  *   plugin-settings.ts               contract 2: a business plugin's settings (parameters only), settingValueProblem
  *   plugin-fingerprint.ts            fingerprint v2 and the signature slot (signature.yaml)
@@ -78,7 +79,7 @@ export {
   PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, SIMILAR_BY, noFlow,
   type PluginSearch, type SimilarBy, type SimilarRule,
   type FlowPart, type PluginSetting,
-  ACTOR_SYSTEM, CALL_ACTORS, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
+  ACTOR_SYSTEM, CALL_ACTORS, EXTERNAL_ID_RE, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
   type CallFailureKind, type CallNature, type CallResultState, type CallUse, type DataClass, type EventUse, type KeepRule,
   type PluginActCall, type PluginCall, type PluginCallInput, type PluginCallListing, type PluginCallRequest, type PluginCalling, type PluginCursor, type PluginDataField,
   type PluginDocumentCall, type PluginEvent, type PluginPoll, type PluginReadCall, type PluginReturn, type PluginReturnList, type PluginSearchCall,
@@ -94,6 +95,7 @@ export {
 } from './plugin-fingerprint'
 export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
 export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
+export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, CALL_TEXT_MAX, citeLink, keepDeclared, LOGGED_POINTERS_MAX, pointersOf, type KeptEntry, type KeptValue } from './plugin-call-answer'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'

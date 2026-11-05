@@ -10,8 +10,9 @@
  *   case-insensitive disk "評価/CAFé/x" lands in the clone of "評価/café" and
  *   is pushed to its repository as <stored path>/<rest>;
  * - the DEEPEST listed scope at or above the path decides; none → no write;
- * - it must be writable both as spelled and with A–Z folded on both sides
- *   (macOS/Windows check "Sales/x" out into an existing "sales/"). When
+ * - it must be writable both as spelled and as a disk folds it on both sides
+ *   (diskKey: macOS/Windows check "Sales/x" and "ſales/x" out into an existing
+ *   "sales/"). When
  *   folding makes two scopes equally deep ("Café" and "café"), the one whose
  *   stored path sorts first (compareScopePaths) decides — the server's
  *   foldScopePaths, so both sides pick the same rules.
@@ -19,7 +20,7 @@
  * Pure: used by the server (the summary), the desktop app's chat guard (main
  * process) and its 閲覧のみ badges (renderer).
  */
-import { compareScopePaths, foldAsciiCase, isSameOrAncestorPath, normalizeRepoPath, pathKey } from './paths'
+import { compareScopePaths, diskKey, isSameOrAncestorPath, normalizeRepoPath } from './paths'
 
 export interface WriteAccessScope {
   path: string
@@ -66,28 +67,28 @@ export function deepestScope<T extends { path: string }>(scopes: readonly T[], p
 }
 
 /**
- * Scopes for the A–Z-folded pass: sorted by their stored paths
- * (compareScopePaths), then with folded paths — so that of two scopes whose
- * paths differ only in A–Z case the one that sorts first decides, whatever
+ * Scopes for the folded pass: sorted by their stored paths
+ * (compareScopePaths), then with diskKey paths — so that of two scopes whose
+ * paths differ only in case the one that sorts first decides, whatever
  * order they arrived in (the database returns rows in no promised order).
  */
 export function foldScopePaths<T extends { path: string }>(scopes: readonly T[]): T[] {
   return [...scopes]
     .sort((a, b) => compareScopePaths(a.path, b.path))
-    .map(s => ({ ...s, path: foldAsciiCase(s.path) }))
+    .map(s => ({ ...s, path: diskKey(s.path) }))
 }
 
 /**
  * `path` (normalised) with the part inside a readable private folder's path
- * put in the folder's stored spelling, when they differ only in A–Z case or
- * Unicode normalisation.
+ * put in the folder's stored spelling, when a disk folds the two onto one
+ * (diskKey): that is the clone the file lands in.
  */
 export function canonicalPrivatePath(scopes: readonly WriteAccessScope[], path: string): string {
-  const key = pathKey(path)
+  const key = diskKey(path)
   for (const s of scopes) {
     if (!s.private || s.path === '') continue
     const folder = normalizeRepoPath(s.path) ?? s.path
-    if (!isSameOrAncestorPath(pathKey(folder), key)) continue
+    if (!isSameOrAncestorPath(diskKey(folder), key)) continue
     const depth = folder.split('/').length
     return [folder, ...path.split('/').slice(depth)].join('/')
   }
@@ -110,7 +111,7 @@ export function evaluateWrite(access: WriteAccess, repoPath: string): WriteDecis
     .sort((a, b) => compareScopePaths(a.path, b.path))
   const path = canonicalPrivatePath(scopes, normalized)
   const exact = deepestScope(scopes, path)
-  const folded = deepestScope(foldScopePaths(scopes), foldAsciiCase(path))
+  const folded = deepestScope(foldScopePaths(scopes), diskKey(path))
   if (!exact || !exact.write) return { write: false, scopePath: exact?.path ?? null }
   if (!folded || !folded.write) return { write: false, scopePath: folded?.path ?? null }
   return { write: true, scopePath: exact.path }

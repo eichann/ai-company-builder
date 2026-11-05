@@ -179,7 +179,9 @@ describe('department folders', () => {
   })
 
   it('rename moves every entry under the folder, reusing its tree', { timeout: SLOW }, async () => {
-    memberCommit(id, { 'sales/proposal.md': 'p\n', 'sales/2026/q3/plan.md': 'q\n', 'sales/.hidden/x.md': 'h\n' })
+    // A skill's script moves with its department: the checker's who-may-change-skills
+    // rule is for members' pushes, and this is the owner's rename through the API.
+    memberCommit(id, { 'sales/proposal.md': 'p\n', 'sales/2026/q3/plan.md': 'q\n', 'sales/.hidden/x.md': 'h\n', 'sales/.claude/skills/r/make.py': 'x\n' })
     const before = tip(id)
     const tree = bareGit(id, ['rev-parse', 'main:sales']).trim()
     const others = files(id).filter(f => !f.startsWith('sales/'))
@@ -193,7 +195,7 @@ describe('department folders', () => {
     // Seen by git as renames, as `git mv` was
     const status = bareGit(id, ['diff', '-M', '--name-status', before, 'main']).trim().split('\n')
     expect(status.every(line => line.startsWith('R100\tsales/'))).toBe(true)
-    expect(status).toHaveLength(5)
+    expect(status).toHaveLength(6)
   })
 
   it('rename refuses an existing target (any case) and leaves main alone', { timeout: SLOW }, async () => {

@@ -117,7 +117,12 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `chatWindow:getContext` / `reportStatus` / `openFile` only a registered consultation window, and
   only about itself (`openFile`: a file of its own company folder, then `chatWindow:fileRequested`
   to the main window only); `app:closeResponse` (the answer to closing the main window,
-  `services/close-guard.ts`) only the main window; `appCommand:respond` (the main window's answer to
+  `services/close-guard.ts`; closing during a sync: once the renderer is done or gone, a running
+  `gitSync.isRunning()` asks 「終わったら閉じる」 (default) / 「閉じない」 / 「すぐに終了する」 in a message box from
+  `electron-adapter.ts`; waiting is `gitSync.whenIdle()`, then the renderer saves again; another close
+  during the wait asks again, so a hung sync cannot trap the member; 「すぐに終了する」 saves the tabs once more and really quits,
+  also from the macOS window button, which alone would leave the sync running with no window to ask in; a
+  sync cut off half-way is the next sync's clean-up, `sync-guards.md`; test `tests/close-guard.test.ts`) only the main window; `appCommand:respond` (the main window's answer to
   the consultation AI's app command, `features/app-commands/ipc.ts`) only the window that was asked,
   and `appCommand:request` goes to the main window only (`commands.md` "Handed to the AI"). Choice prompts and tool approvals go to the window that shows their conversation
   (`webContentsForSession` in `main.ts`, `features/agent-interactions/owner.ts`; the owner is

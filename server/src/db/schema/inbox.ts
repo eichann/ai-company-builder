@@ -27,6 +27,8 @@ export const inboxSchema = `
       seen_at TEXT NOT NULL,
       -- The connector's opaque pointer to this message (the AI reads it again on demand, B4).
       source_ref TEXT,
+      -- Whose mailbox the pointer is in (the member who reported it; NULL before 2026-11-05).
+      reporter_id TEXT,
       PRIMARY KEY (company_id, channel, message_id)
     );
     CREATE INDEX IF NOT EXISTS idx_inbox_messages_interaction ON inbox_messages(company_id, interaction_id);
@@ -38,7 +40,18 @@ export const inboxSchema = `
       channel TEXT NOT NULL CHECK (channel IN ('email', 'chat')),
       connected_at TEXT NOT NULL,
       checked_until TEXT NOT NULL,
+      -- Where the source's change log was last read (mail that left the inbox; NULL: not yet).
+      left_cursor TEXT,
       PRIMARY KEY (company_id, user_id, channel)
+    );
+
+    -- What one 「Gmail でもアーカイブしました」 entry took out of the mailbox inbox (pointers, JSON): its undo puts back only these.
+    CREATE TABLE IF NOT EXISTS inbox_archived (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      interaction_id TEXT NOT NULL,
+      entry_version INTEGER NOT NULL,
+      source_refs TEXT NOT NULL,
+      PRIMARY KEY (company_id, interaction_id, entry_version)
     );
 
     -- Spans nobody checked (a connection broken for more than 7 days): shown to the member.
@@ -58,4 +71,11 @@ export const inboxSchema = `
 export function migrateInboxMessageSourceRef(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(inbox_messages)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('source_ref')) conn.exec('ALTER TABLE inbox_messages ADD COLUMN source_ref TEXT')
+}
+
+/** 2026-11-05 (inbox.md "Mail archived in the mailbox"): whose mailbox a pointer is in, and where its change log was read. */
+export function migrateInboxArchiveColumns(conn: Database.Database): void {
+  const has = (table: string) => new Set((conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!has('inbox_messages').has('reporter_id')) conn.exec('ALTER TABLE inbox_messages ADD COLUMN reporter_id TEXT')
+  if (!has('inbox_connections').has('left_cursor')) conn.exec('ALTER TABLE inbox_connections ADD COLUMN left_cursor TEXT')
 }

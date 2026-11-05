@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { autoSync } from '../api'
-import { syncNoticeFor, syncNoticeHidesItself, type SyncNotice } from '../model'
+import { autoSyncNoticeFor, type SyncNotice } from '../model'
 import { afterSync, recordRun, runDueNow, syncButtonTitle } from '../autoSyncSchedule'
 import { readAutoSyncState, updateAutoSyncState, useAutoSyncState } from '../autoSyncState'
 import { autoSyncSettings } from '../../../shared/lib/autoSyncSettings'
@@ -18,6 +18,8 @@ interface Options {
   setIsSyncing: (value: boolean) => void
   /** Show a notice the way a manual sync would. */
   showNotice: (notice: SyncNotice | null) => void
+  /** Keep a notice of a company no longer on the screen until it is opened again. */
+  keepNoticeFor: (companyId: string, notice: SyncNotice) => void
   /** Reload what teammates may have changed (departments, skills, history). */
   onSynced: () => Promise<void>
 }
@@ -27,13 +29,13 @@ interface Options {
  * "Automatic sync"). When a run is due is autoSyncSchedule.ts; whether it may
  * run now is main's decision (`git:autoSync`), which skips silently.
  */
-export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, showNotice, onSynced }: Options) {
+export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, showNotice, keepNoticeFor, onSynced }: Options) {
   const settings = useSyncExternalStore(autoSyncSettings.subscribe, autoSyncSettings.getSnapshot)
   const state = useAutoSyncState(companyId)
 
   // The tick reads the latest values without restarting its timer.
-  const latest = useRef({ rootPath, companyId, isSyncing, setIsSyncing, showNotice, onSynced })
-  latest.current = { rootPath, companyId, isSyncing, setIsSyncing, showNotice, onSynced }
+  const latest = useRef({ rootPath, companyId, isSyncing, setIsSyncing, showNotice, keepNoticeFor, onSynced })
+  latest.current = { rootPath, companyId, isSyncing, setIsSyncing, showNotice, keepNoticeFor, onSynced }
 
   useEffect(() => {
     if (!rootPath || !companyId) return
@@ -55,7 +57,12 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
           needsMember: readAutoSyncState(company).needsMember,
           offline: typeof navigator !== 'undefined' && navigator.onLine === false,
         })
-        if (stopped) return
+        if (stopped) {
+          // The member moved to another company while it ran: its notice waits for that company.
+          const left = answer.status === 'sent' ? autoSyncNoticeFor(answer.result, false) : null
+          if (left) latest.current.keepNoticeFor(company, left)
+          return
+        }
         if (answer.status === 'skipped') {
           updateAutoSyncState(company, s => recordRun(s, mode, 'skipped', now))
           return
@@ -72,13 +79,10 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
           showFailure = decided.showFailure
           return result.success ? { ...decided.state, lastAutoSyncAt: now } : decided.state
         })
-        if (result.success) {
-          await latest.current.onSynced()
-          // Only what sync set aside is worth interrupting for; a plain success stays quiet.
-          if (!syncNoticeHidesItself(result)) latest.current.showNotice(syncNoticeFor(result))
-        } else if (showFailure) {
-          latest.current.showNotice(syncNoticeFor(result))
-        }
+        // Before anything slow: the window may be closing, waiting only for this sync.
+        const notice = autoSyncNoticeFor(result, showFailure)
+        if (notice) latest.current.showNotice(notice)
+        if (result.success) await latest.current.onSynced()
       } catch (error) {
         console.warn('[auto-sync] run failed:', error instanceof Error ? error.message : 'unknown')
         updateAutoSyncState(company, s => recordRun(s, mode, 'skipped', now))

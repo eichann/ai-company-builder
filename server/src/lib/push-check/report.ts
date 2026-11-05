@@ -14,7 +14,7 @@
  * The "- " lines between the marker and the second separator after it are
  * the paths. Every text below is byte-for-byte what the shell hook printed;
  * [WRITE_DENIED] and [LOCAL_ONLY_PATH] are new and follow the same shape as
- * [PERSONAL_PATH]; instruction files are a new sub-list of [PROTECTED_CONFIG].
+ * [PERSONAL_PATH]; instruction files and skill files are sub-lists of [PROTECTED_CONFIG].
  */
 import { dedupe, nonEmptyLines, utf8Bytes } from './rules'
 
@@ -30,6 +30,8 @@ export interface Findings {
   protected: string
   /** Instruction files (CLAUDE.md, AGENTS.md ...) the pusher may not change. */
   instructions: string
+  /** Files in skill / agent / command folders the pusher may not change (auto-run ones are in `autorun`). */
+  skills: string
   autorun: string
   /** Type definitions (.acb/types/) the pusher may not change. */
   recordTypes: string
@@ -42,7 +44,7 @@ export interface Findings {
 }
 
 export function emptyFindings(): Findings {
-  return { personal: '', localOnly: '', reserved: '', protected: '', instructions: '', autorun: '', recordTypes: '', typeChanges: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
+  return { personal: '', localOnly: '', reserved: '', protected: '', instructions: '', skills: '', autorun: '', recordTypes: '', typeChanges: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
 }
 
 class Out {
@@ -126,7 +128,7 @@ export function renderReport(f: Findings): Buffer | null {
     rejected = true
   }
 
-  if (f.protected || f.instructions || f.autorun || f.recordTypes || f.typeChanges) {
+  if (f.protected || f.instructions || f.skills || f.autorun || f.recordTypes || f.typeChanges) {
     o.line()
     o.line(SEP)
     o.line('[PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています')
@@ -142,6 +144,12 @@ export function renderReport(f: Findings): Buffer | null {
       o.line('以下は、チャットのAIが毎回読み込む指示のファイル(CLAUDE.md / AGENTS.md)です。')
       o.line('会社のオーナー・管理者と、その部署の管理役だけが追加・変更・削除できます:')
       o.list(f.instructions)
+    }
+    if (f.skills) {
+      o.line()
+      o.line('以下は、スキル・エージェント・コマンドのファイルです。スクリプトなどが、使う人のパソコンで動きます。')
+      o.line('会社のオーナー・管理者、その部署の管理役、「Skill を直せる人」に指定された人だけが追加・変更・削除できます:')
+      o.list(f.skills)
     }
     if (f.autorun) {
       o.line()
@@ -184,7 +192,7 @@ export function renderReport(f: Findings): Buffer | null {
     o.line()
     o.line('プッシュをブロックしました。これらのファイルをサーバーの状態に戻してから')
     o.line('再度同期してください（ACBクライアントの同期ボタンから自動で戻せます）。')
-    if (f.autorun) o.line('スキル等は、自動実行の設定を取り除けば、そのまま共有できます。')
+    if (f.autorun) o.line('スキル等は、変更を認められている人が自動実行の設定を取り除けば、共有できます。')
     o.line('配布が必要な場合は、オーナー・管理者に依頼してください。')
     o.line(SEP)
     o.line()

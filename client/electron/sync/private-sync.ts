@@ -42,6 +42,7 @@ import {
 } from './private-folders'
 import { readSparseConfig } from './sparse'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
+import { recoverInterruptedState, recoveryNote } from './interrupted'
 
 export interface PrivatePrep {
   /** The answer in effect for this sync (fresh, or the cached one when the server could not be asked). */
@@ -368,6 +369,8 @@ export interface ReadOnlySyncResult {
   writeDeniedFiles?: string[]
   restoredWriteDeniedFiles?: string[]
   writeDeniedBackupPath?: string
+  recoveredFiles?: string[]
+  recoveryBackupPath?: string
 }
 
 /**
@@ -380,15 +383,27 @@ export interface ReadOnlySyncResult {
 export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope: MyPrivateScope, dir: string): Promise<ReadOnlySyncResult> {
   const git = deps.createGit(dir)
   const gitDir = path.join(dir, '.git')
+  // Told on every way out: the clean-up has happened whatever comes after it.
+  let recovered: Pick<ReadOnlySyncResult, 'recoveredFiles' | 'recoveryBackupPath'> = {}
+  let note = ''
+  const withNote = (error: string) => (note ? `${error}\n\n${note}` : error)
   try {
-    if (fs.existsSync(path.join(gitDir, 'rebase-merge')) || fs.existsSync(path.join(gitDir, 'rebase-apply'))) {
-      await git.rebase(['--abort']).catch(() => {})
-    }
+    const recovery = await recoverInterruptedState({
+      git, repoPath: dir,
+      backupPath: path.join(privateBackupsDir(repoPath), `${stampNow(deps)}_before_recovery`),
+      backupPrefix: scope.path,
+      otherGitRunning: deps.otherGitRunning?.() ?? false,
+      now: deps.now(),
+      log: deps.log,
+    })
+    if (recovery.kept) recovered = { recoveredFiles: recovery.kept.files, recoveryBackupPath: recovery.kept.backupPath }
+    if (!recovery.ok) return { success: false, errorType: recovery.errorType, error: recovery.error, ...recovered }
+    if (recovery.kept) note = recoveryNote(recovery.kept)
     try {
       await git.fetch(['--progress', 'origin'])
     } catch (fetchError) {
       const msg = fetchError instanceof Error ? fetchError.message : String(fetchError)
-      return { success: false, errorType: 'network', error: `サーバーに接続できませんでした。\n${msg}` }
+      return { success: false, errorType: 'network', error: withNote(`サーバーに接続できませんでした。\n${msg}`), ...recovered }
     }
     const changes = await localChangesInClone(git, dir)
     const shown = changes.map(f => `${scope.path}/${f}`)
@@ -398,7 +413,8 @@ export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope:
         success: false,
         errorType: 'write_denied',
         writeDeniedFiles: shown,
-        error: `編集できないファイルがあります。\n次のファイルは、閲覧だけが許可された非公開フォルダにあるため、変更を共有できません。\n\n${shown.map(f => `・${f}`).join('\n')}`,
+        error: withNote(`編集できないファイルがあります。\n次のファイルは、閲覧だけが許可された非公開フォルダにあるため、変更を共有できません。\n\n${shown.map(f => `・${f}`).join('\n')}`),
+        ...recovered,
       }
       if (!deps.dialog.canAsk()) return rejected
       const choice = await deps.dialog.confirmWriteDeniedRestore(shown)
@@ -426,16 +442,17 @@ export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope:
       pruneEmptyUp(path.dirname(full), dir)
     }
     if (fs.existsSync(path.join(gitDir, 'PENDING_PUSH'))) fs.rmSync(path.join(gitDir, 'PENDING_PUSH'), { force: true })
-    if (changes.length === 0) return { success: true, message: '同期が完了しました' }
+    if (changes.length === 0) return { success: true, message: note || '同期が完了しました', ...recovered }
     return {
       success: true,
-      message: `閲覧だけが許可された非公開フォルダのファイル（${changes.length}件）は元に戻しました。あなたが編集した版は非公開フォルダのバックアップに保存してあります。`,
+      message: `閲覧だけが許可された非公開フォルダのファイル（${changes.length}件）は元に戻しました。あなたが編集した版は非公開フォルダのバックアップに保存してあります。${note}`,
       restoredWriteDeniedFiles: shown,
       writeDeniedBackupPath: backupPath,
+      ...recovered,
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    return { success: false, errorType: 'unknown', error: msg }
+    return { success: false, errorType: 'unknown', error: withNote(msg), ...recovered }
   }
 }
 

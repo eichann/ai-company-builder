@@ -117,11 +117,16 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     }
   }
 
-  async function recordOf(companyId: string, recordId: string): Promise<{ state: string; version: number; type: string | null } | null> {
+  async function recordOf(companyId: string, recordId: string): Promise<{ state: string; version: number; type: string | null; title: string | null } | null> {
     const r = await session(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}`)
-    const record = (r?.status === 200 ? (r.data as { record?: { state?: unknown; version?: unknown; type?: unknown } } | undefined)?.record : undefined)
+    const record = (r?.status === 200 ? (r.data as { record?: { state?: unknown; version?: unknown; type?: unknown; title?: unknown } } | undefined)?.record : undefined)
     return record && typeof record.state === 'string' && typeof record.version === 'number'
-      ? { state: record.state, version: record.version, type: typeof record.type === 'string' ? record.type : null } : null
+      ? { state: record.state, version: record.version, type: typeof record.type === 'string' ? record.type : null, title: typeof record.title === 'string' && record.title.trim() ? record.title : null } : null
+  }
+
+  /** The settle's answer, with the record's title as last read (the run may have named it: the runner renames the consultation). */
+  function settled(outcome: AiTurnSettleResult['outcome'], record: { title: string | null } | null): AiTurnSettleResult {
+    return record?.title ? { outcome, title: record.title } : { outcome }
   }
 
   /** Hold a claimed run: register it for the consultation's tokens and renew it while running. */
@@ -299,10 +304,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
         const record = await recordOf(companyId, recordId)
         if (record && record.state !== startedAt) {
           await finishRun(companyId, recordId, null)
-          return { outcome: 'done' }
+          return settled('done', record)
         }
         await finishRun(companyId, recordId, { class: 'temporary', code: record ? 'UNFINISHED' : 'NOT_READABLE' })
-        return { outcome: record ? 'put-back' : 'unknown' }
+        return settled(record ? 'put-back' : 'unknown', record)
       }
       // lane C ▲
       if (!COMPANY.test(companyId) || !aiTurnStepForRecord(recordId)) return { outcome: 'unknown' }
@@ -315,26 +320,26 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       }
       if (settle.done.includes(record.state)) {
         await finishRun(companyId, recordId, null)
-        return { outcome: 'done' }
+        return settled('done', record)
       }
       // The AI said it could not (missing or bad input): a person looks (waiting_person on the server).
       const couldNot = settle.couldNot.includes(record.state)
       if (couldNot || settle.closed.includes(record.state)) {
         await finishRun(companyId, recordId, couldNot ? { class: 'bad-input', code: 'AI_COULD_NOT_FINISH' } : null)
-        return { outcome: 'failed' }
+        return settled('failed', record)
       }
       // Stopped without finishing: tried again later (a few times, then a person — the server counts).
       // Finishing the run puts the reading back (the ledger names the run, not the member).
       const ran = held.has(heldKey(companyId, recordId))
       await finishRun(companyId, recordId, { class: 'temporary', code: 'UNFINISHED' })
-      if (record.state !== settle.working && !claimStates(step).includes(record.state)) return { outcome: 'unknown' }
+      if (record.state !== settle.working && !claimStates(step).includes(record.state)) return settled('unknown', record)
       const after = ran ? await recordOf(companyId, recordId) : record
-      if (after && claimStates(step).includes(after.state)) return { outcome: 'put-back' }
-      if (!after || after.state !== settle.working || settle.putBack === null) return { outcome: 'unknown' }
+      if (after && claimStates(step).includes(after.state)) return settled('put-back', after)
+      if (!after || after.state !== settle.working || settle.putBack === null) return settled('unknown', after ?? record)
       // An older server leaves it reading: put it back with the member's session, as before.
       const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(settle.putBack)}`, { expectedVersion: after.version })
       if (!r || r.status >= 300) log.warn(`[ai-turns] retry: answered ${r?.status ?? 'nothing'}`)
-      return { outcome: r && r.status < 300 ? 'put-back' : 'unknown' }
+      return settled(r && r.status < 300 ? 'put-back' : 'unknown', after)
     },
   }
 }

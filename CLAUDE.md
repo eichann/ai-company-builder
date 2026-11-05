@@ -63,7 +63,9 @@ is missing, the rule files are the complete working instructions.
   for read/write. **Exceptions**: an owner-only record (「持ち主だけ」, `personal_owner`) is
   seen by its owner alone, and a members-only record (「この人たちだけ」, `record_viewers`) by the
   members on its list alone — not by owners, admins or managers either unless listed (`records.md`). Any member can also be a **department manager** (`department_managers`), which
-  allows managing that department's private folders and AI instruction files.
+  allows managing that department's private folders, AI instruction files and skills. **Skill
+  editors** (「Skill を直せる人」, `skill_editors`) may also change skill files, for the whole
+  company or one department.
 
 ## Commands
 
@@ -144,7 +146,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   `^[a-z0-9][a-z0-9_-]*$`. Both rules live in `shared/core/names.ts`.
 - Paths are compared as NFC with only A–Z case-folded (`pathKey` in `shared/core/paths.ts`),
   matching what the push checker does bytewise; use the core helpers rather than ad-hoc
-  `toLowerCase()`.
+  `toLowerCase()`. Where a spelling would land on a Mac is `diskKey`; a protected name is tested
+  with `lookalikeKey`.
 - Log through the existing tagged loggers (`log.warn('Git sync: …')`, `[chat-server] …`), not
   bare `console.log`. Never log session tokens, file contents, the AI-generated commit message, a
   prompt suggestion's text, or (on the server) the paths a member sends to `paths/check`.

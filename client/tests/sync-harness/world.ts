@@ -117,7 +117,7 @@ export const QUESTIONS = {
   sharedNestedRepo: { title: '共有中のフォルダに、別の場所から取り込んだ情報があります', buttons: { exclude: 0, 'keep-sharing': 1, cancel: 2 } },
   externalNestedRepo: { title: '別の場所から取り込んだフォルダがあります', buttons: { exclude: 0, cancel: 1 } },
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
-  protectedConfig: { title: '管理者だけが変更できるファイル', buttons: { restore: 0, cancel: 1 } },
+  protectedConfig: { title: '管理者だけが変更できるファイル', alsoTitled: '変更できないスキルのファイル', buttons: { restore: 0, cancel: 1 } },
   writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
 } as const
 
@@ -189,6 +189,9 @@ export type SyncFn = ((repoPath: string, companyId: string, commitMessage: strin
   pathChecker?: PathChecker
   receive?: GitSync['receive']
   isRunning?: GitSync['isRunning']
+  whenIdle?: GitSync['whenIdle']
+  resumeAutomaticRuns?: GitSync['resumeAutomaticRuns']
+  automaticRunsHeld?: GitSync['automaticRunsHeld']
 }
 
 /** What the app knows when its timer fires (renderer and main), for Member.autoSync. */
@@ -254,6 +257,7 @@ export class World {
   readonly locale: string
   private readonly gitconfig: string
   private scopes: HarnessScope[] = DEFAULT_SCOPES
+  private readonly skillEditing = new Map<string, { everywhere: boolean; folders: string[] }>()
   /** Private folders by scope id (the server's scope repositories). */
   readonly privateFolders = new Map<string, HarnessPrivateFolder>()
   /** Private folders made public (scope id → path); their content may be anywhere now. */
@@ -392,8 +396,18 @@ export class World {
     fs.writeFileSync(file, JSON.stringify({
       version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.allScopes(),
       ...(scopePath ? { scopePath } : {}),
+      ...(this.skillEditing.has(userId) ? { skillEditing: this.skillEditing.get(userId) } : {}),
     }))
     return file
+  }
+
+  /** Put a member on 「Skill を直せる人」 (as git-http's snapshot says it); takes effect at their next push. */
+  setSkillEditing(name: string, editing: { everywhere: boolean; folders: string[] }): void {
+    this.skillEditing.set(`user-${name}`, editing)
+  }
+
+  skillEditingOf(userId: string): { everywhere: boolean; folders: string[] } {
+    return this.skillEditing.get(userId) ?? { everywhere: false, folders: [] }
   }
 
   /** Replace the company's permission scopes; takes effect at every member's next push. */
@@ -728,6 +742,14 @@ export class Member {
   readonly dialogHistory: DialogRecord[] = []
   /** Every sync result, across syncs. */
   readonly results: SyncResultView[] = []
+  /** Runs between staging and committing, where the app waits for the commit message. */
+  beforeCommit: (() => void) | null = null
+  /** Fixes the sync's clock (backup folder names); null: the real time. */
+  clock: Date | null = null
+  /** A download-choice change or private-folder setup is running in the app. */
+  otherGitRunning = false
+  /** The next runs are meant to stop with a rebase or lock left in place. */
+  mayLeaveOperation = false
 
   private readonly answers = new Map<QuestionKind, string[]>()
   private readonly sync_: SyncFn
@@ -747,6 +769,7 @@ export class Member {
   private inFlight = 0
   private pushHooks: Array<() => Promise<void> | void> = []
   private pushFaults: Array<PushFault | null> = []
+  private pullFaults = 0
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
@@ -813,10 +836,11 @@ export class Member {
         cookies: () => host.cookies,
         fetch: host.fetch,
       }),
-      generateCommitMessage: async () => null,
-      now: () => new Date(),
+      generateCommitMessage: async () => { this.beforeCommit?.(); return null },
+      now: () => this.clock ?? new Date(),
       platform: process.platform,
       largeFileThreshold: world.largeFileThreshold,
+      otherGitRunning: options => this.otherGitRunning && !options?.ownActivity,
       log: {
         log: (...args: unknown[]) => this.capture('log', args),
         warn: (...args: unknown[]) => this.capture('warn', args),
@@ -918,6 +942,10 @@ export class Member {
       if (paths.length > 50) return json({ success: false, error: 'too many paths' }, 400)
       return json({ success: true, data: { results: this.world.pathsUsable(this.name, paths) } })
     }
+    if (/^\/api\/companies\/[^/]+\/me\/capabilities$/.test(url.pathname)) {
+      if (this.isOffline) throw new TypeError('fetch failed')
+      return json({ success: true, data: { role: this.role, managedDepartmentFolders: [], skillEditing: this.world.skillEditingOf(`user-${this.name}`) } })
+    }
     if (/^\/api\/companies\/[^/]+\/me\/scopes$/.test(url.pathname)) {
       // Like an older server until the company's first private folder.
       if (!this.world.privateFoldersEnabled) return json({ success: false, error: 'not found' }, 404)
@@ -954,7 +982,10 @@ export class Member {
   }
 
   private answer(options: SyncMessageBoxOptions): number {
-    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find(k => QUESTIONS[k].title === options.title)
+    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find((k) => {
+      const q: { title: string; alsoTitled?: string } = QUESTIONS[k]
+      return q.title === options.title || q.alsoTitled === options.title
+    })
     if (!kind) throw new Error(`unexpected dialog: ${options.title}`)
     const answer = this.answers.get(kind)?.shift() ?? (DEFAULT_ANSWERS[kind] as string)
     const buttons = QUESTIONS[kind].buttons as Record<string, number>
@@ -981,6 +1012,12 @@ export class Member {
    * call fails without the server ever seeing it. `skip` pushes of the
    * same sync run normally first (e.g. to hit a re-push after a rejection).
    */
+  /** The next pull fails without starting a rebase, as when git refuses to overwrite a file. */
+  failNextPull(): this {
+    this.pullFaults++
+    return this
+  }
+
   failNextPush(fault: PushFault, options: { times?: number; skip?: number } = {}): this {
     for (let i = 0; i < (options.skip ?? 0); i++) this.pushFaults.push(null)
     for (let i = 0; i < (options.times ?? 1); i++) this.pushFaults.push(fault)
@@ -991,6 +1028,15 @@ export class Member {
     return new Proxy(git, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver)
+        if (prop === 'pull' && typeof value === 'function') {
+          return async (...args: unknown[]) => {
+            if (this.pullFaults > 0) {
+              this.pullFaults--
+              throw new Error('error: The following untracked working tree files would be overwritten by merge')
+            }
+            return (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+          }
+        }
         if (prop === 'push' && typeof value === 'function') {
           return async (...args: unknown[]) => {
             const hook = this.pushHooks.shift()
@@ -1169,7 +1215,7 @@ export class Member {
     }
     const durationMs = Date.now() - started
     this.results.push(result)
-    if (this.inFlight === 0) this.assertNoOperationInProgress()
+    if (this.inFlight === 0 && !this.mayLeaveOperation) this.assertNoOperationInProgress()
     this.recordCommitted(before)
     return { result, dialogs, logs, durationMs }
   }
@@ -1183,7 +1229,7 @@ export class Member {
     if (!impl.receive || !impl.isRunning) throw new Error('this sync implementation has no automatic sync')
     const before = this.snapshotPending()
     const host = {
-      gitSync: Object.assign((...args: Parameters<GitSync>) => impl(...args), { receive: impl.receive, isRunning: impl.isRunning }),
+      gitSync: Object.assign((...args: Parameters<GitSync>) => impl(...args), { receive: impl.receive, isRunning: impl.isRunning, automaticRunsHeld: impl.automaticRunsHeld ?? (() => false) }),
       aiRunning: () => conditions.aiRunning ?? false,
       activity: () => conditions.activity ?? null,
     }
@@ -1195,12 +1241,24 @@ export class Member {
     this.currentDialogs = []
     this.currentLogs = []
     const answer = await withTimeout(runAutoSync(host, this.dir, 'company', mode, state), this.world.syncTimeoutMs, `${this.name}'s automatic ${mode}`)
-    this.assertNoOperationInProgress()
+    if (!this.mayLeaveOperation) this.assertNoOperationInProgress()
     if (answer.status === 'sent') {
       this.results.push(answer.result)
       this.recordCommitted(before)
     }
     return answer
+  }
+
+  /** Resolves once this member's app runs no sync (what closing the app waits for). */
+  whenIdle(): Promise<void> {
+    const impl = this.sync_
+    if (!impl.whenIdle) throw new Error('this sync implementation cannot be waited for')
+    return impl.whenIdle()
+  }
+
+  /** The member stayed after closing was held. */
+  resumeAutomaticRuns(): void {
+    this.sync_.resumeAutomaticRuns?.()
   }
 
   /** Dialogs shown during the last sync or automatic run. */

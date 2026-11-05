@@ -25,11 +25,12 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 
 | Module | Rules |
 |---|---|
-| `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
+| `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold: naming a place), `diskKey` (Unicode case folding, exactly what APFS does: where a spelling lands), `lookalikeKey` (diskKey over NFKC, without default-ignorables: testing protected names only), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
 | `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
 | `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
-| `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`) |
+| `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`); compared as `diskKey`s |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md`: names, who may change them |
+| `skill-files.ts` | everything under `.claude/skills|agents|commands`: `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
@@ -52,7 +53,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `task-settings.ts` | the company's task settings (`parseTaskSettings`, defaults, `workSwitchPoliciesOf`) and `replyTarget` (返事の目安, Japan time) (`tasks.md`) |
 | `work-switches.ts` | each member's own 受信を読む / AI が自動で進める within the company's (`workSwitchOn`, `chooseWorkSwitch`; `tasks.md`) |
 | `absences.ts` | absence and the delegate (代わりの人): `delegation(periods, day)` → `actsFor` / `coverOf` (the one resolution, no chains), `parseAbsenceInput` (`records.md` "Absence and the delegate") |
-| `plugins.ts` | connector plugins, the one entry point (re-exports; `plugins.md`): the declaration (`plugin-declaration.ts` shape, `plugin-declaration-rules.ts`, `plugin-manifest.ts` `parsePluginManifest` with `plugin-connector-declaration.ts` / `plugin-business-declaration.ts` / `plugin-call-declaration.ts`), the package (`plugin-package.ts` `validatePluginPackage`, `combineUse`), the mapping (`plugin-mapping.ts` `parsePluginMapping`), field policies (`plugin-policies.ts`: external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways (`plugin-values.ts`), `available_to` |
+| `plugins.ts` | connector plugins, the one entry point (re-exports; `plugins.md`): the declaration (`plugin-declaration.ts` shape, `plugin-declaration-rules.ts`, `plugin-manifest.ts` `parsePluginManifest` with `plugin-connector-declaration.ts` / `plugin-business-declaration.ts` / `plugin-call-declaration.ts`, `plugin-call-answer.ts` what is kept of a call's answer), the package (`plugin-package.ts` `validatePluginPackage`, `combineUse`), the mapping (`plugin-mapping.ts` `parsePluginMapping`), field policies (`plugin-policies.ts`: external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways (`plugin-values.ts`), `available_to` |
 | `connector-roles.ts` | the core roles (役目) `calendar` / `mail` / `meetings` / `chat` with their operations and optional capabilities (`CONNECTOR_ROLES`; Drive is not a role), `roleServingProblems`, `resolveRole` (the admin's choice when two could serve), `hasRoleCapability` (`connector-roles.md`) |
 | `identity.ts` | 名寄せ: a 相手's matching keys (`identityKeysOf`, `normalizeDomain`), `FREE_MAIL_DOMAINS` / `isFreeMailDomain` (never a company domain), `autoMatch` (same address, same company domain, same kind, never a held record), `readIdentityProposal` (`identity.md`) |
 | `intake-settings.ts` | 来た連絡: the company's intake settings (`parseIntakeSettings`, defaults), `routeIncoming` (who a new message belongs to: internal / To / CC / shared address / bulk), `companyDomains`, `pollWindow` (7 days read back, the rest a gap) (`inbox.md`) |
@@ -80,9 +81,9 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
   and `client/shared/sparse-paths.ts` re-export what they used to define; Vite bundles it.
 - Admin: from `admin/src/lib`; its Dockerfile copies `shared/` into the build stage; Turbopack's
   root is the repository (`outputFileTracingRoot`).
-- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` (`server/src/lib/push-check/rules.ts`)
-  stay bytewise twins over git's latin1 bytes by design; the regex is built from the core's name
-  list.
+- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` / `SKILL_DIR_RE` (`server/src/lib/push-check/rules.ts`)
+  stay bytewise twins over git's latin1 bytes by design; the regexes are built from the core's name
+  lists.
 
 ## Parity tests (what can still drift is held together by tests, not review)
 
@@ -91,7 +92,7 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
   `/me/scopes` + `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
   gate, and the push gate must not depend on scope order.
 - `client/tests/rule-parity-names.test.ts` — path keys, department folder names, skill names and
-  AI instruction files on one corpus, against the core and the push checker's twins; the renderer
+  AI instruction files and skill files on one corpus, against the core and the push checker's twins; the renderer
   dialogs must import `shared/core/names.ts`.
 - `server/tests/integration/admin-contract.test.ts` — every endpoint the admin calls, checked
   against `admin/src/lib/api.ts` with the TypeScript compiler (`tests/helpers/type-shape.ts`).
