@@ -41,3 +41,13 @@ export const FILE_NOT_LINKABLE = {
  * one answer (records.md "Owner-only records").
  */
 export const LINK_TARGET_NOT_FOUND = { error: 'つなぐ先の記録が見つかりません', code: 'LINK_TARGET_NOT_FOUND' }
+
+/**
+ * A folder a server-only record cannot be placed in — inside a private folder (readable or not),
+ * one the member cannot read, or one that is not in the company folder: one answer, so it never
+ * tells whether a private folder of that name exists (audit B-M1, private-folders.md decision B).
+ */
+export const FOLDER_NOT_PLACEABLE = {
+  error: 'このフォルダには記録を置けません。部署のフォルダを選んでください（非公開のフォルダや、会社のフォルダにまだ無いフォルダには置けません）',
+  code: 'FOLDER_NOT_PLACEABLE',
+} as const

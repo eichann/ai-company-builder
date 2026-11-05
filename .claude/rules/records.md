@@ -822,7 +822,15 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
 - **Share** 「部署に出す／案件につなぐ」: `POST /records/item/:recordId/share { folder,
   expectedVersion, note? }` (contract `ShareRecordRequest`), **session only** (no AI route). Only
   the owner (nobody else finds it); `folder` as on create (a company path the owner reads, not in a
-  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`). Clears
+  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`).
+  **Where a record may be placed (audit B-M1)**: a `folder` inside a private folder (readable or
+  not), one the member cannot read, and one that is not a folder of the company repository's shared
+  branch all get **one** answer, 400 `FOLDER_NOT_PLACEABLE` (`placeFolder`, and the routes'
+  `recordEngine.checkPlace` before `create` / `createByAi` / `share`, which asks the repository —
+  `folderExists`; not known, e.g. no repository: left to the engine). So the answer never tells
+  whether a private folder of that name exists (owner decision B). Replaces `PRIVATE_PLACE` /
+  403 「You cannot read that folder」. Test: `record-ai-placement.test.ts` "a private folder's name
+  is never confirmed by the answer" (mutation-checked). Clears
   `personal_owner`, sets `folder` (`RecordRepository.setPlace`); ledger action `share`, state
   unchanged, changes `place.personal_owner` / `place.folder` before / after, version + 1
   (`VERSION_CONFLICT`). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
@@ -931,7 +939,7 @@ own place). A person's create (session) gets no defaults.
   `defaultFolder` (the department on screen when the message was sent: `chat-server.ts` passes
   `activeDepartment.folder` to the record tools, which add it to the body; 全社 = none = the whole
   company); assignee as said, else the member. The default folder is checked like any `folder`
-  (`placeFolder`: a private one is refused — never placed company-wide instead); an assignee who
+  (`placeFolder`: a private one is refused, `FOLDER_NOT_PLACEABLE` — never placed company-wide instead); an assignee who
   cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
 - A request made with an origin link to a message (a task's `interaction`) always gets a `due`: the
   AI's, else the company's reply 目安 (`messageDue`; `inbox.md` "A task from a message").

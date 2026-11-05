@@ -133,7 +133,7 @@ describe('another person, or a department asked for', () => {
 
   it('the default is checked like any folder: a private one is refused, never placed company-wide', () => {
     const r = engine.createByAi(m('u-alice'), AI, { type: 'task', title: 'x', fields: { assignee: 'u-bob' }, defaultFolder: '経理部' })
-    expect(r).toMatchObject({ ok: false, body: { code: 'PRIVATE_PLACE' } })
+    expect(r).toMatchObject({ ok: false, body: { code: 'FOLDER_NOT_PLACEABLE' } })
     expect(ids('u-owner')).toEqual([])
   })
 
@@ -149,5 +149,37 @@ describe('a person’s create keeps its own rules', () => {
     expect(made.record.personal).toBeUndefined()
     expect(made.record.fields.assignee ?? null).toBeNull()
     expect(made.placed).toEqual({ personal: false, folder: null })
+  })
+})
+
+describe('a private folder\'s name is never confirmed by the answer (audit B-M1)', () => {
+  it('someone who cannot read 経理部 gets the same answer for it, inside it and for a folder that is not there; a reader too', async () => {
+    // The company folder holds コンテンツ only (経理部 is a private folder: not in the company repository).
+    const withRepo = createRecordEngine({
+      companyData: source, transactions: sqliteTransactions(conn),
+      clock: { now: () => TS, nowMs: () => 0 },
+      ids: { newId: () => 'x', newToken: () => Math.random().toString(16).slice(2).padEnd(16, '0') },
+      files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
+      managedFolders: () => [], isMember: (_c, u) => PEOPLE.includes(u), roleOf: (_c, u) => (PEOPLE.includes(u) ? ROLES[u] ?? 'member' : null), notify: () => {},
+      folderExists: async (_c, path) => path === 'コンテンツ',
+    })
+    const answerOf = async (who: string, folder: string, how: 'person' | 'ai') => {
+      const body = { type: 'task', title: 'x', fields: { assignee: who }, personal: false, folder }
+      const pre = await withRepo.checkPlace(m(who), body, how === 'ai')
+      const r = pre.ok ? (how === 'ai' ? withRepo.createByAi(m(who), AI, body) : withRepo.create(m(who), HUMAN, body)) : pre
+      return JSON.stringify(r.ok ? 'created' : { kind: r.kind, body: r.body })
+    }
+    for (const how of ['person', 'ai'] as const) {
+      const missing = await answerOf('u-bob', '存在しない部', how)
+      expect(missing).toContain('FOLDER_NOT_PLACEABLE')
+      expect(await answerOf('u-bob', '経理部', how)).toBe(missing)
+      expect(await answerOf('u-bob', '経理部/請求', how)).toBe(missing)
+      // A folder the member cannot read answers the same too.
+      expect(await answerOf('u-mallory', 'コンテンツ', how)).toBe(missing)
+      // Its reader learns nothing more either (a server-only record is not placed in a private folder yet).
+      expect(await answerOf('u-alice', '経理部', how)).toBe(missing)
+      expect(await answerOf('u-bob', 'コンテンツ', how)).toBe('"created"')
+    }
+    expect(ids('u-owner').length).toBe(2)
   })
 })

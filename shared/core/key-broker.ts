@@ -77,6 +77,11 @@ export interface BrokerServiceInfo {
    * against the decoded path the client sent.
    */
   readOnlyPosts?: readonly RegExp[]
+  /**
+   * An AI model's API: its POSTs are calls to the model, not writes to the company's data, so the
+   * relay is not read-only for it until the company says so (`brokerRelayReadOnlyByDefault`).
+   */
+  modelApi?: true
 }
 
 export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
@@ -85,16 +90,16 @@ export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api
 export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
   // Gemini answers an invalid key with 400 API_KEY_INVALID, a key not allowed to use the API with 403.
   {
-    service: 'gemini', label: 'Google Gemini', category: 'tool', defaultHosts: ['generativelanguage.googleapis.com'], credential: 'x-goog-api-key',
+    service: 'gemini', label: 'Google Gemini', category: 'tool', modelApi: true, defaultHosts: ['generativelanguage.googleapis.com'], credential: 'x-goog-api-key',
     check: { path: '/v1beta/models', headers: {}, rejected: [400, 401, 403] },
   },
   // 403 is not "invalid" here: a restricted project key may lack the models permission and still work for chat.
   {
-    service: 'openai', label: 'OpenAI', category: 'tool', defaultHosts: ['api.openai.com'], credential: 'authorization',
+    service: 'openai', label: 'OpenAI', category: 'tool', modelApi: true, defaultHosts: ['api.openai.com'], credential: 'authorization',
     check: { path: '/v1/models', headers: {}, rejected: [401] },
   },
   {
-    service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key',
+    service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', modelApi: true, defaultHosts: ['api.anthropic.com'], credential: 'x-api-key',
     check: { path: '/v1/models', headers: { 'anthropic-version': '2023-06-01' }, rejected: [401] },
   },
   // HubSpot (milestone 3): a service key (`pat-…`) as `Authorization: Bearer`. The check reads deals
@@ -143,6 +148,16 @@ export function brokerRelayReadOnlyAllows(service: BrokerServiceInfo | null, met
   const m = method.toUpperCase()
   if (m === 'GET' || m === 'HEAD') return true
   return m === 'POST' && !!service?.readOnlyPosts?.some(re => re.test(path))
+}
+
+/**
+ * Whether the relay only reads for a service the company has not chosen for (audit B-M6): every
+ * service — HubSpot, a generic service the company registered — reads only until an admin allows
+ * writes (or its plugin manages it, which never allows them); only an AI model's API (`modelApi`,
+ * whose POSTs are the model calls themselves) is not read-only by default.
+ */
+export function brokerRelayReadOnlyByDefault(service: string): boolean {
+  return builtinBrokerService(service)?.modelApi !== true
 }
 
 export const BROKER_LIMITS = {

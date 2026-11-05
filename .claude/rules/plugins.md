@@ -842,7 +842,9 @@ plugin's switch:
   (`relayPathPattern`: outside ids → `{id}`) — never a body or the key. Tests:
   `tests/integration/plugins.test.ts` 「who may read HubSpot through the relay」 (each guard
   mutation-checked), permission matrix row + `CROSS`, `company-scoped-sql.test.ts`.
-- Companies whose plugin was never on keep the relay as before. **Inventory (2026-10-31)**:
+- Companies whose plugin was never on keep the relay as before when they already had the key
+  (audit B-M6: a key registered later reads only until an admin allows writes, `key-broker.md`
+  "Read-only by default"). **Inventory (2026-10-31)**:
   div's `法人ソリューション/.claude/skills/anken-sync` reads (owners, pipelines, deal search /
   get, v3 paths) **and writes** (creates deals, PATCHes deals, creates meetings) through the
   relay when the app gives it `ACB_HUBSPOT_*`; `weekly-report` prepares the same variables.

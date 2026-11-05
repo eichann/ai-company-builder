@@ -130,6 +130,8 @@ recordsRoute.post('/records/decisions', companyMember, serviceBody, async (c) =>
 recordsRoute.post('/records/item', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const body = c.var.body
+  const place = await recordEngine.checkPlace(member, body)
+  if (!place.ok) return refusal(c, place)
   const result = recordEngine.create(member, humanWith(body), body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, result.value.reused ? 200 : 201)
@@ -193,6 +195,8 @@ recordsRoute.post('/records/item/:recordId/opened', companyMember, async (c) => 
 recordsRoute.post('/records/item/:recordId/share', companyMember, serviceBody, async (c) => {
   const member = c.var.member
   const body = c.var.body
+  const place = await recordEngine.checkPlace(member, body)
+  if (!place.ok) return refusal(c, place)
   return answer(c, recordEngine.share(member, humanWith(body), c.req.param('recordId'), body))
 })
 
