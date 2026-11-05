@@ -21,6 +21,9 @@ services:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3001
       - AUTH_SECRET=${AUTH_SECRET}
+      # Required: the address members and the admin console use (https://your-domain.com).
+      # The server does not start without it in production.
+      - PUBLIC_URL=${PUBLIC_URL:?Set PUBLIC_URL in .env (e.g. https://your-domain.com)}
       - SERVER_HOST=${SERVER_HOST}
       - SERVER_USER=${SERVER_USER}
       - HOST_REPOS_DIR=${HOST_REPOS_DIR}
