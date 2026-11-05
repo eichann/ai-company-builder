@@ -5,7 +5,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import simpleGit, { type SimpleGit } from 'simple-git'
+import { simpleGit, type SimpleGit } from 'simple-git'
 
 export interface GitFactoryOptions {
   /** Git binary (bundled dugite git, or the system git fallback). */
@@ -70,9 +70,31 @@ export function appGitDirs(appGitDir: string): { hooksDir: string; templateDir: 
 /** Build a SimpleGit for `repoPath` with the app's git configuration. */
 export function createConfiguredGit(repoPath: string, options: GitFactoryOptions): SimpleGit {
   const { hooksDir, templateDir } = appGitDirs(options.appGitDir)
+  const env = configuredEnv(options, templateDir)
   return simpleGit(repoPath, {
     binary: options.binary,
-    unsafe: { allowUnsafeCustomBinary: true },
+    // simple-git 4 blocks configuration and environment values that can run
+    // code. Each one allowed here is set by this file from app-owned values,
+    // never from a member's input: the empty hooks directory and template
+    // directory (appGitDirs), the no-op editors (the 2026-07-29 freeze
+    // fix), the askpass helper and the empty credential helper, and the
+    // host-resolved binary. Everything else stays blocked.
+    // simple-git 4 also rejects a task whose explicit environment holds a
+    // guarded key (GIT_*, EDITOR, PAGER, ...) not named here. The whole
+    // environment is app-built (configuredEnv), so every key in it is named.
+    allowEnvironment: Object.keys(env),
+    unsafe: {
+      allowUnsafeCustomBinary: true,
+      allowUnsafeHooksPath: true,
+      allowUnsafeEditor: true,
+      allowUnsafeAskPass: true,
+      allowUnsafeCredentialHelper: true,
+      allowUnsafeTemplateDir: true,
+      // Only for a host that supplies its own base environment (the sync
+      // harness points GIT_CONFIG_GLOBAL at a test file). The default
+      // environment drops such keys (ambientEnv), so the app never needs it.
+      ...(options.baseEnv ? { allowUnsafeConfigPaths: true } : {}),
+    },
     // Kill any git process that produces no output for 5 minutes. Without
     // this, a git process waiting on input that will never come (there is no
     // terminal) hangs `await` forever and freezes sync with it. Network
@@ -83,7 +105,7 @@ export function createConfiguredGit(repoPath: string, options: GitFactoryOptions
     // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
     ...(process.getuid ? { spawnOptions: { uid: process.getuid() } } : {}),
   })
-    .env(configuredEnv(options, templateDir))
+    .env(env)
 }
 
 /**
@@ -126,9 +148,24 @@ function configEntries(options: GitFactoryOptions, hooksDir: string): string[] {
 }
 
 /** The environment every git the app runs gets. */
+/**
+ * The process environment without the keys simple-git 4 guards (GIT_*, EDITOR,
+ * PAGER, ...). A member's own GIT_SSH_COMMAND, GIT_PAGER or GIT_CONFIG_GLOBAL
+ * must neither make every sync fail nor steer the app's git; the keys the app
+ * needs (GIT_ASKPASS, GIT_EDITOR, GIT_EXEC_PATH, ...) are set explicitly.
+ */
+function ambientEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (/^(GIT_|EDITOR$|VISUAL$|PAGER$|SSH_ASKPASS$|SSH_ASKPASS_REQUIRE$)/i.test(key)) continue
+    env[key] = value
+  }
+  return env
+}
+
 function configuredEnv(options: GitFactoryOptions, templateDir: string): NodeJS.ProcessEnv {
   return {
-    ...(options.baseEnv ?? process.env),
+    ...(options.baseEnv ?? ambientEnv()),
     GIT_ASKPASS: options.askPassPath,
     GIT_TOKEN: options.token,
     GIT_TERMINAL_PROMPT: '0',

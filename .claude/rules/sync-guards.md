@@ -45,6 +45,12 @@ what git actually sees through the app's `createGit`.
   and system git alike. A global git-secrets template once made a partial-clone commit hang
   10+ minutes. They are real directories (`/dev/null` is not a path on Windows), so hooks the app
   needs later can be installed there deliberately. Test: `client/tests/sync/user-hooks.test.ts`.
+- simple-git 4 refuses config/env values that can run code. The factory allows only the ones it
+  sets itself from app-owned values (`unsafe`: hooks path, editors, askpass, credential helper,
+  template dir, custom binary; `allowEnvironment`: the keys of the env it built) and drops the
+  member's ambient `GIT_*` / `EDITOR` / `PAGER` (`ambientEnv`), so a member's `GIT_SSH_COMMAND`
+  cannot break or steer sync; a caller-supplied code-running option stays refused. Import is
+  the named `simpleGit` (no default export). Test: `client/tests/git-factory-env.test.ts`.
 - Every app git goes through this factory (`createGit` in `services/app-git.ts`); the only
   other spawn is the `--version` probe. Add new git calls through it.
 - The mac app's bundled git is universal (arm64 + x86_64): electron-builder's `beforePack`

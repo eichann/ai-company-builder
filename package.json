@@ -30,7 +30,25 @@
   },
   "pnpm": {
     "overrides": {
-      "@anthropic-ai/claude-agent-sdk": "0.3.304"
+      "@anthropic-ai/claude-agent-sdk": "0.3.304",
+      "body-parser@2": "^2.4.0",
+      "@ai-sdk/provider-utils@4": "^4.0.33",
+      "nanoid@3": "^3.3.18",
+      "postcss@8": "^8.5.23",
+      "postcss-selector-parser@6": "^6.1.5",
+      "picomatch@2": "^2.3.2",
+      "source-map-js": "^1.2.2",
+      "minimatch@3": "^3.1.4",
+      "brace-expansion@1": "^1.1.21",
+      "brace-expansion@5": "^5.0.12",
+      "flatted": "^3.4.2",
+      "js-yaml@4": "^4.3.2",
+      "ajv@6": "^6.14.0",
+      "browserslist": "^4.28.7",
+      "baseline-browser-mapping": "^2.11.0",
+      "@babel/core": "^7.29.6",
+      "@humanfs/node": "^0.16.8",
+      "rollup@4": "^4.59.0"
     },
     "packageExtensions": {
       "next@*": {

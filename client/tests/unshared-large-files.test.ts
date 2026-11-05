@@ -9,8 +9,11 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { findUnsharedLargeFiles } from '../electron/sync/large-files'
+
+/** simple-git 4 rejects an explicit env holding guarded keys (a developer's GIT_EDITOR); this test's env is its own. */
+const GUARD_OFF = (env: object) => ({ allowEnvironment: Object.keys(env), unsafe: { allowUnsafeEditor: true, allowUnsafeConfigPaths: true, allowUnsafeTemplateDir: true } })
 
 const LIMIT = 1024
 
@@ -43,7 +46,7 @@ test('untracked files over the limit are listed, ignored or not; shared, small a
     write('人事/評価/大きい.mp4', LIMIT + 1)
     write('node_modules/pkg/big.bin', LIMIT + 1)
 
-    const files = await findUnsharedLargeFiles(simpleGit(repo).env(env), repo, LIMIT)
+    const files = await findUnsharedLargeFiles(simpleGit(repo, GUARD_OFF(env)).env(env), repo, LIMIT)
     assert.deepEqual(files.map(f => f.normalize('NFC')), ['ignored-by-line.mov', 'local-line.bin', '営業部/動画/新しい.mp4'])
   } finally {
     fs.rmSync(root, { recursive: true, force: true })
