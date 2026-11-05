@@ -16,6 +16,7 @@ on:
       - '.dockerignore'
       - 'docker-compose.yml'
       - 'docs/self-hosting/docker-compose.production.yml'
+      - 'deploy/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
@@ -62,7 +63,10 @@ jobs:
 
       - name: Start
         run: |
+          # As in production: ./data belongs to the uid/gid the api runs as
+          # (ACB_UID / ACB_GID, default 1000; the runner's own user is 1001).
           mkdir -p data
+          sudo chown 1000:1000 data
           docker compose up -d --no-build api admin
 
       - name: API answers and creates its databases
@@ -110,17 +114,76 @@ jobs:
           echo "api PID 1: $cmd"
           case "$cmd" in *watch*) echo "::error::api runs a file watcher"; exit 1;; esac
 
+      - name: API and admin run unprivileged
+        run: |
+          for svc in api admin; do
+            status=$(docker compose exec -T "$svc" cat /proc/1/status)
+            uid=$(echo "$status" | awk '/^Uid:/ {print $2}')
+            capeff=$(echo "$status" | awk '/^CapEff:/ {print $2}')
+            nnp=$(echo "$status" | awk '/^NoNewPrivs:/ {print $2}')
+            echo "$svc PID 1: uid=$uid CapEff=$capeff NoNewPrivs=$nnp"
+            [ "$uid" != 0 ] || { echo "::error::$svc runs as root"; exit 1; }
+            [ "$capeff" = 0000000000000000 ] || { echo "::error::$svc keeps capabilities"; exit 1; }
+            [ "$nnp" = 1 ] || { echo "::error::$svc may gain privileges (no-new-privileges off)"; exit 1; }
+          done
+          # The admin's root filesystem is read-only too; its cache is a tmpfs it can write.
+          docker compose exec -T admin sh -c '! touch /app/admin/server.js 2>/dev/null' \
+            || { echo "::error::admin's root filesystem is writable"; exit 1; }
+          docker compose exec -T admin sh -c 'touch /app/admin/.next/cache/.rw-check /tmp/.rw-check'
+          # What the server writes belongs to the unprivileged user.
+          [ "$(stat -c %u data/app.sqlite)" = 1000 ] || { echo "::error::data/app.sqlite is not owned by uid 1000"; exit 1; }
+
+      - name: Members push and pull over smart HTTP; the push checker runs
+        run: |
+          # The first account of a fresh server makes the first company (a
+          # throwaway CI account), then git clones, pushes and clones again
+          # through the api running as uid 1000, and a push into a local-only
+          # folder is refused by the pre-receive hook.
+          work=$(mktemp -d)
+          api=http://127.0.0.1:3001
+          origin=http://localhost:3001
+          curl -fsS -X POST "$api/api/auth/sign-up/email" -H "Origin: $origin" -H 'Content-Type: application/json' \
+            -c "$work/cookies" -o "$work/signup.json" \
+            -d '{"email":"ci-owner@example.invalid","password":"ci-only-password-1234","name":"CI"}'
+          token=$(node -e 'console.log(require(process.argv[1]).token)' "$work/signup.json")
+          curl -fsS -X POST "$api/api/companies" -H "Origin: $origin" -H 'Content-Type: application/json' \
+            -b "$work/cookies" -o "$work/company.json" -d '{"name":"CI smoke"}'
+          cid=$(node -e 'const j=require(process.argv[1]); console.log((j.data ?? j).id)' "$work/company.json")
+          url="http://ci:$token@127.0.0.1:3001/api/git-http/$cid.git"
+          git -c init.defaultBranch=main clone -q "$url" "$work/a"
+          mkdir -p "$work/a/smoke"
+          echo 'pushed by CI' > "$work/a/smoke/hello.md"
+          git -C "$work/a" add -A
+          git -C "$work/a" -c user.name=CI -c user.email=ci@example.invalid commit -qm 'CI smoke push'
+          git -C "$work/a" push -q origin HEAD
+          git clone -q "$url" "$work/b"
+          grep -qx 'pushed by CI' "$work/b/smoke/hello.md" || { echo "::error::the pushed file did not come back"; exit 1; }
+          mkdir -p "$work/b/.backups"
+          echo x > "$work/b/.backups/x.txt"
+          git -C "$work/b" add -A
+          git -C "$work/b" -c user.name=CI -c user.email=ci@example.invalid commit -qm 'CI: refused by the hook'
+          if git -C "$work/b" push -q origin HEAD 2> "$work/push.err"; then
+            echo "::error::a push into .backups was accepted: the pre-receive hook did not run"; exit 1
+          fi
+          grep -F '[LOCAL_ONLY_PATH]' "$work/push.err" \
+            || { cat "$work/push.err"; echo "::error::push failed without the push checker's marker"; exit 1; }
+          [ "$(stat -c %u "data/repos/$cid.git/HEAD")" = 1000 ] || { echo "::error::the repository is not owned by uid 1000"; exit 1; }
+          rm -rf "$work"
+
       - name: Key broker is off without a KEK, and on with one mounted read-only
         run: |
           # No BROKER_KEK_HOST_FILE: /dev/null is mounted and the server runs with the broker off.
           docker compose logs --no-color api | grep -F 'Key broker: off' \
             || { echo "::error::api did not report the key broker as off"; exit 1; }
-          # The operator command writes a new 0600 KEK (a throwaway one, in the runner's temp dir).
+          # The operator command writes a new 0600 KEK (a throwaway one, in the runner's temp
+          # dir) exactly as the guide says: as root into a root-only folder, then handed to
+          # the api's uid. A root-owned KEK is unreadable for the unprivileged server.
           kek_dir="$RUNNER_TEMP/acb-kek"
-          install -d -m 700 "$kek_dir"
-          docker compose run --rm --no-deps -v "$kek_dir:/kek" api \
+          sudo install -d -m 700 "$kek_dir"
+          docker compose run --rm --no-deps --user 0:0 -v "$kek_dir:/kek" api \
             node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
           [ "$(sudo stat -c %a "$kek_dir/broker-kek")" = 600 ] || { echo "::error::KEK file is not 0600"; exit 1; }
+          sudo chown 1000:1000 "$kek_dir/broker-kek"
           BROKER_KEK_HOST_FILE="$kek_dir/broker-kek" docker compose up -d --no-build api
           for i in $(seq 1 30); do
             docker compose logs --no-color api | grep -qF 'Key broker: on' && break
@@ -151,9 +214,41 @@ jobs:
           # runtime, so this proves the proxy target is not frozen at build time.
           curl -fsS -o /dev/null -w 'GET :3100/api/config -> %{http_code}\n' http://127.0.0.1:3100/api/config
 
+      - name: Docker API proxy lets autoheal list and restart, nothing else
+        run: |
+          docker compose up -d --no-build docker-api-proxy autoheal
+          # autoheal has no Docker socket, only the proxy.
+          docker compose exec -T autoheal sh -c '! test -e /var/run/docker.sock' \
+            || { echo "::error::autoheal has the Docker socket"; exit 1; }
+          p=http://docker-api-proxy:2375
+          id=$(docker compose ps -q admin)
+          expect() {
+            got=$(docker compose exec -T autoheal curl -s -o /dev/null -w '%{http_code}' -X "$2" "$p$3")
+            echo "$got $2 $3"
+            [ "$got" = "$1" ] || { echo "::error::proxy: $2 $3 -> $got, expected $1"; exit 1; }
+          }
+          for i in $(seq 1 15); do
+            docker compose exec -T autoheal curl -fs -o /dev/null "$p/containers/json" && break
+            sleep 2
+          done
+          expect 200 GET '/containers/json?filters=%7B%22health%22:%5B%22unhealthy%22%5D%7D'
+          expect 200 GET /v1.41/containers/json
+          expect 403 GET "/containers/$id/json"
+          expect 403 GET "/containers/$id/archive?path=/etc/passwd"
+          expect 403 GET "/containers/$id/logs?stdout=1"
+          expect 403 POST /containers/create
+          expect 403 POST "/containers/$id/exec"
+          expect 403 POST "/containers/$id/start"
+          expect 403 POST "/containers/$id/kill"
+          expect 403 GET /images/json
+          expect 403 GET /info
+          expect 403 POST /containers/..%2F..%2Fbuild/restart
+          expect 204 POST "/containers/$id/restart?t=5"
+          curl -fsS --retry 60 --retry-all-errors --retry-delay 2 -o /dev/null http://127.0.0.1:3100/login
+
       - name: Logs
         if: always()
-        run: docker compose logs --no-color --tail 100 api admin
+        run: docker compose logs --no-color --tail 100 api admin docker-api-proxy autoheal
 
       - name: Tear down
         if: always()

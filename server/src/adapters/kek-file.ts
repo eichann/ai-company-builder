@@ -39,7 +39,10 @@ export function loadKekFile(path: string | null, dataDir: string): KekLoad {
     fd = openSync(path, 'r')
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code ?? 'error'
-    return { ok: false, reason: 'kek-unreadable', detail: `BROKER_KEK_FILE cannot be opened (${code})` }
+    // The container runs as an unprivileged uid (docker-compose.yml `user:`), so a
+    // root-owned 0600 file is unreadable: say who must own it.
+    const owner = code === 'EACCES' && process.getuid ? `; it must be owned by the server's user (uid ${process.getuid()}, ACB_UID), mode 600` : ''
+    return { ok: false, reason: 'kek-unreadable', detail: `BROKER_KEK_FILE cannot be opened (${code})${owner}` }
   }
   try {
     const st = fstatSync(fd)
