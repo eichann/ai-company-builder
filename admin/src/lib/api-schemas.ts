@@ -364,6 +364,7 @@ export const googleSchema = topLevel<GoogleAdminView>({
 })
 export const googleRelaySchema = topLevel<GoogleRelayAdminView>({
   available: bool, reason: nullableStr, services: list, capPerMemberPerDay: num, stopped: bool, members: list, records: list,
+  sharedDrives: optionalList,
 })
 export const slackSchema = topLevel<SlackAdminView>({
   vaultEnabled: bool, configured: bool, teamId: nullableStr, clientId: nullableStr, clientSecretLast4: nullableStr,

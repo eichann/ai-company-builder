@@ -33,7 +33,7 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, gmailCallAllowed, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, driveMetadataCallAllowed, gmailCallAllowed, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
@@ -65,7 +65,8 @@ export type GoogleStopReason =
   | 'picker-scope-too-wide'
   /**
    * A Gmail call ACB never makes (shared/core/google.ts `gmailCallAllowed`): anything with
-   * `gmail.modify` but the INBOX label on a thread or message, and any Gmail write but a send.
+   * `gmail.modify` but the INBOX label on a thread or message, and any Gmail write but a send;
+   * with `drive.metadata.readonly`, anything but one file's owner lookup (`driveMetadataCallAllowed`).
    */
   | 'call-not-allowed'
 
@@ -440,6 +441,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       if (!gmailCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, body: req.rawBody ? undefined : req.body })) {
         return notSent('call-not-allowed')
       }
+      // `drive.metadata.readonly` (the relay's owner lookup, B-H1) reads one file's owners, nothing else.
+      if (!driveMetadataCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, query: req.query })) return notSent('call-not-allowed')
       const isRead = req.method === 'GET'
       const body = req.rawBody ? req.rawBody.bytes : req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
       const contentType = req.rawBody ? req.rawBody.contentType : 'application/json'

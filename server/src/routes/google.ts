@@ -14,6 +14,8 @@
  *   GET    /google/relay                「本人の許可で中継する」: services, cap, stop, who allowed, records
  *   PUT    /google/relay                { services?, capPerMemberPerDay?, stopped? }
  *   PUT    /google/relay/members/:userId { stopped } — one member's relay
+ *   POST   /google/relay/shared-drives  { drive, name? } — a shared drive the relay may write into
+ *   DELETE /google/relay/shared-drives/:driveId
  *
  * Any member (the desktop app's 設定 → Google):
  *   GET    /me/google                   my permission: connected, account, what is allowed
@@ -100,5 +102,11 @@ googleRoute.put('/google/relay', companyMember, serviceBody, async (c) => answer
 
 googleRoute.put('/google/relay/members/:userId', companyMember, serviceBody, async (c) =>
   answer(c, await googleRelay.setMemberStopped(c.var.member, c.req.param('userId'), c.var.body)))
+
+googleRoute.post('/google/relay/shared-drives', companyMember, serviceBody, async (c) =>
+  answer(c, await googleRelay.addSharedDrive(c.var.member, c.var.body)))
+
+googleRoute.delete('/google/relay/shared-drives/:driveId', companyMember, async (c) =>
+  answer(c, await googleRelay.removeSharedDrive(c.var.member, c.req.param('driveId'))))
 
 googleRoute.get('/me/google/relay', companyMember, async (c) => answer(c, await googleRelay.my(c.var.member)))

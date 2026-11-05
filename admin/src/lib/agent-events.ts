@@ -88,6 +88,7 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'internal-address': '社内のアドレスへの送信',
   'over-cap': 'API キーの1日の上限',
   'no-deletion': '消す操作（中継では通さない）',
+  'outside-owner': '会社の外の人が持っている表への書き込み',
   'type-definition': '記録の型の定義（管理者だけ）',
   'skill-file': 'スキルのファイル（直せる人だけ）',
   'agent-config': 'AI の設定ファイル（管理者だけ）',
