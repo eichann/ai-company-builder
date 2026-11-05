@@ -73,7 +73,7 @@ export interface BrokerRelayDeps {
    * A connection managed by a connector plugin (plugins.md "The relay and a
    * managed connection"): null = not managed. Asked on every call.
    */
-  managedConnection?: (companyId: string, userId: string, service: string) => ManagedRelayPolicy | null
+  managedConnection?: (companyId: string, userId: string, service: string, host: string) => ManagedRelayPolicy | null
   /**
    * A service relayed with the member's own permission instead of a key (「本人の許可で中継する」:
    * `google`, services/google-relay.ts), or null. Its calls take the token's member only; no key
@@ -120,6 +120,8 @@ export interface ManagedRelayPolicy {
   mayRead: boolean
   /** The plugins' connections (logged with each call). */
   connectionIds: string[]
+  /** A contract-3 connector's service or host: nothing passes, whoever asks (plugins.md "Contract 3"). */
+  closed?: true
 }
 
 /** A path as a pattern for the log: outside ids (digits, long hex / uuid-like segments) become `{id}`. */
@@ -173,7 +175,7 @@ export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
   | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
-  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED' | 'ACB_KEY_NOT_CHOSEN'
+  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED' | 'ACB_CLOSED_TO_RELAY' | 'ACB_KEY_NOT_CHOSEN'
   // The person relay (google-relay.ts): a deletion, a call it does not pass, no permission of the member, Google off.
   | 'ACB_DELETE_REFUSED' | 'ACB_NOT_RELAYED' | 'ACB_GOOGLE_NOT_ALLOWED' | 'ACB_GOOGLE_OFF'
 
@@ -187,6 +189,7 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_READ_ONLY: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_MANAGED_BY_PLUGIN: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_READ_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_CLOSED_TO_RELAY: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_REDIRECT_REFUSED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
   ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
@@ -523,10 +526,11 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       // paths. Checked on every call, so an old token or consultation cannot write either, and
       // turning the plugin off does not bring writes back. Logged with the connection and the path
       // as a pattern (never a body or the key).
-      const managed = deps.managedConnection?.(grant.companyId, grant.userId, req.service) ?? null
+      const managed = deps.managedConnection?.(grant.companyId, grant.userId, req.service, host) ?? null
       if (managed) {
         meta.path = relayPathPattern(path.decoded)
         meta.connection = managed.connectionIds[0]
+        if (managed.closed) return jsonError(403, 'ACB_CLOSED_TO_RELAY', `${target.label} は、つなぎ先のプラグインの決まった呼び出しからだけ使えます（ここからは読めません）。`, grant)
         const reads = (req.method === 'GET' || req.method === 'HEAD' || (req.method === 'POST' && managed.searchPaths.includes(path.decoded)))
           && !req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n))
         if (!reads) return jsonError(403, 'ACB_MANAGED_BY_PLUGIN', `${target.label} の書き換えは、ACB のプラグインの決まった操作からだけ行えます（ここからは読むだけです）。`, grant)

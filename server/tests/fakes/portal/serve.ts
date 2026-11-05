@@ -5,7 +5,8 @@
  * value, never a real one. The server must run with
  * `ACB_ALLOW_FAKE_UPSTREAMS=1 ACB_FAKE_PORTAL_URL=http://127.0.0.1:4013 ACB_FAKE_PORTAL_HOST=<the declared host>`.
  * `FAKE_PORTAL_BASE_PATH` is the declared `base_url`'s path, `FAKE_PORTAL_ALIASES`
- * the declared paths this fake knows by another name.
+ * the declared paths this fake knows by another name, `FAKE_PORTAL_ENVIRONMENT` the
+ * environment it reports (`staging`, or `production` for a package stating that).
  *
  * Refuses to start under NODE_ENV=production: this is not part of the
  * production image (server/Dockerfile copies only server/src and shared).
@@ -25,7 +26,7 @@ if (!key.startsWith(FAKE_PORTAL_KEY_PREFIX)) {
   process.exit(1)
 }
 
-const fake = createFakePortal({ controlRoutes: true, rateLimit: true, basePath: process.env.FAKE_PORTAL_BASE_PATH, aliases: parsePortalAliases(process.env.FAKE_PORTAL_ALIASES) })
+const fake = createFakePortal({ controlRoutes: true, rateLimit: true, environment: process.env.FAKE_PORTAL_ENVIRONMENT === 'production' ? 'production' : 'staging', basePath: process.env.FAKE_PORTAL_BASE_PATH, aliases: parsePortalAliases(process.env.FAKE_PORTAL_ALIASES) })
 fake.addKey(key, Object.values(PORTAL_SCOPES))
 
 const server = serve({ fetch: fake.fetch, port, hostname: '127.0.0.1' }, info => {

@@ -87,6 +87,23 @@ export function stepAllowsOperation(step: Pick<PluginStep, 'tools'>, manifest: P
   return !asksFirst(op) || step.tools.includes('approvals')
 }
 
+/**
+ * May a step read through this contract-3 call: only a step a person started
+ * (`start: person`, "AI 単独では読めません"), with `plugin_operations`, and a call its
+ * plugin declared. The gate and the tool list both ask this.
+ */
+export function stepAllowsCall(step: Pick<PluginStep, 'tools' | 'start'>, manifest: Pick<PluginManifest, 'calls'>, call: string): boolean {
+  return step.start === 'person' && step.tools.includes('plugin_operations') && Object.prototype.hasOwnProperty.call(manifest.calls ?? {}, call)
+}
+
+/**
+ * The conversation an open execution run of this member works in (`ai_runs.conversation_id`): a token issued
+ * for it without `run` is still that run's turn, with no person there. The calls' gate and tool list ask this.
+ */
+export function inRunConversation(handle: Pick<CompanyData, 'aiRuns'>, userId: string, conversationId: string | null | undefined): boolean {
+  return !!conversationId && handle.aiRuns.openOf(userId).some(r => r.conversationId === conversationId)
+}
+
 /** May a step use a connector role (`mail.send`): declared as is, or the bare role (`mail`) for all its operations. */
 export function stepAllowsConnectorRole(step: Pick<PluginStep, 'connectorRoles'>, role: string): boolean {
   const bare = role.split('.')[0]
@@ -223,6 +240,21 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
   }
 
   /**
+   * The same gate for a contract-3 call, narrower on purpose: the AI never reads with no
+   * person present ("AI 単独では読めません"). An execution run is automatic whatever its step
+   * (a core step's, a `start: ai_turn` step's; `start: person` steps have no run), so a token
+   * bound to one is refused. What passes is a member's consultation, and a consultation of a
+   * `start: person` step when the step allows the call (`stepAllowsCall`).
+   */
+  async function callStepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, call: string) {
+    if (actor.kind !== 'ai') return null
+    if (actor.runId || inRunConversation(companyData.forCompany(member.companyId), member.userId, actor.conversationId)) return notInStep()
+    const bound = await boundStep(member, actor, pluginId)
+    if (bound === null) return null
+    return bound && stepAllowsCall(bound.step, bound.manifest, call) ? null : notInStep()
+  }
+
+  /**
    * The step a run-bound AI works in, for `pluginId`: null = not a business
    * plugin's step (a consultation, a core step); false = refused (another
    * plugin's, not running, the pinned version stopped).
@@ -314,7 +346,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, approvalStepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, callStepRefusal, approvalStepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

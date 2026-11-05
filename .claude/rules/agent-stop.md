@@ -52,6 +52,10 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   leave the relay alone; 「すべての鍵を止める」 stays separate. One optional dependency
   (`BrokerRelayDeps.companyStopped`, composed in `composition.ts`), one check after the token is
   validated. Test `server/tests/integration/broker-stop.test.ts` (mutation-checked).
+- **A connector's declared reads** (`services/plugin-calls.ts`, `plugins.md` "Contract 3"): an AI's read is
+  refused, and ended before its next attempt, by the company's or the member's stop of the whole AI and by a
+  stop of the `mcp-external` or `web` kind (`policyFor`), since it reaches a service outside. Test
+  `server/tests/integration/plugin-calls.test.ts`.
 - **Apps that do not follow the stop** (「停止に対応していないアプリ」): an app that follows it
   sends `X-ACB-Agent-Stop: 1` on `/me/agent-policy` and `/me/events`, recorded with its
   `X-ACB-Client-Version`. A member is counted when `client_activity` has a build for them and it

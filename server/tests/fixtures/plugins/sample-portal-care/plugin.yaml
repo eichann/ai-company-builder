@@ -11,6 +11,28 @@ roles:
   support: { label: 窓口の担当 }
 calls:
   diagnose: { who: ["role:support", ai] }
+  find_person: { who: ["role:support", ai] }
+  mail: { who: ["role:support"] }
+  pages: { who: ["role:support", admin, ai] }
   resend: { who: ["role:support", ai], decision: true }
+steps:
+  look_up:
+    label: 窓口で調べる
+    for: { type: inquiry, state: open }
+    start: person
+    procedure: { default: steps/look-up.md, overridable: false }
+    tools: [records, plugin_operations]
+  note_only:
+    label: メモだけ
+    for: { type: inquiry, state: open }
+    start: person
+    procedure: { default: steps/look-up.md, overridable: false }
+    tools: [records]
+  auto_look_up:
+    label: 自動で調べる
+    for: { type: inquiry, state: open }
+    start: ai_turn
+    procedure: { default: steps/look-up.md, overridable: false }
+    tools: [records, plugin_operations]
 events:
   recovered: { type: inquiry, match: person_ref, action: close_by_event }

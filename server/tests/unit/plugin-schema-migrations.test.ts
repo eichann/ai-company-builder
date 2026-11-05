@@ -127,3 +127,27 @@ describe('plugin_operations for creates (milestone 4)', () => {
     expect(() => op(conn, 'new-2', 'deal-b', null)).toThrow(/same company/)
   })
 })
+
+describe('the access log on a database made before it', () => {
+  const row = (conn: Database.Database, id: string, at: string) =>
+    conn.prepare("INSERT INTO plugin_access_log (id, company_id, plugin_id, call, user_id, actor_kind, refs, status, at) VALUES (?, 'a', 'p', 'c', 'u', 'human', '{}', 'ok', ?)").run(id, at)
+
+  it('starting the server adds the table and its guards, keeping every other row; again changes nothing', () => {
+    const conn = new Database(':memory:')
+    initDatabase(conn)
+    conn.exec('DROP TABLE plugin_access_log')
+    conn.prepare("INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES ('a', 'a', 'a', 'u', 'x', 'x')").run()
+    initDatabase(conn)
+    initDatabase(conn)
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM companies').get()).toEqual({ n: 1 })
+    row(conn, 'new', new Date().toISOString())
+    expect(() => conn.prepare("UPDATE plugin_access_log SET status = 'x'").run()).toThrow(/append-only/)
+    expect(() => conn.prepare("DELETE FROM plugin_access_log WHERE id = 'new'").run()).toThrow(/append-only/)
+    row(conn, 'old', new Date(Date.now() - 366 * 86_400_000).toISOString())
+    expect(conn.prepare("DELETE FROM plugin_access_log WHERE id = 'old'").run().changes).toBe(1)
+    // A company archived (cli/company-archive.ts) takes its rows with it.
+    conn.pragma('foreign_keys = ON')
+    conn.prepare("DELETE FROM companies WHERE id = 'a'").run()
+    expect(conn.prepare('SELECT COUNT(*) AS n FROM plugin_access_log').get()).toEqual({ n: 0 })
+  })
+})

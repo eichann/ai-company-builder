@@ -163,6 +163,29 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
         addHistory(history)
       })()
     },
+    addAccessLog(row) {
+      conn.prepare('INSERT INTO plugin_access_log (id, company_id, plugin_id, call, user_id, actor_kind, conversation_id, run_id, refs, status, dropped, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(row.id, companyId, row.pluginId, row.call, row.userId, row.actorKind, row.conversationId, row.runId, row.refs, row.status, row.dropped, row.at)
+    },
+    pruneAccessLog(keepFrom) {
+      return conn.prepare('DELETE FROM plugin_access_log WHERE company_id = ? AND at < ?').run(companyId, keepFrom).changes
+    },
+    countPaced(pluginId, userId, hour) {
+      conn.prepare(`INSERT INTO plugin_call_paced (company_id, plugin_id, user_id, hour, count) VALUES (?, ?, ?, ?, 1)
+        ON CONFLICT(company_id, plugin_id, user_id, hour) DO UPDATE SET count = count + 1`).run(companyId, pluginId, userId, hour)
+    },
+    paced(pluginId, fromHour) {
+      return (conn.prepare('SELECT user_id, hour, count FROM plugin_call_paced WHERE company_id = ? AND plugin_id = ? AND hour >= ? ORDER BY hour DESC, user_id')
+        .all(companyId, pluginId, fromHour) as Array<{ user_id: string; hour: string; count: number }>).map(r => ({ userId: r.user_id, hour: r.hour, count: r.count }))
+    },
+    prunePaced(beforeHour) {
+      conn.prepare('DELETE FROM plugin_call_paced WHERE company_id = ? AND hour < ?').run(companyId, beforeHour)
+    },
+    accessLog(pluginId, limit, before) {
+      return (conn.prepare(`SELECT id, plugin_id, call, user_id, actor_kind, conversation_id, run_id, refs, status, dropped, at FROM plugin_access_log WHERE company_id = ? AND plugin_id = ?${before ? ' AND (at < ? OR (at = ? AND id < ?))' : ''} ORDER BY at DESC, id DESC LIMIT ?`)
+        .all(companyId, pluginId, ...(before ? [before.at, before.at, before.id] : []), limit) as Array<{ id: string; plugin_id: string; call: string; user_id: string; actor_kind: 'human' | 'ai'; conversation_id: string | null; run_id: string | null; refs: string; status: string; dropped: number; at: string }>)
+        .map(r => ({ id: r.id, pluginId: r.plugin_id, call: r.call, userId: r.user_id, actorKind: r.actor_kind, conversationId: r.conversation_id, runId: r.run_id, refs: r.refs, status: r.status, dropped: r.dropped, at: r.at }))
+    },
     policyAcks(pluginId) {
       return (conn.prepare('SELECT plugin_id, field, property, acknowledged_by, acknowledged_at FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? ORDER BY field')
         .all(companyId, pluginId) as Array<{ plugin_id: string; field: string; property: string; acknowledged_by: string; acknowledged_at: string }>)

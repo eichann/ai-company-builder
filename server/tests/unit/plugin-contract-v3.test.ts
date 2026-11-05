@@ -40,7 +40,9 @@ function readPackage(name: string): Files {
   const types: Record<string, string> = {}
   if (existsSync(join(dir, 'types'))) for (const f of readdirSync(join(dir, 'types'))) types[f.replace(/\.md$/, '')] = readFileSync(join(dir, 'types', f), 'utf8')
   const mapping = existsSync(join(dir, 'mapping.yaml')) ? readFileSync(join(dir, 'mapping.yaml'), 'utf8') : null
-  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping }
+  const steps: Record<string, string> = {}
+  if (existsSync(join(dir, 'steps'))) for (const f of readdirSync(join(dir, 'steps'))) steps[`steps/${f}`] = readFileSync(join(dir, 'steps', f), 'utf8')
+  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping, steps }
 }
 const PORTAL = readPackage('sample-portal')
 const CARE = readPackage('sample-portal-care')
@@ -80,20 +82,20 @@ describe('plugin contract 3: what a connector declares', () => {
   it('reads every part of the sample connector', () => {
     const m = valid(PORTAL).manifest
     expect(m.contract).toBe(PLUGIN_CONTRACT_V3)
-    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment' })
+    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment', expectedEnvironment: 'staging' })
     expect(m.calling).toEqual({
       auth: { type: 'company_key', header: 'authorization', format: 'bearer', slots: ['read', 'act'] },
       actor: { memberHeader: 'X-ACB-Actor', emailHeader: 'X-ACB-Actor-Email' },
       limits: { perMinute: 60 },
-      errors: { map: { STATE_CHANGED: 'check_wait', BAD_INPUT: 'refused' } },
+      errors: { map: { STATE_CHANGED: 'unknown-result', INVALID_INPUT: 'bad-input', SCOPE_REQUIRED: 'permission', RATE_LIMITED: 'temporary' } },
       result: { path: '/operations/{id}', statusField: 'status', map: { done: 'applied', in_progress: 'pending', unknown_key: 'not_found' } },
       signature: { scheme: 'hmac_sha256_ts_body', header: 'X-Sample-Signature', timestampHeader: 'X-Sample-Timestamp', maxAge: '5m' },
     })
     expect(m.calls?.diagnose).toMatchObject({
       kind: 'read', path: '/people/{id}/diagnosis',
-      returns: { name: { dataClass: 'personal', keep: 'summary', outside: true }, history: { each: { note: { dataClass: 'sensitive', keep: 'none', outside: false } } } },
+      returns: { name: { dataClass: 'personal', keep: 'summary', outside: true }, findings: { each: { code: { dataClass: 'normal', keep: 'summary', outside: false } } } },
     })
-    expect(m.calls?.find_person).toMatchObject({ kind: 'search', items: 'people', inputs: { email: { dataClass: 'personal' } } })
+    expect(m.calls?.find_person).toMatchObject({ kind: 'search', items: 'results', inputs: { email: { dataClass: 'personal' } } })
     expect(m.calls?.resend).toMatchObject({ kind: 'act', nature: 'people', idempotency: { style: 'header' }, undo: 'none' })
     expect(m.calls?.pages).toMatchObject({ kind: 'document', page: { path: '/pages/{id}' }, list: { items: 'pages', cursor: { param: 'after', next: 'next_cursor' } }, search: { items: 'results' } })
     expect(m.polls?.events).toMatchObject({ path: '/events', items: 'events', typeField: 'type', every: '5m' })
@@ -133,7 +135,7 @@ describe('plugin contract 3: what a connector declares', () => {
     for (const contract of [1, 2]) {
       const text = errorsOf({ manifest: below(contract), types: {} })
       for (const key of ['auth', 'actor', 'limits', 'errors', 'result', 'calls', 'events', 'signature', 'polls']) expect(text, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
-      for (const key of ['id_field', 'environment_field']) expect(text).toContain(`${key} は contract: 3 の包みだけに書けます`)
+      for (const key of ['id_field', 'environment_field', 'expected_environment']) expect(text).toContain(`${key} は contract: 3 の包みだけに書けます`)
       const care = errorsOf({ ...CARE, manifest: CARE.manifest.replace('contract: 3', `contract: ${contract}`) })
       for (const key of ['calls', 'events']) expect(care, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
     }
@@ -187,13 +189,13 @@ describe('plugin contract 3: what a connector declares', () => {
     // Keys someone might reach for.
     expect(portalErrors('    kind: act\n', '    kind: act\n    when: amount\n')).toMatch(/「when」: 条件は書けません/)
     expect(portalErrors('    kind: read\n    path: "/people', '    kind: read\n    if: x\n    path: "/people')).toMatch(/「if」: 条件は書けません/)
-    expect(portalErrors('status: { class: normal, keep: summary }', 'status: { class: normal, keep: summary, expression: x }')).toMatch(/式は書けません/)
-    expect(portalErrors('status: { class: normal, keep: summary }', 'status: { class: normal, keep: summary, transform: upper }')).toMatch(/知らない項目「transform」/)
+    expect(portalErrors('checked_at: { class: normal, keep: none }', 'checked_at: { class: normal, keep: none, expression: x }')).toMatch(/式は書けません/)
+    expect(portalErrors('checked_at: { class: normal, keep: none }', 'checked_at: { class: normal, keep: none, transform: upper }')).toMatch(/知らない項目「transform」/)
     expect(portalErrors('    every: 5m\n', '    every: 5m\n    cron: x\n')).toMatch(/「cron」/)
     expect(portalErrors('    kind: act\n', '    kind: act\n    url: https://other.example\n')).toMatch(/送り先は base_url だけです/)
     // Values that try to be expressions.
     expect(portalErrors('status_field: status', 'status_field: "status.toUpperCase()"')).toMatch(/status_field は項目名/)
-    expect(portalErrors('STATE_CHANGED: check_wait', '"code > 400": check_wait')).toMatch(/外の言葉/)
+    expect(portalErrors('STATE_CHANGED: unknown-result', '"code > 400": check_wait')).toMatch(/外の言葉/)
     expect(portalErrors('items: events', 'items: "events[0]"')).toMatch(/items は項目名/)
     // Closed choices.
     expect(portalErrors('nature: people', 'nature: dangerous')).toMatch(/nature は internal \/ people \/ money \/ irreversible/)
@@ -201,7 +203,7 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('name: { class: personal,', 'name: { class: secret,')).toMatch(/class は normal \/ personal \/ sensitive/)
     expect(portalErrors('keep: summary, outside', 'keep: forever, outside')).toMatch(/keep は none \/ pointer \/ summary/)
     expect(portalErrors('outside: true', 'outside: maybe')).toMatch(/outside は true か false/)
-    expect(portalErrors('STATE_CHANGED: check_wait', 'STATE_CHANGED: ignore')).toMatch(/refused \/ retry_later \/ check_wait \/ needs_person/)
+    expect(portalErrors('STATE_CHANGED: unknown-result', 'STATE_CHANGED: ignore')).toMatch(/temporary \/ permission \/ bad-input \/ unknown-result/)
     expect(portalErrors('done: applied', 'done: finished')).toMatch(/applied \/ pending \/ failed \/ not_found/)
     expect(portalErrors('type: company_key', 'type: member_key')).toMatch(/auth の type は company_key/)
     expect(portalErrors('format: bearer', 'format: template')).toMatch(/format は bearer \/ plain/)
@@ -254,12 +256,12 @@ describe('plugin contract 3: what a connector declares', () => {
     const name = 'name: { class: personal, keep: summary, outside: true }'
     for (const key of ['"history/note"', '"history[*].note"', '"a.b"', '"*"', '"{entry}"']) expect(portalErrors(name, `${key}: { class: normal, keep: none }`), key).toMatch(/項目名です/)
     // A list is `each` with fixed fields, one level deep.
-    const note = '          note: { class: sensitive, keep: none }\n'
-    expect(portalErrors(note, '          "*": { class: sensitive, keep: none }\n')).toMatch(/each の「\*」は項目名です/)
-    expect(portalErrors(note, '          note:\n            each:\n              deep: { class: normal, keep: none }\n')).toMatch(/知らない項目「each」/)
+    const note = '          code: { class: normal, keep: summary }\n          summary: { class: normal, keep: summary }\n'
+    expect(portalErrors(note, '          "*": { class: normal, keep: none }\n')).toMatch(/each の「\*」は項目名です/)
+    expect(portalErrors(note, '          code:\n            each:\n              deep: { class: normal, keep: none }\n')).toMatch(/知らない項目「each」/)
     expect(portalErrors('        each:\n' + note, '        each: {}\n')).toMatch(/each は「項目/)
-    expect(portalErrors('      history:\n        each:\n' + note, '      history: { class: normal, keep: none, each: { note: { class: normal, keep: none } } }\n')).toMatch(/知らない項目「class」/)
-    expect(portalErrors('      history:\n        each:\n' + note, '      history: {}\n')).toMatch(/class は normal/)
+    expect(portalErrors('      findings:\n        each:\n' + note, '      findings: { class: normal, keep: none, each: { code: { class: normal, keep: none } } }\n')).toMatch(/知らない項目「class」/)
+    expect(portalErrors('      findings:\n        each:\n' + note, '      findings: {}\n')).toMatch(/class は normal/)
     // The other answer fields are one name too.
     expect(portalErrors('status_field: status', 'status_field: data.status')).toMatch(/status_field は項目名/)
     expect(portalErrors('items: events', 'items: data.events')).toMatch(/items は項目名/)
@@ -267,6 +269,8 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('next: next_cursor }', 'next: paging.next }')).toMatch(/param \/ next は項目名/)
     expect(portalErrors('id_field: account_id', 'id_field: data.id')).toMatch(/id_field は項目名/)
     expect(portalErrors('environment_field: environment', 'environment_field: data.env')).toMatch(/environment_field は項目名/)
+    // The environment a key must report is a plain name, so it can be compared as is.
+    expect(portalErrors('expected_environment: staging', 'expected_environment: "staging prod"')).toMatch(/expected_environment は環境の名前/)
     expect(portalErrors('      person_ref: { class: personal, keep: pointer }\n      kind:', '      data.ref: { class: personal, keep: pointer }\n      kind:')).toMatch(/fields の「data.ref」は項目名/)
   })
 
@@ -298,7 +302,7 @@ describe('plugin contract 3: what a connector declares', () => {
 
   it('an act can be told apart and never doubled: idempotency, the account, the key', () => {
     expect(portalErrors('    idempotency: { style: header }\n', '')).toMatch(/idempotency/)
-    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }\n', '')).toMatch(/account_info/)
+    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment, expected_environment: staging }\n', '')).toMatch(/account_info/)
     expect(portalErrors(', id_field: account_id', '')).toMatch(/id_field と environment_field/)
     expect(portalErrors(', environment_field: environment', '')).toMatch(/id_field と environment_field/)
     expect(portalErrors('auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }\n', '')).toMatch(/auth（鍵の渡し方）/)
@@ -306,6 +310,8 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('    label: もう一度送る\n', '')).toMatch(/label を書いてください/)
     // A read that takes nothing has nothing to keep; returns is an allow-list.
     expect(portalErrors('    returns:\n      state: { class: normal, keep: none }\n', '')).toMatch(/returns（受け取る項目）/)
+    // A cited field is one the page's answer keeps.
+    expect(portalErrors('cite: viewer_url', 'cite: ghost')).toMatch(/cite は page の returns/)
     // An act has no read-only twin: a read cannot carry what only an act may.
     expect(portalErrors('    kind: read\n    path: /status\n', '    kind: read\n    nature: people\n    path: /status\n')).toMatch(/知らない項目「nature」/)
     expect(portalErrors('    kind: search\n', '    kind: search\n    nature: people\n')).toMatch(/知らない項目「nature」/)
@@ -316,7 +322,7 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('      kind: { class: normal, keep: summary }\n', '      kind: { class: sensitive, keep: none }\n')).toMatch(/class: normal か keep: pointer/)
     expect(portalErrors('    every: 5m\n    fields:\n      person_ref: { class: personal, keep: pointer }', '    every: 5m\n    fields:\n      name: { class: personal, keep: summary }')).toMatch(/class: normal か keep: pointer/)
     // A call's answer is not limited: it was asked for, by someone allowed to.
-    expect(portalErrors('status: { class: normal, keep: summary }', 'status: { class: sensitive, keep: summary }')).toBe('')
+    expect(portalErrors('checked_at: { class: normal, keep: none }', 'checked_at: { class: sensitive, keep: summary }')).toBe('')
   })
 })
 
@@ -344,7 +350,7 @@ describe('plugin contract 3: what a business plugin declares', () => {
 
   it('a combined use has only the calls and events the business plugin declared, with its who', () => {
     const m = combined()
-    expect(Object.keys(m.calls ?? {}).sort()).toEqual(['diagnose', 'resend'])
+    expect(Object.keys(m.calls ?? {}).sort()).toEqual(['diagnose', 'find_person', 'mail', 'pages', 'resend'])
     expect(m.calls?.resend).toMatchObject({ kind: 'act', who: ['role:support', 'ai'], decision: true })
     expect(m.calls?.diagnose).toMatchObject({ who: ['role:support', 'ai'], decision: false })
     expect(Object.keys(m.events ?? {})).toEqual(['recovered'])

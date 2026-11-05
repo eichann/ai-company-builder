@@ -37,6 +37,10 @@ paths:
   - "server/tests/fakes/portal/**"
   - "server/src/services/plugin-operations.ts"
   - "server/src/services/plugin-operation-*.ts"
+  - "server/src/services/plugin-calls.ts"
+  - "server/tests/integration/plugin-calls.test.ts"
+  - "server/tests/unit/plugin-call-answer.test.ts"
+  - "server/src/lib/plugin-access-log-retention.ts"
   - "server/src/services/plugin-mapping-check.ts"
   - "server/tests/integration/plugin-mapping-check.test.ts"
   - "admin/src/app/companies/*/integrations/**"
@@ -345,19 +349,19 @@ conforms** (owner, 2026-11-05). New kinds go in a separate `calls` map beside `o
 a connector's objects, operations and fixed calls are untouched and **a call never reaches
 `manifest.operations`**: `plugins.aiTools` lists only that map and a released app's `pluginToolSpecs`
 sends any kind it does not know to its update tool (`combineUse` keeps them apart; `kind: act` in
-`operations` is refused). **Nothing runs these yet**: no route, no connector call, no AI tool
-(`PluginAiTools` gets its own `calls` list later). `signature`, `polls` and `events` stay declarations
-until then. Only keys present are parsed into the manifest (`calling`, `calls`, `events`, `polls`, all
+`operations` is refused); calls have their own list, `PluginAiTools.calls`. **`read`, `search` and
+`document` run** ("Reading through a call" below); `act`, `signature`, `polls` and `events` stay
+declarations. Only keys present are parsed into the manifest (`calling`, `calls`, `events`, `polls`, all
 optional), so older packages read exactly as before.
 
 ```yaml
 # connector
 contract: 3
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
-account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment, expected_environment: production }
 actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }
 limits: { per_minute: 60 }
-errors: { map: { STATE_CHANGED: check_wait } }
+errors: { map: { STATE_CHANGED: unknown-result } }
 result: { path: "/operations/{id}", status_field: status, map: { done: applied, in_progress: pending } }
 calls:
   diagnose:                # kind: read — GET, inputs in the query
@@ -379,6 +383,7 @@ calls:
   pages:                   # kind: document — page (required) and list GET, search POST
     label: 案内のページ
     kind: document
+    cite: viewer_url       # the field of page's answer holding the link to cite
     page: { path: "/pages/{id}", inputs: { id: { kind: id, class: normal } }, returns: { body: { class: normal, keep: pointer } } }
   resend:                  # kind: act — POST, inputs in the body
     label: もう一度送る
@@ -406,8 +411,8 @@ events:
   Unknown keys at every level make the package unusable.
 - **Every value is a closed choice or a plain name** (labels aside): no condition, computation or
   transformation (owner rule §8-1). `nature`: internal / people / money / irreversible. `class`: normal /
-  personal / sensitive. `keep`: none / pointer / summary. `errors.map` targets: `CALL_FAILURE_KINDS` (refused /
-  retry_later / check_wait / needs_person). `result.map` targets: `CALL_RESULT_STATES` (applied / pending /
+  personal / sensitive. `keep`: none / pointer / summary. `errors.map` targets: the core's failure classes (`CALL_FAILURE_KINDS` =
+  `AI_RUN_FAILURE_CLASSES`: temporary / permission / bad-input / unknown-result). `result.map` targets: `CALL_RESULT_STATES` (applied / pending /
   failed / not_found). Input `kind`: id / text / number / boolean / date. `undo`: none only.
 - **Paths**: the fixed calls' rule, unchanged (`checkPluginPathTemplate`): `{id}` the only placeholder, at
   most once (`result`: exactly once; a poll: none); what a call is about is fixed in the path. `{id}` is
@@ -428,7 +433,8 @@ events:
   fields: the content is read by a call, by someone allowed to.
 - **`calls` / `polls` need** `auth`, `actor` (`member_header` required; `email_header` optional; on a run
   with no member the header says `system`, `ACTOR_SYSTEM`, fixed) and `account_info` naming the account's
-  id and environment (`id_field`, `environment_field`). **An act** also needs `idempotency` (a lost answer
+  id and environment (`id_field`, `environment_field`); a call reads only when the package also states
+  the environment its key must report (`expected_environment`, a plain name). **An act** also needs `idempotency` (a lost answer
   must not double it). A call may not share an operation's or search's name (one tool name).
 - **Headers**: `auth.header` holds only the key. No other declared header may be it, `Authorization`,
   `Idempotency-Key`, one another, or one the way out owns (`RESERVED_HEADERS`: `Host`, `Cookie`, the
@@ -437,6 +443,85 @@ events:
   `decision` / reaction; a use of what the connector lacks → `connector-mismatch`, and an event's `match`
   must be a field of the event and of the event's `type`, its `action` an action of that type
   (`validatePluginPackage`). The connector's facts travel as `calling`; `polls` only with an event.
+### Reading through a call (`services/plugin-calls.ts`, `shared/core/plugin-call-answer.ts`)
+
+```
+POST /api/companies/:companyId/plugins/:pluginId/calls/:call   a person { part?, input?, cursor? }
+POST /api/records-ai/plugins/:pluginId/calls/:call             their AI (a read token is enough)
+GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
+```
+
+- **The gate**, each refusal sending nothing, in this order: a person is there (`callStepRefusal`), the
+  records switch, `active()`, the AI's stops, the call exists (own property), `who` (`mayRunAt`), the inputs
+  (declared names only, each of its `kind`: an id `EXTERNAL_ID_RE`, text 1–2000, a finite number, a date),
+  the cursor (only on a listing with one, `CALL_CURSOR_RE`), the member's share of the pace, the account.
+  Repeated before every attempt (`precheckFor` and the stops).
+- **"AI 単独では読めません"** (§6; `callStepRefusal`, owner rule): **no execution run reads** — a core step's
+  (auto-read minutes running as a role holder), a `start: ai_turn` step's, any token bound to a run, and a token
+  issued without `run` for the conversation of an open run of the member (`inRunConversation`,
+  `ai_runs.conversation_id`) → the one answer `NOT_IN_STEP`, and `aiTools` lists no call for either. A member's own consultation reads as `who`
+  allows; a consultation of a business plugin's step only when the step is `start: person`, has
+  `plugin_operations` and its plugin declared the call (`stepAllowsCall`, which the tool list asks too).
+  Narrower than an operation's gate on purpose.
+- **`who`**: `mayRunAt` resolves `role:` with the company's assignment. The AI passes only if its member
+  holds the role, and only where `ai` is listed. An owner is no holder unless `who` says `admin`. A member
+  removed from the company leaves every role (`companies.removeMember` → `pluginRoles.forgetMember`).
+- **The AI's stops** (`agent-stop.md`): the company's or the member's stop of the whole AI, and a stop of the
+  `mcp-external` or `web` kind, refuse an AI's read (`ACB_STOPPED`) and end it before its next attempt.
+  A person's read is not the AI's.
+- **The pace**: the connection's `limits.per_minute` (the connector waits up to 15 s, else `temporary`), and
+  each member's share, a quarter of it per minute: over it, 429 `CALL_PACED` before anything goes out, no log
+  line, and the refusal does not count (a looping AI cannot grow the log or starve the team). Each refusal adds
+  one to a count per member and hour (`plugin_call_paced`: member, hour, count; nothing of the read), shown as
+  `paced` with the access log for 30 days and gone after a year.
+- **`active()` needs no mapping** for a use of calls alone (no object, no operation).
+- **The account**: `account_info` read as `system`. The id and environment must be plain ids; the environment
+  must be the package's `expected_environment` (none stated → 409 `ENVIRONMENT_NOT_STATED`, another → 409
+  `ENVIRONMENT_MISMATCH`); the account is bound as `<id>.<environment>`, another one → 409 `ACCOUNT_CHANGED`.
+  A check stands 5 minutes per connection and key value (`<keyId>.<secretUpdatedAt>`): a replaced key is
+  checked at once.
+- **The way out** (`connector.callDeclared`): the id through `EXTERNAL_ID_RE`, the key revealed before each
+  attempt and only into `auth.header`, the pace of `limits`, read retries as for any read. Every read sends
+  the actor header `acb_member_<id>` (`system` on the account check) and the email header only with the
+  member's own active Google grant's address, when it is one.
+- **What comes back** (`keepDeclared`): only what `returns` names, one plain value each (an object, a list or a
+  number that is not finite in a plain field is dropped); everything else is left out and counted (`dropped`).
+  **Every string but a plain id is wrapped** as outside text (`CALL_OUTSIDE_HEADER` / `_FOOTER`,
+  `findInstructionLikeText`, a flag never a filter), whatever its class: a normal title or page text is the
+  service's writing too. A plain id (`EXTERNAL_ID_RE`) stays plain unless `outside: true`. Inside the wrapper
+  `【` `】` become `〔` `〕`, so no text closes it (`wrapper-spoof` flags a try), and a text is cut at
+  `CALL_TEXT_MAX` (20 000), saying so. A list's `next` only in `CALL_CURSOR_RE`, else null and counted. A page's
+  `cite` link only when https on the declared host and its default port, no user, ≤ 2000 as handed on (encoded); the field it came from is not also handed
+  on. A sensitive field reaches only whoever passes the `who` of the call declaring it. **Nothing of an answer
+  is stored**: not in the ledger, an operation row or the log.
+- **A failure** is `{ outcome: 'failed', failure, code? }`: `failure` is a core class, from `errors.map` for
+  the answer's top-level `code` (a plain word, else none), else by status (401 / 403 permission, other 4xx
+  bad-input, rest temporary).
+- **`plugin_access_log`** (company handle): one line per read that went out (`onSend`), however it ended — a
+  read stopped before its next attempt too (`status: stopped`); nothing went out, no line. Member, actor kind,
+  the AI's conversation and run (a person's row keeps none: their app's conversation id is self-reported), call, `refs` `{ input, returned, more }`: the plain id inputs (`kind: id`, `class:
+  normal`), and the ids handed back (`pointersOf`: each `keep: pointer`, not sensitive, plain-id value, ≤ 200,
+  `more` past that) — so it answers who read whom; never a search word, an answer or a key. Written before the
+  answer is handed back: a read that cannot be logged is not shown. Append-only: triggers refuse UPDATE, and
+  DELETE of a row under a year old while its company exists (archiving a company still cascades). Rows go
+  after a year, by a daily job (`lib/plugin-access-log-retention.ts`, as mail bodies'). `GET access-log` pages
+  newest first: `?limit=` ≤ 200, `?before=` the previous page's `next`. An AI's read also goes to the AI
+  action log (`recordServerEvent`).
+- **The relay is closed**, reads too, by the **package on the company's shelf** (not by an install), by its
+  service id and by its host (case-insensitive): `relayPolicy` answers `closed` and the relay 403
+  `ACB_CLOSED_TO_RELAY` for anyone, nothing sent — also for a generic service written before the package
+  reached the shelf, or under another id at the same host; `PUT /broker/relay-services/:service` is 409
+  `SERVICE_CLOSED_TO_RELAY` by service id or host. No read scope is seeded or needed to turn it on.
+- **The app**: `pluginCallToolSpecs` (`client/electron/records/tools.ts`), one read tool per call, a document
+  one per part (`<plugin>__<call>_<part>`), for every agent; `cursor` only where the listing has one
+  (`PluginAiCall.cursor`) and in `CALL_CURSOR_RE`. Listed only when the member's AI passes `who` now
+  (`plugins.useCallAccess`) and the step allows it; the gate still decides each call.
+- Known gap: the practice redirect checks the usual credential headers only, so a key in a custom
+  `auth.header` is not checked for being a practice key there.
+- Test: `tests/integration/plugin-calls.test.ts` against the fake portal, `tests/unit/plugin-call-answer.test.ts`,
+  `plugin-schema-migrations.test.ts` (the log on an existing database), permission matrix rows + `CROSS`,
+  `client/tests/plugin-tools.test.ts`. Mutation-checked with the survivors named in the PR.
+
 - **A released app** keeps working: `pluginsFor` lists a contract-3 business plugin, the fingerprint
   matches, and its older `parsePluginManifest` does not know contract 3, so `screensOfPackage` shows
   no screens for it until the app is updated.
@@ -447,7 +532,7 @@ events:
   private kit config's `portal` line gives them (`ACB_FAKE_PORTAL_HOST` / `_SERVICE`, `FAKE_PORTAL_BASE_PATH`,
   `FAKE_PORTAL_ALIASES`); without it the fake stands in for the fixture's made-up host.
 - Test: `tests/unit/plugin-contract-v3.test.ts` with `fixtures/plugins/sample-portal` and
-  `sample-portal-care` — each guard mutation-checked.
+  `sample-portal-care`.
 
 ## Handing packages to the app (plan C2 「配る道」)
 

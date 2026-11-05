@@ -28,6 +28,8 @@ export interface PluginRoleRepository {
   assign(pluginId: string, role: string, userIds: string[], at: string, by: string): void
   /** Set (userIds) or remove (null) a まとまり's override (and write its history line). */
   setOverride(pluginId: string, role: string, bundleId: string, userIds: string[] | null, at: string, by: string): void
+  /** A member left: out of every assignment and override of the company (a history line each), so coming back gives nothing back. An override left empty stays: nobody, not the company's. */
+  forgetMember(userId: string, at: string, by: string): void
   /** History, newest first. */
   history(pluginId: string, limit: number): PluginRoleHistoryRow[]
 }

@@ -30,6 +30,8 @@
  *   (a field or create needing approval → 202 { outcome: 'approval-requested', approval }: routes/approvals.ts)
  *   (conversationId / proposedBy: informational provenance the app reports, never authorizing — records.md)
  *   GET  /plugins/:pluginId/operations/:operationId                   an operation record (its record's readers)
+ *   POST /plugins/:pluginId/calls/:call                               a contract-3 read { part?, input?, cursor? } (`who` decides)
+ *   GET  /plugins/:pluginId/access-log                                who read what through its calls (owner / admin; ?before=<next>&limit=<n>)
  *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only) { conversationId?, proposedBy? }
  *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost (a create: look it up by its correlation value)
  * Creates (milestone 4): log_meeting goes through the record route above ({ title, body?, at, outcome?, note? } on the deal);
@@ -145,6 +147,14 @@ pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', 
   // A field or create that needs approval makes an approval request instead (202; approvals.md).
   return accepted(c, await approvals.runOrRequest(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
 })
+
+// A contract-3 connector's read, by a person (plugins.md "Contract 3"): `who` decides; every read is logged.
+pluginsRoute.post('/plugins/:pluginId/calls/:call', companyMember, serviceBody, async (c) => {
+  const body = c.var.body
+  return answer(c, await services.pluginCalls.read(c.var.member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('call'), body))
+})
+
+pluginsRoute.get('/plugins/:pluginId/access-log', companyMember, (c) => answer(c, services.pluginCalls.accessLog(c.var.member, c.req.param('pluginId'), { before: c.req.query('before'), limit: c.req.query('limit') })))
 
 pluginsRoute.post('/plugins/:pluginId/create/:operation', companyMember, serviceBody, async (c) => {
   const member = c.var.member
