@@ -24,20 +24,47 @@ const authDb = new Database(join(testDataDir, 'auth.sqlite'))
 authDb.exec(`
   CREATE TABLE IF NOT EXISTS user (
     id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
     email TEXT NOT NULL,
-    name TEXT,
+    emailVerified INTEGER NOT NULL DEFAULT 0,
     image TEXT,
-    emailVerified INTEGER DEFAULT 0,
-    createdAt TEXT,
-    updatedAt TEXT
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE IF NOT EXISTS session (
     id TEXT PRIMARY KEY,
-    userId TEXT NOT NULL,
     token TEXT NOT NULL UNIQUE,
     expiresAt TEXT NOT NULL,
     ipAddress TEXT,
     userAgent TEXT,
+    userId TEXT NOT NULL,
+    createdAt TEXT NOT NULL DEFAULT (datetime('now')),
+    updatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- The shape of production's auth.sqlite (Better Auth 1.7 validates the schema
+  -- and refuses all auth when a table or column is missing): account carries a
+  -- legacy expiresAt, and account / verification have nullable timestamps.
+  CREATE TABLE IF NOT EXISTS account (
+    id TEXT PRIMARY KEY,
+    accountId TEXT NOT NULL,
+    providerId TEXT NOT NULL,
+    userId TEXT NOT NULL,
+    accessToken TEXT,
+    refreshToken TEXT,
+    idToken TEXT,
+    expiresAt TEXT,
+    password TEXT,
+    accessTokenExpiresAt TEXT,
+    refreshTokenExpiresAt TEXT,
+    scope TEXT,
+    createdAt TEXT,
+    updatedAt TEXT
+  );
+  CREATE TABLE IF NOT EXISTS verification (
+    id TEXT PRIMARY KEY,
+    identifier TEXT NOT NULL,
+    value TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
     createdAt TEXT,
     updatedAt TEXT
   );

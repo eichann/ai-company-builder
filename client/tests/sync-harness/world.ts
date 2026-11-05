@@ -820,6 +820,8 @@ export class Member {
         appGitDir: world.appGitDir,
         baseEnv: world.env(),
         envOverrides: {
+          // The bundled git's override (app-git.ts) goes through the same factory.
+          GIT_EXEC_PATH: gitExecPath(),
           // What git-http.ts sets for the hook from the authenticated session.
           ACB_PUSHER_ROLE: role,
           ACB_PUSHER_ID: `user-${name}`,
@@ -1362,4 +1364,10 @@ export class Member {
   hasPendingPush(): boolean {
     return fs.existsSync(path.join(this.dir, '.git', 'PENDING_PUSH'))
   }
+}
+
+let execPath: string | undefined
+/** `git --exec-path` of the git the harness runs (what app-git.ts sets for the bundled git). */
+function gitExecPath(): string {
+  return (execPath ??= execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim())
 }

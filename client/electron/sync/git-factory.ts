@@ -90,6 +90,8 @@ export function createConfiguredGit(repoPath: string, options: GitFactoryOptions
       allowUnsafeAskPass: true,
       allowUnsafeCredentialHelper: true,
       allowUnsafeTemplateDir: true,
+      // GIT_EXEC_PATH: the bundled git's own libexec directory (app-git.ts).
+      allowUnsafeExec: true,
       // Only for a host that supplies its own base environment (the sync
       // harness points GIT_CONFIG_GLOBAL at a test file). The default
       // environment drops such keys (ambientEnv), so the app never needs it.
@@ -154,10 +156,16 @@ function configEntries(options: GitFactoryOptions, hooksDir: string): string[] {
  * must neither make every sync fail nor steer the app's git; the keys the app
  * needs (GIT_ASKPASS, GIT_EDITOR, GIT_EXEC_PATH, ...) are set explicitly.
  */
-function ambientEnv(): NodeJS.ProcessEnv {
+export function ambientEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(process.env)) {
-    if (/^(GIT_|EDITOR$|VISUAL$|PAGER$|SSH_ASKPASS$|SSH_ASKPASS_REQUIRE$)/i.test(key)) continue
+    // GIT_SSL_CAINFO / GIT_SSL_CAPATH stay: a company's HTTPS-intercepting proxy needs them.
+    if (/^GIT_SSL_(CAINFO|CAPATH)$/i.test(key)) {
+      env[key] = value
+      continue
+    }
+    // PREFIX is read as a config path by simple-git 4, and a member's own value must not break sync.
+    if (/^(GIT_|EDITOR$|VISUAL$|PAGER$|PREFIX$|SSH_ASKPASS$|SSH_ASKPASS_REQUIRE$)/i.test(key)) continue
     env[key] = value
   }
   return env
