@@ -1,7 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { autoSync } from '../api'
 import { autoSyncNoticeFor, type SyncNotice } from '../model'
-import { afterSync, recordRun, runDueNow, syncButtonTitle } from '../autoSyncSchedule'
+import { afterReceive, afterSync, recordRun, runDueNow, syncButtonTitle } from '../autoSyncSchedule'
 import { readAutoSyncState, updateAutoSyncState, useAutoSyncState } from '../autoSyncState'
 import { autoSyncSettings } from '../../../shared/lib/autoSyncSettings'
 import { hasUnsavedEdits } from '../../../shared/lib/unsavedEdits'
@@ -68,7 +68,13 @@ export function useAutoSync({ rootPath, companyId, isSyncing, setIsSyncing, show
           return
         }
         if (answer.status === 'received') {
-          updateAutoSyncState(company, s => ({ ...recordRun(s, 'receive', 'ran', now), lastAutoSyncAt: now }))
+          let notice: SyncNotice | null = null
+          updateAutoSyncState(company, s => {
+            const next = afterReceive(s, answer.result, now)
+            notice = next.notice
+            return next.state
+          })
+          if (notice) latest.current.showNotice(notice)
           if (answer.result.received > 0) await latest.current.onSynced()
           return
         }

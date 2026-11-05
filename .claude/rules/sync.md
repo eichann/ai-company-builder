@@ -90,15 +90,18 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
      the shared .gitignore; large-files.ts, details below). Runs after 5, so a repository kept
      local is already ignored and never named
 6    git fetch --progress origin
+6.35 a file origin/main changed that another app has open here (an office lock file next to it,
+     open-files.ts) → ask before anything changes; default 「同期をやめる」 stops with `file_open`
+     (sync-guards.md "Files open in another app")
 6.5  hold back files created in not-downloaded folders → .backups/<ts>_outside_checkout/
 6.3  company repo: stop (nothing changed) if origin/main turned a readable private folder or an
      ancestor of it into a file or symlink
 6.6  company repo: new files under a name the member may not use → .backups/<ts>_reserved_path/
 7    reconcile the sparse checkout with the member's exclusions (download-choices.md)
 8    warn about files deleted locally (sync / restore / cancel)
-9    keep the app's temporary save files ignored (.git/info/exclude block) → git add --sparse .
-     → unstage anything under .backups/, .workspace/ or a private folder, and any temporary
-     save file (index only) → commit (AI message, below) → record localHash
+9    keep the app's temporary save files and office lock files ignored (.git/info/exclude blocks) → git add --sparse .
+     → unstage anything under .backups/, .workspace/ or a private folder, any temporary
+     save file and any new office lock file (index only) → commit (AI message, below) → record localHash
 9.5  files at paths of a locally excluded nested repo that origin/main now has (a teammate's
      same-path folder) and that differ → copied to .backups/<ts>_nested_repo/ (the pull would
      overwrite them: they are ignored); a failed check stops before the pull. The same for
@@ -181,7 +184,7 @@ tracked. The sync message still counts the newly ignored files. Threshold:
   retry or a revert on top would fail forever. Push is attempted whenever commits are unpushed.
 - Result fields: `errorType` is one of `network`, `auth`, `conflict`, `locked`, `push_failed`,
   `protected_config`, `write_denied`, `personal_path`, `local_only_path`, `reserved_path`,
-  `needs_member` (automatic send), `unknown` (`SyncErrorType` in the IPC contract names them all
+  `needs_member` (automatic send), `file_open` (with `openFiles`; not a stop of automatic sync), `unknown` (`SyncErrorType` in the IPC contract names them all
   and still accepts another string from an older or newer app). Private folders add
   `privateFolders` (per folder), `newPrivateFolders`, `lostPrivateFolders`, `madePublicFolders`;
   a failed private folder makes the whole result `success: false` with
@@ -240,7 +243,9 @@ both only while the app is open:
   server changed is also changed locally (edited, staged, deleted, new), a path the server adds
   already exists on disk (an ignored file, a private clone, an excluded nested repository — git
   overwrites ignored files silently) or a folder on its way is a file / link, or a changed path in
-  a not-downloaded folder exists on disk. Changes that touch none of the member's paths arrive
+  a not-downloaded folder exists on disk, or a changed path is open in another app (Excel…:
+  `openFiles` in the result, the renderer says it once per set of files, `receiveNoticeFor`).
+  Changes that touch none of the member's paths arrive
   even while the member has other local edits. `merge --ff-only` refusing is a second line.
 - **自動で送る** — default off; at set times (default 12:00 and 18:00, editable) or every
   30 / 60 / 120 min. The normal sync (`gitSync(…, { auto: true })`, every step above, conflicts

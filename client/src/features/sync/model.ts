@@ -1,5 +1,6 @@
 // What the member is told after 「サーバーと同期」, from what sync reported.
 import type { GitResult } from '../../../shared/ipc-contract'
+import type { ReceiveResult } from '../../../shared/auto-sync'
 
 export interface SyncNotice {
   type: 'success' | 'warning' | 'error'
@@ -141,4 +142,22 @@ export function syncNoticeHidesItself(result: GitResult): boolean {
  */
 export function autoSyncNoticeFor(result: GitResult, showFailure: boolean): SyncNotice | null {
   return setSomethingAside(result) || (!result.success && showFailure) ? syncNoticeFor(result) : null
+}
+
+/**
+ * What 「自動で受け取る」 says when a file a teammate changed is open in
+ * another app here (Excel…): nothing was received for that folder, and it
+ * arrives once the file is closed. `shownFor` is the set already shown (its
+ * key): the same files are said once, not at every run.
+ */
+export function receiveNoticeFor(result: ReceiveResult, shownFor: string | null): { notice: SyncNotice | null; key: string | null } {
+  const files = result.openFiles ?? []
+  if (files.length === 0) return { notice: null, key: null }
+  const key = [...files].sort().join('\n')
+  if (key === shownFor) return { notice: null, key }
+  const names = files.slice(0, 3).map(f => `『${f}』`).join('、') + (files.length > 3 ? ` ほか${files.length - 3}件` : '')
+  return {
+    notice: { type: 'warning', message: `${names}をほかのアプリで開いたままなので、ほかの人の変更をまだ受け取っていません。ファイルを閉じると、次の自動受け取りで最新にします。` },
+    key,
+  }
 }

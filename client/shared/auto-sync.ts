@@ -69,6 +69,8 @@ export interface ReceiveResult {
   heldBack: number
   /** The company repository's server could not be reached: nothing was checked. */
   offline?: boolean
+  /** Company-relative files a teammate changed that another app (Excel…) has open: their repository waits until they are closed. */
+  openFiles?: string[]
 }
 
 export type AutoSyncResult<SyncResult> =

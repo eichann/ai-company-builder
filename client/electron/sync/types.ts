@@ -6,6 +6,7 @@ import type { SimpleGit } from 'simple-git'
 import type { MyScopesResponse } from '../../../shared/types/private-folders'
 import type { PathCheckResult } from './path-check'
 import type { SkillSharing } from '../../shared/skill-leftovers'
+import type { OfficeLockProbe } from './open-files'
 
 /** The questions sync asks the member. */
 export interface SyncDialog {
@@ -26,6 +27,12 @@ export interface SyncDialog {
   confirmProtectedConfigRestore(files: string[]): Promise<'restore' | 'cancel'>
   /** The server rejected changes in a folder the member may not edit. */
   confirmWriteDeniedRestore(files: string[]): Promise<'restore' | 'cancel'>
+  /**
+   * Teammates changed files another app (Excel, Word…) has open on this
+   * computer. 'wait' (default): nothing changes, the sync stops; 'continue':
+   * the member says they are closed (a lock file left by a crash), sync goes on.
+   */
+  confirmOpenFiles(files: string[]): Promise<'wait' | 'continue'>
 }
 
 /** Server calls sync makes. Network failures throw; sync logs and moves on. */
@@ -73,6 +80,8 @@ export interface SyncDeps {
   log: SyncLogger
   /** The app's long git outside sync's lock (download choices, private-folder setup) or an AI turn is running: a lock on disk may be theirs. `ownActivity`: the caller runs inside that activity, so only the AI counts. */
   otherGitRunning?(options?: { ownActivity?: boolean }): boolean
+  /** Tells a live office lock file from one a crash left (./open-files.ts). Default: boot time only. */
+  officeLockProbe?: OfficeLockProbe
   /** Bytes above which a file is auto-ignored (step 4). Default 100 MB; tests lower it. */
   largeFileThreshold?: number
 }

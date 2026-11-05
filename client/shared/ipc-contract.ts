@@ -204,7 +204,7 @@ export interface EnvStatusResult {
  */
 export type SyncErrorType =
   | 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied'
-  | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'unknown'
+  | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'file_open' | 'unknown'
   // Older or newer apps may send others; readers treat an unknown one as a plain failure.
   | (string & Record<never, never>)
 
@@ -231,6 +231,8 @@ export interface GitResult {
   nestedRepoBackupFiles?: string[]
   nestedRepoBackupPath?: string
   errorType?: SyncErrorType
+  // file_open: files a teammate changed that another app (Excel…) has open here; nothing was replaced
+  openFiles?: string[]
   secretDetected?: boolean
   // Agent-execution config paths (.claude/settings.json, .mcp.json, ...) the
   // server refused because only an owner/admin may change them

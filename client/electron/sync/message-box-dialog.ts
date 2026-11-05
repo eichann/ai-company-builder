@@ -4,6 +4,7 @@
 
 import type { SyncDialog } from './types'
 import { SKILL_FILES_REASON, onlySkillFiles } from '../protected-config'
+import { openFilesList } from './open-files'
 
 /** The subset of Electron's MessageBoxOptions that sync uses. */
 export interface SyncMessageBoxOptions {
@@ -110,6 +111,22 @@ export function createMessageBoxSyncDialog(host: MessageBoxHost): SyncDialog {
         detail: `次のファイルは、あなたに編集する権限がないフォルダにあります。これらの変更は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n・「元に戻して残りを同期」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\n編集が必要な場合は、そのフォルダの管理者に権限を依頼してください。`,
       })
       return response === 1 ? 'cancel' : 'restore'
+    },
+
+    // Files open in Excel, Word… that a teammate changed (./open-files.ts).
+    // The default changes nothing: replacing an open file lets the app save
+    // its old copy over the teammate's version later.
+    async confirmOpenFiles(openFiles) {
+      const { response } = await host.showMessageBox({
+        type: 'warning',
+        buttons: ['同期をやめる（おすすめ）', '閉じたので続ける'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'ほかのアプリで開いているファイルがあります',
+        message: 'ほかの人が変更したファイルを、Excel などのアプリで開いたままにしています。',
+        detail: `${openFilesList(openFiles)}\n\n開いたまま最新の内容に置き換えると、アプリが前の内容で保存したときに、ほかの人の変更が消えてしまいます。\n\n・「同期をやめる」: 何も変更せずに同期を中止します。ファイルを閉じてから、もう一度同期してください（変更はこのPCに残ります）\n・「閉じたので続ける」: ファイルをもう閉じているときだけ選んでください。最新の内容に置き換えます。このPCで変更していた内容は .backups/ に保存されます`,
+      })
+      return response === 1 ? 'continue' : 'wait'
     },
   }
 }
