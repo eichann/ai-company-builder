@@ -267,8 +267,12 @@ describe('Gmail → ACB: the mail left its owner\'s inbox', () => {
     // To Alice, but listed by Bob's poll (he was in CC): Alice's record, Bob's pointer.
     const { msg, id } = await aliceMail({ cc: [{ address: 'bob@acme.example' }] }, 'u-bob')
     expect(handle().records.byIds([id])[0].personalOwner).toBe('u-alice')
+    // Both read their mail: Alice's look names the same thread id (pointers are per mailbox).
+    inbox.connect('a', 'u-alice', 'email')
+    await inbox.poll('a', 'u-alice')
     await archivedInMailbox('u-bob', msg.threadRef!)
     await archivedInMailbox('u-alice', msg.threadRef!)
+    expect(looks.some(l => l.userId === 'u-alice' && l.cursor !== null)).toBe(true)
     expect(stateOf(id).state).toBe('received')
   })
 
@@ -506,5 +510,20 @@ describe('review of #607 (2): what one close took out is what its undo puts back
     expect(archiveCalls).toEqual([{ userId: 'u-alice', refs, back: false }, { userId: 'u-alice', refs, back: true }])
     expect(ledger(first.id).some(e => e.action === 'archived_there')).toBe(false)
     expect(notices().filter(n => n.kind === 'mail_archived')).toEqual([])
+  })
+
+  it('a later message of her thread read from Bob\'s mailbox is never archived with her permission', async () => {
+    archiveAllowed.add('u-alice')
+    const first = await aliceMail()
+    // Their reply To Alice, CC Bob, listed first by Bob's poll: it joins her record with his pointer.
+    inbox.connect('a', 'u-bob', 'email')
+    const viaBob = mail({ references: [first.msg.messageId], threadRef: first.msg.threadRef, cc: [{ address: 'bob@acme.example' }], occurredAt: '2026-11-02T00:40:00.000Z' })
+    mailbox['u-bob'] = [viaBob]
+    await inbox.poll('a', 'u-bob')
+    expect(handle().inbox.messagesOf(first.id).map(x => x.sourceRef)).toContain(viaBob.sourceRef)
+    unsure(first.id)
+    ok(await engine.act(m('u-alice'), person('u-alice'), first.id, 'settle', { expectedVersion: stateOf(first.id).version }))
+    await inbox.whenIdle()
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [first.msg.sourceRef], back: false }])
   })
 })
