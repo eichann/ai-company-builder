@@ -614,15 +614,38 @@ describe('Google relay: writes only into sheets owned inside the company (B-H1)'
     expect(events.every(e => e.g === 'outside-owner')).toBe(true)
   })
 
-  it('a sheet in a shared drive (Drive names no owner): a write is refused, a read passes', async () => {
+  it('a sheet in a shared drive: refused until an owner/admin registers that drive for this company; another company\'s registration does not count', async () => {
+    const DRIVE = 'fake-shared-drive-0001'
     const { token } = await tokenFor('r-sato')
+    const put = (v: string) => script(token!, 'PUT', `${values(SHARED_DRIVE, '一覧!A2')}?valueInputOption=RAW`, { values: [[v]] })
     expect((await script(token!, 'GET', values(SHARED_DRIVE, '一覧!A1'))).status).toBe(200)
-    const r = await script(token!, 'PUT', `${values(SHARED_DRIVE, '一覧!A2')}?valueInputOption=RAW`, { values: [['X-3']] })
+    const r = await put('X-3')
     expect(r.status).toBe(403)
     expect(r.body.error.code).toBe('ACB_OUTSIDE_SHEET')
-    expect(r.body.error.message).toContain('共有ドライブ')
+    expect(r.body.error.message).toContain('会社に登録されていない共有ドライブ')
+    expect(r.body.error.message).toContain('管理者に')
     expect(writesTo(SHARED_DRIVE)).toBe(0)
-    expect(rows(SHARED_DRIVE)).toEqual([['案件', '状態']])
+    // Another company registering the same drive id changes nothing here.
+    expect((await call('r-other-owner', 'POST', `${C(OTHER)}/google/relay/shared-drives`, { drive: DRIVE })).status).toBe(200)
+    expect((await put('X-3')).body.error.code).toBe('ACB_OUTSIDE_SHEET')
+    // A member cannot register one; a bad address is refused.
+    expect((await call('r-sato', 'POST', `${C()}/google/relay/shared-drives`, { drive: DRIVE })).status).toBe(403)
+    expect((await call('r-owner', 'POST', `${C()}/google/relay/shared-drives`, { drive: 'https://evil.example/drive/folders/fake-shared-drive-0001' })).body.code).toBe('BAD_DRIVE')
+    expect(writesTo(SHARED_DRIVE)).toBe(0)
+    // The owner registers it by its address: writes pass.
+    const added = await call('r-owner', 'POST', `${C()}/google/relay/shared-drives`, { drive: `https://drive.google.com/drive/u/0/folders/${DRIVE}?usp=sharing`, name: '営業部の共有ドライブ' })
+    expect(added.status, JSON.stringify(added.body)).toBe(200)
+    expect(added.body.data.sharedDrives).toMatchObject([{ driveId: DRIVE, name: '営業部の共有ドライブ', addedBy: 'r-owner' }])
+    const ok = await put('X-3')
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200)
+    expect(rows(SHARED_DRIVE)[1]).toEqual(['X-3'])
+    // Removed: refused again at once (no cached answer outlives it).
+    expect((await call('r-owner', 'DELETE', `${C()}/google/relay/shared-drives/${DRIVE}`)).body.data.sharedDrives).toEqual([])
+    expect((await put('X-4')).body.error.code).toBe('ACB_OUTSIDE_SHEET')
+    expect(rows(SHARED_DRIVE)[1]).toEqual(['X-3'])
+    // Both changes are in the company's Google history, with who did it.
+    const history = db.prepare("SELECT by_user AS by, change FROM connector_history WHERE company_id = ? AND action = 'relay-drive' ORDER BY at").all(CO) as Array<{ by: string; change: string }>
+    expect(history.map(h => [h.by, JSON.parse(h.change).added])).toEqual([['r-owner', true], ['r-owner', false]])
   })
 
   it('the Drive metadata permission sends nothing but one file\'s owner lookup (the Google client\'s guard)', async () => {

@@ -128,18 +128,37 @@ export type SheetsRefusal =
  * anything in the sheet are written by whoever owns it, so they are never read for this.
  * - `inside`: in a member's My Drive, every owner's address is `…@<domain>` (exactly; another
  *   domain of the same Workspace counts as outside — fail closed);
- * - `shared-drive`: in a shared drive (`driveId`; Drive names no owner there). Which organization a
- *   shared drive belongs to cannot be read with the member's permission, so a write is refused;
+ * - `shared-drive`: in a shared drive (`driveId`; Drive names no owner there) the company has not
+ *   registered. Which organization a shared drive belongs to cannot be read with the member's
+ *   permission, so only the drives an owner/admin registered (`sharedDrives`, owner decision
+ *   2026-11-05) count as the company's — a sheet in one of them is `inside`;
  * - `outside`: an owner of another domain, or no owner address at all (Google hides an outside
  *   owner's address in some cases), or an answer that is not Drive's shape.
  */
+/** How many shared drives a company may register for relay writes, and a name's length. */
+export const RELAY_SHARED_DRIVES_MAX = 50
+export const RELAY_SHARED_DRIVE_NAME_MAX = 60
+const DRIVE_ID = /^[A-Za-z0-9_-]{10,100}$/
+const DRIVE_URL = /^https:\/\/drive\.google\.com\/drive\/(?:u\/\d{1,2}\/)?folders\/([A-Za-z0-9_-]+)\/?(?:[?#].*)?$/
+
+/**
+ * A shared drive as the admin pastes it: its id, or its address in the browser
+ * (`https://drive.google.com/drive/folders/<id>`, `…/drive/u/0/folders/<id>?…`) → the id, or null.
+ */
+export function parseSharedDriveInput(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const v = raw.trim()
+  const id = DRIVE_URL.exec(v)?.[1] ?? v
+  return DRIVE_ID.test(id) ? id : null
+}
+
 export type SheetOwnership = 'inside' | 'outside' | 'shared-drive'
 
-export function sheetOwnership(meta: unknown, domain: string): SheetOwnership {
+export function sheetOwnership(meta: unknown, domain: string, sharedDrives: readonly string[] = []): SheetOwnership {
   const want = domain.trim().toLowerCase()
   if (!want || !meta || typeof meta !== 'object' || Array.isArray(meta)) return 'outside'
   const m = meta as { owners?: unknown; driveId?: unknown }
-  if (typeof m.driveId === 'string' && m.driveId !== '') return 'shared-drive'
+  if (typeof m.driveId === 'string' && m.driveId !== '') return sharedDrives.includes(m.driveId) ? 'inside' : 'shared-drive'
   if (!Array.isArray(m.owners) || m.owners.length === 0) return 'outside'
   for (const o of m.owners) {
     const email = o && typeof o === 'object' ? (o as { emailAddress?: unknown }).emailAddress : undefined

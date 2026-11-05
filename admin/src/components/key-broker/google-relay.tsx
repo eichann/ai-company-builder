@@ -7,7 +7,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ClockCounterClockwise, GoogleLogo, Pause, Play, ShieldCheck, UserCircle } from '@phosphor-icons/react'
+import { ClockCounterClockwise, GoogleLogo, HardDrives, Pause, Play, ShieldCheck, Trash, UserCircle } from '@phosphor-icons/react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,7 @@ import { GOOGLE_RELAY_CAP, GOOGLE_RELAY_LATER, googleRelayRecordWords, type Goog
 export const GOOGLE_RELAY_SERVICE_TEXT: Record<GoogleRelayService, { label: string; detail: string }> = {
   sheets: {
     label: 'スプレッドシート（読む・書く。消すは通さない）',
-    detail: '本人が編集できる表に、行の追加・書き換えができます。表やシート、行や列を消す操作は中継しません。',
+    detail: '本人が編集できる会社の表に、行の追加・書き換えができます（会社の外の人が持っている表には書き込みません）。表やシート、行や列を消す操作は中継しません。',
   },
 }
 
@@ -47,6 +47,8 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
   const [cap, setCap] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
   const [who, setWho] = useState<string>('all')
+  const [driveInput, setDriveInput] = useState('')
+  const [driveName, setDriveName] = useState('')
   const data = relay.data
 
   const save = async (label: string, fn: () => Promise<GoogleRelayAdminView>) => {
@@ -99,7 +101,7 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
           <ShieldCheck size={16} className="mt-0.5 shrink-0" />
           <span>
             鍵は預かりません。メンバーが自分で許可したときだけ、本人の権限で届けます。
-            <span className="block text-xs text-muted-foreground">表ごとの指定はいりません。本人が編集できる表なら届き、本人に権限のない表は Google が断ります。PC にもスクリプトにも Google の鍵は置きません。</span>
+            <span className="block text-xs text-muted-foreground">表ごとの指定はいりません。本人が編集できる表なら届き、本人に権限のない表は Google が断ります。書き込めるのは会社の人が持っている表と、下で登録した共有ドライブの表だけです（AI がメールにだまされて、外の人の表に会社の情報を書き込まないように）。PC にもスクリプトにも Google の鍵は置きません。</span>
           </span>
         </p>
 
@@ -161,6 +163,48 @@ export function GoogleRelayCard({ companyId }: { companyId: string }) {
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirm('*')}><Pause size={12} />全員の中継を止める</Button>
           )}
         </div>
+
+        <section className="space-y-2" data-testid="google-relay-shared-drives">
+          <h3 className="flex items-center gap-2 text-sm font-medium"><HardDrives size={14} />書き込める共有ドライブ</h3>
+          <p className="text-xs text-muted-foreground">
+            共有ドライブの表は、ここに登録した会社の共有ドライブにあるときだけ書き込めます（ほかの共有ドライブの表は、読めますが書き込めません）。共有ドライブを開いたときのアドレスを貼ってください。
+          </p>
+          {(data.sharedDrives ?? []).length > 0 && (
+            <ul className="divide-y rounded-lg border">
+              {(data.sharedDrives ?? []).map((d) => (
+                <li key={d.driveId} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 text-sm" data-testid={`google-relay-drive-${d.driveId}`}>
+                  <span className="font-medium">{d.name ?? '（名前なし）'}</span>
+                  <span className="break-all font-mono text-xs text-muted-foreground">{d.driveId}</span>
+                  <span className="text-xs text-muted-foreground">{formatDateTime(d.addedAt)} に{d.addedByName ?? '（メンバー）'}が登録</span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {confirm === `drive:${d.driveId}` ? (
+                      <>
+                        <span className="text-xs">登録をやめますか？ この共有ドライブの表には書き込めなくなります。</span>
+                        <Button size="sm" variant="destructive" disabled={busy}
+                          onClick={async () => { await save('共有ドライブの登録をやめました', () => googleApi.removeRelaySharedDrive(companyId, d.driveId)); setConfirm(null) }}>やめる</Button>
+                        <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>そのまま</Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirm(`drive:${d.driveId}`)}><Trash size={12} />登録をやめる</Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="min-w-64 flex-1 space-y-1">
+              <Label htmlFor="google-relay-drive">共有ドライブのアドレス</Label>
+              <Input id="google-relay-drive" className="h-9" placeholder="https://drive.google.com/drive/folders/…" value={driveInput} onChange={(e) => setDriveInput(e.target.value)} />
+            </div>
+            <div className="w-48 space-y-1">
+              <Label htmlFor="google-relay-drive-name">名前（わかりやすく）</Label>
+              <Input id="google-relay-drive-name" className="h-9" maxLength={60} placeholder="営業部の共有ドライブ" value={driveName} onChange={(e) => setDriveName(e.target.value)} />
+            </div>
+            <Button size="sm" variant="outline" disabled={busy || !driveInput.trim()}
+              onClick={async () => { if (await save('共有ドライブを登録しました', () => googleApi.addRelaySharedDrive(companyId, driveInput.trim(), driveName))) { setDriveInput(''); setDriveName('') } }}>登録する</Button>
+          </div>
+        </section>
 
         <section className="space-y-2">
           <h3 className="text-sm font-medium">許可しているメンバー</h3>

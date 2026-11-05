@@ -102,4 +102,26 @@ describe('本人の許可で中継する', () => {
     await waitFor(() => expect(writes(calls)).toHaveLength(1))
     expect(writes(calls)[0].body).toEqual({ stopped: true })
   })
+
+  it('a shared drive is registered by its address and name; removing it asks first and sends only that drive', async () => {
+    const drive = { driveId: '0ABcdEFgh1234567890', name: '営業部の共有ドライブ', addedAt: '2026-11-05T01:00:00.000Z', addedBy: 'u_owner', addedByName: '高杉 晋' }
+    const calls = stubApi({
+      [`POST ${base}/google/relay/shared-drives`]: { body: ok({ ...relay, sharedDrives: [drive] }) },
+      [`DELETE ${base}/google/relay/shared-drives/${drive.driveId}`]: { body: ok({ ...relay, sharedDrives: [] }) },
+    })
+    renderInCompany(<ApiKeysPage />)
+    const section = await screen.findByTestId('google-relay-shared-drives')
+    expect(within(section).getByRole('button', { name: '登録する' })).toBeDisabled()
+    await userEvent.type(within(section).getByLabelText('共有ドライブのアドレス'), `https://drive.google.com/drive/folders/${drive.driveId}`)
+    await userEvent.type(within(section).getByLabelText('名前（わかりやすく）'), drive.name)
+    await userEvent.click(within(section).getByRole('button', { name: '登録する' }))
+    await waitFor(() => expect(writes(calls)).toHaveLength(1))
+    expect(writes(calls)[0]).toMatchObject({ method: 'POST', url: `${base}/google/relay/shared-drives`, body: { drive: `https://drive.google.com/drive/folders/${drive.driveId}`, name: drive.name } })
+    const row = await screen.findByTestId(`google-relay-drive-${drive.driveId}`)
+    await userEvent.click(within(row).getByRole('button', { name: /登録をやめる/ }))
+    expect(writes(calls)).toHaveLength(1)
+    await userEvent.click(within(row).getByRole('button', { name: 'やめる' }))
+    await waitFor(() => expect(writes(calls)).toHaveLength(2))
+    expect(writes(calls)[1]).toMatchObject({ method: 'DELETE', url: `${base}/google/relay/shared-drives/${drive.driveId}` })
+  })
 })

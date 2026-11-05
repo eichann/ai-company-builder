@@ -196,14 +196,18 @@ grant** — never a key, never a service account — so every switch above appli
   holder cannot set (Google sets it; only the company's Workspace holds accounts of its domain);
   title, sharing list, developer metadata and cells are never read for this. A sheet in a **shared
   drive** (`driveId`; Drive names no owner and the member's permission cannot tell whose drive it
-  is) is refused for writes (owner decision pending: a list of the company's shared drives). An
-  outside owner / no owner address / a broken answer → 403 `ACB_OUTSIDE_SHEET`
-  「会社の外の人が持っている表には書き込めません。…（読むことはできます）」 (shared drive: 「共有ドライブにある表には、
-  いまは中継で書き込めません…」); Drive 403/404 → 403 in Google's shape; a grant without the
+  is) passes only when its drive is in **the company's registered shared drives** (owner decision
+  2026-11-05, option A: `google_oauth_clients.relay.sharedDrives`, per company — another company's
+  registration never counts); any other shared drive is refused. An outside owner / no owner
+  address / a broken answer → 403 `ACB_OUTSIDE_SHEET`
+  「会社の外の人が持っている表には書き込めません。…（読むことはできます）」 (an unregistered shared drive:
+  「この表は、会社に登録されていない共有ドライブにあるため…管理者に「API キー → 本人の許可で中継する」で
+  この共有ドライブを登録してもらってください…」); Drive 403/404 → 403 in Google's shape; a grant without the
   permission (before 2026-11-05) → `ACB_GOOGLE_NOT_ALLOWED` 「…会社のものか確かめる許可が必要になりました…［許可する］」,
   and `MyGoogleRelay` / the admin view show it as not allowed so the app (released ones too) offers
   ［許可する］ again. A sheet found inside is not looked up again for 10 minutes (per company,
-  member, domain, sheet; in memory, ≤ 2000; only `inside` is kept). Reads are not checked (reading an
+  member, domain, sheet; in memory, ≤ 2000; only `inside` is kept; a registry change forgets the
+  company's entries). Reads are not checked (reading an
   outside sheet sends nothing of the company's out). The one Google client sends nothing else with
   `drive.metadata.readonly` (`driveMetadataCallAllowed`, `call-not-allowed`: no list, no
   permissions, no other fields, no `alt=media`, no write).
@@ -237,13 +241,20 @@ grant** — never a key, never a service account — so every switch above appli
   `capPerMemberPerDay`, `stopped`, members who allowed / were stopped with today's count, the latest
   100 records); `PUT /google/relay { services?, capPerMemberPerDay?, stopped? }` (history `relay`);
   `PUT /google/relay/members/:userId { stopped }` (history `relay-member`; another company's member
-  → 404 like an unknown one). Stored as `google_oauth_clients.relay` JSON (`migrateGoogleRelay`).
+  → 404 like an unknown one). `POST /google/relay/shared-drives { drive, name? }` (`drive` = the
+  id or the browser address `https://drive.google.com/drive/(u/N/)folders/<id>`, `parseSharedDriveInput`;
+  else 400 `BAD_DRIVE`; ≤ 50 drives, name ≤ 60 characters, no Google call: a shared drive's name
+  needs `drive.readonly`, which ACB never holds, so the admin names it) and
+  `DELETE /google/relay/shared-drives/:driveId` (404 `DRIVE_NOT_FOUND`), history `relay-drive`
+  (`{ driveId, name, added }`); `sharedDrives` in the view (with who registered it). Stored as
+  `google_oauth_clients.relay` JSON (`migrateGoogleRelay`).
   A member stop survives the member's re-consent (it is not on the grant).
 - **Member**: `GET /me/google/relay` (`MyGoogleRelay`: offered / allowed / turned off per service,
   `stopped: company | member | null`, cap and today's count, their own latest 50 records only).
 - **Screens**: admin 「API キー」→ card 「本人の許可で中継する」
   (`admin/src/components/key-broker/google-relay.tsx`, owners / admins): the services as
-  checkboxes (スプレッドシート; 「あとから足せるもの」 lists `GOOGLE_RELAY_LATER`), 1人あたりの上限,
+  checkboxes (スプレッドシート; 「あとから足せるもの」 lists `GOOGLE_RELAY_LATER`), 書き込める共有ドライブ
+  (address + name → 登録する; 登録をやめる asks first), 1人あたりの上限,
   全員の中継を止める / 再開 (asks first), 許可しているメンバー with today's count and
   この人の中継を止める / 再開 (asks first), the records (filter by person). App 設定 → Google →
   「スプレッドシートを中継で使う」 (`GoogleRelayCard.tsx`, `hooks/useGoogleRelay.ts`, shown only
@@ -264,12 +275,15 @@ grant** — never a key, never a service account — so every switch above appli
   member (Google refuses their write to Sato's sheet); another company never reaches a grant here;
   records for admins and the member's own only; no cell content, broker token or Google token in
   any table, answer or log line; asked only by name; B-H1: an outsider's sheet and a shared-drive
-  sheet refused for every write kind with no Sheets write sent, reads pass, a colleague's sheet
+  sheet refused for every write kind with no Sheets write sent, reads pass, a shared drive passes
+  only once this company registered it (another company's registration, a member, a bad address
+  refused; removal applies at once; history lines), a colleague's sheet
   passes after one owner lookup asking only `owners(emailAddress),driveId`, an old grant reads but
   writes nothing until allowed again, the client's `drive.metadata.readonly` guard) and
   `tests/unit/google-relay-owner.test.ts` (`sheetOwnership`), mutation-checked: the owner check,
   the shared-drive and outside refusals, the renew message, the client guard and its query check,
-  the exact-domain comparison, `driveId`; the batchUpdate check, its
+  the exact-domain comparison, `driveId`, the registry (ignored / any drive / another company's /
+  kept in the cache after removal / a member registering / any host in the address); the batchUpdate check, its
   delete and allow-list rules, one kind per request, `values:clear` / `batchClear`, both stops, the
   cap, the query allow-list, never in the one consent, the records' result.
 

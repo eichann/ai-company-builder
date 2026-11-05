@@ -106,6 +106,14 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
         if (typeof o.capPerMemberPerDay === 'number') out.capPerMemberPerDay = o.capPerMemberPerDay
         if (typeof o.stopped === 'boolean') out.stopped = o.stopped
         if (Array.isArray(o.stoppedUserIds)) out.stoppedUserIds = o.stoppedUserIds.filter((s): s is string => typeof s === 'string')
+        if (Array.isArray(o.sharedDrives)) {
+          out.sharedDrives = o.sharedDrives.flatMap((d: unknown) => {
+            if (!d || typeof d !== 'object') return []
+            const r = d as Record<string, unknown>
+            if (typeof r.driveId !== 'string' || typeof r.addedAt !== 'string' || typeof r.addedBy !== 'string') return []
+            return [{ driveId: r.driveId, name: typeof r.name === 'string' ? r.name : null, addedAt: r.addedAt, addedBy: r.addedBy }]
+          })
+        }
         return out
       } catch {
         return {}

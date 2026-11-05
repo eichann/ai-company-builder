@@ -4,7 +4,7 @@
  * company's own domain passes; anything Drive leaves unclear is outside (fail closed).
  */
 import { describe, expect, it } from 'vitest'
-import { sheetOwnership } from '../../../shared/core/google-relay'
+import { parseSharedDriveInput, sheetOwnership } from '../../../shared/core/google-relay'
 
 const owners = (...emails: unknown[]) => ({ owners: emails.map(emailAddress => ({ emailAddress })) })
 
@@ -35,8 +35,27 @@ describe('sheetOwnership', () => {
     expect(sheetOwnership(owners('sato@div.example'), '')).toBe('outside')
   })
 
-  it('a shared drive is its own answer (Drive names no owner there), whatever owners claim', () => {
+  it('a shared drive is inside only when the company registered it, whatever owners claim', () => {
     expect(sheetOwnership({ driveId: '0AB' }, 'div.example')).toBe('shared-drive')
     expect(sheetOwnership({ driveId: '0AB', ...owners('sato@div.example') }, 'div.example')).toBe('shared-drive')
+    expect(sheetOwnership({ driveId: '0AB' }, 'div.example', ['0ABC', '0A'])).toBe('shared-drive')
+    expect(sheetOwnership({ driveId: '0AB' }, 'div.example', ['0AB'])).toBe('inside')
+    expect(sheetOwnership({ driveId: '0AB' }, '', ['0AB'])).toBe('outside')
+  })
+})
+
+describe('parseSharedDriveInput', () => {
+  it('takes a shared drive\'s id or its address in the browser', () => {
+    expect(parseSharedDriveInput('0ABcdEFgh1234567890')).toBe('0ABcdEFgh1234567890')
+    expect(parseSharedDriveInput(' https://drive.google.com/drive/folders/0ABcdEFgh1234567890 ')).toBe('0ABcdEFgh1234567890')
+    expect(parseSharedDriveInput('https://drive.google.com/drive/u/1/folders/0ABcdEFgh1234567890?usp=sharing')).toBe('0ABcdEFgh1234567890')
+  })
+
+  it('refuses anything else', () => {
+    for (const bad of [null, 42, '', 'short', '0AB/../x1234567', 'http://drive.google.com/drive/folders/0ABcdEFgh1234567890',
+      'https://drive.google.com.evil.example/drive/folders/0ABcdEFgh1234567890', 'https://evil.example/drive/folders/0ABcdEFgh1234567890',
+      'https://drive.google.com/file/d/0ABcdEFgh1234567890/view']) {
+      expect(parseSharedDriveInput(bad), String(bad)).toBeNull()
+    }
   })
 })

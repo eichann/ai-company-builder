@@ -24,10 +24,10 @@
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import { DRIVE_OWNER_FIELDS, GOOGLE_API_HOSTS, GOOGLE_SCOPE, googleCompanyFeatureOn, googleCompanySwitched } from '../../shared/core/google'
 import {
-  GOOGLE_RELAY_CAP, GOOGLE_RELAY_REFUSALS_PER_DAY, GOOGLE_RELAY_SERVICES, SHEETS_OPERATIONS, checkSheetsBatchUpdate, isGoogleRelayCap, isGoogleRelayService, parseSheetsCall,
-  sheetOwnership, sheetsPathParts, sheetsQuery, type GoogleRelayService, type SheetsOperation,
+  GOOGLE_RELAY_CAP, GOOGLE_RELAY_REFUSALS_PER_DAY, GOOGLE_RELAY_SERVICES, RELAY_SHARED_DRIVES_MAX, RELAY_SHARED_DRIVE_NAME_MAX, SHEETS_OPERATIONS,
+  checkSheetsBatchUpdate, isGoogleRelayCap, isGoogleRelayService, parseSharedDriveInput, parseSheetsCall, sheetOwnership, sheetsPathParts, sheetsQuery, type GoogleRelayService, type SheetsOperation,
 } from '../../shared/core/google-relay'
-import type { GoogleChangeAction, GoogleRelayAdminView, GoogleRelayMember, GoogleRelayRecord, GoogleUnavailableReason, MyGoogleRelay } from '../../shared/types/google'
+import type { GoogleChangeAction, GoogleRelayAdminView, GoogleRelayMember, GoogleRelayRecord, GoogleRelaySharedDrive, GoogleUnavailableReason, MyGoogleRelay } from '../../shared/types/google'
 import type { AccountDirectory } from '../ports/accounts'
 import type { AgentEventRow } from '../ports/agent-events'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -53,7 +53,7 @@ const INSIDE_CACHE_MS = 10 * 60 * 1000
 const INSIDE_CACHE_MAX = 2000
 /** The refusal of a write into a sheet not owned inside the company (B-H1). */
 export const OUTSIDE_SHEET_MESSAGE = '会社の外の人が持っている表には書き込めません。会社の Google アカウントの人が持っている表を使ってください（読むことはできます）。'
-const SHARED_DRIVE_MESSAGE = '共有ドライブにある表には、いまは中継で書き込めません（会社のものか確かめられないため）。会社の人のマイドライブにある表を使ってください（読むことはできます）。'
+const SHARED_DRIVE_MESSAGE = 'この表は、会社に登録されていない共有ドライブにあるため、中継では書き込めません。管理者に「API キー → 本人の許可で中継する」でこの共有ドライブを登録してもらってください（読むことはできます）。'
 
 export interface GoogleRelayDeps {
   companyData: CompanyDataSource
@@ -218,7 +218,19 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
         }
       }),
       records: records(companyId, null, ADMIN_RECORDS),
+      sharedDrives: sharedDrivesOf(settings),
     }
+  }
+
+  function sharedDrivesOf(settings: GoogleRelaySettingsRow): GoogleRelaySharedDrive[] {
+    const drives = settings.sharedDrives ?? []
+    const names = accounts.byIds([...new Set(drives.map(d => d.addedBy))])
+    return drives.map(d => ({ ...d, addedByName: names.get(d.addedBy)?.name ?? null }))
+  }
+
+  /** A registry change applies to the next write: forget this company's cached owner answers. */
+  function forgetCompany(companyId: string): void {
+    for (const k of [...insideUntil.keys()]) if (k.startsWith(`${companyId}\n`)) insideUntil.delete(k)
   }
 
   /** Sheets found owned inside the company: `company\nmember\nsheet` → until (ms). Only `inside` is kept. */
@@ -230,7 +242,9 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
    * passes (`sheetOwnership`). Anything unsure refuses: the server must not allow when unsure.
    */
   async function ownerRefusal(who: PersonRelayCall['who'], spreadsheetId: string, meta: Partial<PersonRelayResult>): Promise<PersonRelayResult | null> {
-    const domain = connectorsOf(who.companyId).client()?.domain ?? ''
+    const connectors = connectorsOf(who.companyId)
+    const domain = connectors.client()?.domain ?? ''
+    const sharedDrives = (connectors.relaySettings()?.sharedDrives ?? []).map(d => d.driveId)
     const key = `${who.companyId}\n${who.userId}\n${domain}\n${spreadsheetId}`
     const now = clock.nowMs()
     const until = insideUntil.get(key)
@@ -261,7 +275,7 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
       const status = looked.kind === 'rate-limited' ? 429 : 502
       return { status, body: googleError(status, status === 429 ? 'RESOURCE_EXHAUSTED' : 'UNAVAILABLE', 'Google が混み合っているか、使えませんでした。時間をおいてもう一度お試しください。'), bytesIn: meta.bytesIn ?? 0, ...meta }
     }
-    const owner = sheetOwnership(looked.json, domain)
+    const owner = sheetOwnership(looked.json, domain, sharedDrives)
     if (owner === 'shared-drive') return out(403, 'ACB_OUTSIDE_SHEET', SHARED_DRIVE_MESSAGE, meta)
     if (owner !== 'inside') return out(403, 'ACB_OUTSIDE_SHEET', OUTSIDE_SHEET_MESSAGE, meta)
     if (insideUntil.size >= INSIDE_CACHE_MAX) insideUntil.delete(insideUntil.keys().next().value!)
@@ -473,6 +487,46 @@ export function createGoogleRelay(deps: GoogleRelayDeps) {
         const stoppedUserIds = body.stopped ? [...before, userId] : before.filter(u => u !== userId)
         connectors.setRelaySettings({ ...settings, stoppedUserIds }, clock.now(), member.userId, change('relay-member', member.userId, userId, { stopped: body.stopped }))
       }
+      return ok(await adminViewOf(member.companyId))
+    },
+
+    /**
+     * POST …/google/relay/shared-drives { drive, name? } (owner/admin): a shared drive whose sheets
+     * the relay may write into (B-H1, owner decision 2026-11-05). `drive` is its id or its address.
+     */
+    async addSharedDrive(member: Member, body: unknown): Promise<Outcome<GoogleRelayAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_RELAY_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
+      const driveId = parseSharedDriveInput(body.drive)
+      if (!driveId) return refuse('bad-request', '共有ドライブのアドレス（https://drive.google.com/drive/folders/…）か ID を入れてください。', { code: 'BAD_DRIVE' })
+      if (body.name !== undefined && typeof body.name !== 'string') return refuse('bad-request', 'name must be a string')
+      const name = typeof body.name === 'string' && body.name.trim() !== '' ? body.name.trim().slice(0, RELAY_SHARED_DRIVE_NAME_MAX) : null
+      const connectors = connectorsOf(member.companyId)
+      const settings = connectors.relaySettings()
+      if (!settings) return refuse('not-found', 'Google の登録がまだありません。先に「つなぎ先 → Google」で登録してください。', { code: 'NOT_CONFIGURED' })
+      const drives = settings.sharedDrives ?? []
+      if (drives.some(d => d.driveId === driveId)) return ok(await adminViewOf(member.companyId))
+      if (drives.length >= RELAY_SHARED_DRIVES_MAX) return refuse('bad-request', `登録できる共有ドライブは ${RELAY_SHARED_DRIVES_MAX} 個までです。`, { code: 'TOO_MANY_DRIVES' })
+      const at = clock.now()
+      connectors.setRelaySettings({ ...settings, sharedDrives: [...drives, { driveId, name, addedAt: at, addedBy: member.userId }] }, at, member.userId,
+        change('relay-drive', member.userId, null, { driveId, name, added: true }))
+      forgetCompany(member.companyId)
+      return ok(await adminViewOf(member.companyId))
+    },
+
+    /** DELETE …/google/relay/shared-drives/:driveId (owner/admin): writes into its sheets are refused again. */
+    async removeSharedDrive(member: Member, driveId: string): Promise<Outcome<GoogleRelayAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_RELAY_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const connectors = connectorsOf(member.companyId)
+      const settings = connectors.relaySettings()
+      const drives = settings?.sharedDrives ?? []
+      const gone = drives.find(d => d.driveId === driveId)
+      if (!settings || !gone) return refuse('not-found', 'その共有ドライブは登録されていません。', { code: 'DRIVE_NOT_FOUND' })
+      connectors.setRelaySettings({ ...settings, sharedDrives: drives.filter(d => d.driveId !== driveId) }, clock.now(), member.userId,
+        change('relay-drive', member.userId, null, { driveId, name: gone.name, added: false }))
+      forgetCompany(member.companyId)
       return ok(await adminViewOf(member.companyId))
     },
 
