@@ -1,6 +1,6 @@
-import { aiTurnStepAllowsRecordTool, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
+import { aiTurnStepAllowsRecordCall, aiTurnStepAllowsRecordTool, aiTurnStepCreateTypes, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
-import type { RecordTools } from './records/tools'
+import { narrowCreateTypes, type RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { createAppCommandTools } from './app-commands/tools'
@@ -54,6 +54,19 @@ import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, P
 import crypto from 'crypto'
 import net from 'net'
 
+/**
+ * What an unattended step may use (ai-turns.md "Only the step's tools"): its record tools, its
+ * built-in tools and, for a built-in step, the record types its records_create may make.
+ */
+export interface AiTurnToolCeiling {
+  allowsRecordTool(name: string): boolean
+  /** A call's input checked too (records_create's type); absent = the tool alone decides. */
+  allowsRecordCall?(name: string, input: unknown): boolean
+  /** The types records_create may make in this step (absent = the server's gate decides). */
+  createTypes?: readonly string[]
+  builtinTools: string[]
+}
+
 export interface ChatServerConfig extends AgentHost {
   /** Runs one of the app's AI commands in the window showing the consultation (features/app-commands/ipc.ts). */
   runAppCommand?: (sessionId: string, companyId: string, commandId: string, args: unknown, signal?: AbortSignal) => Promise<AppCommandAnswer>
@@ -75,7 +88,7 @@ export interface ChatServerConfig extends AgentHost {
    * server (its AI's plugin power is that step's, for good). false = not bound: the turn is refused.
    */
   bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
-  pluginStepTools?: (conversationId: string, step: string) => { allowsRecordTool(name: string): boolean; builtinTools: string[] } | null
+  pluginStepTools?: (conversationId: string, step: string) => AiTurnToolCeiling | null
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
@@ -311,9 +324,14 @@ export async function startChatServer(config: ChatServerConfig) {
     const can = AGENTS[authMode].capabilities
     // An unattended 「AI の番」 step (ai-turns.md): only its tools, only an agent that takes record actions.
     // A step's tool ceiling: a declared kind's (ai-turn-steps/), or a business plugin step's that main's claim holds.
-    const aiTurnStep = requestedStep === undefined ? undefined
+    const aiTurnStep: AiTurnToolCeiling | null | undefined = requestedStep === undefined ? undefined
       : isAiTurnStep(requestedStep)
-        ? { allowsRecordTool: (name: string) => aiTurnStepAllowsRecordTool(requestedStep, name), builtinTools: [...aiTurnStepDefinition(requestedStep).tools.builtinTools] }
+        ? {
+          allowsRecordTool: (name: string) => aiTurnStepAllowsRecordTool(requestedStep, name),
+          allowsRecordCall: (name: string, input: unknown) => aiTurnStepAllowsRecordCall(requestedStep, name, input),
+          createTypes: aiTurnStepCreateTypes(requestedStep),
+          builtinTools: [...aiTurnStepDefinition(requestedStep).tools.builtinTools],
+        }
         : (appSessionId && config.pluginStepTools?.(appSessionId, requestedStep)) || null
     if (aiTurnStep === null || (aiTurnStep && (!connection.ownsConversation || !can.recordActions))) {
       return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
@@ -451,9 +469,11 @@ export async function startChatServer(config: ChatServerConfig) {
     // An unattended step sees only the record tools it declares, and cannot call any other.
     const records = allRecords && aiTurnStep ? {
       ...allRecords,
-      specs: allRecords.specs.filter(spec => aiTurnStep.allowsRecordTool(spec.name)),
-      execute: (name: string, input: unknown) => aiTurnStep.allowsRecordTool(name)
-        ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具は使えません。'),
+      // A built-in step's records_create shows only the types it may make (the server refuses others too).
+      specs: allRecords.specs.filter(spec => aiTurnStep.allowsRecordTool(spec.name))
+        .map(spec => spec.name === 'records_create' && aiTurnStep.createTypes ? narrowCreateTypes(spec, aiTurnStep.createTypes) : spec),
+      execute: (name: string, input: unknown) => (aiTurnStep.allowsRecordCall ?? aiTurnStep.allowsRecordTool)(name, input)
+        ? allRecords.execute(name, input) : Promise.resolve('この自動の作業では、この道具（またはこの種類の記録）は使えません。'),
     } : allRecords
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
     // A consultation about a task (consultation-task.ts): new files are linked to it; a task only the

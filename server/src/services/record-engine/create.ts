@@ -21,6 +21,8 @@ import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
 import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
 import { meetingMembers, membersList, withNamedPeople } from './members'
+import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
+import { notInStep } from '../plugin-operation-checks'
 
 export function creating(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, placeFolder, changed, tell, summaryOf } = ctx
@@ -53,6 +55,21 @@ export function creating(ctx: EngineContext) {
     if (rest.personal === undefined && !folderSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
     const folder = folderSaid ? rest.folder : typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : undefined
     return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
+  }
+
+  /**
+   * A built-in 「AI の番」 step's run creates only what its job needs (`CORE_STEP_CREATE_TYPES`,
+   * ai-turns.md): text from outside starts it, so an AI whose token is bound to such a run gets
+   * 403 `NOT_IN_STEP` for any other type, before anything is checked or written. A business
+   * plugin's step has its own gate (C4); a consultation's token is not bound to a run.
+   */
+  function builtInStepRefusal(member: Member, actor: ActorInput, body: unknown) {
+    if (actor.kind !== 'ai' || !actor.runId) return null
+    const run = companyData.forCompany(member.companyId).aiRuns.byId(actor.runId)
+    const types = run ? coreStepCreateTypes(run.step) : undefined
+    if (types === undefined) return null
+    const type = typeof body === 'object' && body !== null ? (body as { type?: unknown }).type : undefined
+    return typeof type === 'string' && types.includes(type) ? null : notInStep()
   }
 
   /**
@@ -96,6 +113,8 @@ export function creating(ctx: EngineContext) {
      * answer says where it went (`placed`), for the AI to tell.
      */
     createByAi(member: Member, actor: ActorInput, body: unknown) {
+      const outsideStep = builtInStepRefusal(member, actor, body)
+      if (outsideStep) return outsideStep
       return api.create(member, actor, messageDue(member, aiPlacement(member, body)))
     },
 

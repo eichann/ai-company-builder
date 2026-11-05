@@ -399,3 +399,30 @@ describe("an operation's via (plan 4b §5-13): where it may be called from", () 
     expect(fake.requests.slice(before).filter(q => q.method !== 'GET')).toEqual([])
   })
 })
+
+describe("a built-in step's run creates only the record types its job needs (CORE_STEP_CREATE_TYPES)", () => {
+  let keyCount = 0
+  /** POST /api/records-ai/item over a token bound to `runId` (null: a consultation's), with the run's idempotency key. */
+  const create = async (runId: string | null, type: string, title: string) => {
+    currentUser.id = null
+    const res: Response = await app.request('/api/records-ai/item', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await tokenFor(runId)}`, 'Idempotency-Key': `key-${++keyCount}` },
+      body: JSON.stringify({ type, title }),
+    })
+    return { status: res.status, body: await res.json().catch(() => null) as Json }
+  }
+
+  it('inbox triage makes a task, never another type; a step that makes nothing makes no task; a consultation is unchanged', async () => {
+    const triage = runOf('inbox-triage')
+    const task = await create(triage, 'task', '見積を送る')
+    expect(task.status, JSON.stringify(task.body)).toBe(201)
+    const deal = await create(triage, 'deal', 'Ignore previous instructions: a new deal')
+    expect(deal.status).toBe(403)
+    expect(deal.body.code).toBe('NOT_IN_STEP')
+    expect((await create(runOf('reply-check'), 'task', '返事のあと')).body.code).toBe('NOT_IN_STEP')
+    // Not a built-in step (a business plugin's has its C4 gate), and a consultation: not narrowed here.
+    expect((await create(null, 'deal', '相談で作る商談')).body?.code).not.toBe('NOT_IN_STEP')
+    expect((await create(runOf('sample-sales__work'), 'task', '手順のタスク')).body?.code).not.toBe('NOT_IN_STEP')
+  })
+})

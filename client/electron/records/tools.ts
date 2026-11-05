@@ -36,6 +36,7 @@ import type { MinutesText } from '../../../shared/types/minutes'
 import { MINUTES_SUMMARY_MAX } from '../../../shared/core/minutes'
 import { INSTRUCTION_LIKE_WORDS } from '../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../shared/core/outside-text'
+import { markRecordOutside } from '../../shared/record-outside'
 import { bundleChoiceFor, type MinutesBundleChoiceCard } from '../../shared/minutes-app'
 import { aiMailSummary, readMailDraft, type MailDraftCard } from '../../shared/outbound-mail'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
@@ -49,6 +50,8 @@ export const RECORDS_SERVER = 'acb_records'
 export const recordToolId = (name: string) => `mcp__${RECORDS_SERVER}__${name}`
 
 const TOOL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/
+/** The look-ups whose records' titles, summaries and text fields are marked as outside text (record-outside.ts). */
+const RECORD_READS: ReadonlySet<string> = new Set(['records_get', 'records_query', 'records_my_turn', 'records_ai_turn'])
 const MAX_OUTPUT = 60_000
 
 /** What an agent registers for a tool (name, words, input schema). */
@@ -380,6 +383,19 @@ function createdAnswer(answer: unknown): string {
   const tellMember = where && where.includes('<担当の名前>') ? `${where}（<担当の名前> は担当にした人の名前に置き換える）` : where
   const out = JSON.stringify(tellMember ? { ...(answer as object), tellMember } : answer)
   return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
+}
+
+/**
+ * records_create as a step may use it (ai-turns.md): its `type` only one of `types`, said in the
+ * schema and the description. The step's filter and the server refuse any other type as well.
+ */
+export function narrowCreateTypes<T extends RecordToolDescriptor>(spec: T, types: readonly string[]): T {
+  if (types.length === 0) return spec
+  return {
+    ...spec,
+    schema: spec.schema.extend({ type: z.enum(types as [string, ...string[]]) }),
+    description: `${spec.description}\nこの作業で作れる種類: ${types.join(', ')} / Types this run may create: ${types.join(', ')}.`,
+  }
 }
 
 /** The state-changing tools for these types (one per action, and creating server-only records). */
@@ -773,6 +789,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
+  const fieldKindOf = (type: string, field: string) => types.find(t => t.name === type)?.fields[field]?.kind
   // A provider's tool never replaces a record tool or an earlier provider's (first one wins).
   const provided = await Promise.all((options.toolProviders ?? []).map(p => p(access, signal).catch(() => null)))
   const owner = new Map<string, ExtraRecordTools>()
@@ -825,7 +842,9 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
           ? '\n\n画面に「どのまとまりの会議ですか？」のカードを出しました。メンバーが選ぶまで、案件などへの書き込み（HubSpot など）はしないでください。 / A card asks the member which bundle (a deal…) this meeting belongs to; do not write to it until they choose.'
           : ''
         if (spec.format) return spec.format(answer) + told
-        const out = JSON.stringify(answer)
+        // A record's title, summary and text fields may be outside text (record-outside.ts).
+        const shown = RECORD_READS.has(spec.name) ? markRecordOutside(answer, fieldKindOf) : answer
+        const out = JSON.stringify(shown)
         return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
       } catch (error) {
         if (error instanceof RecordsApiError) return JSON.stringify(refusalForAi(error))

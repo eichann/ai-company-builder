@@ -7,6 +7,7 @@
 import { z } from 'zod'
 import { enteredByWaitOver } from '../../../../shared/core/core-types'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
+import { OUTSIDE_VALUE_NOTE, outsideValue } from '../../../../shared/core/outside-text'
 import type { RecordDetail, RecordSummary } from '../../../../shared/types/records'
 import { RecordsApiError, type RecordTurnAccess } from '../../records/api'
 import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools'
@@ -14,6 +15,8 @@ import type { ExtraRecordTools, RecordToolDescriptor } from '../../records/tools
 const TASK_ID = /^task-[0-9a-z]{6,32}$/
 const json = (v: unknown) => JSON.stringify(v)
 const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+/** Text that may have come from outside (a subject, what the task waits on): `{ outside }`, the one standard (outside-text.ts). */
+const text = (v: unknown) => { const s = str(v); return s === null ? null : outsideValue(s) }
 
 /** The task as the wait-over step reads it; `purpose: 'follow_up'` only when the clock put it in 準備中. */
 export function taskWaitView(detail: RecordDetail, ledger: readonly LedgerEntry[]) {
@@ -22,10 +25,10 @@ export function taskWaitView(detail: RecordDetail, ledger: readonly LedgerEntry[
   if (r.type !== 'task' || r.state !== 'preparing' || !enteredByWaitOver(ledger)) return { ...base, purpose: 'none' as const }
   const linked = (name: string) => detail.links
     .filter(l => l.direction === 'out' && l.name === name && l.record)
-    .map(l => { const x = l.record as RecordSummary; return { id: x.id, type: x.type, title: x.title, state: x.state } })
+    .map(l => { const x = l.record as RecordSummary; return { id: x.id, type: x.type, title: outsideValue(x.title), state: x.state } })
   return {
-    ...base, purpose: 'follow_up' as const, title: r.title,
-    waitingOn: str(r.fields.waiting_on), waitUntil: str(r.fields.wait_until), due: str(r.fields.due), taskPurpose: str(r.fields.purpose),
+    ...base, purpose: 'follow_up' as const, outsideNote: OUTSIDE_VALUE_NOTE, title: outsideValue(r.title),
+    waitingOn: text(r.fields.waiting_on), waitUntil: str(r.fields.wait_until), due: str(r.fields.due), taskPurpose: text(r.fields.purpose),
     interaction: linked('interaction')[0] ?? null, counterpart: linked('counterpart')[0] ?? null, bundle: linked('bundle')[0] ?? null,
     prepared: linked('prepared'),
   }

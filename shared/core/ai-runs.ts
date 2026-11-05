@@ -149,3 +149,24 @@ export const AI_RUN_STATE_LABELS: Record<AiRunState, string> = {
 
 /** States a run cannot leave without a person (「もう一度」 or reconciliation). */
 export const AI_RUN_PERSON_STATES: readonly AiRunState[] = ['waiting_setup', 'waiting_person', 'waiting_reconcile']
+
+/**
+ * The record types each built-in 「AI の番」 step may create (`records_create`), one copy for the
+ * app's tool filter (`client/shared/ai-turn-steps/registry.ts`) and the server's check of a run's
+ * creates (`record-engine/create.ts`, 403 `NOT_IN_STEP`). Text that came from outside starts these
+ * runs, so a step makes only what its job needs: a meeting's homework and a message's task are
+ * tasks; the others make none. A step not listed here (a business plugin's: the C4 gate) is not
+ * narrowed by this table. Adding a type to a step is a deliberate change here, with its prompt.
+ */
+export const CORE_STEP_CREATE_TYPES: Readonly<Record<string, readonly string[]>> = {
+  'minutes-reading': ['task'],
+  'inbox-triage': ['task'],
+  'follow-up': [],
+  'reply-check': [],
+  'task-wait-over': [],
+}
+
+/** The types a built-in step may create, or undefined when the step is not a built-in one. */
+export function coreStepCreateTypes(step: string): readonly string[] | undefined {
+  return Object.prototype.hasOwnProperty.call(CORE_STEP_CREATE_TYPES, step) ? CORE_STEP_CREATE_TYPES[step] : undefined
+}

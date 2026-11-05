@@ -119,6 +119,26 @@ turns").
   with `outsideTitle` — one line, `「」` → `『』` and `【】` → `〔〕` inside, ≤ 200 — and says once
   (`OUTSIDE_TITLE_NOTE`) that it is data. Never `「${title}」` by hand. Test:
   `client/tests/outside-text-entry-points.test.ts`.
+- **What a step may create** (`CORE_STEP_CREATE_TYPES`, `shared/core/ai-runs.ts`, one copy): inbox
+  triage and minutes reading make tasks only; follow-up, reply-check and task-wait-over make
+  nothing. The app's filter (`aiTurnStepAllowsRecordCall`, chat server: the step's
+  `records_create` schema narrowed by `narrowCreateTypes`, any other type refused before the call)
+  and the server (`record-engine/create.ts` `builtInStepRefusal`: an AI token bound to a built-in
+  step's run, any other type → 403 `NOT_IN_STEP` before anything is checked) both apply it; a
+  business plugin's step keeps its C4 gate. `checkCreateTypes` refuses at load a step missing from
+  the table or listing `records_create` against it. Tests: `client/tests/ai-turn-least-privilege.test.ts`,
+  `server/tests/integration/plugin-run-gate.test.ts` (mutation-checked).
+- **Records read as outside text**: `records_get` / `records_query` / `records_my_turn` /
+  `records_ai_turn` (`client/shared/record-outside.ts`) and `task_wait_read` hand a record's title,
+  summary and text fields (kind `text` / `long_text`, or unknown) on as `{ outside }`
+  (`outsideValue`, `【】` → `〔〕`) with `outsideNote` once and `instructionLike` flags; ids, types,
+  states, dates, numbers, choices, people, record links and tags stay plain.
+- **Not yet: the server does not scope a built-in step's token to its tools.** Only creates are
+  checked there (above); every other records-ai route answers a run-bound token as a
+  consultation's, and the app's filter is what keeps a run to its step. Plan: the step lists as
+  route ids in `shared/core` (one table the app's steps also read), one records-ai middleware
+  mapping each route to its tool id and answering `NOT_IN_STEP` for a run-bound token whose
+  built-in step does not list it, and a parity test over every records-ai route.
 
 ## Claiming and settling (main, `electron/features/ai-turns/`)
 
