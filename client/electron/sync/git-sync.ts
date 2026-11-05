@@ -81,7 +81,7 @@ import type { SyncDeps, SyncDialog } from './types'
 import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
 import { isOfficeLockFile, OFFICE_LOCK_EXCLUDE_PATTERNS } from '../../shared/office-lock-files'
-import { openFilesAmong, openFilesStoppedMessage } from './open-files'
+import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
@@ -594,14 +594,17 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // Trees only: in a partial clone this downloads no file contents.
         const incoming = (await git.raw(['diff', '--name-only', '-z', '--no-renames', `${head}...${upstream}`]).catch(() => ''))
           .split('\0').filter(Boolean)
-        const open = incoming.length > 0 ? await openFilesAmong(git, repoPath, incoming) : []
+        const found = incoming.length > 0 ? await findOpenFiles(git, repoPath, incoming, deps.officeLockProbe) : []
+        const open = found.map(o => o.file)
         if (open.length > 0) {
           const choice = deps.dialog.canAsk() ? await deps.dialog.confirmOpenFiles(open) : 'wait'
           if (choice !== 'continue') {
             log.log(`Git sync: ${open.length} file(s) a teammate changed are open in another app; stopped`)
             return { success: false, errorType: 'file_open' as const, error: openFilesStoppedMessage(open.map(shownPath)), openFiles: open.map(shownPath) }
           }
+          // Left by a crash: gone, so the question does not come back at every sync.
           log.log(`Git sync: ${open.length} open file(s) a teammate changed; the member says they are closed`)
+          removeLockFiles(repoPath, found, log)
         }
       }
     }
@@ -1776,9 +1779,14 @@ function withSideEffects(result: RunResult, effects: SyncSideEffects): GitSyncRe
   return withNotes(result, notes, fields)
 }
 
-/** A run the member stopped (a dialog answered with cancel): nothing else runs after it. */
+/**
+ * A run the member stopped (a dialog answered with cancel): nothing else runs after it.
+ * Not a file open in another app: that holds back only its own repository, the
+ * private folders still sync (one repository's failure does not stop the others).
+ */
 function isCancelled(result: GitSyncResult): boolean {
   const error = 'error' in result && typeof result.error === 'string' ? result.error : ''
+  if ('errorType' in result && result.errorType === 'file_open') return false
   return !result.success && /^同期を中止しました|^同期がキャンセルされました/.test(error)
 }
 
@@ -2019,7 +2027,7 @@ export function createGitSync(deps: SyncDeps): GitSync {
     // A leftover lock goes first; one that may be in use holds the repository back.
     const receiveOne = (dir: string) => locked(dir, async () => {
       await lockState(dir)
-      return receiveIntoRepo(deps.createGit(dir), dir, deps.log)
+      return receiveIntoRepo(deps.createGit(dir), dir, deps.log, deps.officeLockProbe)
     })
     const openFiles: string[] = []
     const company = await receiveOne(repoPath)

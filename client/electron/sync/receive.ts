@@ -24,7 +24,7 @@ import type { SimpleGit } from 'simple-git'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
 import { previewChanges } from './preview'
 import { appliedExclusions } from './sparse'
-import { openFilesAmong } from './open-files'
+import { openFilesAmong, type OfficeLockProbe } from './open-files'
 import type { SyncLogger } from './types'
 
 export type HeldBackReason = 'repository-busy' | 'unpushed' | 'local-changes' | 'in-the-way' | 'refused' | 'file-open'
@@ -62,7 +62,7 @@ function inTheWay(repoPath: string, rel: string): boolean {
   return false
 }
 
-export async function receiveIntoRepo(git: SimpleGit, repoPath: string, log: SyncLogger): Promise<RepoReceiveOutcome> {
+export async function receiveIntoRepo(git: SimpleGit, repoPath: string, log: SyncLogger, probe?: OfficeLockProbe): Promise<RepoReceiveOutcome> {
   const gitDir = path.join(repoPath, '.git')
   for (const marker of ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'index.lock']) {
     if (fs.existsSync(path.join(gitDir, marker))) return { kind: 'held-back', reason: 'repository-busy' }
@@ -100,7 +100,7 @@ export async function receiveIntoRepo(git: SimpleGit, repoPath: string, log: Syn
     }
   }
 
-  const open = await openFilesAmong(git, repoPath, changes.map(c => c.path))
+  const open = await openFilesAmong(git, repoPath, changes.map(c => c.path), probe)
   if (open.length > 0) return { kind: 'held-back', reason: 'file-open', openFiles: open }
 
   try {

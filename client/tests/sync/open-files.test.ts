@@ -121,6 +121,76 @@ describe('files open in another app', { concurrency: CONCURRENCY }, () => {
     assert.ok(backup, 'conflict copy written')
     assert.equal(fs.readFileSync(path.join(backup, SHEET), 'utf-8'), 'a の見積')
     assert.equal(world.serverFile(LOCK), null)
+    assert.equal(a.exists(LOCK), false, 'the lock the crash left is removed, so the question does not come back')
+
+    b.write(SHEET, Buffer.from('b の見積 2'))
+    ok(await b.sync(), 'b')
+    const next = ok(await a.sync(), 'a')
+    assert.deepEqual(next.dialogs, [], 'not asked again for the same file')
+    assert.equal(a.readText(SHEET), 'b の見積 2')
+    await settleAndCheck(world)
+  })
+
+  scenario('a lock file from before this computer last started (a crash, then a restart) does not hold anything', async t => {
+    const { world, a, b } = create(t)
+    ok(await a.sync(), 'a')
+    b.write(SHEET, Buffer.from('b の見積'))
+    ok(await b.sync(), 'b')
+    a.write(LOCK, 'stale')
+    const old = new Date(Date.now() - 3 * 24 * 3600_000)
+    fs.utimesSync(path.join(a.dir, LOCK), old, old)
+    a.bootTimeMs = Date.now() - 3600_000
+    const answer = await a.autoSync('receive')
+    const result = answer.status === 'received' ? answer.result : assert.fail(JSON.stringify(answer))
+    assert.equal(result.received, 1)
+    assert.equal(result.openFiles, undefined)
+    assert.equal(a.readText(SHEET), 'b の見積')
+    // The same lock written after the start (the file really open) still holds the update.
+    a.bootTimeMs = old.getTime() - 3600_000
+    b.write(SHEET, Buffer.from('b の見積 2'))
+    ok(await b.sync(), 'b')
+    const out = await a.sync()
+    assert.equal(out.result.errorType, 'file_open')
+    a.remove(LOCK)
+    await settleAndCheck(world)
+  })
+
+  scenario('no Office / LibreOffice app running (Mac process list): a lock is a crash leftover and holds nothing', async t => {
+    const { world, a, b } = create(t)
+    ok(await a.sync(), 'a')
+    b.write(SHEET, Buffer.from('b の見積'))
+    ok(await b.sync(), 'b')
+    a.write(LOCK, 'stale')
+    a.officeAppsRunning = true
+    const held = await a.sync()
+    assert.equal(held.result.errorType, 'file_open', 'an app running: the lock counts')
+    a.officeAppsRunning = false
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs, [])
+    assert.equal(a.readText(SHEET), 'b の見積')
+    a.remove(LOCK)
+    await settleAndCheck(world)
+  })
+
+  scenario('a company file open here holds back only the company repository: private folders still sync', async t => {
+    const world = World.create(t, {
+      members: [{ name: 'a' }, { name: 'b' }],
+      departments: ['営業部', '人事'],
+      seed: { [SHEET]: 'v1' },
+    })
+    world.createPrivateFolder('人事/評価', { viewers: ['a', 'b'], files: { '評価表.md': '評価 v1\n' } })
+    const [a, b] = world.members
+    ok(await a.sync(), 'a')
+    ok(await b.sync(), 'b')
+    b.write(SHEET, 'v2')
+    ok(await b.sync(), 'b')
+    a.write(LOCK, 'owner').write('人事/評価/評価表.md', '評価 a\n')
+    const out = await a.sync()
+    assert.equal(out.result.errorType, 'file_open')
+    const folder = out.result.privateFolders?.find(f => f.path === '人事/評価')
+    assert.equal(folder?.success, true, JSON.stringify(out.result))
+    assert.equal(world.scopeFile('人事/評価', '評価表.md')?.toString(), '評価 a\n')
+    assert.equal(a.readText(SHEET), 'v1')
     a.remove(LOCK)
     await settleAndCheck(world)
   })

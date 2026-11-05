@@ -14,10 +14,21 @@ test('isOfficeLockFile: Office owner files, Word temporary files and LibreOffice
   }
 })
 
-test('lockNamesFor: the full name everywhere; Word\'s shortened owner file only for Word documents', () => {
+test('lockNamesFor: the full name everywhere; Word\'s shortened owner file by Word\'s rule, for Word documents only', () => {
   assert.deepEqual(lockNamesFor('見積.xlsx'), ['~$見積.xlsx', '.~lock.見積.xlsx#'])
-  const word = lockNamesFor('Document.docx')
-  assert.ok(word.includes('~$cument.docx'), 'Word drops the first two characters of a long name')
-  assert.ok(lockNamesFor('Report1.docx').includes('~$eport1.docx'), 'and one of a seven-character one')
-  assert.ok(lockNamesFor('ab.docx').every(n => n === '~$ab.docx' || n === '.~lock.ab.docx#'), 'a short name is never shortened to nothing')
+  assert.deepEqual(lockNamesFor('Document.docx').slice(2), ['~$cument.docx'], '8 or more: the first two characters go')
+  assert.deepEqual(lockNamesFor('Report1.docx').slice(2), ['~$eport1.docx'], '7: the first one goes')
+  assert.deepEqual(lockNamesFor('abcd.docx').slice(2), [], 'up to 6: the whole name (abcd.docx never matches ~$cd.docx)')
+  assert.deepEqual(lockNamesFor('Help.doc'), ['~$Help.doc', '.~lock.Help.doc#'])
+  assert.deepEqual(lockNamesFor('Document.xlsx').slice(2), [], 'Excel and PowerPoint keep the whole name')
+  // Japanese stems: unknown whether Word counts characters or bytes, so both shortened forms count.
+  assert.deepEqual(lockNamesFor('提案書2026.docx').slice(2), ['~$案書2026.docx', '~$書2026.docx'])
+  assert.deepEqual(lockNamesFor('提案.docx').slice(2), [])
+})
+
+test('officeAppIn: the Mac process list names a running Office or LibreOffice app', async () => {
+  const { officeAppIn } = await import('../electron/sync/open-files')
+  assert.equal(officeAppIn('/sbin/launchd\n/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel\n'), true)
+  assert.equal(officeAppIn('/Applications/LibreOffice.app/Contents/MacOS/soffice\n'), true)
+  assert.equal(officeAppIn('/sbin/launchd\n/Applications/Numbers.app/Contents/MacOS/Numbers\n/usr/bin/Microsoft Excel Helper\n'), false)
 })

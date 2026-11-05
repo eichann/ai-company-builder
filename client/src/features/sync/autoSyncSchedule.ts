@@ -1,7 +1,8 @@
 // When 「自動で受け取る」 / 「自動で送る」 run, and what the member is told about
 // them (.claude/rules/sync.md "Automatic sync"). Pure: the timer
 // (hooks/useAutoSync.ts) feeds it the clock and the stored state.
-import type { AutoSyncMode } from '../../../shared/auto-sync'
+import type { AutoSyncMode, ReceiveResult } from '../../../shared/auto-sync'
+import { receiveNoticeFor, type SyncNotice } from './model'
 import { NEEDS_MEMBER_ERROR } from '../../../shared/auto-sync'
 import { parseTimeOfDay, type AutoSyncSettings } from '../../shared/lib/autoSyncSettings'
 
@@ -19,6 +20,12 @@ export interface AutoSyncState {
   needsMember: boolean
   /** Failure kinds already shown since the last successful sync (one notice per kind). */
   notified: string[]
+  /**
+   * 「受け取る」 is waiting for files open in another app (Excel…): the set
+   * already told (its key, `receiveNoticeFor`), kept across restarts so it is
+   * said once; null when nothing waits.
+   */
+  openFilesHeld: string | null
 }
 
 export const EMPTY_AUTO_SYNC_STATE: AutoSyncState = {
@@ -27,6 +34,7 @@ export const EMPTY_AUTO_SYNC_STATE: AutoSyncState = {
   lastAutoSyncAt: null,
   needsMember: false,
   notified: [],
+  openFilesHeld: null,
 }
 
 /** The first time slot (local time of day) strictly after `after`. */
@@ -146,8 +154,23 @@ export function afterSync(state: AutoSyncState, result: SyncOutcomeView, options
 export function syncButtonTitle(state: AutoSyncState, settings: AutoSyncSettings): string {
   if (!settings.receive.enabled && !settings.send.enabled) return 'サーバーと同期'
   if (state.needsMember) return 'サーバーと同期\n自動同期は止まっています（このボタンで同期すると再開します）'
+  if (state.openFilesHeld !== null && settings.receive.enabled) return 'サーバーと同期\nほかのアプリで開いているファイルがあるため、ほかの人の変更の受け取りを待っています'
   if (state.lastAutoSyncAt === null) return 'サーバーと同期'
   const at = new Date(state.lastAutoSyncAt)
   const time = `${at.getMonth() + 1}/${at.getDate()} ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
   return `サーバーと同期\n最後の自動同期: ${time}`
+}
+
+/**
+ * The state after a 「受け取る」 run and the notice to show. Held for a file
+ * open in another app: said once per set of files (`openFilesHeld`, kept across
+ * restarts), and the run is not "the last automatic sync" of the tooltip,
+ * which says it waits instead.
+ */
+export function afterReceive(state: AutoSyncState, result: ReceiveResult, now: number): { state: AutoSyncState; notice: SyncNotice | null } {
+  const { notice, key } = receiveNoticeFor(result, state.openFilesHeld)
+  return {
+    state: { ...recordRun(state, 'receive', 'ran', now), openFilesHeld: key, ...(key === null ? { lastAutoSyncAt: now } : {}) },
+    notice,
+  }
 }

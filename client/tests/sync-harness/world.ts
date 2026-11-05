@@ -754,6 +754,10 @@ export class Member {
   mayLeaveOperation = false
 
   private readonly answers = new Map<QuestionKind, string[]>()
+  /** What the office-lock probe says about Office / LibreOffice running (null: unknown, the app's default). */
+  officeAppsRunning: boolean | null = null
+  /** This computer's boot time for the office-lock probe (default: the real one). */
+  bootTimeMs: number | null = null
   private readonly sync_: SyncFn
   /** offline() was called: the server API (and every remote) is unreachable. */
   private isOffline = false
@@ -845,6 +849,12 @@ export class Member {
       platform: process.platform,
       largeFileThreshold: world.largeFileThreshold,
       otherGitRunning: options => this.otherGitRunning && !options?.ownActivity,
+      // Read at each call: a scenario sets `officeAppsRunning` / `bootTimeMs` on the member.
+      officeLockProbe: {
+        appsRunning: async () => this.officeAppsRunning,
+        targetFree: () => null,
+        bootTimeMs: () => this.bootTimeMs ?? Date.now() - os.uptime() * 1000,
+      },
       log: {
         log: (...args: unknown[]) => this.capture('log', args),
         warn: (...args: unknown[]) => this.capture('warn', args),

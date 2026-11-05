@@ -43,7 +43,7 @@ import {
 import { readSparseConfig } from './sparse'
 import { isNotDownloaded, pathKey } from '../../shared/sparse-paths'
 import { recoverInterruptedState, recoveryNote } from './interrupted'
-import { openFilesAmong, openFilesStoppedMessage } from './open-files'
+import { findOpenFiles, openFilesStoppedMessage, removeLockFiles } from './open-files'
 
 export interface PrivatePrep {
   /** The answer in effect for this sync (fresh, or the cached one when the server could not be asked). */
@@ -414,11 +414,15 @@ export async function syncReadOnlyScope(deps: SyncDeps, repoPath: string, scope:
     const incoming = head
       ? (await git.raw(['diff', '--name-only', '-z', '--no-renames', head, 'origin/main']).catch(() => '')).split('\0').filter(Boolean)
       : []
-    const open = incoming.length > 0 ? await openFilesAmong(git, dir, incoming) : []
-    // The dialog is the folder's own (prefixedDialog): it adds the folder's path itself.
-    if (open.length > 0 && (!deps.dialog.canAsk() || await deps.dialog.confirmOpenFiles(open) !== 'continue')) {
-      const openShown = open.map(f => `${scope.path}/${f}`)
-      return { success: false, errorType: 'file_open', openFiles: openShown, error: withNote(openFilesStoppedMessage(openShown)), ...recovered }
+    const found = incoming.length > 0 ? await findOpenFiles(git, dir, incoming, deps.officeLockProbe) : []
+    const open = found.map(o => o.file)
+    if (open.length > 0) {
+      // The dialog is the folder's own (prefixedDialog): it adds the folder's path itself.
+      if (!deps.dialog.canAsk() || await deps.dialog.confirmOpenFiles(open) !== 'continue') {
+        const openShown = open.map(f => `${scope.path}/${f}`)
+        return { success: false, errorType: 'file_open', openFiles: openShown, error: withNote(openFilesStoppedMessage(openShown)), ...recovered }
+      }
+      removeLockFiles(dir, found, deps.log)
     }
     const changes = await localChangesInClone(git, dir)
     const shown = changes.map(f => `${scope.path}/${f}`)

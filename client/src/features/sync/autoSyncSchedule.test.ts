@@ -3,12 +3,14 @@ import assert from 'node:assert/strict'
 import {
   EMPTY_AUTO_SYNC_STATE,
   RETRY_AFTER_SKIP_MS,
+  afterReceive,
   afterSync,
   dueAt,
   needsMemberAfter,
   nextSlotAfter,
   recordRun,
   runDueNow,
+  syncButtonTitle,
   type AutoSyncState,
 } from './autoSyncSchedule'
 import { DEFAULT_AUTO_SYNC_SETTINGS, normalizeAutoSyncSettings, type AutoSyncSettings } from '../../shared/lib/autoSyncSettings'
@@ -136,4 +138,23 @@ test('a stop for the member lasts until a sync succeeds', () => {
   assert.equal(st.needsMember, true, 'an unrelated failure does not lift it')
   st = afterSync(st, { success: true }, { manual: true }).state
   assert.equal(st.needsMember, false)
+})
+
+test('a receive held for a file open in another app: said once per set (kept in the stored state), not shown as the last automatic sync, the tooltip says it waits', () => {
+  const held = { success: true, received: 0, heldBack: 1, openFiles: ['営業部/見積.xlsx'] }
+  const first = afterReceive(state({ lastAutoSyncAt: at(1, 9) }), held, at(1, 10))
+  assert.ok(first.notice)
+  assert.equal(first.state.lastAutoSyncAt, at(1, 9), 'a held run is not the last automatic sync')
+  assert.match(syncButtonTitle(first.state, settings()), /開いているファイルがあるため、ほかの人の変更の受け取りを待っています/)
+  // The app restarted: the stored state still knows the set was said.
+  const again = afterReceive(JSON.parse(JSON.stringify(first.state)) as AutoSyncState, held, at(1, 10, 15))
+  assert.equal(again.notice, null)
+  const closed = afterReceive(again.state, { success: true, received: 2, heldBack: 0 }, at(1, 10, 30))
+  assert.equal(closed.state.openFilesHeld, null)
+  assert.equal(closed.state.lastAutoSyncAt, at(1, 10, 30))
+  assert.doesNotMatch(syncButtonTitle(closed.state, settings()), /待っています/)
+})
+
+test('a file open in another app is not a stop for the member: automatic sync goes on', () => {
+  assert.equal(needsMemberAfter({ success: false, errorType: 'file_open' }), false)
 })

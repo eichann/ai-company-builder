@@ -35,16 +35,29 @@ export function isOfficeLockFile(p: string): boolean {
 }
 
 /**
- * The lock-file names that say `name` (a file name, no folder) is open. Word's
- * shortened owner file can also match a neighbour with the same tail: then
- * both count as open, the safe side (their update only waits).
+ * The lock-file names that say `name` (a file name, no folder) is open.
+ * Word's owner file follows the old short-name rule: a stem of up to 6
+ * characters keeps the whole name (`~$Help.doc`), 7 drops the first character
+ * (`~$eport1.docx`), 8 or more drop the first two (`~$cument.docx` for
+ * `Document.docx`). For a stem with non-ASCII characters (Japanese) it is not
+ * known whether Word counts characters or bytes, so both shortened forms
+ * count from 3 characters: a neighbour sharing the tail then waits too, the
+ * safe side.
  */
 export function lockNamesFor(name: string): string[] {
   const names = [`~$${name}`, `.~lock.${name}#`]
   if (WORD_EXTENSIONS.test(name)) {
     const stem = name.slice(0, name.lastIndexOf('.'))
-    if (stem.length >= 3) names.push(`~$${name.slice(1)}`)
-    if (stem.length >= 4) names.push(`~$${name.slice(2)}`)
+    const length = [...stem].length
+    const chars = [...name]
+    // eslint-disable-next-line no-control-regex
+    if (/[^\x00-\x7f]/.test(stem)) {
+      if (length >= 3) names.push(`~$${chars.slice(1).join('')}`, `~$${chars.slice(2).join('')}`)
+    } else if (length === 7) {
+      names.push(`~$${name.slice(1)}`)
+    } else if (length >= 8) {
+      names.push(`~$${name.slice(2)}`)
+    }
   }
   return names
 }

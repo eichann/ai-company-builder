@@ -6,16 +6,79 @@
 // on Windows Office holds the file, so git cannot replace it at all). The
 // owner file the app writes next to it (`~$<name>`, `.~lock.<name>#`,
 // client/shared/office-lock-files.ts) is the signal: cheap, the same on Mac and
-// Windows, and it needs no process listing. Apps that leave no such file
-// (Numbers, Preview, a text editor) are not seen.
+// Windows. Apps that leave no such file (Numbers, Preview, a text editor) are
+// not seen.
 //
-// A lock file the company repository itself holds unchanged (an older app
-// shared a teammate's) is not this computer's app: it does not count.
+// What does not count:
+// - a lock file the repository holds unchanged (an older app shared a
+//   teammate's);
+// - a stale lock, left by a crash: written before this computer last started,
+//   no Office / LibreOffice app running (Mac, `OfficeLockProbe.appsRunning`),
+//   or, on Windows, an Office document no app holds (it opens for writing).
+//   Only what proves the app is gone: a document can stay open for days, so
+//   age alone never makes a lock stale.
 
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
+import { execFile } from 'child_process'
 import type { SimpleGit } from 'simple-git'
-import { lockNameKey, lockNamesFor } from '../../shared/office-lock-files'
+import { isOfficeLockFile, lockNameKey, lockNamesFor } from '../../shared/office-lock-files'
+import type { SyncLogger } from './types'
+
+/** How sync tells a live lock from one a crash left. Every answer may be "unknown" (null): the lock then counts. */
+export interface OfficeLockProbe {
+  /** false: no Office / LibreOffice app runs on this computer. */
+  appsRunning(): Promise<boolean | null>
+  /** true: no app holds this file (it opens for writing). Windows only; elsewhere null. */
+  targetFree(absPath: string): boolean | null
+  /** When this computer last started (ms since the epoch). */
+  bootTimeMs(): number
+}
+
+/** Boot time only: what sync can always know. The app wires `systemLockProbe`. */
+export const BOOT_TIME_ONLY_PROBE: OfficeLockProbe = {
+  appsRunning: async () => null,
+  targetFree: () => null,
+  bootTimeMs: () => Date.now() - os.uptime() * 1000,
+}
+
+/** Is one of the office apps among `ps -A -o comm=` lines? */
+export function officeAppIn(psOutput: string): boolean {
+  return psOutput.split('\n').some(line => /(^|\/)(Microsoft (Excel|Word|PowerPoint)|soffice(\.bin)?|LibreOffice)\s*$/.test(line.trim()))
+}
+
+/** The probe for this computer: the process list on a Mac, the file's own lock on Windows. */
+export function systemLockProbe(platform: NodeJS.Platform): OfficeLockProbe {
+  return {
+    bootTimeMs: BOOT_TIME_ONLY_PROBE.bootTimeMs,
+    appsRunning: () => platform !== 'darwin'
+      ? Promise.resolve(null)
+      : new Promise(resolve => {
+        execFile('ps', ['-A', '-o', 'comm='], { timeout: 3000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+          resolve(error ? null : officeAppIn(String(stdout)))
+        })
+      }),
+    targetFree: absPath => {
+      if (platform !== 'win32') return null
+      try {
+        // r+ asks for write access: Office opens a document denying it to others.
+        fs.closeSync(fs.openSync(absPath, 'r+'))
+        return true
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' ? false : null
+      }
+    },
+  }
+}
+
+export interface OpenFile {
+  /** Repository-relative path of the open file (as given). */
+  file: string
+  /** Repository-relative path of its lock file. */
+  lock: string
+}
 
 /** Lock files in `dir` (names), keyed the way the disk compares them. */
 function lockFilesIn(dir: string): Map<string, string> {
@@ -41,11 +104,14 @@ async function sharedUnchanged(git: SimpleGit, locks: string[]): Promise<Set<str
   return new Set(tracked.filter(l => !changedSet.has(l)))
 }
 
+const abs = (repoPath: string, rel: string) => path.join(repoPath, ...rel.split('/').filter(Boolean))
+
 /**
- * The paths (repository-relative, as given) that have an office lock file
- * next to them on this computer. Reads only the folders of the given paths.
+ * The paths (repository-relative, as given) that have a live office lock file
+ * next to them on this computer, with that lock. Reads only the folders of
+ * the given paths.
  */
-export async function openFilesAmong(git: SimpleGit, repoPath: string, paths: readonly string[]): Promise<string[]> {
+export async function findOpenFiles(git: SimpleGit, repoPath: string, paths: readonly string[], probe: OfficeLockProbe = BOOT_TIME_ONLY_PROBE): Promise<OpenFile[]> {
   const byDir = new Map<string, string[]>()
   for (const p of paths) {
     const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : ''
@@ -53,9 +119,9 @@ export async function openFilesAmong(git: SimpleGit, repoPath: string, paths: re
     if (list) list.push(p)
     else byDir.set(dir, [p])
   }
-  const candidates: Array<{ file: string; lock: string }> = []
+  const candidates: OpenFile[] = []
   for (const [dir, files] of byDir) {
-    const locks = lockFilesIn(path.join(repoPath, ...dir.split('/').filter(Boolean)))
+    const locks = lockFilesIn(abs(repoPath, dir))
     if (locks.size === 0) continue
     for (const file of files) {
       const name = file.slice(file.lastIndexOf('/') + 1)
@@ -70,7 +136,42 @@ export async function openFilesAmong(git: SimpleGit, repoPath: string, paths: re
   }
   if (candidates.length === 0) return []
   const notOurs = await sharedUnchanged(git, [...new Set(candidates.map(c => c.lock))])
-  return [...new Set(candidates.filter(c => !notOurs.has(c.lock)).map(c => c.file))]
+  const bootTime = probe.bootTimeMs()
+  const live = candidates.filter(c => {
+    if (notOurs.has(c.lock)) return false
+    let mtime: number
+    try { mtime = fs.lstatSync(abs(repoPath, c.lock)).mtimeMs } catch { return false }
+    if (mtime < bootTime) return false
+    // Windows: Office holds its document; LibreOffice may not, so its lock is not judged this way.
+    if (path.basename(c.lock).startsWith('~$') && probe.targetFree(abs(repoPath, c.file)) === true) return false
+    return true
+  })
+  if (live.length === 0) return []
+  if (await probe.appsRunning() === false) return []
+  const seen = new Set<string>()
+  return live.filter(c => !seen.has(c.file) && seen.add(c.file))
+}
+
+/** The open files' paths only. */
+export async function openFilesAmong(git: SimpleGit, repoPath: string, paths: readonly string[], probe?: OfficeLockProbe): Promise<string[]> {
+  return (await findOpenFiles(git, repoPath, paths, probe)).map(o => o.file)
+}
+
+/**
+ * The member said these files are closed (「閉じたので続ける」): their lock
+ * files, left by a crash, go, so the same question does not come back at
+ * every sync. Only office lock names, only while still there; one that
+ * cannot be removed (an app still holds it) stays.
+ */
+export function removeLockFiles(repoPath: string, open: readonly OpenFile[], log: SyncLogger): void {
+  for (const { lock } of open) {
+    if (!isOfficeLockFile(lock)) continue
+    try {
+      fs.unlinkSync(abs(repoPath, lock))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') log.warn('Git sync: Could not remove an office lock file:', (error as NodeJS.ErrnoException).code)
+    }
+  }
 }
 
 /** The list shown to the member (at most 10 names). */

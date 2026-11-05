@@ -5,6 +5,7 @@
 import path from 'path'
 import { createGitSync, type SyncDialog } from '../../sync/git-sync'
 import { createFetchSyncServerApi } from '../../sync/server-api'
+import { systemLockProbe } from '../../sync/open-files'
 import { createCommitMessages, type CommitMessagesDeps } from '../../services/commit-messages'
 import { createSyncActivity, gitMayBeRunningElsewhere } from '../../services/sync-activity'
 import type { AppGit } from '../../services/app-git'
@@ -46,6 +47,7 @@ export function wireSync(ipc: IpcRegistrar, { paths, appGit, userDataDir, dialog
     platform: process.platform,
     log: console,
     otherGitRunning: options => gitMayBeRunningElsewhere(activity, aiRunning, options),
+    officeLockProbe: systemLockProbe(process.platform),
   })
 
   registerSyncIpc(ipc, { paths, gitSync, writeAccess, activity, aiRunning })
