@@ -76,6 +76,11 @@ export interface MinutesServiceDeps {
   writer: ServiceRecordWriter
   /** The core role 会議の記録を読む, routed to the company's connector (connector-roles.md). */
   meetings: MeetingRecordsReader
+  /**
+   * A person asked for the reading again: its execution run, if one stopped for a person, may be
+   * claimed anew (`AiRunService.askedAgain`; ai-turns.md "Asked again").
+   */
+  readingAskedAgain?: (companyId: string, recordId: string) => void
   /** The company's members with their ACB email and display name (compared only; never logged). */
   members: (companyId: string) => MinutesMember[]
   clock: Clock
@@ -140,6 +145,8 @@ const GOOGLE_BUSY_REASONS = ['rateLimitExceeded', 'userRateLimitExceeded', 'dail
 const GOOGLE_SETTINGS_REASONS = ['domainPolicy', 'accessNotConfigured', 'SERVICE_DISABLED']
 const ACB_PERMISSION_REASONS = ['appNotAuthorizedToFile', 'insufficientPermissions', 'insufficientScopes', 'ACCESS_TOKEN_SCOPE_INSUFFICIENT']
 const NO_COPY_REASONS = ['cannotExportFile', 'cannotDownload', 'cannotDownloadFile', 'cannotDownloadAbusiveFile']
+/** Only what ACB's own permission lacks may be read from Meet's record instead (owner decision 2026-11-05). */
+const MEET_RECORD_REASONS = ACB_PERMISSION_REASONS
 
 /** ［AI に読ませる］ by an attendee whose Google cannot open the minutes (reader rotation, design §4-3). */
 export const MINUTES_NOT_SHARED_MESSAGE = 'あなたの Google では、この会議の議事録を開けません（Google で共有されていません）。ほかの出席者が［AI に読ませる］を押すと、その人の AI が読めます。'
@@ -228,7 +235,7 @@ export function textRefusal(err: GoogleReadFailed): Refusal {
     return refuse('forbidden', '議事録が大きすぎて、Google が文章を取り出せませんでした（10MB まで）。Google ドキュメントで開いて読んでください。', { code: 'MINUTES_TOO_LARGE' })
   }
   if (NO_COPY_REASONS.includes(reason)) {
-    return refuse('forbidden', 'この議事録は開けますが、コピーやダウンロードをさせない設定のため、Google が文章の取り出しを断りました。会議を開いた人か Google の管理者に確かめてください。', { code: 'MINUTES_TEXT_REFUSED' })
+    return refuse('forbidden', 'この議事録は、ファイルの持ち主がコピーやダウンロードを止めているため、AI は読めません。Google ドキュメントで開いて読んでください。', { code: 'MINUTES_TEXT_REFUSED' })
   }
   if (ACB_PERMISSION_REASONS.includes(reason)) {
     return refuse('forbidden', 'この議事録は共有されていて開けますが、いま ACB に許可している範囲では、Google が文章の取り出しを断りました。AI は読めないため、Google ドキュメントで開いて読んでください。会社の管理者にも伝えてください。', { code: 'MINUTES_TEXT_REFUSED' })
@@ -445,14 +452,15 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * The minutes' documents as text with the member's own Google permission, at most `max` characters:
    * what ［AI に読ませる］ tries and what the text answer hands over (minutes.md "The text"). A document
    * Drive will not open is the member's refusal (not shared). One it opens but whose text it refuses
-   * does not stop the others; when no transcript came through, Meet's own record of what was said
-   * stands in. Nothing readable → why, by Google's reason.
+   * does not stop the others; when no transcript came through and every refusal was about what ACB
+   * is allowed (never a copy block: the file's owner said no), Meet's own record of what was said
+   * stands in. Nothing readable → why, by Google's reason, a copy block first.
    */
   async function readDocuments(companyId: string, userId: string, ref: SourceRef, max: number): Promise<Outcome<{ text: string; truncated: boolean; versions: string[] }>> {
     const versions: string[] = []
     let parts: Array<{ kind: 'notes' | 'transcript'; text: string | null }> = []
     let truncated = false
-    let refused: GoogleReadFailed | null = null
+    const refused: GoogleReadFailed[] = []
     let room = max
     const take = (heading: string, got: { text: string; truncated: boolean }) => {
       truncated ||= got.truncated
@@ -469,11 +477,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           parts.push({ kind: d.kind, text: take(heading, got) })
         } catch (err) {
           if (!(err instanceof GoogleReadFailed) || !textRefused(err)) throw err
-          refused ??= err
+          refused.push(err)
           parts.push({ kind: d.kind, text: null })
         }
       }
-      if (refused && !parts.some(p => p.kind === 'transcript' && p.text !== null) && room > 0) {
+      const meetRecordAllowed = refused.length > 0 && refused.every(e => MEET_RECORD_REASONS.includes(e.result.googleReason ?? ''))
+      if (meetRecordAllowed && !parts.some(p => p.kind === 'transcript' && p.text !== null) && room > 0) {
         const got = await meetRecordText(companyId, userId, ref.conference, Math.max(0, room - MEET_RECORD_HEADING.length - 2))
         if (got) parts = [...parts.filter(p => p.kind !== 'transcript'), { kind: 'transcript', text: take(MEET_RECORD_HEADING, got) }]
       }
@@ -481,7 +490,9 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (err instanceof GoogleReadFailed) return googleRefusal(err)
       throw err
     }
-    if (refused && !parts.some(p => p.text !== null)) return textRefusal(refused)
+    if (refused.length > 0 && !parts.some(p => p.text !== null)) {
+      return textRefusal(refused.find(e => NO_COPY_REASONS.includes(e.result.googleReason ?? '')) ?? refused[0])
+    }
     const text = parts.map(p => p.text ?? `${p.kind === 'notes' ? NOTES_HEADING : TRANSCRIPT_HEADING}\n${PART_REFUSED_NOTE}`).join('\n\n')
     return ok({ text, truncated, versions })
   }
@@ -502,7 +513,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * (`readDocuments`, a little of the text, thrown away), so a member whose Google cannot read the
    * minutes hears why at once, not after a failed turn of the AI, and when they are not shared
    * another attendee can press instead (design §4-3). Then arrived / skipped / failed → received
-   * with them as the assignee. Quiet: a turn of the AI tells nobody.
+   * with them as the assignee. Quiet: a turn of the AI tells nobody. An earlier run of the reading
+   * that stopped for a person is given back: this press is that person's answer.
    */
   async function askToRead(companyId: string, userId: string, recordId: string, expected: number, actor: ServiceActor, note: string): Promise<Outcome<MeetingReadRequestResult>> {
     const records = companyData.forCompany(companyId).records
@@ -519,6 +531,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (r.reason === 'records-off') return disabled()
       return refuse('conflict', 'この会議は、いまは AI に読ませられません。', { code: 'MEETING_NOT_WAITING', version: fieldsOf(records, recordId).version })
     }
+    deps.readingAskedAgain?.(companyId, recordId)
     return ok({ recordId, version: r.entry.version, state: 'received' })
   }
 
@@ -1070,7 +1083,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       if (!isAttendee(row, now.fields, member.userId)) return refuse('forbidden', MINUTES_NOT_YOURS.error, { code: MINUTES_NOT_YOURS.code })
       const expected = versionBody(body, now.version)
       if (typeof expected !== 'number') return expected
-      if (now.state === 'received' && now.fields.assignee === member.userId) return ok({ recordId: row.id, version: now.version, state: 'received' })
+      if (now.state === 'received' && now.fields.assignee === member.userId) {
+        // Nothing new on the record; a run that stopped before this press still must not hold the reading back.
+        deps.readingAskedAgain?.(member.companyId, row.id)
+        return ok({ recordId: row.id, version: now.version, state: 'received' })
+      }
       if (!['arrived', 'skipped', 'failed'].includes(now.state ?? '')) {
         return refuse('conflict', 'この会議は、もう AI が読んでいるか、読み終わっています。', { code: 'MEETING_NOT_WAITING', version: now.version })
       }

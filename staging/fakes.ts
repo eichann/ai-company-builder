@@ -1,5 +1,5 @@
 /**
- * The staging kit's practice services (練習用の HubSpot・Google・Slack) in one process on this
+ * The staging kit's practice services (練習用の HubSpot・Google・Slack・ポータル) in one process on this
  * Mac, listening on 127.0.0.1 only. The kit's api container reaches them through
  * host.docker.internal (ACB_FAKE_*_URL, staging only; `.claude/rules/deployment.md`).
  *
@@ -11,7 +11,9 @@
  *   - Google: the seed's two staff become 検証A社's a-member / a-manager, the Workspace domain
  *     example.invalid, the meetings moved to today so 「議事録を確かめる」 finds them, and the practice
  *     spreadsheets for the relay (「練習用 係数表」 a-member edits, a budget they may only read);
- *   - Slack: the seed, plus a-member@example.invalid as a member of the workspace.
+ *   - Slack: the seed, plus a-member@example.invalid as a member of the workspace;
+ *   - portal: the seed, the kit's practice key (FAKE_PORTAL_KEY_FILE), under the path and with the
+ *     aliases the private kit config names (FAKE_PORTAL_BASE_PATH, FAKE_PORTAL_ALIASES).
  * Made-up people and values only. Refuses NODE_ENV=production.
  */
 import { readFileSync } from 'node:fs'
@@ -20,6 +22,7 @@ import { createFakeHubSpot, ALL_FAKE_SCOPES, FAKE_HUBSPOT_KEY_PREFIX } from '../
 import { createFakeGoogle } from '../server/tests/fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../server/tests/fakes/google/seed'
 import { createFakeSlack, defaultSlackSeed } from '../server/tests/fakes/slack/fake-slack'
+import { createFakePortal, FAKE_PORTAL_KEY_PREFIX, parsePortalAliases, PORTAL_SCOPES } from '../server/tests/fakes/portal/fake-portal'
 
 if (process.env.NODE_ENV === 'production') {
   console.error('[fakes] refusing to start with NODE_ENV=production')
@@ -38,11 +41,17 @@ const num = (name: string, fallback: number) => Number(process.env[name] ?? fall
 const hubspotPort = num('FAKE_HUBSPOT_PORT', 14010)
 const googlePort = num('FAKE_GOOGLE_PORT', 14011)
 const slackPort = num('FAKE_SLACK_PORT', 14012)
+const portalPort = num('FAKE_PORTAL_PORT', 14013)
 const publicUrl = (process.env.ACB_PUBLIC_URL ?? 'http://localhost:14001').replace(/\/+$/, '')
 const keyFile = process.env.FAKE_HUBSPOT_KEY_FILE
 if (!keyFile) { console.error('[fakes] FAKE_HUBSPOT_KEY_FILE is not set'); process.exit(1) }
 const hubspotKey = readFileSync(keyFile, 'utf8').trim()
 if (!hubspotKey.startsWith(FAKE_HUBSPOT_KEY_PREFIX)) { console.error('[fakes] the practice HubSpot key must start with ' + FAKE_HUBSPOT_KEY_PREFIX); process.exit(1) }
+
+const portalKeyFile = process.env.FAKE_PORTAL_KEY_FILE
+if (!portalKeyFile) { console.error('[fakes] FAKE_PORTAL_KEY_FILE is not set'); process.exit(1) }
+const portalKey = readFileSync(portalKeyFile, 'utf8').trim()
+if (!portalKey.startsWith(FAKE_PORTAL_KEY_PREFIX)) { console.error('[fakes] the practice portal key must start with ' + FAKE_PORTAL_KEY_PREFIX); process.exit(1) }
 
 // HubSpot
 const hubspot = createFakeHubSpot({ rateLimits: true, controlRoutes: true })
@@ -83,14 +92,21 @@ slackSeed.users.unshift({ id: 'U0STAGING', email: 'a-member@example.invalid', te
 const slack = createFakeSlack(slackSeed)
 const slackApp = slackSeed.apps[0]
 
+// Portal
+const portal = createFakePortal({ controlRoutes: true, rateLimit: true, basePath: process.env.FAKE_PORTAL_BASE_PATH, aliases: parsePortalAliases(process.env.FAKE_PORTAL_ALIASES) })
+portal.addKey(portalKey, Object.values(PORTAL_SCOPES))
+
 const servers = [
   serve({ fetch: hubspot.app.fetch, port: hubspotPort, hostname: '127.0.0.1' }),
   serve({ fetch: google.app.fetch, port: googlePort, hostname: '127.0.0.1' }),
   serve({ fetch: slack.app.fetch, port: slackPort, hostname: '127.0.0.1' }),
+  serve({ fetch: portal.fetch, port: portalPort, hostname: '127.0.0.1' }),
 ]
 console.log(`[fakes] practice HubSpot http://127.0.0.1:${hubspotPort} (key: secrets/fake-hubspot-key)`)
 console.log(`[fakes] practice Google  http://127.0.0.1:${googlePort} (client id ${STAGING_GOOGLE_CLIENT_ID}, domain ${STAGING_DOMAIN}, signs in as a-member@example.invalid)`)
 console.log(`[fakes] practice Slack   http://127.0.0.1:${slackPort} (team ${slackApp.teamId}; client id ${slackApp.clientId}; client secret ${slackApp.clientSecret}; signing secret ${slackApp.signingSecret}; bot token ${slackApp.botToken} — made-up values)`)
+
+console.log(`[fakes] practice portal http://127.0.0.1:${portalPort} (key: secrets/fake-portal-key)`)
 
 const stop = () => {
   hubspot.close()

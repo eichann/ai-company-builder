@@ -3,8 +3,9 @@
 // the real banner 「議事録が届きました」 on top of やること (MeetingBanners) and the real meeting card
 // (RecordCard with the app's MeetingPanel and 案件 field) over a fake main kept in memory. Synthetic
 // data only. `?viewer=suzuki`: another attendee's screen (阿部 already chose ［読まない］ for 採用面接).
-// `?noaccess=1`: the member's Google cannot open the minutes. `?flood=N`: a first discovery, N more
-// meetings at once, and a long list below. `window.__acbMeetings.finish(id)`: the
+// `?noaccess=1`: the member's Google cannot open the minutes. `?renew=1`: their permission is from before the Docs API. `?flood=N`: a first discovery, N more
+// meetings at once, and a long list below. `?bundle=suggest`: the server suggests one 案件 for the
+// card's question (`?bundle=declined`: 案件はない was chosen). `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -56,7 +57,13 @@ const outputs = (m: Meeting) => m.state !== 'read' ? [] : [
 const meetingRecord = (m: Meeting) => rec(m.id, 'meeting', m.title, m.state === 'asked' ? 'received' : m.state, {
   meeting_at: m.at, attendees: JSON.stringify(m.members), ...(m.by && m.state !== 'skipped' ? { assignee: m.by } : {}),
   ...(m.state === 'read' ? { summary_text: '日報の書き方を見直し、11月から AI の下書きを使うことにしました。' } : {}),
+  source_ref: JSON.stringify({ conference: 'c1', event: 'e1', docs: [{ kind: 'notes', id: 'notesDoc12345' }, { kind: 'transcript', id: 'transcriptDoc123' }] }),
 })
+// What a read meeting links besides: a proposal put away, one already added, and its 「議事録を確認する」.
+const putAway = rec('task-prop0004', 'task', '議事録の置き場所を決める', 'dismissed', { assignee: 'u-abe' })
+const added = rec('task-made0001', 'task', '日報のひな形を直す', 'todo', { assignee: 'u-abe' })
+const reviewTask = rec('task-review01', 'task', '議事録を確認する：定例ミーティング', 'todo', { assignee: 'u-abe', task_kind: 'minutes_review' })
+const cardLinks = (m: Meeting) => (m.state !== 'read' ? [] : [...outputs(m), putAway, added, reviewTask].map(r => ({ label: '会議', recordVersion: 1, record: summaryView(r, defs.get(r.type)) })))
 const detailOf = (m: Meeting) => ({ record: { ...meetingRecord(m), version: m.version }, links: outputs(m).map(r => ({ name: 'meeting', direction: 'in' as const, record: r })) })
 const arrivalOf = (m: Meeting): MeetingArrival => ({
   recordId: m.id, title: m.title, version: m.version, meetingAt: m.at, status: m.state as MeetingArrival['status'], attendeeCount: m.members.length,
@@ -72,9 +79,10 @@ installElectronAPI({
   getMeetingCardState: async (_c, id) => {
     const m = find(id)
     const d = detailOf(m)
-    return { success: true, meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
+    return { success: true, ...(params.get('renew') === '1' ? { renewGoogle: true as const } : {}), meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
       review: m.state === 'read' ? { meetingId: m.id, meetingTitle: m.title, summary: '要約', decisions: outputs(m).filter(r => r.type === 'decision').map(r => ({ id: r.id, title: r.title, state: r.state, version: 1, mine: r.fields.owner === ME })) } : null }
   },
+  connectGoogle: async (_c, features) => { say(`google ${features.join(',')}`); return { success: true } },
   requestMeetingReading: async (_c, id, at) => {
     say(`read ${id}@${at}`)
     if (params.get('noaccess') === '1') return { success: false, error: MEETING_NO_ACCESS_TEXT, noAccess: true }
@@ -94,10 +102,15 @@ installElectronAPI({
   getRecordCard: async (_c, id) => {
     const m = find(id)
     const r = { ...meetingRecord(m), version: m.version }
-    return { success: true, card: { record: summaryView(r, defs.get('meeting')), version: m.version, detail: recordDetailOf(r, people, ME) ?? undefined, fields: [], history: [], links: [],
+    return { success: true, card: { record: summaryView(r, defs.get('meeting')), version: m.version, detail: recordDetailOf(r, people, ME) ?? undefined, fields: [], links: cardLinks(m),
+      history: [{ at: '2026-11-04T07:19:00.000Z', text: 'AI：読み終えた', ai: true }],
+      ...(m.state === 'read' ? { ai: { working: false, done: { at: '2026-11-04T07:19:00.000Z', text: '読み終えた' } } } : {}),
       viewers: { kind: 'people' as const, text: `${m.members.length}人が見られます`, count: m.members.length } } }
   },
-  getTaskProposals: async (_c, id) => ({ success: true, proposals: outputs(find(id)).filter(r => r.type === 'task').map(r => ({ id: r.id, kind: 'task' as const, title: r.title, state: 'proposed' as const, version: 1, assignee: String(r.fields.assignee), assigneeName: people[String(r.fields.assignee)], due: null })) }),
+  getTaskProposals: async (_c, id) => ({ success: true, proposals: [...outputs(find(id)).filter(r => r.type === 'task'), putAway].map(r => ({ id: r.id, kind: 'task' as const, title: r.title, state: r.state === 'dismissed' ? 'dismissed' as const : 'proposed' as const, version: 1, assignee: String(r.fields.assignee), assigneeName: people[String(r.fields.assignee)], due: null })) }),
+  getMeetingBundleQuestion: async (_c, id) => ({ success: true, title: find(id).title, canChoose: true, noBundle: params.get('bundle') === 'declined',
+    suggested: params.get('bundle') === 'suggest' ? { id: 'deal-bsha0001', title: 'B社 研修導入' } : null }),
+  declineMinutesBundle: async (_c, id) => { say(`nobundle ${id}`); return { success: true } },
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-bsha0001', title: 'B社 研修導入', typeLabel: '案件' }] }),
   getViewers: async () => ({ success: true, answer: { records: { 'deal-bsha0001': { kind: 'department', text: '営業部のみんな', count: 6 } }, files: {} } }),
   linkMinutesBundle: async (_c, id, bundleId) => { say(`link ${id}=${bundleId}`); return { success: true } },
@@ -125,8 +138,8 @@ function Preview() {
       <section className="min-w-0 flex-1">
         {open && <RecordCard key={open} companyId="co" rootPath="/Users/me/company" recordId={open}
           renderBundleField={f => renderRecordBundleField('co', f, { type: 'deal', name: '案件', source: 'plugin' }, '営業部')}
-          renderMeeting={r => renderMeetingPanel('co', r.id, {
-            members: Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
+          renderMeeting={(r, parts) => renderMeetingPanel('co', r.id, {
+            parts, members: Object.entries(people).filter(([id]) => id !== ME).map(([id, name]) => ({ id, name })),
             onConsult: m => say(`consult ${m.id}`), onChanged: reload,
           })} />}
         {!open && <button type="button" className="m-4 text-[12px] text-accent" onClick={() => setOpen('meeting-teirei01')}>定例ミーティングを開く</button>}

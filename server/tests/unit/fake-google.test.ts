@@ -265,6 +265,21 @@ describe('fake Google: APIs', () => {
     expect((await api(`/drive/v3/files/${S.salesNotesDoc}/export?mimeType=text/plain`, t.access_token)).status).toBe(200)
   })
 
+  it('Docs: documents.get needs its scope and honours sharing, and reaches a hand-made document too', async () => {
+    make()
+    const t = await grant()
+    expect((await api(`/v1/documents/${S.salesNotesDoc}`, t.access_token)).status).toBe(403)
+    const scope = `openid email ${MILESTONE4_SCOPES.slice(2).join(' ')} ${GOOGLE_SCOPES.documentsReadonly}`
+    const docs = await grant({ scope })
+    const got = await api(`/v1/documents/${S.salesNotesDoc}?includeTabsContent=true`, docs.access_token)
+    expect(got.status).toBe(200)
+    expect(JSON.stringify(await got.json())).toContain('textRun')
+    expect((await api(`/v1/documents/${S.plainDoc}`, docs.access_token)).status).toBe(200)
+    fake.signIn({ email: S.colleague })
+    const stranger = await grant({ scope })
+    expect((await api(`/v1/documents/${S.plainDoc}`, stranger.access_token)).status).toBe(404)
+  })
+
   it('Drive: Meet documents export as text (BOM, CRLF) with a version that moves on edits; drive.meet.readonly cannot open a hand-made file; over 10 MB is 403', async () => {
     make({ exportLimitBytes: 2000 })
     const t = await grant()

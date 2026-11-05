@@ -1,8 +1,8 @@
 // The own parts of a meeting's and a 来た連絡's screen (新しい画面のデモ F, J): the meeting's summary
-// as its body with 決めたこと and 宿題 apart, the documents to open; a 連絡's summary (ACB keeps no
-// body) with the original one click away.
+// as its body with 決めたこと and やること apart, the documents to open as rows of 「つながっているもの」;
+// a 連絡's summary (ACB keeps no body) with the original one click away.
 import type { ReactNode } from 'react'
-import { CalendarBlank, CheckCircle, Microphone, NotePencil } from '@phosphor-icons/react'
+import { CalendarBlank, CheckCircle } from '@phosphor-icons/react'
 import type { IncomingDetailView, MeetingDetailView, OpenLink } from '../../../../shared/record-details'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
@@ -11,6 +11,7 @@ import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { SourceIcon, ThingIcon } from '../../../shared/ui/ThingIcon'
 import { openOutside } from '../api'
+import { OPEN_ICON } from './linkRows'
 
 function when(at: string | null): string | null {
   if (!at) return null
@@ -18,21 +19,8 @@ function when(at: string | null): string | null {
   return Number.isNaN(d.getTime()) ? at : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-const OPEN_ICON: Record<OpenLink['kind'], ReactNode> = {
-  transcript: <Microphone size={12} className="text-emerald-600" />,
-  notes: <NotePencil size={12} className="text-sky-600" />,
-  calendar: <SourceIcon source="calendar" />,
-  gmail: <SourceIcon source="gmail" />,
-  slack: <SourceIcon source="slack" />,
-}
-
-export function OpenButton({ link, quiet }: { link: OpenLink; quiet?: boolean }) {
-  return (
-    <button type="button" onClick={() => void openOutside(link.url)}
-      className={quiet ? 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent dark:text-zinc-400 dark:hover:bg-zinc-800' : SMALL_BUTTON}>
-      {OPEN_ICON[link.kind]}{link.label}
-    </button>
-  )
+export function OpenButton({ link }: { link: OpenLink }) {
+  return <button type="button" onClick={() => void openOutside(link.url)} className={SMALL_BUTTON}>{OPEN_ICON[link.kind]}{link.label}</button>
 }
 
 function Section({ kind, title, children }: { kind?: 'decision' | 'task'; title: string; children: ReactNode }) {
@@ -70,18 +58,23 @@ export function MeetingLine({ m }: { m: MeetingDetailView }) {
   )
 }
 
-export function MeetingBody({ m, decisions, homework }: { m: MeetingDetailView; decisions: RecordViewSummary[]; homework: RecordViewSummary[] }) {
+export function MeetingSummary({ m }: { m: MeetingDetailView }) {
+  return (
+    <section aria-label="要約" className="text-[14.5px] leading-[1.8]">
+      <h2 className="mb-1 text-[13px] font-semibold text-gray-700 dark:text-zinc-200">要約</h2>
+      {m.summary
+        ? <p className="whitespace-pre-wrap">{m.summary}</p>
+        : <p className="text-[13px] text-gray-500">AI はまだ議事録を読んでいません。読み終えると、ここに要約が出ます。</p>}
+    </section>
+  )
+}
+
+/** What a meeting's links hold, as plain lists: until the screen has its proposals (or never, on an older server). */
+export function MeetingOutputs({ decisions, tasks }: { decisions: RecordViewSummary[]; tasks: RecordViewSummary[] }) {
   return (
     <>
-      {m.opens.length > 0 && <div className="flex flex-wrap gap-1.5">{m.opens.map(l => <OpenButton key={l.kind} link={l} quiet />)}</div>}
-      <section aria-label="要約" className="text-[14.5px] leading-[1.8]">
-        <h2 className="mb-1 text-[13px] font-semibold text-gray-700 dark:text-zinc-200">要約</h2>
-        {m.summary
-          ? <p className="whitespace-pre-wrap">{m.summary}</p>
-          : <p className="text-[13px] text-gray-500">AI はまだ議事録を読んでいません。読み終えると、ここに要約が出ます。</p>}
-      </section>
       {decisions.length > 0 && <Section kind="decision" title="決めたこと"><Items records={decisions} /></Section>}
-      {homework.length > 0 && <Section kind="task" title="宿題"><Items records={homework} /></Section>}
+      {tasks.length > 0 && <Section kind="task" title="やること"><Items records={tasks} /></Section>}
     </>
   )
 }

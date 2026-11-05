@@ -156,7 +156,7 @@ export function createMeetingsApi(deps: MeetingsDeps) {
     /** One meeting for its card: from the banner's answer when it is there, else from the record (older than the banner). */
     async meeting(companyId: string, id: string): Promise<MeetingCardStateResult> {
       if (!COMPANY.test(companyId) || !MINUTES_ID_RE.test(id)) return BAD_INPUT
-      const [detail, items, mine] = await Promise.all([detailOf(companyId, id), arrivalsOf(companyId), myId()])
+      const [detail, items, mine, google] = await Promise.all([detailOf(companyId, id), arrivalsOf(companyId), myId(), call(companyId, 'GET', '/me/google')])
       if (!detail || detail.record.type !== 'meeting') return { success: false, error: MINUTES_OFFLINE_TEXT }
       // Without the banner's route (an older server) the card offers nothing new.
       if (!items) return { success: false, error: '' }
@@ -177,6 +177,7 @@ export function createMeetingsApi(deps: MeetingsDeps) {
         success: true,
         meeting: { ...item, made: await made(companyId, item, detail) },
         review: status === 'read' && mine ? reviewOf(detail, mine) : null,
+        ...(google?.status === 200 && ((google.json?.data as { renew?: unknown } | undefined)?.renew as unknown[] | undefined)?.includes('minutes') ? { renewGoogle: true as const } : {}),
       }
     },
 

@@ -14,7 +14,7 @@
  */
 import {
   googleCompanyFeatureOn, googleCompanyFeatures, googleCompanySwitched, googleFeaturesOf, googleFeaturesOff, googleMemberFeatures, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
-  checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
+  checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, googleFeaturesToRenew, type GoogleFeature,
 } from '../../shared/core/google'
 import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
 import { emailDomain } from '../../shared/core/mail'
@@ -175,6 +175,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       practice: deps.practiceGoogle,
       companyFeatures: reason === null ? memberFeaturesOf(member) : [],
       seen: googleFeaturesOff(connectors.setupSeen('google', member.userId)),
+      renew: grant?.status === 'active' && reason === null
+        ? googleFeaturesToRenew(grant.scopes).filter(f => memberFeaturesOf(member).includes(f) && !grant.featuresOff.includes(f)) : [],
     }
   }
 

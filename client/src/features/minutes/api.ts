@@ -14,8 +14,6 @@ export type MinutesWrites = ElectronPort<'skipMinutes'>
 export type MeetingBundleQuestionReads = ElectronPort<'getMeetingBundleQuestion'>
 /** 「まとまりはない（社内の会議など）」: the server records the person's choice on the shared meeting. */
 export type MeetingNoBundleWrites = ElectronPort<'declineMinutesBundle'>
-/** はい to 「『…』の会議ですか？」: the same link as choosing by hand (nothing goes outside). */
-export type MeetingBundleLinkWrites = ElectronPort<'linkMinutesBundle'>
 
 const NONE: MinutesNoticesResult = { available: false, notices: [] }
 
@@ -55,15 +53,13 @@ export function declineMeetingBundle(companyId: string, meetingId: string, write
   return writes.declineMinutesBundle(companyId, meetingId)
 }
 
-export function linkSuggestedBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleLinkWrites = window.electronAPI) {
-  return writes.linkMinutesBundle(companyId, meetingId, bundleId)
-}
-
 // Meetings for their attendees (minutes.md "Meetings for their attendees"): the banner and the card.
 /** The member's meetings of the last days, one meeting for its card, and when they may have changed. */
 export type MeetingReads = ElectronPort<'getMeetingArrivals' | 'getMeetingCardState' | 'onMinutesChanged' | 'onRecordsChanged' | 'onNotificationsChanged'>
 /** ［AI に読ませる］［読まない］ and its 取り消す, 「次から自動で読む」: change the shared meeting (the server tells its people). */
 export type MeetingWrites = ElectronPort<'requestMeetingReading' | 'skipMeetingReading' | 'undoTaskAction' | 'setMeetingAutoSeries'>
+/** 「許可をし直す」: Google's page opens in the browser, as the settings' button does. */
+export type MeetingGoogleWrites = ElectronPort<'connectGoogle'>
 /** ［招待する］: shows the meeting to more members (never undone). */
 export type MeetingInviteWrites = ElectronPort<'inviteToRecord'>
 
@@ -86,6 +82,12 @@ export function onMeetingsMayHaveChanged(companyId: string, listener: () => void
 
 export async function requestMeetingReading(companyId: string, meetingId: string, expectedVersion: number, writes: MeetingWrites = window.electronAPI): Promise<MeetingPressResult> {
   return (await writes.requestMeetingReading(companyId, meetingId, expectedVersion)) ?? { success: false, error: 'できませんでした。' }
+}
+
+/** Asks the 議事録 feature again (Google merges what was allowed): null, or why not. */
+export async function renewMinutesPermission(companyId: string, writes: MeetingGoogleWrites = window.electronAPI): Promise<string | null> {
+  const r = await writes.connectGoogle(companyId, ['minutes'])
+  return r?.success ? null : (r?.error ?? 'できませんでした。')
 }
 
 export async function skipMeetingReading(companyId: string, meetingId: string, expectedVersion: number, writes: MeetingWrites = window.electronAPI): Promise<MeetingPressResult> {

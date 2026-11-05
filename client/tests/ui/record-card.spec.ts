@@ -1,11 +1,11 @@
 // The record screens (tests/record-card-ui.tsx, features/records RecordCard; tasks-ui.md "The card",
-// 「Every record opens in one layout」). Guards: a meeting's summary is its body with 決めたこと and 宿題
+// 「Every record opens in one layout」). Guards: a meeting's summary is its body with 決めたこと and やること
 // apart, its documents open outside; 「つながっているもの」 shows three per kind and folds the rest;
 // a 来た連絡 shows its summary (no body) with 「Slack で開く」 and the screen's thread slot.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
-test('a meeting: the summary as its body, 決めたこと and 宿題 apart, the documents opened outside', async ({ page }) => {
+test('a meeting: the summary as its body, 決めたこと and やること apart, the documents opened outside', async ({ page }) => {
   const state = await openPreview(page, 'record-card')
   const card = page.getByTestId('record-card')
   const body = card.getByRole('article')
@@ -13,7 +13,7 @@ test('a meeting: the summary as its body, 決めたこと and 宿題 apart, the 
   await expect(card).toContainText('参加 佐藤・阿部・社外 2人')
   await expect(card.locator('[data-seen]')).toHaveText('営業部のみんな')
   await expect(body.getByRole('region', { name: '決めたこと' })).toContainText('窓口は3つにする')
-  await expect(body.getByRole('region', { name: '宿題' })).toContainText('宿題 4')
+  await expect(body.getByRole('region', { name: 'やること' })).toContainText('宿題 4')
 
   await card.getByRole('button', { name: /Gemini のメモを開く/ }).click()
   await card.getByRole('button', { name: /文字起こしを開く/ }).click()

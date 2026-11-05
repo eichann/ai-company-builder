@@ -226,7 +226,11 @@ meeting's reading makes is made once per meeting and item, decided by the server
   Google refuses the text" below, nothing changes; then → `received` with **assignee = the presser**
   (`request_reading` = `MEETING_READ_REQUEST_ACTION`, quiet): the AI's turn on their PC (`ai-turn`,
   the existing reading, `text` with their grant). Same member while it waits for their AI → the same
-  answer, nothing written; `reading` / `read` / someone else's `received` → 409 `MEETING_NOT_WAITING`.
+  answer, nothing written on the record; `reading` / `read` / someone else's `received` → 409
+  `MEETING_NOT_WAITING`. **The press is a fresh attempt** (production 2026-11-05: a press after a
+  failed reading answered 200 and nothing ran): both answers also give back an earlier run of the
+  reading that stopped for a person, whoever's it was (`readingAskedAgain` → `aiRuns.askedAgain`,
+  `ai-turns.md` "Asked again"); the app drops its own hand-off there too.
 - **［読まない］**: `POST /me/minutes/item/:recordId/skip { expectedVersion? }` — any of its people
   from `arrived` / `failed`, the assignee alone from `received` (「今回だけ読まない」); → `skipped`
   (ledger `skip`, the person as actor, note 「読まない」, quiet): nobody is asked again, the record is
@@ -236,7 +240,9 @@ meeting's reading makes is made once per meeting and item, decided by the server
   series (`meeting_auto_series`, key = digest of the calendar's `recurringEventId`, kept in
   `source_ref.series`). When **that member's** discovery finds a meeting of the series (new, or still
   `arrived`) it is asked to be read for them as above (actor `CLOCK_ACTOR`, note
-  「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`.
+  「この定例は自動で読む設定のため、AI に読ませました」); not shared → it stays `arrived`. Only this call sets
+  it (the card's button, or 元に戻す after 「次から自動で読まない」): never a press of ［AI に読ませる］, discovery or
+  a default. It is per series, so one press shows on every meeting of that series.
 - **「議事録が届きました」**: `GET /me/minutes/arrivals` → `MeetingArrivals { days, items }` — the
   meetings whose list names the caller (`listedRecordIds`, no company-wide scan) that took place in the last `MEETING_ARRIVED_DAYS` (3) days, newest
   first: `status` (arrived / asked / reading / read / skipped / failed), `attendeeCount`, `by` (the
@@ -290,25 +296,34 @@ meeting's reading makes is made once per meeting and item, decided by the server
 - **AI turn**: a meeting the arrivals answer as `asked` by the member (`byYou`) is queued with
   `asked` (`aiTurnQueue`) and runs even while 「自動で進める」 is off — the press is the start
   (`ai-turns.md`). No consultation opens; the hidden run is the existing reading.
-- **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, composed in
-  `src/app/meetingCard.tsx` with the tasks feature's `MinutesReview`, `onMeetingCard`: no second
-  summary): ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
+- **The card** (`MeetingPanel.tsx` through `RecordCard`'s `renderMeeting`, which hands it the card's
+  parts — `MeetingCardParts` — composed in `src/app/meetingCard.tsx` with the tasks feature's
+  `MinutesReview`, `onMeetingCard`: no second summary). **Each thing once, in this order** (owner
+  2026-11-05, 「ごちゃついてるな」): title, when, people (+ 見られる人); 要約; 決めたこと and **one list**
+  「やることの案」 (「やること」 with no proposal left: the proposals with their buttons, put-away ones with
+  ［戻す］, then the other tasks made from the meeting, each once; its 「議事録を確認する」 only on the
+  right), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
   the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members; 「招待した人は
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
-  一度招待すると、取り消すことはできません。」), once read the proposals and decisions, and once per meeting
-  (localStorage `meeting-auto-offered:<company>`) for a series 「この定例は次から自動で読みますか？」. 見られる人:
+  一度招待すると、取り消すことはできません。」) and the 案件 field; then 「つながっているもの」 (the documents
+  and the calendar day: 「Google で開く」), 経緯. The offer comes once per meeting (localStorage
+  `meeting-auto-offered:<company>`) for a series: 「この定例は次から自動で読みますか？」. No band 「AI が反映
+  しました」 here: the chip says it. An older server (no card state): no buttons, plain lists. 見られる人:
   `meetingSeenWords` 「参加者のうち ACB の人 N人・招待した人 N人」 (another place keeps the server's phrase).
-- **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): on a meeting, choosing or making a 案件
-  first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
+- **Linking a 案件** (`src/app/RecordBundleFieldBox.tsx`): one element. While none is linked and the
+  server says the member may choose, the field itself asks 「どの〇〇の会議ですか？」 (or 「『…』の会議ですか？」
+  with ［はい］［ちがう／選ぶ］), with ［新しい〇〇にする］ and ［〇〇はない（社内の会議など）］; otherwise
+  「〇〇 なし」. On a meeting, every way of choosing or making a 案件 here first asks 「〇〇につなぐと、この会議の内容の一部（次のアクションなど）が<その案件の見られる人>に見えます。」
   (`meetingLinkSentence` over `viewers:get` of the 案件); nothing is linked or made before ［つなぐ］.
-  Not yet: the 「どの〇〇の会議ですか？」 question's ［はい］ / chooser links without this sentence.
+  Not yet: the list's and the title bar's 「どの〇〇の会議ですか？」 chooser links without this sentence.
 - Not built from the demo: the consultation's first answer as the AI's summary; ［部署に出す］ on the card.
 - Tests: `client/tests/meetings-app.test.ts` (older server quiet, counts, the card's decisions, the
   press with the session and the runner re-read, NO_ACCESS words, malformed input never sent, the
   words), `src/features/minutes/model.test.ts` (each banner state), `src/features/chat/aiTurns.test.ts`
   (an asked meeting runs while off, nothing else), `client/tests/ui/meetings.spec.ts`
   (`tests/meetings-ui.html`: read → reading → finished → 見る; 読まない + 元に戻す; another attendee's
-  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link; `?flood=12`:
+  view; NO_ACCESS; invite words and the press; consult; the 案件 sentence before the link, ［はい］ too;
+  the card's order wide and narrow, each thing once; `?flood=12`:
   two rows, the fold's own scroll, the list's height and scroll also in a short window, ［まとめて読まない］ and its 元に戻す),
   `record-card.spec.ts` (「新しいプロジェクトにする」 on a meeting asks first).
 
@@ -342,7 +357,27 @@ owner can download by hand in every format — so not sharing, not a download li
 lists `drive.meet.readonly` among its scopes and Google's announcement says the scope reads and
 downloads "files created or edited by Google Meet", but a third party reports Gemini's notes Docs
 fail with it (「The user has not granted the app … read access to the file」, `appNotAuthorizedToFile`)
-while transcripts work. Unconfirmed until the log line below shows Google's reason.
+while transcripts work. Confirmed in production (2026-11-05): `appNotAuthorizedToFile` for both documents. Meet's entries
+were too rough to stand in (no speaker separation, many mis-conversions), so the Docs API comes first.
+
+- **Three ways, in this order** (`google-meetings.ts` `docText`, owner decision 2026-11-05):
+  1. **The Docs API** (`documents.get`, `includeTabsContent`, `documents.readonly`) when the grant has
+     the scope; `docsBodyText` makes the body plain text: headings, list items, smart chips, tables
+     (cells apart by a tab), every tab and child tab (under 「【タブ名】」 when there are several). `max`
+     holds; nothing stored or logged. A Google refusal, no scope, an answer too big or no text → the export.
+     Google asking to wait or a 5xx stops the reading (tried later), so it never quietly reads less.
+  2. **Drive's export**, the only way before; everything below still applies.
+  3. **Meet's record**, the last fallback, under the rule below.
+- **The copy block comes before the Docs API**, which does not answer to it as the export does:
+  `drive.files.get` asks `copyRequiresWriterPermission` and `capabilities.canDownload`. Set, and the member
+  cannot download → refused here as `cannotDownloadFile`. A writer may read. Not said → the export decides,
+  never the Docs API on a guess. A block that only the export reports (an admin's rule) cannot be seen
+  from the Docs side: `copyRequiresWriterPermission` is the file's own setting.
+- **`documents.readonly` reaches any Doc the member can open**: `docText` uses it only for a meeting's
+  documents, after `docVersion` (`drive.files.get` under `drive.meet.readonly`) opened them, so 「共有されて
+  いません」 stays what it was.
+- **A grant without the scope** keeps working by ways 2-3 and the card and 設定 → Google say
+  「Google の許可をし直すと、メモも読めるようになります」 (`MyGoogle.renew`, `google-connector.md`).
 
 - **The log**: every refused Google call prints `[google] call refused: … companyId= operation= status=
   reason=` (`google-client.ts`; Google's short code, never its message, which can name the file).
@@ -351,23 +386,33 @@ while transcripts work. Unconfirmed until the log line below shows Google's reas
 - **One document's export refused** (403/404) does not stop the others: the notes refused, the
   transcript document is still read; the part refused says so in the text (「■ 会議メモ」
   「（Google が文章の取り出しを断ったため…）」), so the AI knows it reads only part.
-- **No transcript came through** → Meet's own record (`transcriptText`, `conferenceRecords.transcripts`
+- **Meet's record stands in only for what ACB is not allowed** (owner decision 2026-11-05): every
+  refusal among the documents must be `appNotAuthorizedToFile` / `insufficientPermissions` /
+  `insufficientScopes` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` (`MEET_RECORD_REASONS`). A copy block
+  (`cannotExportFile`, `cannotDownload…`) is the file's owner saying no: one such document, and Meet's
+  record is not asked at all, nor for any other reason (an unknown one, the size limit). A document Google
+  does export is still read (a block is per file).
+- **No transcript came through**, and the rule above allows it → Meet's own record (`transcriptText`, `conferenceRecords.transcripts`
   + `.entries` + `.participants`, `meetings.space.readonly`, already granted; every transcript not
   `STARTED`, also one without a document; 100 entries a page) under 「■ 文字起こし（Google Meet の記録から）」
   as `<name>: <words>`. Kept by Google 30 days after the meeting, may differ a little from the
   document; handed over like the rest, never stored. **Smart notes have no such way**: the Meet API
   gives their metadata and the document's id only.
-- **Nothing readable** → `textRefusal`, by reason: `exportSizeLimitExceeded` → `MINUTES_TOO_LARGE`;
-  `cannotExportFile` / `cannotDownload…` → `MINUTES_TEXT_REFUSED` (no copying); `appNotAuthorizedToFile`
+- **Nothing readable** → `textRefusal`, by reason, a copy block first when the documents differ:
+  `exportSizeLimitExceeded` → `MINUTES_TOO_LARGE`; `cannotExportFile` / `cannotDownload…` →
+  `MINUTES_TEXT_REFUSED` (「ファイルの持ち主がコピーやダウンロードを止めているため、AI は読めません」); `appNotAuthorizedToFile`
   / `insufficientPermissions` / `insufficientScopes` / `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → the same code
   (「いま ACB に許可している範囲では」); anything else the same code, generic. Never 「共有されていません」.
   403 with `rateLimitExceeded` / `userRateLimitExceeded` / `dailyLimitExceeded` → 503 `GOOGLE_UNAVAILABLE`;
   `domainPolicy` / `accessNotConfigured` / `SERVICE_DISABLED` → `GOOGLE_STOPPED` (these two groups in
   `googleRefusal`, for `files.get` too). The app passes the server's sentence on (`memberText`).
-- **Not done without the owner**: a wider scope. `drive`, `drive.readonly` are `GOOGLE_NEVER_SCOPES`;
-  `documents.readonly` (Docs API) is not allowed yet either.
+- **Not done without the owner**: a wider Drive scope. `drive`, `drive.readonly` stay `GOOGLE_NEVER_SCOPES`.
 - Tests: `meeting-attendees.test.ts` 「Drive opens the minutes but refuses their text」 (each
-  mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`).
+  mutation-checked; fake Google `faults.refuseExport`, `SeedArtifact.entries`), with 「copying blocked by
+  the file's owner」 and 「Meet's record stands in only for what ACB is not allowed」; its 「the minutes'
+  documents by the Docs API」 (order, fallback, a grant from before, copy block, sharing, switches);
+  `server/tests/unit/google-docs-text.test.ts` (the text, each way's choice, the scope's place);
+  `minutes.test.ts` 「a reading the AI could not do, then ［AI に読ませる］」 (mutation-checked).
 
 ## What is stored, and what never
 
@@ -499,7 +544,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the server's `bundle-questions` are items of the task list's あなたの番 with 「まとまりを選ぶ」 (the
   unfinished まとまり the member reads, `tasks:bundles`; choosing calls `minutes:linkBundle`) and
   「まとまりはない」 (`minutes:noBundle`); two or more of one group are one row 「まとまりを選ぶ会議 n件」
-  that opens. The meeting's card (`MeetingBundleBar`, `minutes:bundleQuestion`) offers both while
+  that opens. The meeting's card (its 案件 field, `RecordBundleFieldBox`, `minutes:bundleQuestion`) offers both while
   no まとまり is linked, also after the item left あなたの番; the consultation's card offers
   「まとまりはない」 too. The first message tells the AI to leave the まとまり's fields
   and the meeting log alone and finish the rest when none is linked, so an automatic run never waits

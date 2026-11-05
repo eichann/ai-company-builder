@@ -10,7 +10,7 @@ type Control = {
   requests: Array<{ path: string; body: Record<string, unknown> | null }>
   open(): boolean
   finish(): void
-  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[]; retried: string[] }
+  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[]; retried: string[]; order: string[] }
 }
 const chat = async <T>(page: Page, fn: (control: Control) => T) =>
   (await page.evaluateHandle(() => (window as unknown as { __acbChat: Control }).__acbChat)).evaluate(fn)
@@ -58,6 +58,14 @@ test('when another PC took the AI turn first, nothing is sent from this one', as
   expect(await chat(page, c => c.aiTurns.claims.length)).toBe(1)
 })
 
+test('a meeting that failed on an older build and was asked for again is given back and claimed, without pressing 「もう一度」', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'asked-again' })
+  await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(1)
+  // The server's run goes first: a claim before it would be refused.
+  expect(await chat(page, c => c.aiTurns.retried)).toEqual([MINUTES_ID])
+  expect(await chat(page, c => c.aiTurns.order)).toEqual(['retry', 'claim'])
+})
+
 test('with Codex nothing is claimed or sent; the record says why and can be handed to the person', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual', autoturn: '1', agent: 'codex' })
   await expect(page.getByRole('status', { name: 'AI の番の自動実行' })).toContainText('Claude Code が必要です', { timeout: 15_000 })
@@ -78,7 +86,7 @@ test('a failed run is handed to the person with the reason, and 「もう一度�
   await expect(notice).toContainText('AI が進めています')
   await chat(page, c => c.finish())
   await expect(notice).toContainText('AI ができませんでした', { timeout: 15_000 })
-  await expect(notice).toContainText('読み取れない')
+  await expect(notice).toContainText('読み取れませんでした')
   await notice.getByRole('button', { name: 'もう一度' }).click()
   // The server's run, held for a person after the failure (S10b), is given back too.
   await expect.poll(() => chat(page, c => c.aiTurns.retried), { timeout: 15_000 }).toEqual([MINUTES_ID])

@@ -101,6 +101,9 @@ export function companyRepoPath(companyId: string): string {
  *                         (google-connector.md; the browser's sign-in page too)
  *   ACB_FAKE_SLACK_URL    slack.com (the Slack connection) → `pnpm fake:slack`
  *                         (slack-connector.md; the browser's sign-in page too)
+ *   ACB_FAKE_PORTAL_URL   a contract-3 connector's host → `pnpm fake:portal`. That host is named by
+ *                         ACB_FAKE_PORTAL_HOST and its key-broker service by ACB_FAKE_PORTAL_SERVICE
+ *                         (default `portal`): a real service's host is not written in this public code
  * Server-wide, never per company: a company able to change where a service
  * goes could make the server send its key to another company's or an
  * internal address.
@@ -130,14 +133,21 @@ const PRACTICE_TARGET_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost', 'host.
 const LOCAL_PUBLIC_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost'])
 
 /** Each practice variable → the service it redirects and the real hosts it covers. */
-const PRACTICE_VARIABLES: Array<{ variable: string; service: string; hosts: readonly string[] }> = [
+const PRACTICE_VARIABLES: ReadonlyArray<{ variable: string; service: string; hosts: readonly string[] }> = [
   { variable: 'ACB_FAKE_HUBSPOT_URL', service: 'hubspot', hosts: ['api.hubapi.com'] },
   { variable: 'ACB_FAKE_GOOGLE_URL', service: 'google', hosts: GOOGLE_HOSTS },
   { variable: 'ACB_FAKE_SLACK_URL', service: 'slack', hosts: SLACK_HOSTS },
 ]
 
+/** A host name, nothing around it. */
+const PRACTICE_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/
+const PRACTICE_SERVICE_RE = /^[a-z][a-z0-9-]{0,39}$/
+
 export function practiceUpstreamsFrom(env: Readonly<Record<string, string | undefined>>): PracticeUpstreams {
-  const set = PRACTICE_VARIABLES.filter(v => env[v.variable]?.trim())
+  const portalHost = env.ACB_FAKE_PORTAL_HOST?.trim().toLowerCase() ?? ''
+  const portalService = env.ACB_FAKE_PORTAL_SERVICE?.trim() || 'portal'
+  const variables = [...PRACTICE_VARIABLES, { variable: 'ACB_FAKE_PORTAL_URL', service: portalService, hosts: [portalHost] }]
+  const set = variables.filter(v => env[v.variable]?.trim())
   if (set.length === 0) return { state: 'off' }
   if (env.ACB_ALLOW_FAKE_UPSTREAMS?.trim() !== '1') return { state: 'ignored', reason: 'ACB_ALLOW_FAKE_UPSTREAMS=1 is not set' }
   if (env.NODE_ENV?.trim().toLowerCase() === 'production') return { state: 'ignored', reason: 'NODE_ENV is production' }
@@ -148,6 +158,13 @@ export function practiceUpstreamsFrom(env: Readonly<Record<string, string | unde
     return { state: 'ignored', reason: 'PUBLIC_URL is not a URL' }
   }
   if (!LOCAL_PUBLIC_HOSTS.has(publicHost)) return { state: 'ignored', reason: 'PUBLIC_URL is not on this machine' }
+  if (env.ACB_FAKE_PORTAL_URL?.trim()) {
+    if (!PRACTICE_HOST_RE.test(portalHost)) return { state: 'ignored', reason: 'ACB_FAKE_PORTAL_HOST must be a host name' }
+    // A built-in service keeps its own variable: this one never takes over HubSpot, Google or Slack.
+    if (!PRACTICE_SERVICE_RE.test(portalService) || PRACTICE_VARIABLES.some(v => v.service === portalService || v.hosts.includes(portalHost))) {
+      return { state: 'ignored', reason: 'ACB_FAKE_PORTAL_SERVICE / _HOST must not be a built-in practice service' }
+    }
+  }
   const upstreams: PracticeUpstream[] = []
   for (const v of set) {
     let url: URL

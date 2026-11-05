@@ -64,7 +64,9 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   `host.docker.internal`, port only) send the broker's HubSpot requests to the practice HubSpot,
   `ACB_FAKE_GOOGLE_URL` every Google request to the practice Google and `ACB_FAKE_SLACK_URL`
   every Slack request to the practice Slack — per service, each variable redirects only its own
-  (`google-connector.md`, `slack-connector.md`);
+  (`google-connector.md`, `slack-connector.md`). `ACB_FAKE_PORTAL_URL` + `ACB_FAKE_PORTAL_HOST` (+
+  `ACB_FAKE_PORTAL_SERVICE`) do the same for a contract-3 connector: a real service's host and
+  service are given, never written here, and a built-in service cannot be named (`pnpm fake:portal`);
   passed through by `docker-compose.yml` only — **never add them to the production compose
   file**. The server ignores them under `NODE_ENV=production` or a non-local `PUBLIC_URL`
   (`lib/config.ts` `practiceUpstreamsFrom`, `key-broker.md`).
@@ -106,7 +108,8 @@ A local staging on an FDE's Mac, one command: `pnpm staging:setup|up|down|reset|
 - `staging/compose.yml` mirrors this compose file (read-only api image, production admin build, no
   source mounts) plus a Caddy front door on `127.0.0.1:14001` (`/api/*` → api, rest → admin: one
   origin = `PUBLIC_URL`, so auth needs no extra trusted origin), the practice HubSpot / Google /
-  Slack (`staging/fakes.ts`, on the host, 14010–14012, `ACB_FAKE_*_URL` via `host.docker.internal`),
+  Slack / portal (`staging/fakes.ts`, on the host, 14010–14013, `ACB_FAKE_*_URL` via `host.docker.internal`;
+  the portal stands in for what the private kit config's `portal` line names, else the public fixture's host),
   the kit's data, shelf (read-only) and KEK under `~/acb-staging-kit`; project `acb-staging-kit`.
   Ports / project / home are `ACB_STAGING_*` settings.
 - Secrets (AUTH_SECRET, KEK, the practice HubSpot key, test passwords) are made once, 0600 under

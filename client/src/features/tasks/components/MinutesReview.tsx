@@ -1,8 +1,10 @@
 // 「議事録を確認する」's own parts (新しい画面のデモ F): the meeting's summary, the AI's proposals (案)
 // with ［全部足す］［選んで足す］［要らない］, and the decisions the AI left with ［確かめる］. Each press is one
-// action at the version shown; the server decides who may.
+// action at the version shown; the server decides who may. On the meeting's own card: 決めたこと first,
+// and the tasks already made from the meeting join the proposals in one list.
 import { useState } from 'react'
 import { CheckCircle, Sparkle } from '@phosphor-icons/react'
+import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { MinutesReviewView } from '../../../../shared/task-card'
 import type { TaskProposal } from '../../../../shared/tasks'
 import { CALM } from '../../../../shared/thing-words'
@@ -26,14 +28,20 @@ interface Props {
   onAct: (id: string, action: string, version: number) => Promise<string | null>
   /** The meeting's own card shows its summary already: only the proposals and decisions here. */
   onMeetingCard?: boolean
+  /** The meeting's own card: its linked tasks, among them the proposals, each listed once. */
+  made?: readonly RecordViewSummary[]
 }
 
-export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = false }: Props) {
+export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = false, made = [] }: Props) {
   const { result, reload } = useTaskProposals(companyId, review.meetingId)
   const [picking, setPicking] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const proposals = result?.success ? result.proposals : []
   const open = proposals.filter(p => p.state === 'proposed')
+  // Until the proposals are read nothing tells which linked task is one.
+  const others = result === null ? [] : made.filter(t => !proposals.some(p => p.id === t.id))
+  const listTitle = !onMeetingCard ? 'AI のタスクの案' : proposals.length > 0 ? 'やることの案' : 'やること'
+  const decisionsTitle = onMeetingCard ? '決めたこと' : '決めたこと（AI が残した）'
   // One by one, each at its own version (the server makes each a task of its own).
   const act = async (items: Array<{ id: string; version: number }>, action: string) => {
     setError(null)
@@ -45,6 +53,57 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
     reload()
   }
   const unconfirmed = review.decisions.filter(d => d.mine && d.state === 'unconfirmed')
+  const proposalList = (
+    <section aria-label={listTitle}>
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <Sparkle size={14} weight="fill" className="text-accent" />
+        <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{listTitle}</h2>
+        {open.length > 0 && !picking && <>
+          <button type="button" disabled={busy} onClick={() => void act(open, 'adopt')} className={MAIN_BUTTON}>全部足す</button>
+          <button type="button" disabled={busy} onClick={() => setPicking(new Set(open.map(p => p.id)))} className={SMALL_BUTTON}>選んで足す</button>
+          <button type="button" disabled={busy} onClick={() => void act(open, 'dismiss')} className={SMALL_BUTTON}>要らない</button>
+        </>}
+        {picking && <button type="button" onClick={() => setPicking(null)} className={SMALL_BUTTON}>選ぶのをやめる</button>}
+      </div>
+      {result === null && <p className="text-[12px] text-gray-400">{CALM.loading}</p>}
+      {result && !result.success && <p role="alert" className="text-[12px] text-gray-500">{result.error}</p>}
+      {result?.success && proposals.length === 0 && others.length === 0 && <p className="text-[12px] text-gray-400">案はありません。</p>}
+      <ul className="space-y-1.5">
+        {proposals.map(p => (
+          <ProposalRow key={p.id} p={p} busy={busy} picked={picking?.has(p.id) ?? null}
+            onPick={on => setPicking(s => { const next = new Set(s); if (on) next.add(p.id); else next.delete(p.id); return next })}
+            onAct={action => void act([p], action)} />
+        ))}
+        {others.map(t => <MadeRow key={t.id} t={t} />)}
+      </ul>
+      {picking && (
+        <div className="mt-2 flex gap-2">
+          <button type="button" disabled={busy || picking.size === 0} onClick={() => void act(open.filter(p => picking.has(p.id)), 'adopt')} className={MAIN_BUTTON}>選んだものを足す</button>
+        </div>
+      )}
+      {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+    </section>
+  )
+  const decisionList = (
+      <section aria-label={decisionsTitle}>
+        <div className="mb-2 flex items-center gap-1.5">
+          <ThingIcon kind="decision" size={14} label="" />
+          <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{decisionsTitle}</h2>
+          {unconfirmed.length > 1 && <button type="button" disabled={busy} onClick={() => void act(unconfirmed, 'confirm')} className={SMALL_BUTTON}>まとめて確かめた</button>}
+        </div>
+        <ul className="space-y-1 text-[13px]">
+          {review.decisions.map(d => (
+            <li key={d.id} className="flex items-center gap-2">
+              <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
+              {d.state === 'confirmed'
+                ? <Chip tone="green"><CheckCircle size={11} weight="fill" />確かめた</Chip>
+                : d.mine && <button type="button" disabled={busy} onClick={() => void act([d], 'confirm')} className={SMALL_BUTTON}>確かめる</button>}
+            </li>
+          ))}
+        </ul>
+      </section>
+  )
+  const hasDecisions = review.decisions.length > 0
   return (
     <>
       {!onMeetingCard && <section aria-label="要約（AI）" className="rounded-lg bg-gray-50 px-3.5 py-2.5 text-[13px] leading-relaxed dark:bg-zinc-800/50">
@@ -52,56 +111,21 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
         <p className="whitespace-pre-wrap">{review.summary ?? 'AI はまだ議事録を読んでいません。'}</p>
         <button type="button" onClick={() => runCommand('record.open', { recordId: review.meetingId })} className="text-[11.5px] text-accent hover:underline">会議の記録を開く</button>
       </section>}
-
-      <section aria-label="AI のタスクの案">
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
-          <Sparkle size={14} weight="fill" className="text-accent" />
-          <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">AI のタスクの案</h2>
-          {open.length > 0 && !picking && <>
-            <button type="button" disabled={busy} onClick={() => void act(open, 'adopt')} className={MAIN_BUTTON}>全部足す</button>
-            <button type="button" disabled={busy} onClick={() => setPicking(new Set(open.map(p => p.id)))} className={SMALL_BUTTON}>選んで足す</button>
-            <button type="button" disabled={busy} onClick={() => void act(open, 'dismiss')} className={SMALL_BUTTON}>要らない</button>
-          </>}
-          {picking && <button type="button" onClick={() => setPicking(null)} className={SMALL_BUTTON}>選ぶのをやめる</button>}
-        </div>
-        {result === null && <p className="text-[12px] text-gray-400">{CALM.loading}</p>}
-        {result && !result.success && <p role="alert" className="text-[12px] text-gray-500">{result.error}</p>}
-        {result?.success && proposals.length === 0 && <p className="text-[12px] text-gray-400">案はありません。</p>}
-        <ul className="space-y-1.5">
-          {proposals.map(p => (
-            <ProposalRow key={p.id} p={p} busy={busy} picked={picking?.has(p.id) ?? null}
-              onPick={on => setPicking(s => { const next = new Set(s); if (on) next.add(p.id); else next.delete(p.id); return next })}
-              onAct={action => void act([p], action)} />
-          ))}
-        </ul>
-        {picking && (
-          <div className="mt-2 flex gap-2">
-            <button type="button" disabled={busy || picking.size === 0} onClick={() => void act(open.filter(p => picking.has(p.id)), 'adopt')} className={MAIN_BUTTON}>選んだものを足す</button>
-          </div>
-        )}
-        {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
-      </section>
-
-      {review.decisions.length > 0 && (
-        <section aria-label="決めたこと（AI が残した）">
-          <div className="mb-2 flex items-center gap-1.5">
-            <ThingIcon kind="decision" size={14} label="" />
-            <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">決めたこと（AI が残した）</h2>
-            {unconfirmed.length > 1 && <button type="button" disabled={busy} onClick={() => void act(unconfirmed, 'confirm')} className={SMALL_BUTTON}>まとめて確かめた</button>}
-          </div>
-          <ul className="space-y-1 text-[13px]">
-            {review.decisions.map(d => (
-              <li key={d.id} className="flex items-center gap-2">
-                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
-                {d.state === 'confirmed'
-                  ? <Chip tone="green"><CheckCircle size={11} weight="fill" />確かめた</Chip>
-                  : d.mine && <button type="button" disabled={busy} onClick={() => void act([d], 'confirm')} className={SMALL_BUTTON}>確かめる</button>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {onMeetingCard && hasDecisions && decisionList}
+      {proposalList}
+      {!onMeetingCard && hasDecisions && decisionList}
     </>
+  )
+}
+
+function MadeRow({ t }: { t: RecordViewSummary }) {
+  return (
+    <li className="rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-zinc-700">
+      <button type="button" onClick={() => runCommand('record.open', { recordId: t.id })} className="flex w-full min-w-0 items-center gap-2 text-left hover:text-accent">
+        <ThingIcon kind="task" size={13} label="" />
+        <span className={`min-w-0 flex-1 truncate font-medium ${t.finished ? 'text-gray-400 line-through' : ''}`}>{t.title}</span>
+      </button>
+    </li>
   )
 }
 

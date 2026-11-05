@@ -33,6 +33,12 @@ export const GOOGLE_SCOPE = {
   calendarEventsReadonly: 'https://www.googleapis.com/auth/calendar.events.readonly',
   meetReadonly: 'https://www.googleapis.com/auth/meetings.space.readonly',
   driveMeetReadonly: 'https://www.googleapis.com/auth/drive.meet.readonly',
+  /**
+   * The minutes' Google Docs by the Docs API (owner decision 2026-11-05): Drive's export refuses
+   * Meet's documents under `drive.meet.readonly`. Google lets it open any Doc the member can open;
+   * ACB uses it only for a meeting's documents (`google-meetings.ts` `docText`).
+   */
+  documentsReadonly: 'https://www.googleapis.com/auth/documents.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
   /**
    * Only the files the member picked with Google Picker or ACB created
@@ -65,11 +71,19 @@ const IDENTITY_SCOPES = [GOOGLE_SCOPE.openid, GOOGLE_SCOPE.email]
 
 /** What each feature asks Google for (besides the identity scopes). */
 export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
-  minutes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.meetReadonly, GOOGLE_SCOPE.driveMeetReadonly],
+  minutes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.meetReadonly, GOOGLE_SCOPE.driveMeetReadonly, GOOGLE_SCOPE.documentsReadonly],
   mail: [GOOGLE_SCOPE.gmailSend],
   drive: [GOOGLE_SCOPE.driveFile],
   inbox: [GOOGLE_SCOPE.gmailReadonly],
   sheets: [GOOGLE_SCOPE.spreadsheets],
+}
+
+/**
+ * Asked with the feature, but a grant without them still has it: it reads less well until the
+ * member allows again (`googleFeaturesToRenew`). Grants made before the scope existed keep working.
+ */
+export const GOOGLE_FEATURE_OPTIONAL_SCOPES: Partial<Record<GoogleFeature, readonly string[]>> = {
+  minutes: [GOOGLE_SCOPE.documentsReadonly],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -107,9 +121,14 @@ export function normalizeGrantedScopes(raw: string | readonly string[]): string[
   return [...out].sort()
 }
 
-/** The features whose every scope is granted. */
+/** The features whose every scope is granted (an optional one aside). */
 export function googleFeaturesOf(scopes: readonly string[]): GoogleFeature[] {
-  return GOOGLE_FEATURES.filter(f => GOOGLE_FEATURE_SCOPES[f].every(s => scopes.includes(s)))
+  return GOOGLE_FEATURES.filter(f => GOOGLE_FEATURE_SCOPES[f].every(s => scopes.includes(s) || GOOGLE_FEATURE_OPTIONAL_SCOPES[f]?.includes(s)))
+}
+
+/** The granted features that would do more if the member allowed them again (an optional scope missing). */
+export function googleFeaturesToRenew(scopes: readonly string[]): GoogleFeature[] {
+  return googleFeaturesOf(scopes).filter(f => GOOGLE_FEATURE_OPTIONAL_SCOPES[f]?.some(s => !scopes.includes(s)))
 }
 
 /**
@@ -198,13 +217,15 @@ export function googleFeaturesToAsk(requested: readonly GoogleFeature[], company
 // ---------------------------------------------------------------------------
 // Where Google's APIs live (the server's one Google client maps an API to its host).
 
-export const GOOGLE_APIS = ['calendar', 'meet', 'drive', 'gmail', 'sheets', 'oauth', 'userinfo'] as const
+export const GOOGLE_APIS = ['calendar', 'meet', 'drive', 'docs', 'gmail', 'sheets', 'oauth', 'userinfo'] as const
 export type GoogleApi = typeof GOOGLE_APIS[number]
 
 export const GOOGLE_API_HOSTS: Record<GoogleApi, string> = {
   calendar: 'www.googleapis.com',
   drive: 'www.googleapis.com',
   meet: 'meet.googleapis.com',
+  /** The minutes' documents: `/v1/documents/…`. */
+  docs: 'docs.googleapis.com',
   gmail: 'gmail.googleapis.com',
   /** The relay's Sheets calls (google-relay.ts): `/v4/spreadsheets/…`. */
   sheets: 'sheets.googleapis.com',

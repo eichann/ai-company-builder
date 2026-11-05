@@ -18,7 +18,7 @@ import path from 'node:path'
 import readline from 'node:readline/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
-import { assertKitHome, createLogger, kitPaths, loadAccounts, prepareSecrets, publicUrl, settingsFrom, shortJapaneseDate } from './lib/kit.mjs'
+import { assertKitHome, createLogger, kitPaths, loadAccounts, portalPractice, prepareSecrets, publicUrl, settingsFrom, shortJapaneseDate } from './lib/kit.mjs'
 import { seedStaging } from './seed.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -172,7 +172,7 @@ function fakesPid() {
 
 async function startFakes() {
   if (fakesPid()) return
-  for (const port of [s.fakeHubspotPort, s.fakeGooglePort, s.fakeSlackPort]) {
+  for (const port of [s.fakeHubspotPort, s.fakeGooglePort, s.fakeSlackPort, s.fakePortalPort]) {
     if (await portOpen(port)) throw new Error(`ポート ${port} はほかのプログラムが使っています。ACB_STAGING_FAKE_*_PORT で別の番号にしてください。`)
   }
   const out = fs.openSync(path.join(p.logs, 'fakes.log'), 'a')
@@ -186,15 +186,19 @@ async function startFakes() {
       FAKE_HUBSPOT_PORT: String(s.fakeHubspotPort),
       FAKE_GOOGLE_PORT: String(s.fakeGooglePort),
       FAKE_SLACK_PORT: String(s.fakeSlackPort),
+      FAKE_PORTAL_PORT: String(s.fakePortalPort),
       FAKE_HUBSPOT_KEY_FILE: p.fakeHubspotKey,
+      FAKE_PORTAL_KEY_FILE: p.fakePortalKey,
+      FAKE_PORTAL_BASE_PATH: portalPractice(p).basePath,
+      FAKE_PORTAL_ALIASES: portalPractice(p).aliases.join(','),
       ACB_PUBLIC_URL: base,
     },
   })
   child.unref()
   fs.writeFileSync(fakesPidFile(), String(child.pid))
   for (let i = 0; i < 60; i++) {
-    if ((await Promise.all([s.fakeHubspotPort, s.fakeGooglePort, s.fakeSlackPort].map(portOpen))).every(Boolean)) {
-      say(`練習用の HubSpot・Google・Slack を起動しました（${p.logs}/fakes.log）`)
+    if ((await Promise.all([s.fakeHubspotPort, s.fakeGooglePort, s.fakeSlackPort, s.fakePortalPort].map(portOpen))).every(Boolean)) {
+      say(`練習用の HubSpot・Google・Slack・ポータルを起動しました（${p.logs}/fakes.log）`)
       return
     }
     await sleep(500)
