@@ -22,7 +22,7 @@ import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { sqliteRecordContentEraser } from './adapters/sqlite/record-contents'
-import { betterAuthAccountDirectory } from './adapters/accounts'
+import { betterAuthAccountDirectory, betterAuthAccountIdByEmail } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
 import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
@@ -77,6 +77,7 @@ import { companyNow, createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
 import { createSkillUseService } from './services/skill-uses'
 import { createServerClock } from './services/server-clock'
+import { createSecurityAlertService } from './services/security-alerts'
 import { createTaskAcceptance } from './services/task-acceptance'
 import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
@@ -678,6 +679,17 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // What one meeting's reading made twice: owner/admin list and merge (minutes.md "Outputs made once").
   const meetingOutputs = createMeetingOutputService({ companyData: shared.companyData, act: (...a) => recordEngine.act(...a) })
 
+  // 「気になる動き」 (security-alerts.md): the clock's sweep, git-http's download counter, sign-in (app.ts).
+  const securityAlerts = createSecurityAlertService({
+    ...repos, ...shared,
+    brokerDay: brokerDayOf,
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+    userIdOfEmail: betterAuthAccountIdByEmail(),
+    companiesOf: userId => repos.memberships.companyIdsOf(userId),
+    // The notices' Slack DM (owners / admins who connected Slack), only when the company turned it on.
+    sendDm: (companyId, userId, text) => connectorsLane.slackConnector.sendNoticeDm(companyId, userId, text),
+  })
+
   return {
     ...connectorsLane,
     ...inboxLane,
@@ -724,15 +736,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       pollInbox: (companyId, between) => inboxLane.inbox.pollCompany(companyId, between),
       // Meetings found on the members' calendars, seen by their attendees (minutes.md).
       pollMeetings: (companyId, between) => minutes.pollCompany(companyId, between),
+      // 「気になる動き」 (security-alerts.md): every company, records on or off.
+      securitySweep: companyId => securityAlerts.sweep(companyId),
       yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)),
     }),
     permissionViews,
+    securityAlerts,
     // The admin console's home (server.md "Admin home").
     adminHome: createAdminHomeService({
       ...repos, ...shared,
       overview: m => permissionViews.overview(m),
       googleUsable: companyId => googleConnector.usable(companyId),
       meetingDuplicates: m => { const r = meetingOutputs.duplicates(m); return r.ok ? r.value.groups.length : null },
+      securityAlerts: m => securityAlerts.forHome(m),
       stoppedPlugins: async m => {
         const r = await plugins.list(m)
         if (!r.ok) return []

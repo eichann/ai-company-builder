@@ -348,7 +348,45 @@ state, fields, version } | null, candidates: [{ id, title, typeLabel }], instruc
   「Web で調べる」 uses; it also flags a line addressed to an AI, 「AI へ：…」). A flag, nothing
   removed. The app's tool puts the header above and the footer below the text, then the
   warning and the structured parts (`minutesReadText`, `client/electron/records/tools.ts`).
+- **The block cannot be closed from inside** (`shared/core/outside-text.ts`): the server answers
+  `text` with `【】` → `〔〕` (an older app is covered too) and `instructionLike` from
+  `outsideTextFlags` (+ `wrapper-spoof` when the text spells a block's marker); the app neutralizes
+  again (idempotent, for an older server). `quoteAppearsIn` treats `【】` and `〔〕` alike. Tests:
+  `server/tests/integration/minutes.test.ts` (the seeded follow-up notes spell the footer),
+  `client/tests/outside-text-entry-points.test.ts`.
 - `Cache-Control: no-store`.
+
+### Long minutes (owner report 2026-11-05)
+
+Seen: a 1on1 of about 60,000 characters (1,661 lines) went to 「読めなかった」. One tool result over
+Claude Code's `MAX_MCP_OUTPUT_TOKENS` (25,000 tokens by default; Japanese is about one token a
+character) is moved to a file, and the unattended run has no tool to open it.
+
+- **The app hands the text on in parts** (`minutes_read { id, part? }`, `minutesReadText`,
+  `client/electron/records/tools.ts`): `minutesParts` (`shared/core/minutes.ts`) cuts it on line ends
+  into parts of at most `MINUTES_PART_CHARS` (12,000; a line longer than that alone is cut inside).
+  Each part is its own block (the server's header and footer, `wrapOutsideText`); the first carries
+  the meeting's details (`version`, attendees, candidates…) and the warning over the whole text, a
+  later one the warning over its own text; every answer ends with `{ part, parts, more }`. The parts
+  come from one read of the turn (kept with the turn's tools, at most `MINUTES_KEPT` meetings; a later
+  part asked first reads it again); the まとまり card comes with the first part only. A part past the
+  last → an error naming how many. No `part` = the first (and for short minutes the only) part.
+- **Longer for such an app**: it asks `GET …/text?paged=1`, and the server reads up to
+  `MINUTES_TEXT_PAGED_MAX` (100,000, about eight parts, what the AI holds at once); without it — an
+  older app — `MINUTES_TEXT_MAX` (60,000) as before, in one answer (an older app's own step prompt
+  is its own; nothing changes for it). Past the bound the rest is cut (`truncated`) and the answer
+  tells the AI to make the outputs from what it read and say 「議事録が長すぎて、最後まで読めませんでした」
+  in the summary and its request to the member.
+- The first message (`minutesFirstMessage`) and the automatic run's rules
+  (`autoMinutesFirstMessage`) say to read every part before deciding; the step's tool list is
+  unchanged (`minutes_read` with a `part` is the same tool).
+- **A meeting that went to 「読めなかった」 before** (`failed`) is read again from its card or the
+  banner's row (［AI に読ませる］, 「前回読めず」, "Meetings for their attendees" above) once the app has
+  this.
+- Tests: `client/tests/records-tools.test.ts` (`minutesParts` boundaries; a 60,000-character text in
+  parts, each block on its own and below the limit, one read, the card once, every line once; short
+  minutes one part; cut minutes; the step's words), `server/tests/integration/minutes.test.ts`
+  「long minutes」 (`?paged=1` longer, an older app the old bound).
 
 ### When Google refuses the text (production, 2026-11-05)
 

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import DepartmentsPage from '@/app/companies/[id]/departments/page'
 import MembersPage from '@/app/companies/[id]/members/page'
 import OverviewPage from '@/app/companies/[id]/page'
+import SecurityAlertsPage from '@/app/companies/[id]/alerts/page'
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { ErrorState } from '@/components/app/states'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -93,6 +94,34 @@ describe('ホーム', () => {
     expect(await screen.findByText('同じ会議から重複して作られた記録')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /まとめる/ })).toHaveAttribute('href', `/companies/${COMPANY_ID}/duplicates`)
     expect(screen.getByText('法人営業')).toBeInTheDocument()
+  })
+
+  it('shows 「気になる動き」 with what to do, and leads to the full list; nothing when there is none', async () => {
+    const home = homeOf(quietOverview)
+    const alert = {
+      id: 'al1', kind: 'sign_in_failures', title: '佐藤さんのアカウントで、パスワードの間違いが続きました',
+      detail: '15分の間に12回…', action: '本人に心当たりがあるか聞いてください。', userId: 'u1', name: '佐藤', createdAt: '2026-11-05T03:00:00.000Z',
+    }
+    mockApi({ ...companyRoutes(), [`GET ${base}/home`]: { body: ok({ ...home, attention: { ...home.attention, securityAlerts: [alert] } }) } })
+    renderInCompany(<OverviewPage />)
+    expect(await screen.findByText('気になる動き')).toBeInTheDocument()
+    expect(screen.getByText(alert.title)).toBeInTheDocument()
+    expect(screen.getByText(alert.action)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /気になる動きをすべて見る/ })).toHaveAttribute('href', `/companies/${COMPANY_ID}/alerts`)
+  })
+
+  it('the 「気になる動き」 page saves the Slack choice (off at first)', async () => {
+    const api = mockApi({
+      ...companyRoutes(),
+      [`GET ${base}/security-alerts`]: { body: ok({ items: [], settings: { slackDm: false, updatedAt: null } }) },
+      [`PUT ${base}/security-alerts/settings`]: { body: ok({ slackDm: true, updatedAt: '2026-11-05T03:00:00.000Z' }) },
+    })
+    renderInCompany(<SecurityAlertsPage />)
+    expect(await screen.findByText('気になる動きはありません')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /管理画面だけ/ })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(screen.getByRole('radio', { name: /Slack でも知らせる/ }))
+    await waitFor(() => expect(api.calls.filter(c => c.method === 'PUT').map(c => c.body)).toEqual([{ slackDm: true }]))
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Slack でも知らせる/ })).toHaveAttribute('aria-checked', 'true'))
   })
 
   it('lists rejections in plain Japanese and shows unknown markers raw', async () => {

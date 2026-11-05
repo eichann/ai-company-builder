@@ -156,7 +156,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
   department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
   (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
-  `records.md` "Execution runs").
+  `records.md` "Execution runs") and `securityAlerts` (「気になる動き」: alerts, their Slack setting,
+  members' hourly download counts, the rules' read-only queries; `security-alerts.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -238,6 +239,9 @@ GET  /api/config                                  setup state (no auth)
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET|PUT /second-opinion                         second-opinion.ts
                                                                 (もう一方の AI に聞く: chat-and-agents.md)
+                              GET /security-alerts, PUT /security-alerts/settings (owner/admin)
+                                                                             security-alerts.ts
+                                                                (気になる動き: security-alerts.md)
                               GET|PUT /task-settings, GET|PUT /me/work-switches task-settings.ts
                               GET /home, PUT /home/holidays-checked           admin-home.ts
                                                                 (管理画面のホーム: "Admin home" below)
@@ -323,6 +327,24 @@ repository, and startup configures every repository and hook. The SSH-key and `/
 were removed in R1 (the `ssh_keys` table is still created by `db/schema/company.ts` but nothing uses it).
 The admin console's calls are pinned by `server/tests/integration/admin-contract.test.ts`
 (`shared-core.md`).
+
+## Sign-in (Better Auth, `lib/auth.ts` + `lib/auth-settings.ts`)
+
+- **Base URL = `PUBLIC_URL`'s origin**, never a request's Host header. Production
+  (`NODE_ENV=production`) refuses to start without a valid http(s) `PUBLIC_URL`, like a missing
+  `AUTH_SECRET`; outside production it may be unset (then taken from each request, as before).
+- **Trusted origins** (Better Auth and the API's CORS, one list): `PUBLIC_URL` and `app://`
+  (what every released desktop app sends on sign-in / sign-up / sign-out, from the main
+  process); the dev servers (`localhost:5173`, `localhost:3100`) and the compose names
+  (`api:3001`, `admin:3100`) only outside production. The admin console reaches the API on
+  `PUBLIC_URL` (Caddy: `/api/*` → api); its own `/api/*` proxy passes the browser's Origin through.
+  A new origin needs a reason a released app or the admin actually sends it.
+- The origin check is stated on (`disableOriginCheck: false`), so it also runs under
+  `NODE_ENV=test`. Sign-in attempts are rate-limited in production per client address
+  (`X-Forwarded-For`, set by Caddy; memory storage): `SIGN_IN_RATE_LIMIT`, 10 a minute.
+  Cookies in production: `__Secure-`, Secure, HttpOnly, SameSite=Lax.
+- `tests/security/auth-origins.test.ts` (the production list, the start refusal, a dev origin
+  refused by the real instance, the base URL, the per-address limit).
 
 ## Accounts and roles
 
@@ -454,8 +476,8 @@ admin console's home (管理画面の見直し 2-1): 「最初にやること」
   2026-11-02); a minutes folder chosen; 「会社の休みを確かめた」. The last is the one mark set by
   hand (`PUT /home/holidays-checked { checked: true }`, owner/admin; table `admin_setup_marks`
   behind the handle's `tasks`; the first time is kept). Attention: the overview's lists
-  (`permission-views.ts`) plus the count of one meeting's outputs made twice and the plugins that
-  are on but cannot run.
+  (`permission-views.ts`) plus the count of one meeting's outputs made twice, the plugins that
+  are on but cannot run, and 「気になる動き」 of the last 7 days (`securityAlerts`, `security-alerts.md`).
 - A department manager who is not an owner / admin: no steps; only the sync and app state of the
   members who belong to the departments they manage. Blocked syncs and orphaned rules are left
   out (their paths may name a private folder the manager does not read). Anyone else 403.
@@ -505,7 +527,7 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 Started once per process by `index.ts` (never by `composition.ts`, which tests import), timers
 unref'd: the AI action log's retention (daily), outbound mail bodies' retention (daily) and the
 **server clock** (`services/server-clock.ts`, every 5 minutes; `notifications.md` "The server
-clock"). A new time-based job goes into the server clock rather than a timer of its own, and
+clock"; it also runs 「気になる動き」's sweep, `security-alerts.md`). A new time-based job goes into the server clock rather than a timer of its own, and
 keeps its rules: never runs the AI, writes records only through the engine's writers, takes
 each company through its own handle with a per-company limit and a yield between companies,
 refuses to overlap itself, and derives everything from stored rows (a restart or a second run

@@ -34,7 +34,8 @@ import {
   DRIVE_READ_PDF_MAX_BYTES, DRIVE_READ_TEXT_MAX, DRIVE_TEXT_FOOTER, DRIVE_TEXT_HEADER, driveFolderReachesOutside, drivePutMimeOf, isDriveId, isDrivePickMode,
   type DrivePermissionLike, type DrivePutKind,
 } from '../../shared/core/google-drive'
-import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
 import type { DriveAiStatus, DrivePick, DrivePickerSession, DrivePicksResult, DrivePutAnswer, DrivePutView, DriveReadAnswer } from '../../shared/types/google-drive'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -285,8 +286,9 @@ export function createGoogleDriveService(deps: GoogleDriveDeps) {
       const truncated = text.length > DRIVE_READ_TEXT_MAX
       if (truncated) text = text.slice(0, DRIVE_READ_TEXT_MAX) + TRUNCATED
       return ok({
-        ...base, text, truncated, pdfBase64: null,
-        instructionLike: findInstructionLikeText(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
+        // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
+        ...base, text: neutralizeOutsideText(text), truncated, pdfBase64: null,
+        instructionLike: outsideTextFlags(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 

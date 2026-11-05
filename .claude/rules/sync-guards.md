@@ -229,6 +229,8 @@ what git actually sees through the app's `createGit`.
   scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
   "[LOCAL_ONLY_PATH] …". Skill files (scripts, new files, deletions, renames) take the same
   recovery with their own wording when nothing else was refused (`onlySkillFiles`): `client/tests/sync/skill-files.test.ts`.
+  The default-deny of the rest of `.claude/` and `.agents/` (`push-check.md`) takes the same
+  recovery and dialog: `client/tests/sync/agent-config.test.ts`.
   The recovery compares mode as well as blob id (`sameEntry`): a `chmod +x` alone is refused by the
   server, and a path taken for unchanged was refused at every sync, holding the member's other work
   back (also for `[WRITE_DENIED]`).
@@ -240,6 +242,9 @@ what git actually sees through the app's `createGit`.
 - What running a skill leaves in its own folder (`client/shared/skill-leftovers.ts`) stays on each
   computer: a managed block of `.git/info/exclude`, unstaged if a shared negation re-included it.
   To the server it is a skill change, which would stop automatic sync at every run. Leftovers
+  are matched anywhere in `.claude/`, `.agents/` and `.codex/` (owner/admin only outside skills
+  since the default-deny: a hook's or a setting's script leaves `__pycache__` there too; scenario
+  「what running a tool leaves anywhere…」 in `agent-config.test.ts`). Leftovers
   (`__pycache__/`, `*.pyc`, `node_modules/`, virtual environments, caches, a tool's
   `.tool-output.log`, the desktop's files) for everyone; artifacts (`package-lock.json`, `dist/` and
   `build/` under `tools/`) only for someone who may not share that skill, from

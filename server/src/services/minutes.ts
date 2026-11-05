@@ -36,9 +36,10 @@ import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import {
   MEETING_ARRIVED_DAYS, MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES,
   MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_READ_REQUEST_ACTION, MEETING_SKIP_ACTION, MEETING_TYPE, meetingAsksBundle,
-  meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX,
+  meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX,
 } from '../../shared/core/minutes'
-import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
+import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
 import { isExternalAddress, emailDomain, normalizeEmail } from '../../shared/core/mail'
 import { foldAsciiCase, nameKey, normalizeRepoPath } from '../../shared/core/paths'
 import { findPrivateScope, FULL_ACCESS_ROLES } from '../../shared/core/permissions'
@@ -865,8 +866,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       return created
     },
 
-    /** The minutes as outside text, for the assignee or an attendee (their own Google permission). */
-    async text(member: Member, recordId: string): Promise<Outcome<MinutesText>> {
+    /**
+     * The minutes as outside text, for the assignee or an attendee (their own Google permission).
+     * `paged`: the caller hands it to its AI in parts (`minutes_read`'s `part`), so it may be longer
+     * (`MINUTES_TEXT_PAGED_MAX`); without it an older app gets `MINUTES_TEXT_MAX` as before.
+     */
+    async text(member: Member, recordId: string, options: { paged?: boolean } = {}): Promise<Outcome<MinutesText>> {
       const handle = companyData.forCompany(member.companyId)
       const records = handle.records
       if (!records.settings().enabled) return disabled()
@@ -878,7 +883,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const ref = parseRef(now.fields.source_ref)
       if (!ref || ref.docs.length === 0) return refuse('conflict', 'この議事録の元の文書が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
 
-      const read = await readDocuments(member.companyId, member.userId, ref, MINUTES_TEXT_MAX)
+      const read = await readDocuments(member.companyId, member.userId, ref, options.paged ? MINUTES_TEXT_PAGED_MAX : MINUTES_TEXT_MAX)
       if (!read.ok) return read
       const { text, truncated, versions } = read.value
       let event: MeetEvent | null = null
@@ -904,7 +909,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         recordId: row.id,
         version: now.version,
         header: MINUTES_TEXT_HEADER,
-        text,
+        // 【】 → 〔〕 (outside-text.ts): the text cannot close the block, in an older app too.
+        text: neutralizeOutsideText(text),
         footer: MINUTES_TEXT_FOOTER,
         truncated,
         docVersion: versions.join(','),
@@ -915,7 +921,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         bundle,
         candidates,
         noBundle: noBundleChosen(handle, row.id),
-        instructionLike: findInstructionLikeText(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
+        instructionLike: outsideTextFlags(text).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
     },
 

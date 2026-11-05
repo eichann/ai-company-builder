@@ -306,6 +306,12 @@ own permission, a plugin step's run only with the role declared; nothing stored)
 `inbox_read` asks both — the item view here, then that thread — and shows the thread to the AI
 between `THREAD_TEXT_HEADER` / `FOOTER` (`intake-settings.ts`; outside text: data, not
 instructions) with instruction-like phrases flagged; not readable → the server's sentence why.
+The block follows `shared/core/outside-text.ts` (`wrapOutsideText`): every field of every message
+— names, addresses, subject, text — is inside it with `【】` → `〔〕`, so no message closes it
+(`wrapper-spoof` flagged); header values are one line, and a message line starting `---` is
+quoted (`> ---`), so the other side cannot pass text off as the member's own reply (`--- N（こちらから）`,
+which `reply-check` decides on). The item JSON after the footer is ACB's own view (its `title` may
+be the subject, JSON-encoded). Test: `client/tests/outside-text-entry-points.test.ts`.
 
 ## The AI's turn on the PC (B4: `inbox-triage`)
 

@@ -236,6 +236,18 @@ NODE_ENV=production
 mkdir -p data/repos
 ```
 
+The api container never runs as root. It runs as uid/gid `ACB_UID`:`ACB_GID` (default
+`1000:1000`), and that user must own `data/`. Check with `id -u; id -g` as the user who will
+run the server: if both print `1000`, nothing to do. Otherwise either set `ACB_UID` / `ACB_GID`
+in `.env` to those numbers, or hand the folder to 1000:
+
+```bash
+sudo chown -R 1000:1000 data
+```
+
+An existing installation that ran as root before (files under `data/` owned by root) needs this
+`chown -R` once, with the containers stopped, before the first start of the new images.
+
 #### 2.4 Build and Start
 
 ```bash
@@ -390,14 +402,17 @@ The keys are encrypted with a key-encryption key (KEK) in a file on the host:
 
 ```bash
 sudo install -d -m 700 /etc/acb
-docker compose run --rm --no-deps -v /etc/acb:/kek api \
+docker compose run --rm --no-deps --user 0:0 -v /etc/acb:/kek api \
   node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
+sudo chown 1000:1000 /etc/acb/broker-kek   # ACB_UID:ACB_GID; stays mode 600
 echo 'BROKER_KEK_HOST_FILE=/etc/acb/broker-kek' >> .env
 docker compose up -d api   # the log says "Key broker: on"
 ```
 
 - Keep the file outside the checkout and outside `data/` (backups of `data/` must not contain
-  it), owner-only (`600`). The server refuses a file readable by others or inside `DATA_DIR`.
+  it), owned by the api's uid (`ACB_UID`) with mode `600`, inside a root-only folder. The
+  server refuses a file readable by group or others or inside `DATA_DIR`; a root-owned file
+  is unreadable for it (the log says `cannot be opened (EACCES)` and the broker stays off).
 - Store a copy of its contents in a password manager, off the server. Without it, every stored
   key is unreadable after a loss of the server.
 
@@ -432,6 +447,12 @@ Both databases are SQLite files created automatically on first startup. No manua
 - [ ] Caddy: HTTPS with automatic certificate renewal
 - [ ] `AUTH_SECRET`: Unique, randomly generated, at least 32 characters
 - [ ] `NODE_ENV=production`: Enables secure cookies
+- [ ] Containers: api and admin run as an unprivileged user with no capabilities
+  (`cap_drop: [ALL]`, `no-new-privileges`) on a read-only root filesystem — keep those lines
+  in the compose file; `data/` is owned by `ACB_UID` (step 2.3)
+- [ ] No container gets the raw Docker socket (`/var/run/docker.sock`): it is root on the
+  host. The repository's `docker-compose.yml` gives `autoheal` only a proxy that allows
+  listing and restarting containers (`deploy/docker-api-proxy.cfg`)
 
 ### Optional but Recommended
 
@@ -529,6 +550,10 @@ curl -s https://your-domain.com/api/me
 
 Database migrations run automatically on startup (`CREATE TABLE IF NOT EXISTS`).
 
+Updating from a version whose api ran as root: stop the containers (`... down`), run
+`sudo chown -R 1000:1000 data` (or your `ACB_UID:ACB_GID`) and, if you use the key broker,
+`sudo chown 1000:1000 /etc/acb/broker-kek`, then start as above (step 2.3, "Key broker").
+
 ---
 
 ## Troubleshooting
@@ -551,7 +576,9 @@ docker compose --project-directory . -f docs/self-hosting/docker-compose.product
 
 Common causes:
 - Missing `AUTH_SECRET` in `.env`
-- Data directory permissions (`chown -R deploy:deploy data/`)
+- Data directory permissions: `data/` must belong to `ACB_UID`:`ACB_GID` (default
+  `1000:1000`; `sudo chown -R 1000:1000 data`, step 2.3) — the log shows `EACCES` /
+  `SQLITE_READONLY` / `attempt to write a readonly database` otherwise
 - Port already in use
 
 ### Git sync fails from Electron client

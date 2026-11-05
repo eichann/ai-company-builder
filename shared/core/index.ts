@@ -6,7 +6,9 @@
  *   names.ts              department / skill folder names, scope paths
  *   permissions.ts        the permission model (resolveAccess, writeAccessSummary)
  *   reserved-paths.ts     private-folder paths reserved in the company repository
- *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md
+ *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md, .claude/rules/*.md
+ *   skill-files.ts        .claude/skills|agents|commands, .agents/skills: who may change them
+ *   agent-config.ts       what the agents load and run: owner/admin only (default-deny in .claude/, .agents/)
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
  *   client-version.ts     desktop-app build identity: parsing and ordering
  *   agent-sandbox.ts      the company's AI sandbox setting (「AI の囲い」): shape, validation
@@ -23,6 +25,7 @@
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
+ *   outside-text.ts       the one standard for outside text in an AI prompt (blocks that cannot be closed, titles)
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
  *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget

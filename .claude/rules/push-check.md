@@ -54,7 +54,8 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
   except two intended changes, each with its own expectation helper: secrets in intermediate
   commits (`attemptSecretOnlyInIntermediateCommit`) and Codex's project layer
   (`attemptNewlyProtected`: owner/admin identical, other roles rejected with exactly the listed
-  paths; the skill files rule below goes through the same helper). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
+  paths; the skill files rule and the default-deny of `.claude/` / `.agents/` below go through
+  the same helper). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
   reserved paths) stay out of that corpus and have their own tests. `hook-locale.test.ts` pushes
   under UTF-8 locales.
 
@@ -113,9 +114,30 @@ Deletions are always allowed except where noted (they are how something gets uns
   working directory once the member has trusted the folder — `config.toml` (sandbox and
   permission profiles incl. network and file access, MCP servers, inline hooks), `hooks.json`,
   `rules/` — so the whole folder is protected (added 2026-10-25). Sharing an MCP server is
-  legitimate, so the rule restricts *who*. Test: `protected-config-hook.test.ts`.
+  legitimate, so the rule restricts *who*. Test: `protected-config-hook.test.ts`. The pattern
+  is `AGENT_CONFIG_PATTERN` in `shared/core/agent-config.ts` (the app's guards use it too).
+- **Default-deny in the agents' folders** (`[PROTECTED_CONFIG]`, their own sub-list, owner/admin
+  only; 2026-11-05): everything else in `.claude/` and Codex's `.agents/` (and a file / symlink
+  named `.agents`), any depth, A–Z and look-alike folded — except skill files and instruction
+  files (below), which keep their wider rules. Why: the named list let new kinds through
+  (Codex's repository marketplace `.agents/plugins/marketplace.json`, `.claude/output-styles/`,
+  `.claude/agent-memory/` that a subagent's prompt loads, `.claude/launch.json`, a script a
+  setting points at such as `.claude/statusline.sh`); a kind a CLI starts to load later is now
+  protected the day it appears. Old apps recover from it like any `[PROTECTED_CONFIG]`
+  (restore the server's version). Not for the server's own pushes (a department moved by an
+  owner/admin carries its `.claude/`). Rollout: a build that says it predates the app's
+  leftover handling for these folders (`agentConfigRuleApplies`, `appPredatesAgentConfigRule`
+  in the snapshot, `AGENT_CONFIG_RECOVERY_COMMIT_DATE`) is not checked for this part nor for
+  `.agents/skills/` (it would share `__pycache__` / `.DS_Store` and be refused at every run);
+  no header or an unreadable one is checked. Drop the gate when no such build is left in
+  `client_activity`. Rules: `isAgentConfig` (`shared/core/agent-config.ts`), bytewise
+  `agentFolderPaths` (`rules.ts`); parity: `client/tests/rule-parity-names.test.ts`. Test:
+  `agent-config-hook.test.ts`. Known gap: a setting (`.claude/settings.json`, `.codex/config.toml`)
+  that runs a script or plugin directory OUTSIDE these folders makes that file as dangerous as
+  the setting; keep what settings run inside `.claude/` / `.codex/`.
 - **Skill files** (`[PROTECTED_CONFIG]`, their own sub-list): add / modify / delete / rename of
-  anything under `.claude/skills/`, `.claude/agents/`, `.claude/commands/` (any depth, A–Z
+  anything under `.claude/skills/`, `.claude/agents/`, `.claude/commands/`, and Codex's
+  `.agents/skills/` (since the default-deny; the auto-run check reads them too) (any depth, A–Z
   case-insensitive, every file type, a file or link at the folder's own path too): owner/admin
   anywhere; a department manager inside a department they manage; people on
   「Skill を直せる人」 (`skill_editors`: for the whole company, or one department), or everyone with
@@ -143,7 +165,8 @@ Deletions are always allowed except where noted (they are how something gets uns
   taking the part out helps only someone who may change the file. Text that is not the syntax (`!important`,
   `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
 - **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —
-  Codex reads it in place of `AGENTS.md` — any depth, case-insensitive): owner/admin anywhere; a department manager inside a department folder they
+  Codex reads it in place of `AGENTS.md` — any depth, case-insensitive; and every `.md` inside
+  `.claude/rules/`, which Claude Code loads like CLAUDE.md, since the default-deny): owner/admin anywhere; a department manager inside a department folder they
   manage (`managedFolders` in the snapshot; root-level ones owner/admin only — owner decision
   案B). Others are rejected in their own sub-list of `[PROTECTED_CONFIG]`, which current apps
   already recover from. In a scope repo the path is judged as `<scopePath>/<path>`. Why: these

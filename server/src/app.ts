@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { auth, authDb } from './lib/auth'
+import { serverAuthSettings } from './lib/auth-settings'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
@@ -25,6 +26,7 @@ import { agentSandboxRoute } from './routes/agent-sandbox'
 import { secondOpinionRoute } from './routes/second-opinion'
 import { taskSettingsRoute } from './routes/task-settings'
 import { adminHomeRoute } from './routes/admin-home'
+import { securityAlertsRoute } from './routes/security-alerts'
 import { absencesRoute } from './routes/absences'
 import { viewersRoute } from './routes/viewers'
 import { recordsRoute } from './routes/records'
@@ -71,13 +73,10 @@ export const app = new Hono()
 // (X-Request-Id), company and user ids — never the URL, its query or a path
 // a member sent (lib/request-log.ts).
 app.use('*', requestLog())
+// The same origins sign-in trusts (lib/auth-settings.ts): PUBLIC_URL and the desktop app, plus
+// the dev servers outside production.
 app.use('*', cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3100',
-    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
-    'app://',
-  ],
+  origin: serverAuthSettings().trustedOrigins,
   credentials: true,
 }))
 
@@ -139,8 +138,28 @@ app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
     }
   }
 
+  // 「気になる動き」 (security-alerts.md): wrong passwords per account. Only the address is read
+  // (a copy of the body; the password is never looked at) and only after Better Auth answered.
+  if (c.req.method === 'POST' && c.req.path === '/api/auth/sign-in/email') {
+    const email = await signInEmail(c.req.raw)
+    const res = await auth.handler(c.req.raw)
+    if (email !== null && (res.ok || res.status === 401)) services.securityAlerts.signInAttempt(email, res.ok)
+    return res
+  }
+
   return auth.handler(c.req.raw)
 })
+
+/** The e-mail address of a password sign-in request, from a copy of its body (null: none). */
+async function signInEmail(req: Request): Promise<string | null> {
+  try {
+    const body: unknown = await req.clone().json()
+    const email = body && typeof body === 'object' ? (body as { email?: unknown }).email : undefined
+    return typeof email === 'string' ? email : null
+  } catch {
+    return null
+  }
+}
 
 // Routes
 app.route('/api/me', meRoute)
@@ -157,6 +176,7 @@ app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', secondOpinionRoute)
 app.route('/api/companies/:companyId', taskSettingsRoute)
 app.route('/api/companies/:companyId', adminHomeRoute)
+app.route('/api/companies/:companyId', securityAlertsRoute)
 app.route('/api/companies/:companyId', absencesRoute)
 app.route('/api/companies/:companyId', viewersRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)

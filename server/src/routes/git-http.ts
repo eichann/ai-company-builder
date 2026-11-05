@@ -4,7 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { type AuthUser } from '../lib/auth'
 import { clientIdentityFromHeaders, receivePackSucceeded } from '../lib/client-activity'
-import { skillFileRuleApplies } from '../lib/client-version'
+import { agentConfigRuleApplies, skillFileRuleApplies } from '../lib/client-version'
 import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
@@ -75,8 +75,8 @@ const MAX_OBSERVED_BODY_BYTES = 1024 * 1024
 interface CgiObserver {
   /** Keep a copy of the response body for onClose (bounded). */
   captureBody?: boolean
-  /** Called once when git http-backend exits, before the response ends. */
-  onClose: (exitCode: number | null, body: Buffer | null) => void
+  /** Called once when git http-backend exits, before the response ends; `sentBytes`: its whole output. */
+  onClose: (exitCode: number | null, body: Buffer | null, sentBytes: number) => void
 }
 
 async function handleGitCgi(
@@ -228,6 +228,9 @@ async function handleGitCgi(
   // Observation only: a copy of stdout (headers included) for the observer.
   let observedChunks: Buffer[] | null = observer?.captureBody ? [] : null
   let observedBytes = 0
+  // Everything sent, for 「気になる動き」's download counter (security-alerts.md).
+  let sentBytes = 0
+  if (observer) cgi.stdout.on('data', (chunk: Buffer) => { sentBytes += chunk.length })
   if (observedChunks) {
     cgi.stdout.on('data', (chunk: Buffer) => {
       if (!observedChunks) return
@@ -245,7 +248,7 @@ async function handleGitCgi(
       body = end === -1 ? null : all.subarray(end + 4)
     }
     try {
-      observer.onClose(code, body)
+      observer.onClose(code, body, sentBytes)
     } catch (err) {
       logError('git-http', 'observer failed', err)
     }
@@ -456,6 +459,8 @@ function pushCheckFor(companyId: string, userId: string, clientVersion: string |
       // Skill files: also for the people on 「Skill を直せる人」.
       skillEditing: services.permissionViews.skillEditing(companyId, userId),
       appPredatesSkillRule: !skillFileRuleApplies(clientVersion),
+      // The rest of .claude/ and .agents/ (default-deny): not for an app that would loop on it.
+      appPredatesAgentConfigRule: !agentConfigRuleApplies(clientVersion),
     })
   } catch (err) {
     logError('git-http', 'cannot build the push permission snapshot', err)
@@ -475,8 +480,10 @@ function trackActivity(
   services.clientActivity.record({ userId, companyId, kind: 'seen', version, platform })
   if (op === 'fetch') {
     return {
-      onClose: (code) => {
+      onClose: (code, _body, sentBytes) => {
         if (code === 0) services.clientActivity.record({ userId, companyId, kind: 'fetch', version, platform })
+        // What the member downloaded (a clone, a fetch), per hour: 「気になる動き」 (security-alerts.md).
+        services.securityAlerts.downloaded(companyId, userId, sentBytes)
       },
     }
   }

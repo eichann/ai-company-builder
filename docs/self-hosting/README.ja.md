@@ -226,6 +226,18 @@ NODE_ENV=production
 mkdir -p data/repos
 ```
 
+api コンテナは root では動きません。uid/gid `ACB_UID`:`ACB_GID`（既定 `1000:1000`）で動くので、
+`data/` はこのユーザーの持ち物にします。サーバーを動かすユーザーで `id -u; id -g` を実行し、
+どちらも `1000` なら作業は不要です。違う場合は `.env` の `ACB_UID` / `ACB_GID` をその値にするか、
+フォルダーを 1000 に渡します:
+
+```bash
+sudo chown -R 1000:1000 data
+```
+
+以前 root で動いていた環境（`data/` の中に root のファイルがある）では、新しいイメージで最初に
+起動する前に、コンテナを止めた状態でこの `chown -R` を一度だけ実行してください。
+
 #### 2.4 ビルドと起動
 
 ```bash
@@ -364,13 +376,14 @@ curl -sI https://your-domain.com/api/me 2>&1 | head -5
 
 ```bash
 sudo install -d -m 700 /etc/acb
-docker compose run --rm --no-deps -v /etc/acb:/kek api \
+docker compose run --rm --no-deps --user 0:0 -v /etc/acb:/kek api \
   node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
+sudo chown 1000:1000 /etc/acb/broker-kek   # ACB_UID:ACB_GID。モードは 600 のまま
 echo 'BROKER_KEK_HOST_FILE=/etc/acb/broker-kek' >> .env
 docker compose up -d api   # ログに "Key broker: on" と出ます
 ```
 
-- ファイルはチェックアウトの外、`data/` の外（`data/` のバックアップに含めない）に置き、所有者だけが読める状態（`600`）にします。他人が読める・`DATA_DIR` の中にある場合、サーバーは使いません。
+- ファイルはチェックアウトの外、`data/` の外（`data/` のバックアップに含めない）、root だけが入れるフォルダーに置き、api の uid（`ACB_UID`）の持ち物・モード `600` にします。グループや他人が読める・`DATA_DIR` の中にある場合、サーバーは使いません。root の持ち物のままだとサーバーが読めず、ログに `cannot be opened (EACCES)` と出て預かりは止まったままになります。
 - 中身の控えをサーバーの外（パスワード管理ツール）に1つ保管してください。失うと、預けたキーはすべて読めなくなります。
 
 ### ポート
@@ -404,6 +417,8 @@ docker compose up -d api   # ログに "Key broker: on" と出ます
 - [ ] Caddy: 自動証明書更新付き HTTPS
 - [ ] `AUTH_SECRET`: ユニーク、ランダム生成、32文字以上
 - [ ] `NODE_ENV=production`: セキュア Cookie を有効化
+- [ ] コンテナ: api と admin は特権なしのユーザー・ケーパビリティなし（`cap_drop: [ALL]`、`no-new-privileges`）・読み取り専用のルートファイルシステムで動く（compose ファイルのこの行を消さない）。`data/` は `ACB_UID` の持ち物（ステップ 2.3）
+- [ ] どのコンテナにも Docker ソケット（`/var/run/docker.sock`）をそのまま渡さない（ホストの root と同じ）。リポジトリの `docker-compose.yml` の `autoheal` は、コンテナの一覧と再起動だけを通す中継（`deploy/docker-api-proxy.cfg`）しか使わない
 
 ### 推奨オプション
 
@@ -501,6 +516,8 @@ curl -s https://your-domain.com/api/me
 
 データベースマイグレーションは起動時に自動実行されます（`CREATE TABLE IF NOT EXISTS`）。
 
+api が root で動いていた版からの更新: コンテナを止め（`... down`）、`sudo chown -R 1000:1000 data`（または自分の `ACB_UID:ACB_GID`）、API キーの預かりを使っていれば `sudo chown 1000:1000 /etc/acb/broker-kek` を実行してから、上の手順で起動します（ステップ 2.3、「API キーの預かり」）。
+
 ---
 
 ## トラブルシューティング
@@ -523,7 +540,7 @@ docker compose --project-directory . -f docs/self-hosting/docker-compose.product
 
 よくある原因:
 - `.env` に `AUTH_SECRET` がない
-- データディレクトリの権限（`chown -R deploy:deploy data/`）
+- データディレクトリの権限: `data/` は `ACB_UID`:`ACB_GID`（既定 `1000:1000`）の持ち物にする（`sudo chown -R 1000:1000 data`、ステップ 2.3）。違うとログに `EACCES` / `SQLITE_READONLY` / `attempt to write a readonly database` が出る
 - ポートが使用中
 
 ### Electron クライアントから Git 同期が失敗する

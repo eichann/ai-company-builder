@@ -15,6 +15,9 @@
 //   AI instruction files       shared/core instruction-files.ts (app guard, push
 //                              policy) vs push-check rules.ts INSTRUCTION_FILE_RE
 //                              (bytewise regex built from the core's names)
+//   agent config               shared/core agent-config.ts isAgentConfig (app
+//                              guards) vs push-check rules.ts protectedPaths +
+//                              agentFolderPaths (bytewise, built from its patterns)
 //
 // Intended differences (backslashes, '.' segments, NFD in the push checker, a
 // local-only Unicode fold) are pinned explicitly below.
@@ -30,7 +33,8 @@ import { normalizeReservedPath } from '../../shared/types/private-folders'
 import { pathKey as serverPathKey } from '../../shared/core/paths'
 import { isValidFolderName as coreFolderName, isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../shared/core/names'
 import { instructionFileAllowed, skillFileAllowed } from '../../server/src/lib/push-check/policy'
-import { foldAsciiCase as hookFold, instructionFilePaths, skillFilePaths } from '../../server/src/lib/push-check/rules'
+import { agentFolderPaths, foldAsciiCase as hookFold, instructionFilePaths, protectedPaths, skillFilePaths } from '../../server/src/lib/push-check/rules'
+import { isAgentConfig } from '../../shared/core/agent-config'
 import { isSkillFile, mayChangeSkillFile } from '../../shared/core/skill-files'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
@@ -163,6 +167,8 @@ test('AI instruction files: the chat guard and the push check name the same file
     'CLAUDE.md', 'claude.md', 'Claude.MD', 'CLAUDE.local.md', 'claude.LOCAL.md', 'AGENTS.md', 'agents.md', '営業部/CLAUDE.md',
     'a/b/c/AGENTS.md', 'CLAUDE.md.bak', 'MY-CLAUDE.md', 'CLAUDE.markdown', 'CLAUDE', 'ＣＬＡＵＤＥ.md', 'AGENT.md', 'claude.md/x.txt',
     'CLAUDE.local.md.txt', 'docs/agents.MD', 'AGENTS.override.md', 'x/agents.OVERRIDE.md', 'AGENTS.override.md.bak', 'AGENTS-override.md',
+    '.claude/rules/a.md', '営業部/.claude/rules/x/y.MD', '.Claude/Rules/a.md', '.claude/rules/run.sh', '.claude/rules', '.claude/rules/.md',
+    '.claude/ruleset/a.md', 'claude/rules/a.md', '.claude/ruleſ/a.md', '.ｃlaude/rules/a.md', 'x.claude/rules/a.md',
   ]
   for (const f of files) {
     // The push checker matches git's bytes read as latin1.
@@ -187,6 +193,7 @@ test('skill files: the core and the push checker\'s bytewise regex agree on what
     '営業部/.claude/skills/a/run.sh', 'a/b/.claude/agents/z.py', '.Claude/Skills/a/x', '.CLAUDE/COMMANDS/y', 'がいど'.normalize('NFD') + '/.claude/skills/x',
     '.claude/ſkills/x.py', '.claude/sKills/x.py', '.ｃｌａｕｄｅ/agents/y', '.cl\u200Daude/commands/z',
     '.claude/notes.md', '.claude/skillset/x', '.claude/skills.md', 'claude/skills/x', 'x.claude/skills/y', '.claude', 'skills/a.py', '.claude/hooks/x',
+    '.agents/skills/a/SKILL.md', '営業部/.Agents/Skills/a/run.py', '.agents/skills', '.agentſ/skills/x', '.agents/plugins/x', '.agents/agents/x', 'agents/skills/x',
   ]
   for (const f of files) {
     assert.equal(isSkillFile(f), skillFilePaths([Buffer.from(f, 'utf8').toString('latin1')]).length > 0, `isSkillFile(${JSON.stringify(f)})`)
@@ -204,4 +211,30 @@ test('skill files: the core and the push checker\'s bytewise regex agree on what
     }
   }
   for (const role of ['owner', 'admin']) assert.equal(mayChangeSkillFile({ role, managedFolders: [], skillEditing: cases[3].skillEditing }, '.claude/skills/x'), true)
+})
+
+test('agent config: the core and the push checker\'s bytewise regexes agree on what only owners/admins may change', () => {
+  const files = [
+    // named config
+    '.mcp.json', 'a/.MCP.json', '.claude/settings.json', 'x/.claude/Settings.Local.json', '.claude/hooks/run.sh', '.claude/hooks',
+    '.codex/config.toml', 'a/.Codex/rules/x', '.codex', '.claude', '.claude/hooks/CLAUDE.md', '.mcp.jſon', '.claude/hooKs/x',
+    // default-deny in .claude/ and .agents/
+    '.claude/output-styles/x.md', '.claude/statusline.sh', '.claude/agent-memory/r/MEMORY.md', '営業部/.claude/scripts/a.py',
+    '.agents/plugins/marketplace.json', '.Agents/x', 'a/.agents', '.claude/rules/run.sh', '.claude/.DS_Store', '.claudе/x'.replace('е', 'e'),
+    '.ｃlaude/x', '.cl\u200Daude/launch.json', '.claude/skillset/x', '.claude/skills.md',
+    // their own rules, or nothing at all
+    '.claude/skills/a/run.py', '.claude/agents/a.md', '.claude/commands/c.md', '.agents/skills/a/run.py', '.claude/rules/a.md',
+    '.claude/CLAUDE.md', '.claude/x/AGENTS.md', 'CLAUDE.md', 'docs/claude/x.md', 'x.claude/y', '.claudex/y', 'agents/x', '.agentsx/y',
+    'README.md', '.acb/types/task.md',
+  ]
+  for (const f of files) {
+    const bytes = [Buffer.from(f, 'utf8').toString('latin1')]
+    const server = protectedPaths(bytes).length > 0 || agentFolderPaths(bytes).length > 0
+    assert.equal(isAgentConfig(f), server, `isAgentConfig(${JSON.stringify(f)})`)
+  }
+  // The kinds with their own rules are never also listed as agent config.
+  for (const f of ['.claude/skills/a/run.py', '.agents/skills/a/x', '.claude/rules/a.md', '営業部/.claude/CLAUDE.md']) {
+    assert.equal(agentFolderPaths([f]).length, 0, f)
+    assert.equal(isAgentConfig(f), false, f)
+  }
 })

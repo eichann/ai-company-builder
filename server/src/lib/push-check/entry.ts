@@ -26,6 +26,7 @@ interface Gates {
   /** The pusher's place on 「Skill を直せる人」. */
   skillEditing?: SkillEditing
   appPredatesSkillRule?: boolean
+  appPredatesAgentConfigRule?: boolean
   scopePath?: string
 }
 
@@ -41,6 +42,7 @@ function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
         managedFolders: policy.managedFolders ?? [],
         ...(policy.skillEditing !== undefined ? { skillEditing: policy.skillEditing } : {}),
         appPredatesSkillRule: policy.appPredatesSkillRule === true,
+        appPredatesAgentConfigRule: policy.appPredatesAgentConfigRule === true,
         ...(policy.scopePath !== undefined ? { scopePath: policy.scopePath } : {}),
       }
     } catch (err) {
@@ -76,6 +78,7 @@ async function main(): Promise<number> {
     // member's push never counts as the server's own.
     serverPush: env.ACB_INTERNAL_PUSH === '1' && env.ACB_PUSH_POLICY === undefined,
     appPredatesSkillRule: gates.appPredatesSkillRule === true,
+    appPredatesAgentConfigRule: gates.appPredatesAgentConfigRule === true,
     ...(gates.scopePath !== undefined ? { scopePath: gates.scopePath } : {}),
     contentCheckAvailable,
   })

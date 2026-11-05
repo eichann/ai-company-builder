@@ -67,6 +67,8 @@ export interface PushPolicy {
   skillEditing?: SkillEditing
   /** The pusher's app predates the skill files rule (lib/client-version.ts): not applied to this push. */
   appPredatesSkillRule?: boolean
+  /** The pusher's app predates the default-deny of `.claude/` / `.agents/` (lib/client-version.ts): not applied to this push. */
+  appPredatesAgentConfigRule?: boolean
 }
 
 export type WriteGate =
@@ -154,6 +156,7 @@ export function parsePushPolicy(text: string): PushPolicy {
     ...(managedFolders !== undefined ? { managedFolders } : {}),
     ...(skillEditing !== undefined ? { skillEditing } : {}),
     ...(d.appPredatesSkillRule === true ? { appPredatesSkillRule: true } : {}),
+    ...(d.appPredatesAgentConfigRule === true ? { appPredatesAgentConfigRule: true } : {}),
   }
 }
 

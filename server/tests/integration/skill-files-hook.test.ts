@@ -362,14 +362,16 @@ describe('who may change a skill\'s files', () => {
   })
 
 
-  it('leaves the rest of .claude and the existing skills alone', () => {
+  it('leaves files outside the skill folders to their own rules, and the existing skills alone', () => {
     const { bare, clone } = setup({ [SCRIPT]: 'v1\n' })
     writeFile(clone, '.claude/notes.py', 'mine\n')
     writeFile(clone, 'skills/report/make.py', 'mine\n')
     writeFile(clone, '.claude/skillset/x.py', 'mine\n')
     commitAll(clone)
     const r = push(clone, MEMBER)
-    expect(r.ok, r.output).toBe(true)
+    // Not skill files: the rest of .claude/ is the default-deny's (agent-config-hook.test.ts), not this sub-list's.
+    expect(r.output).not.toContain('スキル・エージェント・コマンドのファイルです')
+    expect(protectedPathsIn(r.output)).toEqual(['.claude/notes.py', '.claude/skillset/x.py'])
     expect(git(['-C', bare, 'show', `main:${SCRIPT}`])).toBe('v1\n')
   })
 

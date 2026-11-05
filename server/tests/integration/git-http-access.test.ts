@@ -185,6 +185,19 @@ describe('git smart HTTP: only members with a live session reach the company rep
     expect(fetched.body.includes(Buffer.from('PACK'))).toBe(true)
   })
 
+  it('counts what a member downloaded, per member and hour (「気になる動き」, security-alerts.md)', async () => {
+    const { db } = await import('../../src/db')
+    const bytesOf = (user: string) => (db.prepare('SELECT COALESCE(SUM(bytes), 0) AS b FROM member_download_hours WHERE company_id = ? AND user_id = ?')
+      .get(CO, user) as { b: number }).b
+    const before = bytesOf('u-member')
+    const fetched = await request(`${CO}.git/git-upload-pack`, { token: 'tok-member', method: 'POST', body: uploadPackBody(), contentType: UPLOAD_PACK })
+    expect(fetched.status).toBe(200)
+    // At least the pack itself; counted when git http-backend has finished.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(bytesOf('u-member') - before).toBeGreaterThanOrEqual(fetched.body.length / 2)
+    expect(bytesOf('u-outsider')).toBe(0)
+  })
+
   const callers: Array<[who: string, token: string | undefined, expected: number[]]> = [
     ['someone from another company', 'tok-outsider', [403, 404]],
     ['a member whose session has expired', 'tok-expired', [401]],

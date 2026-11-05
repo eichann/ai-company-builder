@@ -6,6 +6,7 @@
  * Pure: the renderer and tests use it.
  */
 import type { ChatSessionSummary } from './chat-history'
+import { outsideTitle } from '../../shared/core/outside-text'
 
 /** A record id as the record tools take it (`task-0001ab`). */
 export const TOPIC_RECORD_RE = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
@@ -35,7 +36,7 @@ export function taskConsultTitle(title: string): string {
 export function taskConsultFirstMessage(task: { id: string; title: string }, recordTools: boolean, purpose?: TaskConsultPurpose): string {
   if (!TOPIC_RECORD_RE.test(task.id)) throw new Error('not a record id')
   if (purpose === 'nudge') return nudgeFirstMessage(task, recordTools)
-  const head = `「${task.title}」（やること：${task.id}）について相談させてください。`
+  const head = `${outsideTitle(task.title)}（やること：${task.id}）について相談させてください。`
   if (!recordTools) return head
   return [
     head,
@@ -62,7 +63,7 @@ export function taskConsultPurposeTitle(title: string, purpose: TaskConsultPurpo
  * never sends (a mail goes out only from the draft card, by the member's press).
  */
 function nudgeFirstMessage(task: { id: string; title: string }, recordTools: boolean): string {
-  const head = `「${task.title}」（やること：${task.id}）の返事が、見込みを過ぎてもまだ来ていません。相手に送る短い催促の下書きを作ってください。`
+  const head = `${outsideTitle(task.title)}（やること：${task.id}）の返事が、見込みを過ぎてもまだ来ていません。相手に送る短い催促の下書きを作ってください。`
   const rules = '催促はていねいに短く（3〜5行）。責める言い方はしないでください。送るのは私です。あなたは送らないでください。'
   if (!recordTools) return [head, '', rules, '相手・待っているもの・これまでの流れは、私に聞いてください。'].join('\n')
   return [

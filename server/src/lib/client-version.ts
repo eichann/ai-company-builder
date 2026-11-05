@@ -71,6 +71,25 @@ export function skillFileRuleApplies(version: string | null | undefined): boolea
 }
 
 /**
+ * When the desktop app learned to live with the default-deny of `.claude/`
+ * and `.agents/` (owner/admin only except skill and instruction files): what
+ * running a tool leaves anywhere in those folders (`__pycache__`, `.DS_Store`,
+ * …) and in Codex's `.agents/skills/` stays out of sync. An older app would
+ * share it, be refused, and be refused again at every run of the tool, so the
+ * server does not apply that part of the rule to it (its recovery from
+ * [PROTECTED_CONFIG] is the same either way). A build committed before the
+ * change (UTC, YYYYMMDDHHmmss).
+ */
+export const AGENT_CONFIG_RECOVERY_COMMIT_DATE = '20261105044800'
+
+/** Does the default-deny of `.claude/` / `.agents/` apply to a push from this build? Same defaults as skillFileRuleApplies. */
+export function agentConfigRuleApplies(version: string | null | undefined): boolean {
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return true
+  return parsed.commitDate >= AGENT_CONFIG_RECOVERY_COMMIT_DATE
+}
+
+/**
  * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop
  * app handles private folders: several repositories per company (the
  * company repository plus one scope repository per readable private

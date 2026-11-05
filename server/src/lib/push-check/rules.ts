@@ -20,8 +20,9 @@
  * a separate copy on purpose; client/tests/rule-parity-names.test.ts pins
  * the equivalence on NFC input.
  */
-import { INSTRUCTION_FILE_NAMES } from '../../../shared/core/instruction-files'
-import { SKILL_FOLDER_NAMES } from '../../../shared/core/skill-files'
+import { AGENT_CONFIG_PATTERN, AGENT_FOLDER_PATTERN } from '../../../shared/core/agent-config'
+import { INSTRUCTION_FILE_NAMES, RULES_FILE_PATTERN } from '../../../shared/core/instruction-files'
+import { SKILL_FOLDER_PATTERN } from '../../../shared/core/skill-files'
 import { diskKey, lookalikeKey, pathKey } from '../../../shared/core/paths'
 
 export const ZERO_SHA = '0000000000000000000000000000000000000000'
@@ -86,11 +87,34 @@ export function namesProtected(re: RegExp, line: string): boolean {
  * `hooks.json`, `rules/`, `agents/` — loaded without a prompt once the
  * member trusts the folder. Protected as a whole, and a file or symlink
  * named `.codex` too, like `.claude`.
+ *
+ * The pattern is shared/core/agent-config.ts's (the app's chat guard asks the
+ * same copy); ASCII, so this bytewise `i` match equals the core's.
  */
-export const PROTECTED_RE = /(^|\/)\.mcp\.json$|(^|\/)\.claude$|(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.claude\/hooks(\/|$)|(^|\/)\.codex(\/|$)/i
+export const PROTECTED_RE = new RegExp(AGENT_CONFIG_PATTERN, 'i')
 
+/**
+ * Default-deny (2026-11-05): everything else in `.claude/` and Codex's
+ * `.agents/` (and a file or symlink named `.agents`) is owner/admin only too,
+ * so a file kind an agent starts to load later is protected from the start.
+ * Skill files and instruction files there keep their own, wider rules below.
+ */
+export const AGENT_FOLDER_RE = new RegExp(AGENT_FOLDER_PATTERN, 'i')
+
+/** Named agent config (any role but owner/admin is refused). */
 export function protectedPaths(changedLines: string[]): string[] {
   return sortUnique(changedLines.filter(l => namesProtected(PROTECTED_RE, l)))
+}
+
+/**
+ * The rest of `.claude/` and `.agents/`: not named config, not a skill file,
+ * not an instruction file (shared/core/agent-config.ts isAgentConfig).
+ */
+export function agentFolderPaths(changedLines: string[]): string[] {
+  return sortUnique(changedLines.filter(l => namesProtected(AGENT_FOLDER_RE, l)
+    && !namesProtected(PROTECTED_RE, l)
+    && !namesProtected(SKILL_DIR_RE, l)
+    && !namesProtected(INSTRUCTION_FILE_RE, l)))
 }
 
 /**
@@ -123,12 +147,15 @@ export const RECORD_TYPE_FILE_RE = /^\.acb\/types\/[^/]+\.md$/
  * could not recover from (PROTECTED_CONFIG they can: restore the server's
  * version).
  *
+ * The Markdown files of `.claude/rules/` count too: Claude Code loads them
+ * like CLAUDE.md.
+ *
  * The names come from shared/core/instruction-files.ts (the app's chat guard
  * uses the same list); they are ASCII, so this bytewise, ASCII-only `i`
  * match equals the core's A–Z-folded comparison.
  */
 export const INSTRUCTION_FILE_RE = new RegExp(
-  `(^|/)(${INSTRUCTION_FILE_NAMES.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`,
+  `(^|/)(${INSTRUCTION_FILE_NAMES.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$|${RULES_FILE_PATTERN}`,
   'i',
 )
 
@@ -172,11 +199,15 @@ export function personalPaths(addedLines: string[]): string[] {
 // ----------------------------------------------------------------------------
 
 /**
- * Folder test on byte strings. The folder names come from
- * shared/core/skill-files.ts (the app's guards use the same list); they are
- * ASCII, so this bytewise, ASCII-only `i` match equals the core's comparison.
+ * Folder test on byte strings. The folders come from
+ * shared/core/skill-files.ts (the app's guards use the same list; Codex's
+ * `.agents/skills/` included); they are ASCII, so this bytewise, ASCII-only
+ * `i` match equals the core's comparison.
  */
-export const SKILL_DIR_RE = new RegExp(`(^|/)\\.claude/(${SKILL_FOLDER_NAMES.join('|')})(/|$)`, 'i')
+export const SKILL_DIR_RE = new RegExp(SKILL_FOLDER_PATTERN, 'i')
+
+/** Codex's skills, protected since the default-deny of `.agents/` (an app predating it is not checked there). */
+export const AGENTS_SKILL_DIR_RE = /(^|\/)\.agents\/skills(\/|$)/i
 
 /**
  * Everything in those folders, every file type: a skill's script runs on the

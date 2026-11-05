@@ -37,3 +37,17 @@ export function betterAuthAccountDirectory(): AccountDirectory {
     },
   }
 }
+
+/**
+ * The account id of an e-mail address (「気になる動き」 counts wrong passwords per account;
+ * security-alerts.md), compared without case. Its own connection, opened on first use.
+ */
+export function betterAuthAccountIdByEmail(): (email: string) => string | null {
+  let authDb: Database.Database | null = null
+  const conn = () => (authDb ??= new Database(AUTH_DB_PATH))
+  return (email) => {
+    if (typeof email !== 'string' || email === '' || email.length > 320) return null
+    const row = conn().prepare('SELECT id FROM user WHERE lower(email) = lower(?)').get(email) as { id: string } | undefined
+    return row?.id ?? null
+  }
+}

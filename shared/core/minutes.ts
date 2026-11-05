@@ -6,6 +6,7 @@
  * server's gates (approval for prior fields, a person presses send, fields
  * that are off stay off); this module holds the small shared pieces.
  */
+import { neutralizeOutsideText } from './outside-text'
 
 /** The record type of a meeting (会議); its minutes (議事録) are its content, read where they are. */
 export const MEETING_TYPE = 'meeting'
@@ -90,15 +91,59 @@ export function meetingAsksBundle(m: { externalAttendees: number; hasBundle: boo
 
 /** The record's summary of a meeting's minutes (characters). */
 export const MINUTES_SUMMARY_MAX = 300
-/** Longest minutes text handed to the AI (characters); the rest is cut with a notice. */
+/**
+ * Longest minutes text handed to the AI in one answer (characters); the rest is cut with a notice.
+ * What an older app gets (it asks without `paged`, `minutes.md` "Long minutes").
+ */
 export const MINUTES_TEXT_MAX = 60_000
+/**
+ * Longest minutes text for an app that reads it in parts (`GET …/text?paged=1`): about eight parts
+ * (`MINUTES_PART_CHARS`), which the AI holds at once. Past it the rest is cut with a notice and the
+ * AI says the end could not be read (owner report 2026-11-05: a 60,000-character 1on1).
+ */
+export const MINUTES_TEXT_PAGED_MAX = 100_000
+/**
+ * One part of the minutes per `minutes_read` call (characters). Claude Code moves a tool result
+ * over `MAX_MCP_OUTPUT_TOKENS` (25,000 tokens by default) to a file, which an unattended run has no
+ * tool to open; Japanese is about one token a character, so a part stays far below with the
+ * header, footer and the meeting's details.
+ */
+export const MINUTES_PART_CHARS = 12_000
+
+/**
+ * The minutes cut into parts of at most `size` characters, on line ends (a line longer than `size`
+ * alone is cut inside, never between a surrogate pair). Each part keeps its line ends, so the
+ * parts joined are the text again. An empty text is one empty part.
+ */
+export function minutesParts(text: string, size: number = MINUTES_PART_CHARS): string[] {
+  if (!Number.isInteger(size) || size < 2) throw new Error('part size')
+  const parts: string[] = []
+  let current = ''
+  const push = () => { if (current !== '') parts.push(current); current = '' }
+  for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+    if (current.length + line.length <= size) { current += line; continue }
+    push()
+    let rest = line
+    while (rest.length > size) {
+      let cut = size
+      const code = rest.charCodeAt(cut - 1)
+      if (code >= 0xd800 && code <= 0xdbff) cut-- // never split a surrogate pair
+      parts.push(rest.slice(0, cut))
+      rest = rest.slice(cut)
+    }
+    current = rest
+  }
+  push()
+  return parts.length > 0 ? parts : ['']
+}
 /** A quote cited as the basis of an output: long enough to mean something, short enough to be a quote. */
 export const MINUTES_QUOTE_MIN = 6
 export const MINUTES_QUOTE_MAX = 300
 
 /** Text compared for quotes: NFC, line ends and runs of spaces as one space. */
 function comparable(text: string): string {
-  return text.normalize('NFC').replace(/[\s　]+/g, ' ').trim()
+  // The AI saw 【】 as 〔〕 (outside-text.ts): a quote of what it saw matches either way.
+  return neutralizeOutsideText(text.normalize('NFC')).replace(/[\s\u3000]+/g, ' ').trim()
 }
 
 /**

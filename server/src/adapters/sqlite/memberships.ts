@@ -19,6 +19,10 @@ export function sqliteMembershipRepository(conn: Database.Database): MembershipR
       `).all(companyId) as MembershipRow[]
     },
 
+    companyIdsOf(userId) {
+      return (conn.prepare('SELECT company_id FROM memberships WHERE user_id = ?').all(userId) as Array<{ company_id: string }>).map(r => r.company_id)
+    },
+
     countOwners(companyId) {
       return (conn.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE company_id = ? AND role = 'owner'`)
         .get(companyId) as { n: number }).n

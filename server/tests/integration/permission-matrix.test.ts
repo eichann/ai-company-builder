@@ -249,6 +249,9 @@ const MATRIX: Row[] = [
   // The admin console's home: owner/admin; a department manager sees their departments' attention only
   r('GET /api/companies/:companyId/home', w => ({ path: `${C(w)}/home` }), [200, 200, 403, 200, 404, 401]),
   r('PUT /api/companies/:companyId/home/holidays-checked', w => ({ path: `${C(w)}/home/holidays-checked`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  // 「気になる動き」 (security-alerts.md): owners and admins only.
+  r('GET /api/companies/:companyId/security-alerts', w => ({ path: `${C(w)}/security-alerts` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/security-alerts/settings', w => ({ path: `${C(w)}/security-alerts/settings`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   // 自分の設定 (受信を読む, AI が自動で進める; tasks.md): any member, their own only.

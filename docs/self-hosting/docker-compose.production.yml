@@ -21,6 +21,9 @@ services:
       - NODE_ENV=${NODE_ENV:-production}
       - PORT=3001
       - AUTH_SECRET=${AUTH_SECRET}
+      # Required: the address members and the admin console use (https://your-domain.com).
+      # The server does not start without it in production.
+      - PUBLIC_URL=${PUBLIC_URL:?Set PUBLIC_URL in .env (e.g. https://your-domain.com)}
       - SERVER_HOST=${SERVER_HOST}
       - SERVER_USER=${SERVER_USER}
       - HOST_REPOS_DIR=${HOST_REPOS_DIR}
@@ -42,6 +45,12 @@ services:
     # filesystem): updates need `up -d --build`, as in the guide's Updating
     # section. The server writes only under /app/data and /tmp.
     read_only: true
+    # Never root: ./data (and the KEK file, if any) must belong to this uid/gid
+    # on the host — default 1000:1000; set ACB_UID / ACB_GID in .env to
+    # `id -u` / `id -g` of the user that owns ./data (guide, step 2.3).
+    user: "${ACB_UID:-1000}:${ACB_GID:-1000}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     volumes:
       - ./data:/app/data
       - api-tmp:/tmp
@@ -63,6 +72,13 @@ services:
       - API_PROXY_URL=http://api:3001
     depends_on:
       - api
+    # The image's unprivileged `node` user; cache and scratch files in memory.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/admin/.next/cache:mode=1777
     restart: unless-stopped
 
 volumes:

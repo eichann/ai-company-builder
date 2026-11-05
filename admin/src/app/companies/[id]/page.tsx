@@ -13,6 +13,7 @@ import {
   HandWaving,
   PlugsConnected,
   ProhibitInset,
+  ShieldWarning,
   Question,
   TreeStructure,
   Users,
@@ -20,6 +21,7 @@ import {
 import type { Icon } from '@phosphor-icons/react'
 
 import { DepartmentIcon } from '@/components/app/department-icon'
+import { SecurityAlertRow } from '@/components/security-alerts/alert-row'
 import { ORPHANED_DESCRIPTION, ORPHANED_TITLE } from '@/components/permissions/orphaned-scopes'
 import { EmptyState, ErrorState, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
@@ -91,7 +93,7 @@ function HomeView() {
             permissionsHref={`${base}/folders`}
             rejectionsHref={`${base}/advanced/info/rules`}
             extra={<ExtraAttention attention={data.attention} base={base} />}
-            extraCount={(data.attention.meetingDuplicates > 0 ? 1 : 0) + data.attention.stoppedPlugins.length}
+            extraCount={(data.attention.meetingDuplicates > 0 ? 1 : 0) + data.attention.stoppedPlugins.length + (data.attention.securityAlerts?.length ?? 0)}
           />
           {!isAdmin && canViewAgentEvents && (
             // The log is inside 「詳しい設定」 (owners and admins); a manager the setting lets read it opens it from here.
@@ -171,8 +173,22 @@ function SetupCard({ setup, base }: { setup: NonNullable<AdminHome['setup']>; ba
 
 /** What the home gathers besides the overview's lists (管理画面の見直し 2-3). */
 function ExtraAttention({ attention, base }: { attention: AdminHome['attention']; base: string }) {
+  const alerts = attention.securityAlerts ?? []
   return (
     <>
+      {alerts.length > 0 && (
+        <AttentionCard
+          icon={ShieldWarning}
+          tone="destructive"
+          title="気になる動き"
+          description="この7日にサーバーが見つけたことです。それぞれ、することを書いています。"
+          footer={<FooterLink href={`${base}/alerts`}>気になる動きをすべて見る</FooterLink>}
+        >
+          {alerts.map((a) => (
+            <SecurityAlertRow key={a.id} alert={a} />
+          ))}
+        </AttentionCard>
+      )}
       {attention.meetingDuplicates > 0 && (
         <AttentionCard
           icon={Copy}

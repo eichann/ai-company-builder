@@ -90,6 +90,7 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'no-deletion': '消す操作（中継では通さない）',
   'type-definition': '記録の型の定義（管理者だけ）',
   'skill-file': 'スキルのファイル（直せる人だけ）',
+  'agent-config': 'AI の設定ファイル（管理者だけ）',
   'record-file': '記録のファイルの状態・id の書き換え',
 }
 

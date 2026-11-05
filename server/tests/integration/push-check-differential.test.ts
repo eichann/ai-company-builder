@@ -229,8 +229,9 @@ function attemptSecretOnlyInIntermediateCommit(repo: Repo, a: Attempt, expectedE
 /**
  * The second intended difference: paths the legacy hook did not protect and
  * the push checker does — Codex's project layer (`.codex/` at any depth, a
- * file or symlink named `.codex`) and every file of `.claude/skills|agents|commands`
- * (skill-files-hook.test.ts). Owner/admin runs must still match the
+ * file or symlink named `.codex`), the rest of `.claude/` and `.agents/`
+ * (default-deny, agent-config-hook.test.ts) and every file of
+ * `.claude/skills|agents|commands` (skill-files-hook.test.ts). Owner/admin runs must still match the
  * legacy hook byte for byte (both accept); every other role is rejected
  * with a PROTECTED_CONFIG section listing exactly `expectedEntries`, where
  * the legacy hook accepted. Never applied.
@@ -468,6 +469,26 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
     }), [c0])
     attemptNewlyProtected(repo, { label: 'Codex project config (.codex/ at any depth/case, .codex symlink)', updates: [['refs/heads/main', codex]] },
       ['.codex/config.toml', 'a/.Codex/hooks.json', 'b/.codex'])
+  })
+
+  it('the rest of .claude/ and .agents/: newly protected by default (intended difference)', () => {
+    const repo = new Repo('agent-folders')
+    const base: Tree = new Map<string, Entry>([['README.md', 'hi\n']])
+    const c0 = repo.commit(base, [])
+    attempt(repo, { label: 'seed', updates: [['refs/heads/main', c0]] })
+    const folders = repo.commit(tree(base, {
+      '.claude/output-styles/x.md': 'x\n',
+      'a/.Claude/statusline.sh': 'echo\n',
+      '.agents/plugins/marketplace.json': '{}\n',
+      'b/.agents': { mode: '120000', content: 'elsewhere' },
+      '.claude/rules/style.md': 'be brief\n',
+      '.agents/skills/r/run.py': 'print(1)\n',
+      'agents/notes.md': 'fine\n',
+      'x.claude/y.md': 'fine\n',
+    }), [c0])
+    // The sub-lists print in the section's order: agent folders, instruction files, skill files.
+    attemptNewlyProtected(repo, { label: 'default-deny in .claude/ and .agents/ (any depth/case, .agents symlink)', updates: [['refs/heads/main', folders]] },
+      ['.agents/plugins/marketplace.json', '.claude/output-styles/x.md', 'a/.Claude/statusline.sh', 'b/.agents', '.claude/rules/style.md', '.agents/skills/r/run.py'])
   })
 
   it('several refs in one push, deletions, malformed input', () => {

@@ -38,6 +38,7 @@ import type {
 } from '../../../shared/types/plugins'
 import type { RecordSettings } from '../../../shared/types/records'
 import type { SecondOpinionView } from '../../../shared/types/second-opinion'
+import type { SecurityAlertSettings, SecurityAlertView, SecurityAlertsView } from '../../../shared/types/security-alerts'
 import type { SlackAdminView } from '../../../shared/types/slack'
 import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
 import type {
@@ -162,6 +163,23 @@ export const overviewSchema: z.ZodMiniType<Overview> = z.looseObject({
   }),
 })
 
+// 「気になる動き」 (shared/types/security-alerts.ts). An unknown kind still shows: the words come from the server.
+const securityAlertSchema: z.ZodMiniType<SecurityAlertView> = z.looseObject({
+  id: str,
+  kind: str,
+  title: str,
+  detail: str,
+  action: str,
+  userId: nullableStr,
+  name: nullableStr,
+  createdAt: str,
+}) as unknown as z.ZodMiniType<SecurityAlertView>
+export const securityAlertSettingsSchema: z.ZodMiniType<SecurityAlertSettings> = z.looseObject({ slackDm: z.boolean(), updatedAt: nullableStr })
+export const securityAlertsSchema: z.ZodMiniType<SecurityAlertsView> = z.looseObject({
+  items: z.array(securityAlertSchema),
+  settings: securityAlertSettingsSchema,
+})
+
 export const adminHomeSchema: z.ZodMiniType<AdminHome> = z.looseObject({
   view: z.enum(['admin', 'manager']),
   setup: z.nullable(z.looseObject({
@@ -184,6 +202,8 @@ export const adminHomeSchema: z.ZodMiniType<AdminHome> = z.looseObject({
     orphanedScopes: z.array(orphanedScopeSummarySchema),
     meetingDuplicates: z.number(),
     stoppedPlugins: z.array(z.looseObject({ id: str, label: str, problem: str })),
+    // Absent from a server before 「気になる動き」.
+    securityAlerts: z.optional(z.array(securityAlertSchema)),
   }),
   counts: z.looseObject({ members: z.number(), departments: z.number() }),
 })

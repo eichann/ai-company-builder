@@ -36,7 +36,7 @@ Area rules (load automatically when you touch matching files):
 ai-turns, sync, sync-guards, sync-testing, download-choices, push-check, private-folders, google-drive,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
 web-research, tasks, tasks-ui, agent-sandbox, plugins, outbound-mail, member-oauth, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
-commands, server, records, notifications, google-connector, minutes, calendar,
+commands, server, security-alerts, records, notifications, google-connector, minutes, calendar,
 connector-roles, inbox, slack-connector, identity, plugin-steps, plugin-roles, plugin-frame,
 shared-core, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the

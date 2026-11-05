@@ -55,12 +55,20 @@ services:
     # snapshots, make-public scratch clones; disk-backed, not tmpfs, since a
     # scratch clone can be large).
     read_only: true
+    # Never root (server/Dockerfile ends with USER node): ./data and the KEK
+    # file belong to this uid/gid on the host — default 1000:1000, the usual
+    # first user; set ACB_UID / ACB_GID in .env to `id -u` / `id -g` of the
+    # owner of ./data otherwise. No capabilities, no setuid gains: the server
+    # binds a port above 1024 and touches only files it owns.
+    user: "${ACB_UID:-1000}:${ACB_GID:-1000}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     volumes:
-      # SQLite databases, company repositories, archives
+      # SQLite databases, company repositories, archives (owned by ACB_UID)
       - ./data:/app/data
       - api-tmp:/tmp
-      # Key broker KEK: a root-owned 0600 file OUTSIDE ./data (database backups
-      # must not contain it) and outside this checkout. See .env.example.
+      # Key broker KEK: a 0600 file owned by ACB_UID, OUTSIDE ./data (database
+      # backups must not contain it) and outside this checkout. See .env.example.
       - ${BROKER_KEK_HOST_FILE:-/dev/null}:/run/secrets/broker-kek:ro
     restart: unless-stopped
     healthcheck:
@@ -92,6 +100,16 @@ services:
       - NODE_OPTIONS=--max-old-space-size=1024
     depends_on:
       - api
+    # Runs as the image's `node` user (admin/Dockerfile), with no capabilities
+    # and a read-only root filesystem: the standalone server writes only its
+    # cache (.next/cache, e.g. image optimisation) and scratch files, both in
+    # memory here.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /app/admin/.next/cache:mode=1777
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch(\"http://localhost:3100/\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -102,15 +120,48 @@ services:
     labels:
       - "autoheal=true"
 
+  # Restarts a container whose healthcheck fails (label autoheal=true): Docker
+  # itself only restarts containers that exit. autoheal never sees the Docker
+  # socket — whoever holds it is root on the host — only docker-api-proxy,
+  # which lets through exactly "list containers" and "restart a container"
+  # (deploy/docker-api-proxy.cfg), on a network no other container joins.
+  # Images are pinned by digest; to update, look up the new digest
+  # (`docker buildx imagetools inspect <image>:<tag>`) and change both here.
   autoheal:
-    image: willfarrell/autoheal:latest
+    image: willfarrell/autoheal:latest@sha256:221c1c842f59ff74ac332b38a2f79e3fc3cf93fc2af453e15ed24e9605010326
     restart: unless-stopped
     environment:
       - AUTOHEAL_CONTAINER_LABEL=autoheal
       - AUTOHEAL_INTERVAL=30
       - AUTOHEAL_START_PERIOD=60
+      - DOCKER_SOCK=tcp://docker-api-proxy:2375
+    depends_on:
+      - docker-api-proxy
+    networks:
+      - docker-api
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  docker-api-proxy:
+    image: haproxy:3.2.26-alpine3.24@sha256:5893840576071e6217cd52ebdcc14f454c6f7a631056fa6f4e0f40d3cac4215b
+    restart: unless-stopped
+    # root only to open the socket (root:docker 0660; the gid differs per
+    # host); no capabilities, read-only filesystem, no published port.
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
     volumes:
+      - ./deploy/docker-api-proxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - docker-api
+
+networks:
+  # Only autoheal and its proxy; internal = no route out of the host.
+  docker-api:
+    internal: true
 
 volumes:
   api-tmp:

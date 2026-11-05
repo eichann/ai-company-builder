@@ -19,6 +19,7 @@ import { migratePluginInstallKeyReference, migratePluginOperationCreates, migrat
 import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
+import { securityAlertSchema } from './schema/security-alerts'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -81,6 +82,8 @@ const SCHEMA = [
   notificationSchema,
   aiRunSchema,
   skillUseSchema,
+  // 「気になる動き」 (security-alerts.md).
+  securityAlertSchema,
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (slack-connector.md).
