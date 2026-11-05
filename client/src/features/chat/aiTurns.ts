@@ -34,6 +34,11 @@ export interface HandOff {
   reason: string
   /** The record's version the failed run started from: a newer one back in the queue was asked for again (`askedAgain`). */
   version?: number
+  /**
+   * The record's state it was handed in (a run's start, or the queue's when handed early): back in
+   * the queue in another state, it is another turn of the AI (`movedOn`).
+   */
+  state?: string
 }
 
 /** At most this many records are started in one pass; the next pass comes `AI_TURN_PASS_INTERVAL_MS` later. */
@@ -89,7 +94,10 @@ export function logForToday(stored: unknown, now: number): AiTurnLog {
   for (const [id, h] of Object.entries(s.handed && typeof s.handed === 'object' ? s.handed : {})) {
     const x = h as Partial<HandOff> | null
     if (x && (x.kind === 'failed' || x.kind === 'urgent' || x.kind === 'by-member') && typeof x.reason === 'string') {
-      handed[id] = { kind: x.kind, reason: x.reason === OLD_FAILED_REASON ? FAILED_REASON : x.reason.slice(0, 300), ...(typeof x.version === 'number' ? { version: x.version } : {}) }
+      handed[id] = {
+        kind: x.kind, reason: x.reason === OLD_FAILED_REASON ? FAILED_REASON : x.reason.slice(0, 300),
+        ...(typeof x.version === 'number' ? { version: x.version } : {}), ...(typeof x.state === 'string' && x.state ? { state: x.state.slice(0, 60) } : {}),
+      }
     }
   }
   if (s.day !== base.day) return { ...base, stopped, pausedUntil, pauseSeenAt, failuresInARow, handed }
@@ -144,15 +152,30 @@ export const UNFINISHED_REASON = 'AI が最後まで終えられませんでし�
  * person at once with the reason (never left silently in 「AI の番」) and N in a row stop the
  * runner; Claude's limit pauses (not a failure, the record waits).
  */
-export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pause: UsagePause | null, version?: number): AiTurnLog {
+export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pause: UsagePause | null, version?: number, state?: string | null): AiTurnLog {
   if (outcome === 'done') return { ...log, failuresInARow: 0 }
   if (outcome === 'usage-limit') return pause ? { ...log, pausedUntil: pause.until, pauseSeenAt: pause.seenAt } : log
   const failuresInARow = log.failuresInARow + 1
   const reason = outcome === 'failed' ? FAILED_REASON : UNFINISHED_REASON
   return {
     ...log, failuresInARow, stopped: log.stopped || failuresInARow >= settings.stopAfterFailures,
-    handed: { ...log.handed, [recordId]: { kind: 'failed', reason, ...(version !== undefined ? { version } : {}) } },
+    handed: { ...log.handed, [recordId]: { kind: 'failed', reason, ...(version !== undefined ? { version } : {}), ...(state ? { state } : {}) } },
   }
+}
+
+/**
+ * Records handed to the person in one state that are back in the queue in another (owner report
+ * 2026-11-05): a 返事のお願い handed while the AI drafted (準備中) — a run that ended as the member's
+ * reply moved it on, or due soon — is now 確かめ中, a new turn of the AI. The hand-off answered the
+ * earlier turn; left in place, the record would sit in 「AI の番」 with nothing for anyone to do.
+ * The member's own 「人に渡す」 stays until 「もう一度」, and so does a hand-off from an older build
+ * (no state kept).
+ */
+export function movedOn(log: AiTurnLog, queue: readonly AiTurnCandidate[]): string[] {
+  return queue.filter(c => {
+    const h = log.handed[c.id]
+    return !!h && h.kind !== 'by-member' && h.state !== undefined && !!c.state && c.state !== h.state
+  }).map(c => c.id)
 }
 
 /**
@@ -201,11 +224,11 @@ export function handedOver(log: AiTurnLog, recordId: string, reason: string): Ai
 export function handUrgent(log: AiTurnLog, queue: readonly AiTurnCandidate[], runningId: string | null, now: number): AiTurnLog {
   let handed: Record<string, HandOff> | null = null
   for (const c of queue) {
-    if (c.id === runningId || log.handed[c.id]) continue
+    if (c.id === runningId || log.handed[c.id] || c.notUrgent) continue
     const due = time(c.dueAt)
     if (due - now > URGENT_WITHIN_MS) continue
     handed ??= { ...log.handed }
-    handed[c.id] = { kind: 'urgent', reason: '期限が近いため、AI の準備を待たずにお渡しします。' }
+    handed[c.id] = { kind: 'urgent', reason: '期限が近いため、AI の準備を待たずにお渡しします。', ...(c.state ? { state: c.state } : {}) }
   }
   return handed ? { ...log, handed } : log
 }

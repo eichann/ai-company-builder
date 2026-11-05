@@ -25,6 +25,11 @@ export interface AiTurnCandidate {
    * series): it runs even while 「自動で進める」 is off — the press is the start (minutes.md).
    */
   asked?: true
+  /**
+   * Its due is not what the AI's turn is racing (`AiTurnStepDefinition.dueIsTheAisTurn`): it is
+   * never handed to the person early for being due soon (the runner's `handUrgent`).
+   */
+  notUrgent?: true
 }
 
 /**
@@ -58,6 +63,14 @@ export interface AiTurnStepDefinition<Step extends string = string> {
    * state another way (a consultation created a task in 準備中 and prepares it) is never queued.
    */
   onlyWaitOver?: true
+  /**
+   * Whether the record's due is what this turn races, so that a record due soon is handed to the
+   * person rather than waiting for the AI (the runner's `handUrgent`). Absent = always. A 返事のお願い's
+   * due is the reply's: it counts while the AI drafts the first reply, not when the AI checks a reply
+   * already sent or drafts a nudge after the wait (owner report 2026-11-05: a 確かめ中 request past
+   * its due was handed at once and sat in 「AI が確かめている」 with nothing for anyone to do).
+   */
+  dueIsTheAisTurn?: (record: { state: string; waitOver: boolean }) => boolean
   /**
    * The type's first AI action, run by main at the version read just before, and the state it
    * starts from. `action: null`: the type has no start mark (an interaction in 届いた) — the

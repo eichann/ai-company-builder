@@ -3,7 +3,8 @@
 // process whose card is built by the real `summaryView` / `recordDetailOf`. `?record=meeting` (the
 // default) is a meeting with its decisions, homework and many links; `?record=slack` a 来た連絡
 // from Slack with the thread slot filled, the member's to settle (`&replies=open`: its 返事のお願い open); `?record=bundle` a 案件 with everyone's やること, an approval
-// request and what the AI last did (`?ai=working`: while it works); `?field=real` draws the meeting's real
+// request and what the AI last did; `?record=reply` a 返事のお願い in 確かめ中 (the AI's turn) that is the member's,
+// ［終わりにする］ moving it as the server would (`&type=v4`: an older server's type, close only from 返事をする / 返事待ち) (`?ai=working`: while it works); `?field=real` draws the meeting's real
 // 案件・プロジェクト field (no 案件 yet: 「新しいプロジェクトにする」). Links opened outside show in `#opened`.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -37,6 +38,13 @@ let slack = rec('interaction-0000bb', 'interaction', '資料送付のお願い',
 }, '先日の打ち合わせ資料を送ってほしいとのこと。')
 const slackBefore: RecordSummary[] = []
 const ME = 'u-sato'
+// A 返事のお願い after the member's reply: 確かめ中, the AI's turn (owner report 2026-11-05).
+let reply = rec('reply_request-0000c1', 'reply_request', 'Re: 資料送付のお願い', 'checking', { assignee: ME, requested_by: ME, trigger_kind: 'our_reply' })
+const replyBefore: RecordSummary[] = []
+const replyDef = params.get('type') === 'v4'
+  ? { actions: { ...defs.get('reply_request')!.actions, close: { ...defs.get('reply_request')!.actions.close, from: ['open', 'waiting_reply'] } } }
+  : defs.get('reply_request')
+const replyCard = () => ({ record: view(reply), version: reply.version, detail: recordDetailOf(reply, people, ME, replyDef) ?? undefined, fields: [], history: [], links: [], viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } })
 
 const realField = params.get('field') === 'real'
 const task = (n: number, state = 'todo') => ({ label: 'もとの会議', recordVersion: 2, record: view(rec(`task-00000${n}`, 'task', `宿題 ${n}`, state)) })
@@ -73,9 +81,14 @@ const card = kind === 'bundle'
   : { record: view(record), version: 3, detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
 
 installElectronAPI({
-  getRecordCard: async () => ({ success: true, card: kind === 'slack' ? slackCard() : card }),
+  getRecordCard: async () => ({ success: true, card: kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : card }),
   actOnTask: async (_c, recordId, input) => {
     say(`act ${recordId} ${input.action}@${input.expectedVersion}`)
+    if (recordId === reply.id) {
+      replyBefore.push(reply)
+      reply = { ...reply, state: 'closed', version: reply.version + 1 }
+      return { success: true, recordId }
+    }
     slackBefore.push(slack)
     const state = input.action === 'settle' ? 'handled' : 'excluded'
     slack = { ...slack, state, version: slack.version + 1, fields: { ...slack.fields, ...(input.action === 'settle' ? { settled_by: ME } : {}) } }
@@ -86,6 +99,11 @@ installElectronAPI({
   unlinkRecordFromRecord: async (_c, recordId, input) => { say(`unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   undoTaskAction: async (_c, recordId, version, expected) => {
     say(`undo ${recordId} ${version}@${expected}`)
+    if (recordId === reply.id) {
+      const was = replyBefore.pop()
+      if (was) reply = { ...was, version: reply.version + 1 }
+      return { success: true, recordId }
+    }
     const before = recordId === slack.id ? slackBefore.pop() : undefined
     if (before) slack = { ...before, version: slack.version + 1 }
     return { success: true, recordId }
@@ -101,7 +119,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="opened" className="text-[10px]" />
-      <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={record.id}
+      <RecordCard companyId="co-preview" rootPath="/Users/me/company" recordId={kind === 'reply' ? reply.id : record.id}
         renderSource={r => (r.type === 'interaction' ? <div data-testid="thread">スレッドの前後と返事の下書き：{r.title}</div> : null)}
         renderApproval={id => <div data-testid="approval">承認のお願いのカード：{id}</div>}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: 'A社 打ち合わせのあと', updatedAt: '2026-11-05T07:00:00.000Z' }]}

@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_INTAKE_SETTINGS, defaultIntakeSettings, parseIntakeSettings, pollWindow, routeIncoming, type RouteInput,
 } from '../../../shared/core/intake-settings'
-import { coreTypeDefinitions, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
+import { CORE_TYPE_FILES, coreTypeDefinitions, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { compareTypeDefinitions, parseTypeFile, type TypeDefinition } from '../../../shared/core/record-types'
 import { INTERACTION_V4_TEXT, INTERACTION_V5_TEXT, INTERACTION_V6_TEXT, INTERACTION_V7_TEXT, REPLY_REQUEST_V1_TEXT, TASK_V7_TEXT } from '../helpers/core-types-before-inbox'
 
@@ -127,5 +127,20 @@ describe('the core types the inbox writes', () => {
     expect(aiEnds(def('task'))).toEqual([])
     // A person's close is the assignee's, never the AI's.
     expect(rr.actions.close.who).toEqual(['assignee'])
+  })
+
+  it('reply_request 5: the assignee may end it in the AI\'s turn too (owner report 2026-11-05), additive over 4', () => {
+    const rr = def('reply_request')
+    expect(rr.version).toBe(5)
+    // Every open state, 準備中 and 確かめ中 included: no 返事のお願い is left with nothing for its person to press.
+    expect(rr.actions.close).toMatchObject({ from: ['preparing', 'open', 'waiting_reply', 'checking'], to: 'closed', who: ['assignee'] })
+    const open = rr.states.filter(s => !rr.final.includes(s))
+    expect(open.every(s => rr.actions.close.from?.includes(s))).toBe(true)
+    const v4 = CORE_TYPE_FILES.reply_request.replace(/version: \d+/, 'version: 4')
+      .replace('from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee]', 'from: [open, waiting_reply], to: closed, who: [assignee]')
+    const change = compareTypeDefinitions(parsed('reply_request', v4), rr)
+    expect(change.changed).toBe(true)
+    expect(change.breaking).toEqual([])
+    expect(change.versionProblem).toBeNull()
   })
 })

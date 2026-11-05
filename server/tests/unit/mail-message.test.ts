@@ -81,7 +81,7 @@ describe('a reply (outbound-mail.md "Replies")', () => {
   })
 
   it('reply_request 4 only adds to 3 (the task a mail we sent first came from, an origin link)', () => {
-    const v3 = CORE_TYPE_FILES.reply_request.replace('version: 4', 'version: 3').split('\n').filter(l => !l.startsWith('  task:')).join('\n')
+    const v3 = CORE_TYPE_FILES.reply_request.replace(/version: \d+/, 'version: 3').split('\n').filter(l => !l.startsWith('  task:')).join('\n')
     const before = parseTypeFile('reply_request', v3)
     if (!before.ok) throw new Error(before.errors.join())
     const now = coreTypeDefinitions().find(d => d.name === 'reply_request')!
