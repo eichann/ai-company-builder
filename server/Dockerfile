@@ -66,15 +66,20 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# git: the server hosts the company repositories (smart HTTP + pre-receive hook)
+# git: the server hosts the company repositories (smart HTTP + pre-receive hook).
+# Its settings go in the system config (/etc/gitconfig), not a home directory:
+# the server runs as an unprivileged uid chosen at run time (compose `user:`,
+# ACB_UID), which may have no passwd entry and whose HOME is not writable on
+# the read-only root filesystem. safe.directory '*': repositories written by
+# an earlier uid (e.g. before the switch from root) stay usable.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && git config --global user.email "system@ai-company-builder" \
-    && git config --global user.name "AI Company Builder" \
-    && git config --global safe.directory '*' \
-    && git config --global init.defaultBranch main
+    && git config --system user.email "system@ai-company-builder" \
+    && git config --system user.name "AI Company Builder" \
+    && git config --system safe.directory '*' \
+    && git config --system init.defaultBranch main
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY server/package.json server/tsconfig.json ./
@@ -87,8 +92,15 @@ COPY server/src ./src
 # The server imports ../../shared (types and the shared rules, shared/core).
 COPY shared ./shared
 
-# Create data directory
-RUN mkdir -p data
+# /app/data is a mount point (compose mounts ./data there). Owned by the
+# image's unprivileged user so a plain `docker run` without the mount works.
+RUN mkdir -p data && chown node:node data
+
+# Never root at run time. The image's default is the base image's `node` user
+# (uid/gid 1000); compose overrides the numbers with ACB_UID / ACB_GID to match
+# the host owner of ./data. Everything under /app except data/ stays root-owned
+# and read-only to the server.
+USER node
 
 # Expose port
 EXPOSE 3001

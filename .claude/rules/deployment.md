@@ -4,6 +4,7 @@ paths:
   - "server/Dockerfile"
   - "admin/Dockerfile"
   - ".dockerignore"
+  - "deploy/**"
   - "docs/self-hosting/**"
   - ".github/**"
   - "package.json"
@@ -33,7 +34,8 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
 
 ## Docker Compose (`docker-compose.yml`)
 
-- `docker compose up -d` runs `api` (port 3001), `admin` (3100) and `autoheal`. Ports bind to
+- `docker compose up -d` runs `api` (port 3001), `admin` (3100), `autoheal` and its
+  `docker-api-proxy`. Ports bind to
   loopback by default (`BIND_ADDR`, 127.0.0.1); use a reverse proxy (Caddy) for external access.
   OrbStack ≤ 2.2.0 cannot forward loopback-bound ports when host and container ports match —
   set `BIND_ADDR=0.0.0.0` in `.env` there.
@@ -45,14 +47,37 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   what it runs. A new place the server writes at run time goes under `DATA_DIR`, or `/tmp` for
   scratch; anything else fails on the read-only filesystem. The image stays TypeScript + tsx on
   purpose: the pre-receive hook runs `push-check/entry.ts` with the server's node and tsx loader.
+- **No root, no capabilities** (both compose files and `staging/compose.yml`): `api` runs as
+  `user: ${ACB_UID:-1000}:${ACB_GID:-1000}` (the image itself ends with `USER node`, uid 1000),
+  `admin` as the image's `node`; both `cap_drop: [ALL]`, `no-new-privileges:true`, read-only
+  root filesystem (admin: tmpfs `/tmp` and `/app/admin/.next/cache`, `mode=1777` — compose's
+  default tmpfs is root 0755). The host's `./data` and the KEK file must belong to
+  `ACB_UID:ACB_GID` (`sudo chown -R`); a root-owned leftover fails with `EACCES` /
+  `SQLITE_READONLY`. git's settings (`safe.directory '*'`, identity, `init.defaultBranch`) are in
+  `/etc/gitconfig` (`git config --system`), because the run-time uid may have no home. Don't
+  add a capability or `user: root` back without a measured need; a new image or service gets the
+  same three lines. CI ("API and admin run unprivileged", "Members push and pull over smart
+  HTTP") checks uid ≠ 0, `CapEff` 0, `NoNewPrivs` 1, file owners, a push + clone and the push
+  checker's refusal.
+- `autoheal` (restarts a container whose healthcheck fails; label `autoheal=true`) never gets the
+  Docker socket — that is root on the host. It talks to `docker-api-proxy` (official haproxy,
+  `deploy/docker-api-proxy.cfg`), which passes only `GET /containers/json` and
+  `POST /containers/<id>/restart` and answers 403 to everything else (inspect would show
+  `AUTH_SECRET`, archive the KEK, create/start = root); both sit alone on the `internal`
+  network `docker-api`. Generic socket proxies (tecnativa) cannot do this: "containers + POST"
+  includes create and start. Both images are pinned by digest
+  (`docker buildx imagetools inspect <image>:<tag>` for a new one). CI step "Docker API proxy
+  lets autoheal list and restart, nothing else".
 - `admin` is a production build (`next build`, standalone server) with no source mount, because
   it is internet-facing and must not run `next dev`. Rebuild after admin changes
   (`docker compose up -d --build admin`), or use `pnpm dev:admin` on the host for hot reload.
   `/api/*` is forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at run time
   (`http://api:3001` on the compose network). The admin Dockerfile copies `shared/` into its
   build stage.
-- Optional key broker KEK: `BROKER_KEK_HOST_FILE` (host path, root-owned `0600`, outside the
-  checkout and `./data`) is mounted read-only at `/run/secrets/broker-kek`
+- Optional key broker KEK: `BROKER_KEK_HOST_FILE` (host path, owned by `ACB_UID`, mode `0600`
+  — `kek-file.ts` refuses any group/other bit, so a group-readable root file is no option —
+  in a root-only folder, outside the checkout and `./data`; generated with
+  `docker compose run --user 0:0 …` then `chown`, see `.env.example`) is mounted read-only at `/run/secrets/broker-kek`
   (`BROKER_KEK_FILE`); unset → `/dev/null` is mounted and the broker stays off
   (`key-broker.md`). Same in `docs/self-hosting/docker-compose.production.yml`.
   `BROKER_TOKEN_TTL_MINUTES` (15–60, default 30) sets the tokens' lifetime;
