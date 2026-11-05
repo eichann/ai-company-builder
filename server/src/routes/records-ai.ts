@@ -14,7 +14,7 @@
  *   POST /item/:recordId/actions/:action         (act)
  *   POST /item/:recordId/file-links (+ /remove)  (act) link a file later / remove it (types letting the AI act)
  *
- *   GET  /minutes/:recordId/text          the minutes as outside text (tool minutes_read; G7, minutes.md):
+ *   GET  /minutes/:recordId/text[?paged=1] the minutes as outside text (tool minutes_read; G7, minutes.md):
  *                                         the assignee or an attendee, read now from Google with
  *                                         the member's own permission; never stored or logged
  *   POST /minutes/:recordId/bundle        (act) { bundleId, expectedVersion? } — the assignee / an admin's AI
@@ -98,7 +98,8 @@ recordsAiRoute.post('/decisions', aiActs, serviceBody, async (c) => {
 recordsAiRoute.get('/minutes/:recordId/text', aiReads, async (c) => {
   const h = c.var.holder
   c.header('Cache-Control', 'no-store')
-  return answer(c, await minutes.text(h.member, c.req.param('recordId')))
+  // `paged=1`: an app that reads the minutes in parts (minutes.md "Long minutes"); an older app asks without it.
+  return answer(c, await minutes.text(h.member, c.req.param('recordId'), { paged: c.req.query('paged') === '1' }))
 })
 
 recordsAiRoute.post('/minutes/:recordId/bundle', aiActs, serviceBody, async (c) => {

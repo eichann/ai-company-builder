@@ -22,6 +22,8 @@ export function autoMinutesFirstMessage(base: string, version: number | null): s
       ? [`- 読み始めの印をつけたあとの会議の version は ${version} です。会議の操作（meeting__finish_reading など）の expectedVersion にはこれを使い、minutes_link_bundle でまとまりをつないだら、その答えの version を使ってください。`]
       : ['- 会議の操作（meeting__finish_reading など）の expectedVersion には、minutes_read の答えの version を使ってください。']),
     '- 「ほかの人が先に変えました」と断られたら、その答えの version でもう一度だけ試してください。',
+    '- 議事録が分かれて渡されたとき（答えの more が true）は、最後の part まで全部読んでから出力を作ってください。途中で読めなかったことにはしないでください。',
+    '- 議事録が長すぎて最後まで渡せなかったと答えにあるときは、読めたところまでで出力を作り、要約とお願いに「議事録が長すぎて、最後まで読めませんでした」と書いてください。',
     '- どのまとまり（案件など）の会議か決まらないときや私に聞きたいことがあるときは、作業を止めずに、最後に私へのお願いとしてまとめてください。',
     '- 最後に必ず meeting__finish_reading（読めなかったときは meeting__fail_reading）にしてください。',
   ].join('\n')

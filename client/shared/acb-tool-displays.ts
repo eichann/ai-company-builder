@@ -130,7 +130,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   }),
   [records('records_link_file')]: say('記録にファイルをつなぎました', '記録にファイルをつないでいます', '記録にファイルを {n} 件つなぎました', input => companyPath(input.path)),
   [records('records_unlink_file')]: say('記録からファイルを外しました', '記録からファイルを外しています', '記録からファイルを {n} 件外しました', input => companyPath(input.path)),
-  [records('minutes_read')]: say('議事録を読みました', '議事録を読んでいます', '議事録を {n} 件読みました'),
+  [records('minutes_read')]: say('議事録を読みました', '議事録を読んでいます', '議事録を {n} 回読みました'),
   [records('minutes_link_bundle')]: say('会議を案件などにつなぎました', '会議を案件などにつないでいます', '会議を {n} 件つなぎました'),
   [records('decisions_record')]: say('決めたことを残しました', '決めたことを残しています', '決めたことを {n} 件残しました', input => shortText(input.title)),
   [records('mail_recipients')]: say('宛先の候補を調べました', '宛先の候補を調べています', '宛先の候補を {n} 回調べました'),

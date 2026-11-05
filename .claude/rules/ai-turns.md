@@ -58,7 +58,7 @@ turns").
   and only the record tools the step declares (its `tools` in `client/shared/ai-turn-steps/<step>.ts`:
   minutes reading = `minutes_read`, `minutes_link_bundle`, the three `meeting__…_reading` actions,
   `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
-  `show` — no business plugin's operation: what a まとまり gets from the meeting is the plugin's
+  `show` (long minutes come in parts of one tool, `minutes.md` "Long minutes") — no business plugin's operation: what a まとまり gets from the meeting is the plugin's
   own step, `plugin-steps.md` "After a meeting is read"; anything else is filtered out and refused
   if called). There is deliberately **no `records_get`** (least privilege: the run
   reads only its meeting): the version it acts at comes from the first message, `minutes_read`'s

@@ -27,7 +27,10 @@ import { recordActionChoices } from '../shared/record-actions'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { OLD_CONNECTION_LABEL, RECORD_ACTION_AGENTS } from '../../shared/types/records'
 import { AGENT_IDS } from '../shared/agents/registry'
-import { MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER } from '../../shared/core/minutes'
+import { MINUTES_PART_CHARS, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, minutesParts } from '../../shared/core/minutes'
+import { minutesFirstMessage } from '../shared/minutes-app'
+import { autoMinutesFirstMessage } from '../shared/ai-turn-steps/minutes-reading'
+import { aiTurnStepAllowsRecordCall } from '../shared/ai-turn-steps/registry'
 
 const TYPES = coreTypeDefinitions()
 const TASK = TYPES.find(t => t.name === 'task')!
@@ -214,7 +217,7 @@ test('minutes_read hands the minutes over as outside text: the header above, the
     if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'read', expiresAt: 'x' })
     if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
-    if (url.endsWith('/api/records-ai/minutes/minutes-abcdef123456/text')) return json(200, minutesText)
+    if (url.includes('/api/records-ai/minutes/minutes-abcdef123456/text')) return json(200, minutesText)
     return json(200, { plugins: [] })
   }) as unknown as typeof globalThis.fetch
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
@@ -233,6 +236,142 @@ test('minutes_read hands the minutes over as outside text: the header above, the
   assert.ok(!after.includes('150万円'))
   assert.equal(JSON.parse(after.slice(after.indexOf('{'))).externalAttendees, 2)
   await tools!.close()
+})
+
+test('minutesParts: cut on line ends at most the part size; joined they are the text again; a long line alone is cut inside, never in a surrogate pair', () => {
+  const lines = Array.from({ length: 50 }, (_, i) => `${i}：${'あ'.repeat(30 + (i % 7))}`)
+  const text = lines.join('\n')
+  const parts = minutesParts(text, 200)
+  assert.ok(parts.length > 1)
+  assert.equal(parts.join(''), text)
+  for (const p of parts) assert.ok(p.length <= 200, String(p.length))
+  // Every part but the last ends a line: no line is split between two parts.
+  for (const p of parts.slice(0, -1)) assert.ok(p.endsWith('\n'))
+  // A part is as full as it can be: the next line would not have fitted.
+  for (let i = 0; i < parts.length - 1; i++) assert.ok(parts[i].length + parts[i + 1].split('\n')[0].length + 1 > 200)
+  // One line longer than a part (a transcript without line ends).
+  const long = `前\n${'😀'.repeat(150)}\n後`
+  const cut = minutesParts(long, 101)
+  assert.equal(cut.join(''), long)
+  for (const p of cut) {
+    assert.ok(p.length <= 101)
+    assert.ok(!/[\uD800-\uDBFF]$/.test(p) && !/^[\uDC00-\uDFFF]/.test(p), 'a surrogate pair split')
+  }
+  assert.deepEqual(minutesParts(''), [''])
+  assert.deepEqual(minutesParts('短い議事録\n'), ['短い議事録\n'])
+  // The part size keeps a tool result far below Claude Code's 25,000-token limit (about a token a character).
+  assert.ok(MINUTES_PART_CHARS <= 15_000)
+})
+
+test('minutes_read hands long minutes over in parts (owner report 2026-11-05): each part its own block, the details once, later parts from the same read, no part past the last', async () => {
+  const line = '佐藤：研修の進め方について、営業部と相談して来週までに決めます。'
+  const text = Array.from({ length: 1700 }, (_, i) => `${i + 1} ${line}`).join('\n') // about 60,000 characters, the 1on1's size
+  const minutesText = {
+    recordId: 'meeting-abcdef123456', version: 4, header: MINUTES_TEXT_HEADER, text, footer: MINUTES_TEXT_FOOTER,
+    truncated: false, docVersion: 'notes:7', meeting: { title: '1on1', at: '2026-11-05T05:00:00.000Z' },
+    attendees: [{ memberId: 'u-sato', displayName: '佐藤 健' }], externalAttendees: 0, bundle: null,
+    candidates: [{ id: 'deal-aaaaaa01', title: 'A' }, { id: 'deal-bbbbbb02', title: 'B' }], noBundle: false, instructionLike: [],
+  }
+  const urls: string[] = []
+  const fetch = (async (url: string) => {
+    const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+    if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+    if (url.includes('/api/records-ai/minutes/meeting-abcdef123456/text')) { urls.push(url); return json(200, minutesText) }
+    return json(200, { plugins: [] })
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  const access = await api.openTurn('co', { conversationId: 'c1', agent: 'claude-code', scope: 'act' })
+  const cards: unknown[] = []
+  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'c1', onBundleChoice: c => cards.push(c), newId: () => 'card-1' })
+  const spec = tools!.specs.find(s => s.name === 'minutes_read')!
+  // An older app's call (no part) is still valid input; the part is a whole number from 1.
+  assert.equal(spec.schema.safeParse({ id: 'meeting-abcdef123456' }).success, true)
+  assert.equal(spec.schema.safeParse({ id: 'meeting-abcdef123456', part: 0 }).success, false)
+  assert.match(spec.description, /more が true/)
+
+  const expected = minutesParts(text)
+  assert.ok(expected.length >= 5, String(expected.length))
+  const first = await tools!.execute('minutes_read', { id: 'meeting-abcdef123456' })
+  // This app asks the server for the longer text it can page (an older server ignores it).
+  assert.match(urls[0], /\/text\?paged=1$/)
+  const outs = [first]
+  for (let part = 2; part <= expected.length; part++) outs.push(await tools!.execute('minutes_read', { id: 'meeting-abcdef123456', part }))
+  // Google is read once for the whole reading; the card is offered once.
+  assert.equal(urls.length, 1)
+  assert.equal(cards.length, 1)
+  const inside: string[] = []
+  outs.forEach((out, i) => {
+    // Far below the CLI's tool-result limit, also with the header, footer and the meeting's details.
+    assert.ok(out.length < 16_000, `part ${i + 1}: ${out.length}`)
+    const start = out.indexOf(MINUTES_TEXT_HEADER)
+    const end = out.indexOf(MINUTES_TEXT_FOOTER)
+    assert.ok(start >= 0 && end > start, `part ${i + 1} is its own block`)
+    assert.equal(out.indexOf(MINUTES_TEXT_HEADER, start + 1), -1)
+    inside.push(out.slice(start + MINUTES_TEXT_HEADER.length + 1, end - 1))
+    const json = out.slice(out.lastIndexOf('{"recordId"'))
+    const tail = JSON.parse(json.slice(0, json.indexOf('\n') === -1 ? undefined : json.indexOf('\n')))
+    assert.equal(tail.part, i + 1)
+    assert.equal(tail.parts, expected.length)
+    assert.equal(tail.more, i + 1 < expected.length)
+    // The meeting's details (version, attendees…) come with the first part only.
+    assert.equal(tail.version, i === 0 ? 4 : undefined)
+  })
+  assert.match(first, new RegExp(`${expected.length} つに分けて`))
+  assert.match(outs[outs.length - 1], /これで最後です/)
+  // Every line handed on exactly once, in order, none cut.
+  assert.equal(inside.join('\n'), text)
+  // Past the last part: an error that names how many there are.
+  const past = JSON.parse(await tools!.execute('minutes_read', { id: 'meeting-abcdef123456', part: expected.length + 1 }))
+  assert.equal(past.parts, expected.length)
+  assert.match(past.error, /part は 1〜/)
+  await tools!.close()
+})
+
+test('minutes_read: short minutes are one part as before; cut minutes tell the AI to say so; a later part asked first reads the text itself', async () => {
+  const base = {
+    recordId: 'meeting-abcdef123456', version: 2, header: MINUTES_TEXT_HEADER, footer: MINUTES_TEXT_FOOTER, docVersion: 'notes:7',
+    meeting: { title: '定例', at: null }, attendees: [], externalAttendees: 0, bundle: null, candidates: [], noBundle: true, instructionLike: [],
+  }
+  let answer: Record<string, unknown> = { ...base, text: '会議メモ\n来週までに見積を出す。', truncated: false }
+  let calls = 0
+  const fetch = (async (url: string) => {
+    const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+    if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+    if (url.includes('/api/records-ai/minutes/meeting-abcdef123456/text')) { calls++; return json(200, answer) }
+    return json(200, { plugins: [] })
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c1', agent: 'claude-code', scope: 'act' }))!)
+  const short = await tools!.execute('minutes_read', { id: 'meeting-abcdef123456' })
+  assert.ok(short.startsWith(`${MINUTES_TEXT_HEADER}\n会議メモ`), 'no paging words for one part')
+  assert.deepEqual((({ part, parts, more }) => ({ part, parts, more }))(JSON.parse(short.slice(short.lastIndexOf('\n') + 1))), { part: 1, parts: 1, more: false })
+
+  answer = { ...base, text: `${'あ'.repeat(100)}\n`.repeat(300), truncated: true }
+  const tools2 = await createRecordTools((await api.openTurn('co', { conversationId: 'c2', agent: 'claude-code', scope: 'act' }))!)
+  // A later part asked first (a new turn): the text is read, then cut the same way.
+  const before = calls
+  const second = await tools2!.execute('minutes_read', { id: 'meeting-abcdef123456', part: 2 })
+  assert.equal(calls, before + 1)
+  assert.match(second, /2 つめ（全部で 3）/)
+  const last = await tools2!.execute('minutes_read', { id: 'meeting-abcdef123456', part: 3 })
+  assert.match(last, /最後まで読めませんでした/)
+  const first = await tools2!.execute('minutes_read', { id: 'meeting-abcdef123456', part: 1 })
+  assert.match(first, /最後まで読めませんでした/)
+  await tools!.close()
+  await tools2!.close()
+})
+
+test('the minutes-reading step tells the AI to read every part before deciding, and still allows minutes_read with a part', () => {
+  const base = minutesFirstMessage({ id: 'meeting-abcdef123456', title: '1on1', meetingAt: null })
+  assert.match(base, /more が true のあいだ part/)
+  const auto = autoMinutesFirstMessage(base, 3)
+  assert.match(auto, /最後の part まで全部読んでから/)
+  assert.match(auto, /最後まで読めませんでした/)
+  assert.ok(aiTurnStepAllowsRecordCall('minutes-reading', 'minutes_read', { id: 'meeting-abcdef123456', part: 2 }))
 })
 
 test('records_create: the consultation\'s department goes along as the server\'s default place; the answer tells the AI what to say', async () => {
