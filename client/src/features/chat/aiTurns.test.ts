@@ -6,6 +6,7 @@ import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../share
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
   FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, askedAgain, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
+  canResumeAiTurns, retitledConsultation, usagePause, usagePauseLifted,
 } from './aiTurns'
 import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
@@ -77,11 +78,11 @@ test('a record is tried at most twice a day (no endless retries of the same minu
 
 test('N failures in a row stop until the member resumes; a success in between resets the count', () => {
   const settings = { ...ON, stopAfterFailures: 2 }
-  let log = recordOutcome(freshLog(NOW), 'minutes-x1x1x1x1', 'failed', settings, 0)
-  log = recordOutcome(log, 'minutes-x2x2x2x2', 'done', settings, 0)
-  log = recordOutcome(log, 'minutes-x3x3x3x3', 'unfinished', settings, 0)
+  let log = recordOutcome(freshLog(NOW), 'minutes-x1x1x1x1', 'failed', settings, null)
+  log = recordOutcome(log, 'minutes-x2x2x2x2', 'done', settings, null)
+  log = recordOutcome(log, 'minutes-x3x3x3x3', 'unfinished', settings, null)
   assert.deepEqual(nextAiTurn(input({ settings, log })), { run: B })
-  log = recordOutcome(log, 'minutes-x4x4x4x4', 'failed', settings, 0)
+  log = recordOutcome(log, 'minutes-x4x4x4x4', 'failed', settings, null)
   assert.deepEqual(nextAiTurn(input({ settings, log })), { wait: 'stopped' })
   // A stop is kept across a reload and a new day; only the member's resume clears it.
   assert.equal(logForToday(JSON.parse(JSON.stringify(log)), NOW + 24 * 3600_000).stopped, true)
@@ -94,12 +95,48 @@ test("Claude's usage limit pauses (not a failure) until the window resets", () =
     windows: [{ id: 'five_hour', label: '5時間', usedPercent: 100, resetsAt }, { id: 'seven_day', label: '1週間', usedPercent: 60, resetsAt: NOW + 3 * 86_400_000 }] }
   const until = usagePauseUntil(snapshot, NOW)
   assert.equal(until, resetsAt)
-  const log = recordOutcome(freshLog(NOW), B.id, 'usage-limit', ON, until)
+  const log = recordOutcome(freshLog(NOW), B.id, 'usage-limit', ON, usagePause(snapshot, NOW))
+  assert.equal(log.pausedUntil, until)
   assert.equal(log.failuresInARow, 0)
   assert.equal(log.handed[B.id], undefined)
   assert.deepEqual(nextAiTurn(input({ log })), { wait: 'paused-usage' })
   assert.deepEqual(nextAiTurn(input({ log, now: resetsAt + 1 })), { run: B })
   assert.ok(usagePauseUntil(undefined, NOW) > NOW)
+})
+
+// Owner report 2026-11-05: signed in again with another Claude account, the pause and its notice stayed until 20:00.
+test("Claude's usage pause: the member can resume it, and it lifts when Claude says there is room again — never on an older snapshot", () => {
+  const rejected = { provider: 'claude-code' as const, status: 'rejected' as const, updatedAt: NOW,
+    windows: [{ id: 'five_hour', label: '5時間', usedPercent: 100, resetsAt: NOW + 3 * 3600_000 }] }
+  const paused = recordOutcome(freshLog(NOW), B.id, 'usage-limit', ON, usagePause(rejected, NOW))
+  // ［もう一度自動で進める］ is offered for the pause as for a stop, and pressing it runs again.
+  assert.equal(canResumeAiTurns('paused-usage'), true)
+  assert.equal(canResumeAiTurns('daily-limit'), false)
+  assert.deepEqual(nextAiTurn(input({ log: resumed(paused) })), { run: B })
+  // The snapshot that paused, or an older one (main's cache after a reload), keeps it.
+  assert.equal(usagePauseLifted(paused, rejected), paused)
+  assert.equal(usagePauseLifted(paused, { ...rejected, status: 'allowed', updatedAt: NOW - 1 }), paused)
+  assert.equal(usagePauseLifted(paused, { ...rejected, updatedAt: NOW + 60_000 }), paused)
+  // A newer one that is not rejected (another account's turn) lifts it; so does a change of AI or sign-in.
+  for (const lifted of [usagePauseLifted(paused, { ...rejected, status: 'allowed', updatedAt: NOW + 60_000 }), usagePauseLifted(paused, rejected, true)]) {
+    assert.equal(lifted.pausedUntil, null)
+    assert.deepEqual(nextAiTurn(input({ log: lifted })), { run: B })
+  }
+  // A pause kept across a reload keeps its time; one from an older build (no time) is lifted only by a change or the button.
+  assert.equal(logForToday(JSON.parse(JSON.stringify(paused)), NOW).pauseSeenAt, NOW)
+  const old = { ...paused, pauseSeenAt: null }
+  assert.equal(usagePauseLifted(old, { ...rejected, status: 'allowed', updatedAt: NOW + 60_000 }), old)
+})
+
+// Owner FB 2026-11-05: a Slack message without a subject kept 来た連絡「（件名なし）」の判断 after the AI named it.
+test('the hidden consultation follows the name the run gave its record, never over a name the member chose', () => {
+  const given = '来た連絡「（件名なし）」の判断'
+  const renamed = '来た連絡「見積書の送付のお願い」の判断'
+  assert.equal(retitledConsultation({ given, current: given, renamed }), renamed)
+  // The member renamed it: theirs. Not saved yet, or the record kept its title: nothing to do.
+  assert.equal(retitledConsultation({ given, current: '見積もりの件', renamed }), null)
+  assert.equal(retitledConsultation({ given, current: undefined, renamed }), null)
+  assert.equal(retitledConsultation({ given, current: given, renamed: given }), null)
 })
 
 test('settings from a server: unusable values fall back to the defaults, never to "unlimited"; unreadable means off', () => {
@@ -112,7 +149,7 @@ test('settings from a server: unusable values fall back to the defaults, never t
 
 test('a failed run is handed to the person at once with the reason, never left silently in 「AI の番」; 「もう一度」 gives it back', () => {
   let log = recordStarted(freshLog(NOW), B.id)
-  log = recordOutcome(log, B.id, 'failed', ON, 0)
+  log = recordOutcome(log, B.id, 'failed', ON, null)
   assert.deepEqual(nextAiTurn(input({ log })), { run: A })
   const [b] = aiTurnItems({ queue: [B], log, wait: 'busy', noticeText: null, running: null })
   assert.deepEqual(b, { recordId: B.id, state: 'failed', reason: FAILED_REASON, canRetry: true, canHand: false })
@@ -160,7 +197,7 @@ test('a record due soon goes to the person early instead of waiting for the AI',
 
 test('a meeting asked for again after the AI could not read it runs again; a hand-off is otherwise kept', () => {
   const at = (version: number) => [{ ...B, version }]
-  const failed = recordOutcome(recordStarted(recordStarted(freshLog(NOW), B.id), B.id), B.id, 'failed', ON, 0, 3)
+  const failed = recordOutcome(recordStarted(recordStarted(freshLog(NOW), B.id), B.id), B.id, 'failed', ON, null, 3)
   // The queue not read again since the run: still the failure.
   assert.deepEqual(askedAgain(failed, at(3)), [])
   // ［AI に読ませる］ moved it back at a newer version: the hand-off and today's attempts no longer hold it.
@@ -168,7 +205,7 @@ test('a meeting asked for again after the AI could not read it runs again; a han
   assert.deepEqual(nextAiTurn(input({ log: failed, queue: at(7) })), { wait: 'empty' })
   assert.equal(('run' in nextAiTurn(input({ log: retried(failed, B.id), queue: at(7) }))), true)
   // Stopped unfinished, handed by the member, due soon: the record never left, only 「もう一度」 brings it back.
-  assert.deepEqual(askedAgain(recordOutcome(freshLog(NOW), B.id, 'unfinished', ON, 0, 3), at(7)), [])
+  assert.deepEqual(askedAgain(recordOutcome(freshLog(NOW), B.id, 'unfinished', ON, null, 3), at(7)), [])
   assert.deepEqual(askedAgain(handedOver(freshLog(NOW), B.id, ''), at(7)), [])
 })
 
@@ -178,5 +215,5 @@ test('a hand-off an older build kept (no version, its old words) counts as asked
   assert.equal(log.handed[B.id].reason, FAILED_REASON)
   assert.deepEqual(askedAgain(log, [B]), [B.id])
   // A kept version survives the daily read of the log.
-  assert.equal(logForToday(recordOutcome(freshLog(NOW), B.id, 'failed', ON, 0, 3), NOW).handed[B.id].version, 3)
+  assert.equal(logForToday(recordOutcome(freshLog(NOW), B.id, 'failed', ON, null, 3), NOW).handed[B.id].version, 3)
 })
