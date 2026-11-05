@@ -29,6 +29,7 @@ import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, ALL_FAKE_SCOPES, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 import { withRecordText } from '../helpers/record-text'
+import { MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX } from '../../../shared/core/minutes'
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })
 
@@ -97,7 +98,7 @@ async function call(user: string | null, method: string, path: string, body?: un
   if (token) headers.Authorization = `Bearer ${token}`
   const res: Response = await app.request(`${PUBLIC}${path}`, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
   const text = await res.text()
-  if (!/\/minutes\/(item\/)?[^/]+\/text$/.test(path)) answers.push(text)
+  if (!/\/minutes\/(item\/)?[^/]+\/text(\?paged=1)?$/.test(path)) answers.push(text)
   let json: Json = null
   try { json = JSON.parse(text) } catch { /* a page */ }
   return { status: res.status, body: json, text }
@@ -360,6 +361,28 @@ describe('the text', () => {
     // The meeting's version now: an unattended run (no records_get) finishes with it.
     const record = await call('mn-sato', 'GET', `${C()}/records/item/${followUp.id}`)
     expect(ai.body.data.version).toBe(record.body.data.record.version)
+  })
+
+  it('long minutes (owner report 2026-11-05): an app that reads in parts (?paged=1) gets up to the longer bound, an older app the old one', async () => {
+    const followUp = minutesRows().find(r => r.title.includes('2回目'))
+    const doc = GOOGLE_SEED.followUpTranscriptDoc
+    const before = google.doc(doc)!.text
+    const line = '佐藤：来期の研修の進め方について、営業部と相談して決めます。'
+    google.changeDoc(doc, `${line}\n`.repeat(Math.ceil(80_000 / (line.length + 1))))
+    try {
+      const token = await tokenFor('mn-sato')
+      const older = await call(null, 'GET', `/api/records-ai/minutes/${followUp.id}/text`, undefined, token)
+      expect(older.status, older.text).toBe(200)
+      expect(older.body.data.text.length).toBeLessThanOrEqual(MINUTES_TEXT_MAX)
+      expect(older.body.data.truncated).toBe(true)
+      const paged = await call(null, 'GET', `/api/records-ai/minutes/${followUp.id}/text?paged=1`, undefined, token)
+      expect(paged.status, paged.text).toBe(200)
+      expect(paged.body.data.text.length).toBeGreaterThan(80_000)
+      expect(paged.body.data.text.length).toBeLessThanOrEqual(MINUTES_TEXT_PAGED_MAX)
+      expect(paged.body.data.truncated).toBe(false)
+    } finally {
+      google.changeDoc(doc, before)
+    }
   })
 
   it('refuses a member who is neither assignee nor attendee, and another company\'s record is the same 404 as a missing one', async () => {
