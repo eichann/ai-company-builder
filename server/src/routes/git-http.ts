@@ -4,7 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { type AuthUser } from '../lib/auth'
 import { clientIdentityFromHeaders, receivePackSucceeded } from '../lib/client-activity'
-import { skillFileRuleApplies } from '../lib/client-version'
+import { agentConfigRuleApplies, skillFileRuleApplies } from '../lib/client-version'
 import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
@@ -456,6 +456,8 @@ function pushCheckFor(companyId: string, userId: string, clientVersion: string |
       // Skill files: also for the people on 「Skill を直せる人」.
       skillEditing: services.permissionViews.skillEditing(companyId, userId),
       appPredatesSkillRule: !skillFileRuleApplies(clientVersion),
+      // The rest of .claude/ and .agents/ (default-deny): not for an app that would loop on it.
+      appPredatesAgentConfigRule: !agentConfigRuleApplies(clientVersion),
     })
   } catch (err) {
     logError('git-http', 'cannot build the push permission snapshot', err)

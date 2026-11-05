@@ -1,7 +1,8 @@
 /**
- * Skill files — everything under `.claude/skills/`, `.claude/agents/` and
- * `.claude/commands/` at any depth (A–Z case-insensitive; a file or link at
- * one of those paths counts too), every file type. Sync gives these files to
+ * Skill files — everything under `.claude/skills/`, `.claude/agents/`,
+ * `.claude/commands/` and Codex's `.agents/skills/` at any depth (A–Z
+ * case-insensitive; a file or link at one of those paths counts too), every
+ * file type. Sync gives these files to
  * every member, and a skill's script then runs on that member's computer,
  * under their account and tokens, so whoever changes one runs code as a
  * teammate.
@@ -15,7 +16,7 @@
  * else may edit the file: that is the push check's separate rule.
  *
  * The push checker matches git's raw bytes (read as latin1) with a regex built
- * from SKILL_FOLDER_NAMES (server/src/lib/push-check/rules.ts), and non-ASCII
+ * from SKILL_FOLDERS (server/src/lib/push-check/rules.ts), and non-ASCII
  * paths also through lookalikeKey, as isSkillFile does: `.claude/ſkills/x` lands
  * in `.claude/skills/` on a Mac.
  *
@@ -25,10 +26,17 @@ import { instructionFileInManagedFolder } from './instruction-files'
 import { FULL_ACCESS_ROLES } from './permissions'
 import { lookalikeKey } from './paths'
 
-/** The folders of `.claude/` that hold skills, subagents and slash commands. */
-export const SKILL_FOLDER_NAMES: readonly string[] = ['skills', 'agents', 'commands']
+/**
+ * The folders that hold skills, subagents and slash commands: Claude Code's
+ * three in `.claude/`, and Codex's skills (`.agents/skills/`, read from every
+ * folder between the working directory and the repository root).
+ */
+export const SKILL_FOLDERS: readonly string[] = ['.claude/skills', '.claude/agents', '.claude/commands', '.agents/skills']
 
-const SKILL_PATH_RE = new RegExp(`(^|/)\\.claude/(${SKILL_FOLDER_NAMES.join('|')})(/|$)`)
+/** Regex source matching a path at or inside one of SKILL_FOLDERS (the push checker builds its bytewise twin from it). */
+export const SKILL_FOLDER_PATTERN = `(^|/)(${SKILL_FOLDERS.map(f => f.replace(/\./g, '\\.')).join('|')})(/|$)`
+
+const SKILL_PATH_RE = new RegExp(SKILL_FOLDER_PATTERN)
 
 /** One member's place on 「Skill を直せる人」. */
 export interface SkillEditing {

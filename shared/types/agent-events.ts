@@ -69,6 +69,9 @@ export const GUARD_REASONS = [
   'type-definition', 'record-file',
   // A skill / agent / command file the member may not change (shared/core/skill-files.ts).
   'skill-file',
+  // Agent config only owners/admins may change: .mcp.json, .codex/, and the rest of .claude/ /
+  // .agents/ (shared/core/agent-config.ts).
+  'agent-config',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 

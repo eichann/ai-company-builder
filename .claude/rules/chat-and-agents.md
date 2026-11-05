@@ -156,9 +156,15 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   project's `.codex/` (`project_root_markers` only changes root detection), so the app leaves it
   loading; shared config is legitimate when an owner/admin writes it.
 - The enforcement is the push checker: these paths are `[PROTECTED_CONFIG]` (owner/admin only,
-  `push-check.md`). The chat write guard does not refuse AI edits to them (only instruction
-  files and skill files); a member's AI edit is caught at sync by the protected-config dialog. `AGENTS.md` /
-  `AGENTS.override.md` are instruction files (`chat-write-guard.md`).
+  `push-check.md`), and since 2026-11-05 so is everything else in `.claude/` and `.agents/`
+  (default-deny) except skill files (incl. Codex's `.agents/skills/`) and instruction files (incl.
+  `.claude/rules/*.md`). What the CLIs load from the company folder, as checked for that rule:
+  Claude Code — `.mcp.json`, `.claude/settings*.json` (hooks, statusLine, apiKeyHelper, env,
+  plugins / marketplaces), `.claude/hooks/`, `skills|agents|commands/`, `rules/`,
+  `output-styles/`, `agent-memory/`, CLAUDE.md files; Codex — `.codex/`, AGENTS(.override).md,
+  `.agents/skills/`, `.agents/plugins/marketplace.json`. The chat write guard refuses a member's
+  AI edit to any of them before it runs (`chat-write-guard.md`, guard reason `agent-config`);
+  sync's protected-config dialog stays the safety net.
 
 ## Claude Code agent stack
 

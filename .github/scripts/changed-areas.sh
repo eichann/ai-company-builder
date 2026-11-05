@@ -45,7 +45,7 @@ SYNC=(
   server/src/lib/push-check/ server/src/lib/git-exec.ts server/src/lib/git-server/
   server/src/lib/error-log.ts server/src/lib/request-log.ts
   server/src/templates/ server/package.json server/tsconfig.json
-  shared/core/instruction-files.ts shared/core/paths.ts shared/core/permissions.ts
+  shared/core/agent-config.ts shared/core/instruction-files.ts shared/core/paths.ts shared/core/permissions.ts
   shared/core/record-types.ts shared/core/records.ts shared/core/reserved-paths.ts shared/core/skill-files.ts
   shared/core/write-access.ts shared/core/yaml-lite.ts
   shared/types/private-folders.ts shared/package.json shared/tsconfig.json

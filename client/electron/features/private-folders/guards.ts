@@ -11,8 +11,10 @@ import type { PrivateFoldersApi } from '../../private-folders-api'
 import type { PathChecker } from '../../sync/path-check'
 import { companyFileOf, companyPathOf, readPrivateScopesCache, readableScopeOf } from '../../sync/private-folders'
 import { readLocalPrivateSkills } from '../../sync/local-ignores'
-import { inPrivateSkill, isUnsharedPath, skillFileMessage, type InstructionAuthority } from '../../write-guard'
+import { agentConfigMessage, inPrivateSkill, isUnsharedPath, skillFileMessage, type InstructionAuthority } from '../../write-guard'
 import { isSkillFile, mayChangeSkillFile } from '../../../../shared/core/skill-files'
+import { isAgentConfig } from '../../../../shared/core/agent-config'
+import { FULL_ACCESS_ROLES } from '../../../../shared/core/permissions'
 
 export interface PrivateFolderGuardsDeps {
   api: PrivateFoldersApi
@@ -41,7 +43,13 @@ export interface PrivateFolderGuards {
    * A skill kept on this computer is theirs, unless it is about to be shared (`sharing`).
    */
   skillRefusal(absPath: string, options?: { sharing?: boolean }): Promise<string | null>
-  /** What the app's own file operations ask: the skill rule, then the reserved names. */
+  /**
+   * The sentence when the member may not change the agent config at `absPath`
+   * (owner/admin only, shared/core/agent-config.ts); else null, also while
+   * their authority is unknown (the push check decides).
+   */
+  agentConfigRefusal(absPath: string): Promise<string | null>
+  /** What the app's own file operations ask: the skill rule, the agent config rule, then the reserved names. */
   writeRefusal(absPath: string): Promise<string | null>
 }
 
@@ -107,6 +115,17 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
     return skillFileMessage(where.rel)
   }
 
+  async function agentConfigRefusal(absPath: string): Promise<string | null> {
+    const where = companyFileOf(absPath)
+    if (!where || !isAgentConfig(where.rel) || isUnsharedPath(where.rel)) return null
+    const pending = refreshAuthority(where.companyId, 3000)
+    if (!instructionAuthority.has(where.companyId)) await pending
+    const authority = instructionAuthority.get(where.companyId)
+    if (!authority || FULL_ACCESS_ROLES.has(authority.role)) return null
+    console.warn('[fs] Refused a change to agent config')
+    return agentConfigMessage(where.rel)
+  }
+
   return {
     refreshReadable(companyId, timeoutMs) {
       let pending = privateFolderRefreshes.get(companyId)
@@ -149,6 +168,7 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
      */
     reservedRefusal,
     skillRefusal,
-    writeRefusal: async absPath => await skillRefusal(absPath) ?? await reservedRefusal(absPath),
+    agentConfigRefusal,
+    writeRefusal: async absPath => await skillRefusal(absPath) ?? await agentConfigRefusal(absPath) ?? await reservedRefusal(absPath),
   }
 }

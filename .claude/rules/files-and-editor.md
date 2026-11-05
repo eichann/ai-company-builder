@@ -178,7 +178,10 @@ in a sentence before anything is written: `guards.skillRefusal` behind `fs:write
 ask). `skills:publish` asks with `sharing: true`: 公開する is where a private skill would reach the
 server. A skill kept on this computer is otherwise the member's to write, and an empty folder is
 never refused. 「他からコピー」 by someone who may not share keeps the copy on this computer
-(`useSkillActions`): the way to change and try a shared skill before asking for it to be shared. Unknown authority allows. Tests: `client/tests/skill-file-refusal.test.ts`,
+(`useSkillActions`): the way to change and try a shared skill before asking for it to be shared.
+The same handlers (through `writeRefusal`) also refuse agent config for anyone but owner/admin
+(`guards.agentConfigRefusal`, `isAgentConfig`: `.mcp.json`, `.codex/`, and the rest of `.claude/`
+/ `.agents/` beyond skill and instruction files). Unknown authority allows. Tests: `client/tests/skill-file-refusal.test.ts`,
 `client/tests/ipc-fs.test.ts` 「fs and skills handlers…」.
 
 New skill and copy never replace a skill folder that exists (checked first, then main's
