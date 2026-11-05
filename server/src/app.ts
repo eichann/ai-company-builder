@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { auth, authDb } from './lib/auth'
+import { serverAuthSettings } from './lib/auth-settings'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
@@ -71,13 +72,10 @@ export const app = new Hono()
 // (X-Request-Id), company and user ids — never the URL, its query or a path
 // a member sent (lib/request-log.ts).
 app.use('*', requestLog())
+// The same origins sign-in trusts (lib/auth-settings.ts): PUBLIC_URL and the desktop app, plus
+// the dev servers outside production.
 app.use('*', cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3100',
-    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
-    'app://',
-  ],
+  origin: serverAuthSettings().trustedOrigins,
   credentials: true,
 }))
 

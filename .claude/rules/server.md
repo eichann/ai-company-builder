@@ -324,6 +324,24 @@ were removed in R1 (the `ssh_keys` table is still created by `db/schema/company.
 The admin console's calls are pinned by `server/tests/integration/admin-contract.test.ts`
 (`shared-core.md`).
 
+## Sign-in (Better Auth, `lib/auth.ts` + `lib/auth-settings.ts`)
+
+- **Base URL = `PUBLIC_URL`'s origin**, never a request's Host header. Production
+  (`NODE_ENV=production`) refuses to start without a valid http(s) `PUBLIC_URL`, like a missing
+  `AUTH_SECRET`; outside production it may be unset (then taken from each request, as before).
+- **Trusted origins** (Better Auth and the API's CORS, one list): `PUBLIC_URL` and `app://`
+  (what every released desktop app sends on sign-in / sign-up / sign-out, from the main
+  process); the dev servers (`localhost:5173`, `localhost:3100`) and the compose names
+  (`api:3001`, `admin:3100`) only outside production. The admin console reaches the API on
+  `PUBLIC_URL` (Caddy: `/api/*` → api); its own `/api/*` proxy passes the browser's Origin through.
+  A new origin needs a reason a released app or the admin actually sends it.
+- The origin check is stated on (`disableOriginCheck: false`), so it also runs under
+  `NODE_ENV=test`. Sign-in attempts are rate-limited in production per client address
+  (`X-Forwarded-For`, set by Caddy; memory storage): `SIGN_IN_RATE_LIMIT`, 10 a minute.
+  Cookies in production: `__Secure-`, Secure, HttpOnly, SameSite=Lax.
+- `tests/security/auth-origins.test.ts` (the production list, the start refusal, a dev origin
+  refused by the real instance, the base URL, the per-address limit).
+
 ## Accounts and roles
 
 - Only owners grant owner/admin: `PUT /companies/:companyId/members/:userId/role`,

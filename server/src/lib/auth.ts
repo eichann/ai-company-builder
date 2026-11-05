@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import { AUTH_DB_PATH, DATA_DIR } from './config'
+import { serverAuthSettings, SIGN_IN_RATE_LIMIT } from './auth-settings'
 import { noteRequestUser } from './request-log'
 
 // Ensure data directory exists
@@ -16,8 +17,13 @@ export const authDb = new Database(AUTH_DB_PATH)
 authDb.pragma('journal_mode = WAL')
 authDb.pragma('busy_timeout = 5000')
 
+// Base URL, trusted origins (lib/auth-settings.ts; server.md "Sign-in (Better Auth)").
+const AUTH_SETTINGS = serverAuthSettings()
+
 export const auth = betterAuth({
   database: authDb,
+  // PUBLIC_URL (required in production): never derived from a request's Host header.
+  baseURL: AUTH_SETTINGS.baseURL,
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
@@ -39,16 +45,22 @@ export const auth = betterAuth({
     }
     return secret
   })(),
-  trustedOrigins: [
-    'http://localhost:5173',
-    'http://localhost:3100',
-    ...(process.env.PUBLIC_URL ? [process.env.PUBLIC_URL] : []),
-    'http://api:3001',
-    'http://admin:3100',
-    'app://',
-  ],
+  trustedOrigins: AUTH_SETTINGS.trustedOrigins,
+  // Stated rather than left to Better Auth's defaults: on in production (per client address
+  // from X-Forwarded-For, which Caddy sets), in memory (one server process).
+  rateLimit: {
+    enabled: AUTH_SETTINGS.production,
+    storage: 'memory',
+    customRules: { '/sign-in/*': { ...SIGN_IN_RATE_LIMIT } },
+  },
   advanced: {
-    useSecureCookies: process.env.NODE_ENV === 'production',
+    // Production: the __Secure- cookie with Secure; always HttpOnly and SameSite=Lax (Better
+    // Auth's defaults). The desktop app reads the token with or without the prefix
+    // (client/electron/services/session.ts).
+    useSecureCookies: AUTH_SETTINGS.production,
+    // The origin check is on everywhere, also under NODE_ENV=test (Better Auth skips it there by
+    // default), so tests/security/auth-origins.test.ts runs the check production runs.
+    disableOriginCheck: false,
   },
 })
 
