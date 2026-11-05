@@ -14,6 +14,7 @@ import { pluginTurnCandidate, type QueuedPluginStep } from './plugin'
 import { taskWaitOver } from './task-wait-over'
 // lane C ▲
 import { claimStates, type AiTurnCandidate, type AiTurnStepDefinition } from './types'
+import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
 
 const STEPS = [
   minutesReading,
@@ -61,7 +62,20 @@ export function checkAiTurnSteps(steps: readonly AiTurnStepDefinition[]): string
   return null
 }
 
-const problem = checkAiTurnSteps(STEPS)
+/**
+ * Every built-in step is in the server's table of what it may create (`CORE_STEP_CREATE_TYPES`),
+ * and lists `records_create` exactly when it may create something: the app and the server agree.
+ */
+export function checkCreateTypes(steps: readonly AiTurnStepDefinition[]): string | null {
+  for (const s of steps) {
+    const types = coreStepCreateTypes(s.step)
+    if (types === undefined) return `${s.step}: not in CORE_STEP_CREATE_TYPES`
+    if (s.tools.recordTools.includes('records_create') !== types.length > 0) return `${s.step}: records_create and CORE_STEP_CREATE_TYPES disagree`
+  }
+  return null
+}
+
+const problem = checkAiTurnSteps(STEPS) ?? checkCreateTypes(STEPS)
 if (problem) throw new Error(`ai-turn-steps: ${problem}`)
 
 /** The steps by name. */
@@ -93,6 +107,24 @@ export function aiTurnStepForRecord(recordId: string, state?: string | null): St
 export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): boolean {
   const tools = aiTurnStepDefinition(step).tools
   return tools.recordTools.includes(name) || tools.recordToolEndings.some(ending => name.endsWith(ending) && name.length > ending.length)
+}
+
+/**
+ * Whether the step may make this call: its tool (`aiTurnStepAllowsRecordTool`) and, for
+ * `records_create`, only a type the step may create (`CORE_STEP_CREATE_TYPES`; the server checks
+ * the same for the run's token). Text from outside starts these runs: a step makes only what its
+ * job needs.
+ */
+export function aiTurnStepAllowsRecordCall(step: AiTurnStep, name: string, input: unknown): boolean {
+  if (!aiTurnStepAllowsRecordTool(step, name)) return false
+  if (name !== 'records_create') return true
+  const type = typeof input === 'object' && input !== null ? (input as { type?: unknown }).type : undefined
+  return typeof type === 'string' && (coreStepCreateTypes(step) ?? []).includes(type)
+}
+
+/** The record types the step may create ([] = none). */
+export function aiTurnStepCreateTypes(step: AiTurnStep): readonly string[] {
+  return coreStepCreateTypes(step) ?? []
 }
 
 /**

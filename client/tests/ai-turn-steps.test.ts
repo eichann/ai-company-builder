@@ -278,8 +278,10 @@ test('task_wait_read answers in full only for a task the clock put in 準備中;
   const overByClock = [entry('create', null, 'todo'), entry('wait', 'todo', 'waiting'), entry('wait_over', 'waiting', 'preparing', 'acb:clock'), entry('set_tags', null, null)]
   const view = taskWaitView(detail, overByClock)
   assert.equal(view.purpose, 'follow_up')
-  assert.deepEqual('interaction' in view && view.interaction, { id: 'interaction-bbbbbbbb', type: 'interaction', title: '見積のお願い', state: 'handled' })
-  assert.equal('waitingOn' in view && view.waitingOn, '先方の見積')
+  // Titles and what it waits on may be outside text (a subject): { outside } (outside-text.ts); ids, states, dates plain.
+  assert.deepEqual('interaction' in view && view.interaction, { id: 'interaction-bbbbbbbb', type: 'interaction', title: { outside: '見積のお願い' }, state: 'handled' })
+  assert.deepEqual('waitingOn' in view && view.waitingOn, { outside: '先方の見積' })
+  assert.equal('waitUntil' in view && view.waitUntil, '2026-11-04')
   // Created in 準備中 by a consultation, or moved since: no details.
   for (const ledger of [[entry('create', null, 'preparing')], [...overByClock, entry('take_over', 'preparing', 'todo'), entry('wait', 'todo', 'waiting'), entry('wait_over', 'waiting', 'preparing', 'u-bob')]]) {
     assert.deepEqual(taskWaitView(detail, ledger), { id: 'task-aaaaaaaa', state: 'preparing', version: 4, purpose: 'none' })
