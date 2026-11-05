@@ -113,6 +113,13 @@ test('an automatic failure is shown once per kind until a sync succeeds; a manua
   assert.equal(afterSync(st, failure, { manual: false }).showFailure, true, 'shown again after it was resolved')
 })
 
+test('a successful sync ends the wait for an open file (the tooltip no longer says it waits)', () => {
+  const held = state({ openFilesHeld: '営業部/見積.xlsx' })
+  const after = afterSync(held, { success: true }, { manual: true }).state
+  assert.equal(after.openFilesHeld, null)
+  assert.doesNotMatch(syncButtonTitle(after, settings()), /受け取りを待っています/)
+})
+
 test('the member cancelling a manual sync means "not now": automatic sync resumes at its next run (owner, 2026-10-30)', () => {
   const open = at(30, 9)
   const s = settings()
