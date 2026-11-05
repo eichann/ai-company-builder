@@ -19,6 +19,11 @@ export interface AiTurnLog {
   stopped: boolean
   /** Claude's usage limit: nothing starts before this time (epoch ms). */
   pausedUntil: number | null
+  /**
+   * When Claude said so (the rate-limit snapshot's `updatedAt`): only a snapshot newer than this
+   * may lift the pause early (`usagePauseLifted`). null: no such time (a log from an older build).
+   */
+  pauseSeenAt: number | null
   /** Records given to the person (not run again until 「もう一度」), with why. Kept across days. */
   handed: Record<string, HandOff>
 }
@@ -69,7 +74,7 @@ export function localDay(now: number): string {
 }
 
 export function freshLog(now: number): AiTurnLog {
-  return { day: localDay(now), runs: 0, attempts: {}, failuresInARow: 0, stopped: false, pausedUntil: null, handed: {} }
+  return { day: localDay(now), runs: 0, attempts: {}, failuresInARow: 0, stopped: false, pausedUntil: null, pauseSeenAt: null, handed: {} }
 }
 
 /** The stored log for today (another day: counts start again; a stop and a pause carry over). */
@@ -78,6 +83,7 @@ export function logForToday(stored: unknown, now: number): AiTurnLog {
   const base = freshLog(now)
   const stopped = s.stopped === true
   const pausedUntil = typeof s.pausedUntil === 'number' && s.pausedUntil > now ? s.pausedUntil : null
+  const pauseSeenAt = pausedUntil !== null && typeof s.pauseSeenAt === 'number' ? s.pauseSeenAt : null
   const failuresInARow = typeof s.failuresInARow === 'number' && s.failuresInARow >= 0 ? s.failuresInARow : 0
   const handed: Record<string, HandOff> = {}
   for (const [id, h] of Object.entries(s.handed && typeof s.handed === 'object' ? s.handed : {})) {
@@ -86,10 +92,10 @@ export function logForToday(stored: unknown, now: number): AiTurnLog {
       handed[id] = { kind: x.kind, reason: x.reason === OLD_FAILED_REASON ? FAILED_REASON : x.reason.slice(0, 300), ...(typeof x.version === 'number' ? { version: x.version } : {}) }
     }
   }
-  if (s.day !== base.day) return { ...base, stopped, pausedUntil, failuresInARow, handed }
+  if (s.day !== base.day) return { ...base, stopped, pausedUntil, pauseSeenAt, failuresInARow, handed }
   const attempts: Record<string, number> = {}
   for (const [id, n] of Object.entries(s.attempts && typeof s.attempts === 'object' ? s.attempts : {})) if (typeof n === 'number') attempts[id] = n
-  return { ...base, runs: typeof s.runs === 'number' && s.runs >= 0 ? s.runs : 0, attempts, stopped, pausedUntil, failuresInARow, handed }
+  return { ...base, runs: typeof s.runs === 'number' && s.runs >= 0 ? s.runs : 0, attempts, stopped, pausedUntil, pauseSeenAt, failuresInARow, handed }
 }
 
 const time = (iso: string | null | undefined): number => {
@@ -138,9 +144,9 @@ export const UNFINISHED_REASON = 'AI が最後まで終えられませんでし�
  * person at once with the reason (never left silently in 「AI の番」) and N in a row stop the
  * runner; Claude's limit pauses (not a failure, the record waits).
  */
-export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pauseUntil: number, version?: number): AiTurnLog {
+export function recordOutcome(log: AiTurnLog, recordId: string, outcome: AiTurnOutcome, settings: AutoTurnSettings, pause: UsagePause | null, version?: number): AiTurnLog {
   if (outcome === 'done') return { ...log, failuresInARow: 0 }
-  if (outcome === 'usage-limit') return { ...log, pausedUntil: pauseUntil }
+  if (outcome === 'usage-limit') return pause ? { ...log, pausedUntil: pause.until, pauseSeenAt: pause.seenAt } : log
   const failuresInARow = log.failuresInARow + 1
   const reason = outcome === 'failed' ? FAILED_REASON : UNFINISHED_REASON
   return {
@@ -166,7 +172,12 @@ export function askedAgain(log: AiTurnLog, queue: readonly AiTurnCandidate[]): s
 
 /** The member pressed 「もう一度自動で進める」. */
 export function resumed(log: AiTurnLog): AiTurnLog {
-  return { ...log, stopped: false, failuresInARow: 0, pausedUntil: null }
+  return { ...log, stopped: false, failuresInARow: 0, pausedUntil: null, pauseSeenAt: null }
+}
+
+/** 「もう一度自動で進める」 is offered for a stop after failures and for Claude's usage pause (another account may have room). */
+export function canResumeAiTurns(wait: AiTurnWait | null): boolean {
+  return wait === 'stopped' || wait === 'paused-usage'
 }
 
 /** 「もう一度」 on one record: back to the AI (its hand-off and today's attempts cleared, a stop or pause lifted). */
@@ -241,6 +252,39 @@ export function aiTurnItems(input: {
 /** Claude's usage limit is reached (the account's snapshot says rejected). */
 export function usageLimitReached(snapshot: RateLimitSnapshot | undefined): boolean {
   return snapshot?.status === 'rejected'
+}
+
+/** Claude's usage pause: until when, and the time of the snapshot that said so. */
+export interface UsagePause { until: number; seenAt: number }
+
+/** The pause a rejecting snapshot asks for (`usagePauseUntil`), remembered with the snapshot's time. */
+export function usagePause(snapshot: RateLimitSnapshot | undefined, now: number): UsagePause {
+  return { until: usagePauseUntil(snapshot, now), seenAt: snapshot?.updatedAt ?? now }
+}
+
+/**
+ * Lift Claude's usage pause before its reset time when the chosen AI or its sign-in changed on this
+ * PC (`agentChanged`: perhaps another account), or when a rate-limit snapshot **newer than the one
+ * that paused** says Claude takes requests again (another account, an earlier reset, a plan change:
+ * seen in a normal consultation's turn). A snapshot from before the pause (the main process's
+ * cache, a fetch after a reload) never lifts it, nor does one when the pause has no time (a log
+ * from an older build). If the next run hits the limit again, it simply pauses again.
+ */
+export function usagePauseLifted(log: AiTurnLog, snapshot: RateLimitSnapshot | undefined, agentChanged = false): AiTurnLog {
+  if (log.pausedUntil === null) return log
+  const newerRoom = !!snapshot && log.pauseSeenAt !== null && snapshot.updatedAt > log.pauseSeenAt && !usageLimitReached(snapshot)
+  return agentChanged || newerRoom ? { ...log, pausedUntil: null, pauseSeenAt: null } : log
+}
+
+/**
+ * The hidden consultation's name after a run, when the run renamed its record (a message without a
+ * subject gets the AI's title, inbox.md): `renamed` is the step's title made from the record's
+ * title now. Only while the consultation still has the name the runner gave it (`given`): a name
+ * the member edited is theirs and is never overwritten. null: nothing to rename.
+ */
+export function retitledConsultation(input: { given: string; current: string | null | undefined; renamed: string }): string | null {
+  const { given, current, renamed } = input
+  return current === given && renamed.trim() !== '' && renamed !== given ? renamed : null
 }
 
 /** Until when to pause: the latest reset of a full window, else the earliest future reset, else an hour. */

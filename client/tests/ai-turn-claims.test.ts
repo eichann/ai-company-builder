@@ -15,7 +15,7 @@ const INTERACTION = 'interaction-0a1b2c3d4e5f6071'
 const REPLY_REQUEST = 'reply_request-0a1b2c3d4e5f6071'
 const TASK = 'task-0a1b2c3d4e5f6071'
 
-function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES, ownAutoRun?: boolean | 'broken') {
+function fakeServer(initial: { state: string; version: number; title?: string } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES, ownAutoRun?: boolean | 'broken') {
   const record = { ...initial }
   const calls: string[] = []
   const tokens: Array<{ conversationId: string; agent: string; scope: string; run?: { id: string; generation: number } }> = []
@@ -268,6 +268,16 @@ test('a kind without a start mark (an incoming message in 届いた): the server
   assert.equal((await pc.claim(COMPANY, INTERACTION, 2, 'conversation-cccc')).claimed, true)
   again.record.state = 'handled'
   assert.deepEqual(await pc.settle(COMPANY, INTERACTION), { outcome: 'done' })
+})
+
+// Owner FB 2026-11-05: the run names a message that came without a subject; the runner renames its consultation from this.
+test('settle answers the record\'s title as read after the run (the AI may have named it)', async () => {
+  const server = fakeServer({ state: 'received', version: 2, title: '（件名なし）' }, undefined, INTERACTION)
+  const pc = claimsFor(server)
+  assert.equal((await pc.claim(COMPANY, INTERACTION, 2, 'conversation-aaaa')).claimed, true)
+  server.record.state = 'handled'
+  server.record.title = '見積書の送付のお願い'
+  assert.deepEqual(await pc.settle(COMPANY, INTERACTION), { outcome: 'done', title: '見積書の送付のお願い' })
 })
 
 test('a 返事のお願い is claimed from 準備中 or 確かめ中 (no start mark); finished elsewhere, nothing is claimed', async () => {

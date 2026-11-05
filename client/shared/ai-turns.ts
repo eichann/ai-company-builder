@@ -61,8 +61,10 @@ export type AiTurnClaimResult =
  * The record after an automatic turn (`aiTurns:settle`): `done` = the AI
  * finished it, `failed` = it said it could not, `put-back` = it was still in
  * progress and went back to 「AI の番」 (`retry`), `unknown` = not readable now.
+ * `title`: the record's title as main last read it (the run may have named it: a message without a
+ * subject, inbox.md); the runner renames the hidden consultation to follow it (ai-turns.md).
  */
-export type AiTurnSettleResult = { outcome: 'done' | 'failed' | 'put-back' | 'unknown' }
+export type AiTurnSettleResult = { outcome: 'done' | 'failed' | 'put-back' | 'unknown'; title?: string }
 
 /**
  * Where one record of 「AI の番」 stands on this PC, for every screen that lists it (the minutes
