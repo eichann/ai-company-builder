@@ -8,6 +8,12 @@
  *   logged; the one Google client records only the operation name and status.
  * - send (`mail` feature, `gmail.send`): a message the member confirmed
  *   (`services/outbound-mail.ts`), once, never retried.
+ * - inbox state (`inbox` feature, `gmail.readonly`): which conversations left the member's
+ *   inbox, from Gmail's history (labels only), for the inbox's 「Gmail ではアーカイブ済み」.
+ * - archive (`inbox_archive` feature, `gmail.modify`, owner decision 2026-11-05): the INBOX label of
+ *   the messages ACB took in taken off, one message at a time (never the whole conversation: a reply
+ *   not read yet stays), or put back for ［元に戻す］ — the only call made with that permission (the
+ *   Google client refuses any other: `gmailCallAllowed`).
  *
  * Every call goes through the one Google client (`google-client.ts`), so every
  * switch — the operator's stop, the company's Google off, the vault, the
@@ -15,11 +21,11 @@
  * (`features_off`) — applies from the next call. Only `users/me` is ever
  * asked for: nothing here can name another mailbox.
  */
-import { googleFeaturesOff, GOOGLE_SCOPE } from '../../shared/core/google'
+import { GMAIL_ARCHIVE_BODY, GMAIL_UNARCHIVE_BODY, googleFeaturesOff, GOOGLE_SCOPE } from '../../shared/core/google'
 import { normalizeEmail } from '../../shared/core/mail'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { InboxSource } from '../ports/inbox'
-import type { MailAddress, MailMessage, MailRead, MailReader, MailReadFailure, MailSender, MailSenderAccount, MailSummary } from '../ports/mail'
+import type { MailAddress, MailArchiver, MailInboxWatcher, MailMessage, MailRead, MailReader, MailReadFailure, MailSender, MailSenderAccount, MailSummary } from '../ports/mail'
 import type { GoogleResult } from './google-client'
 import type { GoogleRequester } from './google-meetings'
 
@@ -33,6 +39,11 @@ const PAGE_MAX = 50
 const PAGE_DEFAULT = 25
 const ID_RE = /^[A-Za-z0-9_-]{1,200}$/
 const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{1,500}$/
+const HISTORY_ID_RE = /^[0-9]{1,30}$/
+/** Gmail's history ids are decimal strings that grow: compared as numbers without a size limit. */
+const laterHistory = (a: string, b: string) => (a.length !== b.length ? a.length > b.length : a > b)
+/** Pages of Gmail's history read per call (500 changes each); the rest is read on the next poll. */
+export const HISTORY_PAGES_MAX = 5
 const METADATA_HEADERS = ['From', 'Sender', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
 const BULK_LABELS = ['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS']
 
@@ -199,7 +210,7 @@ export function mailTextOf(raw: unknown, max = MAIL_TEXT_MAX): { text: string; t
   return { text: `${text.slice(0, Math.max(0, max - TRUNCATED.length)).trimEnd()}${TRUNCATED}`, truncated: true }
 }
 
-export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender {
+export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender & MailInboxWatcher & MailArchiver {
   const { request } = deps
 
   async function metadata(companyId: string, userId: string, id: string): Promise<MailRead<MailSummary>> {
@@ -274,6 +285,97 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       return { ok: true, value: { id: threadId, messages, more: all.length > messages.length } }
     },
 
+    async inboxCursor(companyId, userId) {
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'GET', path: '/gmail/v1/users/me/profile', scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.profile.get',
+      })
+      if (!r.ok) return { ok: false, reason: mailReadReasonOf(r) }
+      const id = isObj(r.json) ? str(r.json.historyId) ?? (typeof r.json.historyId === 'number' ? String(r.json.historyId) : null) : null
+      return id && HISTORY_ID_RE.test(id) ? { ok: true, value: id } : { ok: false, reason: 'unavailable' }
+    },
+
+    async inboxRemovalsSince(companyId, userId, cursor) {
+      if (!HISTORY_ID_RE.test(cursor)) return { ok: true, value: { expired: true } }
+      const threads = new Set<string>()
+      let last = cursor
+      let pageToken: string | undefined
+      for (let page = 0; page < HISTORY_PAGES_MAX; page++) {
+        const r = await request(companyId, userId, {
+          api: 'gmail', method: 'GET', path: '/gmail/v1/users/me/history',
+          query: { startHistoryId: cursor, historyTypes: ['labelRemoved', 'messageDeleted'], maxResults: '500', ...(pageToken ? { pageToken } : {}) },
+          scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.history.list',
+        })
+        // Gmail keeps about a week of changes: an older start is answered 404 (start again).
+        if (!r.ok) return r.kind === 'refused' && r.status === 404 ? { ok: true, value: { expired: true } } : { ok: false, reason: mailReadReasonOf(r) }
+        const body = isObj(r.json) ? r.json : {}
+        for (const h of Array.isArray(body.history) ? body.history : []) {
+          if (!isObj(h)) continue
+          const hid = str(h.id) ?? (typeof h.id === 'number' ? String(h.id) : null)
+          if (hid && HISTORY_ID_RE.test(hid) && laterHistory(hid, last)) last = hid
+          const removed = Array.isArray(h.labelsRemoved) ? h.labelsRemoved : []
+          for (const x of removed) {
+            if (!isObj(x) || !Array.isArray(x.labelIds) || !x.labelIds.includes('INBOX') || !isObj(x.message)) continue
+            const t = str(x.message.threadId)
+            if (t && ID_RE.test(t)) threads.add(t)
+          }
+          for (const x of Array.isArray(h.messagesDeleted) ? h.messagesDeleted : []) {
+            const t = isObj(x) && isObj(x.message) ? str(x.message.threadId) : null
+            if (t && ID_RE.test(t)) threads.add(t)
+          }
+        }
+        const next = str(body.nextPageToken)
+        if (!next || !PAGE_TOKEN_RE.test(next)) {
+          // All read: the mailbox's own position is where the next look starts.
+          const now = str(body.historyId) ?? (typeof body.historyId === 'number' ? String(body.historyId) : null)
+          if (now && HISTORY_ID_RE.test(now) && laterHistory(now, last)) last = now
+          return { ok: true, value: { cursor: last, threadIds: [...threads] } }
+        }
+        pageToken = next
+      }
+      // More than the pages one look reads: the next poll goes on from the last change read.
+      return { ok: true, value: { cursor: last, threadIds: [...threads] } }
+    },
+
+    async messageInInbox(companyId, userId, messageId) {
+      if (!ID_RE.test(messageId)) return { ok: true, value: false }
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'GET', path: `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`,
+        query: { format: 'minimal' }, scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.messages.get',
+      })
+      if (!r.ok) {
+        const reason = mailReadReasonOf(r)
+        return reason === 'not-found' ? { ok: true, value: false } : { ok: false, reason }
+      }
+      const labels = isObj(r.json) && Array.isArray(r.json.labelIds) ? r.json.labelIds : []
+      return { ok: true, value: labels.includes('INBOX') }
+    },
+
+    async threadInInbox(companyId, userId, threadId) {
+      if (!ID_RE.test(threadId)) return { ok: true, value: false }
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'GET', path: `/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}`,
+        query: { format: 'minimal' }, scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.threads.get',
+      })
+      if (!r.ok) {
+        const reason = mailReadReasonOf(r)
+        // Deleted for good: not in the inbox any more.
+        return reason === 'not-found' ? { ok: true, value: false } : { ok: false, reason }
+      }
+      const body = isObj(r.json) ? r.json : {}
+      const messages = Array.isArray(body.messages) ? body.messages : []
+      return { ok: true, value: messages.some(m => isObj(m) && Array.isArray(m.labelIds) && m.labelIds.includes('INBOX')) }
+    },
+
+    async archiveMessage(companyId, userId, messageId, back) {
+      if (!ID_RE.test(messageId)) return { ok: false, reason: 'not-found' }
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/modify`,
+        body: back ? GMAIL_UNARCHIVE_BODY : GMAIL_ARCHIVE_BODY,
+        scope: GOOGLE_SCOPE.gmailModify, operation: back ? 'gmail.messages.unarchive' : 'gmail.messages.archive',
+      })
+      return r.ok ? { ok: true, value: true } : { ok: false, reason: mailReadReasonOf(r) }
+    },
+
     async senderAccount(companyId, userId): Promise<MailSenderAccount> {
       const grant = deps.companyData.forCompany(companyId).connectors.grant('google', userId)
       if (!grant || grant.status !== 'active' || !grant.scopes.includes(GOOGLE_SCOPE.gmailSend)) return { ok: false, reason: 'consent-needed' }
@@ -303,7 +405,58 @@ export const INBOX_POLL_MAX = 1000
  * so the poll keeps its window. One cap for both lists: at the limit, the newest
  * are kept and `readFrom` says where they start (where a cut list stops, too).
  */
-export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, nowMs: () => number): InboxSource {
+export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'> & Partial<MailInboxWatcher & MailArchiver>, nowMs: () => number): InboxSource {
+  const gmailIdOf = (ref: string) => (ref.startsWith('gmail:') && ID_RE.test(ref.slice(6)) ? ref.slice(6) : null)
+  const leftOf = {
+    label: 'Gmail',
+    ...(reader.inboxCursor && reader.inboxRemovalsSince ? {
+      async leftSince(companyId: string, userId: string, cursor: string | null) {
+        if (cursor !== null) {
+          const r = await reader.inboxRemovalsSince!(companyId, userId, cursor)
+          if (!r.ok) return 'not-connected' as const
+          if (!('expired' in r.value)) return { cursor: r.value.cursor, threadRefs: r.value.threadIds.map(t => `gmail:${t}`) }
+        }
+        // No cursor yet, or too old: start from now; the inbox checks its open records itself.
+        const now = await reader.inboxCursor!(companyId, userId)
+        return now.ok ? { cursor: now.value, threadRefs: null } : 'not-connected' as const
+      },
+    } : {}),
+    ...(reader.threadInInbox ? {
+      async inInbox(companyId: string, userId: string, threadRefs: string[]) {
+        const out: Record<string, boolean> = {}
+        for (const ref of threadRefs) {
+          const t = gmailIdOf(ref)
+          if (!t) continue
+          const r = await reader.threadInInbox!(companyId, userId, t)
+          if (r.ok) { out[ref] = r.value; continue }
+          if (r.reason === 'not-connected' || r.reason === 'turned-off' || r.reason === 'stopped') return 'not-connected' as const
+        }
+        return out
+      },
+    } : {}),
+    ...(reader.archiveMessage && reader.messageInInbox ? {
+      async archive(companyId: string, userId: string, sourceRefs: string[], back: boolean) {
+        const changed: string[] = []
+        const stopOf = (reason: MailReadFailure) => (reason === 'unavailable' ? 'failed' as const : 'not-allowed' as const)
+        for (const ref of [...new Set(sourceRefs)]) {
+          const id = gmailIdOf(ref)
+          if (!id) continue
+          if (!back) {
+            // Only a message in the inbox now: one archived by the member, or never in it (Sent), is left alone.
+            const now = await reader.messageInInbox!(companyId, userId, id)
+            if (!now.ok) return { changed, stop: stopOf(now.reason) }
+            if (!now.value) continue
+          }
+          const r = await reader.archiveMessage!(companyId, userId, id, back)
+          if (r.ok) { changed.push(ref); continue }
+          // Deleted meanwhile: nothing to take out (or put back).
+          if (r.reason === 'not-found') continue
+          return { changed, stop: stopOf(r.reason) }
+        }
+        return { changed, stop: null }
+      },
+    } : {}),
+  }
   const party = (a: MailAddress) => ({ address: a.email, name: a.name || null })
   async function listAll(companyId: string, userId: string, afterMs: number, label: 'inbox' | 'sent'): Promise<{ found: MailSummary[]; cut: boolean } | null> {
     const found: MailSummary[] = []
@@ -368,5 +521,6 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'>, 
     async ready(companyId, userId) {
       return (await reader.listMessages(companyId, userId, { afterMs: nowMs(), max: 1 })).ok
     },
+    ...leftOf,
   }
 }

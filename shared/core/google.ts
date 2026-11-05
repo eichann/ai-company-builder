@@ -7,9 +7,10 @@
  * ask only for the features the company turned on, all of them in one consent
  * (`googleFeaturesToAsk`); a feature the company turns on later is asked once
  * more (or when first used); never `drive`, `drive.readonly`, `gmail.compose`,
- * `gmail.metadata`, `gmail.modify` or domain-wide delegation
- * (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox`
- * feature (owner decision 2026-11-01, spec §7-1: the member can turn it off).
+ * `gmail.metadata` or domain-wide delegation (`GOOGLE_NEVER_SCOPES`).
+ * `gmail.readonly` is allowed only as the `inbox` feature (owner decision 2026-11-01, spec §7-1:
+ * the member can turn it off); `gmail.modify` only as the `inbox_archive` feature, and only for
+ * taking a thread out of the inbox and putting it back (`gmailCallAllowed`, owner decision 2026-11-05).
  * The Google account must be the member's own ACB email. 受信を読む's switches are the
  * member's own 受信を読む within the company's (`work-switches.ts`), not a Google switch.
  *
@@ -17,12 +18,13 @@
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox', 'sheets'] as const
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox', 'sheets', 'inbox_archive'] as const
 /**
  * minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く
  * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`), sheets = スプレッドシートを中継で使う
  * (`spreadsheets`: a script's Sheets calls relayed with the member's own permission,
- * `google-relay.ts`; owner decision 2026-11-04).
+ * `google-relay.ts`; owner decision 2026-11-04), inbox_archive = 済んだメールを Gmail でもアーカイブする
+ * (`gmail.modify`, used for nothing but the inbox label: `gmailCallAllowed`; owner decision 2026-11-05).
  */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
@@ -53,6 +55,13 @@ export const GOOGLE_SCOPE = {
    * never passes a deletion (shared/core/google-relay.ts).
    */
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
+  /**
+   * 済んだメールを Gmail でもアーカイブする (the `inbox_archive` feature only, owner decision
+   * 2026-11-05). Google lets it read, label, trash and draft too; ACB sends exactly one kind of call
+   * with it — one message's INBOX label removed (archive) or added back (undo): `gmailCallAllowed`,
+   * enforced by the one Google client before anything leaves.
+   */
+  gmailModify: 'https://www.googleapis.com/auth/gmail.modify',
 } as const
 
 /** Scopes ACB never asks for, holds or hands out (owner decisions; `google-connector.md`). */
@@ -62,7 +71,9 @@ export const GOOGLE_NEVER_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/gmail.metadata',
-  'https://www.googleapis.com/auth/gmail.modify',
+  // `gmail.modify` left this list on 2026-11-05 (owner decision: 「済んだメールを Gmail でもアーカイブする」,
+  // opt-in per member). It is held only as the `inbox_archive` feature, and the Google client sends
+  // nothing with it but `messages.modify` on one message's INBOX label (`gmailCallAllowed`).
   'https://mail.google.com/',
 ]
 
@@ -76,6 +87,7 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   drive: [GOOGLE_SCOPE.driveFile],
   inbox: [GOOGLE_SCOPE.gmailReadonly],
   sheets: [GOOGLE_SCOPE.spreadsheets],
+  inbox_archive: [GOOGLE_SCOPE.gmailModify],
 }
 
 /**
@@ -94,6 +106,7 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...GOOGLE_FEATURE_SCOPES.drive,
   ...GOOGLE_FEATURE_SCOPES.inbox,
   ...GOOGLE_FEATURE_SCOPES.sheets,
+  ...GOOGLE_FEATURE_SCOPES.inbox_archive,
 ]
 
 /** Google's short names → the long form it reports. */
@@ -153,9 +166,10 @@ export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
  * off. 受信を読む (`inbox`) is no longer Google's own company switch since 2026-11-02 — it is
  * the company's 受信を読む (`work-switches.ts`, the task settings' `readIncoming.allowed`, allowed
  * by default, each member starting off), which covers Slack's reading too. `sheets` (the relay,
- * 2026-11-04) is off until the admin ticks スプレッドシート under 「API キー」→「本人の許可で中継する」.
+ * 2026-11-04) is off until the admin ticks スプレッドシート under 「API キー」→「本人の許可で中継する」;
+ * `inbox_archive` (2026-11-05) until the admin turns it on in 「会社で使うもの」.
  */
-export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['sheets']
+export const GOOGLE_COMPANY_DEFAULT_OFF: readonly GoogleFeature[] = ['sheets', 'inbox_archive']
 
 /**
  * The admin's switches as stored (default-on features turned off, default-off features turned on)
@@ -191,8 +205,11 @@ export function googleCompanyFeatures(company: GoogleCompanySwitches & { pickerC
   return GOOGLE_FEATURES.filter(f => googleCompanyFeatureOn(f, company) && (f !== 'drive' || company.pickerConfigured))
 }
 
-/** Features never asked in the one consent: only when the member names them (the relay, 2026-11-04). */
-export const GOOGLE_ASKED_BY_NAME_ONLY: readonly GoogleFeature[] = ['sheets']
+/**
+ * Features never asked in the one consent: only when the member names them (the relay, 2026-11-04;
+ * 済んだメールを Gmail でもアーカイブする, 2026-11-05: only members who choose it allow it).
+ */
+export const GOOGLE_ASKED_BY_NAME_ONLY: readonly GoogleFeature[] = ['sheets', 'inbox_archive']
 
 /**
  * What one member is offered (「仕事の道具をつなぐ」's one consent, the screen's 「まだ許可していないもの」):
@@ -212,6 +229,57 @@ export function googleMemberFeatures(companyFeatures: readonly GoogleFeature[], 
  */
 export function googleFeaturesToAsk(requested: readonly GoogleFeature[], companyFeatures: readonly GoogleFeature[], granted: readonly GoogleFeature[]): GoogleFeature[] {
   return GOOGLE_FEATURES.filter(f => companyFeatures.includes(f) && (requested.includes(f) || granted.includes(f)))
+}
+
+// ---------------------------------------------------------------------------
+// The Gmail calls ACB makes (owner decision 2026-11-05): the one rule the Google client applies to
+// every call to the Gmail API before anything leaves.
+
+/** The message a label change names (Gmail's ids). */
+const GMAIL_ID = '[A-Za-z0-9_-]{1,200}'
+const GMAIL_READ_RE = /^\/gmail\/v1\/users\/me\/(messages|threads|history|profile|labels)(\/[A-Za-z0-9_-]{1,200})?$/
+const GMAIL_SEND_PATH = '/gmail/v1/users/me/messages/send'
+/** One message's labels (never a whole conversation: a reply ACB has not read yet must stay in the inbox). */
+const GMAIL_MODIFY_RE = new RegExp(`^/gmail/v1/users/me/messages/${GMAIL_ID}/modify$`)
+
+/** The only bodies a call with `gmail.modify` may carry: the INBOX label off (archive) or back on (undo). */
+export const GMAIL_ARCHIVE_BODY = Object.freeze({ removeLabelIds: Object.freeze(['INBOX']) })
+export const GMAIL_UNARCHIVE_BODY = Object.freeze({ addLabelIds: Object.freeze(['INBOX']) })
+
+/** A path Google routes to Gmail on its shared host (`/gmail/…`, `/upload/gmail/…`, `/batch/gmail/…`), however escaped. */
+function mentionsGmail(path: string): boolean {
+  let decoded = path
+  try { decoded = decodeURIComponent(path) } catch { /* as written */ }
+  const GMAIL_ROUTE = /^\/+((upload|batch)\/+)?gmail(\/|$)/i
+  return GMAIL_ROUTE.test(path) || GMAIL_ROUTE.test(decoded)
+}
+
+function isLabelBody(body: unknown, key: 'removeLabelIds' | 'addLabelIds'): boolean {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return false
+  const keys = Object.keys(body)
+  const list = (body as Record<string, unknown>)[key]
+  return keys.length === 1 && keys[0] === key && Array.isArray(list) && list.length === 1 && list[0] === 'INBOX'
+}
+
+/**
+ * Whether ACB may send this Gmail call (`google-client.ts` refuses anything else as `call-not-allowed`,
+ * nothing sent): reads (`GET` of messages, threads, history, the profile, labels) with
+ * `gmail.readonly`; `messages/send` with `gmail.send`; and with `gmail.modify` exactly
+ * `POST messages/<id>/modify` (one message, never a thread) whose body is `{ removeLabelIds: ['INBOX'] }` or
+ * `{ addLabelIds: ['INBOX'] }` — never trash, delete, a draft, a send, a read, any other label or a
+ * batch. `gmail.modify` is accepted for no other API, and no other API may name a Gmail path. Only
+ * `users/me`.
+ */
+export function gmailCallAllowed(req: { api: string; method: string; path: string; scope: string; body?: unknown }): boolean {
+  if (req.scope === GOOGLE_SCOPE.gmailModify) {
+    return req.api === 'gmail' && req.method === 'POST' && GMAIL_MODIFY_RE.test(req.path)
+      && (isLabelBody(req.body, 'removeLabelIds') || isLabelBody(req.body, 'addLabelIds'))
+  }
+  // Google also serves Gmail on www.googleapis.com (the Calendar / Drive host): a Gmail path named
+  // under another API is still a Gmail call, and ACB makes none that way.
+  if (req.api !== 'gmail') return !mentionsGmail(req.path)
+  if (req.method === 'GET') return req.scope === GOOGLE_SCOPE.gmailReadonly && GMAIL_READ_RE.test(req.path)
+  return req.method === 'POST' && req.path === GMAIL_SEND_PATH && req.scope === GOOGLE_SCOPE.gmailSend
 }
 
 // ---------------------------------------------------------------------------

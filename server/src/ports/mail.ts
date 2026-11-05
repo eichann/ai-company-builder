@@ -116,3 +116,31 @@ export interface MailSender {
    */
   send(companyId: string, userId: string, raw: string, options?: { threadId?: string }): Promise<MailSendResult>
 }
+
+/**
+ * Which of the member's conversations left their inbox (archived, trashed, deleted), read with the
+ * member's own read permission (inbox.md "Mail archived in the mailbox"). Header facts and labels
+ * only, never a text.
+ */
+export interface MailInboxWatcher {
+  /** Where the mailbox's change log stands now (a fresh start for `inboxRemovalsSince`). */
+  inboxCursor(companyId: string, userId: string): Promise<MailRead<string>>
+  /**
+   * The conversations that had a message leave the inbox (or deleted) since `cursor`, and the new
+   * cursor; `expired` when the mailbox no longer keeps changes that old (start again).
+   */
+  inboxRemovalsSince(companyId: string, userId: string, cursor: string): Promise<MailRead<{ cursor: string; threadIds: string[] } | { expired: true }>>
+  /** Whether this one message is in the inbox now (a deleted one: false). */
+  messageInInbox(companyId: string, userId: string, messageId: string): Promise<MailRead<boolean>>
+  /** Whether any message of the conversation is still in the inbox (a deleted one: false). */
+  threadInInbox(companyId: string, userId: string, threadId: string): Promise<MailRead<boolean>>
+}
+
+/**
+ * 済んだメールをアーカイブする (owner decision 2026-11-05): one message taken out of the member's
+ * inbox, or put back (`back`), with the member's own permission for it — nothing else. Per message,
+ * never the whole conversation: a reply that arrived since ACB last read the mailbox stays in the inbox.
+ */
+export interface MailArchiver {
+  archiveMessage(companyId: string, userId: string, messageId: string, back: boolean): Promise<MailRead<true>>
+}

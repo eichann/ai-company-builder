@@ -19,6 +19,11 @@
  * them is returned, logged, stored or put in an error. Google's error bodies
  * are not passed on (only its short reason code).
  *
+ * Gmail (owner decision 2026-11-05): before anything else, a Gmail call must be one ACB makes
+ * (`gmailCallAllowed`): reads with `gmail.readonly`, a send with `gmail.send`, and with
+ * `gmail.modify` only one message's INBOX label off or back on — never a thread, trash, delete, a
+ * draft or a read.
+ *
  * Retries: reads (GET) after a 429, a 5xx or a failure before sending — wait
  * (Retry-After, else 1 s, 2 s), at most 2 retries. Writes (Gmail send) are
  * never retried here; a connection lost after sending is `unknown`.
@@ -28,7 +33,7 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, gmailCallAllowed, googleCompanyFeatureOn, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
@@ -58,6 +63,11 @@ export type GoogleStopReason =
   | 'practice-real-secret' | 'bad-path' | 'token-refused' | 'token-unavailable'
   /** Google answered the Picker's token with more than `drive.file`: it is not handed out. */
   | 'picker-scope-too-wide'
+  /**
+   * A Gmail call ACB never makes (shared/core/google.ts `gmailCallAllowed`): anything with
+   * `gmail.modify` but the INBOX label on a thread or message, and any Gmail write but a send.
+   */
+  | 'call-not-allowed'
 
 export interface GoogleRequest {
   api: Exclude<GoogleApi, 'oauth' | 'userinfo'>
@@ -425,6 +435,11 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       if (!host) return notSent('bad-path')
       const path = pathWithQuery(req)
       if (!path) return notSent('bad-path')
+      // The one place every Gmail call passes (owner decision 2026-11-05): `gmail.modify` only ever
+      // takes a thread out of the inbox or puts it back; no other Gmail write but a send.
+      if (!gmailCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, body: req.rawBody ? undefined : req.body })) {
+        return notSent('call-not-allowed')
+      }
       const isRead = req.method === 'GET'
       const body = req.rawBody ? req.rawBody.bytes : req.body === undefined ? null : new TextEncoder().encode(JSON.stringify(req.body))
       const contentType = req.rawBody ? req.rawBody.contentType : 'application/json'

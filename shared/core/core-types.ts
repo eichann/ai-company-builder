@@ -89,6 +89,10 @@
  * (sent from the phone, or in Slack / Gmail itself) and tasks made from the message are still open:
  * the member's AI checks whether the reply finished them (`finish_reply_check`, `who: [ai]`; the
  * inbox's reply-check route completes them), or the assignee looks themselves (`check_myself`).
+ * Version 8 (owner decision 2026-11-05, additive): 「受信トレイから外れた」 (`left_inbox`, 届いた /
+ * 確認待ち → handled, `who: [system]`: only the inbox, never a member nor their AI) — the mail left the
+ * member's own mailbox inbox (archived, trashed, deleted there) and nothing was made from it; the
+ * assignee may undo that entry (`UNDO_BY_ASSIGNEE`). inbox.md "Mail archived in the mailbox".
  *
  * Outside time (owner decision 2026-11-01 「流れを測れる記録」): every core type
  * of a thing that happened outside implements `outside_event` — `occurred_at`
@@ -200,7 +204,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 `,
   interaction: `---
 label: やりとり
-version: 7
+version: 8
 implements: [outside_event, request]
 storage: server
 fields:
@@ -238,6 +242,7 @@ actions:
   settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
   finish_reply_check: { label: 返事のあとを確かめた, from: [replied], to: handled, who: [ai], note: optional }
   check_myself: { label: 自分で確かめる, from: [replied], to: handled, who: [assignee], note: optional }
+  left_inbox:   { label: 受信トレイから外れた（自動）, from: [received, unsure], to: handled, who: [system], note: optional }
 ---
 # やりとり
 
@@ -656,6 +661,9 @@ export function acceptanceOf(type: string) {
  * them; `services/inbox.ts`, inbox.md). `reply_arrived` and an interaction
  * entering `unsure` are the notices `reply_arrived` / `intake_unsure`.
  */
+const INBOX_ACTIONS_LEFT = 'left_inbox'
+const INBOX_ACTIONS_ARCHIVED = 'archived_there'
+
 export const INBOX_ACTIONS = Object.freeze({
   /** A reply_request: their reply came (waiting_reply → checking). */
   replyArrived: 'reply_arrived',
@@ -675,7 +683,29 @@ export const INBOX_ACTIONS = Object.freeze({
   repliedDone: 'replied_done',
   /** A task: the member replied, but work remains (a note only: 「返事は済み」). */
   replyNoted: 'reply_noted',
+  /**
+   * An interaction: the mail left the owner's mailbox inbox and nothing was made from it — closed
+   * (届いた / 確認待ち → handled; the type's `left_inbox`, `who: [system]`). Its assignee may undo it.
+   */
+  leftInbox: INBOX_ACTIONS_LEFT,
+  /** An interaction: the mail left the inbox but a task or 返事のお願い is open (a note only: 「Gmail ではアーカイブ済み」). */
+  leftInboxNoted: 'left_inbox_noted',
+  /** An interaction: ACB took the mail out of the owner's mailbox inbox after they closed it (a note; undo = put back). */
+  archivedThere: INBOX_ACTIONS_ARCHIVED,
+  /** An interaction: putting it back did not work (a note only). */
+  unarchiveFailed: 'unarchive_failed',
 })
+
+/**
+ * The system's entries a record's assignee may undo although they are not its actor (the engine's
+ * undo, records.md "The state engine"): the inbox closing a message because it left the mailbox
+ * inbox, and taking it out of the mailbox inbox — each with a notice and ［元に戻す］ (owner decision
+ * 2026-11-05: actions on things run automatically, with a notice and an undo). Only an entry whose
+ * actor is a server service (an `acb:` id, kind `external`). Core rules only.
+ */
+export const UNDO_BY_ASSIGNEE: Readonly<Record<string, readonly string[]>> = {
+  interaction: [INBOX_ACTIONS_LEFT, INBOX_ACTIONS_ARCHIVED],
+}
 
 /** The inbox as a ledger actor (kind `external`, an `acb:` id → cause `system`). */
 export const INBOX_ACTOR = Object.freeze({ id: 'acb:inbox', kind: 'external' as const, source: 'ACB の受付' })
@@ -837,4 +867,11 @@ export function coreTypeDefinitions(): TypeDefinition[] {
     if (!r.ok) throw new Error(`core type ${name}: ${r.errors.join(' / ')}`)
     return r.definition
   })
+}
+
+/** Whether `member` may undo this entry as the record's assignee (`UNDO_BY_ASSIGNEE`). */
+export function undoableByAssignee(type: string, entry: { action: string; actorId: string; actorKind: string }, assignee: unknown, userId: string): boolean {
+  const actions = Object.prototype.hasOwnProperty.call(UNDO_BY_ASSIGNEE, type) ? UNDO_BY_ASSIGNEE[type] : undefined
+  return !!actions && actions.includes(entry.action) && entry.actorKind === 'external' && entry.actorId.startsWith('acb:')
+    && typeof assignee === 'string' && assignee !== '' && assignee === userId
 }

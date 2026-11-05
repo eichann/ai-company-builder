@@ -28,6 +28,7 @@ export const GOOGLE_FEATURE_LABEL: Record<GoogleFeature, string> = {
   drive: 'Drive で選んだものを読む・置く',
   inbox: '受信を読む',
   sheets: 'スプレッドシートを中継で使う',
+  inbox_archive: '済んだメールを Gmail でもアーカイブする',
 }
 
 export const GOOGLE_UNAVAILABLE_TEXT: Record<GoogleUnavailableReason, string> = {
@@ -95,7 +96,19 @@ export interface GoogleSectionView {
   canRenewMinutes: boolean
   canDisconnect: boolean
   domainHint: string | null
+  /**
+   * 「済んだメールを Gmail でもアーカイブする」 (owner decision 2026-11-05), only while the company offers it
+   * and the member is connected: allow = ［許可する］ (Google's page), resume = ［オンにする］ (they only
+   * turned it off: no new consent), on = ［やめる］. null: not shown.
+   */
+  archive: 'allow' | 'resume' | 'on' | null
 }
+
+/** What the archive card says (plain words: no labels, scopes or permissions' names). */
+export const GOOGLE_ARCHIVE_TEXT = 'ACB で来た連絡を「済んだ」「取り込まない」にしたときや、そこから作ったやることがすべて終わったときに、Gmail でもそのメールをアーカイブします（受信トレイから外すだけで、消したり送ったりはしません）。知らせの［元に戻す］で受信トレイに戻せます。'
+
+/** 「やめる」 stops ACB using it; the permission itself stays with Google until 「許可をやめる」. */
+export const GOOGLE_ARCHIVE_STOP_TEXT = '「やめる」と ACB は Gmail をアーカイブしなくなりますが、Google での許可そのものは残ります。許可ごと取り消すには上の「許可をやめる」を押してください（予定や議事録なども読めなくなります）。'
 
 /** The company offers the feature (an older server without the list: as before, offered). */
 const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.companyFeatures.includes(f)
@@ -113,6 +126,9 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
     canRenewMinutes: my.available && my.connected && (my.renew ?? []).includes('minutes'),
     canDisconnect: my.connected || my.status !== null,
     domainHint: my.domain ? `会社の Google アカウント（@${my.domain}）で許可してください。` : null,
+    archive: !my.available || !my.connected || !(my.offeredByName ?? []).includes('inbox_archive') ? null
+      : !my.features.includes('inbox_archive') ? 'allow'
+        : (my.featuresOff ?? []).includes('inbox_archive') ? 'resume' : 'on',
   }
 }
 

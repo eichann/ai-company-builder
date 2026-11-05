@@ -46,8 +46,9 @@ export function getNoticeSettings(companyId: string, reads: NoticesReads = windo
 }
 
 /**
- * ［元に戻す］ on a notice about what the member's own AI did for them (`replied_done`: the AI completed
- * a task their reply finished; inbox.md): the undo of exactly that entry, at its version — the server
+ * ［元に戻す］ on a notice that offers it (`UNDOABLE_NOTIFICATION_KINDS`: `replied_done` — the AI completed
+ * a task their reply finished; `mail_left_inbox` / `mail_archived` — the inbox closed a mail archived in
+ * Gmail, or archived it there; inbox.md): the undo of exactly that entry, at its version — the server
  * refuses when something changed since.
  */
 export type NoticeUndo = ElectronPort<'undoTaskAction'>

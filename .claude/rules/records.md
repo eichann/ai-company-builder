@@ -1093,7 +1093,10 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 clock's, a separate service writing through the service writer: `notifications.md`).
 
 - **Who**: a person field of the record whose value is the member, `admin` (owner/admin role),
-  `dept_manager` (manages the department holding the record's path or folder), `anyone`. Roles do
+  `dept_manager` (manages the department holding the record's path or folder), `anyone`; `system`
+  (2026-11-05) — only the server's own services move it through the service writer: the engine
+  refuses it to every member and AI, and no screen (`recordActionChoices`) or AI tool offers it
+  (`isSystemOnly`). First use: interaction v8's `left_inbox`. Roles do
   not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
   member who qualifies on their own (or any member when `who` is `[ai]` alone) — so the AI cannot
   complete a task. `ok_from` widens `who` for a person who states whose OK it was (above), never
@@ -1125,7 +1128,10 @@ clock's, a separate service writing through the service writer: `notifications.m
 - **Undo** (`POST …/undo { version, expectedVersion }`): a new `undo` entry with the reversed
   changes (`reversesVersion`); refused when a later entry changed the same values
   (`CHANGED_SINCE`), for `create` / `undo` entries and a `share` (`place.*` changes), and for anyone but the entry's actor or an
-  owner/admin.
+  owner/admin — or the record's assignee for a server service's entry listed in `UNDO_BY_ASSIGNEE`
+  (`core-types.ts`, 2026-11-05: the inbox's `left_inbox` / `archived_there`, each told with
+  ［元に戻す］; `inbox.md` "Mail archived in the mailbox"). After an undo the engine runs `afterAct`
+  too (the inbox puts a mail back in the mailbox).
 - **Replay** (§13.11): `replayRecordState(entries, n)` folds entries 1..n; it throws on a gap or a
   version that does not exist rather than describe another version. `GET …/versions/:version`
   answers the values plus `origin` (action, actor, kind, at, provenance of entry n).
@@ -1736,7 +1742,7 @@ it (additive). Details: `plugin-roles.md`, `approvals.md`.
 ## Incoming messages (来た連絡, stage 3 B2: `inbox.md`)
 
 The inbox writes `interaction` v5 (implements `request` and `outside_event`; 確認待ち / 部署の番 /
-やることにしなかった) and `reply_request` v1 (返事のお願い: service-owned, the one type whose AI may
+やることにしなかった; v8 adds the system's `left_inbox`) and `reply_request` v1 (返事のお願い: service-owned, the one type whose AI may
 end it — `ai_close`); task v8 adds the `interaction` link. Unlike every earlier service record,
 an individual's mail is **owner-only**: the service writer's `personalOwner` (with `state` and
 `quiet`) — so "Service-written records are never owner-only" above holds for every service but

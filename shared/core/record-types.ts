@@ -281,8 +281,16 @@ export function actionWho(action: Pick<ActionDef, 'who' | 'whoUnless'>, fields: 
 /** The server fields an action with `ok_from` writes (whose OK it was / an OK from outside ACB). */
 export const OK_FIELDS = { by: 'ok_by', note: 'ok_note' } as const
 
-/** Who-values that are not field names. */
-export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone'] as const
+/**
+ * Who-values that are not field names. `system` (owner decision 2026-11-05): only the server's own
+ * services move it (through the service writer) — never a member, an admin, nor anyone's AI; the
+ * engine refuses it to everyone, and no screen or AI tool offers it.
+ */
+export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone', 'system'] as const
+export const SYSTEM_WHO = 'system'
+
+/** An action only the server's own services run (`who: [system]`): offered on no screen, as no AI tool. */
+export const isSystemOnly = (who: readonly string[]): boolean => who.length > 0 && who.every(w => w === SYSTEM_WHO)
 
 /** `role:<name>` in an action's `who` (plan C3; the same name rule as a plugin's declared roles). */
 export const ROLE_REF_RE = /^role:[a-z][a-z0-9_]{0,39}$/

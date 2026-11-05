@@ -27,6 +27,7 @@ paths:
   - "shared/core/google-relay.ts"
   - "server/src/services/google-relay.ts"
   - "server/tests/integration/google-relay.test.ts"
+  - "server/tests/integration/google-inbox-archive.test.ts"
   - "admin/src/components/key-broker/google-relay.tsx"
   - "client/src/features/settings/components/GoogleRelayCard.tsx"
   - "client/src/features/settings/hooks/useGoogleRelay.ts"
@@ -44,8 +45,10 @@ ACB email** (case-insensitive), verified, in the company's Workspace domain (no 
 ask only for the features the company turned on — all of them in one consent (「仕事の道具をつなぐ」,
 owner decision 2026-11-02, "One consent" below), a feature turned on later once more or when first
 used; never `drive`, `drive.readonly`,
-`gmail.compose`, `gmail.metadata`, `gmail.modify`, `https://mail.google.com/` or domain-wide
-delegation (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox` feature,
+`gmail.compose`, `gmail.metadata`, `https://mail.google.com/` or domain-wide
+delegation (`GOOGLE_NEVER_SCOPES`). `gmail.modify` left that list on 2026-11-05 (owner decision) for
+the `inbox_archive` feature only, and nothing but the INBOX label is ever sent with it ("Archiving in
+Gmail"). `gmail.readonly` is allowed only as the `inbox` feature,
 off for a company until its admin turns it on (owner decisions 2026-11-01 / 11-02, spec §7-1; each company registers its own internal app, so no
 Google review). Drive (`drive.file` + Google Picker): `google-drive.md`. Google is a built-in
 core connector serving the roles 予定を読む / メールを読む・送る / 会議の記録を読む
@@ -83,7 +86,8 @@ core connector serving the roles 予定を読む / メールを読む・送る /
 `minutes` (予定と議事録を読む) = `calendar.events.readonly`, `meetings.space.readonly`,
 `drive.meet.readonly`, and optionally `documents.readonly` (below); `mail` (メールを送る) = `gmail.send`; `drive` (Drive で選んだものを読む・置く)
 = `drive.file` (`google-drive.md`); `inbox` (受信を読む) = `gmail.readonly`; `sheets`
-(スプレッドシートを中継で使う) = `spreadsheets` (the relay, below); each with `openid email`.
+(スプレッドシートを中継で使う) = `spreadsheets` (the relay, below); `inbox_archive` (済んだメールを Gmail
+でもアーカイブする) = `gmail.modify` ("Archiving in Gmail"); each with `openid email`.
 `googleScopesFor`, `googleFeaturesOf` (a feature counts only when all its scopes are granted),
 `normalizeGrantedScopes` (Google's report → allowed long forms only), `googleFeatureOfScope`
 (each feature scope belongs to one feature), `googleFeaturesOff`.
@@ -235,6 +239,43 @@ grant** — never a key, never a service account — so every switch above appli
   delete and allow-list rules, one kind per request, `values:clear` / `batchClear`, both stops, the
   cap, the query allow-list, never in the one consent, the records' result.
 
+## Archiving in Gmail (「済んだメールを Gmail でもアーカイブする」, owner decision 2026-11-05)
+
+- **Feature** `inbox_archive` = `gmail.modify`. Off for a company until the admin turns it on in
+  「会社で使うもの」 (`GOOGLE_COMPANY_DEFAULT_OFF`, `PUT /google/features`); never in the one consent
+  (`GOOGLE_ASKED_BY_NAME_ONLY`): only members who choose it allow it (`POST /me/google/connect
+  { features: ['inbox_archive'] }`); 「やめる」 / back on without a consent = `PUT /me/google/features
+  { feature: 'inbox_archive' }` (`features_off`; the Google grant keeps the scope — the card says so,
+  「許可をやめる」 ends the whole grant). Both switches are checked by `scopeStop` before every
+  call (`off` / `feature-off`). `MyGoogle.offeredByName` names what the company offers by name only.
+- **The one guard** (`shared/core/google.ts` `gmailCallAllowed`, applied by `google-client.ts` `request`
+  before anything else, refusing as `call-not-allowed`, nothing sent): a call with `gmail.modify` must be
+  `POST /gmail/v1/users/me/messages/<id>/modify` (one message — never a thread, which would also take a
+  reply ACB has not read out of the inbox) whose body is exactly `{ removeLabelIds:
+  ['INBOX'] }` or `{ addLabelIds: ['INBOX'] }`, on the `gmail` API; any other Gmail call must be a read
+  (`GET` of messages, threads, history, profile, labels) with `gmail.readonly` or `messages/send` with
+  `gmail.send`; no other API may name a Gmail route (`/gmail/…`, `/upload/gmail/…`, `/batch/gmail/…`,
+  escaped or not — Google serves Gmail on the shared host too). The access token carries every granted
+  scope, so the declared scope alone is not trusted: the call's shape is. Never trash, delete, a draft,
+  a send, a read, another label, a batch or another mailbox with it.
+- Used only by the inbox (`inbox.md` "Mail archived in the mailbox") through `google-mail.ts`
+  `messageInInbox` then `archiveMessage` (the incoming messages ACB took in that are in the inbox now,
+  one at a time; the undo puts back exactly the ones changed) with the mailbox owner's own grant.
+- **Google Cloud** (each company's own internal app): add `https://www.googleapis.com/auth/gmail.modify`
+  to the OAuth consent screen's scopes (Data access) beside `gmail.readonly`. Google's consent page
+  describes it in Google's own, broader words (the permission would let an app read, change and send
+  mail); the app's card says what ACB does with it (the INBOX label of the messages it took in only).
+- **Screens**: admin 「会社で使うもの」 lists 「済んだメールを Gmail でもアーカイブする」 with one line on what it
+  does; app 設定 → Google shows the card while the company offers it and the member is connected
+  (`googleSectionView().archive`: ［許可する］ → Google's page, ［やめる］ / ［オンにする］ → IPC
+  `google:setArchive`, main sends only `{ feature: 'inbox_archive', on }`).
+- Tests: `server/tests/integration/google-inbox-archive.test.ts` (off until the admin turns it on, never
+  in the one consent, asked by name; every forbidden call refused with nothing sent — trash, delete,
+  draft, send, read with it, a whole thread, other labels, batch, another mailbox, another API, a Gmail
+  path under another API escaped or not; the INBOX label off and on works; the switches), `google-one-consent.test.ts`
+  (default off), `client/tests/google-connect.test.ts` (the card's states, `setArchive`) —
+  mutation-checked.
+
 ## Routes (`routes/google.ts` → `services/google-connector.ts`; `routes/oauth.ts` → `services/member-oauth.ts`)
 
 - Owner/admin, `/api/companies/:id`: `GET /google` (`GoogleAdminView`: configured, client id,
@@ -345,6 +386,14 @@ Drive through the role ports (`connector-roles.md`).
   Only `users/me`. **Nothing stored, nothing of a message logged** (the client's action-log line
   names `gmail.messages.list` / `.get` only). Failures: `not-connected`, `turned-off`, `stopped`,
   `not-found`, `unavailable`.
+- **Inbox state** (`inbox`, `gmail.readonly`; `MailInboxWatcher`, 2026-11-05): `messageInInbox`
+  (`messages/<id>?format=minimal`, labels only, before an archive), `inboxCursor`
+  (`users/me/profile` → `historyId`), `inboxRemovalsSince` (`users/me/history?historyTypes=labelRemoved
+  &historyTypes=messageDeleted`, the threads that lost INBOX or were deleted; 404 → `expired`),
+  `threadInInbox` (`threads/<id>?format=minimal`, labels only; 404 → false). Action-log lines
+  `gmail.profile.get`, `gmail.history.list`, `gmail.threads.get`.
+- **Archive** (`inbox_archive`, `gmail.modify`; `MailArchiver`): `archiveMessage` (`messages/<id>/modify`,
+  INBOX off or back on; `gmail.messages.archive` / `.unarchive`). A write: never retried.
 - **Send** (`mail`, `gmail.send`; `MailSender`): `senderAccount` (the active grant with
   `gmail.send` and `mail` not off → the Google email; else `consent-needed` / `turned-off`) and
   `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`).

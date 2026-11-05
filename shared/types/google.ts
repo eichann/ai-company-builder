@@ -134,6 +134,11 @@ export interface MyGoogle {
   renew?: GoogleFeature[]
   /** Features already shown to the member on 「仕事の道具をつなぐ」 (connected, declined or 「あとで」). */
   seen: GoogleFeature[]
+  /**
+   * What the company offers that a member allows only by choosing it (`GOOGLE_ASKED_BY_NAME_ONLY`:
+   * 済んだメールを Gmail でもアーカイブする, the relay); an older server leaves it out.
+   */
+  offeredByName?: GoogleFeature[]
 }
 
 /** PUT /api/companies/:id/me/google/features — the member turns one allowed feature on or off. */

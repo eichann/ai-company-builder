@@ -24,7 +24,7 @@
  */
 import { z, type ZodTypeAny } from 'zod'
 import { argDefaultOf, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
-import { DATE_VALUE_RE, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
+import { DATE_VALUE_RE, isSystemOnly, TAG_MAX_LENGTH, TAGS_MAX_COUNT, type FieldKind, type TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL, type RecordDetail } from '../../../shared/types/records'
 import { droppedRecordSummary } from '../../shared/record-drop'
@@ -410,6 +410,8 @@ export function actionToolSpecs(types: TypeDefinition[], place: { department?: s
     // Approving and sending change state through their own screens only (the server refuses the rest).
     if (SERVICE_STATE_TYPES.includes(t.name)) continue
     for (const [name, a] of Object.entries(t.actions)) {
+      // Only the server's own services run it (`who: [system]`, interaction 8's 「受信トレイから外れた」).
+      if (isSystemOnly(a.who)) continue
       const tool = `${t.name}__${name}`
       if (!TOOL_NAME_RE.test(tool)) continue
       const shape: Record<string, ZodTypeAny> = {

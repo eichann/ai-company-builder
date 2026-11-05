@@ -169,6 +169,16 @@ test('screens are offered only the actions that can start from the record\'s sta
   assert.equal(recordActionChoices(TASK, 'review').find(c => c.action === 'send_back')!.noteRequired, true)
 })
 
+test('an action only the server runs (`who: [system]`, interaction 8\'s 受信トレイから外れた) is no AI tool and no screen choice', async () => {
+  const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const names = act!.specs.map(s => s.name)
+  assert.ok(names.includes('interaction__settle'), names.join())
+  assert.ok(!names.includes('interaction__left_inbox'))
+  const interaction = TYPES.find(t => t.name === 'interaction')!
+  const choices = recordActionChoices(interaction, 'unsure').map(c => c.action)
+  assert.ok(choices.includes('settle') && !choices.includes('left_inbox'), choices.join())
+})
+
 test('task completion: the AI may suggest it to the member, never do it, and cannot pass an OK statement', () => {
   const complete = actionToolSpecs(TYPES).find(s => s.name === 'task__complete')!
   assert.match(complete.description, /AI からはできない/)

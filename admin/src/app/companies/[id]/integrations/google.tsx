@@ -34,6 +34,7 @@ export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   drive: 'Drive で選んだものを読む・置く',
   inbox: '受信を読む',
   sheets: 'スプレッドシートを中継で使う',
+  inbox_archive: '済んだメールを Gmail でもアーカイブする',
 }
 
 const GRANT_STATUS_TEXT: Record<GoogleGrantSummary['status'], string> = {
@@ -275,6 +276,11 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
                   {f === 'inbox' && (
                     <span className="w-full text-xs text-muted-foreground">
                       「やることの一覧」の設定の「受信を読む」と同じ切り替えです（Slack も同じ）。オンのときは、各自が自分の設定でオンにした人にだけ許可を求めます。
+                    </span>
+                  )}
+                  {f === 'inbox_archive' && (
+                    <span className="w-full text-xs text-muted-foreground">
+                      ACB で来た連絡を済ませたとき、Gmail でもそのメールをアーカイブします（受信トレイから外すだけで、消したり送ったりはしません）。オンにしても、使うのはアプリの設定で自分から許可した人だけです。
                     </span>
                   )}
                 </li>

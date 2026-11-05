@@ -101,6 +101,13 @@ a plugin can never draw a notice (§2-2).
     since); then 「元に戻しました」. Not a person's own completion, not the AI's other actions.
     Tests: `notifications.test.ts` 「a task the member's reply finished」, `tests/ui/title-bar-notices.spec.ts`
     (`?undo=1`) — mutation-checked.
+  - `mail_left_inbox` 「Gmail ではアーカイブ済みのため、閉じました：「…」」 and `mail_archived` 「Gmail でも
+    アーカイブしました：「…」」 (2026-11-05, `inbox.md` "Mail archived in the mailbox"): the inbox closed the
+    owner's 来た連絡 because the mail left their mailbox inbox, or archived it there after they closed it
+    (actor `INBOX_ACTOR`, ledger actions `left_inbox` / `archived_there`; the text uses the entry's note).
+    Both rows have **［元に戻す］** like `replied_done` (`UNDOABLE_NOTIFICATION_KINDS`): the assignee may
+    undo those entries (`UNDO_BY_ASSIGNEE`); undoing `archived_there` puts the mail back. On by default.
+    Test: `tests/ui/title-bar-notices.spec.ts` (`?undo=mail`), `google-inbox-archive.test.ts` (the words).
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
