@@ -8,12 +8,15 @@
  *   until its admin turns it on, never asked in the one consent, asked only when the member chooses
  *   it; the company's switch and the member's own both stop it before anything leaves ACB;
  * - the one guard (`gmailCallAllowed` in the Google client): with that permission nothing leaves
- *   ACB but a thread's INBOX label taken off or put back — no trash, delete, draft, send, read, other
- *   label, batch or other mailbox, also when such a call names another permission;
+ *   ACB but one message's INBOX label taken off or put back — no thread, trash, delete, draft, send,
+ *   read, other label, batch or other mailbox, also when such a call names another permission;
  * - Gmail → ACB: a mail Sato archived in Gmail closes its 来た連絡 on the next clock run, as the
  *   inbox, with a notice to him, read with labels and history only, and asks Gmail to change nothing;
  * - ACB → Gmail: Sato's own 「済んだ」 archives the thread in his own mailbox with his own
- *   permission (not Tanaka's mailbox), tells him, and his ［元に戻す］ puts it back.
+ *   permission (not Tanaka's mailbox), tells him, and his ［元に戻す］ puts it back;
+ * - review of #607: a reply that reached Gmail after the last poll is never archived with the
+ *   thread (it is taken in next); his own 「済んだ」 taken back is not closed again by ACB's own
+ *   archive; another record of the same conversation stays open.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -99,7 +102,7 @@ const inboxOf = (account: string, thread: string) => fake.threadLabels(account, 
 
 let seq = 200
 /** A mail from outside arrives in an account's Gmail (To the account): its thread id. */
-function deliver(account: string, at: string, subject = 'ご相談'): { thread: string; messageId: string } {
+function deliver(account: string, at: string, subject = 'ご相談'): { thread: string; messageId: string; id: string } {
   const k = ++seq
   const thread = `fakethread0${k}`
   fake.deliver({
@@ -107,7 +110,7 @@ function deliver(account: string, at: string, subject = 'ご相談'): { thread: 
     headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: account, Subject: subject, 'Message-ID': `<fake-0${k}@a-corp.example>` },
     text: '本文です。',
   })
-  return { thread, messageId: `<fake-0${k}@a-corp.example>` }
+  return { thread, messageId: `<fake-0${k}@a-corp.example>`, id: `fakemail0${k}` }
 }
 const interactionOf = (messageId: string) => (db.prepare(`SELECT r.id FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
   WHERE r.company_id = ? AND r.type = 'interaction' AND json_extract(s.fields, '$.message_id') = ?`).get(CO, messageId) as { id: string }).id
@@ -180,9 +183,8 @@ describe('「済んだメールを Gmail でもアーカイブする」: opt-in,
     await allow('ga-tanaka', { features: ['minutes', 'inbox', 'inbox_archive'] }, TANAKA)
   })
 
-  it('the one guard: with gmail.modify only a thread\'s INBOX label goes out — never trash, delete, a draft, a send, a read or another label', async () => {
-    const { thread } = deliver(SATO, '2026-11-06T23:00:00.000Z', '守るもの')
-    const id = `fakemail0${seq}`
+  it('the one guard: with gmail.modify only one message\'s INBOX label goes out — never a thread, trash, delete, a draft, a send, a read or another label', async () => {
+    const { thread, id } = deliver(SATO, '2026-11-06T23:00:00.000Z', '守るもの')
     const forbidden: Array<{ method: string; path: string; scope: string; body?: unknown }> = [
       { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/trash`, scope: MODIFY },
       // The access token carries every granted permission: a write named under another one is refused too.
@@ -194,13 +196,15 @@ describe('「済んだメールを Gmail でもアーカイブする」: opt-in,
       { method: 'POST', path: '/gmail/v1/users/me/drafts', scope: MODIFY, body: { message: { raw: 'eA' } } },
       { method: 'GET', path: `/gmail/v1/users/me/messages/${id}`, scope: MODIFY },
       { method: 'GET', path: `/gmail/v1/users/me/messages/${id}`, scope: SEND },
-      { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX', 'UNREAD'] } },
-      { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { addLabelIds: ['TRASH'] } },
-      { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'], addLabelIds: ['TRASH'] } },
-      { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: READ, body: { removeLabelIds: ['INBOX'] } },
+      // Never a whole conversation: a reply ACB has not read yet would leave the inbox with it.
+      { method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
+      { method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX', 'UNREAD'] } },
+      { method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { addLabelIds: ['TRASH'] } },
+      { method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'], addLabelIds: ['TRASH'] } },
+      { method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: READ, body: { removeLabelIds: ['INBOX'] } },
       { method: 'POST', path: '/gmail/v1/users/me/messages/batchModify', scope: MODIFY, body: { ids: [id], removeLabelIds: ['INBOX'] } },
-      { method: 'POST', path: `/gmail/v1/users/${TANAKA}/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
-      { method: 'PUT', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
+      { method: 'POST', path: `/gmail/v1/users/${TANAKA}/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
+      { method: 'PUT', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
     ]
     const before = fake.requests.length
     for (const f of forbidden) {
@@ -210,7 +214,7 @@ describe('「済んだメールを Gmail でもアーカイブする」: opt-in,
     // Nor for another API — and no other API names a Gmail path (Google serves Gmail on that host too).
     const otherApis = [
       { api: 'calendar', method: 'GET', path: '/calendar/v3/calendars/primary/events', scope: MODIFY },
-      { api: 'drive', method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
+      { api: 'drive', method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] } },
       { api: 'calendar', method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/trash`, scope: READ },
       { api: 'drive', method: 'POST', path: `/%67mail/v1/users/me/threads/${thread}/trash`, scope: READ },
     ]
@@ -221,9 +225,9 @@ describe('「済んだメールを Gmail でもアーカイブする」: opt-in,
     expect(fake.requests.length).toBe(before)
     expect(fake.threadLabels(SATO, thread)).toEqual([['INBOX']])
     // What it is for: the INBOX label off, and back on.
-    expect((await services.googleClient.request(CO, 'ga-sato', { api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] }, operation: 'test' })).ok).toBe(true)
+    expect((await services.googleClient.request(CO, 'ga-sato', { api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { removeLabelIds: ['INBOX'] }, operation: 'test' })).ok).toBe(true)
     expect(inboxOf(SATO, thread)).toBe(false)
-    expect((await services.googleClient.request(CO, 'ga-sato', { api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/threads/${thread}/modify`, scope: MODIFY, body: { addLabelIds: ['INBOX'] }, operation: 'test' })).ok).toBe(true)
+    expect((await services.googleClient.request(CO, 'ga-sato', { api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/messages/${id}/modify`, scope: MODIFY, body: { addLabelIds: ['INBOX'] }, operation: 'test' })).ok).toBe(true)
     expect(inboxOf(SATO, thread)).toBe(true)
   })
 })
@@ -273,7 +277,7 @@ describe('the server clock and the member\'s own closes', () => {
       expect(done.ok, JSON.stringify(done)).toBe(true)
       await services.inbox.whenIdle()
       const writes = gmailCalls(before).filter(r => r.method !== 'GET')
-      expect(writes.map(r => r.path)).toEqual([`/gmail/v1/users/me/threads/${a.thread}/modify`])
+      expect(writes.map(r => r.path)).toEqual([`/gmail/v1/users/me/messages/${a.id}/modify`])
       expect(inboxOf(SATO, a.thread)).toBe(false)
       expect(inboxOf(TANAKA, a.thread)).toBe(true)
       const entry = ledger(id).at(-1)!
@@ -320,5 +324,77 @@ describe('the server clock and the member\'s own closes', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('review of #607: the archive never loses mail nor closes what the member kept', () => {
+  // The switches test above left the company's switch off: on again, and every case below checks it archived.
+  beforeAll(async () => {
+    expect((await call('ga-owner', 'PUT', `${C}/google/features`, { feature: 'inbox_archive', on: true })).status).toBe(200)
+  })
+  const settleIt = async (id: string) => {
+    expect(services.inbox.judge(member('ga-sato'), ai('ga-sato'), id, { expectedVersion: stateOf(id).version, outcome: 'unsure', reason: 'x' }).ok).toBe(true)
+    const r = await services.recordEngine.act(member('ga-sato'), human(), id, 'settle', { expectedVersion: stateOf(id).version })
+    expect(r.ok, JSON.stringify(r)).toBe(true)
+    await services.inbox.whenIdle()
+  }
+  const messagesOf = (id: string) => (db.prepare('SELECT message_id FROM inbox_messages WHERE company_id = ? AND interaction_id = ?').all(CO, id) as Array<{ message_id: string }>).map(r => r.message_id)
+
+  it('H1: a reply that reached Gmail after the last poll stays in the inbox and is taken in next', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      await clockAt('2026-11-08T00:00:00.000Z')
+      const a = deliver(SATO, '2026-11-08T00:01:00.000Z', '発注の件')
+      await clockAt('2026-11-08T00:05:00.000Z')
+      const id = interactionOf(a.messageId)
+      // The customer replies at 00:06; ACB has not read the mailbox since.
+      fake.deliver({ id: 'fakemailreply1', threadId: a.thread, account: SATO, labelIds: ['INBOX', 'UNREAD'], receivedAt: '2026-11-08T00:06:00.000Z',
+        headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: SATO, Subject: 'Re: 発注の件', 'Message-ID': '<reply-1@a-corp.example>', 'In-Reply-To': a.messageId, References: a.messageId }, text: '至急：数量を変えてください' })
+      vi.setSystemTime(new Date('2026-11-08T00:07:00.000Z'))
+      await settleIt(id)
+      expect(fake.threadLabels(SATO, a.thread)).toEqual([[], ['INBOX', 'UNREAD']])
+      await clockAt('2026-11-08T00:10:00.000Z')
+      expect(messagesOf(id)).toContain('<reply-1@a-corp.example>')
+      // Their reply opened it again (the AI judges it); nothing closed it as archived.
+      expect(stateOf(id).state).toBe('received')
+      expect(ledger(id).some(e => e.action === 'left_inbox')).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('P1: he takes back his own 済んだ after ACB archived it: the next run does not close it again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const a = deliver(SATO, '2026-11-08T01:01:00.000Z', '別件')
+      await clockAt('2026-11-08T01:05:00.000Z')
+      const id = interactionOf(a.messageId)
+      await settleIt(id)
+      expect(inboxOf(SATO, a.thread)).toBe(false)
+      expect(ledger(id).at(-1)!.action).toBe('archived_there')
+      const settle = ledger(id).find(e => e.action === 'settle')!
+      const undone = await services.recordEngine.undo(member('ga-sato'), human(), id, { version: settle.version, expectedVersion: ledger(id).at(-1)!.version })
+      expect(undone.ok, JSON.stringify(undone)).toBe(true)
+      await clockAt('2026-11-08T01:10:00.000Z')
+      expect(stateOf(id).state).toBe('unsure')
+      expect(ledger(id).some(e => e.action === 'left_inbox')).toBe(false)
+      expect(noticesOf('ga-sato').filter(n => n.recordId === id && n.kind === 'mail_left_inbox')).toEqual([])
+    } finally { vi.useRealTimers() }
+  })
+
+  it('C1: two records of one Gmail conversation: closing one archives only its message, the other stays open', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const a = deliver(SATO, '2026-11-08T02:01:00.000Z', '定例のご案内')
+      fake.deliver({ id: 'fakemailsame2', threadId: a.thread, account: SATO, labelIds: ['INBOX'], receivedAt: '2026-11-08T02:02:00.000Z',
+        headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: SATO, Subject: '定例のご案内', 'Message-ID': '<same-2@a-corp.example>' }, text: '別の依頼' })
+      await clockAt('2026-11-08T02:05:00.000Z')
+      const one = interactionOf(a.messageId)
+      const two = interactionOf('<same-2@a-corp.example>')
+      expect(one).not.toBe(two)
+      await settleIt(one)
+      await clockAt('2026-11-08T02:10:00.000Z')
+      expect(stateOf(two).state).toBe('received')
+      expect(ledger(two).some(e => e.action === 'left_inbox')).toBe(false)
+      expect(fake.threadLabels(SATO, a.thread)).toEqual([[], ['INBOX']])
+    } finally { vi.useRealTimers() }
   })
 })

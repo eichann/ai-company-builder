@@ -99,9 +99,11 @@ export interface InboxSource {
   /** Whether each conversation still has a message in the member's inbox (false: archived, trashed, gone; left out: unknown). */
   inInbox?(companyId: string, userId: string, threadRefs: string[]): Promise<Record<string, boolean> | 'not-connected'>
   /**
-   * The conversation taken out of the member's own inbox, or put back (`back`), with their own
-   * permission to do so (owner decision 2026-11-05) — `not-allowed` when they have not allowed it
-   * (or turned it off, or the company did): nothing is sent then.
+   * These messages (`sourceRef`s ACB took in from the member's own mailbox) taken out of their inbox,
+   * or put back (`back`), with their own permission to do so (owner decision 2026-11-05) — never the
+   * whole conversation, so a message ACB has not read yet stays where it is. `not-allowed` when they
+   * have not allowed it (or turned it off, or the company did): nothing is sent then. `done` only
+   * when every message was changed (a message deleted meanwhile counts as done).
    */
-  archive?(companyId: string, userId: string, threadRef: string, back: boolean): Promise<'done' | 'not-allowed' | 'not-found' | 'failed'>
+  archive?(companyId: string, userId: string, sourceRefs: string[], back: boolean): Promise<'done' | 'not-allowed' | 'not-found' | 'failed'>
 }

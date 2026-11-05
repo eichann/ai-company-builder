@@ -245,11 +245,13 @@ grant** — never a key, never a service account — so every switch above appli
   「会社で使うもの」 (`GOOGLE_COMPANY_DEFAULT_OFF`, `PUT /google/features`); never in the one consent
   (`GOOGLE_ASKED_BY_NAME_ONLY`): only members who choose it allow it (`POST /me/google/connect
   { features: ['inbox_archive'] }`); 「やめる」 / back on without a consent = `PUT /me/google/features
-  { feature: 'inbox_archive' }` (`features_off`). Both switches are checked by `scopeStop` before every
+  { feature: 'inbox_archive' }` (`features_off`; the Google grant keeps the scope — the card says so,
+  「許可をやめる」 ends the whole grant). Both switches are checked by `scopeStop` before every
   call (`off` / `feature-off`). `MyGoogle.offeredByName` names what the company offers by name only.
 - **The one guard** (`shared/core/google.ts` `gmailCallAllowed`, applied by `google-client.ts` `request`
   before anything else, refusing as `call-not-allowed`, nothing sent): a call with `gmail.modify` must be
-  `POST /gmail/v1/users/me/threads|messages/<id>/modify` whose body is exactly `{ removeLabelIds:
+  `POST /gmail/v1/users/me/messages/<id>/modify` (one message — never a thread, which would also take a
+  reply ACB has not read out of the inbox) whose body is exactly `{ removeLabelIds:
   ['INBOX'] }` or `{ addLabelIds: ['INBOX'] }`, on the `gmail` API; any other Gmail call must be a read
   (`GET` of messages, threads, history, profile, labels) with `gmail.readonly` or `messages/send` with
   `gmail.send`; no other API may name a Gmail route (`/gmail/…`, `/upload/gmail/…`, `/batch/gmail/…`,
@@ -257,19 +259,19 @@ grant** — never a key, never a service account — so every switch above appli
   scope, so the declared scope alone is not trusted: the call's shape is. Never trash, delete, a draft,
   a send, a read, another label, a batch or another mailbox with it.
 - Used only by the inbox (`inbox.md` "Mail archived in the mailbox") through `google-mail.ts`
-  `archiveThread` with the mailbox owner's own grant.
+  `archiveMessage` (the messages ACB took in, one at a time) with the mailbox owner's own grant.
 - **Google Cloud** (each company's own internal app): add `https://www.googleapis.com/auth/gmail.modify`
   to the OAuth consent screen's scopes (Data access) beside `gmail.readonly`. Google's consent page
   describes it in Google's own, broader words (the permission would let an app read, change and send
-  mail); the app's card says what ACB does with it (the INBOX label only).
+  mail); the app's card says what ACB does with it (the INBOX label of the messages it took in only).
 - **Screens**: admin 「会社で使うもの」 lists 「済んだメールを Gmail でもアーカイブする」 with one line on what it
   does; app 設定 → Google shows the card while the company offers it and the member is connected
   (`googleSectionView().archive`: ［許可する］ → Google's page, ［やめる］ / ［オンにする］ → IPC
   `google:setArchive`, main sends only `{ feature: 'inbox_archive', on }`).
 - Tests: `server/tests/integration/google-inbox-archive.test.ts` (off until the admin turns it on, never
   in the one consent, asked by name; every forbidden call refused with nothing sent — trash, delete,
-  draft, send, read with it, other labels, batch, another mailbox, another API, a Gmail path under
-  another API escaped or not; the INBOX label off and on works; the switches), `google-one-consent.test.ts`
+  draft, send, read with it, a whole thread, other labels, batch, another mailbox, another API, a Gmail
+  path under another API escaped or not; the INBOX label off and on works; the switches), `google-one-consent.test.ts`
   (default off), `client/tests/google-connect.test.ts` (the card's states, `setArchive`) —
   mutation-checked.
 
@@ -388,8 +390,8 @@ Drive through the role ports (`connector-roles.md`).
   &historyTypes=messageDeleted`, the threads that lost INBOX or were deleted; 404 → `expired`),
   `threadInInbox` (`threads/<id>?format=minimal`, labels only; 404 → false). Action-log lines
   `gmail.profile.get`, `gmail.history.list`, `gmail.threads.get`.
-- **Archive** (`inbox_archive`, `gmail.modify`; `MailArchiver`): `archiveThread` (`threads/<id>/modify`,
-  INBOX off or back on; `gmail.threads.archive` / `.unarchive`). A write: never retried.
+- **Archive** (`inbox_archive`, `gmail.modify`; `MailArchiver`): `archiveMessage` (`messages/<id>/modify`,
+  INBOX off or back on; `gmail.messages.archive` / `.unarchive`). A write: never retried.
 - **Send** (`mail`, `gmail.send`; `MailSender`): `senderAccount` (the active grant with
   `gmail.send` and `mail` not off → the Google email; else `consent-needed` / `turned-off`) and
   `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`).

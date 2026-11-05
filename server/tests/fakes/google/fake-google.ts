@@ -1052,8 +1052,8 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   let historySeq = 1000
   let historyKeptFrom = 0
   const history: Array<{ id: number; account: string; kind: 'labelRemoved' | 'labelAdded' | 'messageDeleted'; messageId: string; threadId: string; labelIds: string[] }> = []
-  function changeLabels(account: string, threadId: string, add: string[], remove: string[]) {
-    for (const m of mails.filter(x => x.threadId === threadId && x.account.toLowerCase() === account.toLowerCase())) {
+  function changeLabels(account: string, threadId: string, add: string[], remove: string[], messageId?: string) {
+    for (const m of mails.filter(x => x.threadId === threadId && x.account.toLowerCase() === account.toLowerCase() && (messageId === undefined || x.id === messageId))) {
       const removed = remove.filter(l => m.labelIds.includes(l))
       const added = add.filter(l => !m.labelIds.includes(l))
       m.labelIds = [...m.labelIds.filter(l => !removed.includes(l)), ...added]
@@ -1111,7 +1111,7 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
       const target = mails.find(m => m.account.toLowerCase() === box && (kind === 'threads' ? m.threadId === id : m.id === id))
       if (!target) throw apiError(404, 'Requested entity was not found.', 'notFound')
       const body = await c.req.json().catch(() => ({})) as { addLabelIds?: string[]; removeLabelIds?: string[] }
-      changeLabels(box, target.threadId, body.addLabelIds ?? [], body.removeLabelIds ?? [])
+      changeLabels(box, target.threadId, body.addLabelIds ?? [], body.removeLabelIds ?? [], kind === 'messages' ? id : undefined)
       return c.json({ id, ...(kind === 'messages' ? { threadId: target.threadId, labelIds: target.labelIds } : {}) })
     })
   }

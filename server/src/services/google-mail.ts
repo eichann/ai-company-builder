@@ -10,9 +10,10 @@
  *   (`services/outbound-mail.ts`), once, never retried.
  * - inbox state (`inbox` feature, `gmail.readonly`): which conversations left the member's
  *   inbox, from Gmail's history (labels only), for the inbox's 「Gmail ではアーカイブ済み」.
- * - archive (`inbox_archive` feature, `gmail.modify`, owner decision 2026-11-05): a conversation's
- *   INBOX label taken off, or put back for ［元に戻す］ — the only call made with that permission
- *   (the Google client refuses any other: `gmailCallAllowed`).
+ * - archive (`inbox_archive` feature, `gmail.modify`, owner decision 2026-11-05): the INBOX label of
+ *   the messages ACB took in taken off, one message at a time (never the whole conversation: a reply
+ *   not read yet stays), or put back for ［元に戻す］ — the only call made with that permission (the
+ *   Google client refuses any other: `gmailCallAllowed`).
  *
  * Every call goes through the one Google client (`google-client.ts`), so every
  * switch — the operator's stop, the company's Google off, the vault, the
@@ -41,6 +42,8 @@ const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{1,500}$/
 const HISTORY_ID_RE = /^[0-9]{1,30}$/
 /** Gmail's history ids are decimal strings that grow: compared as numbers without a size limit. */
 const laterHistory = (a: string, b: string) => (a.length !== b.length ? a.length > b.length : a > b)
+/** The most messages of one 来た連絡 archived (or put back) at once. */
+export const ARCHIVE_MESSAGES_MAX = 50
 /** Pages of Gmail's history read per call (500 changes each); the rest is read on the next poll. */
 export const HISTORY_PAGES_MAX = 5
 const METADATA_HEADERS = ['From', 'Sender', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
@@ -351,12 +354,12 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       return { ok: true, value: messages.some(m => isObj(m) && Array.isArray(m.labelIds) && m.labelIds.includes('INBOX')) }
     },
 
-    async archiveThread(companyId, userId, threadId, back) {
-      if (!ID_RE.test(threadId)) return { ok: false, reason: 'not-found' }
+    async archiveMessage(companyId, userId, messageId, back) {
+      if (!ID_RE.test(messageId)) return { ok: false, reason: 'not-found' }
       const r = await request(companyId, userId, {
-        api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}/modify`,
+        api: 'gmail', method: 'POST', path: `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/modify`,
         body: back ? GMAIL_UNARCHIVE_BODY : GMAIL_ARCHIVE_BODY,
-        scope: GOOGLE_SCOPE.gmailModify, operation: back ? 'gmail.threads.unarchive' : 'gmail.threads.archive',
+        scope: GOOGLE_SCOPE.gmailModify, operation: back ? 'gmail.messages.unarchive' : 'gmail.messages.archive',
       })
       return r.ok ? { ok: true, value: true } : { ok: false, reason: mailReadReasonOf(r) }
     },
@@ -391,7 +394,7 @@ export const INBOX_POLL_MAX = 1000
  * are kept and `readFrom` says where they start (where a cut list stops, too).
  */
 export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'> & Partial<MailInboxWatcher & MailArchiver>, nowMs: () => number): InboxSource {
-  const threadOf = (ref: string) => (ref.startsWith('gmail:') && ID_RE.test(ref.slice(6)) ? ref.slice(6) : null)
+  const gmailIdOf = (ref: string) => (ref.startsWith('gmail:') && ID_RE.test(ref.slice(6)) ? ref.slice(6) : null)
   const leftOf = {
     label: 'Gmail',
     ...(reader.inboxCursor && reader.inboxRemovalsSince ? {
@@ -410,7 +413,7 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'> &
       async inInbox(companyId: string, userId: string, threadRefs: string[]) {
         const out: Record<string, boolean> = {}
         for (const ref of threadRefs) {
-          const t = threadOf(ref)
+          const t = gmailIdOf(ref)
           if (!t) continue
           const r = await reader.threadInInbox!(companyId, userId, t)
           if (r.ok) { out[ref] = r.value; continue }
@@ -419,14 +422,18 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'> &
         return out
       },
     } : {}),
-    ...(reader.archiveThread ? {
-      async archive(companyId: string, userId: string, threadRef: string, back: boolean) {
-        const t = threadOf(threadRef)
-        if (!t) return 'not-found' as const
-        const r = await reader.archiveThread!(companyId, userId, t, back)
-        if (r.ok) return 'done' as const
-        if (r.reason === 'not-found') return 'not-found' as const
-        return r.reason === 'unavailable' ? 'failed' as const : 'not-allowed' as const
+    ...(reader.archiveMessage ? {
+      async archive(companyId: string, userId: string, sourceRefs: string[], back: boolean) {
+        const ids = [...new Set(sourceRefs.map(gmailIdOf).filter((t): t is string => t !== null))].slice(0, ARCHIVE_MESSAGES_MAX)
+        if (ids.length === 0) return 'not-found' as const
+        let changed = 0
+        for (const id of ids) {
+          const r = await reader.archiveMessage!(companyId, userId, id, back)
+          // Deleted meanwhile: nothing left to take out (or put back).
+          if (r.ok || r.reason === 'not-found') { changed++; continue }
+          return r.reason === 'unavailable' ? 'failed' as const : 'not-allowed' as const
+        }
+        return changed > 0 ? 'done' as const : 'not-found' as const
       },
     } : {}),
   }

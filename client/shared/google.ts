@@ -107,6 +107,9 @@ export interface GoogleSectionView {
 /** What the archive card says (plain words: no labels, scopes or permissions' names). */
 export const GOOGLE_ARCHIVE_TEXT = 'ACB で来た連絡を「済んだ」「取り込まない」にしたときや、そこから作ったやることがすべて終わったときに、Gmail でもそのメールをアーカイブします（受信トレイから外すだけで、消したり送ったりはしません）。知らせの［元に戻す］で受信トレイに戻せます。'
 
+/** 「やめる」 stops ACB using it; the permission itself stays with Google until 「許可をやめる」. */
+export const GOOGLE_ARCHIVE_STOP_TEXT = '「やめる」と ACB は Gmail をアーカイブしなくなりますが、Google での許可そのものは残ります。許可ごと取り消すには上の「許可をやめる」を押してください（予定や議事録なども読めなくなります）。'
+
 /** The company offers the feature (an older server without the list: as before, offered). */
 const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.companyFeatures.includes(f)
 

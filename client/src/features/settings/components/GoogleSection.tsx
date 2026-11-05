@@ -4,7 +4,7 @@
 import { useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
-import { GOOGLE_ARCHIVE_TEXT, GOOGLE_FEATURE_LABEL, GOOGLE_PRACTICE_TEXT, GOOGLE_RENEW_MINUTES_TEXT, googleSectionView } from '../../../../shared/google'
+import { GOOGLE_ARCHIVE_STOP_TEXT, GOOGLE_ARCHIVE_TEXT, GOOGLE_FEATURE_LABEL, GOOGLE_PRACTICE_TEXT, GOOGLE_RENEW_MINUTES_TEXT, googleSectionView } from '../../../../shared/google'
 import { useGoogle } from '../hooks/useGoogle'
 import { googlePermissionKey } from '../../../shared/lib/googlePermission'
 import { GoogleRelayCard } from './GoogleRelayCard'
@@ -76,6 +76,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
             <Card className="space-y-2 p-5" data-testid="google-archive">
               <p className="text-[13px] font-medium">{GOOGLE_FEATURE_LABEL.inbox_archive}</p>
               <p className="text-[12px] text-zinc-500">{GOOGLE_ARCHIVE_TEXT}</p>
+              {view.archive !== 'allow' && <p className="text-[12px] text-zinc-500">{GOOGLE_ARCHIVE_STOP_TEXT}</p>}
               <p className="text-[12px]">{view.archive === 'on' ? 'いまは：使っています' : view.archive === 'resume' ? 'いまは：オフにしています' : 'いまは：使っていません'}</p>
               <div className="flex flex-wrap gap-2 pt-1">
                 {view.archive === 'allow' && (

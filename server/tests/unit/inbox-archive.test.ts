@@ -63,7 +63,7 @@ let looks: Array<{ userId: string; cursor: string | null }> = []
 let inInboxAsked: Array<{ userId: string; refs: string[] }> = []
 /** Members who allowed the archive (else `not-allowed`, as the Google client refuses it). */
 let archiveAllowed = new Set<string>()
-let archiveCalls: Array<{ userId: string; threadRef: string; back: boolean }> = []
+let archiveCalls: Array<{ userId: string; refs: string[]; back: boolean }> = []
 
 const m = (userId: string): Member => ({ companyId: 'a', userId, role: ROLES[userId] ?? 'member' })
 const handle = () => source.forCompany('a')
@@ -151,11 +151,15 @@ beforeEach(() => {
       inInboxAsked.push({ userId, refs })
       return Object.fromEntries(refs.map(r => [r, !gone.has(`${userId}|${r}`)]))
     },
-    async archive(_co, userId, threadRef, back) {
+    async archive(_co, userId, refs, back) {
       if (!archiveAllowed.has(userId)) return 'not-allowed'
-      archiveCalls.push({ userId, threadRef, back })
-      if (back) gone.delete(`${userId}|${threadRef}`)
-      else gone.add(`${userId}|${threadRef}`)
+      archiveCalls.push({ userId, refs, back })
+      // The fake's pointers `fake:<k>` belong to the conversation `thread-<k>`.
+      for (const r of refs) {
+        const thread = `${userId}|thread-${r.slice('fake:'.length)}`
+        if (back) gone.delete(thread)
+        else gone.add(thread)
+      }
       return 'done'
     },
   }
@@ -279,20 +283,20 @@ describe('ACB → Gmail: the owner closed it here (opt-in)', () => {
     told = []
     ok(await engine.act(m('u-alice'), person('u-alice'), s.id, 'settle', { expectedVersion: stateOf(s.id).version }))
     await inbox.whenIdle()
-    expect(archiveCalls).toEqual([{ userId: 'u-alice', threadRef: s.msg.threadRef, back: false }])
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [s.msg.sourceRef], back: false }])
     const entry = ledger(s.id).at(-1)!
     expect(entry).toMatchObject({ action: 'archived_there', actorId: 'acb:inbox', note: 'Gmail でもアーカイブしました' })
     expect(notices()).toContainEqual({ userId: 'u-alice', kind: 'mail_archived' })
     // ［元に戻す］: her undo of the inbox's entry puts the thread back in her inbox.
     ok(await engine.undo(m('u-alice'), person('u-alice'), s.id, { version: entry.version, expectedVersion: entry.version }))
     await inbox.whenIdle()
-    expect(archiveCalls.at(-1)).toEqual({ userId: 'u-alice', threadRef: s.msg.threadRef, back: true })
+    expect(archiveCalls.at(-1)).toEqual({ userId: 'u-alice', refs: [s.msg.sourceRef], back: true })
 
     const d = await aliceMail()
     unsure(d.id)
     ok(await engine.act(m('u-alice'), person('u-alice'), d.id, 'drop', { expectedVersion: stateOf(d.id).version }))
     await inbox.whenIdle()
-    expect(archiveCalls.at(-1)).toEqual({ userId: 'u-alice', threadRef: d.msg.threadRef, back: false })
+    expect(archiveCalls.at(-1)).toEqual({ userId: 'u-alice', refs: [d.msg.sourceRef], back: false })
   })
 
   it('not allowed: nothing is archived and nothing is written', async () => {
@@ -326,7 +330,7 @@ describe('ACB → Gmail: the owner closed it here (opt-in)', () => {
     await finish(one)
     expect(archiveCalls).toEqual([])
     await finish(two)
-    expect(archiveCalls).toEqual([{ userId: 'u-alice', threadRef: t.msg.threadRef, back: false }])
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [t.msg.sourceRef], back: false }])
   })
 
   it('no loop: a message the inbox closed because the mailbox archived it is never archived again', async () => {
@@ -360,5 +364,83 @@ describe('ACB → Gmail: the owner closed it here (opt-in)', () => {
     ok(await engine.act(m('u-alice'), person('u-alice'), id, 'settle', { expectedVersion: stateOf(id).version }))
     await inbox.whenIdle()
     expect(archiveCalls).toEqual([])
+  })
+})
+
+describe('review of #607: what the archive never does', () => {
+  it('only the messages ACB took in from her mailbox are archived — the thread\'s later message too once taken in, nothing else', async () => {
+    archiveAllowed.add('u-alice')
+    const first = await aliceMail()
+    // Their reply in the same thread, taken in by her next poll.
+    mailbox['u-alice'] = [mail({ references: [first.msg.messageId], threadRef: first.msg.threadRef, occurredAt: '2026-11-02T00:40:00.000Z' })]
+    const reply = mailbox['u-alice'][0]
+    await inbox.poll('a', 'u-alice')
+    unsure(first.id)
+    ok(await engine.act(m('u-alice'), person('u-alice'), first.id, 'settle', { expectedVersion: stateOf(first.id).version }))
+    await inbox.whenIdle()
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs: [first.msg.sourceRef, reply.sourceRef], back: false }])
+  })
+
+  it('she takes back her own 済んだ after ACB archived it: the next looks — history or a fresh start — never close it again', async () => {
+    archiveAllowed.add('u-alice')
+    const s = await aliceMail()
+    unsure(s.id)
+    ok(await engine.act(m('u-alice'), person('u-alice'), s.id, 'settle', { expectedVersion: stateOf(s.id).version }))
+    await inbox.whenIdle()
+    const settle = ledger(s.id).find(e => e.action === 'settle')!
+    ok(await engine.undo(m('u-alice'), person('u-alice'), s.id, { version: settle.version, expectedVersion: stateOf(s.id).version }))
+    expect(stateOf(s.id).state).toBe('unsure')
+    told = []
+    // Gmail's history shows ACB's own archive.
+    await archivedInMailbox('u-alice', s.msg.threadRef!)
+    // A fresh start (no cursor) checks the open records themselves.
+    handle().inbox.setLeftCursor('u-alice', 'email', null)
+    await inbox.poll('a', 'u-alice')
+    expect(stateOf(s.id).state).toBe('unsure')
+    expect(ledger(s.id).some(e => e.action === 'left_inbox' || e.action === 'left_inbox_noted')).toBe(false)
+    expect(notices()).toEqual([])
+  })
+
+  it('a double follow-up of one close calls the mailbox once and tells her once', async () => {
+    archiveAllowed.add('u-alice')
+    const s = await aliceMail()
+    unsure(s.id)
+    ok(await engine.act(m('u-alice'), person('u-alice'), s.id, 'settle', { expectedVersion: stateOf(s.id).version }))
+    // The same close reported again before the first follow-up finished (two app windows, a retry).
+    inbox.afterAct('a', { type: 'interaction', entry: ledger(s.id).at(-1)! })
+    await inbox.whenIdle()
+    expect(archiveCalls).toHaveLength(1)
+    expect(ledger(s.id).filter(e => e.action === 'archived_there')).toHaveLength(1)
+  })
+
+  it('the AI completing the tasks (the reply check) archives nothing: only a person\'s close or completion does', async () => {
+    archiveAllowed.add('u-alice')
+    const t = await aliceMail()
+    const task = ok(await engine.create(m('u-alice'), AI('u-alice'), { type: 'task', title: '見積書を送る', personal: true, fields: { assignee: 'u-alice' }, links: { interaction: [t.id] } })).record.id
+    ok(inbox.judge(m('u-alice'), AI('u-alice'), t.id, { expectedVersion: 1, outcome: 'task', reason: '見積の依頼', taskId: task }))
+    // Her own reply (her Sent mail) → her AI's check, which completes the task.
+    inbox.receive('a', 'u-alice', mail({ references: [t.msg.messageId], threadRef: t.msg.threadRef, from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true, occurredAt: '2026-11-02T00:50:00.000Z' }))
+    expect(stateOf(t.id).state).toBe('replied')
+    const checked = ok(inbox.replyCheck(m('u-alice'), AI('u-alice'), t.id, { expectedVersion: stateOf(t.id).version, tasks: [{ taskId: task, outcome: 'done' }] }))
+    expect(checked.state).toBe('handled')
+    expect(stateOf(task).state).toBe('done')
+    await inbox.whenIdle()
+    expect(archiveCalls).toEqual([])
+  })
+
+  it('more watched records than one look checks: the cursor waits until every one was checked', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < LEFT_CHECK_MAX + 3; i++) ids.push((await aliceMail()).id)
+    const refs = ids.map(id => fieldsOf(id).thread_ref as string)
+    for (const r of refs) gone.add(`u-alice|${r}`)
+    const cursor = handle().inbox.connection('u-alice', 'email')!.leftCursor
+    reported['u-alice'] = refs
+    await inbox.poll('a', 'u-alice')
+    expect(ids.filter(id => stateOf(id).state === 'handled')).toHaveLength(LEFT_CHECK_MAX)
+    expect(handle().inbox.connection('u-alice', 'email')!.leftCursor).toBe(cursor)
+    reported['u-alice'] = refs
+    await inbox.poll('a', 'u-alice')
+    expect(ids.filter(id => stateOf(id).state === 'handled')).toHaveLength(LEFT_CHECK_MAX + 3)
+    expect(handle().inbox.connection('u-alice', 'email')!.leftCursor).not.toBe(cursor)
   })
 })

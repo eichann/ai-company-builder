@@ -21,7 +21,8 @@
  *
  * Gmail (owner decision 2026-11-05): before anything else, a Gmail call must be one ACB makes
  * (`gmailCallAllowed`): reads with `gmail.readonly`, a send with `gmail.send`, and with
- * `gmail.modify` only a thread's INBOX label off or back on — never trash, delete, a draft or a read.
+ * `gmail.modify` only one message's INBOX label off or back on — never a thread, trash, delete, a
+ * draft or a read.
  *
  * Retries: reads (GET) after a 429, a 5xx or a failure before sending — wait
  * (Retry-After, else 1 s, 2 s), at most 2 retries. Writes (Gmail send) are

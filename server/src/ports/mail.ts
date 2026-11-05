@@ -135,9 +135,10 @@ export interface MailInboxWatcher {
 }
 
 /**
- * 済んだメールをアーカイブする (owner decision 2026-11-05): the conversation taken out of the member's
- * inbox, or put back (`back`), with the member's own permission for it — nothing else.
+ * 済んだメールをアーカイブする (owner decision 2026-11-05): one message taken out of the member's
+ * inbox, or put back (`back`), with the member's own permission for it — nothing else. Per message,
+ * never the whole conversation: a reply that arrived since ACB last read the mailbox stays in the inbox.
  */
 export interface MailArchiver {
-  archiveThread(companyId: string, userId: string, threadId: string, back: boolean): Promise<MailRead<true>>
+  archiveMessage(companyId: string, userId: string, messageId: string, back: boolean): Promise<MailRead<true>>
 }

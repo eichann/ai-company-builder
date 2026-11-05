@@ -242,7 +242,7 @@ actions:
   settle:       { label: 済んだ, from: [unsure], to: handled, who: [assignee], args: { settled_by: person }, note: optional }
   finish_reply_check: { label: 返事のあとを確かめた, from: [replied], to: handled, who: [ai], note: optional }
   check_myself: { label: 自分で確かめる, from: [replied], to: handled, who: [assignee], note: optional }
-  left_inbox:   { label: 受信トレイから外れた, from: [received, unsure], to: handled, who: [system], note: optional }
+  left_inbox:   { label: 受信トレイから外れた（自動）, from: [received, unsure], to: handled, who: [system], note: optional }
 ---
 # やりとり
 

@@ -58,7 +58,7 @@ export const GOOGLE_SCOPE = {
   /**
    * 済んだメールを Gmail でもアーカイブする (the `inbox_archive` feature only, owner decision
    * 2026-11-05). Google lets it read, label, trash and draft too; ACB sends exactly one kind of call
-   * with it — a thread's INBOX label removed (archive) or added back (undo): `gmailCallAllowed`,
+   * with it — one message's INBOX label removed (archive) or added back (undo): `gmailCallAllowed`,
    * enforced by the one Google client before anything leaves.
    */
   gmailModify: 'https://www.googleapis.com/auth/gmail.modify',
@@ -73,7 +73,7 @@ export const GOOGLE_NEVER_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/gmail.metadata',
   // `gmail.modify` left this list on 2026-11-05 (owner decision: 「済んだメールを Gmail でもアーカイブする」,
   // opt-in per member). It is held only as the `inbox_archive` feature, and the Google client sends
-  // nothing with it but `threads.modify` / `messages.modify` on the INBOX label (`gmailCallAllowed`).
+  // nothing with it but `messages.modify` on one message's INBOX label (`gmailCallAllowed`).
   'https://mail.google.com/',
 ]
 
@@ -235,11 +235,12 @@ export function googleFeaturesToAsk(requested: readonly GoogleFeature[], company
 // The Gmail calls ACB makes (owner decision 2026-11-05): the one rule the Google client applies to
 // every call to the Gmail API before anything leaves.
 
-/** The thread or message that a label change names (Gmail's ids). */
+/** The message a label change names (Gmail's ids). */
 const GMAIL_ID = '[A-Za-z0-9_-]{1,200}'
 const GMAIL_READ_RE = /^\/gmail\/v1\/users\/me\/(messages|threads|history|profile|labels)(\/[A-Za-z0-9_-]{1,200})?$/
 const GMAIL_SEND_PATH = '/gmail/v1/users/me/messages/send'
-const GMAIL_MODIFY_RE = new RegExp(`^/gmail/v1/users/me/(threads|messages)/${GMAIL_ID}/modify$`)
+/** One message's labels (never a whole conversation: a reply ACB has not read yet must stay in the inbox). */
+const GMAIL_MODIFY_RE = new RegExp(`^/gmail/v1/users/me/messages/${GMAIL_ID}/modify$`)
 
 /** The only bodies a call with `gmail.modify` may carry: the INBOX label off (archive) or back on (undo). */
 export const GMAIL_ARCHIVE_BODY = Object.freeze({ removeLabelIds: Object.freeze(['INBOX']) })
@@ -264,7 +265,7 @@ function isLabelBody(body: unknown, key: 'removeLabelIds' | 'addLabelIds'): bool
  * Whether ACB may send this Gmail call (`google-client.ts` refuses anything else as `call-not-allowed`,
  * nothing sent): reads (`GET` of messages, threads, history, the profile, labels) with
  * `gmail.readonly`; `messages/send` with `gmail.send`; and with `gmail.modify` exactly
- * `POST threads|messages/<id>/modify` whose body is `{ removeLabelIds: ['INBOX'] }` or
+ * `POST messages/<id>/modify` (one message, never a thread) whose body is `{ removeLabelIds: ['INBOX'] }` or
  * `{ addLabelIds: ['INBOX'] }` — never trash, delete, a draft, a send, a read, any other label or a
  * batch. `gmail.modify` is accepted for no other API, and no other API may name a Gmail path. Only
  * `users/me`.
