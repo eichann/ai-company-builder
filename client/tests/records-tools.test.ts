@@ -22,12 +22,12 @@ import { createRecordsApi } from '../electron/records/api'
 import { actionToolSpecs, createRecordTools } from '../electron/records/tools'
 import { decideToolWrite, type WriteGuard } from '../electron/write-guard'
 import { decideRecordEdit } from '../electron/write-guard'
-import { AGENTS } from '../shared/agents/registry'
+import { AGENTS, claudeCliModel, modelHasLargeContext } from '../shared/agents/registry'
 import { recordActionChoices } from '../shared/record-actions'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { OLD_CONNECTION_LABEL, RECORD_ACTION_AGENTS } from '../../shared/types/records'
 import { AGENT_IDS } from '../shared/agents/registry'
-import { MINUTES_PART_CHARS, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, minutesParts } from '../../shared/core/minutes'
+import { keepHeadAndTail, MINUTES_PART_CHARS, MINUTES_READ_CHARS_LARGE, MINUTES_READ_CHARS_STANDARD, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_PAGED_MAX, minutesParts } from '../../shared/core/minutes'
 import { minutesFirstMessage } from '../shared/minutes-app'
 import { autoMinutesFirstMessage } from '../shared/ai-turn-steps/minutes-reading'
 import { aiTurnStepAllowsRecordCall } from '../shared/ai-turn-steps/registry'
@@ -284,7 +284,8 @@ test('minutes_read hands long minutes over in parts (owner report 2026-11-05): e
   const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
   const access = await api.openTurn('co', { conversationId: 'c1', agent: 'claude-code', scope: 'act' })
   const cards: unknown[] = []
-  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'c1', onBundleChoice: c => cards.push(c), newId: () => 'card-1' })
+  // The chat default (a 1M-token model) is handed the whole 60,000 characters.
+  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'c1', largeContext: true, onBundleChoice: c => cards.push(c), newId: () => 'card-1' })
   const spec = tools!.specs.find(s => s.name === 'minutes_read')!
   // An older app's call (no part) is still valid input; the part is a whole number from 1.
   assert.equal(spec.schema.safeParse({ id: 'meeting-abcdef123456' }).success, true)
@@ -329,6 +330,92 @@ test('minutes_read hands long minutes over in parts (owner report 2026-11-05): e
   await tools!.close()
 })
 
+test('keepHeadAndTail: within the bound unchanged; longer keeps the beginning and the end on line ends, one mark saying how much and where', () => {
+  assert.deepEqual(keepHeadAndTail('短い\n議事録', 100), { text: '短い\n議事録', skipped: false })
+  const lines = Array.from({ length: 2000 }, (_, i) => `${i + 1}行目：${'あ'.repeat(40)}`)
+  const text = lines.join('\n')
+  const kept = keepHeadAndTail(text, 20_000)
+  assert.equal(kept.skipped, true)
+  assert.ok(kept.text.length <= 20_000, String(kept.text.length))
+  // The beginning (about three quarters) and the very end (where decisions and next steps are) are kept.
+  assert.ok(kept.text.startsWith(`${lines[0]}\n`))
+  assert.ok(kept.text.endsWith(lines[lines.length - 1]))
+  const marks = kept.text.split('\n').filter(l => /長いため省きました/.test(l))
+  assert.equal(marks.length, 1)
+  assert.match(marks[0], /全体のおよそ \d+%〜\d+% のところ/)
+  // Cut on line ends: every other line is a whole line of the text, in order, none twice.
+  const rest = kept.text.split('\n').filter(l => !/長いため省きました/.test(l))
+  for (const l of rest) assert.ok(lines.includes(l), l)
+  assert.ok(rest.length > 300 && rest.length < lines.length)
+  const headLines = kept.text.slice(0, kept.text.indexOf(marks[0])).length
+  assert.ok(headLines > kept.text.length * 0.6, 'most of the room goes to the beginning')
+  // A text without line ends is cut inside, never in a surrogate pair.
+  const emoji = keepHeadAndTail('😀'.repeat(5000), 1000)
+  assert.ok(emoji.text.length <= 1000)
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(emoji.text), 'a surrogate pair split')
+  // The bounds (minutes.md "Long minutes"): a standard model's share stays far below its window, the server answers at most the largest.
+  assert.ok(MINUTES_READ_CHARS_STANDARD * 1.3 <= 200_000 * 0.4)
+  assert.ok(MINUTES_READ_CHARS_LARGE * 1.3 <= 1_000_000 * 0.3)
+  assert.equal(MINUTES_TEXT_PAGED_MAX, MINUTES_READ_CHARS_LARGE)
+})
+
+test('minutes_read hands each model what fits its context: a 1M-token model the whole long minutes, a standard one the beginning and the end with the skipped part named', async () => {
+  const lines = Array.from({ length: 4000 }, (_, i) => `${i + 1} 佐藤：研修の進め方について、営業部と相談して決めます。`)
+  lines.push('最後に：見積は来週金曜までに田中さんが出す。次回は12月3日。')
+  const text = lines.join('\n') // about 130,000 characters
+  const answer = {
+    recordId: 'meeting-abcdef123456', version: 4, header: MINUTES_TEXT_HEADER, text, footer: MINUTES_TEXT_FOOTER,
+    truncated: false, docVersion: 'notes:7', meeting: { title: '研修', at: null }, attendees: [], externalAttendees: 0,
+    bundle: null, candidates: [], noBundle: true, instructionLike: [],
+  }
+  const fetch = (async (url: string) => {
+    const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+    if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+    if (url.includes('/api/records-ai/minutes/meeting-abcdef123456/text')) return json(200, answer)
+    return json(200, { plugins: [] })
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  const readAll = async (largeContext: boolean) => {
+    const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c1', agent: 'claude-code', scope: 'act' }))!, undefined, { largeContext })
+    const outs = [await tools!.execute('minutes_read', { id: 'meeting-abcdef123456' })]
+    while (JSON.parse(outs[outs.length - 1].slice(outs[outs.length - 1].lastIndexOf('\n') + 1)).more) {
+      outs.push(await tools!.execute('minutes_read', { id: 'meeting-abcdef123456', part: outs.length + 1 }))
+    }
+    await tools!.close()
+    const inside = outs.map(o => o.slice(o.indexOf(MINUTES_TEXT_HEADER) + MINUTES_TEXT_HEADER.length + 1, o.indexOf(MINUTES_TEXT_FOOTER) - 1)).join('\n')
+    return { outs, inside }
+  }
+  const large = await readAll(true)
+  assert.equal(large.inside, text)
+  assert.doesNotMatch(large.outs.join(''), /読めませんでした/)
+
+  const standard = await readAll(false)
+  assert.ok(standard.inside.length <= MINUTES_READ_CHARS_STANDARD, String(standard.inside.length))
+  assert.ok(standard.inside.startsWith(lines[0]))
+  // The end — where the decisions and the next steps are — is read, not cut.
+  assert.ok(standard.inside.endsWith(lines[lines.length - 1]))
+  assert.match(standard.inside, /全体のおよそ \d+%〜\d+% のところ）は、長いため省きました/)
+  // The AI is told which part it did not read, before the text and again after the last part; never that it missed the end.
+  assert.match(standard.outs[0], /途中（全体のおよそ ◯%〜◯% のところ）を読めませんでした/)
+  assert.match(standard.outs[standard.outs.length - 1], /途中（全体のおよそ ◯%〜◯% のところ）を読めませんでした/)
+  assert.doesNotMatch(standard.outs.join(''), /最後まで読めませんでした/)
+  assert.equal(JSON.parse(standard.outs[0].slice(standard.outs[0].lastIndexOf('\n') + 1)).truncated, true)
+})
+
+test('modelHasLargeContext: the registry\'s 1M models and the chat default; Sonnet, Haiku, Codex\'s live catalog and anything unknown are standard', () => {
+  assert.equal(modelHasLargeContext('claude-code', 'opus-5-5'), true)
+  assert.equal(modelHasLargeContext('claude-code', 'fable-5'), true)
+  assert.equal(modelHasLargeContext('claude-code', undefined), true)
+  assert.equal(modelHasLargeContext('claude-code', 'sonnet'), false)
+  assert.equal(modelHasLargeContext('claude-code', 'haiku'), false)
+  // A CLI model string is not a registry id: unknown, so standard.
+  assert.equal(modelHasLargeContext('claude-code', claudeCliModel('opus-5-5')), false)
+  assert.equal(modelHasLargeContext('codex', 'gpt-5.6'), false)
+  assert.equal(modelHasLargeContext('nobody', 'opus-5-5'), false)
+})
+
 test('minutes_read: short minutes are one part as before; cut minutes tell the AI to say so; a later part asked first reads the text itself', async () => {
   const base = {
     recordId: 'meeting-abcdef123456', version: 2, header: MINUTES_TEXT_HEADER, footer: MINUTES_TEXT_FOOTER, docVersion: 'notes:7',
@@ -371,6 +458,7 @@ test('the minutes-reading step tells the AI to read every part before deciding, 
   const auto = autoMinutesFirstMessage(base, 3)
   assert.match(auto, /最後の part まで全部読んでから/)
   assert.match(auto, /最後まで読めませんでした/)
+  assert.match(auto, /途中（全体のおよそ ◯%〜◯% のところ）を読めませんでした/)
   assert.ok(aiTurnStepAllowsRecordCall('minutes-reading', 'minutes_read', { id: 'meeting-abcdef123456', part: 2 }))
 })
 
