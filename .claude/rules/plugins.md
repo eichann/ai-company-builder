@@ -427,7 +427,7 @@ events:
   table of codes.
 - **`who` on a call**: `role:<name>` (declared), `admin`, `ai`, with at least one person. Narrower than an
   operation's on purpose: there is no record, so no person field; `viewer` becomes `anyone`
-  (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI — all refused. `decision: true`
+  (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI when there is no record — all refused. `decision: true`
   only on an act (`combineUse`).
 - **What arrives by itself** (`events`, a poll's `fields`) carries only `class: normal` or `keep: pointer`
   fields: the content is read by a call, by someone allowed to.

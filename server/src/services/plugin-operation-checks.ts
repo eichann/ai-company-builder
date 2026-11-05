@@ -186,7 +186,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
   ): boolean {
     const managesPlace = who.includes('dept_manager') && deps.managedFolders(member.companyId, member.userId).some(f => isSameOrAncestorPath(f, place))
     const holds = (role: string) => roleHolds?.(member.companyId, at.pluginId, at.recordId, role, member.userId) === true
-    return mayAct(engineWho(who), member, { kind: actor.kind, source: actor.source }, values, managesPlace, holds)
+    return mayAct(engineWho(who), member, { kind: actor.kind, source: actor.source }, values, managesPlace, holds, at.recordId !== null)
   }
 
   function mayRun(member: Member, actor: Pick<OperationActor, 'kind' | 'source'>, who: string[], recordId: string, place: string, pluginId: string): boolean {

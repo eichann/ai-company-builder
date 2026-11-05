@@ -50,8 +50,16 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   message; otherwise it is routed as new: never told to someone it did not reach).
   **The reporter's own message** (`outgoing: true`: their Sent mail, their own Slack message) joins
   only an interaction the reporter reads (owner FB #19): another member's sent mail never moves
-  someone else's records. It is then `skipped` with nothing written — not even its id — so the copy
-  that reached the owner (their inbox, as a member sender) is still taken as before.
+  someone else's records — except a reply whose To / CC (of the sender's own Sent mail) names the
+  record's owner: they did send it to her, so it counts in her own thread. Otherwise it is
+  `skipped` with nothing written — not even its id.
+  **Ours only from the connector** (audit B-M3, 2026-11-05): `outgoing` comes only from the
+  member's own Sent label (Gmail), their own Slack message (the event's own user id) or a mail ACB
+  sent — **never from a From header matching a member's address**. A message in someone's inbox
+  whose From names a member (forwarded, spoofed) is neither ours nor theirs: `skipped`, nothing
+  written, so it can never close a 返事のお願い, discard a draft or mark a message handled; the
+  sender's own Sent copy, reported by that member, is still taken when it comes. Guard:
+  `inbox.test.ts` "a mail that only claims a member's name …".
 - **Routing a new message** (`shared/core/intake-settings.ts` `routeIncoming`, in this order):
   spam → nothing; internal (sender is a member, or of the company's domains — the settings'
   plus the members' own, never free mail; mail only — a colleague's Slack DM or mention is what
@@ -118,7 +126,7 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
 - **The thread went on**: their reply (not `automated` / `bulk`: an automatic reply is no reply)
   moves each 返事待ち reply request to `checking` (ledger `reply_arrived`, the assignee told:
   notice `reply_arrived`); with no open reply request a `handled` interaction goes back to
-  `received` (the AI judges again). A reply of the company (`outgoing`, or a member sender) moves
+  `received` (the AI judges again). A reply of the company (`outgoing` only, see above) moves
   open / preparing reply requests to `checking` (`member_replied`, `memberReply: ai_checks`,
   default — spec §7-3: the reply's content decides) or ends them (`close`); `replied_by` is named
   only when that member can read the record. A 返事のお願い with a `task` link (a mail we sent
@@ -446,7 +454,7 @@ message and purpose, a task counts only when it names the
 message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
 stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is
 the person's; owner FB #19 (mutation-checked): her Sent mail found by the poll moves the 返事のお願い and
-drops its draft, another member's sent mail moves nothing (her own copy still counts), her reply makes
+drops its draft, another member's sent mail moves nothing unless it went to her (To / CC), a mail only claiming a member's From moves nothing (B-M3), her reply makes
 the tasks from that message her AI's check listing only her own open ones, the reply check refuses
 anything else before writing and never completes a 確かめてから task, `done` completes as her AI with
 her notice and her undo, `open` notes 「返事は済み」, with 自動で進める off the note alone; polling: first connection, 7-day read-back, the gap shown to its member
