@@ -79,8 +79,12 @@ export interface StoredBrokerService {
   ownKeyHosts: string
   /** JSON of BrokerRelayDefinition for a generic service the company registered (K9); null otherwise. */
   relay: string | null
-  /** The relay forwards only reads for this service (`brokerRelayReadOnlyAllows`). */
-  readOnly: boolean
+  /**
+   * The relay forwards only reads for this service (`brokerRelayReadOnlyAllows`), as the company
+   * chose it; null = never chosen, the default applies (`brokerRelayReadOnlyByDefault`: read-only
+   * except an AI model's API — audit B-M6).
+   */
+  readOnly: boolean | null
   /**
    * The company key the admin chose for this service (「このサービスは、この鍵を使う」) when
    * several exist, or null. Cleared when that key is stopped or deleted.

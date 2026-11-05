@@ -302,6 +302,21 @@ describe('the relay', () => {
     expect([sent.host, sent.path, sent.headers.authorization]).toEqual(['api.hubapi.com', '/crm/objects/2026-03/deals/123?properties=dealname', `Bearer ${FAKE_HUBSPOT}`])
   })
 
+  it('by default (a key, no plugin, nobody chose): HubSpot reads only — the AI cannot write through the relay; an AI model\'s API is not read-only (audit B-M6)', async () => {
+    const token = tokenFor(['hubspot'])
+    const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+    reply = () => ({ status: 200, body: '{"id":"123"}' })
+    const before = received.length
+    for (const [method, path] of [['PATCH', '/hubspot/crm/v3/objects/deals/123'], ['POST', '/hubspot/crm/v3/objects/deals'], ['DELETE', '/hubspot/crm/v3/objects/deals/123']] as const) {
+      const r = await call(method, path, { headers: auth, ...(method === 'DELETE' ? {} : { body: '{"properties":{"amount":"1"}}' }) })
+      expect([method, path, r.status, r.json.error.code]).toEqual([method, path, 403, 'ACB_READ_ONLY'])
+    }
+    expect(received.length).toBe(before)
+    expect((await call('GET', '/hubspot/crm/v3/objects/deals/123', { headers: auth })).status).toBe(200)
+    expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(true)
+    for (const model of ['gemini', 'openai', 'anthropic']) expect(services.keyBroker.relayReadOnly(CO, model)).toBe(false)
+  })
+
   it('read-only switch: a write never reaches HubSpot; reads and search still do', async () => {
     const token = tokenFor(['hubspot'])
     const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }

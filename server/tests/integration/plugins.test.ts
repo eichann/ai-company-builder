@@ -250,6 +250,9 @@ describe('connector plugins: install, turn on, mapping', () => {
   })
 
   it('turning on makes the relay read-only for the service; nothing holds the key value', async () => {
+    // Read-only already by default (audit B-M6); an admin had allowed writes here.
+    expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(true)
+    expect(services.keyBroker.setReadOnly(owner, 'hubspot', { readOnly: false }).ok).toBe(true)
     expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(false)
     // Who may read it through the relay must be decided first (empty = nobody; owner, 2026-10-31).
     expect(await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_REQUIRED' } })
@@ -259,7 +262,8 @@ describe('connector plugins: install, turn on, mapping', () => {
     expect(on.ok).toBe(true)
     expect(on.value.plugin.install).toMatchObject({ enabled: true, problem: null, keyId: hubKey })
     expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(true)
-    expect(services.keyBroker.relayReadOnly(OTHER, 'hubspot')).toBe(false)
+    // The other company never chose: read-only by default (audit B-M6).
+    expect(services.keyBroker.relayReadOnly(OTHER, 'hubspot')).toBe(true)
     const all = JSON.stringify([on, await services.plugins.list(owner), db.prepare('SELECT * FROM plugin_history').all(), db.prepare('SELECT * FROM plugin_installs').all()])
     expect(all).not.toContain(SECRET)
   })
@@ -337,10 +341,15 @@ describe('connector plugins: every kill switch acts on the next call', () => {
 })
 
 describe('the relay and a connection the plugin manages (review §5.1 / §5.2)', () => {
-  it('before the plugin was ever on, the relay is untouched (existing skills keep working)', async () => {
+  it('before the plugin was ever on, the relay only reads until an admin allows writes (audit B-M6)', async () => {
     // Runs first in file order? No: the plugin is on by now. Checked on the other company, which never turned it on.
     const otherToken = services.brokerTokens.issue(otherOwner, { conversationId: 'c-o', services: ['hubspot'] }).value.token
+    expect(await relay(otherToken, 'PATCH', '/crm/v3/objects/deals/1')).toMatchObject({ status: 403, code: 'ACB_READ_ONLY', forwarded: false })
+    expect(await relay(otherToken, 'GET', '/crm/v3/objects/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    // The admin's switch (no plugin manages it here) allows writes again.
+    expect(services.keyBroker.setReadOnly(otherOwner, 'hubspot', { readOnly: false }).ok).toBe(true)
     expect(await relay(otherToken, 'PATCH', '/crm/v3/objects/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(services.keyBroker.setReadOnly(otherOwner, 'hubspot', { readOnly: true }).ok).toBe(true)
   })
 
   it('writes never pass, from old tokens too, and turning the plugin off does not bring them back', async () => {

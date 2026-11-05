@@ -114,6 +114,24 @@ export function migrateBrokerSettings(conn: Database.Database): void {
   if (!serviceCols.has('relay')) conn.exec(`ALTER TABLE broker_services ADD COLUMN relay TEXT`)
   // The relay only reads for this service (milestone 3: HubSpot once its plugin is on): 1 / 0.
   if (!serviceCols.has('read_only')) conn.exec(`ALTER TABLE broker_services ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0`)
+  // Whether `read_only` is the company's choice (1) or never chosen (0: `brokerRelayReadOnlyByDefault`,
+  // audit B-M6: read-only but for an AI model's API). What a company already uses keeps working as it
+  // does (owner: harden without hurting today's work — e.g. a skill that writes HubSpot through the
+  // relay before its plugin is on): a row that was read-only, a generic service, or a service with a
+  // key already registered stays as it is, as the company's choice (the admin sees the switch); a key
+  // registered from now on reads only until an admin allows writes.
+  if (!serviceCols.has('read_only_set')) {
+    conn.transaction(() => {
+      conn.exec(`ALTER TABLE broker_services ADD COLUMN read_only_set INTEGER NOT NULL DEFAULT 0`)
+      conn.exec(`UPDATE broker_services SET read_only_set = 1 WHERE relay IS NOT NULL OR read_only = 1
+        OR EXISTS (SELECT 1 FROM broker_keys k WHERE k.company_id = broker_services.company_id AND k.service = broker_services.service)`)
+      // A built-in service with keys and no row yet (its settings were the defaults): writes kept.
+      conn.exec(`INSERT OR IGNORE INTO broker_services (company_id, service, category, rule, own_key_hosts, read_only, read_only_set, updated_at, updated_by)
+        SELECT DISTINCT company_id, service, CASE service WHEN 'hubspot' THEN 'system' ELSE 'tool' END, 'company-only', '[]', 0, 1,
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'acb:migration'
+        FROM broker_keys WHERE service NOT IN ('gemini', 'openai', 'anthropic')`)
+    })()
+  }
   // The company key the admin chose for the service when several exist (key-broker.md "Which company key"); null = none chosen.
   if (!serviceCols.has('default_key_id')) conn.exec(`ALTER TABLE broker_services ADD COLUMN default_key_id TEXT`)
 }
