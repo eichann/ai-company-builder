@@ -136,6 +136,8 @@ export interface PushCheckRequest {
   managedFolders?: string[]
   /** The pusher's place on 「Skill を直せる人」: skill files there are theirs to change. */
   skillEditing?: SkillEditing
+  /** The pusher's app predates the skill files rule: not applied to this push. */
+  appPredatesSkillRule?: boolean
 }
 
 export interface PreparedPushCheck {
@@ -160,6 +162,7 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     ...(req.scopePath !== undefined ? { scopePath: req.scopePath } : {}),
     ...(req.managedFolders !== undefined ? { managedFolders: req.managedFolders } : {}),
     ...(req.skillEditing !== undefined ? { skillEditing: req.skillEditing } : {}),
+    ...(req.appPredatesSkillRule ? { appPredatesSkillRule: true } : {}),
   }
   let dir: string | null = null
   try {

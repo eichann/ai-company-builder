@@ -42,8 +42,10 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
   Mac: APFS folds them. Two keys in `shared/core/paths.ts`: `lookalikeKey` (NFKC + Unicode case
   folding, default-ignorables gone) for names that are protected — `namesProtected` applies it to
   agent config, instruction files, type definitions, skill files and the auto-run check, the listed
-  path staying the pushed spelling; `diskKey` (no NFKC: `（1）` and `(1)` are two files) for the write
-  gate's second pass, reserved private paths and `diskCollisions`. `.personal` / `.backups` are not
+  path staying the pushed spelling; `diskKey` (what APFS does and nothing more: `（1）` / `(1)`, ı / i, ⭐️ / ⭐ and 葛󠄀城 /
+  葛城 stay two files; `client/tests/disk-key.test.ts` walks every cased character on a Mac) for the
+  write gate's second pass, reserved private paths and `diskCollisions`. Over-folding refuses
+  ordinary names and stops a member's sync. `.personal` / `.backups` are not
   folded: nothing is granted there. Test: `skill-files-hook.test.ts`.
   `foldAsciiCase` / `INSTRUCTION_FILE_RE` in `rules.ts` are bytewise twins of `shared/core`
   (`shared-core.md`).
@@ -123,7 +125,12 @@ Deletions are always allowed except where noted (they are how something gets uns
   judged as `<scopePath>/<path>`. Rules: `shared/core/skill-files.ts`. Why (owner decision
   2026-11-04, audit B-H2): a skill's script reaches every member by sync and runs on their
   computer under their account and tokens. Being on a list grants no folder access: the write
-  check still applies. Skills already shared keep working; only changes are refused.
+  check still applies. Skills already shared keep working; only changes are refused. Rollout: a
+  build that says it predates the app's recovery (`skillFileRuleApplies`, `lib/client-version.ts`;
+  `appPredatesSkillRule` in the snapshot) is not refused by this rule, since it would loop on a
+  `chmod +x` or a `.pyc`. No header or an unreadable one is checked, so a plain `git push` never
+  skips it. The hole stays open for such builds until they update; drop the gate when none is left
+  in `client_activity`.
   Test: `skill-files-hook.test.ts`; the list: `skill-editors.test.ts`.
 - **Auto-run parts of those files**: whoever else may edit the file, a change is owner/admin only
   when the new `.md` blob has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
@@ -170,8 +177,9 @@ Deletions are always allowed except where noted (they are how something gets uns
 - Also checked: Windows-invalid / case-colliding paths (`[WINPATH_DETECTED]`) and gitlinks
   (`[GITLINK_DETECTED]`). The collision check also refuses a path this push adds when a disk folds
   it, at any folder level, onto another spelling in the tree (`diskCollisions`, same entry shape,
-  everyone included). Only added paths: a pair already in a repository stops nobody; two spellings
-  of one NFC path (a Mac's NFD) are not a collision.
+  everyone included). Only when the added path itself creates the pair: a pair already in a
+  repository stops nobody, a new file inside a folder of one included; two spellings of one NFC path
+  (a Mac's NFD) are not a collision. The app names the file (`winPathMessage`, `path_name`).
 
 ## Bare repositories (`lib/git-server/index.ts`, `repo-config.ts`)
 

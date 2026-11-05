@@ -25,6 +25,7 @@ interface Gates {
   managedFolders?: string[]
   /** The pusher's place on 「Skill を直せる人」. */
   skillEditing?: SkillEditing
+  appPredatesSkillRule?: boolean
   scopePath?: string
 }
 
@@ -39,6 +40,7 @@ function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
         reserved: reservedPathsFor(policy),
         managedFolders: policy.managedFolders ?? [],
         ...(policy.skillEditing !== undefined ? { skillEditing: policy.skillEditing } : {}),
+        appPredatesSkillRule: policy.appPredatesSkillRule === true,
         ...(policy.scopePath !== undefined ? { scopePath: policy.scopePath } : {}),
       }
     } catch (err) {
@@ -73,6 +75,7 @@ async function main(): Promise<number> {
     // git-http strips ACB_INTERNAL_PUSH and always sets ACB_PUSH_POLICY, so a
     // member's push never counts as the server's own.
     serverPush: env.ACB_INTERNAL_PUSH === '1' && env.ACB_PUSH_POLICY === undefined,
+    appPredatesSkillRule: gates.appPredatesSkillRule === true,
     ...(gates.scopePath !== undefined ? { scopePath: gates.scopePath } : {}),
     contentCheckAvailable,
   })

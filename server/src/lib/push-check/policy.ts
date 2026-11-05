@@ -65,6 +65,8 @@ export interface PushPolicy {
    * paths). Absent = nowhere.
    */
   skillEditing?: SkillEditing
+  /** The pusher's app predates the skill files rule (lib/client-version.ts): not applied to this push. */
+  appPredatesSkillRule?: boolean
 }
 
 export type WriteGate =
@@ -151,6 +153,7 @@ export function parsePushPolicy(text: string): PushPolicy {
     ...(scopePath !== undefined ? { scopePath } : {}),
     ...(managedFolders !== undefined ? { managedFolders } : {}),
     ...(skillEditing !== undefined ? { skillEditing } : {}),
+    ...(d.appPredatesSkillRule === true ? { appPredatesSkillRule: true } : {}),
   }
 }
 

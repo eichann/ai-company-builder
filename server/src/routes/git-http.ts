@@ -4,6 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { type AuthUser } from '../lib/auth'
 import { clientIdentityFromHeaders, receivePackSucceeded } from '../lib/client-activity'
+import { skillFileRuleApplies } from '../lib/client-version'
 import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
@@ -436,7 +437,7 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
 // For a scope repository (`scopePath` set) the checker evaluates every pushed
 // path as `<scopePath>/<path>`; for the company repository it also refuses
 // changes under private folders' paths ([RESERVED_PATH]).
-function pushCheckFor(companyId: string, userId: string, scopePath?: string): PreparedPushCheck {
+function pushCheckFor(companyId: string, userId: string, clientVersion: string | null | undefined, scopePath?: string): PreparedPushCheck {
   try {
     // The pusher's membership (checked before this runs); without one, no snapshot (fail closed).
     const member = services.access.memberOf(companyId, userId)
@@ -454,6 +455,7 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
       managedFolders,
       // Skill files: also for the people on 「Skill を直せる人」.
       skillEditing: services.permissionViews.skillEditing(companyId, userId),
+      appPredatesSkillRule: !skillFileRuleApplies(clientVersion),
     })
   } catch (err) {
     logError('git-http', 'cannot build the push permission snapshot', err)
@@ -538,7 +540,7 @@ gitHttpRoute.post('/:repo/git-receive-pack', ownCredential(SMART_HTTP_AUTH), asy
   // Registered BEFORE the snapshot: creating a private folder waits for every
   // push whose snapshot may predate its reservation (lib/private-folders.ts).
   const endPush = beginCompanyPush(companyId)
-  const check = pushCheckFor(companyId, user.id)
+  const check = pushCheckFor(companyId, user.id, clientIdentityFromHeaders((n) => c.req.header(n)).version)
   const pushCheck: PreparedPushCheck = {
     env: check.env,
     cleanup: () => {
@@ -646,7 +648,7 @@ gitHttpRoute.post('/:company/scopes/:repo/git-receive-pack', ownCredential(SMART
   if (isScopeClosing(r.scope.id) || !beginScopePush(r.scope.id)) {
     return new Response('This folder is being changed; try again shortly', { status: 503 })
   }
-  const check = pushCheckFor(r.companyId, r.user.id, r.scope.path)
+  const check = pushCheckFor(r.companyId, r.user.id, clientIdentityFromHeaders((n) => c.req.header(n)).version, r.scope.path)
   let ended = false
   const pushCheck: PreparedPushCheck = {
     env: check.env,

@@ -92,6 +92,8 @@ export interface PushCheckContext {
    * authorised. Skips only the who-may-change-skills rule.
    */
   serverPush?: boolean
+  /** The pusher's app predates the rule (lib/client-version.ts): it would be refused at every sync. */
+  appPredatesSkillRule?: boolean
   /** Set for a scope repository: the private folder's company path (pushed paths are relative to it). */
   scopePath?: string
 }
@@ -424,7 +426,7 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
 
       // Everything else in skill / agent / command folders: also the people
       // named for it. A path with auto-run parts is already listed, with its reason.
-      if (lists.ok && !ctx.serverPush) {
+      if (lists.ok && !ctx.serverPush && !ctx.appPredatesSkillRule) {
         const text = (bytes: string) => Buffer.from(bytes, 'latin1').toString('utf8')
         const withReason = new Set(nonEmptyLines(autorun).map(l => cleanControl(text(l.slice(0, l.lastIndexOf('\t'))))))
         const skills = captured(skillFilePaths(nameListLines(lists))

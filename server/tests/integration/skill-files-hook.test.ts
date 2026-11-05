@@ -50,6 +50,7 @@ interface Pusher {
   role: string
   managedFolders?: string[]
   skillEditing?: { everywhere: boolean; folders: string[] }
+  appPredatesSkillRule?: boolean
   scopePath?: string
   scopes?: unknown[]
 }
@@ -66,6 +67,7 @@ function policyFile(p: Pusher): string {
     ...(p.scopePath ? { scopePath: p.scopePath } : {}),
     ...(p.managedFolders ? { managedFolders: p.managedFolders } : {}),
     ...(p.skillEditing ? { skillEditing: p.skillEditing } : {}),
+    ...(p.appPredatesSkillRule ? { appPredatesSkillRule: true } : {}),
   }))
   return file
 }
@@ -307,16 +309,16 @@ describe('who may change a skill\'s files', () => {
   })
 
   it('a look-alike of a private folder is that folder: reserved, for everyone', () => {
-    const scopes = [...OPEN_SCOPES, { id: 'p', path: 'secret', kind: 'folder', repoId: 'repo-1', rules: [{ id: 'e', subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false }] }]
+    const scopes = [...OPEN_SCOPES, { id: 'q', path: 'assets', kind: 'folder', repoId: 'repo-2', rules: [{ id: 'e2', subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false }] }, { id: 'p', path: 'secret', kind: 'folder', repoId: 'repo-1', rules: [{ id: 'e', subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false }] }]
     const { clone } = setup()
-    plant(clone, ['ſecret/x.md'])
+    plant(clone, ['ſecret/x.md', 'aẞets/y.md'])
     const r = push(clone, { role: 'owner', scopes })
     expect(r.ok).toBe(false)
     expect(r.output).toContain('[RESERVED_PATH]')
   })
 
   it('a new path a disk folds onto an existing one stops at the collision check, for owners too; files and folders alike', () => {
-    for (const [seed, added] of [['docs/secret.md', 'docs/ſecret.md'], ['sales/old.md', 'ſales/new.md'], ['docs/ﬁle.md', 'docs/file.md']]) {
+    for (const [seed, added] of [['docs/secret.md', 'docs/ſecret.md'], ['sales/old.md', 'ſales/new.md'], ['docs/ﬁle.md', 'docs/file.md'], ['docs/Strasse.md', 'docs/Straẞe.md']]) {
       const { clone } = setup({ [seed]: 'real\n' })
       plant(clone, [added])
       const r = push(clone, { role: 'owner' })
@@ -329,7 +331,9 @@ describe('who may change a skill\'s files', () => {
   it('names that only look alike on paper stay two files; a Mac\'s NFD and an old pair stop nobody', () => {
     const { clone } = setup({ '資料/見積(1).md': 'a\n', 'ガイド/a.md': 'a\n' })
     // É.md: with a spelling a disk folds in the tree, the comparison really runs.
-    plant(clone, ['資料/見積（1）.md', 'ｶﾀﾛｸﾞ.md', 'カタログ.md', `${'ガイド'.normalize('NFD')}/b.md`, 'É.md'], 'b\n')
+    plant(clone, ['資料/見積（1）.md', 'ｶﾀﾛｸﾞ.md', 'カタログ.md', `${'ガイド'.normalize('NFD')}/b.md`, 'É.md',
+      // What APFS keeps apart, so ordinary names a member may well have.
+      '⭐重要.md', '⭐️重要.md', '葛城.pdf', '葛\u{E0100}城.pdf', 'ı.md', 'i.md', 'ab.md', 'a\u200Bb.md'], 'b\n')
     const r = push(clone, MEMBER)
     expect(r.ok, r.output).toBe(true)
 
@@ -339,7 +343,24 @@ describe('who may change a skill\'s files', () => {
     git(['-C', old.bare, 'fetch', '-q', old.clone, '+main:main'])
     plant(old.clone, ['other.md'], 'o\n')
     expect(push(old.clone, MEMBER).ok).toBe(true)
+
+    // A folder pair: a new file inside either one creates nothing new.
+    const folders = setup()
+    plant(folders.clone, ['Ａ社/a.md', 'ａ社/b.md'], 'x\n')
+    git(['-C', folders.bare, 'fetch', '-q', folders.clone, '+main:main'])
+    plant(folders.clone, ['Ａ社/new.md', 'notes.md'], 'n\n')
+    expect(push(folders.clone, MEMBER).ok).toBe(true)
   })
+
+  it('an app that says it predates the rule is not refused, it would loop; auto-run parts are refused all the same', () => {
+    const app: Pusher = { role: 'member', appPredatesSkillRule: true }
+    expect(changeAs(app, SCRIPT).ok).toBe(true)
+    const { clone } = setup()
+    writeFile(clone, '.claude/skills/x/SKILL.md', '---\nhooks: {}\n---\n')
+    commitAll(clone)
+    expect(push(clone, app).ok).toBe(false)
+  })
+
 
   it('leaves the rest of .claude and the existing skills alone', () => {
     const { bare, clone } = setup({ [SCRIPT]: 'v1\n' })

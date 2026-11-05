@@ -51,25 +51,28 @@ export function pathKey(path: string): string {
 }
 
 const DEFAULT_IGNORABLE_RE = /\p{Default_Ignorable_Code_Point}/gu
-
 /**
  * Where a spelling lands on a case-insensitive disk: pathKey, then Unicode full
- * case folding (ſ → s, K (Kelvin) → k, ß → ss, É → é), with default-ignorable
- * characters gone (HFS+ skips them). `.claude/ſkills/x` is `.claude/skills/x`
- * on a Mac, though git and pathKey see two paths. Compatibility forms stay
- * apart, as on disk: `（1）` and `(1)` are two files.
+ * case folding (ſ → s, K (Kelvin) → k, ß and ẞ → ss, É → é, ﬁ → fi).
+ * `.claude/ſkills/x` is `.claude/skills/x` on a Mac, though git and pathKey see
+ * two paths. Held to what APFS does (client/tests/disk-key.test.ts walks every
+ * cased character on the Mac runners): `（1）` and `(1)`, half-width kana, ı and
+ * i, and spellings that differ by a variation selector or joiner (⭐️ / ⭐,
+ * 葛󠄀城 / 葛城) stay two files. Over-folding refuses ordinary names.
  */
 export function diskKey(path: string): string {
-  return pathKey(path).replace(DEFAULT_IGNORABLE_RE, '').toUpperCase().toLowerCase().normalize('NFC')
+  // Each piece on its own: JavaScript upper-cases ı to I, a disk does not.
+  return pathKey(path).split('ı').map(s => s.toLowerCase().toUpperCase().toLowerCase().normalize('NFC')).join('ı')
 }
 
 /**
- * diskKey over compatibility forms too (NFKC: full-width letters, ligatures):
- * for testing a path against names that are protected, where a false refusal
- * of `.ｃｌａｕｄｅ/` costs nothing. Not for telling two files apart.
+ * For testing a path against names that are protected, where a false refusal
+ * of `.ｃｌａｕｄｅ/` costs nothing: diskKey over compatibility forms (NFKC:
+ * full-width letters, ligatures) and without default-ignorable characters
+ * (HFS+ and tools skip them). Not for telling two files apart.
  */
 export function lookalikeKey(path: string): string {
-  return diskKey(path.normalize('NFKC'))
+  return diskKey(path.normalize('NFKC').replace(DEFAULT_IGNORABLE_RE, ''))
 }
 
 /**

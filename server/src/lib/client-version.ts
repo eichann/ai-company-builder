@@ -50,6 +50,27 @@ export function supportsWriteDeniedRecovery(version: string | null | undefined):
 }
 
 /**
+ * When the desktop app learned to live with the skill files rule (#596): its
+ * recovery restores a `chmod +x`, and what running a skill leaves stays out of
+ * sync. An older app is refused for those at every sync, holding its other work
+ * back, so the server does not apply the rule to it.
+ */
+export const SKILL_FILE_RECOVERY_COMMIT_DATE = '20261104203000'
+
+/**
+ * Does the skill files rule apply to a push from this build? Yes unless the
+ * build says it is older: the opposite default to supportsWriteDeniedRecovery on
+ * purpose. No header (a plain `git push`) or an unreadable one means the rule
+ * applies, so only a build that announces itself as old is let through, and
+ * the rule's hole stays open for those builds until they are updated.
+ */
+export function skillFileRuleApplies(version: string | null | undefined): boolean {
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return true
+  return parsed.commitDate >= SKILL_FILE_RECOVERY_COMMIT_DATE
+}
+
+/**
  * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop
  * app handles private folders: several repositories per company (the
  * company repository plus one scope repository per readable private

@@ -356,9 +356,10 @@ export function windowsPathProblems(treeLines: string[]): string[] {
  * or never arrives, and that member's pull stops. Compared at every folder
  * level; two spellings of one NFC path (a Mac's NFD) are not a collision.
  *
- * Only paths this push adds are reported (`addedLines`): the windows check reads
- * the whole tree, and a pair already in a repository must not stop every
- * member's push. Same entry shape as the case collisions above.
+ * Reported only when the added path itself creates the pair (`addedLines`): the
+ * windows check reads the whole tree, and a pair already in a repository, or a
+ * new file inside a folder of one, must not stop a member's push. Same entry
+ * shape as the case collisions above.
  */
 export function diskCollisions(treeLines: string[], addedLines: string[]): string[] {
   if (addedLines.length === 0) return []
@@ -369,17 +370,22 @@ export function diskCollisions(treeLines: string[], addedLines: string[]): strin
   // A collision needs a spelling that differs from its key; most trees have none.
   const folds = (line: string) => /[\x80-\xff]/.test(line) && diskKey(textOf(line)) !== pathKey(textOf(line))
   if (!treeLines.some(folds)) return []
+  const added = new Set(addedLines)
   const spellings = new Map<string, Set<string>>()
+  /** Spellings the tree had before this push: anything at or above a path it did not add. */
+  const existing = new Set<string>()
   for (const line of treeLines) {
     for (const p of prefixes(line)) {
       const key = diskKey(p)
       const set = spellings.get(key) ?? new Set<string>()
       set.add(pathKey(p))
       spellings.set(key, set)
+      if (!added.has(line)) existing.add(pathKey(p))
     }
   }
+  const creates = (p: string) => (spellings.get(diskKey(p))?.size ?? 0) > 1 && !existing.has(pathKey(p))
   const caseDup = utf8Bytes(' （大文字小文字のみ異なるパスが複数存在）')
-  return sortUnique(addedLines).filter(l => prefixes(l).some(p => (spellings.get(diskKey(p))?.size ?? 0) > 1)).map(l => l + caseDup)
+  return sortUnique(addedLines).filter(l => prefixes(l).some(creates)).map(l => l + caseDup)
 }
 
 // ----------------------------------------------------------------------------

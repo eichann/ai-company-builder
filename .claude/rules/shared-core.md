@@ -25,7 +25,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 
 | Module | Rules |
 |---|---|
-| `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold: naming a place), `diskKey` (Unicode case folding: where a spelling lands on APFS / NTFS), `lookalikeKey` (diskKey over NFKC: testing protected names), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
+| `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold: naming a place), `diskKey` (Unicode case folding, exactly what APFS does: where a spelling lands), `lookalikeKey` (diskKey over NFKC, without default-ignorables: testing protected names only), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
 | `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
 | `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`); compared as `diskKey`s |
