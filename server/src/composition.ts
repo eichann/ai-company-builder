@@ -300,6 +300,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const recordEngine = createRecordEngine({
     ...shared,
     files: gitRecordFileWriter(),
+    // Is a folder in the company folder? (audit B-M1: a missing one answers like a private one.)
+    folderExists: async (companyId, path) => (repoStore.companyRepoExists(companyId) ? (await repoStore.resolveFolder(companyId, path)) !== null : null),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,

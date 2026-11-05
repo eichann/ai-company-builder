@@ -4,6 +4,7 @@ import { findPrivateScope } from '../../../shared/core/permissions'
 import { noTurnStates } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
+import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordLinkRow } from '../../ports/records'
 import type { Member } from '../access'
@@ -15,7 +16,7 @@ import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-se
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
-import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, FOLDER_NOT_PLACEABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
@@ -107,6 +108,25 @@ export function creating(ctx: EngineContext) {
   }
 
   const api = {
+    /**
+     * Before a create, an AI's create (`byAi`: after its defaults) or a share that names a folder
+     * (the routes call it first; the engine itself is synchronous): a folder that is not in the
+     * company folder gets the same answer as one inside a private folder (`FOLDER_NOT_PLACEABLE`),
+     * so an answer never tells whether a private folder of that name exists (audit B-M1). Not
+     * known (no repository, git failed, no `folderExists`) → left to `create` / `share`.
+     */
+    async checkPlace(member: Member, body: unknown, byAi = false): Promise<Outcome<null>> {
+      if (!deps.folderExists) return ok(null)
+      const placed = byAi ? aiPlacement(member, body) : body
+      if (typeof placed !== 'object' || placed === null || Array.isArray(placed)) return ok(null)
+      const raw = (placed as Record<string, unknown>).folder
+      const f = typeof raw === 'string' ? normalizeRepoPath(raw) : null
+      if (!f) return ok(null)
+      let exists: boolean | null
+      try { exists = await deps.folderExists(member.companyId, f) } catch { exists = null }
+      return exists === false ? bad(FOLDER_NOT_PLACEABLE.error, FOLDER_NOT_PLACEABLE.code) : ok(null)
+    },
+
     /**
      * The member's AI (`POST /api/records-ai/item`, tool records_create): `create` after the
      * AI's defaults (`aiPlacement`, and a due for what comes from a message: `messageDue`). The
