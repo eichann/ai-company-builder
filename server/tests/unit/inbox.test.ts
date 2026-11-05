@@ -373,7 +373,8 @@ describe('one interaction per thread, no body', () => {
     inbox.receive('a', 'u-alice', first)
     const row = interactions()[0]
     const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
-    expect(inbox.receive('a', 'u-bob', mail({ references: [first.messageId], from: { address: 'bob@acme.example' }, to: [{ address: 'tanaka@client.example' }] }))).toBe('continued')
+    // Bob's own Sent mail, his reply in her thread with her in CC (he did send it to her).
+    expect(inbox.receive('a', 'u-bob', mail({ references: [first.messageId], from: { address: 'bob@acme.example' }, to: [{ address: 'tanaka@client.example' }], cc: [{ address: 'alice@acme.example' }], outgoing: true }))).toBe('continued')
     expect(stateOf(rr).state).toBe('checking')
     expect(fieldsOf(rr).trigger_kind).toBe('our_reply')
     // u-bob cannot read u-alice's own record: never named on it.
@@ -775,7 +776,7 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
       ...handle().records.linksFrom([rr]),
       { sourceId: rr, name: 'prepared', position: 9, targetId: draft.record.id, targetPath: null },
     ])
-    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }] }))
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true }))
     expect(stateOf(rr).state).toBe('checking')
     expect(stateOf(draft.record.id).state).toBe('discarded')
     expect(handle().records.ledger(draft.record.id).at(-1)?.note).toBe('メールで返信済み')
@@ -784,7 +785,7 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
   it('replied before the AI judged it: the message is handled, and the AI makes no 返事のお願い for an answered thread', () => {
     const first = mail()
     inbox.receive('a', 'u-alice', first)
-    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }] }))
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true }))
     const [row] = interactions()
     expect(stateOf(row.id).state).toBe('handled')
     expect(fieldsOf(row.id).needs_reply).toBe(false)
@@ -833,7 +834,7 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     const [row] = interactions()
     const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
     // Her reply (sent from the card's draft) is seen: the AI's turn to check it.
-    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }] }))
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true }))
     expect(stateOf(rr).state).toBe('checking')
     const v = stateOf(rr).version
     const aiActor = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
@@ -1217,7 +1218,7 @@ describe('owner FB #19: a reply sent elsewhere (the phone, Gmail / Slack itself)
     expect(handle().inbox.messagesOf(row.id).map(x => x.direction)).toEqual(['in', 'out'])
   })
 
-  it('another member\'s sent mail never moves someone else\'s records; her own copy of it (CC) still counts', () => {
+  it('another member\'s sent mail never moves someone else\'s records; his own Sent mail to her (CC) counts, her inbox copy does not', () => {
     const first = mail()
     inbox.receive('a', 'u-alice', first)
     const [row] = interactions()
@@ -1225,13 +1226,44 @@ describe('owner FB #19: a reply sent elsewhere (the phone, Gmail / Slack itself)
     const bobs = mail({
       references: [first.messageId], from: { address: 'bob@acme.example' }, to: [{ address: 'tanaka@client.example' }], cc: [{ address: 'alice@acme.example' }], outgoing: true,
     })
-    // Bob's Sent mail: Bob cannot read Alice's own message — nothing moves, nothing is kept.
-    expect(inbox.receive('a', 'u-bob', bobs)).toBe('skipped')
+    // Bob's Sent mail that did not go to her: Bob cannot read Alice's own message — nothing moves, nothing is kept.
+    expect(inbox.receive('a', 'u-bob', { ...bobs, messageId: '<bob-only@acme.example>', cc: [] })).toBe('skipped')
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(handle().inbox.message('email', '<bob-only@acme.example>')).toBeNull()
+    // Nor does a copy of his that only claims his name.
+    // The copy that reached her inbox only says it is from Bob (a From header proves nothing): it
+    // moves nothing and is not kept (audit B-M3).
+    expect(inbox.receive('a', 'u-alice', { ...bobs, outgoing: false })).toBe('skipped')
     expect(stateOf(rr).state).toBe('preparing')
     expect(handle().inbox.message('email', bobs.messageId)).toBeNull()
-    // The copy that reached her (CC) is a reply of the company in her thread, as before.
-    expect(inbox.receive('a', 'u-alice', { ...bobs, outgoing: false })).toBe('continued')
+    // Bob's own Sent mail that went to her (CC) is a reply of the company in her thread.
+    expect(inbox.receive('a', 'u-bob', bobs)).toBe('continued')
     expect(stateOf(rr).state).toBe('checking')
+  })
+
+  it('a mail that only claims a member\'s name (forwarded, spoofed From) never closes her 返事のお願い nor drops its draft (audit B-M3)', () => {
+    settings({ memberReply: 'close' })
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const draft = serviceWriter.create('a', {
+      type: 'outbound_message', title: 'Re: お見積り', personalOwner: 'u-alice', fields: { assignee: 'u-alice', requested_by: 'u-alice', channel: 'email' },
+      links: { interaction: [row.id] }, actor: { id: 'u-alice', kind: 'human', source: null }, note: '', quiet: true,
+    })
+    if (!draft.ok) throw new Error(draft.reason)
+    // In her inbox (not her Sent label), From: herself or a colleague.
+    for (const from of ['alice@acme.example', 'bob@acme.example', 'boss@acme.example']) {
+      const fake = mail({ references: [first.messageId], from: { address: from }, to: [{ address: 'alice@acme.example' }] })
+      expect(inbox.receive('a', 'u-alice', fake)).toBe('skipped')
+    }
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(stateOf(draft.record.id).state).toBe('draft')
+    expect(handle().inbox.messagesOf(row.id).map(x => x.direction)).toEqual(['in'])
+    // Her real Sent mail still ends it.
+    expect(inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true }))).toBe('continued')
+    expect(stateOf(rr).state).toBe('closed')
+    expect(stateOf(draft.record.id).state).toBe('discarded')
   })
 
   it('her reply makes the tasks from that message her AI\'s check, which lists only her own open ones from it', () => {
