@@ -5,7 +5,8 @@
  * them, and a deletion changes no remaining content), in the shell hook's
  * order:
  *
- *   protected config   owner/admin only (role from ACB_PUSHER_ROLE)
+ *   protected config   owner/admin only (role from ACB_PUSHER_ROLE); also,
+ *                      by default, the rest of .claude/ and .agents/   (new)
  *   instruction files  CLAUDE.md / CLAUDE.local.md / AGENTS.md: owner/admin,
  *                      or a manager inside their department   (new)
  *   auto-run skills    owner/admin only
@@ -60,6 +61,9 @@ import {
   utf8Bytes,
   windowsPathProblems,
   type RefUpdate,
+  agentFolderPaths,
+  AGENTS_SKILL_DIR_RE,
+  namesProtected,
 } from './rules'
 import { emptyFindings, renderReport, type Findings } from './report'
 import { instructionFileAllowed, reservedAncestorOf, reservedPrefixOf, skillFileAllowed, type WriteGate } from './policy'
@@ -94,6 +98,13 @@ export interface PushCheckContext {
   serverPush?: boolean
   /** The pusher's app predates the rule (lib/client-version.ts): it would be refused at every sync. */
   appPredatesSkillRule?: boolean
+  /**
+   * The pusher's app predates the default-deny of `.claude/` / `.agents/`
+   * (lib/client-version.ts): it would share what running a tool leaves there
+   * (`__pycache__`, `.DS_Store`) and be refused at every sync. The rest of
+   * those folders and Codex's `.agents/skills/` are then not checked for it.
+   */
+  appPredatesAgentConfigRule?: boolean
   /** Set for a scope repository: the private folder's company path (pushed paths are relative to it). */
   scopePath?: string
 }
@@ -413,6 +424,14 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
       const found = lists.ok ? captured(protectedPaths(nameListLines(lists)).join('\n')) : unableToCheck(ref.refname)
       if (found) f.protected += found + '\n'
 
+      // Default-deny: the rest of .claude/ and .agents/ (not skill or
+      // instruction files, which follow their own rules below). Listed with
+      // the named config: the same recovery restores them in every app.
+      const folders = lists.ok && !ctx.serverPush && !ctx.appPredatesAgentConfigRule
+        ? captured(agentFolderPaths(nameListLines(lists)).join('\n'))
+        : ''
+      if (folders) f.agentFolders += folders + '\n'
+
       // CLAUDE.md / AGENTS.md: also a department manager's inside their department.
       const instructions = lists.ok
         ? captured(instructionFilePaths(nameListLines(lists))
@@ -430,6 +449,7 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
         const text = (bytes: string) => Buffer.from(bytes, 'latin1').toString('utf8')
         const withReason = new Set(nonEmptyLines(autorun).map(l => cleanControl(text(l.slice(0, l.lastIndexOf('\t'))))))
         const skills = captured(skillFilePaths(nameListLines(lists))
+          .filter(l => !(ctx.appPredatesAgentConfigRule && namesProtected(AGENTS_SKILL_DIR_RE, l)))
           .filter(l => !withReason.has(cleanControl(text(l))) && !skillFileAllowed(text(l), ctx.managedFolders ?? [], ctx.skillEditing, ctx.scopePath))
           .join('\n'))
         if (skills) f.skills += skills + '\n'

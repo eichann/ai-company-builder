@@ -29,8 +29,9 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
 | `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`); compared as `diskKey`s |
-| `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md`: names, who may change them |
-| `skill-files.ts` | everything under `.claude/skills|agents|commands`: `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
+| `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md` and `.claude/rules/*.md` (`RULES_FILE_PATTERN`): names, who may change them |
+| `skill-files.ts` | everything under `.claude/skills|agents|commands` and `.agents/skills` (`SKILL_FOLDERS`, `SKILL_FOLDER_PATTERN`): `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
+| `agent-config.ts` | what the agents load and run, owner/admin only: the named config (`AGENT_CONFIG_PATTERN`) and the default-deny of the rest of `.claude/` / `.agents/` (`AGENT_FOLDER_PATTERN`): `isAgentConfig`; the push checker builds its bytewise regexes from the patterns |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
@@ -82,9 +83,9 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
   and `client/shared/sparse-paths.ts` re-export what they used to define; Vite bundles it.
 - Admin: from `admin/src/lib`; its Dockerfile copies `shared/` into the build stage; Turbopack's
   root is the repository (`outputFileTracingRoot`).
-- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` / `SKILL_DIR_RE` (`server/src/lib/push-check/rules.ts`)
-  stay bytewise twins over git's latin1 bytes by design; the regexes are built from the core's name
-  lists.
+- The push checker's `foldAsciiCase` / `INSTRUCTION_FILE_RE` / `SKILL_DIR_RE` / `PROTECTED_RE` /
+  `AGENT_FOLDER_RE` (`server/src/lib/push-check/rules.ts`) stay bytewise twins over git's latin1
+  bytes by design; the regexes are built from the core's name lists and patterns.
 
 ## Parity tests (what can still drift is held together by tests, not review)
 

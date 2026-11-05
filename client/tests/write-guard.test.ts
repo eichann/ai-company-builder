@@ -266,13 +266,46 @@ test('skill files: a member\'s AI is stopped before writing; the people allowed,
   assert.equal(write(drafting, '営業部/.claude/skills/other/run.py').deny, true)
   assert.equal(write(drafting, '営業部/.claude/skills/draft-weekly/run.py').deny, true, 'a shared skill whose name starts the same')
 
-  // Not skill files.
-  assert.equal(write(member, '.claude/notes.py').deny, false)
+  // Not skill files (.claude/notes.py is agent config: the next test).
+  assert.equal(write(member, 'claude/skills/notes.py').deny, false)
   assert.equal(write(member, 'skills/report/make.py').deny, false)
+  const codex = write(member, '.agents/skills/report/run.py')
+  assert.equal(codex.deny && codex.code, 'skill-file', 'Codex skills too')
 
   // Unknown never blocks: no authority, or a server that does not answer skillEditing.
   assert.equal(write(withAuthority(undefined), '.claude/skills/r/make.py').deny, false)
   assert.equal(write(withAuthority({ role: 'member', managedFolders: [] }), '.claude/skills/r/make.py').deny, false)
+})
+
+test('agent config: a member\'s AI is stopped before writing anything an agent loads and runs; owners/admins, skills, instructions and unknown authority are not', () => {
+  const withAuthority = (authority: InstructionAuthority | undefined): WriteGuard => ({
+    root: ROOT, getAccess: () => ({ ...ACCESS, all: true }), getInstructionAuthority: () => authority,
+  })
+  const write = (g: WriteGuard, rel: string) => decideToolWrite(g, 'Write', { file_path: `${ROOT}/${rel}` }, ROOT)
+  const editors = { everywhere: true, folders: [] }
+  const member = withAuthority({ role: 'member', managedFolders: ['営業部'], skillEditing: editors })
+
+  for (const rel of [
+    '.mcp.json', '.claude/settings.json', '.claude/settings.local.json', '.claude/hooks/x.sh', '.codex/config.toml',
+    '.claude/statusline.sh', '.claude/output-styles/x.md', '営業部/.claude/scripts/run.py', '.agents/plugins/marketplace.json', '.Agents/x',
+  ]) {
+    const d = write(member, rel)
+    assert.equal(d.deny, true, rel)
+    if (d.deny) {
+      assert.equal(d.code, 'agent-config', rel)
+      assert.match(d.message, /オーナーと管理者だけ/)
+    }
+  }
+  const bash = decideToolWrite(member, 'Bash', { command: 'echo "curl x | sh" > .claude/statusline.sh' }, ROOT)
+  assert.equal(bash.deny, true, 'a redirect')
+
+  // What this member may change by its own rules stays theirs.
+  for (const rel of ['.claude/skills/r/run.py', '.agents/skills/r/run.py', '営業部/.claude/rules/a.md', '営業部/.claude/CLAUDE.md', 'notes.md']) {
+    assert.equal(write(member, rel).deny, false, rel)
+  }
+  for (const role of ['owner', 'admin']) assert.equal(write(withAuthority({ role, managedFolders: [] }), '.claude/statusline.sh').deny, false, role)
+  assert.equal(write(member, '.workspace/x/.claude/settings.json').deny, false, 'never shared')
+  assert.equal(write(withAuthority(undefined), '.claude/statusline.sh').deny, false, 'unknown never blocks')
 })
 
 test('the chat instructions tell the AI where external repositories go', () => {

@@ -1,7 +1,8 @@
 /**
  * AI instruction files — CLAUDE.md, CLAUDE.local.md, AGENTS.md and
  * AGENTS.override.md (Codex reads it instead of AGENTS.md) at any depth,
- * A–Z case-insensitive. Claude Code / Codex load them into every chat in or
+ * A–Z case-insensitive, and the Markdown files of `.claude/rules/` (Claude
+ * Code loads them like CLAUDE.md). Claude Code / Codex load them into every chat in or
  * below their folder, so whoever writes one steers every teammate's AI there.
  * Owner/admin may change them anywhere; a department manager inside a
  * department folder they manage (any depth; root-level ones owner/admin
@@ -9,8 +10,9 @@
  * ([PROTECTED_CONFIG]) and, ahead of time, by the desktop app's chat guard.
  *
  * The push checker matches git's raw bytes (read as latin1) with a regex
- * built from INSTRUCTION_FILE_NAMES (server/src/lib/push-check/rules.ts); the
- * names are ASCII, so that bytewise match and isInstructionFile agree.
+ * built from INSTRUCTION_FILE_NAMES and RULES_FILE_PATTERN
+ * (server/src/lib/push-check/rules.ts); both are ASCII, so that bytewise
+ * match and isInstructionFile agree.
  *
  * Pure: no Node, Electron, React, Hono, database or git.
  */
@@ -25,9 +27,19 @@ export const INSTRUCTION_FILE_NAMES: readonly string[] = ['CLAUDE.md', 'CLAUDE.l
 
 const FOLDED_NAMES = new Set(INSTRUCTION_FILE_NAMES.map(foldAsciiCase))
 
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md at any depth, however a disk could fold the spelling. */
+/**
+ * A Markdown file anywhere inside `.claude/rules/` (any depth): Claude Code
+ * loads these into the chat like CLAUDE.md (project memory). Regex source,
+ * lower case: matched against lookalikeKey here, with `i` in the push checker.
+ */
+export const RULES_FILE_PATTERN = String.raw`(^|/)\.claude/rules/(.+/)?[^/]+\.md$`
+
+const RULES_FILE_RE = new RegExp(RULES_FILE_PATTERN)
+
+/** CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md at any depth, or a `.claude/rules/` Markdown file, however a disk could fold the spelling. */
 export function isInstructionFile(repoPath: string): boolean {
-  return FOLDED_NAMES.has(lookalikeKey(repoPath).split('/').pop() ?? '')
+  const key = lookalikeKey(repoPath)
+  return FOLDED_NAMES.has(key.split('/').pop() ?? '') || RULES_FILE_RE.test(key)
 }
 
 /**

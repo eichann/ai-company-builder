@@ -138,6 +138,8 @@ export interface PushCheckRequest {
   skillEditing?: SkillEditing
   /** The pusher's app predates the skill files rule: not applied to this push. */
   appPredatesSkillRule?: boolean
+  /** The pusher's app predates the default-deny of `.claude/` / `.agents/`: not applied to this push. */
+  appPredatesAgentConfigRule?: boolean
 }
 
 export interface PreparedPushCheck {
@@ -163,6 +165,7 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     ...(req.managedFolders !== undefined ? { managedFolders: req.managedFolders } : {}),
     ...(req.skillEditing !== undefined ? { skillEditing: req.skillEditing } : {}),
     ...(req.appPredatesSkillRule ? { appPredatesSkillRule: true } : {}),
+    ...(req.appPredatesAgentConfigRule ? { appPredatesAgentConfigRule: true } : {}),
   }
   let dir: string | null = null
   try {

@@ -22,15 +22,19 @@
  * hold-back (sync/outside-checkout.ts) stays the safety net there.
  *
  * Two more refusals share the hook:
- * - AI instruction files (CLAUDE.md / CLAUDE.local.md / AGENTS.md, any depth, A–Z case
+ * - AI instruction files (CLAUDE.md / CLAUDE.local.md / AGENTS.md, `.claude/rules/*.md`, any depth, A–Z case
  *   folded) for a member who may not change them: owners/admins anywhere,
  *   department managers inside their own department — the server's push
  *   check enforces the same rule; unknown authority never blocks.
- * - Skill files (everything under `.claude/skills|agents|commands`, any depth)
+ * - Skill files (everything under `.claude/skills|agents|commands` and
+ *   `.agents/skills`, any depth)
  *   for a member who may not change them: owners/admins, department managers
  *   inside their department, the people on 「Skill を直せる人」 — the push
  *   check's rule. A skill this member keeps private (`getPrivateSkills`) is
  *   never shared, so it is theirs to write. Unknown authority never blocks.
+ * - Agent config (`.mcp.json`, `.codex/`, and everything else in `.claude/`
+ *   and `.agents/`, shared/core/agent-config.ts) for a member who is not
+ *   owner/admin — the push check's rule; unknown authority never blocks.
  * - `git clone` (and `gh repo clone`) into the company folder outside
  *   `.workspace/`: an external repository there would be shared with the
  *   whole company (or stop sync as a nested repository).
@@ -53,6 +57,7 @@ import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-pa
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 import { isSkillFile, mayChangeSkillFile, type SkillEditing } from '../../shared/core/skill-files'
+import { isAgentConfig } from '../../shared/core/agent-config'
 import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
@@ -138,6 +143,10 @@ export function inPrivateSkill(privateSkills: readonly string[], rel: string): b
   return privateSkills.some(line => isSameOrAncestorPath(pathKey(line), key))
 }
 
+export function agentConfigMessage(path: string): string {
+  return `このファイル（${path}）はチャットのAIが読み込んで動かす設定のため、会社のオーナーと管理者だけが変更できます。変更が必要な場合は、管理者に依頼してください。`
+}
+
 export function typeDefinitionMessage(path: string): string {
   return `このファイル（${path}）は会社の記録の形を決める定義のため、オーナーと管理者だけが変更できます。変更が必要な場合は、管理者に依頼してください。`
 }
@@ -188,6 +197,15 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
       && !mayChangeSkillFile({ ...authority, skillEditing: authority.skillEditing }, rel)
       && !inPrivateSkill(guard.getPrivateSkills?.() ?? [], rel)) {
       return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: skillFileMessage(rel), code: 'skill-file' }
+    }
+  }
+  // Agent config (.mcp.json, .codex/, and everything in .claude/ / .agents/
+  // that is not a skill or instruction file): owner/admin only, the push
+  // check's rule (shared/core/agent-config.ts). Unknown authority never blocks.
+  if (isAgentConfig(rel) && !isUnsharedPath(rel)) {
+    const authority = guard.getInstructionAuthority?.()
+    if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
+      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: agentConfigMessage(rel), code: 'agent-config' }
     }
   }
   if (TYPE_DEFINITION_RE.test(lookalikeKey(rel))) {

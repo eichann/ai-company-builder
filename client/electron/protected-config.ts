@@ -4,10 +4,13 @@
 // The server's pre-receive hook (server/src/templates/pre-receive-hook.sh)
 // rejects any push in which *some commit* adds, modifies, deletes or renames
 // a protected path (.claude/settings.json, .claude/settings.local.json,
-// .mcp.json, anything under .claude/hooks/ — at any depth) unless the pusher
-// is an owner/admin; skill / agent / command files the same way, with more
-// people allowed (shared/core/skill-files.ts). Claude Code runs the commands in those files without a
-// prompt, so a member could otherwise run code on every teammate's machine.
+// .mcp.json, anything under .claude/hooks/ or .codex/, and by default
+// everything else in .claude/ and .agents/ — at any depth,
+// shared/core/agent-config.ts) unless the pusher is an owner/admin; skill /
+// agent / command files and instruction files the same way, with more
+// people allowed (shared/core/skill-files.ts, instruction-files.ts). The
+// agents run the commands in those files without a prompt, so a member could
+// otherwise run code on every teammate's machine.
 //
 // The rejected change is already committed locally, so retrying the push can
 // never succeed: every sync would fail at the same step — the failure shape

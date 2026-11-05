@@ -6,7 +6,9 @@
  *   names.ts              department / skill folder names, scope paths
  *   permissions.ts        the permission model (resolveAccess, writeAccessSummary)
  *   reserved-paths.ts     private-folder paths reserved in the company repository
- *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md
+ *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md, .claude/rules/*.md
+ *   skill-files.ts        .claude/skills|agents|commands, .agents/skills: who may change them
+ *   agent-config.ts       what the agents load and run: owner/admin only (default-deny in .claude/, .agents/)
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
  *   client-version.ts     desktop-app build identity: parsing and ordering
  *   agent-sandbox.ts      the company's AI sandbox setting (「AI の囲い」): shape, validation

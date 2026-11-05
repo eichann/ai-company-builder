@@ -60,3 +60,17 @@ test('unknown never blocks: no answer from the server, or a server without the l
   const older = company(t, { success: true, role: 'member', managedDepartmentFolders: [] })
   assert.equal(await older.guards.skillRefusal(older.at('.claude/skills/r/make.py')), null)
 })
+
+test('agent config (.mcp.json, .codex/, the rest of .claude/ and .agents/): only owners and admins, in a sentence before anything is written', async t => {
+  const manager = company(t, { ...MEMBER, managedDepartmentFolders: ['営業部'], skillEditing: { everywhere: true, folders: [] } } as Capabilities)
+  for (const rel of ['.mcp.json', '.claude/settings.json', '.claude/statusline.sh', '営業部/.claude/output-styles/x.md', '.agents/plugins/marketplace.json']) {
+    assert.match(await manager.guards.writeRefusal(manager.at(rel)) ?? '', /オーナーと管理者だけ/, rel)
+  }
+  // Their own rules: a skill they may share, an instruction file in their department.
+  assert.equal(await manager.guards.writeRefusal(manager.at('.agents/skills/r/run.py')), null)
+  assert.equal(await manager.guards.writeRefusal(manager.at('営業部/.claude/rules/a.md')), null)
+  const admin = company(t, { success: true, role: 'admin', managedDepartmentFolders: [], skillEditing: { everywhere: false, folders: [] } })
+  assert.equal(await admin.guards.writeRefusal(admin.at('.claude/statusline.sh')), null)
+  const offline = company(t, { success: false, offline: true, error: 'offline' })
+  assert.equal(await offline.guards.writeRefusal(offline.at('.claude/statusline.sh')), null, 'unknown never blocks')
+})

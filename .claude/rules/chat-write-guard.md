@@ -53,10 +53,18 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
-- AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`) are refused unless the
+- AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`, and the
+  `.md` files of `.claude/rules/`) are refused unless the
   member may change them (owner/admin; a manager inside their department), mirroring the push
   checker (`mayChangeInstructionFile`).
-- Skill files (everything under `.claude/skills|agents|commands`, `shared/core/skill-files.ts`) are
+- Agent config (`.mcp.json`, `.claude/settings*.json`, `.claude/hooks/`, `.codex/`, and by default
+  everything else in `.claude/` and `.agents/` that is neither a skill nor an instruction file:
+  `isAgentConfig`, `shared/core/agent-config.ts`) is refused for anyone but owner/admin (guard
+  reason `agent-config`, 「…会社のオーナーと管理者だけが変更できます」); unknown authority never
+  blocks. The app's own file operations ask the same (`agentConfigRefusal`). Before 2026-11-05
+  these edits ran and were caught at sync by the protected-config dialog. Tests:
+  `client/tests/write-guard.test.ts`, `client/tests/skill-file-refusal.test.ts`.
+- Skill files (everything under `.claude/skills|agents|commands` and `.agents/skills`, `shared/core/skill-files.ts`) are
   refused unless the member may change them (`mayChangeSkillFile`, guard reason `skill-file`):
   owner/admin; a manager inside their department; 「Skill を直せる人」 (`skillEditing` from
   `/me/capabilities`). Unknown authority or a server without `skillEditing` never blocks; neither
