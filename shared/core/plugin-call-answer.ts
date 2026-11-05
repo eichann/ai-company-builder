@@ -2,10 +2,10 @@
  * What is kept of a call's answer (plugins.md "Contract 3"): `returns` is an
  * allow-list, so anything it does not name is dropped and counted, never handed
  * on. A named field is one plain value; a list named with `each` is entries with
- * those fixed fields. Text someone outside wrote (`outside: true`) and every
- * personal or sensitive string is wrapped here, on the server, with the header and
- * footer and the instruction-like flag; its 【 】 are changed, so it cannot close
- * the wrapper itself.
+ * those fixed fields. Every string but a plain id is text the service sent, whatever
+ * its class: it is wrapped here, on the server, with the header and footer and the
+ * instruction-like flag, bounded, and its 【 】 are changed, so it cannot close the
+ * wrapper itself.
  */
 import { findInstructionLikeText } from './instruction-like'
 import { EXTERNAL_ID_RE, type PluginDataField, type PluginReturn } from './plugin-declaration'
@@ -22,8 +22,11 @@ export const CALL_OUTSIDE_FOOTER = '【外から来た文ここまで】'
  * sentence nor an address, and it is bounded. It reaches a GET's URL and the AI as is.
  */
 export const CALL_CURSOR_RE = /^[A-Za-z0-9._~+/=:-]{1,500}$/
-/** The longest link a page may cite. */
+/** The longest link a page may cite, as handed on. */
 const CITE_MAX = 2000
+/** The longest text of one field handed on; the rest is cut, and said so inside the wrapper. */
+export const CALL_TEXT_MAX = 20_000
+const CUT_NOTE = '…（長いため、ここで切りました）'
 /** The most ids of one answer's entries the access log keeps; the rest are counted. */
 export const LOGGED_POINTERS_MAX = 200
 
@@ -38,18 +41,19 @@ const isPlain = (v: unknown): v is KeptPlain => v === null || typeof v === 'stri
 
 /** The wrapper. `【` `】` inside become `〔` `〕`: no spelling of the footer (or a second header) survives, whatever is inserted in it. */
 function wrapOutside(value: string): KeptOutside {
-  const text = value.replace(/【/g, '〔').replace(/】/g, '〕')
-  const flags = findInstructionLikeText(value)
+  const bounded = value.length > CALL_TEXT_MAX ? `${value.slice(0, CALL_TEXT_MAX)}${CUT_NOTE}` : value
+  const text = bounded.replace(/【/g, '〔').replace(/】/g, '〕')
+  const flags = findInstructionLikeText(bounded)
   return { outsideText: `${CALL_OUTSIDE_HEADER}\n${text}\n${CALL_OUTSIDE_FOOTER}`, instructionLike: value.includes('外から来た文') ? [...flags, 'wrapper-spoof'] : flags }
 }
 
 /**
- * `outside: true` always; a personal or sensitive string by default, with no way to
- * declare it off. The one exception is a pointer that is a plain id: it has no room
- * for a sentence, and it is what the next call takes as its input.
+ * Only a plain id stays plain (and not where `outside: true` says otherwise): it has no
+ * room for a sentence, and it is what the next call takes as its input. Every other
+ * string is wrapped, `class: normal` too: a title or a page's text is the service's
+ * writing, and a declaration cannot turn that off.
  */
-const staysPlain = (value: string, field: PluginDataField): boolean =>
-  !field.outside && (field.dataClass === 'normal' || (field.keep === 'pointer' && EXTERNAL_ID_RE.test(value)))
+const staysPlain = (value: string, field: PluginDataField): boolean => !field.outside && EXTERNAL_ID_RE.test(value)
 
 function keepPlain(value: unknown, field: PluginDataField): KeptPlain | KeptOutside | undefined {
   if (!isPlain(value)) return undefined
@@ -130,7 +134,9 @@ export function citeLink(value: unknown, host: string): string | null {
   if (typeof value !== 'string' || value.length > CITE_MAX) return null
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname === host && !url.username && !url.password ? url.toString() : null
+    const link = url.toString()
+    // The default port only: another port on the same name is another service.
+    return url.protocol === 'https:' && url.hostname === host && url.port === '' && !url.username && !url.password && link.length <= CITE_MAX ? link : null
   } catch {
     return null
   }

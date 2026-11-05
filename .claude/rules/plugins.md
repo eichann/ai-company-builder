@@ -457,8 +457,9 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   the cursor (only on a listing with one, `CALL_CURSOR_RE`), the member's share of the pace, the account.
   Repeated before every attempt (`precheckFor` and the stops).
 - **"AI 単独では読めません"** (§6; `callStepRefusal`, owner rule): **no execution run reads** — a core step's
-  (auto-read minutes running as a role holder), a `start: ai_turn` step's, any token bound to a run → the one
-  answer `NOT_IN_STEP`, and `aiTools` lists no call for a run. A member's own consultation reads as `who`
+  (auto-read minutes running as a role holder), a `start: ai_turn` step's, any token bound to a run, and a token
+  issued without `run` for the conversation of an open run of the member (`inRunConversation`,
+  `ai_runs.conversation_id`) → the one answer `NOT_IN_STEP`, and `aiTools` lists no call for either. A member's own consultation reads as `who`
   allows; a consultation of a business plugin's step only when the step is `start: person`, has
   `plugin_operations` and its plugin declared the call (`stepAllowsCall`, which the tool list asks too).
   Narrower than an operation's gate on purpose.
@@ -470,7 +471,9 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   A person's read is not the AI's.
 - **The pace**: the connection's `limits.per_minute` (the connector waits up to 15 s, else `temporary`), and
   each member's share, a quarter of it per minute: over it, 429 `CALL_PACED` before anything goes out, no log
-  line, and the refusal does not count (a looping AI cannot grow the log or starve the team).
+  line, and the refusal does not count (a looping AI cannot grow the log or starve the team). Each refusal adds
+  one to a count per member and hour (`plugin_call_paced`: member, hour, count; nothing of the read), shown as
+  `paced` with the access log for 30 days and gone after a year.
 - **`active()` needs no mapping** for a use of calls alone (no object, no operation).
 - **The account**: `account_info` read as `system`. The id and environment must be plain ids; the environment
   must be the package's `expected_environment` (none stated → 409 `ENVIRONMENT_NOT_STATED`, another → 409
@@ -483,11 +486,12 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   member's own active Google grant's address, when it is one.
 - **What comes back** (`keepDeclared`): only what `returns` names, one plain value each (an object, a list or a
   number that is not finite in a plain field is dropped); everything else is left out and counted (`dropped`).
-  **Every personal or sensitive string is wrapped** as outside text (`CALL_OUTSIDE_HEADER` / `_FOOTER`,
-  `findInstructionLikeText`, a flag never a filter), `outside: true` or not; only a normal value and a
-  pointer that is a plain id stay plain. Inside the wrapper `【` `】` become `〔` `〕`, so no text closes it
-  (`wrapper-spoof` flags a try). A list's `next` only in `CALL_CURSOR_RE`, else null and counted. A page's
-  `cite` link only when https on the declared host, no user, ≤ 2000; the field it came from is not also handed
+  **Every string but a plain id is wrapped** as outside text (`CALL_OUTSIDE_HEADER` / `_FOOTER`,
+  `findInstructionLikeText`, a flag never a filter), whatever its class: a normal title or page text is the
+  service's writing too. A plain id (`EXTERNAL_ID_RE`) stays plain unless `outside: true`. Inside the wrapper
+  `【` `】` become `〔` `〕`, so no text closes it (`wrapper-spoof` flags a try), and a text is cut at
+  `CALL_TEXT_MAX` (20 000), saying so. A list's `next` only in `CALL_CURSOR_RE`, else null and counted. A page's
+  `cite` link only when https on the declared host and its default port, no user, ≤ 2000 as handed on (encoded); the field it came from is not also handed
   on. A sensitive field reaches only whoever passes the `who` of the call declaring it. **Nothing of an answer
   is stored**: not in the ledger, an operation row or the log.
 - **A failure** is `{ outcome: 'failed', failure, code? }`: `failure` is a core class, from `errors.map` for
@@ -495,7 +499,7 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   bad-input, rest temporary).
 - **`plugin_access_log`** (company handle): one line per read that went out (`onSend`), however it ended — a
   read stopped before its next attempt too (`status: stopped`); nothing went out, no line. Member, actor kind,
-  conversation, run, call, `refs` `{ input, returned, more }`: the plain id inputs (`kind: id`, `class:
+  the AI's conversation and run (a person's row keeps none: their app's conversation id is self-reported), call, `refs` `{ input, returned, more }`: the plain id inputs (`kind: id`, `class:
   normal`), and the ids handed back (`pointersOf`: each `keep: pointer`, not sensitive, plain-id value, ≤ 200,
   `more` past that) — so it answers who read whom; never a search word, an answer or a key. Written before the
   answer is handed back: a read that cannot be logged is not shown. Append-only: triggers refuse UPDATE, and

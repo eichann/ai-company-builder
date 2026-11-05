@@ -96,6 +96,14 @@ export function stepAllowsCall(step: Pick<PluginStep, 'tools' | 'start'>, manife
   return step.start === 'person' && step.tools.includes('plugin_operations') && Object.prototype.hasOwnProperty.call(manifest.calls ?? {}, call)
 }
 
+/**
+ * The conversation an open execution run of this member works in (`ai_runs.conversation_id`): a token issued
+ * for it without `run` is still that run's turn, with no person there. The calls' gate and tool list ask this.
+ */
+export function inRunConversation(handle: Pick<CompanyData, 'aiRuns'>, userId: string, conversationId: string | null | undefined): boolean {
+  return !!conversationId && handle.aiRuns.openOf(userId).some(r => r.conversationId === conversationId)
+}
+
 /** May a step use a connector role (`mail.send`): declared as is, or the bare role (`mail`) for all its operations. */
 export function stepAllowsConnectorRole(step: Pick<PluginStep, 'connectorRoles'>, role: string): boolean {
   const bare = role.split('.')[0]
@@ -240,7 +248,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
    */
   async function callStepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, call: string) {
     if (actor.kind !== 'ai') return null
-    if (actor.runId) return notInStep()
+    if (actor.runId || inRunConversation(companyData.forCompany(member.companyId), member.userId, actor.conversationId)) return notInStep()
     const bound = await boundStep(member, actor, pluginId)
     if (bound === null) return null
     return bound && stepAllowsCall(bound.step, bound.manifest, call) ? null : notInStep()

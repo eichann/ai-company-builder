@@ -10,7 +10,7 @@ import type { PluginAiCall, PluginAiField, PluginAiOperation, PluginAiTools } fr
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
-import { boundStepOf, parsePluginRunStep, stepAllowsCall, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
+import { boundStepOf, inRunConversation, parsePluginRunStep, stepAllowsCall, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -158,7 +158,7 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
           operations.push({ name, label: op.label, kind: op.kind, recordType, decision: op.decision, fields })
         }
         // An execution run is automatic: no person is there, so no call is listed (the gate refuses them too).
-        const calls = runId ? [] : aiCallsOf(manifest, step, who => callAccess(member, install.pluginId, who))
+        const calls = runId || inRunConversation(handle, member.userId, conversationId) ? [] : aiCallsOf(manifest, step, who => callAccess(member, install.pluginId, who))
         if (operations.length > 0 || calls.length > 0) out.push({ id: install.pluginId, label: manifest.label, operations, ...(calls.length > 0 ? { calls } : {}) })
       }
       return ok({ plugins: out })

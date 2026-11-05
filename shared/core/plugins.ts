@@ -95,7 +95,7 @@ export {
 } from './plugin-fingerprint'
 export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
 export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
-export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, citeLink, keepDeclared, LOGGED_POINTERS_MAX, pointersOf, type KeptEntry, type KeptValue } from './plugin-call-answer'
+export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, CALL_TEXT_MAX, citeLink, keepDeclared, LOGGED_POINTERS_MAX, pointersOf, type KeptEntry, type KeptValue } from './plugin-call-answer'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'

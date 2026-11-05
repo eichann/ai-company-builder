@@ -16,7 +16,7 @@
 import { CALL_CURSOR_RE, keepDeclared, citeLink, pointersOf, type KeptEntry, type PluginCall, type PluginCallRequest, type PluginCallListing, type PluginCalling } from '../../shared/core/plugins'
 import type { AiRunFailureClass } from '../../shared/core/ai-runs'
 import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
-import type { PluginAccessLogEntry, PluginCallAnswer } from '../../shared/types/plugins'
+import type { PluginAccessLogEntry, PluginCallAnswer, PluginPacedCount } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { Member } from './access'
@@ -31,6 +31,8 @@ import { RECORDS_DISABLED } from './records'
 
 export const ACCESS_LOG_RETENTION_DAYS = 365
 const ACCESS_LOG_LIMIT = 200
+/** How far back the access log's view shows the paced counts. */
+const PACED_SHOWN_DAYS = 30
 const ACCESS_LOG_CURSOR_RE = /^\d{4}-\d{2}-\d{2}T[0-9:.]{1,20}Z~[A-Za-z0-9-]{1,64}$/
 const TEXT_INPUT_MAX = 2000
 const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T[0-9:.+Z-]{1,30})?$/
@@ -199,7 +201,11 @@ export function createPluginCalls(deps: PluginCallDeps) {
       if (problem) return badInput(problem)
       const cursor = body.cursor
       if (cursor !== undefined && (typeof cursor !== 'string' || !CALL_CURSOR_RE.test(cursor) || !target.listing?.cursor)) return badInput('cursor は続きのある一覧だけです')
-      if (overMemberShare(member, plugin)) return refuse('rate-limited', '読む回数が多すぎます。少し待ってから、もう一度お試しください', { code: 'CALL_PACED' })
+      if (overMemberShare(member, plugin)) {
+        // Counted per member and hour, nothing else: a looping AI shows in the log's view without a row per refusal.
+        handle.plugins.countPaced(pluginId, member.userId, clock.now().slice(0, 13))
+        return refuse('rate-limited', '読む回数が多すぎます。少し待ってから、もう一度お試しください', { code: 'CALL_PACED' })
+      }
 
       // The checks repeated before every attempt; a stop there is a refusal, not a read.
       const repeated = gate.precheckFor(member, actor, plugin, call.who, null, '', () => true)
@@ -248,7 +254,8 @@ export function createPluginCalls(deps: PluginCallDeps) {
       if (out.sent) {
         handle.plugins.addAccessLog({
           id: deps.ids.newId(), pluginId, call: target.part ? `${name}.${target.part}` : name, userId: member.userId, actorKind: actor.kind === 'ai' ? 'ai' : 'human',
-          conversationId: actor.conversationId ?? null, runId: actor.runId ?? null,
+          // A person's conversation id is what their app said: kept only for the AI's, whose token carries it.
+          conversationId: actor.kind === 'ai' ? actor.conversationId ?? null : null, runId: actor.kind === 'ai' ? actor.runId ?? null : null,
           refs: JSON.stringify({ input: loggedInputs(target.request, input), returned: returned.ids, more: returned.more }),
           status: stopped ? 'stopped' : answer.outcome === 'ok' ? 'ok' : answer.failure!, dropped: answer.dropped, at: clock.now(),
         })
@@ -265,7 +272,7 @@ export function createPluginCalls(deps: PluginCallDeps) {
      * GET …/plugins/:pluginId/access-log?before=<next>&limit=<n> — owner / admin, newest
      * first, at most 200 a page; `next` is the `before` of the next page, null at the end.
      */
-    accessLog(member: Member, pluginId: string, page: { before?: string; limit?: string } = {}): Outcome<{ entries: PluginAccessLogEntry[]; next: string | null }> {
+    accessLog(member: Member, pluginId: string, page: { before?: string; limit?: string } = {}): Outcome<{ entries: PluginAccessLogEntry[]; next: string | null; paced: PluginPacedCount[] }> {
       const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
       if (!allowed.ok) return allowed
       const repo = companyData.forCompany(member.companyId).plugins
@@ -281,6 +288,7 @@ export function createPluginCalls(deps: PluginCallDeps) {
         entries: shown.map(({ at, userId, actorKind, call, refs, status, dropped, conversationId, runId }) =>
           ({ at, userId, actorKind, call, refs: JSON.parse(refs) as PluginAccessLogEntry['refs'], status, dropped, conversationId, runId })),
         next: rows.length > limit && last ? `${last.at}~${last.id}` : null,
+        paced: repo.paced(pluginId, new Date(clock.nowMs() - PACED_SHOWN_DAYS * 86_400_000).toISOString().slice(0, 13)),
       })
     },
 
@@ -288,7 +296,11 @@ export function createPluginCalls(deps: PluginCallDeps) {
     cleanupAccessLog(): { deleted: number } {
       const keepFrom = new Date(clock.nowMs() - ACCESS_LOG_RETENTION_DAYS * 86_400_000).toISOString()
       let deleted = 0
-      for (const companyId of deps.companyIds()) deleted += companyData.forCompany(companyId).plugins.pruneAccessLog(keepFrom)
+      for (const companyId of deps.companyIds()) {
+        const repo = companyData.forCompany(companyId).plugins
+        deleted += repo.pruneAccessLog(keepFrom)
+        repo.prunePaced(keepFrom.slice(0, 13))
+      }
       return { deleted }
     },
   }

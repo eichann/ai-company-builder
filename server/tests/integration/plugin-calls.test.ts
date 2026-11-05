@@ -64,6 +64,8 @@ const read = (member: Json, actor: Json, call: string, body: Json = {}) => servi
 const diagnose = (member: Json = holder, actor: Json = HUMAN, id: string = PORTAL_SEED.member) => read(member, actor, 'diagnose', { input: { id } })
 const logRows = () => db.prepare('SELECT * FROM plugin_access_log WHERE company_id = ? ORDER BY rowid').all(CO) as Json[]
 const asked = () => fake.requests().filter(r => !r.path.endsWith('/account'))
+/** The text of a wrapped value (every string but a plain id is wrapped). */
+const textOf = (v: Json): string => (typeof v === 'string' ? v : v.outsideText.split('\n').slice(1, -1).join('\n'))
 async function call(opts: { user?: string; token?: string; method: string; path: string; body?: unknown }) {
   currentUser.id = opts.user ?? null
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -154,7 +156,7 @@ describe('what comes back', () => {
     expect(r.value.dropped).toBe(3)
     expect(r.value.data.person_ref).toBe(PORTAL_SEED.member)
     // A list's entries hold only their fixed fields too (`severity`, `facts` are not named).
-    expect(r.value.data.findings).toEqual([{ code: 'PAYMENT_LATE', summary: '支払いが遅れています' }])
+    expect(r.value.data.findings.map((f: Json) => [f.code, textOf(f.summary)])).toEqual([['PAYMENT_LATE', '支払いが遅れています']])
     expect(logRows().at(-1).dropped).toBe(3)
   })
 
@@ -175,7 +177,7 @@ describe('what comes back', () => {
 
   it('a document: list, a page with the link to cite, a search', async () => {
     const list = await read(holder, HUMAN, 'pages', { part: 'list' })
-    expect(list.value.items.map((p: Json) => p.title)).toContain('ログインできないとき')
+    expect(list.value.items.map((p: Json) => textOf(p.title))).toContain('ログインできないとき')
     const page = await read(holder, HUMAN, 'pages', { part: 'page', input: { id: PORTAL_SEED.page } })
     expect(page.value.cite).toBe(`https://${HOST}/pages/${PORTAL_SEED.page}`)
     const found = await read(holder, HUMAN, 'pages', { part: 'search', input: { words: 'ログイン' } })
@@ -287,6 +289,26 @@ describe('who may read', () => {
     expect(fake.requests().length).toBe(before)
   })
 
+  it('a token issued without `run` for the conversation of an open run reads nothing, and lists no call', async () => {
+    const at = ts()
+    db.pragma('foreign_keys = OFF')
+    companyData.forCompany(CO).aiRuns.insert({
+      id: 'pc-run-adv', recordId: 'inquiry-adv', step: 'sample-portal-care__auto_look_up', userId: holder.userId, state: 'running', generation: 1, deviceId: 'device-pc-0001', conversationId: 'conv-adv-auto',
+      claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null, retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
+    })
+    db.pragma('foreign_keys = ON')
+    const t = await call({ user: holder.userId, method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'conv-adv-auto', agent: 'claude-code', scope: 'act' } })
+    expect(t.status, JSON.stringify(t.body)).toBe(201)
+    const before = fake.requests().length
+    const r = await call({ token: t.body.data.token, method: 'POST', path: '/api/records-ai/plugins/sample-portal-care/calls/diagnose', body: { input: { id: PORTAL_SEED.member } } })
+    expect([r.status, r.body?.code]).toEqual([403, 'NOT_IN_STEP'])
+    expect(fake.requests().length).toBe(before)
+    const tools = await call({ token: t.body.data.token, method: 'GET', path: '/api/records-ai/plugins' })
+    expect((tools.body.data.plugins as Json[]).flatMap(p => p.calls ?? [])).toEqual([])
+    // Another conversation of the same member is theirs: it reads.
+    expect((await diagnose(holder, { ...AI, conversationId: 'conv-adv-other' })).ok).toBe(true)
+  })
+
   it("a step's consultation: only a `start: person` step with plugin_operations, only a call its plugin declared", async () => {
     db.pragma('foreign_keys = OFF')
     for (const step of ['look_up', 'note_only', 'auto_look_up']) {
@@ -361,6 +383,11 @@ describe('the access log', () => {
     // A search: who came back (their ids), never the word it was asked with.
     expect(human).toMatchObject({ call: 'find_person', actor_kind: 'human' })
     expect(JSON.parse(human.refs)).toEqual({ input: {}, returned: [PORTAL_SEED.member], more: 0 })
+    // A person's conversation id is only what their app said: not kept.
+    const rowsNow = logRows().length
+    const r = await call({ user: 'pc-holder', method: 'POST', path: `/api/companies/${CO}/plugins/sample-portal-care/calls/diagnose`, body: { input: { id: PORTAL_SEED.member }, conversationId: 'conv-someone-elses' } })
+    expect(r.status).toBe(200)
+    expect(logRows().slice(rowsNow).map(x => [x.actor_kind, x.conversation_id])).toEqual([['human', null]])
     const everything = JSON.stringify(logRows())
     for (const secret of ['taro@example.com', '見本 太郎', '支払いが遅れています']) expect(everything).not.toContain(secret)
   })
@@ -566,6 +593,12 @@ describe('what is checked before anything goes out', () => {
     for (let i = 0; i < 20; i++) expect((await diagnose(holder, AI)).body?.code).toBe('CALL_PACED')
     vi.setSystemTime(Date.now() + 15_000)
     expect((await diagnose(holder, AI)).ok).toBe(true)
+    // Each refusal is counted, per member and hour, with nothing of the read: visible to an admin.
+    const view = services.pluginCalls.accessLog(owner, 'sample-portal-care')
+    expect(view.value.paced.filter((p: Json) => p.userId === holder.userId).reduce((n: number, p: Json) => n + p.count, 0)).toBe(26)
+    const counts = db.prepare('SELECT * FROM plugin_call_paced WHERE company_id = ?').all(CO) as Json[]
+    expect(counts.length).toBeLessThanOrEqual(2)
+    expect(Object.keys(counts[0]).sort()).toEqual(['company_id', 'count', 'hour', 'plugin_id', 'user_id'])
   })
 })
 

@@ -297,6 +297,13 @@ export interface PluginCallAnswer {
   code?: string
 }
 
+/** Reads refused for the member's share of the pace, counted per member and hour (`hour`: `YYYY-MM-DDTHH`, UTC). */
+export interface PluginPacedCount {
+  userId: string
+  hour: string
+  count: number
+}
+
 /** One line of `GET /plugins/:id/access-log`. */
 export interface PluginAccessLogEntry {
   at: string

@@ -84,6 +84,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_access_log: ['adapters/sqlite/plugins.ts'],
+  plugin_call_paced: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],
   plugin_history: ['adapters/sqlite/plugins.ts'],
   plugin_external_links: ['adapters/sqlite/plugins.ts'],

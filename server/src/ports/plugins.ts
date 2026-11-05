@@ -196,6 +196,11 @@ export interface PluginRepository {
   accessLog(pluginId: string, limit: number, before: { at: string; id: string } | null): PluginAccessLogRow[]
   /** Removes this company's rows older than `keepFrom` (retention); how many went. */
   pruneAccessLog(keepFrom: string): number
+  /** One more paced refusal of `userId` in `hour` (`YYYY-MM-DDTHH`). */
+  countPaced(pluginId: string, userId: string, hour: string): void
+  /** The paced counts from `fromHour` on, newest first. */
+  paced(pluginId: string, fromHour: string): Array<{ userId: string; hour: string; count: number }>
+  prunePaced(beforeHour: string): void
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
   /** Insert or replace the install row and add a history row (one transaction). */

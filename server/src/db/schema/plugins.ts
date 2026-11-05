@@ -57,6 +57,17 @@ export const pluginSchema = `
     WHEN OLD.at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days') AND EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
     BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
 
+    -- Reads refused for a member's share of a call's pace (plugins.md "Contract 3"): a count per member and
+    -- hour, nothing else, so a looping AI shows without a log row per refusal. Gone after a year.
+    CREATE TABLE IF NOT EXISTS plugin_call_paced (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      hour TEXT NOT NULL,
+      count INTEGER NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, user_id, hour)
+    );
+
     -- The company's mapping (読み替え表), every version kept (restorable).
     CREATE TABLE IF NOT EXISTS plugin_mappings (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
