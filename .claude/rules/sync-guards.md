@@ -40,6 +40,15 @@ what git actually sees through the app's `createGit`.
 - `merge.stat=false` — a fast-forward diffstat reads every changed blob, which in a partial
   clone silently downloads teammates' departments the member did not pick.
 - `credential.helper` cleared; the bundled Git Credential Manager is never run.
+- **The GIT_ASKPASS helper** (prints `$GIT_TOKEN`, the session's sync pass; git runs it outside
+  the agent's sandbox) is the app's alone (audit B-M8): `<userData>/git/askpass/git-askpass.sh`
+  (`.bat` on Windows) — never the shared temp folder, where it used to be written once and reused
+  as found —, folder and file 0700, and `ensureAskPass` (`services/app-git.ts`) checks it before
+  **every** git the app builds: a regular file (no symlink), owned by the app's user, no group /
+  other write bit, exactly the app's content; anything else is replaced (written beside it, then
+  renamed over it). The agent's sandbox neither reads nor writes userData (`agent-sandbox.md`);
+  the check covers the sandbox being off. Test: `client/tests/app-git-askpass.test.ts`
+  (mutation-checked).
 - The member's own hooks and templates never run: `core.hooksPath` and `GIT_TEMPLATE_DIR` point
   at app-owned empty directories (`<userData>/git/{hooks,templates}`, `appGitDirs`), for bundled
   and system git alike. A global git-secrets template once made a partial-clone commit hang

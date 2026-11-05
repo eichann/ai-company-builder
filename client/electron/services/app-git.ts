@@ -4,7 +4,6 @@
 
 import { execFileSync } from 'child_process'
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import type { SimpleGit } from 'simple-git'
@@ -27,25 +26,47 @@ export interface AppGit {
   binaryStatus(): { bundled: boolean; binary: string }
 }
 
+const ASKPASS_FILE = process.platform === 'win32' ? 'git-askpass.bat' : 'git-askpass.sh'
+const ASKPASS_CONTENT = process.platform === 'win32' ? '@echo %GIT_TOKEN%\r\n' : '#!/bin/sh\necho "$GIT_TOKEN"\n'
+
 /**
- * Create a GIT_ASKPASS helper script that outputs the session token.
- * Git calls this script when HTTPS authentication is needed.
+ * The GIT_ASKPASS helper (prints $GIT_TOKEN, the session's sync pass): git runs it, outside the
+ * agent's sandbox, whenever HTTPS needs credentials. Audit B-M8: anything able to rewrite it would
+ * run code at the next sync and read the pass — it was in the shared temp folder, written once and
+ * reused as found. So it lives in the app's own folder (`<userData>/git/askpass/`, which the
+ * agent's sandbox neither reads nor writes: agent-sandbox.md), the folder 0700 and the file 0700
+ * (owner only, no group / other bits), and it is checked **before every use**: a regular file (not
+ * a symlink), exactly the app's content, nobody else may write it — anything else is replaced
+ * first (written beside it, then renamed over it). Returns the helper's path.
  */
-function writeAskPassScript(): string {
-  // Use a path without spaces to avoid issues with GIT_ASKPASS execution
-  const dir = path.join(os.tmpdir(), 'acb-git-helpers')
-  fs.mkdirSync(dir, { recursive: true })
-
-  const isWindows = process.platform === 'win32'
-  const scriptPath = path.join(dir, isWindows ? 'git-askpass.bat' : 'git-askpass.sh')
-
-  if (isWindows) {
-    fs.writeFileSync(scriptPath, '@echo %GIT_TOKEN%\r\n')
-  } else {
-    fs.writeFileSync(scriptPath, '#!/bin/sh\necho "$GIT_TOKEN"\n')
-    fs.chmodSync(scriptPath, 0o755)
-  }
+export function ensureAskPass(appGitDir: string): string {
+  const dir = path.join(path.resolve(appGitDir), 'askpass')
+  const scriptPath = path.join(dir, ASKPASS_FILE)
+  const dirStat = lstatOrNull(dir)
+  if (dirStat && !dirStat.isDirectory()) fs.rmSync(dir, { force: true, recursive: true })
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  if (process.platform !== 'win32') fs.chmodSync(dir, 0o700)
+  if (askPassIntact(scriptPath)) return scriptPath
+  const temp = path.join(dir, `.${ASKPASS_FILE}.${process.pid}.${Date.now()}`)
+  fs.writeFileSync(temp, ASKPASS_CONTENT, { mode: 0o700, flag: 'wx' })
+  if (process.platform !== 'win32') fs.chmodSync(temp, 0o700)
+  fs.renameSync(temp, scriptPath)
   return scriptPath
+}
+
+function lstatOrNull(p: string): fs.Stats | null {
+  try { return fs.lstatSync(p) } catch { return null }
+}
+
+/** The helper as the app wrote it: a regular file, its content byte for byte, writable by its owner only. */
+function askPassIntact(scriptPath: string): boolean {
+  const st = lstatOrNull(scriptPath)
+  if (!st || !st.isFile()) return false
+  if (process.platform !== 'win32') {
+    if ((st.mode & 0o022) !== 0) return false
+    if (typeof process.getuid === 'function' && st.uid !== process.getuid()) return false
+  }
+  try { return fs.readFileSync(scriptPath, 'utf8') === ASKPASS_CONTENT } catch { return false }
 }
 
 // Resolve git binary: try dugite's bundled git first, fall back to system git.
@@ -91,12 +112,9 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
 }
 
 export function createAppGit(deps: AppGitDeps): AppGit {
-  /** Path to the GIT_ASKPASS helper script */
-  let gitAskPassPath: string | null = null
+  /** The GIT_ASKPASS helper, checked (and put back if changed) before every use: ensureAskPass. */
   function getGitAskPassPath(): string {
-    if (gitAskPassPath && fs.existsSync(gitAskPassPath)) return gitAskPassPath
-    gitAskPassPath = writeAskPassScript()
-    return gitAskPassPath
+    return ensureAskPass(deps.appGitDir())
   }
 
   // Cache the resolved git binary (checked once, on first use)
