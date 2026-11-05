@@ -371,12 +371,42 @@ character) is moved to a file, and the unattended run has no tool to open it.
   come from one read of the turn (kept with the turn's tools, at most `MINUTES_KEPT` meetings; a later
   part asked first reads it again); the まとまり card comes with the first part only. A part past the
   last → an error naming how many. No `part` = the first (and for short minutes the only) part.
-- **Longer for such an app**: it asks `GET …/text?paged=1`, and the server reads up to
-  `MINUTES_TEXT_PAGED_MAX` (100,000, about eight parts, what the AI holds at once); without it — an
-  older app — `MINUTES_TEXT_MAX` (60,000) as before, in one answer (an older app's own step prompt
-  is its own; nothing changes for it). Past the bound the rest is cut (`truncated`) and the answer
-  tells the AI to make the outputs from what it read and say 「議事録が長すぎて、最後まで読めませんでした」
-  in the summary and its request to the member.
+- **Longer for such an app**: it asks `GET …/text?paged=1`, and the server answers up to
+  `MINUTES_TEXT_PAGED_MAX` (200,000); a document longer than its room keeps its **beginning and its
+  end** (`keepHeadAndTail`, `shared/core/minutes.ts`: three quarters head, a quarter tail, cut on line
+  ends) with one line in place of the middle saying how much and where
+  (「（……ここで N 字（全体のおよそ 40%〜85% のところ）は、長いため省きました……）」). Google sends the whole
+  export either way (an answer is at most 12 MB, `google-client.ts`), so this reads no more from
+  Google; only Meet's own record (the stand-in transcript) still stops at its bound (its pages are
+  read in order). Without `paged` — an older app — `MINUTES_TEXT_MAX` (60,000) as before, end cut, in
+  one answer (an older app's own step prompt is its own; nothing changes for it).
+- **What the AI is handed depends on its model** (`largeContext` on `createRecordTools`, from
+  `modelHasLargeContext` in `client/shared/agents/registry.ts`: the model's `context`; no model = the
+  chat default; Sonnet, Haiku, Codex's live catalog and any unknown id count as standard). The text is
+  cut once more, the same way, to `MINUTES_READ_CHARS_LARGE` (200,000) on a 1M-token model or
+  `MINUTES_READ_CHARS_STANDARD` (60,000) otherwise, before it is split into parts. Why these numbers:
+  - The AI turn runs on the member's chosen model (`useAiTurnRunner` → the tab's `modelId`), default
+    Opus 5.5 with 1M tokens, but Sonnet / Haiku run as CLI aliases with a 200,000-token window. Every
+    part stays in the conversation (the CLI drops nothing until it auto-compacts near the window,
+    which would summarise the minutes away mid-reading), so the minutes should stay under about 40%
+    of the window: Claude Code's own prompt and the tools, the thinking and every output with its
+    quote need the rest. Japanese is up to about 1.3 tokens a character on the newer tokenizers.
+  - Standard: 60,000 × 1.3 ≈ 78,000 tokens ≈ 39% of 200,000 (five parts).
+  - 1M: the window is not the limit, time and the member's Claude usage are. Each part is one more
+    request that re-reads everything before it (cached), and every output after it re-reads the whole
+    reading: 200,000 characters ≈ 260,000 tokens (a quarter of the window), ~17 parts, roughly 6
+    million cached input tokens a run (about $2–3 at API prices on Opus 5.5) and some ten minutes —
+    inside the 30-minute `MINUTES_READING_STALE_MS` with room. Doubling it would roughly triple the
+    cost (the re-reading grows with the square) for meetings that do not exist: 200,000 characters
+    is over ten hours of talk (about 300 characters a minute), a full-day workshop with its notes fits.
+  - The server's bound is the largest an AI is handed, so a longer document's end reaches every model.
+- **What could not be read is said, and where**: a skipped middle (the mark, the server's or the
+  app's) → the answer tells the AI to make the outputs from what it read and write 「議事録が長すぎて、途中
+  （全体のおよそ ◯%〜◯% のところ）を読めませんでした」 with the mark's place in the summary and its request to
+  the member; the end cut by the server without a mark (an older server, Meet's record) → 「議事録が長すぎて、
+  最後まで読めませんでした」 as before. `truncated` is true in both. A two-pass reading with running notes
+  was not chosen: the parts stay in the conversation anyway, so notes save nothing before the CLI
+  compacts, and compaction mid-run is the failure this avoids.
 - The first message (`minutesFirstMessage`) and the automatic run's rules
   (`autoMinutesFirstMessage`) say to read every part before deciding; the step's tool list is
   unchanged (`minutes_read` with a `part` is the same tool).
@@ -385,8 +415,11 @@ character) is moved to a file, and the unattended run has no tool to open it.
   this.
 - Tests: `client/tests/records-tools.test.ts` (`minutesParts` boundaries; a 60,000-character text in
   parts, each block on its own and below the limit, one read, the card once, every line once; short
-  minutes one part; cut minutes; the step's words), `server/tests/integration/minutes.test.ts`
-  「long minutes」 (`?paged=1` longer, an older app the old bound).
+  minutes one part; cut minutes; the step's words; `keepHeadAndTail` (end kept, one mark, line ends,
+  the bounds against the windows); a 130,000-character text whole on a 1M model, head + end with the
+  skipped part named on a standard one; `modelHasLargeContext`), `server/tests/integration/minutes.test.ts`
+  「long minutes」 (`?paged=1` longer, an older app the old bound; past the paged bound the end kept
+  with the mark, an older app the beginning only).
 
 ### When Google refuses the text (production, 2026-11-05)
 

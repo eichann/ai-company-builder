@@ -385,6 +385,35 @@ describe('the text', () => {
     }
   })
 
+  it('long minutes past the paged bound keep their end: the middle is skipped with a mark saying where; an older app still gets the beginning only', async () => {
+    const followUp = minutesRows().find(r => r.title.includes('2回目'))
+    const doc = GOOGLE_SEED.followUpTranscriptDoc
+    const before = google.doc(doc)!.text
+    const line = '佐藤：来期の研修の進め方について、営業部と相談して決めます。'
+    const end = '最後に：見積は来週金曜までに田中が出す。次回は12月3日。'
+    const lines = Array.from({ length: Math.ceil(300_000 / (line.length + 8)) }, (_, i) => `${i + 1} ${line}`)
+    google.changeDoc(doc, `${lines.join('\n')}\n${end}\n`)
+    try {
+      const token = await tokenFor('mn-sato')
+      const paged = await call(null, 'GET', `/api/records-ai/minutes/${followUp.id}/text?paged=1`, undefined, token)
+      expect(paged.status, paged.text).toBe(200)
+      const text = paged.body.data.text as string
+      expect(text.length).toBeLessThanOrEqual(MINUTES_TEXT_PAGED_MAX)
+      expect(text.length).toBeGreaterThan(MINUTES_TEXT_PAGED_MAX * 0.9)
+      expect(paged.body.data.truncated).toBe(true)
+      expect(text).toContain(`1 ${line}`)
+      expect(text.trimEnd().endsWith(end)).toBe(true)
+      expect(text).toMatch(/全体のおよそ \d+%〜\d+% のところ）は、長いため省きました/)
+      const older = await call(null, 'GET', `/api/records-ai/minutes/${followUp.id}/text`, undefined, token)
+      expect(older.status, older.text).toBe(200)
+      expect(older.body.data.text.length).toBeLessThanOrEqual(MINUTES_TEXT_MAX)
+      expect(older.body.data.text).not.toContain(end)
+      expect(older.body.data.text).not.toMatch(/長いため省きました/)
+    } finally {
+      google.changeDoc(doc, before)
+    }
+  })
+
   it('refuses a member who is neither assignee nor attendee, and another company\'s record is the same 404 as a missing one', async () => {
     // Yamada was not there: the meeting does not exist for him.
     const yamada = await textOf('mn-yamada', salesId)

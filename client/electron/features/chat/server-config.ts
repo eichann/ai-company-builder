@@ -149,7 +149,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
-    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, department, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
+    createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, department, largeContext, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
       // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
       const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
@@ -159,7 +159,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         const topic = topicAfterTaskMade(deps.history.get(companyId, conversationId), made)
         if (topic && deps.history.patch(companyId, conversationId, { topicRecordId: topic })) deps.chatHistory.changed({ companyId, sessionId: conversationId, kind: 'patch' })
       }
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
     },
     consultationTopic: (companyId, conversationId) => {
       const session = deps.history.get(companyId, conversationId)

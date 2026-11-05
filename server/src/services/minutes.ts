@@ -36,7 +36,7 @@ import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import {
   MEETING_ARRIVED_DAYS, MEETING_ARRIVED_STATE, MEETING_ATTENDEES_ACTION, MEETING_BUNDLE_DAYS_MAX, MEETING_BUNDLE_DAYS_MIN, MEETING_INTAKE_CHOICES,
   MEETING_BUNDLE_LINKED_ACTION, MEETING_NO_BUNDLE_ACTION, MEETING_READ_REQUEST_ACTION, MEETING_SKIP_ACTION, MEETING_TYPE, meetingAsksBundle,
-  meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX,
+  meetingBundleDaysOf, meetingIntakeOf, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX, MINUTES_TEXT_PAGED_MAX, keepHeadAndTail,
 } from '../../shared/core/minutes'
 import { INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { neutralizeOutsideText, outsideTextFlags } from '../../shared/core/outside-text'
@@ -134,6 +134,12 @@ export const MINUTES_NOT_YOURS = {
 }
 /** ［AI に読ませる］ tries this much of the text: enough to prove reading works, nothing is kept. */
 const READ_PROBE_CHARS = 200
+/**
+ * A document is taken whole before its beginning and end are kept (`readDocuments`' `keepEnd`):
+ * Google sends the whole export anyway (an answer is at most 12 MB, google-client.ts), this only
+ * bounds the string handled.
+ */
+const MINUTES_TEXT_FETCH_MAX = 4_000_000
 const NOTES_HEADING = '■ 会議メモ'
 const TRANSCRIPT_HEADING = '■ 文字起こし'
 /** Words said in the meeting, read from Meet's record because Drive refused the document. */
@@ -456,8 +462,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
    * does not stop the others; when no transcript came through and every refusal was about what ACB
    * is allowed (never a copy block: the file's owner said no), Meet's own record of what was said
    * stands in. Nothing readable → why, by Google's reason, a copy block first.
+   * `keepEnd` (an app that reads in parts): a document over its room keeps its beginning and its
+   * end, the middle skipped with a mark (`keepHeadAndTail`, minutes.md "Long minutes"); Google sends
+   * the whole document either way, so this costs no more reading. Without it the end is cut as before.
    */
-  async function readDocuments(companyId: string, userId: string, ref: SourceRef, max: number): Promise<Outcome<{ text: string; truncated: boolean; versions: string[] }>> {
+  async function readDocuments(companyId: string, userId: string, ref: SourceRef, max: number, keepEnd = false): Promise<Outcome<{ text: string; truncated: boolean; versions: string[] }>> {
     const versions: string[] = []
     let parts: Array<{ kind: 'notes' | 'transcript'; text: string | null }> = []
     let truncated = false
@@ -474,7 +483,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         if (room <= 0) { truncated = true; continue }
         const heading = d.kind === 'notes' ? NOTES_HEADING : TRANSCRIPT_HEADING
         try {
-          const got = await meetings.docText(companyId, userId, d.id, Math.max(0, room - heading.length - 2))
+          const docRoom = Math.max(0, room - heading.length - 2)
+          const got = keepEnd ? headAndTail(await meetings.docText(companyId, userId, d.id, MINUTES_TEXT_FETCH_MAX), docRoom) : await meetings.docText(companyId, userId, d.id, docRoom)
           parts.push({ kind: d.kind, text: take(heading, got) })
         } catch (err) {
           if (!(err instanceof GoogleReadFailed) || !textRefused(err)) throw err
@@ -496,6 +506,12 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     }
     const text = parts.map(p => p.text ?? `${p.kind === 'notes' ? NOTES_HEADING : TRANSCRIPT_HEADING}\n${PART_REFUSED_NOTE}`).join('\n\n')
     return ok({ text, truncated, versions })
+  }
+
+  /** A document's text within `max`, its beginning and end kept (`readDocuments`' `keepEnd`). */
+  function headAndTail(got: { text: string; truncated: boolean }, max: number): { text: string; truncated: boolean } {
+    const kept = keepHeadAndTail(got.text, max)
+    return { text: kept.text, truncated: got.truncated || kept.skipped }
   }
 
   /** Meet's record of what was said, or null when it holds none or Google refuses this member too. */
@@ -869,7 +885,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     /**
      * The minutes as outside text, for the assignee or an attendee (their own Google permission).
      * `paged`: the caller hands it to its AI in parts (`minutes_read`'s `part`), so it may be longer
-     * (`MINUTES_TEXT_PAGED_MAX`); without it an older app gets `MINUTES_TEXT_MAX` as before.
+     * (`MINUTES_TEXT_PAGED_MAX`) and keeps the end of a document longer than that (its middle skipped
+     * with a mark); without it an older app gets `MINUTES_TEXT_MAX`, end cut, as before.
      */
     async text(member: Member, recordId: string, options: { paged?: boolean } = {}): Promise<Outcome<MinutesText>> {
       const handle = companyData.forCompany(member.companyId)
@@ -883,7 +900,9 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const ref = parseRef(now.fields.source_ref)
       if (!ref || ref.docs.length === 0) return refuse('conflict', 'この議事録の元の文書が分かりません。', { code: 'MINUTES_SOURCE_UNKNOWN' })
 
-      const read = await readDocuments(member.companyId, member.userId, ref, options.paged ? MINUTES_TEXT_PAGED_MAX : MINUTES_TEXT_MAX)
+      const read = await (options.paged
+        ? readDocuments(member.companyId, member.userId, ref, MINUTES_TEXT_PAGED_MAX, true)
+        : readDocuments(member.companyId, member.userId, ref, MINUTES_TEXT_MAX))
       if (!read.ok) return read
       const { text, truncated, versions } = read.value
       let event: MeetEvent | null = null

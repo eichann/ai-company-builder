@@ -388,6 +388,19 @@ export function agentBrokerReservedServices(id: unknown): readonly string[] {
   return agentDescriptor(id)?.brokerReservedServices ?? []
 }
 
+/**
+ * Whether a turn of `agentId` on `modelId` has a one-million-token context (the model's `context`;
+ * no model = the agent's chat default). A model the registry does not list (Codex's live catalog,
+ * an id passed through) counts as standard: what is sized by it (minutes.md "Long minutes") stays safe.
+ */
+export function modelHasLargeContext(agentId: unknown, modelId?: string): boolean {
+  const agent = agentDescriptor(agentId)
+  if (!agent) return false
+  const models: readonly AgentModel[] = agent.models
+  const model = modelId ? models.find(m => m.id === modelId) : models.find(m => m.cliModel === agent.tasks.chat)
+  return model?.context === '1m'
+}
+
 /** One capability of an id; false for an unknown id. */
 export function agentCan(id: unknown, capability: keyof AgentCapabilities): boolean {
   return agentDescriptor(id)?.capabilities[capability] ?? false
