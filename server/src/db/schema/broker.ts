@@ -123,13 +123,18 @@ export function migrateBrokerSettings(conn: Database.Database): void {
   if (!serviceCols.has('read_only_set')) {
     conn.transaction(() => {
       conn.exec(`ALTER TABLE broker_services ADD COLUMN read_only_set INTEGER NOT NULL DEFAULT 0`)
-      conn.exec(`UPDATE broker_services SET read_only_set = 1 WHERE relay IS NOT NULL OR read_only = 1
-        OR EXISTS (SELECT 1 FROM broker_keys k WHERE k.company_id = broker_services.company_id AND k.service = broker_services.service)`)
+      // One company at a time: every statement names its company (company-scoped-sql.test.ts).
+      const keep = conn.prepare(`UPDATE broker_services SET read_only_set = 1 WHERE company_id = ? AND (relay IS NOT NULL OR read_only = 1
+        OR EXISTS (SELECT 1 FROM broker_keys k WHERE k.company_id = ? AND k.service = broker_services.service))`)
       // A built-in service with keys and no row yet (its settings were the defaults): writes kept.
-      conn.exec(`INSERT OR IGNORE INTO broker_services (company_id, service, category, rule, own_key_hosts, read_only, read_only_set, updated_at, updated_by)
+      const add = conn.prepare(`INSERT OR IGNORE INTO broker_services (company_id, service, category, rule, own_key_hosts, read_only, read_only_set, updated_at, updated_by)
         SELECT DISTINCT company_id, service, CASE service WHEN 'hubspot' THEN 'system' ELSE 'tool' END, 'company-only', '[]', 0, 1,
           strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'acb:migration'
-        FROM broker_keys WHERE service NOT IN ('gemini', 'openai', 'anthropic')`)
+        FROM broker_keys WHERE company_id = ? AND service NOT IN ('gemini', 'openai', 'anthropic')`)
+      for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+        keep.run(id, id)
+        add.run(id)
+      }
     })()
   }
   // The company key the admin chose for the service when several exist (key-broker.md "Which company key"); null = none chosen.
