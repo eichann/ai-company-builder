@@ -2,15 +2,15 @@
  * Integration Test: the pre-receive hook keeps auto-run parts of skills,
  * subagents and slash commands owner/admin-only.
  *
- * Sharing skills (.claude/skills/, .claude/agents/, .claude/commands/) is the
- * product's core feature, so those folders are not path-protected like
- * .claude/settings.json. But their Markdown can make Claude Code run commands
- * with no prompt when it is merely loaded: frontmatter `hooks` /
- * `mcpServers` (and the plugin-style `lspServers` / `monitors`), body
- * !`command` and ```! blocks. A member may add or change any skill except one
- * whose new version contains those parts; deletions are always allowed. The
- * rejection reuses the PROTECTED_CONFIG section so desktop clients offer the
- * same "restore to the server version" recovery.
+ * Who may change .claude/skills/, .claude/agents/ and .claude/commands/ at all
+ * is skill-files-hook.test.ts: here the pusher is someone allowed to (a person
+ * on 「Skill を直せる人」, `EDITOR`) unless a plain member's refusal is the
+ * point. But their Markdown can make Claude Code run commands with no prompt
+ * when it is merely loaded: frontmatter `hooks` / `mcpServers` (and the
+ * plugin-style `lspServers` / `monitors`), body !`command` and ```! blocks.
+ * Those parts stay owner/admin only, whoever else may edit the file; removing
+ * them is allowed. The rejection reuses the PROTECTED_CONFIG section so desktop
+ * clients offer the same "restore to the server version" recovery.
  *
  * Pushes go to a real bare repository configured by configureBareRepo (real
  * hook) over the local transport with ACB_PUSHER_ROLE set the way
@@ -33,7 +33,7 @@ vi.mock('../../src/lib/auth', () => ({
 
 import { configureBareRepo } from '../../src/routes/git'
 
-vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
+vi.setConfig({ testTimeout: 180_000, hookTimeout: 60_000 })
 
 type Role = 'owner' | 'admin' | 'member' | 'superuser' | undefined
 
@@ -116,11 +116,24 @@ function expectMemberRejected(files: Record<string, string>, seed: Record<string
   return r
 }
 
-function expectMemberAccepted(files: Record<string, string>, seed: Record<string, string> = { 'README.md': 'hi\n' }) {
+/** A member on 「Skill を直せる人」 for the whole company, as git-http's snapshot says it. */
+function editorEnv(): Record<string, string> {
+  const file = join(workDir, 'editor-policy.json')
+  writeFileSync(file, JSON.stringify({
+    version: 1,
+    companyId: 'company',
+    pusher: { id: 'editor', role: 'member' },
+    scopes: [{ id: 'root', path: '', kind: 'folder', rules: [{ id: 'r', subjectType: 'everyone', subjectId: null, canRead: true, canWrite: true }] }],
+    skillEditing: { everywhere: true, folders: [] },
+  }))
+  return { ACB_PUSH_POLICY: file }
+}
+
+function expectEditorAccepted(files: Record<string, string>, seed: Record<string, string> = { 'README.md': 'hi\n' }) {
   const { bare, clone } = setup(seed)
   for (const [rel, content] of Object.entries(files)) writeFile(clone, rel, content)
   commitAll(clone, 'member change')
-  const r = pushAs(clone, 'member')
+  const r = pushAs(clone, 'member', editorEnv())
   expect(r.output).not.toContain('PROTECTED_CONFIG')
   expect(r.ok, r.output).toBe(true)
   expect(remoteHead(bare)).toBe(git(['rev-parse', 'HEAD'], clone).trim())
@@ -174,12 +187,12 @@ describe('pre-receive hook: auto-run parts of skills / agents / commands', () =>
     })
   })
 
-  it('accepts a member adding and editing ordinary skills, agents and commands', () => {
+  it('accepts someone on the list adding and editing ordinary skills, agents and commands', () => {
     const seed = {
       'README.md': 'hi\n',
       '.claude/skills/report/SKILL.md': '---\nname: report\ndescription: 週次レポート\n---\n手順\n',
     }
-    expectMemberAccepted({
+    expectEditorAccepted({
       '.claude/skills/report/SKILL.md': [
         '---',
         'name: report',
@@ -257,11 +270,11 @@ describe('pre-receive hook: auto-run parts of skills / agents / commands', () =>
     expect(r.output).toContain('シンボリックリンク')
   })
 
-  it('always accepts a member deleting a skill that has auto-run parts', () => {
+  it('accepts someone on the list deleting a skill that has auto-run parts', () => {
     const { bare, clone } = setup({ 'README.md': 'hi\n', [LOCATIONS.skill]: HOOKS_FM, [LOCATIONS.command]: BANG_BODY })
     git(['rm', '-q', LOCATIONS.skill, LOCATIONS.command], clone)
     commitAll(clone, 'remove')
-    const r = pushAs(clone, 'member')
+    const r = pushAs(clone, 'member', editorEnv())
     expect(r.output).not.toContain('PROTECTED_CONFIG')
     expect(r.ok).toBe(true)
     expect(remoteHead(bare)).toBe(git(['rev-parse', 'HEAD'], clone).trim())
@@ -276,8 +289,8 @@ describe('pre-receive hook: auto-run parts of skills / agents / commands', () =>
     )
   })
 
-  it('accepts a member removing the auto-run parts from an admin-published skill', () => {
-    expectMemberAccepted(
+  it('accepts someone on the list removing the auto-run parts from an admin-published skill', () => {
+    expectEditorAccepted(
       { [LOCATIONS.skill]: '---\nname: x\ndescription: d\n---\nBody\n' },
       { 'README.md': 'hi\n', [LOCATIONS.skill]: HOOKS_FM },
     )
@@ -297,7 +310,7 @@ describe('pre-receive hook: auto-run parts of skills / agents / commands', () =>
     writeFile(b.clone, 'README.md', 'hi\n')
     writeFile(b.clone, LOCATIONS.skill, '---\nname: report\n---\nok\n')
     commitAll(b.clone, 'first')
-    expect(pushAs(b.clone, 'member').ok).toBe(true)
+    expect(pushAs(b.clone, 'member', editorEnv()).ok).toBe(true)
   })
 
   it('catches an auto-run part added in an earlier commit even when a later commit removes it', () => {

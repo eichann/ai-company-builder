@@ -14,7 +14,8 @@ import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
+import { git, loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
+import { writePrivateScopesCache } from '../electron/sync/private-folders'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
 
 let h: MainHarness
@@ -454,4 +455,44 @@ test('fs:watch sends the watcher batches to the window as fs:changes; fs:unwatch
   fs.writeFileSync(path.join(company, 'after.md'), 'x')
   await new Promise(resolve => setTimeout(resolve, 500))
   assert.deepEqual(window.sentOn('fs:changes'), [])
+})
+
+test('fs and skills handlers: a skill file the member may not change is refused in a sentence and stays as it is; a private one is theirs', async () => {
+  const company = h.companyDir('skills')
+  fs.mkdirSync(company, { recursive: true })
+  await h.invoke('fs:registerAllowedRoot', company)
+  const skill = path.join(company, '.claude/skills/report')
+  fs.mkdirSync(skill, { recursive: true })
+  git(h.base, company, ['init', '-q', '-b', 'main'])
+  writePrivateScopesCache(company, { companyId: 'skills-co', version: 'v', fetchedAt: new Date().toISOString(), scopes: [] })
+  h.server.on('GET', '/api/companies/skills-co/me/capabilities', { json: { success: true, data: { role: 'member', managedDepartmentFolders: [], skillEditing: { everywhere: false, folders: [] } } } })
+  const script = path.join(skill, 'make.py')
+  const md = path.join(skill, 'SKILL.md')
+  fs.writeFileSync(script, 'v1\n')
+  fs.writeFileSync(md, '---\nname: report\n---\nbody\n')
+
+  assert.equal(await h.invoke('fs:writeFile', script, 'mine\n'), false)
+  const refused = (r: unknown) => assert.match(String((r as { error?: string }).error), /Skill を直せる人/)
+  refused(await h.invoke('fs:delete', script))
+  refused(await h.invoke('fs:createFile', path.join(skill, 'new.sh'), 'x'))
+  refused(await h.invoke('fs:rename', script, path.join(skill, 'other.py')))
+  refused(await h.invoke('fs:move', script, path.join(company, 'moved.py')))
+  refused(await h.invoke('fs:copy', md, path.join(skill, 'copy.md')))
+  refused(await h.invoke('skills:toggleNurturing', md, true))
+  assert.match(String(await h.invoke('privateFolders:reservedPathRefusal', script)), /Skill を直せる人/, 'the tree and the editor ask this')
+  assert.equal(fs.readFileSync(script, 'utf-8'), 'v1\n')
+  assert.equal(fs.existsSync(path.join(skill, 'new.sh')), false)
+
+  // Kept on this computer: never shared. Publishing is the moment it would be.
+  assert.deepEqual(await h.invoke('skills:makePrivate', company, '.claude/skills/draft/'), { success: true })
+  const draft = path.join(company, '.claude/skills/draft/SKILL.md')
+  assert.equal(await h.invoke('fs:createDirectory', path.dirname(draft)), true)
+  assert.deepEqual(await h.invoke('fs:createFile', draft, 'x'), { success: true })
+  refused(await h.invoke('skills:publish', company, '.claude/skills/draft/'))
+
+  // 「他からコピー」 for such a member: the copy is marked first, then it may be written.
+  assert.deepEqual(await h.invoke('skills:makePrivate', company, '.claude/skills/mine/'), { success: true })
+  assert.deepEqual(await h.invoke('fs:copy', skill, path.join(company, '.claude/skills/mine')), { success: true })
+  assert.equal(await h.invoke('fs:writeFile', path.join(company, '.claude/skills/mine/make.py'), 'mine\n'), true)
+  assert.match(fs.readFileSync(path.join(company, '.git/info/exclude'), 'utf-8'), /\.claude\/skills\/draft\//, 'still private')
 })

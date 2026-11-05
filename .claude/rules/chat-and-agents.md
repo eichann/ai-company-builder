@@ -157,7 +157,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   loading; shared config is legitimate when an owner/admin writes it.
 - The enforcement is the push checker: these paths are `[PROTECTED_CONFIG]` (owner/admin only,
   `push-check.md`). The chat write guard does not refuse AI edits to them (only instruction
-  files); a member's AI edit is caught at sync by the protected-config dialog. `AGENTS.md` /
+  files and skill files); a member's AI edit is caught at sync by the protected-config dialog. `AGENTS.md` /
   `AGENTS.override.md` are instruction files (`chat-write-guard.md`).
 
 ## Claude Code agent stack

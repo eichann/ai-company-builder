@@ -94,6 +94,8 @@ export interface SkillsDeps {
    * made private. Unknown (no repository, git failed) → false.
    */
   isShared: (rootPath: string, relFolder: string) => Promise<boolean>
+  /** The sentence when the member may not change this skill file (`sharing`: not even one they keep private); null to allow. */
+  skillRefusal: (absPath: string, options?: { sharing?: boolean }) => Promise<string | null>
 }
 
 /** skills:makePrivate on a skill the company already has. */
@@ -104,7 +106,7 @@ export interface SkillsFeature {
   invalidateForChanges(changes: FileChange[]): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared, skillRefusal }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -353,6 +355,9 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
+      // Asked before the line goes: refused at sync, the skill would move to .backups/.
+      const refused = await skillRefusal(path.join(rootPath, skillRelativePath), { sharing: true })
+      if (refused) return { success: false, error: refused, code: 'refused' as const }
       if (fs.existsSync(path.join(rootPath, '.git'))) {
         localExcludeOf(rootPath)
         setLocalPrivateSkill(rootPath, skillRelativePath, false)
@@ -400,6 +405,8 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: Skills
       if (!fs.existsSync(skillMdPath)) {
         return { success: false, error: 'SKILL.md not found' }
       }
+      const refused = await skillRefusal(skillMdPath)
+      if (refused) return { success: false, error: refused, code: 'refused' as const }
 
       let content = fs.readFileSync(skillMdPath, 'utf-8')
       const frontmatterMatch = content.match(/^(---\n)([\s\S]*?)\n(---)/)

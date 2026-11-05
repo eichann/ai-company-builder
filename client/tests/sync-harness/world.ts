@@ -117,7 +117,7 @@ export const QUESTIONS = {
   sharedNestedRepo: { title: '共有中のフォルダに、別の場所から取り込んだ情報があります', buttons: { exclude: 0, 'keep-sharing': 1, cancel: 2 } },
   externalNestedRepo: { title: '別の場所から取り込んだフォルダがあります', buttons: { exclude: 0, cancel: 1 } },
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
-  protectedConfig: { title: '管理者だけが変更できるファイル', buttons: { restore: 0, cancel: 1 } },
+  protectedConfig: { title: '管理者だけが変更できるファイル', alsoTitled: '変更できないスキルのファイル', buttons: { restore: 0, cancel: 1 } },
   writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
 } as const
 
@@ -257,6 +257,7 @@ export class World {
   readonly locale: string
   private readonly gitconfig: string
   private scopes: HarnessScope[] = DEFAULT_SCOPES
+  private readonly skillEditing = new Map<string, { everywhere: boolean; folders: string[] }>()
   /** Private folders by scope id (the server's scope repositories). */
   readonly privateFolders = new Map<string, HarnessPrivateFolder>()
   /** Private folders made public (scope id → path); their content may be anywhere now. */
@@ -395,8 +396,18 @@ export class World {
     fs.writeFileSync(file, JSON.stringify({
       version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.allScopes(),
       ...(scopePath ? { scopePath } : {}),
+      ...(this.skillEditing.has(userId) ? { skillEditing: this.skillEditing.get(userId) } : {}),
     }))
     return file
+  }
+
+  /** Put a member on 「Skill を直せる人」 (as git-http's snapshot says it); takes effect at their next push. */
+  setSkillEditing(name: string, editing: { everywhere: boolean; folders: string[] }): void {
+    this.skillEditing.set(`user-${name}`, editing)
+  }
+
+  skillEditingOf(userId: string): { everywhere: boolean; folders: string[] } {
+    return this.skillEditing.get(userId) ?? { everywhere: false, folders: [] }
   }
 
   /** Replace the company's permission scopes; takes effect at every member's next push. */
@@ -758,6 +769,7 @@ export class Member {
   private inFlight = 0
   private pushHooks: Array<() => Promise<void> | void> = []
   private pushFaults: Array<PushFault | null> = []
+  private pullFaults = 0
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
@@ -930,6 +942,10 @@ export class Member {
       if (paths.length > 50) return json({ success: false, error: 'too many paths' }, 400)
       return json({ success: true, data: { results: this.world.pathsUsable(this.name, paths) } })
     }
+    if (/^\/api\/companies\/[^/]+\/me\/capabilities$/.test(url.pathname)) {
+      if (this.isOffline) throw new TypeError('fetch failed')
+      return json({ success: true, data: { role: this.role, managedDepartmentFolders: [], skillEditing: this.world.skillEditingOf(`user-${this.name}`) } })
+    }
     if (/^\/api\/companies\/[^/]+\/me\/scopes$/.test(url.pathname)) {
       // Like an older server until the company's first private folder.
       if (!this.world.privateFoldersEnabled) return json({ success: false, error: 'not found' }, 404)
@@ -966,7 +982,10 @@ export class Member {
   }
 
   private answer(options: SyncMessageBoxOptions): number {
-    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find(k => QUESTIONS[k].title === options.title)
+    const kind = (Object.keys(QUESTIONS) as QuestionKind[]).find((k) => {
+      const q: { title: string; alsoTitled?: string } = QUESTIONS[k]
+      return q.title === options.title || q.alsoTitled === options.title
+    })
     if (!kind) throw new Error(`unexpected dialog: ${options.title}`)
     const answer = this.answers.get(kind)?.shift() ?? (DEFAULT_ANSWERS[kind] as string)
     const buttons = QUESTIONS[kind].buttons as Record<string, number>
@@ -993,6 +1012,12 @@ export class Member {
    * call fails without the server ever seeing it. `skip` pushes of the
    * same sync run normally first (e.g. to hit a re-push after a rejection).
    */
+  /** The next pull fails without starting a rebase, as when git refuses to overwrite a file. */
+  failNextPull(): this {
+    this.pullFaults++
+    return this
+  }
+
   failNextPush(fault: PushFault, options: { times?: number; skip?: number } = {}): this {
     for (let i = 0; i < (options.skip ?? 0); i++) this.pushFaults.push(null)
     for (let i = 0; i < (options.times ?? 1); i++) this.pushFaults.push(fault)
@@ -1003,6 +1028,15 @@ export class Member {
     return new Proxy(git, {
       get: (target, prop, receiver) => {
         const value = Reflect.get(target, prop, receiver)
+        if (prop === 'pull' && typeof value === 'function') {
+          return async (...args: unknown[]) => {
+            if (this.pullFaults > 0) {
+              this.pullFaults--
+              throw new Error('error: The following untracked working tree files would be overwritten by merge')
+            }
+            return (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+          }
+        }
         if (prop === 'push' && typeof value === 'function') {
           return async (...args: unknown[]) => {
             const hook = this.pushHooks.shift()

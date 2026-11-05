@@ -105,6 +105,7 @@ export const CHARACTERIZATIONS: Record<string, Characterization> = {
       await rec.sync(a)
       a.hasWindow = true
       await rec.sync(a)
+      w.setSkillEditing('a', { everywhere: true, folders: [] })
       a.write('.claude/skills/s/SKILL.md', '---\nhooks: {}\n---\n').willAnswer('protectedConfig', 'cancel')
       await rec.sync(a)
       a.write('.claude/skills/s/SKILL.md', '---\nname: s\n---\n')

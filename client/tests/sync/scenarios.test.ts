@@ -398,9 +398,10 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
-  test('skill with auto-run parts: member is rejected; removing the auto-run part keeps the skill (squash path)', async t => {
+  test('skill with auto-run parts: someone on the list is rejected; removing the auto-run part keeps the skill (squash path)', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'admin', role: 'admin' }] })
     const [a, admin] = world.members
+    world.setSkillEditing('a', { everywhere: true, folders: [] })
     const withHooks = '---\nname: deploy\nhooks:\n  PreToolUse: []\n---\n# Deploy\n'
     const clean = '---\nname: deploy\n---\n# Deploy\n'
     a.write('.claude/skills/deploy/SKILL.md', withHooks).willAnswer('protectedConfig', 'cancel')

@@ -330,6 +330,66 @@ export function replaceDepartmentManagers(conn: Conn, companyId: string, departm
   })()
 }
 
+/** 「Skill を直せる人」 of a department (null: the whole company), oldest first. */
+export function listSkillEditorIds(conn: Conn, companyId: string, departmentId: string | null): string[] {
+  const rows = conn.prepare(`
+    SELECT user_id FROM skill_editors WHERE company_id = ? AND department_id IS ?
+    ORDER BY created_at ASC, user_id ASC
+  `).all(companyId, departmentId) as Array<{ user_id: string }>
+  return rows.map(r => r.user_id)
+}
+
+/** Replace that list (kept rows keep their created_at/by). Another company's department is refused by the insert trigger. */
+export function replaceSkillEditors(conn: Conn, companyId: string, departmentId: string | null, userIds: string[], createdBy: string): void {
+  conn.transaction(() => {
+    const current = new Set((conn.prepare(`SELECT user_id FROM skill_editors WHERE company_id = ? AND department_id IS ?`)
+      .all(companyId, departmentId) as Array<{ user_id: string }>).map(r => r.user_id))
+    const wanted = new Set(userIds)
+    for (const id of current) {
+      if (!wanted.has(id)) {
+        conn.prepare(`DELETE FROM skill_editors WHERE company_id = ? AND department_id IS ? AND user_id = ?`).run(companyId, departmentId, id)
+      }
+    }
+    const ts = timestamp()
+    for (const id of wanted) {
+      if (!current.has(id)) {
+        conn.prepare(`
+          INSERT INTO skill_editors (company_id, department_id, user_id, created_at, created_by)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(companyId, departmentId, id, ts, createdBy)
+      }
+    }
+  })()
+}
+
+/** Where the user is named on 「Skill を直せる人」 (read at every push: the snapshot). */
+export function skillEditorPlaces(conn: Conn, companyId: string, userId: string): { everywhere: boolean; departmentIds: string[] } {
+  const rows = conn.prepare(`SELECT department_id FROM skill_editors WHERE company_id = ? AND user_id = ?`)
+    .all(companyId, userId) as Array<{ department_id: string | null }>
+  return {
+    everywhere: rows.some(r => r.department_id === null),
+    departmentIds: rows.flatMap(r => (r.department_id === null ? [] : [r.department_id])),
+  }
+}
+
+/** 「全員が直せる」 (read at every push: the snapshot). */
+export function skillEditingOpen(conn: Conn, companyId: string): boolean {
+  const row = conn.prepare(`SELECT everyone FROM skill_editing_settings WHERE company_id = ?`).get(companyId) as { everyone: number } | undefined
+  return row?.everyone === 1
+}
+
+export function setSkillEditingOpen(conn: Conn, companyId: string, open: boolean, updatedBy: string): void {
+  conn.prepare(`
+    INSERT INTO skill_editing_settings (company_id, everyone, updated_at, updated_by) VALUES (?, ?, ?, ?)
+    ON CONFLICT (company_id) DO UPDATE SET everyone = excluded.everyone, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `).run(companyId, open ? 1 : 0, timestamp(), updatedBy)
+}
+
+/** A member left the company: they are on none of its lists any more. */
+export function removeSkillEditorFromCompany(conn: Conn, companyId: string, userId: string): void {
+  conn.prepare(`DELETE FROM skill_editors WHERE company_id = ? AND user_id = ?`).run(companyId, userId)
+}
+
 // ----------------------------------------------------------------------------
 // Rule editing (Phase 2: admin panel)
 //

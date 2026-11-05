@@ -153,7 +153,8 @@ export interface SimpleResult {
  * `error` is then a plain Japanese sentence for the member.
  */
 export interface FileOpResult extends SimpleResult {
-  code?: 'name_taken'
+  /** `refused`: `error` is the sentence to show as it is (a skill file the member may not change, …). */
+  code?: 'name_taken' | 'refused'
 }
 
 /**
@@ -478,7 +479,7 @@ export interface IpcInvokeChannels {
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
-  'fs:delete': { args: [path: string]; result: SimpleResult }
+  'fs:delete': { args: [path: string]; result: FileOpResult }
   'fs:rename': { args: [oldPath: string, newPath: string]; result: FileOpResult & { newPath?: string } }
   'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
   'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
@@ -664,9 +665,9 @@ export interface IpcInvokeChannels {
 
   // Skills and their tools (web apps)
   'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
-  'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
+  'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: FileOpResult }
   'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
-  'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+  'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: FileOpResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
   'shell:openExternal': { args: [url: string]; result: SimpleResult }

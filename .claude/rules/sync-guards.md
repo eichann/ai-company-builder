@@ -227,7 +227,31 @@ what git actually sees through the app's `createGit`.
 - Rejection recovery rewrites unpushed commits, never retries or reverts on top (the hook checks
   every commit). `client/tests/protected-config.test.ts`, `client/tests/sync/write-denied.test.ts`,
   scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
-  "[LOCAL_ONLY_PATH] …".
+  "[LOCAL_ONLY_PATH] …". Skill files (scripts, new files, deletions, renames) take the same
+  recovery with their own wording when nothing else was refused (`onlySkillFiles`): `client/tests/sync/skill-files.test.ts`.
+  The recovery compares mode as well as blob id (`sameEntry`): a `chmod +x` alone is refused by the
+  server, and a path taken for unchanged was refused at every sync, holding the member's other work
+  back (also for `[WRITE_DENIED]`).
+- A pull that fails without a rebase, while origin/main holds commits HEAD lacks, ends the sync with
+  `pull_failed` (「サーバーの最新の内容を受け取れなかった…」), nothing moved. It used to go on and report
+  「同期が完了しました」, with the member missing the server's changes for good (a look-alike path on a
+  Mac did this). No origin/main (a company's first push) still goes on. Scenario: 「a pull that fails…」
+  in `skill-files.test.ts`.
+- What running a skill leaves in its own folder (`client/shared/skill-leftovers.ts`) stays on each
+  computer: a managed block of `.git/info/exclude`, unstaged if a shared negation re-included it.
+  To the server it is a skill change, which would stop automatic sync at every run. Leftovers
+  (`__pycache__/`, `*.pyc`, `node_modules/`, virtual environments, caches, a tool's
+  `.tool-output.log`, the desktop's files) for everyone; artifacts (`package-lock.json`, `dist/` and
+  `build/` under `tools/`) only for someone who may not share that skill, from
+  `getSkillSharing` (`/me/capabilities`): a skill with a screen ships them, and a rebuilt `dist/`
+  must not leave a page pointing at an unshared asset. Ignored rather than untracked, so a shared
+  copy can still arrive over the member's own. New files only: taking a tracked one out of the
+  index would delete it for everyone. Unknown authority keeps the last block. A shared lock file
+  that a member's `npm install` changes still meets the refusal and its recovery. Scenarios in
+  `skill-files.test.ts`.
+- `[WINPATH_DETECTED]` ends the sync with `path_name` and a sentence naming the file (`winPathMessage`),
+  no `PENDING_PUSH`: a retry could only be refused the same way. The member's other work waits for the
+  rename; nothing is moved. Scenario: 「a name the server refuses…」 in `skill-files.test.ts`.
 
 ## Remote, sparse checkout and not-downloaded folders
 

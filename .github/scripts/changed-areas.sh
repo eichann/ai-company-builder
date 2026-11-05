@@ -39,14 +39,14 @@ COMMON=(
 SYNC=(
   client/electron/sync/ client/electron/protected-config.ts client/electron/write-guard.ts
   client/shared/auto-sync.ts client/shared/sparse-paths.ts client/shared/temp-save-file.ts
-  client/shared/write-access.ts
+  client/shared/skill-leftovers.ts client/shared/write-access.ts
   client/tests/sync/ client/tests/sync-harness/
   client/package.json ':(glob)client/tsconfig*.json'
   server/src/lib/push-check/ server/src/lib/git-exec.ts server/src/lib/git-server/
   server/src/lib/error-log.ts server/src/lib/request-log.ts
   server/src/templates/ server/package.json server/tsconfig.json
   shared/core/instruction-files.ts shared/core/paths.ts shared/core/permissions.ts
-  shared/core/record-types.ts shared/core/records.ts shared/core/reserved-paths.ts
+  shared/core/record-types.ts shared/core/records.ts shared/core/reserved-paths.ts shared/core/skill-files.ts
   shared/core/write-access.ts shared/core/yaml-lite.ts
   shared/types/private-folders.ts shared/package.json shared/tsconfig.json
   .github/scripts/sync-shard.mjs
@@ -66,7 +66,7 @@ CLIENT=(
 # any client/electron/ change runs it; renderer-only changes do not.
 CLIENT_MAC=(
   client/electron/ client/shared/ client/native/ ':(glob)client/tests/*.swift'
-  client/tests/agent-env.test.ts client/tests/commit-message.test.ts
+  client/tests/agent-env.test.ts client/tests/commit-message.test.ts client/tests/disk-key.test.ts
   client/tests/company-watcher.test.ts client/tests/ipc-fs.test.ts
   client/tests/permission-mode.test.ts client/tests/sandbox-claude.test.ts
   client/tests/voice-helper.test.ts client/tests/voice-polisher.test.ts client/tests/voice-probe.test.ts

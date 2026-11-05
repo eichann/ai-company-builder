@@ -16,8 +16,8 @@ interface Props {
   onCopySkill?: () => void
   onEditFile: (filePath: string) => void
   onOpenTool: (tool: SkillTool, port: number) => void
-  onPublish: (skill: Skill) => void
-  onToggleNurturing: (skill: Skill) => void
+  onPublish: (skill: Skill) => Promise<string | null>
+  onToggleNurturing: (skill: Skill) => Promise<string | null>
 }
 
 /** The スキル tab: the department's skills, and the chosen one's details beside them. */

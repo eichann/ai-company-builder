@@ -20,6 +20,7 @@ import {
   type ScopeRule,
   type WriteAccessSummary,
 } from '../../shared/core/permissions'
+import type { SkillEditing } from '../../shared/core/skill-files'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -42,6 +43,22 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
   // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
   const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const orphanedScopesOf = (companyId: string) => companyData.forCompany(companyId).orphanedScopes
+
+  /**
+   * The user's place on 「Skill を直せる人」, folders (NFC) instead of
+   * department ids: the push check's snapshot and the app's guards decide by path.
+   */
+  function skillEditing(companyId: string, userId: string): SkillEditing {
+    // 「全員が直せる」: as if everyone were on the company's list. The write check still applies.
+    if (scopesOf(companyId).skillEditingOpen()) return { everywhere: true, folders: [] }
+    const { everywhere, departmentIds } = scopesOf(companyId).skillEditorPlaces(userId)
+    if (departmentIds.length === 0) return { everywhere, folders: [] }
+    const named = new Set(departmentIds)
+    return {
+      everywhere,
+      folders: companyData.forCompany(companyId).departments.folders().filter(d => named.has(d.id)).map(d => d.folder.normalize('NFC')),
+    }
+  }
 
   return {
     /** The overview screen (an owner/admin acting). */
@@ -187,6 +204,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
         role: member.role,
         managedDepartmentIds: managed,
         managedDepartmentFolders: managed.map(id => folderOf.get(id)).filter((f): f is string => typeof f === 'string'),
+        skillEditing: skillEditing(member.companyId, member.userId),
       }
     },
 
@@ -207,6 +225,8 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
         .filter(d => managed.has(d.id))
         .map(d => d.folder.normalize('NFC'))
     },
+
+    skillEditing,
   }
 }
 

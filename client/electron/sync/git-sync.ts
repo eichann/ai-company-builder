@@ -15,6 +15,10 @@ import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
+  onlySkillFiles,
+  parseWinPathFiles,
+  winPathMessage,
+  WINPATH_MARKER,
   parseProtectedConfigPaths,
   protectedConfigMessage,
   restoreProtectedPaths,
@@ -74,12 +78,29 @@ import {
   syncReadOnlyScope,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
-import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
+import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
+import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
 import { clearStaleLocks, isDiskFull, lockFailureMessage, pruneRecoveryRefs, recoverInterruptedState, recoveryNote, REPOSITORY_BUSY_MESSAGE, type KeptBeforeRecovery } from './interrupted'
+
+const PULL_FAILED_MESSAGE = 'サーバーの最新の内容を受け取れなかったため、同期を完了できませんでした。このPCの変更はそのまま残っています。もう一度同期しても直らないときは、管理者に連絡してください。'
+
+/** Does origin/main, as last fetched, hold commits HEAD does not? False without it (the first push of a company). */
+async function upstreamNotMerged(git: SimpleGit): Promise<boolean> {
+  const upstream = (await git.raw(['rev-parse', '--verify', '--quiet', 'origin/main']).catch(() => '')).trim()
+  if (!upstream) return false
+  // Hashes, not exit codes: simple-git does not reject on a silent non-zero exit.
+  return (await git.raw(['merge-base', upstream, 'HEAD']).catch(() => '')).trim() !== upstream
+}
+
+/** This computer's ignore rule for what running a skill leaves in its folder (.git/info/exclude). */
+const SKILL_LEFTOVER_EXCLUDES: ExcludeBlock = {
+  begin: '# >>> ACB skill leftovers (managed by the app, local only) >>>',
+  end: '# <<< ACB skill leftovers <<<',
+}
 
 /** This computer's ignore rule for the app's temporary save files (.git/info/exclude). */
 const TEMP_SAVE_EXCLUDES: ExcludeBlock = {
@@ -186,13 +207,22 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     const stageAll = async () => {
       try {
         writeExcludeLines(repoPath, TEMP_SAVE_EXCLUDES, [TEMP_SAVE_EXCLUDE_PATTERN])
+        // Unknown (offline, an older server): the block stays as the last known answer left it.
+        const sharing = await deps.api.getSkillSharing(companyId).catch(() => null)
+        if (sharing) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, skillExcludeLines(sharing, opts.backupPrefix ?? ''))
+        else if (readExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES).length === 0) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, SKILL_LEFTOVER_PATTERNS)
       } catch (excludeError) {
         log.warn('Git sync: Could not write .git/info/exclude (temporary save files):', excludeError)
       }
       await git.raw(['add', '--sparse', '.'])
       const staged = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=AMT']).catch(() => ''))
         .split('\0').filter(Boolean)
-      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f))
+      // A leftover only while new: one the company already has is a tracked file,
+      // and taking it out of the index here would delete it for everyone.
+      const added = staged.some(isSkillLeftover)
+        ? new Set((await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=A']).catch(() => '')).split('\0'))
+        : new Set<string>()
+      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f) || (added.has(f) && isSkillLeftover(f)))
       if (stray.length > 0) {
         log.warn('Git sync: Unstaging local-only paths that reached the index:', stray.length)
         for (let i = 0; i < stray.length; i += 200) {
@@ -750,6 +780,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       if (!rebaseInProgress()) {
         // Not a conflict — e.g. network error or no remote tracking branch
         log.warn('Git sync: Pull failed but no rebase in progress:', pullError)
+        // The fetch saw server changes this pull did not bring in: going on
+        // would report a finished sync while the member misses them. (A push
+        // would be refused anyway.) Nothing of theirs moved.
+        if (await upstreamNotMerged(git)) {
+          return { success: false, errorType: 'pull_failed', error: PULL_FAILED_MESSAGE }
+        }
       } else {
         log.log('Git sync: Pull stopped mid-rebase, resolving conflicts...')
 
@@ -1258,7 +1294,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         // member may not edit, or both.
         const refusedWhat = hasProtected && hasWriteDenied
           ? '共有できない'
-          : hasProtected ? '管理者だけが変更できる' : '編集する権限がないフォルダの'
+          : hasProtected ? (onlySkillFiles(protectedFiles) ? '変更できないスキルの' : '管理者だけが変更できる') : '編集する権限がないフォルダの'
 
         // First try keeping every file as the member has it now. The hook
         // checks every commit in the range, so a change the member has since
@@ -1397,7 +1433,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             return {
               success: false,
               error: hasProtected && !hasWriteDenied
-                ? '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。'
+                ? `${refusedWhat}ファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`
                 : `${refusedWhat}ファイルを元に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`,
               errorType: 'push_failed' as const,
               pushFailed: true,
@@ -1408,7 +1444,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
 
         const parts = ['同期完了。']
-        if (hasProtected) parts.push(`管理者だけが変更できるファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
+        if (hasProtected) parts.push(`${onlySkillFiles(revertedProtected) ? '変更できないスキルの' : '管理者だけが変更できる'}ファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
         if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
         if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
         if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
@@ -1507,6 +1543,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             excludedNestedRepos: newlyExcludedNestedRepos
           }
         }
+      } else if (pushErrorMsg.includes(WINPATH_MARKER)) {
+        // The name decides, so a retry would be refused the same way: no
+        // PENDING_PUSH, and the member is told which file.
+        log.warn('Git sync: Push rejected — a name other computers cannot hold')
+        return { success: false, errorType: 'path_name', error: winPathMessage(parseWinPathFiles(pushErrorMsg)) }
       } else {
         log.error('Git sync: Push to main failed:', pushErrorMsg)
         // Try master branch if main fails

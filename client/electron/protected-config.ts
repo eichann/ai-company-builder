@@ -5,7 +5,8 @@
 // rejects any push in which *some commit* adds, modifies, deletes or renames
 // a protected path (.claude/settings.json, .claude/settings.local.json,
 // .mcp.json, anything under .claude/hooks/ — at any depth) unless the pusher
-// is an owner/admin. Claude Code runs the commands in those files without a
+// is an owner/admin; skill / agent / command files the same way, with more
+// people allowed (shared/core/skill-files.ts). Claude Code runs the commands in those files without a
 // prompt, so a member could otherwise run code on every teammate's machine.
 //
 // The rejected change is already committed locally, so retrying the push can
@@ -26,6 +27,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SimpleGit } from 'simple-git'
+import { isSkillFile } from '../../shared/core/skill-files'
 
 export const PROTECTED_CONFIG_MARKER = '[PROTECTED_CONFIG]'
 
@@ -71,11 +73,41 @@ function parseRejectionPaths(errorMessage: string, marker: string): string[] {
   return paths
 }
 
+/** Everything refused is a skill / agent / command file: more people than admins may change those. */
+export function onlySkillFiles(paths: string[]): boolean {
+  return paths.length > 0 && paths.every(isSkillFile)
+}
+
+export const SKILL_FILES_REASON = 'スキル・エージェント・コマンドのファイルは使う人のパソコンで動くため、管理者・部署の管理役・「Skill を直せる人」に指定された人だけが変更できます（自動実行の設定はオーナー・管理者だけです）。'
+
 /** Plain-words explanation shown to the member (Japanese UI). */
 export function protectedConfigMessage(paths: string[]): string {
   const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  if (onlySkillFiles(paths)) {
+    return `このスキルのファイルは変更できません。\n` +
+      `${SKILL_FILES_REASON}\n\n${list}`
+  }
   return `このファイルは管理者だけが変更できます。\n` +
     `チャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
+}
+
+// ---------------------------------------------------------------------------
+// WINPATH_DETECTED — a name other members' computers cannot hold
+// ---------------------------------------------------------------------------
+
+export const WINPATH_MARKER = '[WINPATH_DETECTED]'
+
+/** The paths of the section; each line is "  - <path> （<why>）". */
+export function parseWinPathFiles(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, WINPATH_MARKER).map(line => line.replace(/ （[^（）]*）$/, ''))
+}
+
+/** Plain words: nothing is retried until the name changes, so the member has to know which file. */
+export function winPathMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `次のファイルは名前の問題で共有できないため、同期を止めました。\n` +
+    `ほかのメンバーのパソコンで別のファイルと同じ名前になるか、Windowsで使えない名前です。\n\n${list}\n\n` +
+    `名前を変えてから、もう一度同期してください。このPCの変更はすべて残っています。`
 }
 
 export class ProtectedConfigRecoveryError extends Error {}
@@ -162,17 +194,28 @@ export interface ProtectedConfigRecoveryResult {
 
 type EntryType = 'blob' | 'tree' | null
 
-async function entryAt(git: SimpleGit, rev: string, file: string): Promise<{ type: EntryType; oid: string | null }> {
+interface TreeEntry { type: EntryType; oid: string | null; mode: string | null }
+
+async function entryAt(git: SimpleGit, rev: string, file: string): Promise<TreeEntry> {
   try {
     // ls-tree on the exact path: one line "<mode> <type> <oid>\t<path>", or nothing.
     const out = (await git.raw(['ls-tree', '-z', rev, '--', file])).split('\0')[0]
-    if (!out) return { type: null, oid: null }
+    if (!out) return { type: null, oid: null, mode: null }
     const [meta] = out.split('\t')
-    const [, type, oid] = meta.split(' ')
-    return { type: type === 'tree' ? 'tree' : 'blob', oid }
+    const [mode, type, oid] = meta.split(' ')
+    return { type: type === 'tree' ? 'tree' : 'blob', oid, mode }
   } catch {
-    return { type: null, oid: null }
+    return { type: null, oid: null, mode: null }
   }
+}
+
+/**
+ * Nothing to put back. The mode counts: the server refuses a `chmod +x` like any
+ * other change of the file, so a path differing only there has to be restored
+ * too, or the same push is refused at every sync.
+ */
+function sameEntry(local: TreeEntry, server: TreeEntry): boolean {
+  return local.type === 'blob' && local.oid === server.oid && local.mode === server.mode
 }
 
 function assertInsideRepo(repoPath: string, file: string): string {
@@ -223,7 +266,7 @@ export async function restoreProtectedPaths(options: {
 
   // Decide per path before touching anything, so an unsupported case aborts
   // with the repository unchanged.
-  const plan: Array<{ file: string; local: { type: EntryType; oid: string | null }; server: { type: EntryType; oid: string | null } }> = []
+  const plan: Array<{ file: string; local: TreeEntry; server: TreeEntry }> = []
   for (const file of paths) {
     const local = await entryAt(git, localHead, file)
     const server = await entryAt(git, upstreamHash, file)
@@ -247,7 +290,7 @@ export async function restoreProtectedPaths(options: {
   const restored: string[] = []
   const removed: string[] = []
   for (const { file, local, server } of plan) {
-    if (local.type === 'blob' && local.oid === server.oid) continue
+    if (sameEntry(local, server)) continue
     // A folder now (e.g. .claude was briefly a symlink in an earlier commit):
     // only an intermediate commit touched this path and squashing drops it.
     // Never check a folder out over the member's work — skills live there.
@@ -277,7 +320,7 @@ export async function restoreProtectedPaths(options: {
 
   // 3. Put each protected path back to the server's version.
   for (const { file, local, server } of plan) {
-    if (local.type === 'tree' || (local.type === 'blob' && local.oid === server.oid)) continue
+    if (local.type === 'tree' || sameEntry(local, server)) continue
     if (local.type === 'blob') {
       await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', file])
       fs.rmSync(fullPaths.get(file)!, { force: true }) // a symlink is removed, not followed

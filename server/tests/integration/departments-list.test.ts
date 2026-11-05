@@ -234,7 +234,7 @@ describe('GET /departments returns the same data as before', () => {
     writeFile(member, '営業部/提案書/案件A.md', 'a\n')
     writeFile(member, '経理/月次/9月.md', 'x\n')
     writeFile(member, 'docs/readme.md', 'd\n')
-    writeFile(member, '.claude/skills/x/SKILL.md', '---\nname: x\n---\nbody\n')
+    writeFile(member, '.claude/notes/x.md', 'body\n')
     rmSync(join(member, 'gone'), { recursive: true, force: true })
     pushAll(member)
 

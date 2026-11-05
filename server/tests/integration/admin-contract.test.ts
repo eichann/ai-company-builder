@@ -97,6 +97,7 @@ const TYPES: Record<string, string> = {
   Department: 'Department',
   DepartmentStats: '{ files: number; folders: number; exists: boolean }',
   Managers: '{ managers: DepartmentManager[] }',
+  SkillEditors: 'SkillEditors',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
   InboxSettings: 'InboxSettingsView',
@@ -231,6 +232,7 @@ beforeAll(async () => {
   const { departmentsRoute } = await import('../../src/routes/departments')
   const { permissionsRoute } = await import('../../src/routes/permissions')
   const { permissionRulesRoute } = await import('../../src/routes/permission-rules')
+  const { skillEditorsRoute } = await import('../../src/routes/skill-editors')
   const { privateFoldersRoute } = await import('../../src/routes/private-folders')
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
@@ -251,6 +253,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId/departments', departmentsRoute)
   app.route('/api/companies/:companyId', permissionsRoute)
   app.route('/api/companies/:companyId', permissionRulesRoute)
+  app.route('/api/companies/:companyId', skillEditorsRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
@@ -304,6 +307,9 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('DepartmentStats', USERS.owner, 'GET', `${base}/departments/${created.id}/stats`)
     await expectShape('Managers', USERS.owner, 'PUT', `${base}/departments/${created.id}/managers`, { userIds: [USERS.member] })
     await expectShape('Managers', USERS.owner, 'GET', `${base}/departments/${created.id}/managers`)
+    await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors`, { departmentId: created.id, userIds: [USERS.member] })
+    await expectShape('SkillEditors', USERS.owner, 'GET', `${base}/skill-editors`)
+    await expectShape('SkillEditors', USERS.owner, 'PUT', `${base}/skill-editors/everyone`, { everyone: false })
     await expectShape('DepartmentMembers', USERS.owner, 'PUT', `${base}/departments/${created.id}/members`, { userIds: [USERS.member] })
     await expectShape('DepartmentMembers', USERS.member, 'GET', `${base}/departments/${created.id}/members`)
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)

@@ -35,6 +35,7 @@ import { configureBareRepoAsync, listAllScopeRepos } from './scope-repo'
 import { gitAsync } from '../git-exec'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
 import type { ScopeWithRules } from '../../../shared/core/permissions'
+import type { SkillEditing } from '../../../shared/core/skill-files'
 
 export { installPreReceiveHook, renderPreReceiveHook, PUSH_CHECK_ENTRY, HOOK_TEMPLATE_PATH } from './hook'
 export { BARE_REPO_CONFIG } from './repo-config'
@@ -133,6 +134,10 @@ export interface PushCheckRequest {
   scopePath?: string
   /** Department folders (NFC) the pusher manages: instruction files inside are theirs to change. */
   managedFolders?: string[]
+  /** The pusher's place on 「Skill を直せる人」: skill files there are theirs to change. */
+  skillEditing?: SkillEditing
+  /** The pusher's app predates the skill files rule: not applied to this push. */
+  appPredatesSkillRule?: boolean
 }
 
 export interface PreparedPushCheck {
@@ -156,6 +161,8 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     scopes: req.scopes,
     ...(req.scopePath !== undefined ? { scopePath: req.scopePath } : {}),
     ...(req.managedFolders !== undefined ? { managedFolders: req.managedFolders } : {}),
+    ...(req.skillEditing !== undefined ? { skillEditing: req.skillEditing } : {}),
+    ...(req.appPredatesSkillRule ? { appPredatesSkillRule: true } : {}),
   }
   let dir: string | null = null
   try {

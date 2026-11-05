@@ -231,6 +231,50 @@ test('a new git init inside the company folder outside .workspace/ is refused (s
   assert.equal(deny('git submodule init', `${ROOT}/営業部`).deny, false)
 })
 
+test('skill files: a member\'s AI is stopped before writing; the people allowed, unshared places and a private skill are not', () => {
+  const noOne = { everywhere: false, folders: [] }
+  const withAuthority = (authority: InstructionAuthority | undefined, privateSkills: string[] = []): WriteGuard => ({
+    root: ROOT, getAccess: () => ({ ...ACCESS, all: true }), getInstructionAuthority: () => authority, getPrivateSkills: () => privateSkills,
+  })
+  const write = (g: WriteGuard, rel: string) => decideToolWrite(g, 'Write', { file_path: `${ROOT}/${rel}` }, ROOT)
+  const member = withAuthority({ role: 'member', managedFolders: [], skillEditing: noOne })
+
+  for (const rel of ['.claude/skills/report/make.py', '.claude/agents/a.md', '営業部/.claude/commands/x.sh', '.Claude/Skills/r/run.js']) {
+    const d = write(member, rel)
+    assert.equal(d.deny, true, rel)
+    if (d.deny) {
+      assert.equal(d.code, 'skill-file')
+      assert.match(d.message, /Skill を直せる人/)
+      assert.match(d.message, /「新しいスキル」や「他からコピー」/, 'and the way to try something anyway')
+    }
+  }
+  const bash = decideToolWrite(member, 'Bash', { command: 'echo x > .claude/skills/report/make.py' }, ROOT)
+  assert.equal(bash.deny, true, 'a redirect')
+
+  assert.equal(write(withAuthority({ role: 'admin', managedFolders: [], skillEditing: noOne }), '.claude/skills/r/make.py').deny, false)
+  assert.equal(write(withAuthority({ role: 'member', managedFolders: [], skillEditing: { everywhere: true, folders: [] } }), '.claude/skills/r/make.py').deny, false)
+  for (const allowed of [{ role: 'member', managedFolders: ['営業部'], skillEditing: noOne }, { role: 'member', managedFolders: [], skillEditing: { everywhere: false, folders: ['営業部'] } }]) {
+    assert.equal(write(withAuthority(allowed), '営業部/.claude/skills/r/make.py').deny, false)
+    assert.equal(write(withAuthority(allowed), '.claude/skills/r/make.py').deny, true, 'not outside their department')
+  }
+
+  // Never shared, so never the server's business.
+  assert.equal(write(member, '.workspace/x/.claude/skills/r/make.py').deny, false)
+  assert.equal(write(member, '営業部/.personal/.claude/skills/r/make.py').deny, false)
+  const drafting = withAuthority({ role: 'member', managedFolders: [], skillEditing: noOne }, ['営業部/.claude/skills/draft/'])
+  assert.equal(write(drafting, '営業部/.claude/skills/draft/scripts/run.py').deny, false, 'a skill kept on this computer')
+  assert.equal(write(drafting, '営業部/.claude/skills/other/run.py').deny, true)
+  assert.equal(write(drafting, '営業部/.claude/skills/draft-weekly/run.py').deny, true, 'a shared skill whose name starts the same')
+
+  // Not skill files.
+  assert.equal(write(member, '.claude/notes.py').deny, false)
+  assert.equal(write(member, 'skills/report/make.py').deny, false)
+
+  // Unknown never blocks: no authority, or a server that does not answer skillEditing.
+  assert.equal(write(withAuthority(undefined), '.claude/skills/r/make.py').deny, false)
+  assert.equal(write(withAuthority({ role: 'member', managedFolders: [] }), '.claude/skills/r/make.py').deny, false)
+})
+
 test('the chat instructions tell the AI where external repositories go', () => {
   assert.match(externalRepositoryInstruction('/Users/me/会社/'), /「\/Users\/me\/会社\/\.workspace\/」の中に置いてください/)
   assert.match(externalRepositoryInstruction(), /会社フォルダ直下の「\.workspace\/」/)

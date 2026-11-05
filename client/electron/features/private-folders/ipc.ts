@@ -13,7 +13,7 @@ import type { SyncActivity } from '../../services/sync-activity'
 export interface PrivateFoldersDeps {
   paths: PathGuard
   api: PrivateFoldersApi
-  guards: Pick<PrivateFolderGuards, 'reservedRefusal'>
+  guards: Pick<PrivateFolderGuards, 'writeRefusal'>
   /** Automatic sync waits while a folder is being created. */
   activity: Pick<SyncActivity, 'during'>
 }
@@ -21,11 +21,12 @@ export interface PrivateFoldersDeps {
 export function registerPrivateFoldersIpc(ipc: IpcRegistrar, { paths, api, guards, activity }: PrivateFoldersDeps): void {
   // The file tree asks before creating / renaming / moving to a path: a
   // folder named like a private folder the member cannot read is refused with
-  // the server's [RESERVED_PATH] sentence (only the name the member typed).
+  // the server's [RESERVED_PATH] sentence (only the name the member typed), a
+  // skill file the member may not change with its own sentence.
   // The fs:* handlers refuse the same paths as a backstop (features/fs).
   ipc.handle('privateFolders:reservedPathRefusal', async (_, targetPath: string) => {
     try {
-      return await guards.reservedRefusal(paths.validate(targetPath))
+      return await guards.writeRefusal(paths.validate(targetPath))
     } catch {
       return null
     }

@@ -13,6 +13,7 @@ import { readFileSync } from 'fs'
 import { isRunnable, runPushCheck } from './check'
 import { parsePushPolicy, reservedPathsFor, writeGateFor, type WriteGate } from './policy'
 import { hookErrorLine } from './report'
+import type { SkillEditing } from '../../../shared/core/skill-files'
 
 export const REJECT_EXIT = 10
 
@@ -22,6 +23,9 @@ interface Gates {
   reserved: string[]
   /** Department folders the pusher manages (instruction files). */
   managedFolders?: string[]
+  /** The pusher's place on 「Skill を直せる人」. */
+  skillEditing?: SkillEditing
+  appPredatesSkillRule?: boolean
   scopePath?: string
 }
 
@@ -35,6 +39,8 @@ function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
         write: writeGateFor(policy),
         reserved: reservedPathsFor(policy),
         managedFolders: policy.managedFolders ?? [],
+        ...(policy.skillEditing !== undefined ? { skillEditing: policy.skillEditing } : {}),
+        appPredatesSkillRule: policy.appPredatesSkillRule === true,
         ...(policy.scopePath !== undefined ? { scopePath: policy.scopePath } : {}),
       }
     } catch (err) {
@@ -65,6 +71,11 @@ async function main(): Promise<number> {
     writeGate: gates.write,
     reserved: gates.reserved,
     managedFolders: gates.managedFolders ?? [],
+    ...(gates.skillEditing !== undefined ? { skillEditing: gates.skillEditing } : {}),
+    // git-http strips ACB_INTERNAL_PUSH and always sets ACB_PUSH_POLICY, so a
+    // member's push never counts as the server's own.
+    serverPush: env.ACB_INTERNAL_PUSH === '1' && env.ACB_PUSH_POLICY === undefined,
+    appPredatesSkillRule: gates.appPredatesSkillRule === true,
     ...(gates.scopePath !== undefined ? { scopePath: gates.scopePath } : {}),
     contentCheckAvailable,
   })

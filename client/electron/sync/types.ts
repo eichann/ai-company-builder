@@ -5,6 +5,7 @@
 import type { SimpleGit } from 'simple-git'
 import type { MyScopesResponse } from '../../../shared/types/private-folders'
 import type { PathCheckResult } from './path-check'
+import type { SkillSharing } from '../../shared/skill-leftovers'
 
 /** The questions sync asks the member. */
 export interface SyncDialog {
@@ -49,6 +50,11 @@ export interface SyncServerApi {
    * folder the member cannot read). null when there is no usable answer.
    */
   checkPaths(companyId: string, paths: string[]): Promise<PathCheckResult[] | null>
+  /**
+   * GET /api/companies/:companyId/me/capabilities → who may share which skills.
+   * null when there is no usable answer (an older server, other errors).
+   */
+  getSkillSharing(companyId: string): Promise<SkillSharing | null>
 }
 
 export type SyncLogger = Pick<Console, 'log' | 'warn' | 'error'>

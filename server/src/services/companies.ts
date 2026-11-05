@@ -361,6 +361,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       transactions.run(() => {
         memberships.delete(companyId, targetUserId)
         scopesOf(companyId).removeManagerFromCompany(targetUserId)
+        scopesOf(companyId).removeSkillEditorFromCompany(targetUserId)
         scopesOf(companyId).deleteUserRules(targetUserId)
         // They belong to no department of it any more (tasks.md "Department membership").
         companyData.forCompany(companyId).tasks.removeMember(targetUserId, actor.userId, clock.now())
