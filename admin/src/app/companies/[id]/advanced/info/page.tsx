@@ -104,6 +104,18 @@ export default function SettingsPage() {
           </div>
         </Card>
 
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle>気になる動き</CardTitle>
+            <CardDescription>パスワードの間違いが続いた、ふだんよりずっと多く受け取った、などサーバーが見つけたことの一覧と、Slack でも知らせるかどうかです。</CardDescription>
+          </CardHeader>
+          <div className="border-t px-5 py-3">
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/companies/${companyId}/alerts`}>開く</Link>
+            </Button>
+          </div>
+        </Card>
+
         {role === 'admin' && (
           <Card className="border-destructive/30">
             <CardHeader className="pb-5">

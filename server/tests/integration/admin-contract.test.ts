@@ -78,6 +78,8 @@ const TYPES: Record<string, string> = {
   AgentSandbox: 'AgentSandboxView',
   AgentStops: 'AgentStopView',
   SecondOpinion: 'SecondOpinionView',
+  SecurityAlerts: 'SecurityAlertsView',
+  SecurityAlertSettings: 'SecurityAlertSettings',
   RecordSettings: 'RecordSettings',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
@@ -260,6 +262,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', secondOpinionRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/admin-home')).adminHomeRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/security-alerts')).securityAlertsRoute)
   app.route('/api/companies/:companyId', inboxRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/absences')).absencesRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
@@ -403,6 +406,11 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   it('「もう一方の AI に聞く」', async () => {
     await expectShape('SecondOpinion', USERS.owner, 'GET', `${base}/second-opinion`)
     await expectShape('SecondOpinion', USERS.admin, 'PUT', `${base}/second-opinion`, { allowed: true })
+  })
+
+  it('「気になる動き」', async () => {
+    await expectShape('SecurityAlerts', USERS.owner, 'GET', `${base}/security-alerts`)
+    await expectShape('SecurityAlertSettings', USERS.admin, 'PUT', `${base}/security-alerts/settings`, { slackDm: true })
   })
 
   it('「記録とやることの一覧を使う」 (the records switch)', async () => {

@@ -17,7 +17,7 @@ export const ADVANCED_SECTIONS: Array<{ id: AdvancedSection; title: string; desc
   { id: 'calendar', title: '会社の暦', description: '夏休み・年末年始など、会社の休み（土日・祝日は自動）', path: 'advanced/calendar' },
   { id: 'inbox', title: '来た連絡の決まり', description: '宛先が何人もいるとき・CC だけのとき・メルマガ・共有の受付アドレスなど', path: 'advanced/inbox' },
   { id: 'ai-safety', title: 'AI の安全', description: 'AI を止める・AI の操作の記録・AI の囲い・API キー・もう一方の AI に聞く', path: 'advanced/ai-safety' },
-  { id: 'info', title: '会社の情報', description: '会社名・この会社から退出・組み込みのルールと止められた同期', path: 'advanced/info' },
+  { id: 'info', title: '会社の情報', description: '会社名・この会社から退出・組み込みのルールと止められた同期・気になる動き', path: 'advanced/info' },
 ]
 
 const sorted = <T,>(xs: readonly T[]) => [...xs].map(String).sort()

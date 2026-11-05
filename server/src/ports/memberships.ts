@@ -20,6 +20,8 @@ export interface MembershipRepository {
   roleOf(companyId: string, userId: string): string | null
   /** Every member of the company, oldest membership first. */
   listByCompany(companyId: string): MembershipRow[]
+  /** The companies the user belongs to (「気になる動き」's sign-in alerts go to each). */
+  companyIdsOf(userId: string): string[]
   countOwners(companyId: string): number
   insert(membership: NewMembership): void
   updateRole(companyId: string, userId: string, role: string, updatedAt: string): void
