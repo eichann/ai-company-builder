@@ -11,13 +11,13 @@ runs:
     # --frozen-lockfile install. Bump this together with regenerating the
     # lockfile on the newer pnpm. (Since Electron 45 nothing depends on
     # fd-slicer any more; the patch can go with that bump.)
-    - uses: pnpm/action-setup@v6
+    - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       with:
         version: 9
 
     # Node 20 matches server/Dockerfile and admin/Dockerfile (node:20-slim)
     # and the engines floor in the root package.json.
-    - uses: actions/setup-node@v7
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version: 20
         cache: pnpm

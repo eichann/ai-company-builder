@@ -153,12 +153,14 @@ describe('preparing: the AI’s turn before the person’s', () => {
       return r.record.id
     }
     // Not a type implementing `prepared`, a record the actor cannot read, another company's, a missing id: one answer.
+    // (On a task that is u-mallory's own, so her AI may prepare it.)
+    const hers = task(m('u-alice'), { state: 'preparing', fields: { assignee: 'u-mallory' } }, AI)
     const closed = mail('a', '経理')
-    const answers = await Promise.all([t.id, closed, mail('b'), 'outbound_message-0000000000000000'].map(id =>
-      engine.act(m('u-mallory'), AI, t.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '空きを確かめた' }, links: { prepared: [id] } })))
+    const answers = await Promise.all([hers.id, closed, mail('b'), 'outbound_message-0000000000000000'].map(id =>
+      engine.act(m('u-mallory'), AI, hers.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '空きを確かめた' }, links: { prepared: [id] } })))
     for (const a of answers) expect(a).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
     expect(new Set(answers.map(a => JSON.stringify(a)))).toHaveProperty('size', 1)
-    expect(ledger(t.id)).toHaveLength(1)
+    expect(ledger(hers.id)).toHaveLength(1)
 
     const draft = mail('a')
     const r = ok(await engine.act(m('u-alice'), AI, t.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '先方の空きを確かめ、返事の下書きを作りました' }, links: { prepared: [draft] } }))
@@ -166,6 +168,22 @@ describe('preparing: the AI’s turn before the person’s', () => {
     expect(r.entry.changes).toEqual(expect.arrayContaining([{ field: 'links.prepared', before: null, after: draft }]))
     expect(notified).toEqual([['a', ['u-bob']]])
     expect(ids(ok(service.myTurn(m('u-bob'))))).toEqual([t.id])
+  })
+})
+
+describe('an AI-only action is the AI of the record\'s own people only (audit B-M4)', () => {
+  it('another member\'s AI — even the owner\'s — cannot finish or hand over someone else\'s preparation; the assignee\'s and the requester\'s can', async () => {
+    const t = task(m('u-alice'), { state: 'preparing' }, AI)
+    for (const who of ['u-mallory', 'u-owner']) {
+      for (const [action, body] of [['finish_prep', { args: { prep_summary: '確かめた' } }], ['hand_over', { note: '渡します' }]] as const) {
+        expect(await engine.act(m(who), AI, t.id, action, { expectedVersion: 1, ...body })).toMatchObject({ ok: false, kind: 'forbidden', body: { code: 'NOT_ALLOWED' } })
+      }
+    }
+    expect(ledger(t.id)).toHaveLength(1)
+    // The assignee's AI (its 「AI の番」) and the requester's (the consultation that made it).
+    expect(ok(await engine.act(m('u-bob'), AI, t.id, 'hand_over', { expectedVersion: 1, note: '渡します' })).record.state).toBe('todo')
+    const u = task(m('u-alice'), { state: 'preparing' }, AI)
+    expect(ok(await engine.act(m('u-alice'), AI, u.id, 'finish_prep', { expectedVersion: 1, args: { prep_summary: '確かめた' } })).record.state).toBe('todo')
   })
 })
 

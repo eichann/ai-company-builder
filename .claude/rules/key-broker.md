@@ -351,8 +351,8 @@ relay's usual `agent_events` line, with `operation`.
   company key; rule 「会社の鍵だけ」 by default). Milestone 3 uses only the **company key**: the
   plugin's connector (P5) reads it with `vault.reveal` like the relay. HubSpot has no SDK
   variables, so scripts get only `ACB_HUBSPOT_API_KEY` / `ACB_HUBSPOT_BASE_URL` (K6).
-- **Read-only switch** (per company and service, `broker_services.read_only`, additive column in
-  `migrateBrokerSettings`, default off): `PUT /broker/services/:service/read-only { readOnly }`
+- **Read-only switch** (per company and service, `broker_services.read_only` + `read_only_set`,
+  additive columns in `migrateBrokerSettings`): `PUT /broker/services/:service/read-only { readOnly }`
   (owner/admin; built-in or registered generic services, else 404; history action `read-only`;
   the view's service carries `readOnly`). While on, the relay forwards only `GET` / `HEAD` and the
   POST paths the built-in service names as reads (`readOnlyPosts`: HubSpot's search,
@@ -370,6 +370,20 @@ relay's usual `agent_events` line, with `operation`.
   `services/plugins.ts` `setEnabled`; owner 0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
   through the relay). Test: `tests/integration/broker-relay.test.ts` 「read-only switch」
   (mutation-checked: the guard, the method-override check, the POST allow-list).
+- **Read-only by default** (audit B-M6, 2026-11-05): a service nobody chose for (`read_only_set`
+  0, the port's `readOnly: null`) reads only — HubSpot with a key but no plugin, and any generic
+  service a company registers — **except an AI model's API** (`modelApi` on Gemini / OpenAI /
+  Anthropic in `BUILTIN_BROKER_SERVICES`: their POSTs are the model calls;
+  `brokerRelayReadOnlyByDefault`). Writes pass only after an owner/admin turns the switch off (a
+  plugin-managed service never). The view's `readOnly` is the effective value. Migration (owner: harden without
+  breaking today's work — div's `anken-sync` writes HubSpot through the relay, `plugins.md`): what a
+  company already used keeps working as the company's choice — a row that was read-only, a generic
+  service, a service with a key registered at migration time (a row is added for a built-in one) —
+  and a key registered from then on reads only until an admin allows writes. Visible cost: an admin
+  registering a generic AI gateway turns 読むだけ off for it. Tests:
+  `broker-relay.test.ts` "by default (a key, no plugin, nobody chose) …" (mutation-checked),
+  `broker-read-only-default.test.ts` (the default, the migration), `broker-relay-generic.test.ts`,
+  `plugins.test.ts` "before the plugin was ever on, the relay only reads …".
 - **Practice HubSpot (staging only)**: `lib/config.ts` `practiceUpstreamsFrom` /
   `PRACTICE_UPSTREAMS` — `ACB_FAKE_HUBSPOT_URL` (`http(s)://127.0.0.1 | [::1] | localhost |
   host.docker.internal[:port]`, nothing more) takes effect only with `ACB_ALLOW_FAKE_UPSTREAMS=1`,

@@ -25,6 +25,7 @@
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
+ *   ai-turn-routes.ts     which AI routes a built-in 「AI の番」 step's token may use (the server's scope)
  *   outside-text.ts       the one standard for outside text in an AI prompt (blocks that cannot be closed, titles)
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays

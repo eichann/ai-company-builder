@@ -23,6 +23,7 @@ function parse(text: string | null): AutoSyncState {
     lastAutoSyncAt: num(raw.lastAutoSyncAt),
     needsMember: raw.needsMember === true,
     notified: Array.isArray(raw.notified) ? raw.notified.filter((k): k is string => typeof k === 'string') : [],
+    openFilesHeld: typeof raw.openFilesHeld === 'string' ? raw.openFilesHeld : null,
   }
 }
 

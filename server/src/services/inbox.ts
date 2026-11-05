@@ -413,7 +413,7 @@ export function createInboxService(deps: InboxDeps) {
   }
 
   /** The thread went on: a message answering one the interaction already has. */
-  function continueThread(companyId: string, handle: CompanyData, interaction: RecordRow, msg: IncomingMessage, fromMember: string | null, outgoing: boolean, reporterId: string): void {
+  function continueThread(companyId: string, handle: CompanyData, interaction: RecordRow, msg: IncomingMessage, outgoing: boolean, reporterId: string): void {
     const at = clock.now()
     handle.inbox.insertMessage({
       channel: msg.channel, messageId: msg.messageId, interactionId: interaction.id, direction: outgoing ? 'out' : 'in', occurredAt: msg.occurredAt, seenAt: at,
@@ -424,7 +424,7 @@ export function createInboxService(deps: InboxDeps) {
       // Someone of the company replied in the thread (spec §7-3: 返事と終わりは別 — the AI checks, or the setting ends it).
       const close = settingsOf(companyId).memberReply === 'close'
       // Who replied is named only when they can read the record (someone's own record never names another reader).
-      const replier = memberOf(companyId, fromMember ?? reporterId)
+      const replier = memberOf(companyId, reporterId)
       const mayName = (id: string) => {
         const row = handle.records.byIds([id])[0]
         return !!replier && !!row && recordReader(replier, handle.scopes.listWithRules()).record(row)
@@ -450,7 +450,7 @@ export function createInboxService(deps: InboxDeps) {
         }))
       }
       // Tasks made from the message: did the reply finish them? (Their AI checks; owner FB #19.)
-      afterOwnReply(companyId, handle, interaction.id, fromMember ?? reporterId, msg.channel)
+      afterOwnReply(companyId, handle, interaction.id, reporterId, msg.channel)
       return
     }
     // An automatic reply is no reply (spec §7-3).
@@ -496,10 +496,16 @@ export function createInboxService(deps: InboxDeps) {
     const [from] = matchParties(companyId, [msg.from], byEmail)
     const to = matchParties(companyId, msg.to, byEmail)
     const cc = matchParties(companyId, msg.cc ?? [], byEmail)
-    const outgoing = msg.outgoing === true || from.memberId !== null
+    // Ours only when the connector says so: the member's own Sent label (Gmail), their own Slack
+    // message, a mail ACB sent. A From header naming a member proves nothing (forwarded, spoofed):
+    // such a message is neither ours nor theirs — it moves nothing and nothing of it is kept, so the
+    // sender's own Sent copy (reported by that member) is still taken when it comes (audit B-M3).
+    const outgoing = msg.outgoing === true
+    if (!outgoing && from.memberId !== null) return 'skipped'
 
     // A thread the company already has: the same interaction — when it concerns its owner.
-    const reporterAndRecipients = new Set([reporterId, ...[...to, ...cc].map(p => p.memberId).filter((m): m is string => !!m)])
+    const recipients = new Set([...to, ...cc].map(p => p.memberId).filter((m): m is string => !!m))
+    const reporterAndRecipients = new Set([reporterId, ...recipients])
     const reporter = memberOf(companyId, reporterId)
     const reporterReads = (row: RecordRow) => !!reporter && recordReader(reporter, handle.scopes.listWithRules()).record(row)
     for (const id of handle.inbox.interactionsOf(msg.channel, msg.references ?? [])) {
@@ -513,8 +519,10 @@ export function createInboxService(deps: InboxDeps) {
       // The reporter's own message (their Sent mail, their own chat message) touches only a record
       // they read: another member's sent mail never moves someone else's records. Nothing is kept,
       // so the copy that reached the owner (their inbox) is still taken when it comes.
-      if (msg.outgoing === true && !reporterReads(row)) continue
-      continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
+      // One exception: a member's own sent reply that went to the record's owner (To / CC of their
+      // Sent mail — they did send it to her) counts in her own thread (owner FB #19).
+      if (outgoing && !reporterReads(row) && !(row.personalOwner !== null && recipients.has(row.personalOwner))) continue
+      continueThread(companyId, handle, row, msg, outgoing, reporterId)
       return 'continued'
     }
     // A member's plain (unthreaded) message in a chat DM answers the latest message they got there
@@ -526,7 +534,7 @@ export function createInboxService(deps: InboxDeps) {
       const row = last ? handle.records.byIds([last.interactionId])[0] : undefined
       if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)
         && (row.members === null || row.members.includes(reporterId))) {
-        continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
+        continueThread(companyId, handle, row, msg, outgoing, reporterId)
         return 'continued'
       }
     }

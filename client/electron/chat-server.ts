@@ -36,7 +36,7 @@ import { SANDBOX_INSTRUCTIONS, SANDBOX_MESSAGES, decideTurnSandbox, sandboxPlatf
 import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
 import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
 import { createAgentConnection, type AgentHost } from './agents/registry'
-import { AGENTS, isAgentId, type AgentId } from '../shared/agents/registry'
+import { AGENTS, isAgentId, modelHasLargeContext, type AgentId } from '../shared/agents/registry'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateFolderOfPath, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
@@ -89,7 +89,7 @@ export interface ChatServerConfig extends AgentHost {
    */
   bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
   pluginStepTools?: (conversationId: string, step: string) => AiTurnToolCeiling | null
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
    * (consultation-task.ts). Read at each new file, so a task the AI made earlier in the turn counts.
@@ -457,6 +457,8 @@ export async function startChatServer(config: ChatServerConfig) {
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,
         // The department on screen: where a request for someone else goes (records.md "Where the AI puts a request").
         department: activeDepartment?.folder ?? null,
+        // How much of long minutes this turn's model is handed (minutes.md "Long minutes").
+        largeContext: modelHasLargeContext(authMode, typeof modelId === 'string' ? modelId : undefined),
         onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
         // An approval request made or shown: the app's own card (approvals.ts), never the AI's text.
         onApprovalCard: card => injector.push({ type: APPROVAL_PART_TYPE, id: `approval-${card.id}`, data: card }),

@@ -119,6 +119,7 @@ export const QUESTIONS = {
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
   protectedConfig: { title: '管理者だけが変更できるファイル', alsoTitled: '変更できないスキルのファイル', buttons: { restore: 0, cancel: 1 } },
   writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
+  openFiles: { title: 'ほかのアプリで開いているファイルがあります', buttons: { wait: 0, continue: 1 } },
 } as const
 
 export type QuestionKind = keyof typeof QUESTIONS
@@ -131,6 +132,7 @@ export const DEFAULT_ANSWERS: { [K in QuestionKind]: Answer<K> } = {
   deletedFiles: 'sync-deletions',
   protectedConfig: 'restore',
   writeDenied: 'restore',
+  openFiles: 'wait',
 }
 
 /** How an injected push failure relates to the server (Member.failNextPush). */
@@ -752,6 +754,10 @@ export class Member {
   mayLeaveOperation = false
 
   private readonly answers = new Map<QuestionKind, string[]>()
+  /** What the office-lock probe says about Office / LibreOffice running (null: unknown, the app's default). */
+  officeAppsRunning: boolean | null = null
+  /** This computer's boot time for the office-lock probe (default: the real one). */
+  bootTimeMs: number | null = null
   private readonly sync_: SyncFn
   /** offline() was called: the server API (and every remote) is unreachable. */
   private isOffline = false
@@ -820,6 +826,8 @@ export class Member {
         appGitDir: world.appGitDir,
         baseEnv: world.env(),
         envOverrides: {
+          // The bundled git's override (app-git.ts) goes through the same factory.
+          GIT_EXEC_PATH: gitExecPath(),
           // What git-http.ts sets for the hook from the authenticated session.
           ACB_PUSHER_ROLE: role,
           ACB_PUSHER_ID: `user-${name}`,
@@ -841,6 +849,12 @@ export class Member {
       platform: process.platform,
       largeFileThreshold: world.largeFileThreshold,
       otherGitRunning: options => this.otherGitRunning && !options?.ownActivity,
+      // Read at each call: a scenario sets `officeAppsRunning` / `bootTimeMs` on the member.
+      officeLockProbe: {
+        appsRunning: async () => this.officeAppsRunning,
+        targetFree: () => null,
+        bootTimeMs: () => this.bootTimeMs ?? Date.now() - os.uptime() * 1000,
+      },
       log: {
         log: (...args: unknown[]) => this.capture('log', args),
         warn: (...args: unknown[]) => this.capture('warn', args),
@@ -1362,4 +1376,10 @@ export class Member {
   hasPendingPush(): boolean {
     return fs.existsSync(path.join(this.dir, '.git', 'PENDING_PUSH'))
   }
+}
+
+let execPath: string | undefined
+/** `git --exec-path` of the git the harness runs (what app-git.ts sets for the bundled git). */
+function gitExecPath(): string {
+  return (execPath ??= execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim())
 }

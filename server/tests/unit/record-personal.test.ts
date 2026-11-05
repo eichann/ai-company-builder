@@ -251,7 +251,7 @@ describe('sharing it to a folder (「部署に出す」)', () => {
   it('only the owner, to a folder they read outside private folders; then that folder’s readers see it', async () => {
     const { record } = await alicesTask()
     expect(engine.share(m('u-alice'), HUMAN, record.id, { expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'FOLDER_REQUIRED' } })
-    expect(engine.share(m('u-alice'), HUMAN, record.id, { folder: '経理部', expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'PRIVATE_PLACE' } })
+    expect(engine.share(m('u-alice'), HUMAN, record.id, { folder: '経理部', expectedVersion: 2 })).toMatchObject({ ok: false, body: { code: 'FOLDER_NOT_PLACEABLE' } })
     expect(engine.share(m('u-alice'), HUMAN, record.id, { folder: '秘書室', expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'VERSION_CONFLICT' } })
     expect(ok(service.query(m('u-bob'), {})).total).toBe(0)
 

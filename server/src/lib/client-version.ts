@@ -90,6 +90,28 @@ export function agentConfigRuleApplies(version: string | null | undefined): bool
 }
 
 /**
+ * When the server began scoping a built-in 「AI の番」 step's record token to its
+ * routes (`shared/core/ai-turn-routes.ts`, ai-turns.md). An app built before it
+ * may run steps whose tools the table does not know (older step definitions), so
+ * its runs are not scoped; a build at or after it is (its steps are checked
+ * against the table by client/tests/ai-turn-routes.test.ts). UTC, YYYYMMDDHHmmss.
+ * Remove the gate (always apply) once no member runs a build older than this.
+ */
+export const AI_TURN_ROUTE_SCOPE_COMMIT_DATE = '20261105104917'
+
+/**
+ * Does the route scope apply to a run-bound call from this build? Only when the
+ * build says it is at or after AI_TURN_ROUTE_SCOPE_COMMIT_DATE: no header or an
+ * unreadable one is an app from before the header, never scoped (released apps
+ * keep working; a person with their own token can do what their AI could anyway).
+ */
+export function aiTurnRouteScopeApplies(version: string | null | undefined): boolean {
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return false
+  return parsed.commitDate >= AI_TURN_ROUTE_SCOPE_COMMIT_DATE
+}
+
+/**
  * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop
  * app handles private folders: several repositories per company (the
  * company repository plus one scope repository per readable private

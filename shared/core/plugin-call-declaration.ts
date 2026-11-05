@@ -385,7 +385,7 @@ export function parseConnectorV3(raw: Raw, err: Err): Pick<PluginManifest, 'call
 /**
  * A call's `who`. Narrower than an operation's on purpose: a call has no record,
  * so no person field and no `viewer` (which the engine reads as `anyone`), and
- * at least one person: `mayAct` lets `[ai]` alone pass for any member's AI.
+ * at least one person: with no record, `mayAct` lets `[ai]` alone pass for any member's AI.
  */
 function callWhoProblem(where: string, who: string[] | null): string | null {
   const allowed = `role:<名前> / ${CALL_ACTORS.join(' / ')}`

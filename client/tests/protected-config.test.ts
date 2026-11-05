@@ -11,7 +11,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import simpleGit, { type SimpleGit } from 'simple-git'
+import { simpleGit, type SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
   parseProtectedConfigPaths,
@@ -44,7 +44,7 @@ function write(root: string, rel: string, content: string | Buffer) {
 function memberGit(dir: string, extraEnv: Record<string, string> = {}): SimpleGit {
   const env: NodeJS.ProcessEnv = { ...process.env, GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true', GIT_TERMINAL_PROMPT: '0', ...extraEnv }
   delete env.ACB_PUSHER_ROLE
-  return simpleGit(dir, { config: ['core.hooksPath=/dev/null', 'core.quotePath=false'] }).env(env)
+  return simpleGit(dir, { config: ['core.hooksPath=/dev/null', 'core.quotePath=false'], allowEnvironment: Object.keys(env), unsafe: { allowUnsafeHooksPath: true, allowUnsafeEditor: true } }).env(env)
 }
 
 function setupServer(t: { after: (fn: () => void) => void }, legacy: Record<string, string> = {}) {

@@ -97,11 +97,27 @@ export const MINUTES_SUMMARY_MAX = 300
  */
 export const MINUTES_TEXT_MAX = 60_000
 /**
- * Longest minutes text for an app that reads it in parts (`GET …/text?paged=1`): about eight parts
- * (`MINUTES_PART_CHARS`), which the AI holds at once. Past it the rest is cut with a notice and the
- * AI says the end could not be read (owner report 2026-11-05: a 60,000-character 1on1).
+ * Longest minutes text for an app that reads it in parts (`GET …/text?paged=1`): the most any
+ * turn's AI is handed (`MINUTES_READ_CHARS_LARGE`). A longer document keeps its beginning and its
+ * end (`keepHeadAndTail`): the middle is skipped with a mark saying where, so the closing part —
+ * where the decisions and the next steps usually are — is always read (minutes.md "Long minutes").
  */
-export const MINUTES_TEXT_PAGED_MAX = 100_000
+export const MINUTES_TEXT_PAGED_MAX = 200_000
+/**
+ * What a turn's AI is handed of the minutes (characters), by its model's context window
+ * (`client/shared/agents/registry.ts` `context`), minutes.md "Long minutes" has the reasoning:
+ * Japanese is up to about 1.3 tokens a character on the newer tokenizers, and the minutes should
+ * stay under about 40% of the window, so the AI still has room for Claude Code's own prompt, its
+ * thinking and its outputs before the CLI compacts the conversation.
+ * - LARGE (a 1M-token model): 200,000 ≈ 260,000 tokens, about a quarter of the window. Bound by time
+ *   and the member's Claude usage, not by the window: ~17 parts, every later request re-reads what
+ *   came before (~10 minutes and several million cached tokens a run). 200,000 characters is over
+ *   ten hours of talk, so a real meeting fits whole.
+ * - STANDARD (a 200,000-token model, or one the registry does not know): 60,000 ≈ 78,000 tokens,
+ *   about 40% of the window, five parts.
+ */
+export const MINUTES_READ_CHARS_LARGE = MINUTES_TEXT_PAGED_MAX
+export const MINUTES_READ_CHARS_STANDARD = 60_000
 /**
  * One part of the minutes per `minutes_read` call (characters). Claude Code moves a tool result
  * over `MAX_MCP_OUTPUT_TOKENS` (25,000 tokens by default) to a file, which an unattended run has no
@@ -136,6 +152,37 @@ export function minutesParts(text: string, size: number = MINUTES_PART_CHARS): s
   push()
   return parts.length > 0 ? parts : ['']
 }
+/** The mark a skipped middle leaves, at most this long (with its line ends). */
+const SKIP_MARK_ROOM = 120
+/** Recognises the skip mark in a text (`keepHeadAndTail`). */
+export const MINUTES_SKIP_MARK_RE = /は、長いため省きました……）/
+
+/**
+ * `text` within `max` characters keeping its beginning (three quarters) and its end (a quarter),
+ * cut on line ends where one is near, never inside a surrogate pair. The skipped middle becomes one
+ * line saying how much and where (「全体のおよそ 40%〜85% のところ」), which the AI repeats when it
+ * says what it could not read. A text within `max` is unchanged.
+ */
+export function keepHeadAndTail(text: string, max: number): { text: string; skipped: boolean } {
+  if (text.length <= max) return { text, skipped: false }
+  const room = Math.max(0, max - SKIP_MARK_ROOM)
+  const tailLen = Math.floor(room / 4)
+  let headEnd = room - tailLen
+  const lineEnd = text.lastIndexOf('\n', headEnd - 1)
+  if (lineEnd >= 0 && lineEnd + 1 >= headEnd / 2) headEnd = lineEnd + 1
+  else if (isHighSurrogate(text.charCodeAt(headEnd - 1))) headEnd--
+  let tailStart = text.length - tailLen
+  const lineStart = text.indexOf('\n', tailStart)
+  if (lineStart >= 0 && lineStart + 1 <= text.length - tailLen / 2) tailStart = lineStart + 1
+  else if (isHighSurrogate(text.charCodeAt(tailStart - 1))) tailStart++
+  const pct = (i: number) => Math.round((i / text.length) * 100)
+  const mark = `（……ここで ${(tailStart - headEnd).toLocaleString('en-US')} 字（全体のおよそ ${pct(headEnd)}%〜${pct(tailStart)}% のところ）は、長いため省きました……）\n`
+  const head = text.slice(0, headEnd)
+  return { text: `${head}${head.endsWith('\n') || head === '' ? '' : '\n'}${mark}${text.slice(tailStart)}`, skipped: true }
+}
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff
+
 /** A quote cited as the basis of an output: long enough to mean something, short enough to be a quote. */
 export const MINUTES_QUOTE_MIN = 6
 export const MINUTES_QUOTE_MAX = 300

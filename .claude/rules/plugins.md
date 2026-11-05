@@ -427,7 +427,7 @@ events:
   table of codes.
 - **`who` on a call**: `role:<name>` (declared), `admin`, `ai`, with at least one person. Narrower than an
   operation's on purpose: there is no record, so no person field; `viewer` becomes `anyone`
-  (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI — all refused. `decision: true`
+  (`engineWho`), and `mayAct` lets `[ai]` alone pass for any member's AI when there is no record — all refused. `decision: true`
   only on an act (`combineUse`).
 - **What arrives by itself** (`events`, a poll's `fields`) carries only `class: normal` or `keep: pointer`
   fields: the content is read by a call, by someone allowed to.
@@ -842,7 +842,9 @@ plugin's switch:
   (`relayPathPattern`: outside ids → `{id}`) — never a body or the key. Tests:
   `tests/integration/plugins.test.ts` 「who may read HubSpot through the relay」 (each guard
   mutation-checked), permission matrix row + `CROSS`, `company-scoped-sql.test.ts`.
-- Companies whose plugin was never on keep the relay as before. **Inventory (2026-10-31)**:
+- Companies whose plugin was never on keep the relay as before when they already had the key
+  (audit B-M6: a key registered later reads only until an admin allows writes, `key-broker.md`
+  "Read-only by default"). **Inventory (2026-10-31)**:
   div's `法人ソリューション/.claude/skills/anken-sync` reads (owners, pipelines, deal search /
   get, v3 paths) **and writes** (creates deals, PATCHes deals, creates meetings) through the
   relay when the app gives it `ACB_HUBSPOT_*`; `weekly-report` prepares the same variables.

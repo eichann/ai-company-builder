@@ -40,11 +40,26 @@ what git actually sees through the app's `createGit`.
 - `merge.stat=false` — a fast-forward diffstat reads every changed blob, which in a partial
   clone silently downloads teammates' departments the member did not pick.
 - `credential.helper` cleared; the bundled Git Credential Manager is never run.
+- **The GIT_ASKPASS helper** (prints `$GIT_TOKEN`, the session's sync pass; git runs it outside
+  the agent's sandbox) is the app's alone (audit B-M8): `<userData>/git/askpass/git-askpass.sh`
+  (`.bat` on Windows) — never the shared temp folder, where it used to be written once and reused
+  as found —, folder and file 0700, and `ensureAskPass` (`services/app-git.ts`) checks it before
+  **every** git the app builds: a regular file (no symlink), owned by the app's user, no group /
+  other write bit, exactly the app's content; anything else is replaced (written beside it, then
+  renamed over it). The agent's sandbox neither reads nor writes userData (`agent-sandbox.md`);
+  the check covers the sandbox being off. Test: `client/tests/app-git-askpass.test.ts`
+  (mutation-checked).
 - The member's own hooks and templates never run: `core.hooksPath` and `GIT_TEMPLATE_DIR` point
   at app-owned empty directories (`<userData>/git/{hooks,templates}`, `appGitDirs`), for bundled
   and system git alike. A global git-secrets template once made a partial-clone commit hang
   10+ minutes. They are real directories (`/dev/null` is not a path on Windows), so hooks the app
   needs later can be installed there deliberately. Test: `client/tests/sync/user-hooks.test.ts`.
+- simple-git 4 refuses config/env values that can run code. The factory allows only the ones it
+  sets itself from app-owned values (`unsafe`: hooks path, editors, askpass, credential helper,
+  template dir, custom binary; `allowEnvironment`: the keys of the env it built) and drops the
+  member's ambient `GIT_*` / `EDITOR` / `PAGER` (`ambientEnv`), so a member's `GIT_SSH_COMMAND`
+  cannot break or steer sync; a caller-supplied code-running option stays refused. Import is
+  the named `simpleGit` (no default export). Test: `client/tests/git-factory-env.test.ts`.
 - Every app git goes through this factory (`createGit` in `services/app-git.ts`); the only
   other spawn is the `--version` probe. Add new git calls through it.
 - The mac app's bundled git is universal (arm64 + x86_64): electron-builder's `beforePack`
@@ -200,6 +215,42 @@ what git actually sees through the app's `createGit`.
   the shared `.gitignore`; one that still reached the index (a shared `!.*` outranks
   `info/exclude`) is unstaged after the `git add`, like `.backups/`. The file stays on disk
   untouched. Tests: `client/tests/sync/temp-save-files.test.ts`, `client/tests/temp-save-file.test.ts`.
+- Files open in another app (audit C-A4). Office and LibreOffice write a lock file next to an
+  open document (`~$見積.xlsx`, Word's shortened `~$cument.docx`, `.~lock.見積.xlsx#`) and Word
+  saves through `~WRL*.tmp` / `~WRD*.tmp` (`client/shared/office-lock-files.ts`). Shared, they told
+  every teammate 「〇〇が編集中」 and came back at every save: every sync keeps
+  `OFFICE_LOCK_EXCLUDE_PATTERNS` in its own managed block of `.git/info/exclude` (never the shared
+  `.gitignore`) and unstages a **new** one a shared negation re-included (a tracked one an older app
+  shared is left alone: its app deletes it on close and that deletion syncs). The lock file is also
+  the signal that the file is open (`sync/open-files.ts`; readdir of the changed paths' folders
+  only; a lock git holds unchanged is a teammate's and does not count). A lock a crash left is
+  stale only on proof the app is gone (`OfficeLockProbe`, wired in `features/sync/wire.ts`):
+  written before this computer last started; on a Mac no Office / LibreOffice process
+  (`ps -A -o comm=`, 3 s; unknown counts as running); on Windows an Office document that opens for
+  writing (Office denies that while it has it). Never by age alone: a document stays open for days.
+  Known gap: a tracked lock (an older app shared it) that its own member's Office rewrites with the
+  same content between two syncs reads as a teammate's; mtime cannot tell (git's status refresh
+  rewrites the index stat), and it ends at that member's next sync after closing (the deletion). A file
+  origin/main changed and an app has open here is never replaced unasked — the app would save its
+  old in-memory copy over the teammate's version later (Windows Office also holds the file, so the
+  pull could not replace it): the manual sync asks before anything changes (`confirmOpenFiles`,
+  「ほかのアプリで開いているファイルがあります」; default 「同期をやめる」 → `file_open`, message
+  starting 「同期を中止しました。」, nothing committed or replaced; private folders still sync —
+  `isCancelled` leaves `file_open` out; 「閉じたので続ける」 for a lock left by a crash → its lock files
+  are removed (office lock names only, while still there) and the normal sync runs, a local edit
+  goes to `.backups/` as a conflict); no window → stop.
+  「自動で送る」 waits without asking and without `needs_member` (the next run goes through once the
+  file is closed); 「自動で受け取る」 holds that repository back and reports `openFiles`: said once
+  per set of files and the tooltip says it waits (`afterReceive`, `openFilesHeld` in the stored
+  state, so a restart does not repeat it; a held run is not 「最後の自動同期」). The same in
+  private folders' clones, read-only ones included. Only files a teammate changed count: a file open
+  here that nobody else changed syncs as always (the everyday case). Not seen: apps that leave no
+  lock file (Numbers, Preview, text editors). The server does not refuse lock files (older apps would
+  be refused at every sync). Word's shortened owner file follows Word's rule (stem ≤ 6 characters:
+  whole name, 7: one dropped, ≥ 8: two); a Japanese stem allows both shortened forms (characters or
+  bytes is unknown). Scenarios: `client/tests/sync/open-files.test.ts`; unit
+  `client/tests/office-lock-files.test.ts`; notice and tooltip `src/features/sync/model.test.ts`,
+  `autoSyncSchedule.test.ts`, `autoSyncState.test.ts`.
 - Who may change the shared root `.gitignore` — **still an open hole on the server**. The
   settings page's editor (「同期しないファイル」) is offered to owners / admins only
   (`download-choices.md`), and this version of the app no longer writes large-file or

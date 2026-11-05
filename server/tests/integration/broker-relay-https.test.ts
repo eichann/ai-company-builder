@@ -119,6 +119,8 @@ describe('the relay over HTTPS', () => {
     const owner = { companyId: CO, userId: 'rh-owner', role: 'owner' }
     // A built-in service's key goes only to its own host, so the local provider is a registered (generic) service.
     expect(services.keyBroker.setRelayService(owner, 'fake-ai', { label: 'Fake AI', baseUrl: `https://${HOST}`, header: 'x-goog-api-key', format: '{key}' }).ok).toBe(true)
+    // A registered service only reads until the admin allows writes (audit B-M6); an AI gateway's calls are POSTs.
+    expect(services.keyBroker.setReadOnly(owner, 'fake-ai', { readOnly: false }).ok).toBe(true)
     expect((await services.keyBroker.create(owner, {
       service: 'fake-ai', displayName: 'g', secret: FAKE_KEY,
       audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] },

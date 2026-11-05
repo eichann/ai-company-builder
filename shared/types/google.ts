@@ -33,6 +33,8 @@ export interface GoogleGrantSummary {
 export type GoogleChangeAction = 'client' | 'enabled' | 'features' | 'picker' | 'grant' | 'grant-revoked' | 'grant-stopped' | 'grant-features' | 'stop-all'
   /** The relay's settings (cap, the company-wide stop) and one member's relay stop. */
   | 'relay' | 'relay-member'
+  /** A shared drive registered for relay writes, or removed (B-H1). */
+  | 'relay-drive'
 
 /** One line of the history (who, when, what — never a secret or token). */
 export interface GoogleChange {
@@ -184,8 +186,8 @@ export interface GoogleRelayRecord {
    * found); refused: ACB did not pass it (`reason`); error: Google or the way failed.
    */
   result: 'ok' | 'google-refused' | 'refused' | 'error'
-  /** Why ACB refused: deletion / not-relayed / stopped / over-cap / not-allowed (no permission, feature off) / other. */
-  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'other' | null
+  /** Why ACB refused: deletion / not-relayed / stopped / over-cap / not-allowed (no permission, feature off) / outside (a write into a sheet not owned inside the company) / other. */
+  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'outside' | 'other' | null
 }
 
 /** One member in the admin's relay view. */
@@ -218,6 +220,27 @@ export interface GoogleRelayAdminView {
   members: GoogleRelayMember[]
   /** The latest relayed calls of everyone (newest first, ≤ 100). */
   records: GoogleRelayRecord[]
+  /**
+   * The company's shared drives whose sheets the relay may write into (owner/admin registered;
+   * sheets in other shared drives are refused). An older server leaves it out.
+   */
+  sharedDrives?: GoogleRelaySharedDrive[]
+}
+
+/** A shared drive registered for relay writes. */
+export interface GoogleRelaySharedDrive {
+  driveId: string
+  /** The name the admin gave it (ACB cannot read a shared drive's name with the permissions it holds). */
+  name: string | null
+  addedAt: string
+  addedBy: string
+  addedByName: string | null
+}
+
+/** POST /api/companies/:id/google/relay/shared-drives — the drive's id or address, and a name. */
+export interface GoogleRelaySharedDriveAdd {
+  drive: string
+  name?: string
 }
 
 /** PUT /api/companies/:id/google/relay — any subset. */

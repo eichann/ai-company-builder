@@ -128,6 +128,8 @@ recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
   const body = c.var.body
   return keyedWrite(c, h, 'record-create', body, async () => {
     // The AI's defaults (personal for the member alone, else the consultation's department): records.md.
+    const place = await recordEngine.checkPlace(h.member, body, true)
+    if (!place.ok) return answer(c, place)
     const result = recordEngine.createByAi(h.member, aiActor(h), body)
     return answer(c, result, result.ok && result.value.reused ? 200 : 201)
   })

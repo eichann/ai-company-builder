@@ -204,6 +204,12 @@ describe('generic relay services (K9)', () => {
     const token = tokenFor(['crm'])
     expect(token).toMatch(/^acb_tok_/)
     reply = () => ({ status: 200, body: '{"contacts":[]}' })
+    // A newly registered service only reads until an admin allows writes (audit B-M6): its POST is refused, nothing sent.
+    const before = received.length
+    const refused = await relay('POST', '/crm/contacts', { headers: { authorization: `Token token=${token}`, 'content-type': 'application/json' }, body: '{}' })
+    expect([refused.status, refused.json.error.code]).toEqual([403, 'ACB_READ_ONLY'])
+    expect(received.length).toBe(before)
+    expect((await adminCall('gr-owner', 'PUT', '/broker/services/crm/read-only', { readOnly: false })).status).toBe(200)
     const r = await relay('POST', `/crm/contacts/search?limit=5&echo=${token}`, {
       headers: {
         authorization: `Token token=${token}`, 'content-type': 'application/json', cookie: 'session=abc', 'x-forwarded-for': '1.2.3.4',

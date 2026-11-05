@@ -36,6 +36,8 @@ export interface GoogleRelaySettingsRow {
   capPerMemberPerDay?: number
   stopped?: boolean
   stoppedUserIds?: string[]
+  /** Shared drives the relay may write into (B-H1). */
+  sharedDrives?: Array<{ driveId: string; name: string | null; addedAt: string; addedBy: string }>
 }
 
 export interface ConnectorGrantRow {

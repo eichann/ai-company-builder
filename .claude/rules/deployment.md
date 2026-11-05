@@ -303,7 +303,13 @@ merge `app.asar.unpacked`, so the merge must happen before packing. CI job "Univ
 
 - pnpm only (`pnpm-workspace.yaml`); Node ≥ 20, pnpm ≥ 9 (`engines`).
 - `pnpm.overrides` pins `@anthropic-ai/claude-agent-sdk` to the app's version; bump it together
-  with `client/package.json` (`chat-and-agents.md`).
+  with `client/package.json` (`chat-and-agents.md`). The other overrides are security floors
+  for transitive packages (`pnpm audit`: body-parser, nanoid, postcss, minimatch, ...), each kept
+  inside its major (`pkg@N` keys); drop one when `pnpm audit` is clean without it. What stays
+  open after that is dev tooling or a major bump (vite dev server, `@hono/node-server` under the
+  agent SDK's MCP SDK, electron-builder's minimatch).
+- GitHub Actions are pinned by commit SHA with the tag in a trailing comment
+  (`uses: actions/checkout@<sha> # v7`); Dependabot updates both.
 - Two React lines: client is on React 18 (`@types/react` 18), admin on React 19. A library whose
   `.d.ts` imports `react` without declaring `@types/react` as a peer finds the types through
   pnpm's hidden hoist, which holds whichever version pnpm hoisted — admin's typecheck then failed

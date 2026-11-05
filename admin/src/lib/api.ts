@@ -1228,6 +1228,7 @@ export type {
   GoogleRelayMember,
   GoogleRelayRecord,
   GoogleRelaySave,
+  GoogleRelaySharedDrive,
 } from '../../../shared/types/google'
 
 import type { GoogleClientSave, GoogleFeature, GooglePickerSave, GoogleRelaySave } from '../../../shared/types/google'
@@ -1256,6 +1257,11 @@ export const googleApi = {
   /** One member's relay stopped / resumed (their Google permission stays). */
   setRelayMemberStopped: (companyId: string, userId: string, stopped: boolean) =>
     getData(`/api/companies/${enc(companyId)}/google/relay/members/${enc(userId)}`, googleRelaySchema, { method: 'PUT', body: { stopped } }),
+  /** A shared drive whose sheets the relay may write into (its address or id, and a name). */
+  addRelaySharedDrive: (companyId: string, drive: string, name: string) =>
+    getData(`/api/companies/${enc(companyId)}/google/relay/shared-drives`, googleRelaySchema, { method: 'POST', body: { drive, ...(name.trim() ? { name } : {}) } }),
+  removeRelaySharedDrive: (companyId: string, driveId: string) =>
+    getData(`/api/companies/${enc(companyId)}/google/relay/shared-drives/${enc(driveId)}`, googleRelaySchema, { method: 'DELETE' }),
 }
 
 // The Slack connection (「つなぎ先」→「Slack」, stage 3 A3, slack-connector.md): shapes from shared/types/slack.ts.

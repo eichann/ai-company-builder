@@ -44,6 +44,12 @@ export interface RecordEngineDeps {
    * without it.
    */
   recordChanged?: (companyId: string, recordId: string) => void
+  /**
+   * Is this (NFC) path a folder of the company repository's shared branch? null when that cannot
+   * be told (no repository yet, git failed). Used by `checkPlace` before a create / share names a
+   * folder (audit B-M1: a missing folder answers like a private one). Absent → not checked.
+   */
+  folderExists?: (companyId: string, path: string) => Promise<boolean | null>
   /** Digests an output's item key into its id (minutes.md "Outputs made once"); absent → by title only. */
   tokenDigest?: TokenDigest
   /**

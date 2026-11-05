@@ -13,10 +13,10 @@ import type { RecordFileRepo } from '../../ports/record-files'
 import type { RecordAccessRow, RecordRepository, RecordRow } from '../../ports/records'
 import { logError } from '../../lib/error-log'
 import type { Member } from '../access'
-import { refuse, type Outcome } from '../outcome'
+import type { Outcome } from '../outcome'
 import { recordReader, type RecordReader } from '../record-access'
 import { recordSummaries } from '../records'
-import { bad } from './refusals'
+import { bad, FOLDER_NOT_PLACEABLE } from './refusals'
 import type { ActorInput, AfterActionListener, RecordChange, RecordEngineDeps, RoleHolders } from './types'
 
 export function engineContext(deps: RecordEngineDeps) {
@@ -60,15 +60,19 @@ export function engineContext(deps: RecordEngineDeps) {
 
   /**
    * A folder a server-only record may be placed in (its readers' place): a
-   * company path outside every private folder that the member reads.
+   * company path outside every private folder that the member reads. Every
+   * refusal is one answer (`FOLDER_NOT_PLACEABLE`), also the one `checkPlace`
+   * gives for a folder that is not there: a private folder's name is never
+   * confirmed to someone who cannot read it (audit B-M1).
    */
   function placeFolder(member: Member, type: string, raw: unknown, reader: RecordReader): string | Outcome<never> {
     const f = typeof raw === 'string' ? normalizeRepoPath(raw) : null
     if (!f) return bad('folder must be a company path')
     const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
     // Server-only records outside private folders for now (their links and reads assume a public place).
-    if (findPrivateScope(scopes, f)) return bad('A server-only record cannot be placed in a private folder yet', 'PRIVATE_PLACE')
-    if (!reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null, members: null })) return refuse('forbidden', 'You cannot read that folder')
+    if (findPrivateScope(scopes, f) || !reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null, members: null })) {
+      return bad(FOLDER_NOT_PLACEABLE.error, FOLDER_NOT_PLACEABLE.code)
+    }
     return f
   }
 

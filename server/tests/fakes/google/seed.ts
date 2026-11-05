@@ -131,6 +131,8 @@ export interface SeedSpreadsheet {
   /** May only read. */
   readers: string[]
   sheets: Array<{ sheetId: number; title: string; rows: string[][] }>
+  /** In a shared drive (Drive then names no owner, only `driveId`). */
+  driveId?: string
 }
 
 export interface GoogleSeed {
@@ -176,6 +178,12 @@ export const GOOGLE_SEED = {
   // Sheets (the relay): a practice coefficient table 佐藤 edits, and a budget he may only read.
   practiceSheet: 'fakesheet-keisu-practice-0000000000000000001',
   readOnlySheet: 'fakesheet-budget-readonly-000000000000000002',
+  /** A customer's sheet shared with 佐藤 as an editor (B-H1: the relay must not write company content into it). */
+  outsideSheet: 'fakesheet-customer-owned-0000000000000000003',
+  /** 田中's sheet (inside the company's domain) 佐藤 may edit. */
+  colleagueSheet: 'fakesheet-colleague-owned-000000000000000005',
+  /** A sheet in a shared drive 佐藤 may edit (Drive names no owner there). */
+  sharedDriveSheet: 'fakesheet-shared-drive-00000000000000000004',
 } as const
 
 const S = GOOGLE_SEED
@@ -376,6 +384,18 @@ export function defaultGoogleSeed(): GoogleSeed {
     {
       id: S.readOnlySheet, title: '経理部 予算表（見るだけ）', owner: S.colleague, editors: [S.colleague], readers: [S.member],
       sheets: [{ sheetId: 0, title: '予算', rows: [['部署', '予算'], ['営業部', '1000']] }],
+    },
+    {
+      id: S.outsideSheet, title: '株式会社サンプル 共有の表', owner: S.customerSuzuki, editors: [S.customerSuzuki, S.member], readers: [],
+      sheets: [{ sheetId: 0, title: 'ご依頼', rows: [['項目', '内容'], ['日程', '未定']] }],
+    },
+    {
+      id: S.colleagueSheet, title: '営業部 案件一覧（田中）', owner: S.colleague, editors: [S.colleague, S.member], readers: [],
+      sheets: [{ sheetId: 0, title: '一覧', rows: [['案件', '状態']] }],
+    },
+    {
+      id: S.sharedDriveSheet, title: '営業部 共有ドライブの表', owner: S.member, editors: [S.member, S.colleague], readers: [], driveId: 'fake-shared-drive-0001',
+      sheets: [{ sheetId: 0, title: '一覧', rows: [['案件', '状態']] }],
     },
   ]
   return { users, events, conferences, docs, driveFiles, mails, spreadsheets }

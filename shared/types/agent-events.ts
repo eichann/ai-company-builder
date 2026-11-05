@@ -64,6 +64,8 @@ export const GUARD_REASONS = [
   'key-not-available', 'destination-not-allowed', 'internal-address', 'over-cap',
   // The Google relay with the member's own permission refused a deletion (google-connector.md "The relay").
   'no-deletion',
+  // …and a write into a sheet not owned inside the company's Workspace (B-H1).
+  'outside-owner',
   // The company map (records.md): a type definition (.acb/types/) the member may not change,
   // and state / identity written into a record file instead of through the record tools.
   'type-definition', 'record-file',

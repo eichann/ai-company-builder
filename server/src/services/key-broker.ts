@@ -52,6 +52,7 @@ import {
   parseOwnKeyHosts,
   parseInternalHosts,
   ownKeysSwitchSetting,
+  brokerRelayReadOnlyByDefault,
   type BrokerAudience,
   type BrokerCaps,
   type BrokerDestinations,
@@ -209,6 +210,11 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     return { category, rule, ownKeyHosts }
   }
 
+  /** Does the relay only read for the service: the company's choice, else the default (read-only but for an AI model's API — audit B-M6). */
+  function readOnlyOf(stored: StoredBrokerService | undefined, service: string): boolean {
+    return stored?.readOnly ?? brokerRelayReadOnlyByDefault(service)
+  }
+
   /** The chosen company key of the service when it is still an active company key of it; else null (none chosen). */
   function chosenKey(stored: StoredBrokerService | undefined, service: string, rows: BrokerKeyRow[]): BrokerKeyRow | null {
     const id = stored?.defaultKeyId
@@ -286,7 +292,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         ...setting,
         defaultHosts: builtin ? [...builtin.defaultHosts] : relay ? [relay.host] : [],
         relay,
-        readOnly: stored.get(service)?.readOnly ?? false,
+        readOnly: readOnlyOf(stored.get(service), service),
         defaultKeyId: chosenKey(stored.get(service), service, rows)?.id ?? null,
         practice: deps.practiceServices?.includes(service) ?? false,
         companyKeys: rows.filter(r => r.service === service && r.scope === 'company').length,
@@ -340,7 +346,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const at = clock.now()
     brokerKeys.saveService(member.companyId, {
       service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
-      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, defaultKeyId: stored?.defaultKeyId ?? null, updatedAt: at, updatedBy: member.userId,
+      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? null, defaultKeyId: stored?.defaultKeyId ?? null, updatedAt: at, updatedBy: member.userId,
     }, changeRow(member, at, null, { action: 'service', service, before, after }))
   }
 
@@ -605,7 +611,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (!isObject(body) || typeof body.readOnly !== 'boolean') return refuse('bad-request', 'readOnly must be true or false')
       const stored = serviceSettings(member.companyId).get(service)
       if (!builtinBrokerService(service) && !relayOf(stored)) return refuse('not-found', 'Unknown service')
-      const before = stored?.readOnly ?? false
+      const before = readOnlyOf(stored, service)
       if (!body.readOnly && deps.managedByPlugin?.(member.companyId, service)) {
         return refuse('conflict', 'つなぎ先のプラグインが管理しているため、読むだけのままです（書き換えはプラグインの決まった操作からだけ行います）', { code: 'MANAGED_BY_PLUGIN' })
       }
@@ -644,7 +650,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const at = clock.now()
       brokerKeys.saveService(member.companyId, {
         service, category: setting.category, rule: setting.rule, ownKeyHosts: JSON.stringify(setting.ownKeyHosts),
-        relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, defaultKeyId: key?.id ?? null, updatedAt: at, updatedBy: member.userId,
+        relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? null, defaultKeyId: key?.id ?? null, updatedAt: at, updatedBy: member.userId,
       }, changeRow(member, at, key?.id ?? before?.id ?? null, { action: 'default-key', service, before: before ? keyRef(before) : null, after: key ? keyRef(key) : null }))
       return ok(view(member.companyId))
     },
@@ -658,7 +664,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
 
     /** The relay forwards only reads for this service (the company's switch). */
     relayReadOnly(companyId: string, service: string): boolean {
-      return serviceSettings(companyId).get(service)?.readOnly ?? false
+      return readOnlyOf(serviceSettings(companyId).get(service), service)
     },
 
     /**
@@ -701,7 +707,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         // Own keys may go only to the service's host.
         ownKeyHosts: JSON.stringify((setting?.ownKeyHosts ?? []).filter(h => h === after.host)),
         relay: JSON.stringify(after),
-        readOnly: stored?.readOnly ?? false,
+        readOnly: stored?.readOnly ?? null,
         defaultKeyId: stored?.defaultKeyId ?? null,
         updatedAt: at,
         updatedBy: member.userId,

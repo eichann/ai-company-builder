@@ -673,9 +673,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * The 「やりとり」 of a sent new mail. With `waiting` (「返事を待つ」 ticked) it also keeps our
    * Message-ID and the Gmail thread (their reply finds it), is placed like the mail itself and is
    * the sender's, already handled (nobody's turn; a reply after the waiting ended is judged again by
-   * their AI, inbox.md). Without it: in the まとまり's folder — except that a mail whose own record is
-   * owner-only or members-only keeps that place either way (records.md "Members-only records"):
-   * the receipt says what was sent, so it is never wider than the mail.
+   * their AI, inbox.md). Either way it is placed like the mail itself (its まとまり's folder, else its
+   * meeting's / 連絡's / やること's place; owner-only and members-only kept, records.md "Members-only
+   * records"): the receipt says what was sent, so it is never wider than the mail (audit B-M2).
    */
   function recordInteraction(member: Member, mail: OutboundMailRow, at: string, gmailId: string | null, recipients: string[], waiting: { messageId: string; threadId: string | null } | null = null): string | null {
     const handle = companyData.forCompany(member.companyId)
@@ -685,7 +685,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const own = handle.records.byIds([mail.messageId])[0]
     // Without its own record the mail's place is not known: no receipt rather than a guessed one.
     if (!own) { logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: 'no-record' }); return null }
-    const place = waiting || restricted(own) ? placeOfRow(own) : { folder: bundle?.folder ?? null }
+    // Always where the mail itself is (its まとまり's, else its meeting's, 連絡's or やること's place):
+    // never wider than the mail — a department task's mail outside any まとまり is not company-wide (audit B-M2).
+    const place = placeOfRow(own)
     const made = writer.create(member.companyId, {
       type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), ...place,
       fields: {

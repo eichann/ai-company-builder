@@ -822,7 +822,15 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
 - **Share** 「部署に出す／案件につなぐ」: `POST /records/item/:recordId/share { folder,
   expectedVersion, note? }` (contract `ShareRecordRequest`), **session only** (no AI route). Only
   the owner (nobody else finds it); `folder` as on create (a company path the owner reads, not in a
-  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`). Clears
+  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`).
+  **Where a record may be placed (audit B-M1)**: a `folder` inside a private folder (readable or
+  not), one the member cannot read, and one that is not a folder of the company repository's shared
+  branch all get **one** answer, 400 `FOLDER_NOT_PLACEABLE` (`placeFolder`, and the routes'
+  `recordEngine.checkPlace` before `create` / `createByAi` / `share`, which asks the repository —
+  `folderExists`; not known, e.g. no repository: left to the engine). So the answer never tells
+  whether a private folder of that name exists (owner decision B). Replaces `PRIVATE_PLACE` /
+  403 「You cannot read that folder」. Test: `record-ai-placement.test.ts` "a private folder's name
+  is never confirmed by the answer" (mutation-checked). Clears
   `personal_owner`, sets `folder` (`RecordRepository.setPlace`); ledger action `share`, state
   unchanged, changes `place.personal_owner` / `place.folder` before / after, version + 1
   (`VERSION_CONFLICT`). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
@@ -931,7 +939,7 @@ own place). A person's create (session) gets no defaults.
   `defaultFolder` (the department on screen when the message was sent: `chat-server.ts` passes
   `activeDepartment.folder` to the record tools, which add it to the body; 全社 = none = the whole
   company); assignee as said, else the member. The default folder is checked like any `folder`
-  (`placeFolder`: a private one is refused — never placed company-wide instead); an assignee who
+  (`placeFolder`: a private one is refused, `FOLDER_NOT_PLACEABLE` — never placed company-wide instead); an assignee who
   cannot read it is refused (`ASSIGNEE_CANNOT_READ`).
 - A request made with an origin link to a message (a task's `interaction`) always gets a `due`: the
   AI's, else the company's reply 目安 (`messageDue`; `inbox.md` "A task from a message").
@@ -1098,8 +1106,13 @@ clock's, a separate service writing through the service writer: `notifications.m
   refuses it to every member and AI, and no screen (`recordActionChoices`) or AI tool offers it
   (`isSystemOnly`). First use: interaction v8's `left_inbox`. Roles do
   not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
-  member who qualifies on their own (or any member when `who` is `[ai]` alone) — so the AI cannot
-  complete a task. `ok_from` widens `who` for a person who states whose OK it was (above), never
+  member who qualifies on their own — so the AI cannot complete a task. When `who` is `[ai]`
+  alone, only the AI of the record's own people: `assignee`, `next_actor` (the 「AI の番」 rule) or
+  `requested_by` (a task the member's consultation made in 準備中) is the member — never another
+  member's or another department's record, owners and admins included (audit B-M4,
+  `AI_ONLY_OWNER_FIELDS` in `record-engine/act.ts`; a plugin's create, with no record yet, is not
+  limited by it). Tests: `record-task-v5.test.ts` "an AI-only action is the AI of the record's own
+  people only", `inbox.test.ts` "a department message taken by Bob …". `ok_from` widens `who` for a person who states whose OK it was (above), never
   for the AI. Whether it is the AI is decided by the credential (next section), never by the
   request body (an `actor` field there is ignored). `external` is reserved for server-side
   integrations.

@@ -107,6 +107,7 @@ interface World {
     /** An operation record (操作の控え) of the other company. */
     operation: string
     googleGrant: string
+    sharedDrive: string
     /** An approval request of the other company. */
     approval: string
     /** A mail draft of the other company's member (outbound-mail.md). */
@@ -491,6 +492,8 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/google/relay', w => ({ path: `${C(w)}/google/relay` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/google/relay', w => ({ path: `${C(w)}/google/relay`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/google/relay/members/:userId', w => ({ path: `${C(w)}/google/relay/members/pm-nobody`, body: { stopped: true } }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/google/relay/shared-drives', w => ({ path: `${C(w)}/google/relay/shared-drives`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/google/relay/shared-drives/:driveId', w => ({ path: `${C(w)}/google/relay/shared-drives/0AnoSuchDrive000000` }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/google/relay', w => ({ path: `${C(w)}/me/google/relay` }), MEMBERS, 'the member\'s own relay view and records'),
   // The Slack connection (slack-connector.md): the company's app and members' grants are owner/admin;
   // a member's own permission is theirs. Slack's events are public: an unsigned request is an empty 401 for everyone.
@@ -643,6 +646,7 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/bundle-question', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/bundle-question` }), w => w.other.record, 'meeting-nosuch01'),
   x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
   x('PUT /api/companies/:companyId/google/relay/members/:userId', (w, id) => ({ path: `${C(w)}/google/relay/members/${id}`, body: { stopped: true } }), w => w.other.googleGrant, 'pm-nobody'),
+  x('DELETE /api/companies/:companyId/google/relay/shared-drives/:driveId', (w, id) => ({ path: `${C(w)}/google/relay/shared-drives/${id}` }), w => w.other.sharedDrive, '0AnoSuchDrive000000'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
@@ -871,6 +875,10 @@ async function seed(): Promise<World> {
   await call('outsider', 'PUT', `${O}/broker/relay-services/crm`, { label: '顧客管理', baseUrl: 'https://api.crm.example.com/v2/', header: 'Authorization', format: 'Token token={key}' })
   const otherToken = await call('outsider', 'POST', `${O}/me/broker-tokens`, { conversationId: 'conv-other', department: '営業部' })
   const otherInv = await call('outsider', 'POST', `${O}/invitations`, { role: 'member' })
+  // The other company's Google with a shared drive registered for relay writes (rows written directly).
+  db.prepare(`INSERT INTO google_oauth_clients (company_id, client_id, secret_last4, client_secret_sealed, domain, enabled, created_at, created_by, updated_at, updated_by, relay)
+    VALUES (?, 'other-client.apps.googleusercontent.com', 'abcd', 'sealed', 'other.example', 1, ?, ?, ?, ?, ?)`)
+    .run(other, expires, USER.outsider, expires, USER.outsider, JSON.stringify({ sharedDrives: [{ driveId: '0AotherDrive0000001', name: '他社', addedAt: expires, addedBy: USER.outsider }] }))
 
   // The company map, on in both companies (rows written directly: turning it on
   // through the API would start an index run in the background), with a record in the other.
@@ -954,6 +962,7 @@ async function seed(): Promise<World> {
       plugin: 'other-sales',
       operation: 'op-other-1',
       googleGrant: otherMember,
+      sharedDrive: '0AotherDrive0000001',
       approval: 'approval-other001',
       outboundMail: 'outbound_message-other00000001',
       absence: 'absence-other-1',

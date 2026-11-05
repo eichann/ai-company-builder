@@ -133,12 +133,27 @@ turns").
   summary and text fields (kind `text` / `long_text`, or unknown) on as `{ outside }`
   (`outsideValue`, `【】` → `〔〕`) with `outsideNote` once and `instructionLike` flags; ids, types,
   states, dates, numbers, choices, people, record links and tags stay plain.
-- **Not yet: the server does not scope a built-in step's token to its tools.** Only creates are
-  checked there (above); every other records-ai route answers a run-bound token as a
-  consultation's, and the app's filter is what keeps a run to its step. Plan: the step lists as
-  route ids in `shared/core` (one table the app's steps also read), one records-ai middleware
-  mapping each route to its tool id and answering `NOT_IN_STEP` for a run-bound token whose
-  built-in step does not list it, and a parity test over every records-ai route.
+- **The server scopes a built-in step's token to its routes** (`shared/core/ai-turn-routes.ts`,
+  one copy): `AI_ROUTES` is every route a record token reaches (`<METHOD> <path under
+  /api/records-ai>`); `AI_TURN_STEP_ROUTES` grants each built-in step its tools' routes, the read
+  after a replayed write (`replayReadPath`) and, for all, `AI_TURN_BASE_ROUTES` (the turn start:
+  `GET /types`, `GET /plugins`; Drive's status is refused and the turn goes on without Drive). A
+  grant may carry a `RouteCondition` on the route's parameters — today `record-actions`
+  (`POST /item/:recordId/actions/:action` only for `<type>__<action>` the step names, a legacy
+  `minutes-` id being a meeting); an unknown kind refuses. A later step adds its kind there (a skill
+  run writing only under its deliverable folder: `path-under`). The record-token guard
+  (`routes/guards.ts`) asks `aiRuns.routeRefusal` for a run-bound token: a built-in step's run on
+  any other route → 403 `NOT_IN_STEP` before the handler. Not scoped: a consultation's token (no
+  run), a business plugin's step (its C4 gate), and — **the gate for released apps** — a call whose
+  `X-ACB-Client-Version` is older than `AI_TURN_ROUTE_SCOPE_COMMIT_DATE`
+  (`server/src/lib/client-version.ts`, `aiTurnRouteScopeApplies`) or absent; remove the gate once
+  every member runs a newer build. Creates are checked by type as well (above). Tests:
+  `server/tests/unit/ai-turn-routes.test.ts` (every record-token route listed and every listed one
+  served — a new AI route fails until listed; grants; the gate),
+  `server/tests/integration/plugin-run-gate.test.ts` (over HTTP: scoped for a new build, not for an
+  old build / none / a consultation / a plugin step; mutation-checked),
+  `client/tests/ai-turn-routes.test.ts` (every step's tools, run against a fake server, call only
+  granted routes — a tool added to a step without its route fails).
 
 ## Claiming and settling (main, `electron/features/ai-turns/`)
 
