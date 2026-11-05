@@ -184,8 +184,8 @@ export interface GoogleRelayRecord {
    * found); refused: ACB did not pass it (`reason`); error: Google or the way failed.
    */
   result: 'ok' | 'google-refused' | 'refused' | 'error'
-  /** Why ACB refused: deletion / not-relayed / stopped / over-cap / not-allowed (no permission, feature off) / other. */
-  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'other' | null
+  /** Why ACB refused: deletion / not-relayed / stopped / over-cap / not-allowed (no permission, feature off) / outside (a write into a sheet not owned inside the company) / other. */
+  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'outside' | 'other' | null
 }
 
 /** One member in the admin's relay view. */

@@ -51,10 +51,18 @@ export const GOOGLE_SCOPE = {
   gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
   /**
    * スプレッドシートを中継で使う (the `sheets` feature only): every sheet the member can edit —
-   * no per-file designation (owner decision 2026-11-04); Google refuses the rest, and the relay
-   * never passes a deletion (shared/core/google-relay.ts).
+   * no per-file designation (owner decision 2026-11-04); Google refuses the rest, the relay
+   * never passes a deletion and writes only into sheets owned inside the company's Workspace
+   * (shared/core/google-relay.ts `sheetOwnership`).
    */
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
+  /**
+   * With スプレッドシートを中継で使う only (owner decision 2026-11-04, 「会社の Workspace の中の表だけに
+   * 書ける」): to read who owns a sheet before the relay writes into it. Google lets it read the
+   * names and details of every file the member can see (never their contents); ACB sends exactly
+   * one kind of call with it — one file's `owners` and `driveId` (`driveMetadataCallAllowed`).
+   */
+  driveMetadataReadonly: 'https://www.googleapis.com/auth/drive.metadata.readonly',
   /**
    * 済んだメールを Gmail でもアーカイブする (the `inbox_archive` feature only, owner decision
    * 2026-11-05). Google lets it read, label, trash and draft too; ACB sends exactly one kind of call
@@ -68,7 +76,9 @@ export const GOOGLE_SCOPE = {
 export const GOOGLE_NEVER_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/drive',
   'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
+  // `drive.metadata.readonly` left this list on 2026-11-05 (B-H1: the relay writes only into sheets
+  // owned inside the company's Workspace, and only Drive tells the owner). Held only with the
+  // `sheets` feature; the Google client sends nothing with it but one file's owner lookup.
   'https://www.googleapis.com/auth/gmail.compose',
   'https://www.googleapis.com/auth/gmail.metadata',
   // `gmail.modify` left this list on 2026-11-05 (owner decision: 「済んだメールを Gmail でもアーカイブする」,
@@ -86,7 +96,7 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   mail: [GOOGLE_SCOPE.gmailSend],
   drive: [GOOGLE_SCOPE.driveFile],
   inbox: [GOOGLE_SCOPE.gmailReadonly],
-  sheets: [GOOGLE_SCOPE.spreadsheets],
+  sheets: [GOOGLE_SCOPE.spreadsheets, GOOGLE_SCOPE.driveMetadataReadonly],
   inbox_archive: [GOOGLE_SCOPE.gmailModify],
 }
 
@@ -96,6 +106,9 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
  */
 export const GOOGLE_FEATURE_OPTIONAL_SCOPES: Partial<Record<GoogleFeature, readonly string[]>> = {
   minutes: [GOOGLE_SCOPE.documentsReadonly],
+  // A grant from before 2026-11-05 still reads sheets; the relay refuses its writes until the member
+  // allows again (it cannot tell who owns the sheet).
+  sheets: [GOOGLE_SCOPE.driveMetadataReadonly],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -281,6 +294,25 @@ export function gmailCallAllowed(req: { api: string; method: string; path: strin
   if (req.method === 'GET') return req.scope === GOOGLE_SCOPE.gmailReadonly && GMAIL_READ_RE.test(req.path)
   return req.method === 'POST' && req.path === GMAIL_SEND_PATH && req.scope === GOOGLE_SCOPE.gmailSend
 }
+
+/** The one call ACB makes with `drive.metadata.readonly`: a file's owners and shared drive. */
+const DRIVE_OWNER_PATH_RE = /^\/drive\/v3\/files\/[A-Za-z0-9_-]{1,200}$/
+const DRIVE_OWNER_QUERY = new Set(['fields', 'supportsAllDrives'])
+
+/**
+ * Whether ACB makes this call with `drive.metadata.readonly` (enforced by the server's one Google
+ * client before anything leaves): only `GET /drive/v3/files/<id>` asking for the owners and the
+ * shared drive. Calls with any other scope are not this function's business (true).
+ */
+export function driveMetadataCallAllowed(req: { api: string; method: string; path: string; scope: string; query?: Record<string, string | string[]> }): boolean {
+  if (req.scope !== GOOGLE_SCOPE.driveMetadataReadonly) return true
+  if (req.api !== 'drive' || req.method !== 'GET' || !DRIVE_OWNER_PATH_RE.test(req.path)) return false
+  const q = req.query ?? {}
+  return Object.keys(q).every(k => DRIVE_OWNER_QUERY.has(k)) && q.fields === DRIVE_OWNER_FIELDS
+}
+
+/** The fields the relay's owner lookup asks Drive for (and nothing else). */
+export const DRIVE_OWNER_FIELDS = 'owners(emailAddress),driveId'
 
 // ---------------------------------------------------------------------------
 // Where Google's APIs live (the server's one Google client maps an API to its host).

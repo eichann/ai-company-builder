@@ -57,7 +57,7 @@ export function GoogleRelayCard({ companyId, account, busy: parentBusy, waiting,
                 <Button size="sm" variant="primary" disabled={disabled}
                   onClick={() => void (view.state === 'resume' ? setOn(true) : connect(['sheets']))}>許可する</Button>
                 <span className="text-[12px] text-zinc-500">
-                  {view.state === 'resume' ? '前に許可したままなので、Google の画面は開きません。' : 'Google の画面が開きます。会社の Google アカウントで「スプレッドシートの表示、編集」に同意してください。'}
+                  {view.state === 'resume' ? '前に許可したままなので、Google の画面は開きません。' : 'Google の画面が開きます。会社の Google アカウントで「スプレッドシートの表示、編集」と、書き込む表が会社のものか確かめるための「Google ドライブのファイルの情報の表示」に同意してください。'}
                 </span>
               </div>
             )}

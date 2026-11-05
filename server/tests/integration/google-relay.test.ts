@@ -14,6 +14,9 @@
  *   permission (Google refuses what they cannot edit), another company never reaches a grant here;
  * - one record per call (who, which spreadsheet and range, the result) visible to admins and to the
  *   member themself (their own lines only) — never a cell's content, a token or a Google token;
+ * - a write goes only into a sheet owned inside the company's Workspace (B-H1): a sheet an outsider
+ *   owns and shared with the member, or one in a shared drive, is refused before the Sheets call
+ *   (reads still pass); a grant without the owner lookup's permission writes nothing until renewed;
  * - the relay is asked only when the member chooses it (never in the one consent), offered only once
  *   the company turned it on; the name `google` cannot hold a key.
  */
@@ -528,6 +531,118 @@ describe('Google relay: records', () => {
     const events = JSON.stringify(db.prepare("SELECT * FROM agent_events WHERE tool = 'broker:google'").all())
     expect(events).toContain('values.append')
     expect(events).not.toContain(CELL)
+  })
+})
+
+describe('Google relay: writes only into sheets owned inside the company (B-H1)', () => {
+  const OUTSIDE = GOOGLE_SEED.outsideSheet
+  const COLLEAGUE = GOOGLE_SEED.colleagueSheet
+  const SHARED_DRIVE = GOOGLE_SEED.sharedDriveSheet
+  const METADATA_SCOPE = 'https://www.googleapis.com/auth/drive.metadata.readonly'
+  /** Sheets calls that reached the fake for this sheet with a method that writes. */
+  const writesTo = (id: string) => fake.requests.filter(r => r.path.includes(id) && r.path.startsWith('/v4/') && r.method !== 'GET').length
+  const ownerLookups = (id: string) => fake.requests.filter(r => r.path === `/drive/v3/files/${id}`)
+
+  it('a grant from before the owner lookup reads as before, writes nothing until the member allows again', async () => {
+    // 「Google で許可」 with the Drive metadata permission unticked (as every grant made before 2026-11-05).
+    fake.signIn({ email: GOOGLE_SEED.member, withholdScopes: [METADATA_SCOPE] })
+    const start = await call('r-sato', 'POST', `${C()}/me/google/connect`, { features: ['sheets'] })
+    expect(start.status, JSON.stringify(start.body)).toBe(200)
+    const back = new URL((await fetch(new URL(start.body.data.authorizeUrl), { redirect: 'manual' })).headers.get('location')!)
+    expect((await call(null, 'GET', `/api/oauth/google/callback${back.search}`)).status).toBe(200)
+    const grant = db.prepare("SELECT scopes FROM connector_grants WHERE provider = 'google' AND user_id = 'r-sato'").get() as { scopes: string }
+    expect(grant.scopes).not.toContain(METADATA_SCOPE)
+    const { token } = await tokenFor('r-sato')
+    expect((await script(token!, 'GET', values(COLLEAGUE, '一覧!A1:B1'))).status).toBe(200)
+    const before = sent()
+    const write = await script(token!, 'PUT', `${values(COLLEAGUE, '一覧!A2')}?valueInputOption=RAW`, { values: [['X-1']] })
+    expect(write.status).toBe(403)
+    expect(write.body.error.code).toBe('ACB_GOOGLE_NOT_ALLOWED')
+    expect(write.body.error.message).toContain('会社のものか確かめる許可')
+    expect(sent()).toBe(before)
+    // The member's own view says it needs allowing again (the app then shows ［許可する］), the admin's too.
+    const mine = (await call('r-sato', 'GET', `${C()}/me/google/relay`)).body.data
+    expect(mine.services[0]).toMatchObject({ service: 'sheets', allowed: false, turnedOff: false })
+    const admin = (await call('r-owner', 'GET', `${C()}/google/relay`)).body.data
+    expect(admin.members.find((m: Json) => m.userId === 'r-sato').allowed).toBe(false)
+    expect(rows(COLLEAGUE)).toEqual([['案件', '状態']])
+    // Allowing again (the permission ticked) writes.
+    await allow('r-sato', ['sheets'], GOOGLE_SEED.member)
+    const again = await script(token!, 'PUT', `${values(COLLEAGUE, '一覧!A2')}?valueInputOption=RAW`, { values: [['X-1', '進行中']] })
+    expect(again.status, JSON.stringify(again.body)).toBe(200)
+    expect(rows(COLLEAGUE)[1]).toEqual(['X-1', '進行中'])
+    expect((await call('r-sato', 'GET', `${C()}/me/google/relay`)).body.data.services[0].allowed).toBe(true)
+  })
+
+  it('a sheet a colleague of the company owns: Drive is asked who owns it (owners and shared drive only), then the write passes', async () => {
+    const { token } = await tokenFor('r-sato')
+    const write = await script(token!, 'POST', `${values(COLLEAGUE, '一覧!A:B', ':append')}?valueInputOption=RAW`, { values: [['X-2', '完了']] })
+    expect(write.status, JSON.stringify(write.body)).toBe(200)
+    expect(rows(COLLEAGUE).at(-1)).toEqual(['X-2', '完了'])
+    const lookups = ownerLookups(COLLEAGUE)
+    expect(lookups.length).toBeGreaterThan(0)
+    for (const l of lookups) {
+      expect(l.method).toBe('GET')
+      expect(new URLSearchParams(l.search).get('fields')).toBe('owners(emailAddress),driveId')
+    }
+  })
+
+  it('a sheet an outsider owns and shared with the member: reads pass, every kind of write is refused before the Sheets call', async () => {
+    const { token } = await tokenFor('r-sato')
+    const read = await script(token!, 'GET', values(OUTSIDE, 'ご依頼!A1:B2'))
+    expect(read.status, JSON.stringify(read.body)).toBe(200)
+    const writes: Array<[string, string, unknown]> = [
+      ['PUT', `${values(OUTSIDE, 'ご依頼!A3')}?valueInputOption=RAW`, { values: [[CELL]] }],
+      ['POST', `${values(OUTSIDE, 'ご依頼!A:B', ':append')}?valueInputOption=RAW`, { values: [[CELL]] }],
+      ['POST', `/v4/spreadsheets/${OUTSIDE}/values:batchUpdate`, { valueInputOption: 'RAW', data: [{ range: 'ご依頼!A3', values: [[CELL]] }] }],
+      ['POST', `/v4/spreadsheets/${OUTSIDE}:batchUpdate`, { requests: [{ addSheet: { properties: { title: CELL } } }] }],
+    ]
+    for (const [method, path, body] of writes) {
+      const r = await script(token!, method, path, body)
+      expect(r.status, path).toBe(403)
+      expect(r.body.error.code).toBe('ACB_OUTSIDE_SHEET')
+      expect(r.body.error.message).toContain('会社の外の人が持っている表には書き込めません')
+    }
+    expect(writesTo(OUTSIDE)).toBe(0)
+    expect(fake.spreadsheet(OUTSIDE)!.sheets.map(s => s.title)).toEqual(['ご依頼'])
+    expect(rows(OUTSIDE)).toEqual([['項目', '内容'], ['日程', '未定']])
+    // Filed as such: admins and the member see it was refused because an outsider owns the sheet.
+    const mine = (await call('r-sato', 'GET', `${C()}/me/google/relay`)).body.data.records
+    expect(mine.find((x: Json) => x.spreadsheetId === OUTSIDE && x.result === 'refused')?.reason).toBe('outside')
+    const events = db.prepare("SELECT guard_reason AS g FROM agent_events WHERE tool = 'broker:google' AND decision = 'guard-denied' AND target LIKE ?").all(`%${OUTSIDE}%`) as Array<{ g: string }>
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.every(e => e.g === 'outside-owner')).toBe(true)
+  })
+
+  it('a sheet in a shared drive (Drive names no owner): a write is refused, a read passes', async () => {
+    const { token } = await tokenFor('r-sato')
+    expect((await script(token!, 'GET', values(SHARED_DRIVE, '一覧!A1'))).status).toBe(200)
+    const r = await script(token!, 'PUT', `${values(SHARED_DRIVE, '一覧!A2')}?valueInputOption=RAW`, { values: [['X-3']] })
+    expect(r.status).toBe(403)
+    expect(r.body.error.code).toBe('ACB_OUTSIDE_SHEET')
+    expect(r.body.error.message).toContain('共有ドライブ')
+    expect(writesTo(SHARED_DRIVE)).toBe(0)
+    expect(rows(SHARED_DRIVE)).toEqual([['案件', '状態']])
+  })
+
+  it('the Drive metadata permission sends nothing but one file\'s owner lookup (the Google client\'s guard)', async () => {
+    const before = sent()
+    const refused: Array<Record<string, unknown>> = [
+      { api: 'drive', method: 'GET', path: '/drive/v3/files', query: { q: "name contains 'x'" } },
+      { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}/permissions` },
+      { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: '*' } },
+      { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: 'owners(emailAddress),driveId', alt: 'media' } },
+      { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}` },
+      { api: 'drive', method: 'PATCH', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: 'owners(emailAddress),driveId' }, body: { name: 'x' } },
+      { api: 'sheets', method: 'GET', path: `/v4/spreadsheets/${OUTSIDE}` },
+    ]
+    for (const r of refused) {
+      const res = await services.googleClient.request(CO, 'r-sato', { operation: 'test', scope: METADATA_SCOPE, ...r })
+      expect(res, JSON.stringify(r)).toMatchObject({ ok: false, kind: 'not-sent', reason: 'call-not-allowed' })
+    }
+    expect(sent()).toBe(before)
+    const ok = await services.googleClient.request(CO, 'r-sato', { api: 'drive', method: 'GET', path: `/drive/v3/files/${OUTSIDE}`, query: { fields: 'owners(emailAddress),driveId', supportsAllDrives: 'true' }, scope: METADATA_SCOPE, operation: 'test' })
+    expect(ok.ok).toBe(true)
   })
 })
 

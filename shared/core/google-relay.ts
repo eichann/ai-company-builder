@@ -9,6 +9,9 @@
  * records). Pure: imports nothing outside shared/core.
  *
  * - **No per-file designation**: any spreadsheet the member can edit; Google refuses the rest.
+ * - **Writes only into the company's own sheets** (owner decision 2026-11-04, 「会社の Workspace の
+ *   中の表だけに書ける」): a write passes only when Drive says the sheet's owner is an account of the
+ *   company's Workspace domain (`sheetOwnership`); reads are not checked.
  * - **Never a deletion**: `values:clear`, `values:batchClear(ByDataFilter)` and a
  *   `spreadsheets:batchUpdate` with any `delete…` / `clear…` request are refused before anything
  *   leaves ACB; other batchUpdate request kinds pass only when listed in
@@ -115,6 +118,39 @@ export type SheetsRefusal =
   | 'not-relayed'
 
 /**
+ * Who holds a spreadsheet, from Drive's `files.get` (`fields=owners(emailAddress),driveId`,
+ * `supportsAllDrives=true`), against the company's Workspace domain (`google_oauth_clients.domain`,
+ * lower case). A relayed write passes only on `inside` (owner decision 2026-11-04, B-H1: an AI led
+ * by a mail must not copy company content into a sheet an outsider shared with the member).
+ *
+ * The owner is the one signal its holder cannot choose: Google sets it, and only the company's
+ * Workspace can hold an account of its domain. The title, the sharing list, developer metadata or
+ * anything in the sheet are written by whoever owns it, so they are never read for this.
+ * - `inside`: in a member's My Drive, every owner's address is `…@<domain>` (exactly; another
+ *   domain of the same Workspace counts as outside — fail closed);
+ * - `shared-drive`: in a shared drive (`driveId`; Drive names no owner there). Which organization a
+ *   shared drive belongs to cannot be read with the member's permission, so a write is refused;
+ * - `outside`: an owner of another domain, or no owner address at all (Google hides an outside
+ *   owner's address in some cases), or an answer that is not Drive's shape.
+ */
+export type SheetOwnership = 'inside' | 'outside' | 'shared-drive'
+
+export function sheetOwnership(meta: unknown, domain: string): SheetOwnership {
+  const want = domain.trim().toLowerCase()
+  if (!want || !meta || typeof meta !== 'object' || Array.isArray(meta)) return 'outside'
+  const m = meta as { owners?: unknown; driveId?: unknown }
+  if (typeof m.driveId === 'string' && m.driveId !== '') return 'shared-drive'
+  if (!Array.isArray(m.owners) || m.owners.length === 0) return 'outside'
+  for (const o of m.owners) {
+    const email = o && typeof o === 'object' ? (o as { emailAddress?: unknown }).emailAddress : undefined
+    if (typeof email !== 'string') return 'outside'
+    const at = email.lastIndexOf('@')
+    if (at <= 0 || email.slice(at + 1).toLowerCase() !== want) return 'outside'
+  }
+  return 'inside'
+}
+
+/**
  * One Sheets call from its method and decoded path on sheets.googleapis.com
  * (`/v4/spreadsheets/<id>/values/<range>:append`), or why it is refused. The body of a
  * `spreadsheets.batchUpdate` is checked separately (`checkSheetsBatchUpdate`).
@@ -219,7 +255,7 @@ export function googleRelayRecordWords(r: {
   operation: SheetsOperation | null
   range: string | null
   result: 'ok' | 'google-refused' | 'refused' | 'error'
-  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'other' | null
+  reason: 'deletion' | 'not-relayed' | 'stopped' | 'over-cap' | 'not-allowed' | 'outside' | 'other' | null
 }): { action: string; result: string; note: string | null } {
   const action = r.operation ? SHEETS_OPERATION_TEXT[r.operation] : r.reason === 'deletion' ? '消す操作' : '中継しない操作'
   if (r.result === 'ok') return { action, result: '届けました', note: null }
@@ -229,6 +265,7 @@ export function googleRelayRecordWords(r: {
     : r.reason === 'not-relayed' ? 'この操作は中継しません'
       : r.reason === 'stopped' ? '管理者が止めていました'
         : r.reason === 'over-cap' ? '今日の上限に達していました'
-          : r.reason === 'not-allowed' ? '本人の許可がありませんでした' : null
+          : r.reason === 'not-allowed' ? '本人の許可がありませんでした'
+            : r.reason === 'outside' ? '会社の外の人が持っている表でした' : null
   return { action, result: '中継しませんでした', note }
 }

@@ -27,6 +27,7 @@ paths:
   - "shared/core/google-relay.ts"
   - "server/src/services/google-relay.ts"
   - "server/tests/integration/google-relay.test.ts"
+  - "server/tests/unit/google-relay-owner.test.ts"
   - "server/tests/integration/google-inbox-archive.test.ts"
   - "admin/src/components/key-broker/google-relay.tsx"
   - "client/src/features/settings/components/GoogleRelayCard.tsx"
@@ -48,7 +49,8 @@ used; never `drive`, `drive.readonly`,
 `gmail.compose`, `gmail.metadata`, `https://mail.google.com/` or domain-wide
 delegation (`GOOGLE_NEVER_SCOPES`). `gmail.modify` left that list on 2026-11-05 (owner decision) for
 the `inbox_archive` feature only, and nothing but the INBOX label is ever sent with it ("Archiving in
-Gmail"). `gmail.readonly` is allowed only as the `inbox` feature,
+Gmail"). `drive.metadata.readonly` left it the same day (B-H1) for the `sheets` feature only, and
+nothing but one file's owner lookup is ever sent with it ("The relay", 「会社の表だけに書く」). `gmail.readonly` is allowed only as the `inbox` feature,
 off for a company until its admin turns it on (owner decisions 2026-11-01 / 11-02, spec §7-1; each company registers its own internal app, so no
 Google review). Drive (`drive.file` + Google Picker): `google-drive.md`. Google is a built-in
 core connector serving the roles 予定を読む / メールを読む・送る / 会議の記録を読む
@@ -157,8 +159,10 @@ a member, `google` in the token — nothing the request names) and hands the cal
 `services/google-relay.ts`, which sends it through `googleClient.request` **with that member's own
 grant** — never a key, never a service account — so every switch above applies from the next call.
 
-- **Scope / feature** `sheets` = `spreadsheets`: no per-file designation (any sheet the member can
-  edit; Google refuses the rest). Default off for a company (`GOOGLE_COMPANY_DEFAULT_OFF`): the
+- **Scope / feature** `sheets` = `spreadsheets` + `drive.metadata.readonly` (the second optional,
+  `GOOGLE_FEATURE_OPTIONAL_SCOPES`: a grant without it still reads): no per-file designation (any
+  sheet the member can read; Google refuses the rest), but **writes only into the company's own
+  sheets** (below). Default off for a company (`GOOGLE_COMPANY_DEFAULT_OFF`): the
   admin turns it on as a relay service (`PUT /google/relay { services: { sheets } }` writes the
   company feature switch, history `features`). Never in the one consent (`GOOGLE_ASKED_BY_NAME_ONLY`,
   `googleMemberFeatures`): asked only when the member names it (`POST /me/google/connect
@@ -181,9 +185,31 @@ grant** — never a key, never a service account — so every switch above appli
   headers refused. Nothing of the client's headers is forwarded (the Google client builds its
   own). The path sent on is the raw path without its first segment.
   Overwriting cells with values (also empty ones) is an edit and passes.
+- **Writes only into sheets owned inside the company's Workspace** (B-H1, owner decision
+  2026-11-04 「会社の Workspace の中の表だけに書ける」: an AI led by a mail must not copy company
+  content into a sheet an outsider shared with the member). Before a write (every operation but
+  `spreadsheets.get`, `values.get` / `batchGet`) the relay asks Drive, with the member's own
+  `drive.metadata.readonly`, `GET /drive/v3/files/<id>?fields=owners(emailAddress),driveId&supportsAllDrives=true`
+  and passes only `sheetOwnership(…) === 'inside'` (`shared/core/google-relay.ts`): every owner's
+  address exactly `…@<google_oauth_clients.domain>` (case-insensitive; another domain of the same
+  Workspace, a sub-domain or a look-alike is outside). The owner is the one signal the sheet's
+  holder cannot set (Google sets it; only the company's Workspace holds accounts of its domain);
+  title, sharing list, developer metadata and cells are never read for this. A sheet in a **shared
+  drive** (`driveId`; Drive names no owner and the member's permission cannot tell whose drive it
+  is) is refused for writes (owner decision pending: a list of the company's shared drives). An
+  outside owner / no owner address / a broken answer → 403 `ACB_OUTSIDE_SHEET`
+  「会社の外の人が持っている表には書き込めません。…（読むことはできます）」 (shared drive: 「共有ドライブにある表には、
+  いまは中継で書き込めません…」); Drive 403/404 → 403 in Google's shape; a grant without the
+  permission (before 2026-11-05) → `ACB_GOOGLE_NOT_ALLOWED` 「…会社のものか確かめる許可が必要になりました…［許可する］」,
+  and `MyGoogleRelay` / the admin view show it as not allowed so the app (released ones too) offers
+  ［許可する］ again. A sheet found inside is not looked up again for 10 minutes (per company,
+  member, domain, sheet; in memory, ≤ 2000; only `inside` is kept). Reads are not checked (reading an
+  outside sheet sends nothing of the company's out). The one Google client sends nothing else with
+  `drive.metadata.readonly` (`driveMetadataCallAllowed`, `call-not-allowed`: no list, no
+  permissions, no other fields, no `alt=media`, no write).
 - **Order, all before anything leaves ACB**: token → the company's AI stop (M2) → path → the
   company-wide relay stop → this member's relay stop → the company's service switch → the call →
-  query → body (JSON ≤ 10 MB; batchUpdate kinds) → the AI stop, both relay stops and the service
+  query → body (JSON ≤ 10 MB; batchUpdate kinds) → for a write, the owner (Drive lookup above) → the AI stop, both relay stops and the service
   switch again (a stop pressed while the body arrived applies) → the member's daily cap (default 500, admin
   1–10000; counted in `broker_usage` under the key id `person-relay:google`, before sending, like
   the key caps) → `googleClient.request` (operator stop, client on, vault, member, grant, scope,
@@ -192,19 +218,21 @@ grant** — never a key, never a service account — so every switch above appli
   with Google's status in Google's error shape `{ error: { code, status, message } }` (Japanese
   message, never Google's text); ACB's own refusals in the broker's error shape
   (`ACB_DELETE_REFUSED`, `ACB_NOT_RELAYED`, `ACB_GOOGLE_NOT_ALLOWED` — 「設定 → Google で…［許可する］」,
-  `ACB_GOOGLE_OFF`, `ACB_STOPPED`, `ACB_OVER_CAP`). A write is never retried; a lost answer → 504.
+  `ACB_OUTSIDE_SHEET`, `ACB_GOOGLE_OFF`, `ACB_STOPPED`, `ACB_OVER_CAP`). A write is never retried; a lost answer → 504.
 - **Records**: one AI-action-log line per call, filed by the broker relay (tool `broker:google`,
   target `{ kind: 'broker', service: 'google', host: 'sheets.googleapis.com', path: <decoded path,
   spreadsheet id and range>, operation, status, bytesIn, bytesOut }`, the conversation and
   department of the token; `googleClient` adds none: `recordedByCaller`). Refusals: deletion →
   guard-denied `no-deletion`, unlisted → `destination-not-allowed`, no permission →
-  `key-not-available`, cap → `over-cap`, stops / Google off → `stopped`. Never a cell's content.
+  `key-not-available`, an outside / shared-drive sheet → `outside-owner` (record reason `outside`,
+  「会社の外の人が持っている表でした」), cap → `over-cap`, stops / Google off → `stopped`. Never a cell's content.
   Refusals do not count against the cap; past `GOOGLE_RELAY_REFUSALS_PER_DAY` (200) refused calls
   of one member in a day they are still refused but not recorded (a looping script cannot flood
   the log; counted in `broker_usage` under `person-relay:google:refused`).
 - **Accepted residual risks** (owner): a formula written into a sheet (`=IMPORTDATA()`, `=IMAGE()`)
-  makes Google fetch outside URLs; a sheet the member can edit can be overwritten with values (no
-  per-file designation, decision §2-7).
+  makes Google fetch outside URLs; a company-owned sheet the member can edit can be overwritten with
+  values (no per-file designation, decision §2-7), also one its company owner shared outside (the
+  check is the owner, not the sharing list).
 - **Admin** (owner/admin): `GET /google/relay` (`GoogleRelayAdminView`: available, services,
   `capPerMemberPerDay`, `stopped`, members who allowed / were stopped with today's count, the latest
   100 records); `PUT /google/relay { services?, capPerMemberPerDay?, stopped? }` (history `relay`);
@@ -235,7 +263,13 @@ grant** — never a key, never a service account — so every switch above appli
   company stop / member stop / cap refused with nothing sent; another member's token acts as that
   member (Google refuses their write to Sato's sheet); another company never reaches a grant here;
   records for admins and the member's own only; no cell content, broker token or Google token in
-  any table, answer or log line; asked only by name), mutation-checked: the batchUpdate check, its
+  any table, answer or log line; asked only by name; B-H1: an outsider's sheet and a shared-drive
+  sheet refused for every write kind with no Sheets write sent, reads pass, a colleague's sheet
+  passes after one owner lookup asking only `owners(emailAddress),driveId`, an old grant reads but
+  writes nothing until allowed again, the client's `drive.metadata.readonly` guard) and
+  `tests/unit/google-relay-owner.test.ts` (`sheetOwnership`), mutation-checked: the owner check,
+  the shared-drive and outside refusals, the renew message, the client guard and its query check,
+  the exact-domain comparison, `driveId`; the batchUpdate check, its
   delete and allow-list rules, one kind per request, `values:clear` / `batchClear`, both stops, the
   cap, the query allow-list, never in the one consent, the records' result.
 

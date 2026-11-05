@@ -82,6 +82,7 @@ export const GOOGLE_SCOPES = {
   gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
   spreadsheets: 'https://www.googleapis.com/auth/spreadsheets',
   documentsReadonly: 'https://www.googleapis.com/auth/documents.readonly',
+  driveMetadataReadonly: 'https://www.googleapis.com/auth/drive.metadata.readonly',
 } as const
 
 /** The scopes milestone 4 asks for (design §5-2). */
@@ -928,6 +929,19 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
   })
 
   app.get('/drive/v3/files/:fileId', c => {
+    const sheet = spreadsheets.get(c.req.param('fileId') ?? '')
+    if (sheet) {
+      // A spreadsheet's metadata (the relay's owner lookup, B-H1): any Drive metadata scope, and the
+      // account must be able to open it. In a shared drive Drive names no owner, only `driveId`.
+      const a = bearer(c, [GOOGLE_SCOPES.driveMetadataReadonly, `${AUTH}drive.readonly`, `${AUTH}drive`], 'drive.googleapis.com')
+      const email = a.email.toLowerCase()
+      if (![sheet.owner, ...sheet.editors, ...sheet.readers].some(e => e.toLowerCase() === email)) throw fileNotFound(sheet.id)
+      if (c.req.query('supportsAllDrives') !== 'true' && sheet.driveId) throw fileNotFound(sheet.id)
+      return c.json(selectFields({
+        kind: 'drive#file', id: sheet.id, name: sheet.title, mimeType: 'application/vnd.google-apps.spreadsheet',
+        ...(sheet.driveId ? { driveId: sheet.driveId } : { owners: [{ kind: 'drive#user', emailAddress: sheet.owner, me: sheet.owner.toLowerCase() === email }] }),
+      }, c.req.query('fields')))
+    }
     if (!docs.has(c.req.param('fileId') ?? '')) {
       const a = bearer(c, NEEDS.drive, 'drive.googleapis.com')
       const f = visibleDriveFile(a, c.req.param('fileId') ?? '')
