@@ -245,6 +245,7 @@ test('skill files: a member\'s AI is stopped before writing; the people allowed,
     if (d.deny) {
       assert.equal(d.code, 'skill-file')
       assert.match(d.message, /Skill を直せる人/)
+      assert.match(d.message, /「新しいスキル」や「他からコピー」/, 'and the way to try something anyway')
     }
   }
   const bash = decideToolWrite(member, 'Bash', { command: 'echo x > .claude/skills/report/make.py' }, ROOT)
@@ -263,6 +264,7 @@ test('skill files: a member\'s AI is stopped before writing; the people allowed,
   const drafting = withAuthority({ role: 'member', managedFolders: [], skillEditing: noOne }, ['営業部/.claude/skills/draft/'])
   assert.equal(write(drafting, '営業部/.claude/skills/draft/scripts/run.py').deny, false, 'a skill kept on this computer')
   assert.equal(write(drafting, '営業部/.claude/skills/other/run.py').deny, true)
+  assert.equal(write(drafting, '営業部/.claude/skills/draft-weekly/run.py').deny, true, 'a shared skill whose name starts the same')
 
   // Not skill files.
   assert.equal(write(member, '.claude/notes.py').deny, false)

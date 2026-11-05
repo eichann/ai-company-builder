@@ -64,5 +64,23 @@ export function createFetchSyncServerApi(options: FetchSyncServerApiOptions): Sy
       const body = await response.json()
       return parseMyScopes(body?.data)
     },
+
+    async getSkillSharing(companyId) {
+      // Asked while staging: a slow server must not hold a sync up.
+      const response = await doFetch(`${options.baseUrl()}/api/companies/${encodeURIComponent(companyId)}/me/capabilities`, {
+        headers: optionalCookie(),
+        signal: AbortSignal.timeout(3000),
+      })
+      if (!response.ok) return null
+      const data = (await response.json().catch(() => null) as { data?: Record<string, unknown> } | null)?.data
+      const editing = data?.skillEditing as { everywhere?: unknown; folders?: unknown } | undefined
+      if (typeof data?.role !== 'string' || typeof editing?.everywhere !== 'boolean' || !Array.isArray(editing.folders)) return null
+      const folders = (value: unknown) => (Array.isArray(value) ? value.filter((f): f is string => typeof f === 'string') : [])
+      return {
+        role: data.role,
+        managedFolders: folders(data.managedDepartmentFolders),
+        skillEditing: { everywhere: editing.everywhere, folders: folders(editing.folders) },
+      }
+    },
   }
 }

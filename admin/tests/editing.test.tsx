@@ -420,6 +420,11 @@ describe('「Skill を直せる人」', () => {
     await waitFor(() => expect(box).toBeEnabled())
     expect(box).not.toBeChecked()
     await user.click(box)
+    // Nothing changes until the warning is answered.
+    expect(calls.filter((c) => c.method === 'PUT')).toEqual([])
+    const warning = await screen.findByRole('alertdialog').catch(() => screen.findByRole('dialog'))
+    expect(warning).toHaveTextContent('ほかの人のパソコンでも動く')
+    await user.click(within(warning).getByRole('button', { name: '全員が直せるようにする' }))
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ everyone: true }]))
     await waitFor(() => expect(box).toBeChecked())
   })

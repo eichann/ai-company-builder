@@ -132,6 +132,7 @@ describe('git:sync skill files', { concurrency: CONCURRENCY }, () => {
       .write('営業部/.claude/skills/x/tools/app/package-lock.json', '{}\n')
       .write('営業部/.claude/skills/x/tools/app/dist/index.html', '<html>\n')
       .write('営業部/.claude/skills/x/tools/app/.next/cache/a', 'x\n')
+      .write('営業部/.claude/skills/x/tools/app/.tool-output.log', 'ready\n')
       .write('notes.md', 'notes\n')
     a.hasWindow = false
     const out = ok(await a.sync(), 'a')
@@ -139,6 +140,53 @@ describe('git:sync skill files', { concurrency: CONCURRENCY }, () => {
     assert.equal(world.serverFile('notes.md')?.toString(), 'notes\n')
     assert.equal(world.serverFile('.claude/skills/report/.DS_Store'), null)
     assert.ok(a.exists('.claude/skills/report/__pycache__/make.cpython-312.pyc'), 'it stays where it was')
+  })
+
+  test('someone who may share a skill with a screen shares its lock file and build; a rebuilt dist stays whole', async t => {
+    const T = '.claude/skills/ui/tools/app/'
+    const D = `${T}dist/`
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { ...seed, [`${D}index.html`]: '<script src=old.js>\n', [`${D}old.js`]: 'old\n' } })
+    const [a, b] = world.members
+    world.setSkillEditing('a', { everywhere: true, folders: [] })
+    a.remove(`${D}old.js`).write(`${D}index.html`, '<script src=new.js>\n').write(`${D}new.js`, 'new\n').write(`${T}package-lock.json`, '{}\n')
+      .write(`${T}.tool-output.log`, 'ready\n')
+    a.willAnswer('deletedFiles', 'sync-deletions')
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile(`${D}new.js`)?.toString(), 'new\n', 'the page and what it loads travel together')
+    assert.equal(world.serverFile(`${T}package-lock.json`)?.toString(), '{}\n')
+    assert.equal(world.serverFile(`${T}.tool-output.log`), null, 'a log never does')
+
+    // A member with their own generated copy still receives the shared one.
+    b.write(`${T}package-lock.json`, '{"mine":1}\n')
+    ok(await b.sync(), 'b')
+    assert.equal(b.readText(`${T}package-lock.json`), '{}\n')
+  })
+
+  test('someone named for one department shares its lock file; another department\'s stays on their computer, asking nothing', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed })
+    const [a] = world.members
+    world.setSkillEditing('a', { everywhere: false, folders: ['営業部'] })
+    const lock = (dept: string) => `${dept}/.claude/skills/x/tools/app/package-lock.json`
+    a.write(lock('営業部'), '{}\n').write(lock('経理部'), '{}\n')
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs, [])
+    assert.ok(world.serverFile(lock('営業部')))
+    assert.equal(world.serverFile(lock('経理部')), null)
+    assert.ok(a.exists(lock('経理部')))
+  })
+
+  test('a name the server refuses: the member is told which file, nothing is retried, and renaming it ends it', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], seed })
+    const [a] = world.members
+    a.write('営業部/a:b.md', 'x\n').write('notes.md', 'notes\n')
+    const out = await a.sync()
+    assert.equal(out.result.success, false)
+    assert.equal(out.result.errorType, 'path_name')
+    assert.match(String(out.result.error), /・営業部\/a:b\.md\n/)
+    assert.equal(a.hasPendingPush(), false, 'a retry could only be refused the same way')
+    a.rename('営業部/a:b.md', '営業部/a-b.md')
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile('notes.md')?.toString(), 'notes\n')
   })
 
   test('a lock file the company already shares stays tracked: changing it does not delete it for everyone', async t => {

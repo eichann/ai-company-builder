@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { MemberChecklist } from '@/components/departments/member-checklist'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -29,6 +30,7 @@ export function SkillEditorsCard({ companyId, departments, members }: { companyI
   const editors = useQuery(`skill-editors:${companyId}`, () => skillEditorsApi.get(companyId))
   const [editing, setEditing] = useState<Place | null>(null)
   const [switching, setSwitching] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   const setEveryone = async (everyone: boolean) => {
     setSwitching(true)
@@ -63,7 +65,7 @@ export function SkillEditorsCard({ companyId, departments, members }: { companyI
           className="mt-1"
           checked={editors.data?.everyone ?? false}
           disabled={!editors.data || switching}
-          onChange={(e) => void setEveryone(e.target.checked)}
+          onChange={(e) => (e.target.checked ? setConfirmOpen(true) : void setEveryone(false))}
         />
         <span>
           <span className="block font-medium">全員が直せるようにする</span>
@@ -87,6 +89,18 @@ export function SkillEditorsCard({ companyId, departments, members }: { companyI
           </li>
         ))}
       </ul>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="全員がスキルを直せるようにしますか？"
+        description={
+          <p>
+            スキルの中のスクリプトは、使う人のパソコンで、その人の権限で動きます。オンにすると、メンバーのだれか（またはその人の AI）が直したスクリプトが、ほかの人のパソコンでも動くようになります。
+          </p>
+        }
+        confirmLabel="全員が直せるようにする"
+        onConfirm={() => setEveryone(true)}
+      />
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="gap-0 p-0 sm:max-w-md">
           {editing && (

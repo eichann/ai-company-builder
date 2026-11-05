@@ -403,6 +403,10 @@ export class World {
     this.skillEditing.set(`user-${name}`, editing)
   }
 
+  skillEditingOf(userId: string): { everywhere: boolean; folders: string[] } {
+    return this.skillEditing.get(userId) ?? { everywhere: false, folders: [] }
+  }
+
   /** Replace the company's permission scopes; takes effect at every member's next push. */
   setScopes(scopes: HarnessScope[]): void {
     this.scopes = scopes
@@ -925,6 +929,10 @@ export class Member {
       const paths = (JSON.parse(String(init?.body ?? '{}')) as { paths?: string[] }).paths ?? []
       if (paths.length > 50) return json({ success: false, error: 'too many paths' }, 400)
       return json({ success: true, data: { results: this.world.pathsUsable(this.name, paths) } })
+    }
+    if (/^\/api\/companies\/[^/]+\/me\/capabilities$/.test(url.pathname)) {
+      if (this.isOffline) throw new TypeError('fetch failed')
+      return json({ success: true, data: { role: this.role, managedDepartmentFolders: [], skillEditing: this.world.skillEditingOf(`user-${this.name}`) } })
     }
     if (/^\/api\/companies\/[^/]+\/me\/scopes$/.test(url.pathname)) {
       // Like an older server until the company's first private folder.

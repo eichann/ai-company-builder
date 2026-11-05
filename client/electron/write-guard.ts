@@ -53,7 +53,7 @@ import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-pa
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 import { isSkillFile, mayChangeSkillFile, type SkillEditing } from '../../shared/core/skill-files'
-import { lookalikeKey, pathKey } from '../../shared/core/paths'
+import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { readFileSync } from 'node:fs'
@@ -129,13 +129,13 @@ export function instructionFileMessage(path: string): string {
 }
 
 export function skillFileMessage(path: string): string {
-  return `このファイル（${path}）はスキルの一部で、使う人のパソコンで動くため、管理者・部署の管理役・「Skill を直せる人」に指定された人だけが変更できます。変更が必要な場合は、管理者に依頼してください。`
+  return `このファイル（${path}）はスキルの一部で、使う人のパソコンで動くため、管理者・部署の管理役・「Skill を直せる人」に指定された人だけが変更できます。変更が必要な場合は、管理者に依頼してください。自分で試したいときは、スキルの画面の「新しいスキル」や「他からコピー」で、自分だけのスキルとして作れます。`
 }
 
 /** Is `rel` inside a skill this member keeps on this computer? Such a line is `<folder>/.claude/skills/<name>/`. */
 export function inPrivateSkill(privateSkills: readonly string[], rel: string): boolean {
   const key = pathKey(rel)
-  return privateSkills.some(line => key.startsWith(pathKey(line)))
+  return privateSkills.some(line => isSameOrAncestorPath(pathKey(line), key))
 }
 
 export function typeDefinitionMessage(path: string): string {

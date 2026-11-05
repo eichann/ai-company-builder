@@ -91,6 +91,25 @@ export function protectedConfigMessage(paths: string[]): string {
     `チャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
 }
 
+// ---------------------------------------------------------------------------
+// WINPATH_DETECTED — a name other members' computers cannot hold
+// ---------------------------------------------------------------------------
+
+export const WINPATH_MARKER = '[WINPATH_DETECTED]'
+
+/** The paths of the section; each line is "  - <path> （<why>）". */
+export function parseWinPathFiles(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, WINPATH_MARKER).map(line => line.replace(/ （[^（）]*）$/, ''))
+}
+
+/** Plain words: nothing is retried until the name changes, so the member has to know which file. */
+export function winPathMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `次のファイルは名前の問題で共有できないため、同期を止めました。\n` +
+    `ほかのメンバーのパソコンで別のファイルと同じ名前になるか、Windowsで使えない名前です。\n\n${list}\n\n` +
+    `名前を変えてから、もう一度同期してください。このPCの変更はすべて残っています。`
+}
+
 export class ProtectedConfigRecoveryError extends Error {}
 
 // ---------------------------------------------------------------------------

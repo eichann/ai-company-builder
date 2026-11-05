@@ -16,6 +16,9 @@ import type { SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
   onlySkillFiles,
+  parseWinPathFiles,
+  winPathMessage,
+  WINPATH_MARKER,
   parseProtectedConfigPaths,
   protectedConfigMessage,
   restoreProtectedPaths,
@@ -75,9 +78,9 @@ import {
   syncReadOnlyScope,
 } from './private-sync'
 import type { SyncDeps, SyncDialog } from './types'
-import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
+import { readExcludeLines, writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
-import { isSkillLeftover, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
+import { isSkillLeftover, skillExcludeLines, SKILL_LEFTOVER_PATTERNS } from '../../shared/skill-leftovers'
 import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
 import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
 import { stagedAutoCommitMessage } from './auto-message'
@@ -195,7 +198,10 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     const stageAll = async () => {
       try {
         writeExcludeLines(repoPath, TEMP_SAVE_EXCLUDES, [TEMP_SAVE_EXCLUDE_PATTERN])
-        writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, SKILL_LEFTOVER_PATTERNS)
+        // Unknown (offline, an older server): the block stays as the last known answer left it.
+        const sharing = await deps.api.getSkillSharing(companyId).catch(() => null)
+        if (sharing) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, skillExcludeLines(sharing, opts.backupPrefix ?? ''))
+        else if (readExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES).length === 0) writeExcludeLines(repoPath, SKILL_LEFTOVER_EXCLUDES, SKILL_LEFTOVER_PATTERNS)
       } catch (excludeError) {
         log.warn('Git sync: Could not write .git/info/exclude (temporary save files):', excludeError)
       }
@@ -1525,6 +1531,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             excludedNestedRepos: newlyExcludedNestedRepos
           }
         }
+      } else if (pushErrorMsg.includes(WINPATH_MARKER)) {
+        // The name decides, so a retry would be refused the same way: no
+        // PENDING_PUSH, and the member is told which file.
+        log.warn('Git sync: Push rejected — a name other computers cannot hold')
+        return { success: false, errorType: 'path_name', error: winPathMessage(parseWinPathFiles(pushErrorMsg)) }
       } else {
         log.error('Git sync: Push to main failed:', pushErrorMsg)
         // Try master branch if main fails
