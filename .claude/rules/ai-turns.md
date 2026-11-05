@@ -240,13 +240,23 @@ the server's run in `waiting_person` (a claim → `RUN_WAITING` → `taken`).
   hand-off (the record never left) still waits for 「もう一度」. A hand-off without a version comes
   from an older build and counts as asked again.
 - **An app without this** still shows the old failure after a press; its ［もう一度］ runs the reading.
+- **Another turn of the same record** (owner report 2026-11-05: a 返事のお願い sat in 「AI が確かめている」
+  for good): a hand-off keeps the record's state it was given in (`HandOff.state`: the run's start state
+  in `recordOutcome`, the queue's in `handUrgent`). Back in the queue in **another** state (`movedOn`:
+  drafted in 準備中, then the member's reply made it 確かめ中 — a draft run that ended as the reply moved
+  it, or one handed for being due soon), it is a new turn and given back (`giveBack`, like 「もう一度」).
+  The member's 「人に渡す」 and a hand-off without a state (an older build) stay until 「もう一度」.
+- **Due soon, but not this turn's due**: a step may say when the record's due is what its turn races
+  (`dueIsTheAisTurn`; absent = always). The queue marks the others `notUrgent` and `handUrgent` never
+  hands them early. `follow-up`: only 準備中 not after a wait-over (the first draft) — a check of a reply
+  already sent, or a nudge, is past its due by nature and was handed at once.
 - **The words**: `FAILED_REASON` no longer says the AI judged (mostly Google refused and the app cannot
   tell); `logForToday` reads the old stored sentence as the new one.
 
 ## Tests
 
 `src/features/chat/aiTurns.test.ts` (setting off, Codex, order, one at a time and the pass cap,
-daily limit, attempts per record, stop after failures and resume, usage pause, the pause resumed by the member and lifted by a newer snapshot or a change of AI but never by an older snapshot, the consultation renamed after its record but never over the member's name, settings values; a meeting asked for again runs, other hand-offs stay; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
+daily limit, attempts per record, stop after failures and resume, usage pause, a record whose due is not the turn's never handed early, a hand-off given back when the record waits in another state (never the member's own), the pause resumed by the member and lifted by a newer snapshot or a change of AI but never by an older snapshot, the consultation renamed after its record but never over the member's name, settings values; a meeting asked for again runs, other hand-offs stay; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
 `tests/ai-turn-unattended.test.ts` (an unattended run's Claude options: no settings layers, strict
 MCP config, no built-in tools, shell / web / write denied, only the record server, everything else
 refused even in bypass; a normal turn unchanged; Codex refuses; the minutes step's tool list; the

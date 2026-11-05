@@ -813,6 +813,47 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     expect(stateOf(rr).state).toBe('closed')
   })
 
+  it('「終わりにする」 in the AI\'s turn (owner report 2026-11-05): the person ends a 確かめ中 request; the AI\'s late check cannot undo it; ［取り消す］ gives it back', async () => {
+    const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    // Her reply (sent from the card's draft) is seen: the AI's turn to check it.
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }] }))
+    expect(stateOf(rr).state).toBe('checking')
+    const v = stateOf(rr).version
+    const aiActor = { id: 'u-alice', kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-1' }
+    // The AI may never use the person's close.
+    expect((await engine.act(m('u-alice'), aiActor, rr, 'close', { expectedVersion: v })).ok).toBe(false)
+    // Another member is not its assignee.
+    expect((await engine.act(m('u-bob'), person('u-bob'), rr, 'close', { expectedVersion: v })).ok).toBe(false)
+    const closed = await engine.act(m('u-alice'), person('u-alice'), rr, 'close', { expectedVersion: v })
+    expect(closed.ok).toBe(true)
+    expect(stateOf(rr).state).toBe('closed')
+    expect(handle().records.ledger(rr).at(-1)).toMatchObject({ action: 'close', actorId: 'u-alice', actorKind: 'human', fromState: 'checking', toState: 'closed' })
+    // The AI's check that was running answers late, at the version it read: refused, the person's close stands.
+    for (const [action, args] of [['ai_close', { close_reason: '返した' }], ['await_reply', { waiting_on: '返事' }], ['hand_over', {}]] as const) {
+      expect((await engine.act(m('u-alice'), aiActor, rr, action, { expectedVersion: v, args, note: '確かめました' })).ok).toBe(false)
+      expect((await engine.act(m('u-alice'), aiActor, rr, action, { expectedVersion: v + 1, args, note: '確かめました' })).ok).toBe(false)
+    }
+    expect(stateOf(rr)).toMatchObject({ state: 'closed', version: v + 1 })
+    // ［取り消す］: her own entry, nothing changed since.
+    ok(await engine.undo(m('u-alice'), person('u-alice'), rr, { version: v + 1, expectedVersion: v + 1 }))
+    expect(stateOf(rr).state).toBe('checking')
+  })
+
+  it('「終わりにする」 while the AI prepares the draft (準備中) too', async () => {
+    const person = (u: string) => ({ id: u, kind: 'human' as const, source: null })
+    inbox.receive('a', 'u-alice', mail())
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    expect(stateOf(rr).state).toBe('preparing')
+    expect((await engine.act(m('u-alice'), person('u-alice'), rr, 'close', { expectedVersion: 1 })).ok).toBe(true)
+    expect(stateOf(rr).state).toBe('closed')
+    expect((await engine.act(m('u-alice'), { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1' }, rr, 'finish_prep', { expectedVersion: 2, args: { prep_summary: '下書き' } })).ok).toBe(false)
+  })
+
   it('「もう返した」 drops the prepared draft and the card\'s own reply drafts to that 連絡, so no second reply can be sent; other 連絡\' drafts stay', async () => {
     inbox.receive('a', 'u-alice', mail())
     inbox.receive('a', 'u-alice', mail())

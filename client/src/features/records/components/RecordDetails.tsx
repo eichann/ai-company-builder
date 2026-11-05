@@ -3,7 +3,7 @@
 // a 連絡's summary (ACB keeps no body) with the original one click away.
 import type { ReactNode } from 'react'
 import { CalendarBlank, CheckCircle } from '@phosphor-icons/react'
-import type { IncomingDetailView, MeetingDetailView, OpenLink } from '../../../../shared/record-details'
+import type { IncomingDetailView, MeetingDetailView, OpenLink, ReplyRequestDetailView } from '../../../../shared/record-details'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
 import { NEXT_STEP } from '../../../../shared/thing-words'
@@ -99,6 +99,26 @@ export function IncomingBody({ m }: { m: IncomingDetailView }) {
       <p className="whitespace-pre-wrap">{m.summary || '（要約はまだありません）'}</p>
     </section>
   )
+}
+
+/**
+ * A 返事のお願い's actions (owner report 2026-11-05: one sat in 「AI が確かめている」 after the member's
+ * reply, with nothing to press): ［終わりにする］ as the main button whenever its person may end it —
+ * the AI's turn included — and ［もう返した］ in 「…」. Each at the card's version; 取り消す follows.
+ */
+export function ReplyRequestActions({ m, busy, onAct }: {
+  m: ReplyRequestDetailView
+  busy: boolean
+  onAct: (action: 'close' | 'replied_elsewhere') => void
+}) {
+  if (!m.close && !m.repliedElsewhere) return null
+  return <>
+    {m.close && <button type="button" disabled={busy} onClick={() => onAct('close')} className={MAIN_BUTTON}><CheckCircle size={13} weight="fill" />{NEXT_STEP.endReply}</button>}
+    {m.repliedElsewhere && <MoreMenu compact items={[{
+      label: NEXT_STEP.repliedElsewhere, hint: '電話やほかの経路で返したとき。終わりにして、AI の下書きは送らずに片づけます',
+      onClick: () => { if (!busy) onAct('replied_elsewhere') },
+    }]} />}
+  </>
 }
 
 /**

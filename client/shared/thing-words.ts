@@ -148,6 +148,10 @@ export const NEXT_STEP = {
   unsettle: '元に戻す',
   /** A 来た連絡 not taken in (やることにしなかった一覧). */
   dropMessage: '取り込まない',
+  /** A 返事のお願い ended by its person, the AI's turn included (its state then reads 「終わった」). */
+  endReply: '終わりにする',
+  /** A 返事のお願い answered where ACB cannot see (the phone, another channel). */
+  repliedElsewhere: 'もう返した',
 } as const
 
 /** Whose turn it is, for a row's small line: 「あなたの番」「田中さんの番」「相手の番」「AI の番」. */

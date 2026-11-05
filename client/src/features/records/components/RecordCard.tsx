@@ -13,7 +13,7 @@ import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
 import { linkRows, meetingOpenRows, type NotDownloadedFolderOf } from './linkRows'
-import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton } from './RecordDetails'
+import { IncomingActions, IncomingBody, IncomingLine, MeetingLine, MeetingOutputs, MeetingSummary, OpenButton, ReplyRequestActions } from './RecordDetails'
 import { RecordMarks } from './RecordRows'
 
 interface Props {
@@ -99,14 +99,17 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
     else setError(r.error)
   }
   const card = result.card
-  // A 来た連絡's ［済んだ］ / ［取り込まない］ at the version shown; 取り消す undoes that one entry.
-  const act = async (action: 'settle' | 'drop') => {
+  // A 来た連絡's ［済んだ］ / ［取り込まない］, a 返事のお願い's ［終わりにする］ / ［もう返した］, at the version
+  // shown (a run of the AI that wrote meanwhile makes it refused: the card reads again); 取り消す undoes that one entry.
+  const DONE_WORDS = { settle: '済んだにしました', drop: 'やることにしなかった一覧に移しました', close: '終わりにしました', replied_elsewhere: '「もう返した」で終わりにしました' } as const
+  const act = async (action: keyof typeof DONE_WORDS) => {
     if (card.version === undefined) return
     setBusy(true)
     const r = await actOnRecord(companyId, card.record.id, action, card.version)
     setBusy(false)
-    if (!r.success) { setError(r.error); return }
-    changed(action === 'settle' ? '済んだにしました' : 'やることにしなかった一覧に移しました', { recordId: card.record.id, version: card.version + 1 })
+    if (!r.success) { setError(r.error); reload(); return }
+    // 「もう返した」 also put its drafts away (the inbox's follow-up): taking the close back would not bring them back.
+    changed(DONE_WORDS[action], action === 'replied_elsewhere' ? null : { recordId: card.record.id, version: card.version + 1 })
   }
   const unsettle = async () => {
     if (card.version === undefined) return
@@ -117,7 +120,9 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
   const incoming = card.detail?.kind === 'incoming' && card.version !== undefined
     ? <IncomingActions m={card.detail} busy={busy} onAct={a => void act(a)} onUndo={() => void unsettle()}
       openReplies={card.links.filter(l => l.record?.type === 'reply_request' && !l.record.finished).length} />
-    : null
+    : card.detail?.kind === 'reply' && card.version !== undefined
+      ? <ReplyRequestActions m={card.detail} busy={busy} onAct={a => void act(a)} />
+      : null
   const bundleLink = card.links.find(l => l.bundle && l.record)
   const field = renderBundleField && (card.detail?.kind === 'meeting' || card.detail?.kind === 'incoming') && card.version !== undefined
     ? renderBundleField({
@@ -142,7 +147,7 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
 
 function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
   drop: LinkedDrop
-  /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), beside the title. */
+  /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), or a 返事のお願い's ［終わりにする］, beside the title. */
   incoming: ReactNode
   renderMeeting?: Props['renderMeeting']
   onReload: () => void
@@ -174,6 +179,8 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
     body = <BundleBody b={detail} renderApproval={renderApproval} />
+  } else if (detail?.kind === 'reply') {
+    actions = incoming
   }
   // A bundle's やること say whose turn they are on the right too.
   const turns = new Map(detail?.kind === 'bundle' ? detail.groups.flatMap(g => g.tasks.map(t => [t.id, t.turn] as const)) : [])
