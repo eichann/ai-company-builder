@@ -42,8 +42,6 @@ const PAGE_TOKEN_RE = /^[A-Za-z0-9_-]{1,500}$/
 const HISTORY_ID_RE = /^[0-9]{1,30}$/
 /** Gmail's history ids are decimal strings that grow: compared as numbers without a size limit. */
 const laterHistory = (a: string, b: string) => (a.length !== b.length ? a.length > b.length : a > b)
-/** The most messages of one 来た連絡 archived (or put back) at once. */
-export const ARCHIVE_MESSAGES_MAX = 50
 /** Pages of Gmail's history read per call (500 changes each); the rest is read on the next poll. */
 export const HISTORY_PAGES_MAX = 5
 const METADATA_HEADERS = ['From', 'Sender', 'To', 'Cc', 'Subject', 'Date', 'Message-ID', 'In-Reply-To', 'References', 'List-Id', 'List-Unsubscribe', 'Precedence', 'Auto-Submitted', 'X-Autoreply']
@@ -338,6 +336,20 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
       return { ok: true, value: { cursor: last, threadIds: [...threads] } }
     },
 
+    async messageInInbox(companyId, userId, messageId) {
+      if (!ID_RE.test(messageId)) return { ok: true, value: false }
+      const r = await request(companyId, userId, {
+        api: 'gmail', method: 'GET', path: `/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`,
+        query: { format: 'minimal' }, scope: GOOGLE_SCOPE.gmailReadonly, operation: 'gmail.messages.get',
+      })
+      if (!r.ok) {
+        const reason = mailReadReasonOf(r)
+        return reason === 'not-found' ? { ok: true, value: false } : { ok: false, reason }
+      }
+      const labels = isObj(r.json) && Array.isArray(r.json.labelIds) ? r.json.labelIds : []
+      return { ok: true, value: labels.includes('INBOX') }
+    },
+
     async threadInInbox(companyId, userId, threadId) {
       if (!ID_RE.test(threadId)) return { ok: true, value: false }
       const r = await request(companyId, userId, {
@@ -422,18 +434,26 @@ export function googleMailInboxSource(reader: Pick<MailReader, 'listMessages'> &
         return out
       },
     } : {}),
-    ...(reader.archiveMessage ? {
+    ...(reader.archiveMessage && reader.messageInInbox ? {
       async archive(companyId: string, userId: string, sourceRefs: string[], back: boolean) {
-        const ids = [...new Set(sourceRefs.map(gmailIdOf).filter((t): t is string => t !== null))].slice(0, ARCHIVE_MESSAGES_MAX)
-        if (ids.length === 0) return 'not-found' as const
-        let changed = 0
-        for (const id of ids) {
+        const changed: string[] = []
+        const stopOf = (reason: MailReadFailure) => (reason === 'unavailable' ? 'failed' as const : 'not-allowed' as const)
+        for (const ref of [...new Set(sourceRefs)]) {
+          const id = gmailIdOf(ref)
+          if (!id) continue
+          if (!back) {
+            // Only a message in the inbox now: one archived by the member, or never in it (Sent), is left alone.
+            const now = await reader.messageInInbox!(companyId, userId, id)
+            if (!now.ok) return { changed, stop: stopOf(now.reason) }
+            if (!now.value) continue
+          }
           const r = await reader.archiveMessage!(companyId, userId, id, back)
-          // Deleted meanwhile: nothing left to take out (or put back).
-          if (r.ok || r.reason === 'not-found') { changed++; continue }
-          return r.reason === 'unavailable' ? 'failed' as const : 'not-allowed' as const
+          if (r.ok) { changed.push(ref); continue }
+          // Deleted meanwhile: nothing to take out (or put back).
+          if (r.reason === 'not-found') continue
+          return { changed, stop: stopOf(r.reason) }
         }
-        return changed > 0 ? 'done' as const : 'not-found' as const
+        return { changed, stop: null }
       },
     } : {}),
   }

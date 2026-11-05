@@ -28,7 +28,7 @@ import type { InboxSource } from '../../src/ports/inbox'
 import { ensureCoreTypes } from '../../src/services/record-index'
 import { createServiceRecordWriter, createRecordEngine, type RecordChange, type RecordEngine } from '../../src/services/record-engine'
 import { createIdentityService } from '../../src/services/identities'
-import { createInboxService, LEFT_CHECK_MAX, type InboxService } from '../../src/services/inbox'
+import { ARCHIVE_MESSAGES_MAX, createInboxService, LEFT_CHECK_MAX, type InboxService } from '../../src/services/inbox'
 import { createConnectorRoles } from '../../src/services/connector-roles'
 import { noticeKind } from '../../src/services/notifications'
 import type { Member } from '../../src/services/access'
@@ -64,6 +64,10 @@ let inInboxAsked: Array<{ userId: string; refs: string[] }> = []
 /** Members who allowed the archive (else `not-allowed`, as the Google client refuses it). */
 let archiveAllowed = new Set<string>()
 let archiveCalls: Array<{ userId: string; refs: string[]; back: boolean }> = []
+/** The service writer refuses the entry 「Gmail でもアーカイブしました」 (a lost race). */
+let refuseArchivedEntry = false
+/** Pointers whose change the fake mailbox refuses (Google answering 500). */
+let failOn = new Set<string>()
 
 const m = (userId: string): Member => ({ companyId: 'a', userId, role: ROLES[userId] ?? 'member' })
 const handle = () => source.forCompany('a')
@@ -103,6 +107,8 @@ beforeEach(() => {
   inInboxAsked = []
   archiveAllowed = new Set()
   archiveCalls = []
+  failOn = new Set()
+  refuseArchivedEntry = false
   nowMs = Date.parse('2026-11-02T01:00:00.000Z')
   conn = new Database(':memory:')
   initDatabase(conn)
@@ -120,7 +126,9 @@ beforeEach(() => {
   const roles = createConnectorRoles({ choices: { choice: () => null, setChoice: () => {} }, clock })
   roles.register({ id: 'fakemail', servings: [{ role: 'mail', operations: ['read', 'send'], capabilities: [] }], usable: async () => true })
   inbox = createInboxService({
-    companyData: source, clock, ids, writer,
+    companyData: source, clock, ids,
+    // The entry 「Gmail でもアーカイブしました」 can be refused (a lost race) when a test asks.
+    writer: { ...writer, transition: (co, input) => (refuseArchivedEntry && input.action === 'archived_there' ? { ok: false as const, reason: 'stale' as const } : writer.transition(co, input)) },
     resolveAddress: (member, address) => identities.resolveAddress(member, address),
     roleOf,
     memberAddresses: () => MEMBERS.map(u => ({ userId: u, email: EMAILS[u] })),
@@ -152,15 +160,18 @@ beforeEach(() => {
       return Object.fromEntries(refs.map(r => [r, !gone.has(`${userId}|${r}`)]))
     },
     async archive(_co, userId, refs, back) {
-      if (!archiveAllowed.has(userId)) return 'not-allowed'
+      if (!archiveAllowed.has(userId)) return { changed: [], stop: 'not-allowed' as const }
       archiveCalls.push({ userId, refs, back })
-      // The fake's pointers `fake:<k>` belong to the conversation `thread-<k>`.
+      const changed: string[] = []
       for (const r of refs) {
+        if (failOn.has(r)) return { changed, stop: 'failed' as const }
+        // The fake's pointers `fake:<k>` belong to the conversation `thread-<k>`.
         const thread = `${userId}|thread-${r.slice('fake:'.length)}`
         if (back) gone.delete(thread)
         else gone.add(thread)
+        changed.push(r)
       }
-      return 'done'
+      return { changed, stop: null }
     },
   }
   inbox.registerSource('fakemail', fake)
@@ -442,5 +453,58 @@ describe('review of #607: what the archive never does', () => {
     await inbox.poll('a', 'u-alice')
     expect(ids.filter(id => stateOf(id).state === 'handled')).toHaveLength(LEFT_CHECK_MAX + 3)
     expect(handle().inbox.connection('u-alice', 'email')!.leftCursor).not.toBe(cursor)
+  })
+})
+
+describe('review of #607 (2): what one close took out is what its undo puts back', () => {
+  /** Alice's message with `extra` more incoming messages of the same thread taken in, and her own Sent reply. */
+  async function longThread(extra: number) {
+    archiveAllowed.add('u-alice')
+    const first = await aliceMail()
+    const more: IncomingMessage[] = []
+    for (let i = 0; i < extra; i++) more.push(mail({ references: [first.msg.messageId], threadRef: first.msg.threadRef, occurredAt: new Date(Date.parse('2026-11-02T00:31:00.000Z') + i * 1000).toISOString() }))
+    const sent = mail({ references: [first.msg.messageId], threadRef: first.msg.threadRef, from: { address: 'alice@acme.example' }, to: [{ address: 'tanaka@client.example' }], outgoing: true, occurredAt: '2026-11-02T00:30:30.000Z' })
+    mailbox['u-alice'] = [sent, ...more]
+    await inbox.poll('a', 'u-alice')
+    unsure(first.id)
+    return { first, more, sent }
+  }
+
+  it('never her own Sent mail; the newest messages when there are more than one close takes, said so in the note', async () => {
+    const { first, more, sent } = await longThread(ARCHIVE_MESSAGES_MAX + 1)
+    ok(await engine.act(m('u-alice'), person('u-alice'), first.id, 'settle', { expectedVersion: stateOf(first.id).version }))
+    await inbox.whenIdle()
+    const asked = archiveCalls[0].refs
+    expect(asked).toHaveLength(ARCHIVE_MESSAGES_MAX)
+    expect(asked).not.toContain(sent.sourceRef)
+    // The oldest two (her first message and the first reply) are left: the newest are taken.
+    expect(asked).toEqual(more.slice(1).map(x => x.sourceRef))
+    expect(ledger(first.id).at(-1)).toMatchObject({ action: 'archived_there', note: 'Gmail でもアーカイブしました（一部はできませんでした）' })
+  })
+
+  it('stopped partway: what changed gets the entry, the notice and an undo that puts back only that', async () => {
+    const { first, more } = await longThread(2)
+    failOn.add(more[1].sourceRef)
+    told = []
+    ok(await engine.act(m('u-alice'), person('u-alice'), first.id, 'settle', { expectedVersion: stateOf(first.id).version }))
+    await inbox.whenIdle()
+    const entry = ledger(first.id).at(-1)!
+    expect(entry).toMatchObject({ action: 'archived_there', note: 'Gmail でもアーカイブしました（一部はできませんでした）' })
+    expect(notices()).toContainEqual({ userId: 'u-alice', kind: 'mail_archived' })
+    ok(await engine.undo(m('u-alice'), person('u-alice'), first.id, { version: entry.version, expectedVersion: entry.version }))
+    await inbox.whenIdle()
+    expect(archiveCalls.at(-1)).toEqual({ userId: 'u-alice', refs: [first.msg.sourceRef, more[0].sourceRef], back: true })
+  })
+
+  it('no entry could be written: what was taken out goes back — never archived without a notice and an undo', async () => {
+    const { first, more } = await longThread(1)
+    refuseArchivedEntry = true
+    told = []
+    ok(await engine.act(m('u-alice'), person('u-alice'), first.id, 'settle', { expectedVersion: stateOf(first.id).version }))
+    await inbox.whenIdle()
+    const refs = [first.msg.sourceRef, more[0].sourceRef]
+    expect(archiveCalls).toEqual([{ userId: 'u-alice', refs, back: false }, { userId: 'u-alice', refs, back: true }])
+    expect(ledger(first.id).some(e => e.action === 'archived_there')).toBe(false)
+    expect(notices().filter(n => n.kind === 'mail_archived')).toEqual([])
   })
 })

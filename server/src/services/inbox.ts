@@ -108,7 +108,10 @@ const REPLY_FINAL = ['closed', 'dropped']
 /** The note when the mail left the inbox (「Gmail ではアーカイブ済み」) and when ACB archived it there. */
 export const leftInboxNote = (label: string) => `${label} ではアーカイブ済み`
 export const archivedThereNote = (label: string) => `${label} でもアーカイブしました`
+export const archivedPartlyNote = (label: string) => `${label} でもアーカイブしました（一部はできませんでした）`
 export const unarchiveFailedNote = (label: string) => `${label} の受信トレイに戻せませんでした`
+/** The most messages one close takes out of the mailbox inbox (the newest; more → 「一部はできませんでした」). */
+export const ARCHIVE_MESSAGES_MAX = 50
 const DEFAULT_MAILBOX_LABEL = 'メール'
 /** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
 const DM_REPLY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
@@ -807,9 +810,16 @@ export function createInboxService(deps: InboxDeps) {
     try { await archiveThereOnce(companyId, interactionId) } finally { inFlight.delete(flight) }
   }
 
-  /** The owner's own messages of an interaction ACB took in (their pointers): what is archived there, never more. */
-  const knownRefs = (handle: CompanyData, interactionId: string, owner: string) =>
-    handle.inbox.messagesOf(interactionId).filter(m => m.reporterId === owner && m.sourceRef !== null).map(m => m.sourceRef as string)
+  /**
+   * What a close takes out of the mailbox inbox: the incoming messages ACB took in from the owner's own
+   * mailbox (never their own Sent mail), oldest first; the newest `ARCHIVE_MESSAGES_MAX` are tried and
+   * `left` counts the rest.
+   */
+  function archivable(handle: CompanyData, interactionId: string, owner: string): { refs: string[]; left: number } {
+    const all = handle.inbox.messagesOf(interactionId).filter(m => m.direction === 'in' && m.reporterId === owner && m.sourceRef !== null).map(m => m.sourceRef as string)
+    const refs = all.slice(-ARCHIVE_MESSAGES_MAX)
+    return { refs, left: all.length - refs.length }
+  }
 
   async function archiveThereOnce(companyId: string, interactionId: string): Promise<void> {
     const handle = handleOf(companyId)
@@ -827,34 +837,46 @@ export function createInboxService(deps: InboxDeps) {
     if (ledger.some(e => already.includes(e.action) && e.at >= since)) return
     const source = await sourceFor(companyId)
     if (!source?.archive) return
-    // Only the messages ACB took in: a reply that came since the last poll stays in the inbox (and is read next).
-    const done = await source.archive(companyId, mine.owner, knownRefs(handle, interactionId, mine.owner), false)
-    if (done !== 'done') {
-      if (done !== 'not-allowed') console.warn(`[inbox] archiving in the mailbox did not work: ${done}`)
+    // Only the incoming messages ACB took in, and of those only the ones in the inbox now: a reply that
+    // came since the last poll, the member's own Sent mail and what they archived themselves stay as they are.
+    const { refs, left } = archivable(handle, interactionId, mine.owner)
+    if (refs.length === 0) return
+    const r = await source.archive(companyId, mine.owner, refs, false)
+    if (r.stop === 'failed') console.warn(`[inbox] archiving in the mailbox stopped partway: ${r.changed.length} of ${refs.length} done`)
+    // Nothing changed (not allowed, nothing in the inbox, or the first call failed): nothing to tell.
+    if (r.changed.length === 0) return
+    const label = source.label ?? DEFAULT_MAILBOX_LABEL
+    const partly = r.stop !== null || left > 0
+    // Written meanwhile (another follow-up of the same close): one entry, one notice — ours goes back.
+    const after = lastSeenOf(handle, interactionId)
+    const written = handle.records.ledger(interactionId).some(e => e.action === INBOX_ACTIONS.archivedThere && e.at >= after) ? null
+      : deps.writer.transition(companyId, {
+        recordId: interactionId, action: INBOX_ACTIONS.archivedThere, expectedVersion: fieldsOf(handle, interactionId).version, to: null, actor: INBOX_ACTOR,
+        note: partly ? archivedPartlyNote(label) : archivedThereNote(label),
+        // Its owner hears it, with ［元に戻す］: the undo of this entry puts back exactly what it changed (afterAct).
+        notify: [mine.owner],
+      })
+    if (written?.ok) {
+      handle.inbox.putArchived(interactionId, written.entry.version, r.changed)
       return
     }
-    // Written meanwhile (another follow-up of the same close): one entry, one notice.
-    const after = lastSeenOf(handle, interactionId)
-    if (handle.records.ledger(interactionId).some(e => e.action === INBOX_ACTIONS.archivedThere && e.at >= after)) return
-    const now = fieldsOf(handle, interactionId)
-    logFailure('archived there', deps.writer.transition(companyId, {
-      recordId: interactionId, action: INBOX_ACTIONS.archivedThere, expectedVersion: now.version, to: null, actor: INBOX_ACTOR,
-      note: archivedThereNote(source.label ?? DEFAULT_MAILBOX_LABEL),
-      // Its owner hears it, with ［元に戻す］: the undo of this entry puts the mail back (afterAct).
-      notify: [mine.owner],
-    }))
+    if (written) logFailure('archived there', written)
+    // No entry to undo it by: what was taken out goes back (never archived without a notice and an undo).
+    const back = await source.archive(companyId, mine.owner, r.changed, true)
+    if (back.changed.length < r.changed.length) console.warn(`[inbox] putting back an archive with no entry stopped: ${back.changed.length} of ${r.changed.length}`)
   }
 
-  /** ［元に戻す］ of 「Gmail でもアーカイブしました」: the conversation back in its owner's mailbox inbox. */
-  async function unarchiveThere(companyId: string, interactionId: string): Promise<void> {
+  /** ［元に戻す］ of 「Gmail でもアーカイブしました」: exactly the messages that entry took out go back in the inbox. */
+  async function unarchiveThere(companyId: string, interactionId: string, entryVersion: number): Promise<void> {
     const handle = handleOf(companyId)
     const row = handle.records.byIds([interactionId])[0]
     const mine = row ? ownMailbox(handle, row) : null
-    const source = mine ? await sourceFor(companyId) : null
+    const refs = handle.inbox.archived(interactionId, entryVersion) ?? []
+    const source = mine && refs.length > 0 ? await sourceFor(companyId) : null
     if (!mine || !source?.archive) return
-    const done = await source.archive(companyId, mine.owner, knownRefs(handle, interactionId, mine.owner), true)
-    if (done === 'done') return
-    console.warn(`[inbox] putting the mail back in the mailbox did not work: ${done}`)
+    const r = await source.archive(companyId, mine.owner, refs, true)
+    if (r.stop === null) return
+    console.warn(`[inbox] putting the mail back in the mailbox stopped: ${r.changed.length} of ${refs.length}`)
     const now = fieldsOf(handle, interactionId)
     logFailure('unarchive failed', deps.writer.transition(companyId, {
       recordId: interactionId, action: INBOX_ACTIONS.unarchiveFailed, expectedVersion: now.version, to: null, actor: INBOX_ACTOR,
@@ -874,7 +896,7 @@ export function createInboxService(deps: InboxDeps) {
     if (type === 'interaction') {
       if (entry.action === 'undo') {
         const reversed = handle.records.ledger(entry.recordId).find(e => e.version === entry.reversesVersion)
-        if (reversed?.action === INBOX_ACTIONS.archivedThere) track(unarchiveThere(companyId, entry.recordId))
+        if (reversed?.action === INBOX_ACTIONS.archivedThere) track(unarchiveThere(companyId, entry.recordId, reversed.version))
         return
       }
       const row = handle.records.byIds([entry.recordId])[0]

@@ -86,6 +86,20 @@ export function sqliteInboxRepository(conn: Database.Database, companyId: string
     setLeftCursor(userId, channel, cursor) {
       conn.prepare('UPDATE inbox_connections SET left_cursor = ? WHERE company_id = ? AND user_id = ? AND channel = ?').run(cursor, companyId, userId, channel)
     },
+    putArchived(interactionId, entryVersion, sourceRefs) {
+      conn.prepare(`INSERT INTO inbox_archived (company_id, interaction_id, entry_version, source_refs) VALUES (?, ?, ?, ?)
+        ON CONFLICT(company_id, interaction_id, entry_version) DO UPDATE SET source_refs = excluded.source_refs`)
+        .run(companyId, interactionId, entryVersion, JSON.stringify(sourceRefs))
+    },
+    archived(interactionId, entryVersion) {
+      const r = conn.prepare('SELECT source_refs FROM inbox_archived WHERE company_id = ? AND interaction_id = ? AND entry_version = ?')
+        .get(companyId, interactionId, entryVersion) as { source_refs: string } | undefined
+      if (!r) return null
+      try {
+        const v = JSON.parse(r.source_refs) as unknown
+        return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null
+      } catch { return null }
+    },
     addGap(row) {
       conn.prepare('INSERT INTO inbox_gaps (company_id, user_id, channel, gap_from, gap_to, noted_at) VALUES (?, ?, ?, ?, ?, ?)')
         .run(companyId, row.userId, row.channel, row.from, row.to, row.notedAt)

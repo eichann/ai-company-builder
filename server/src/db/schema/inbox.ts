@@ -45,6 +45,15 @@ export const inboxSchema = `
       PRIMARY KEY (company_id, user_id, channel)
     );
 
+    -- What one 「Gmail でもアーカイブしました」 entry took out of the mailbox inbox (pointers, JSON): its undo puts back only these.
+    CREATE TABLE IF NOT EXISTS inbox_archived (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      interaction_id TEXT NOT NULL,
+      entry_version INTEGER NOT NULL,
+      source_refs TEXT NOT NULL,
+      PRIMARY KEY (company_id, interaction_id, entry_version)
+    );
+
     -- Spans nobody checked (a connection broken for more than 7 days): shown to the member.
     CREATE TABLE IF NOT EXISTS inbox_gaps (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

@@ -259,7 +259,8 @@ grant** — never a key, never a service account — so every switch above appli
   scope, so the declared scope alone is not trusted: the call's shape is. Never trash, delete, a draft,
   a send, a read, another label, a batch or another mailbox with it.
 - Used only by the inbox (`inbox.md` "Mail archived in the mailbox") through `google-mail.ts`
-  `archiveMessage` (the messages ACB took in, one at a time) with the mailbox owner's own grant.
+  `messageInInbox` then `archiveMessage` (the incoming messages ACB took in that are in the inbox now,
+  one at a time; the undo puts back exactly the ones changed) with the mailbox owner's own grant.
 - **Google Cloud** (each company's own internal app): add `https://www.googleapis.com/auth/gmail.modify`
   to the OAuth consent screen's scopes (Data access) beside `gmail.readonly`. Google's consent page
   describes it in Google's own, broader words (the permission would let an app read, change and send
@@ -385,7 +386,8 @@ Drive through the role ports (`connector-roles.md`).
   Only `users/me`. **Nothing stored, nothing of a message logged** (the client's action-log line
   names `gmail.messages.list` / `.get` only). Failures: `not-connected`, `turned-off`, `stopped`,
   `not-found`, `unavailable`.
-- **Inbox state** (`inbox`, `gmail.readonly`; `MailInboxWatcher`, 2026-11-05): `inboxCursor`
+- **Inbox state** (`inbox`, `gmail.readonly`; `MailInboxWatcher`, 2026-11-05): `messageInInbox`
+  (`messages/<id>?format=minimal`, labels only, before an archive), `inboxCursor`
   (`users/me/profile` → `historyId`), `inboxRemovalsSince` (`users/me/history?historyTypes=labelRemoved
   &historyTypes=messageDeleted`, the threads that lost INBOX or were deleted; 404 → `expired`),
   `threadInInbox` (`threads/<id>?format=minimal`, labels only; 404 → false). Action-log lines

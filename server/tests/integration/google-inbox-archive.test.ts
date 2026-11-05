@@ -398,3 +398,60 @@ describe('review of #607: the archive never loses mail nor closes what the membe
     } finally { vi.useRealTimers() }
   })
 })
+
+describe('review of #607 (2): only what ACB took out goes back, and a stop partway still has its undo', () => {
+  beforeAll(async () => {
+    expect((await call('ga-owner', 'PUT', `${C}/google/features`, { feature: 'inbox_archive', on: true })).status).toBe(200)
+  })
+  /** His message, his own Sent reply (never in the inbox) and their answer, one conversation. */
+  const threadOf3 = (base: string, tag: string) => {
+    const a = deliver(SATO, `${base}:01:00.000Z`, `件名${tag}`)
+    fake.deliver({ id: `sent${tag}`, threadId: a.thread, account: SATO, labelIds: ['SENT'], receivedAt: `${base}:02:00.000Z`,
+      headers: { From: SATO, To: 'suzuki@a-corp.example', Subject: `Re: 件名${tag}`, 'Message-ID': `<sent-${tag}@div.example>`, 'In-Reply-To': a.messageId, References: a.messageId }, text: '返信' })
+    fake.deliver({ id: `reply${tag}`, threadId: a.thread, account: SATO, labelIds: ['INBOX'], receivedAt: `${base}:03:00.000Z`,
+      headers: { From: '"鈴木 一郎" <suzuki@a-corp.example>', To: SATO, Subject: `Re: 件名${tag}`, 'Message-ID': `<reply-${tag}@a-corp.example>`, 'In-Reply-To': `<sent-${tag}@div.example>`, References: `${a.messageId} <sent-${tag}@div.example>` }, text: '追伸' })
+    return a
+  }
+  const labelsById = (thread: string) => Object.fromEntries(
+    (fake.threadLabels(SATO, thread)).map((l, i) => [i, l.includes('INBOX')]))
+
+  it('N1: the undo puts back only what ACB took out — not his Sent reply, nor a message he archived himself', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const a = threadOf3('2026-11-08T03', 'n1')
+      await clockAt('2026-11-08T03:05:00.000Z')
+      const id = interactionOf(a.messageId)
+      // He archived the first message himself in Gmail; their answer is still in the inbox.
+      fake.archiveMessageInGmail(SATO, a.id)
+      const r = await services.recordEngine.act(member('ga-sato'), human(), id, 'handle', { expectedVersion: stateOf(id).version })
+      expect(r.ok, JSON.stringify(r)).toBe(true)
+      await services.inbox.whenIdle()
+      expect(labelsById(a.thread)).toEqual({ 0: false, 1: false, 2: false })
+      const entry = ledger(id).at(-1)!
+      expect(entry.action).toBe('archived_there')
+      expect((await services.recordEngine.undo(member('ga-sato'), human(), id, { version: entry.version, expectedVersion: entry.version })).ok).toBe(true)
+      await services.inbox.whenIdle()
+      // Oldest first: his first message (archived by him) and his Sent reply stay out; only their answer is back.
+      expect(labelsById(a.thread)).toEqual({ 0: false, 1: false, 2: true })
+    } finally { vi.useRealTimers() }
+  })
+
+  it('N2: one message fails: the one taken out still gets the entry, the notice and the undo', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      const a = threadOf3('2026-11-08T04', 'n2')
+      await clockAt('2026-11-08T04:05:00.000Z')
+      const id = interactionOf(a.messageId)
+      fake.faults.failOn('/gmail/v1/users/me/messages/replyn2/modify', 1, 500)
+      expect((await services.recordEngine.act(member('ga-sato'), human(), id, 'handle', { expectedVersion: stateOf(id).version })).ok).toBe(true)
+      await services.inbox.whenIdle()
+      expect(labelsById(a.thread)).toEqual({ 0: false, 1: false, 2: true })
+      const entry = ledger(id).at(-1)!
+      expect(entry).toMatchObject({ action: 'archived_there', note: 'Gmail でもアーカイブしました（一部はできませんでした）' })
+      expect(noticesOf('ga-sato')).toContainEqual({ kind: 'mail_archived', recordId: id })
+      expect((await services.recordEngine.undo(member('ga-sato'), human(), id, { version: entry.version, expectedVersion: entry.version })).ok).toBe(true)
+      await services.inbox.whenIdle()
+      expect(labelsById(a.thread)).toEqual({ 0: true, 1: false, 2: true })
+    } finally { vi.useRealTimers() }
+  })
+})

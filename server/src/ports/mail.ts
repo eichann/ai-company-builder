@@ -130,6 +130,8 @@ export interface MailInboxWatcher {
    * cursor; `expired` when the mailbox no longer keeps changes that old (start again).
    */
   inboxRemovalsSince(companyId: string, userId: string, cursor: string): Promise<MailRead<{ cursor: string; threadIds: string[] } | { expired: true }>>
+  /** Whether this one message is in the inbox now (a deleted one: false). */
+  messageInInbox(companyId: string, userId: string, messageId: string): Promise<MailRead<boolean>>
   /** Whether any message of the conversation is still in the inbox (a deleted one: false). */
   threadInInbox(companyId: string, userId: string, threadId: string): Promise<MailRead<boolean>>
 }

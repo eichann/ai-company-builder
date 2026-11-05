@@ -132,6 +132,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   inbox_messages: ['adapters/sqlite/inbox.ts'],
   inbox_connections: ['adapters/sqlite/inbox.ts'],
   inbox_gaps: ['adapters/sqlite/inbox.ts'],
+  inbox_archived: ['adapters/sqlite/inbox.ts'],
   // lane B ▲
   // lane C ▼
   // A plugin step's pins and the company's Skill per step (plugin-steps.md).

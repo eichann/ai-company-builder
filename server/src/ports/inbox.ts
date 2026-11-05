@@ -65,6 +65,9 @@ export interface InboxRepository {
   putConnection(row: InboxConnectionRow): void
   setCheckedUntil(userId: string, channel: InboxChannel, at: string): void
   setLeftCursor(userId: string, channel: InboxChannel, cursor: string | null): void
+  /** The pointers ACB took out of the mailbox inbox with one `archived_there` entry (its version): what its undo puts back. */
+  putArchived(interactionId: string, entryVersion: number, sourceRefs: string[]): void
+  archived(interactionId: string, entryVersion: number): string[] | null
   addGap(row: InboxGapRow): void
   gaps(userId: string): InboxGapRow[]
 }
@@ -101,9 +104,11 @@ export interface InboxSource {
   /**
    * These messages (`sourceRef`s ACB took in from the member's own mailbox) taken out of their inbox,
    * or put back (`back`), with their own permission to do so (owner decision 2026-11-05) — never the
-   * whole conversation, so a message ACB has not read yet stays where it is. `not-allowed` when they
-   * have not allowed it (or turned it off, or the company did): nothing is sent then. `done` only
-   * when every message was changed (a message deleted meanwhile counts as done).
+   * whole conversation, so a message ACB has not read yet stays where it is. Taking out changes only
+   * a message in the inbox now (one the member archived themselves, or never in it, is left alone).
+   * `changed`: the pointers actually changed, in the order given — also when it stopped partway;
+   * `stop`: why it stopped before the end (`not-allowed`: no permission, or a switch turned off —
+   * nothing more is sent; `failed`: Google refused or did not answer), null when it went through.
    */
-  archive?(companyId: string, userId: string, sourceRefs: string[], back: boolean): Promise<'done' | 'not-allowed' | 'not-found' | 'failed'>
+  archive?(companyId: string, userId: string, sourceRefs: string[], back: boolean): Promise<{ changed: string[]; stop: 'not-allowed' | 'failed' | null }>
 }

@@ -167,9 +167,11 @@ nor archived in one.
     an empty inbox archive mail that still needs work).
 - **ACB → Gmail** (opt-in: `inbox_archive`, `gmail.modify`, `google-connector.md` "Archiving in
   Gmail"). The engine's `afterAct` (`mailboxFollowUp`) starts `archiveThere`, which takes **only the
-  messages ACB took in from the owner's own mailbox** (`inbox_messages` rows of the record with
-  `reporter_id` = the owner, ≤ 50) out of the inbox, one at a time (`InboxSource.archive`: Gmail
-  `messages.modify` `removeLabelIds: ['INBOX']`) — never the whole conversation, so a reply that came
+  incoming messages ACB took in from the owner's own mailbox** (`inbox_messages` rows of the record,
+  direction `in`, `reporter_id` = the owner — never their own Sent mail; the newest
+  `ARCHIVE_MESSAGES_MAX` (50)) out of the inbox, one at a time, and of those **only the ones in the
+  inbox now** (`InboxSource.archive`: Gmail `messages.get?format=minimal`, then `messages.modify`
+  `removeLabelIds: ['INBOX']`; one the member archived themselves is left alone) — never the whole conversation, so a reply that came
   after the last poll stays in the inbox and is taken in next (review of #607: a thread archive lost
   it, since intake lists `labelIds=INBOX`), and another record of the same conversation keeps its
   message there. The source answers `not-allowed` without the permission, the company's switch or the
@@ -190,10 +192,14 @@ nor archived in one.
   - **No loop**: nothing is archived when the ledger has `left_inbox`, `left_inbox_noted` or
     `archived_there` since the thread's newest message (the mailbox archived it already, or ACB did,
     or the member put it back).
-  - Done → the note 「Gmail でもアーカイブしました」 (`archived_there`, actor `INBOX_ACTOR`), the owner
-    told (`mail_archived`) with ［元に戻す］: its undo (the assignee's, `UNDO_BY_ASSIGNEE`) reaches the
-    inbox through `afterAct` (also run after an undo), which puts the conversation back
-    (`addLabelIds: ['INBOX']` on the same messages); when that fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
+  - At least one message changed → the note 「Gmail でもアーカイブしました」 (`archived_there`, actor
+    `INBOX_ACTOR`; 「（一部はできませんでした）」 when it stopped partway — Google refused, a switch turned
+    off meanwhile — or more than 50 were left), the owner told (`mail_archived`) with ［元に戻す］, and
+    **the pointers it changed** kept under that entry's version (`inbox_archived`). Its undo (the
+    assignee's, `UNDO_BY_ASSIGNEE`) reaches the inbox through `afterAct` (also run after an undo), which
+    puts back exactly those (`addLabelIds: ['INBOX']`) — never the Sent mail or what the member
+    archived themselves. When no entry can be written (a lost race), what was taken out is put back at
+    once: nothing stays archived without a notice and an undo. When the undo fails, the quiet note 「Gmail の受信トレイに戻せませんでした」
     (`unarchive_failed`). Calls run after the action's answer (`whenIdle` in tests).
 - Tests: `server/tests/unit/inbox-archive.test.ts` (close as the inbox with the owner's undo, nobody
   runs `left_inbox`, task / 返事のお願い → the note once, another member's mailbox never, no cursor →

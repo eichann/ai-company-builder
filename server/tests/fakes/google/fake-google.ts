@@ -218,6 +218,8 @@ export interface FakeGoogle {
   deliver(mail: SeedMail): void
   /** The person archives a conversation in Gmail itself (its INBOX label off; a history entry). */
   archiveInGmail(account: string, threadId: string): void
+  /** The person archives one message in Gmail itself (its INBOX label off; a history entry). */
+  archiveMessageInGmail(account: string, messageId: string): void
   /** The person deletes a conversation in Gmail for good (a history entry). */
   deleteInGmail(account: string, threadId: string): void
   /** The labels of a conversation's messages now (for assertions), oldest first. */
@@ -1434,6 +1436,10 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     deliver(mail) { mails.push({ ...mail, headers: { ...mail.headers }, labelIds: [...mail.labelIds] }) },
     archiveInGmail(account, threadId) { changeLabels(account, threadId, [], ['INBOX']) },
     deleteInGmail(account, threadId) { deleteThread(account, threadId) },
+    archiveMessageInGmail(account, messageId) {
+      const m = mails.find(x => x.id === messageId && x.account.toLowerCase() === account.toLowerCase())
+      if (m) changeLabels(account, m.threadId, [], ['INBOX'], messageId)
+    },
     threadLabels(account, threadId) {
       return mails.filter(m => m.threadId === threadId && m.account.toLowerCase() === account.toLowerCase())
         .sort((x, y) => Date.parse(x.receivedAt) - Date.parse(y.receivedAt)).map(m => [...m.labelIds])
