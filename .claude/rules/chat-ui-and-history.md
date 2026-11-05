@@ -43,7 +43,9 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
 per-agent model pickers, buttons; owns its width observer: under 420 px — a pane at its narrowest —
 only the meter, the model picker, ＋, the list and settings stay, and nothing is drawn outside the
-pane: `tests/ui/chat-narrow.spec.ts`), `ChatMessageList.tsx`
+pane: `tests/ui/chat-narrow.spec.ts`; the header clips its row, so a popover from it — the usage
+meter's details — goes through `src/shared/ui/HoverTooltip.tsx` (drawn on `document.body`,
+fixed, kept in the window): `tests/ui/chat-usage-popover.spec.ts`), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
 dropped files and images in `ComposerAttachments.tsx`, and the text input
 `CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug
