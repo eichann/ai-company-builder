@@ -267,6 +267,8 @@ export interface PluginAiCall {
   part: 'page' | 'list' | 'search' | null
   label: string
   inputs: Array<{ name: string; kind: 'id' | 'text' | 'number' | 'boolean' | 'date'; required: boolean; label: string | null }>
+  /** A list or search with a next page: the tool takes `cursor`. */
+  cursor: boolean
 }
 
 /** The company's running connector plugins, as the member's AI may use them (GET /api/records-ai/plugins). */
@@ -301,7 +303,9 @@ export interface PluginAccessLogEntry {
   userId: string
   actorKind: 'human' | 'ai'
   call: string
-  refs: Record<string, string>
+  /** `input`: the plain id inputs. `returned`: the ids of the entries handed on (never a search word); `more`: how many past the limit. */
+  refs: { input: Record<string, string>; returned: string[]; more: number }
+  /** `ok`, a failure's class, or `stopped` (stopped after a first attempt went out). */
   status: string
   dropped: number
   conversationId: string | null

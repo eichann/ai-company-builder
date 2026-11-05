@@ -38,12 +38,12 @@
  * `code`, the rest is dropped as above.
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import type { PluginEndpoint, PluginEndpointName } from '../../shared/core/plugins'
+import { EXTERNAL_ID_RE, type PluginEndpoint, type PluginEndpointName } from '../../shared/core/plugins'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { ActivePlugin } from './plugins'
 
 /** One outside id as it may appear in a path (HubSpot's are digits). */
-export const EXTERNAL_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
+export { EXTERNAL_ID_RE }
 
 export type ConnectorEndpoint = PluginEndpointName | 'account_info'
 
@@ -66,6 +66,8 @@ export interface DeclaredCall {
   body?: unknown
   /** The member header's value; the address only when the member's own, verified, and the service wants one. */
   actor: { member: string; email: string | null }
+  /** Told right before each attempt goes out: what the access log needs (a call refused before this reached nobody). */
+  onSend?: () => void
 }
 
 export type ConnectorResult =
@@ -200,7 +202,7 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
   /** The attempts of one call: pace, precheck, the key revealed right then, the answer, retries for reads. */
   async function attempts(companyId: string, plugin: ActivePlugin, r: {
     method: string; path: string; isRead: boolean; isSearch: boolean; perMinute: number | null; body: unknown
-    credential: { header: string; value: (key: string) => string }; headers: Record<string, string>; errorCodes: boolean
+    credential: { header: string; value: (key: string) => string }; headers: Record<string, string>; errorCodes: boolean; onSend?: () => void
   }, precheck: () => Promise<string | null>): Promise<ConnectorResult> {
     const { method, path, isRead, credential } = r
     const body = r.body === undefined ? null : new TextEncoder().encode(JSON.stringify(r.body))
@@ -216,6 +218,7 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
       const headers: Record<string, string> = { accept: 'application/json', ...r.headers, [credential.header]: credential.value(key), 'accept-encoding': 'identity' }
       if (body) { headers['content-type'] = 'application/json'; headers['content-length'] = String(body.byteLength) }
       const controller = new AbortController()
+      r.onSend?.()
       const sent = await deps.upstream.send({
         host: plugin.manifest.baseUrl.host, method, path, headers,
         body: body ? (async function* () { yield body })() : null,
@@ -290,7 +293,7 @@ export function createPluginConnector(deps: PluginConnectorDeps) {
       if (actor.emailHeader && call.actor.email) headers[actor.emailHeader.toLowerCase()] = call.actor.email
       return attempts(companyId, plugin, {
         method: call.method, path, isRead: true, isSearch: false, perMinute: limits?.perMinute ?? null, body: call.body,
-        credential: { header: auth.header.toLowerCase(), value: key => (auth.format === 'bearer' ? `Bearer ${key}` : key) }, headers, errorCodes: true,
+        credential: { header: auth.header.toLowerCase(), value: key => (auth.format === 'bearer' ? `Bearer ${key}` : key) }, headers, errorCodes: true, onSend: call.onSend,
       }, precheck)
     },
   }

@@ -400,7 +400,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // A contract-3 connector's reads (plugins.md "Contract 3"), behind the operations' gate; its service gets no relay.
   const pluginCalls = createPluginCalls({
     ...shared, plugins, connector: pluginConnector, gate: pluginOperations.gate,
-    aiStopped: companyId => agentStops.companyStopped(companyId),
+    aiStops: member => agentStops.policyFor(member),
+    keyStamp: (companyId, keyId) => {
+      const key = repos.brokerKeys.find(companyId, keyId)
+      return key ? `${key.id}.${key.secretUpdatedAt}` : null
+    },
+    companyIds: () => repos.companies.allIds(),
     recordAiRead: (companyId, userId, e) => {
       try {
         agentEvents.recordServerEvent(companyId, userId, {
@@ -413,7 +418,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       }
     },
   })
-  keyBroker.useRelayClosed((companyId, service) => plugins.relayClosed(companyId, service))
+  keyBroker.useRelayClosed((companyId, service, host) => plugins.relayClosed(companyId, service, host))
   plugins.useCallAccess((member, pluginId, who) => pluginOperations.gate.mayRunAt(member, { kind: 'ai' }, who, {}, '', { pluginId, recordId: null }))
 
   // Approval requests with fixed content (milestone 4 G6, approvals.md): the service writer and the
@@ -763,7 +768,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
       companyStopped: agentStops.companyStopped,
-      managedConnection: (companyId, userId, service) => plugins.relayPolicy(companyId, userId, service),
+      managedConnection: (companyId, userId, service, host) => plugins.relayPolicy(companyId, userId, service, host),
       personRelays: service => (service === 'google' ? googleRelay.relay : null),
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),

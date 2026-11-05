@@ -205,6 +205,8 @@ export type DataClass = typeof DATA_CLASSES[number]
 /** What ACB may keep of a value: nothing, a pointer to it, a summary of it. */
 export const KEEP_RULES = ['none', 'pointer', 'summary'] as const
 export type KeepRule = typeof KEEP_RULES[number]
+/** A plain outside id: what fills `{id}`, and the only shape of a value the access log keeps. No `:`, `/`, `.`, `@` or space. */
+export const EXTERNAL_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 /** What a call's input is; an input filling a path placeholder is an `id` (a plain outside id). */
 export const CALL_INPUT_KINDS = ['id', 'text', 'number', 'boolean', 'date'] as const
 export type CallInputKind = typeof CALL_INPUT_KINDS[number]
@@ -227,7 +229,7 @@ export const CALL_ACTORS = ['admin', 'ai'] as const
 export interface PluginDataField {
   dataClass: DataClass
   keep: KeepRule
-  /** Text someone outside wrote: handed on wrapped as outside text, never as an instruction. */
+  /** Text someone outside wrote: handed on wrapped as outside text, never as an instruction. A personal or sensitive string is wrapped whatever this says. */
   outside: boolean
 }
 
@@ -560,7 +562,8 @@ export interface PluginManifest {
    * written to another (review §5.7). Contract 3: the answer's fields holding
    * the account's id and its environment.
    */
-  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string }) | null
+  /** `expectedEnvironment`: the environment a contract-3 connector's key must report; a call reads only when it is stated (plugins.md "Contract 3"). */
+  accountInfo: (PluginEndpoint & { idField?: string; environmentField?: string; expectedEnvironment?: string }) | null
   /**
    * A connector: its service's notification mail senders (`notification_senders`: addresses or
    * `@domain`, notification-senders.ts), left out of the mail intake while it is installed and on.

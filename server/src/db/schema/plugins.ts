@@ -34,7 +34,8 @@ export const pluginSchema = `
     );
 
     -- Every read of a contract-3 call (plugins.md "Contract 3"): who, which ids, how it went; never an
-    -- answer. Append-only (the trigger); rows go only when a year old (retention).
+    -- answer. Append-only (the triggers); a row goes only when a year old (retention), or with its company
+    -- (the cascade removes the company first, so the row's company is gone by then).
     CREATE TABLE IF NOT EXISTS plugin_access_log (
       id TEXT PRIMARY KEY,
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
@@ -51,6 +52,9 @@ export const pluginSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_plugin_access_log ON plugin_access_log(company_id, plugin_id, at);
     CREATE TRIGGER IF NOT EXISTS plugin_access_log_no_update BEFORE UPDATE ON plugin_access_log
+    BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS plugin_access_log_no_delete BEFORE DELETE ON plugin_access_log
+    WHEN OLD.at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-365 days') AND EXISTS (SELECT 1 FROM companies WHERE id = OLD.company_id)
     BEGIN SELECT RAISE(ABORT, 'plugin_access_log is append-only'); END;
 
     -- The company's mapping (読み替え表), every version kept (restorable).

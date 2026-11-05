@@ -60,6 +60,20 @@ export function sqlitePluginRoleRepository(conn: Database.Database, companyId: s
         historyLine(pluginId, role, bundleId, 'override', userIds, at, by)
       })()
     },
+    forgetMember(userId, at, by) {
+      conn.transaction(() => {
+        const assigned = conn.prepare('SELECT plugin_id, role, user_ids FROM plugin_role_assignments WHERE company_id = ?').all(companyId) as Array<{ plugin_id: string; role: string; user_ids: string }>
+        for (const r of assigned) {
+          const held = ids(r.user_ids)
+          if (held.includes(userId)) this.assign(r.plugin_id, r.role, held.filter(u => u !== userId), at, by)
+        }
+        const overridden = conn.prepare('SELECT plugin_id, role, bundle_id, user_ids FROM plugin_role_overrides WHERE company_id = ?').all(companyId) as Array<{ plugin_id: string; role: string; bundle_id: string; user_ids: string }>
+        for (const r of overridden) {
+          const held = ids(r.user_ids)
+          if (held.includes(userId)) this.setOverride(r.plugin_id, r.role, r.bundle_id, held.filter(u => u !== userId), at, by)
+        }
+      })()
+    },
     history(pluginId, limit) {
       const rows = conn.prepare(`SELECT plugin_id, role, bundle_id, action, user_ids, at, by_user FROM plugin_role_history
           WHERE company_id = ? AND plugin_id = ? ORDER BY seq DESC LIMIT ?`)

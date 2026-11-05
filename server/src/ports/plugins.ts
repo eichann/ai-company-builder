@@ -181,9 +181,9 @@ export interface PluginAccessLogRow {
   actorKind: 'human' | 'ai'
   conversationId: string | null
   runId: string | null
-  /** The call's plain id inputs (JSON). */
+  /** JSON `{ input, returned, more }`: the call's plain id inputs, the ids of the entries handed on, how many past the limit. */
   refs: string
-  /** `ok`, or the failure's class. */
+  /** `ok`, the failure's class, or `stopped` (stopped after a first attempt went out). */
   status: string
   /** Answer fields nobody declared, dropped. */
   dropped: number
@@ -191,9 +191,11 @@ export interface PluginAccessLogRow {
 }
 
 export interface PluginRepository {
-  /** Adds the row and removes this company's rows older than `keepFrom` (retention). */
-  addAccessLog(row: PluginAccessLogRow, keepFrom: string): void
-  accessLog(pluginId: string, limit: number): PluginAccessLogRow[]
+  addAccessLog(row: PluginAccessLogRow): void
+  /** Newest first; `before`: only rows after that one in this order. */
+  accessLog(pluginId: string, limit: number, before: { at: string; id: string } | null): PluginAccessLogRow[]
+  /** Removes this company's rows older than `keepFrom` (retention); how many went. */
+  pruneAccessLog(keepFrom: string): number
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
   /** Insert or replace the install row and add a history row (one transaction). */

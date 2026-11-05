@@ -410,7 +410,8 @@ who uses it).
   basePath, header, format }; additive column, `migrateBrokerSettings`); category / rule /
   own-key hosts are the same row (`PUT /broker/services/:service`). The view's service carries
   `relay` and `defaultHosts: [host]`.
-- A contract-3 connector's service is never one: 409 `SERVICE_CLOSED_TO_RELAY` (`plugins.md` "Contract 3").
+- A contract-3 connector's service is never one, by service id or by host: 409 `SERVICE_CLOSED_TO_RELAY`; a generic service already
+  there for it is refused at relay time, 403 `ACB_CLOSED_TO_RELAY` (`plugins.md` "Contract 3").
 - Rules (`shared/core/key-broker.ts`): id `isValidRelayServiceId` — `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`,
   2–32, never a built-in name, no `_` (so `ACB_<ID>_*` with `-` → `_` is one name per service);
   `parseRelayBaseUrl` — `https://` only, port 443 only, no user / query / fragment, the host by

@@ -40,7 +40,9 @@ function readPackage(name: string): Files {
   const types: Record<string, string> = {}
   if (existsSync(join(dir, 'types'))) for (const f of readdirSync(join(dir, 'types'))) types[f.replace(/\.md$/, '')] = readFileSync(join(dir, 'types', f), 'utf8')
   const mapping = existsSync(join(dir, 'mapping.yaml')) ? readFileSync(join(dir, 'mapping.yaml'), 'utf8') : null
-  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping }
+  const steps: Record<string, string> = {}
+  if (existsSync(join(dir, 'steps'))) for (const f of readdirSync(join(dir, 'steps'))) steps[`steps/${f}`] = readFileSync(join(dir, 'steps', f), 'utf8')
+  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping, steps }
 }
 const PORTAL = readPackage('sample-portal')
 const CARE = readPackage('sample-portal-care')
@@ -80,7 +82,7 @@ describe('plugin contract 3: what a connector declares', () => {
   it('reads every part of the sample connector', () => {
     const m = valid(PORTAL).manifest
     expect(m.contract).toBe(PLUGIN_CONTRACT_V3)
-    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment' })
+    expect(m.accountInfo).toEqual({ method: 'GET', path: '/account', idField: 'account_id', environmentField: 'environment', expectedEnvironment: 'staging' })
     expect(m.calling).toEqual({
       auth: { type: 'company_key', header: 'authorization', format: 'bearer', slots: ['read', 'act'] },
       actor: { memberHeader: 'X-ACB-Actor', emailHeader: 'X-ACB-Actor-Email' },
@@ -133,7 +135,7 @@ describe('plugin contract 3: what a connector declares', () => {
     for (const contract of [1, 2]) {
       const text = errorsOf({ manifest: below(contract), types: {} })
       for (const key of ['auth', 'actor', 'limits', 'errors', 'result', 'calls', 'events', 'signature', 'polls']) expect(text, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
-      for (const key of ['id_field', 'environment_field']) expect(text).toContain(`${key} は contract: 3 の包みだけに書けます`)
+      for (const key of ['id_field', 'environment_field', 'expected_environment']) expect(text).toContain(`${key} は contract: 3 の包みだけに書けます`)
       const care = errorsOf({ ...CARE, manifest: CARE.manifest.replace('contract: 3', `contract: ${contract}`) })
       for (const key of ['calls', 'events']) expect(care, `${key} at ${contract}`).toContain(`「${key}」は contract: 3 の包みだけに書けます`)
     }
@@ -267,6 +269,8 @@ describe('plugin contract 3: what a connector declares', () => {
     expect(portalErrors('next: next_cursor }', 'next: paging.next }')).toMatch(/param \/ next は項目名/)
     expect(portalErrors('id_field: account_id', 'id_field: data.id')).toMatch(/id_field は項目名/)
     expect(portalErrors('environment_field: environment', 'environment_field: data.env')).toMatch(/environment_field は項目名/)
+    // The environment a key must report is a plain name, so it can be compared as is.
+    expect(portalErrors('expected_environment: staging', 'expected_environment: "staging prod"')).toMatch(/expected_environment は環境の名前/)
     expect(portalErrors('      person_ref: { class: personal, keep: pointer }\n      kind:', '      data.ref: { class: personal, keep: pointer }\n      kind:')).toMatch(/fields の「data.ref」は項目名/)
   })
 
@@ -298,7 +302,7 @@ describe('plugin contract 3: what a connector declares', () => {
 
   it('an act can be told apart and never doubled: idempotency, the account, the key', () => {
     expect(portalErrors('    idempotency: { style: header }\n', '')).toMatch(/idempotency/)
-    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }\n', '')).toMatch(/account_info/)
+    expect(portalErrors('account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment, expected_environment: staging }\n', '')).toMatch(/account_info/)
     expect(portalErrors(', id_field: account_id', '')).toMatch(/id_field と environment_field/)
     expect(portalErrors(', environment_field: environment', '')).toMatch(/id_field と environment_field/)
     expect(portalErrors('auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }\n', '')).toMatch(/auth（鍵の渡し方）/)

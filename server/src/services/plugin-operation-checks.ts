@@ -87,6 +87,15 @@ export function stepAllowsOperation(step: Pick<PluginStep, 'tools'>, manifest: P
   return !asksFirst(op) || step.tools.includes('approvals')
 }
 
+/**
+ * May a step read through this contract-3 call: only a step a person started
+ * (`start: person`, "AI 単独では読めません"), with `plugin_operations`, and a call its
+ * plugin declared. The gate and the tool list both ask this.
+ */
+export function stepAllowsCall(step: Pick<PluginStep, 'tools' | 'start'>, manifest: Pick<PluginManifest, 'calls'>, call: string): boolean {
+  return step.start === 'person' && step.tools.includes('plugin_operations') && Object.prototype.hasOwnProperty.call(manifest.calls ?? {}, call)
+}
+
 /** May a step use a connector role (`mail.send`): declared as is, or the bare role (`mail`) for all its operations. */
 export function stepAllowsConnectorRole(step: Pick<PluginStep, 'connectorRoles'>, role: string): boolean {
   const bare = role.split('.')[0]
@@ -223,16 +232,18 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
   }
 
   /**
-   * The same gate for a contract-3 call (all of them read today): a core step's run may read;
-   * a business plugin's step only its own plugin's declared calls, with `plugin_operations`.
+   * The same gate for a contract-3 call, narrower on purpose: the AI never reads with no
+   * person present ("AI 単独では読めません"). An execution run is automatic whatever its step
+   * (a core step's, a `start: ai_turn` step's; `start: person` steps have no run), so a token
+   * bound to one is refused. What passes is a member's consultation, and a consultation of a
+   * `start: person` step when the step allows the call (`stepAllowsCall`).
    */
   async function callStepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, call: string) {
-    const run = actor.kind === 'ai' ? boundStepOf(companyData.forCompany(member.companyId), member.userId, actor) : null
-    if (run && run !== 'missing' && !parsePluginRunStep(run.step)) return null
+    if (actor.kind !== 'ai') return null
+    if (actor.runId) return notInStep()
     const bound = await boundStep(member, actor, pluginId)
     if (bound === null) return null
-    const declared = bound && Object.prototype.hasOwnProperty.call(bound.manifest.calls ?? {}, call)
-    return declared && bound.step.tools.includes('plugin_operations') ? null : notInStep()
+    return bound && stepAllowsCall(bound.step, bound.manifest, call) ? null : notInStep()
   }
 
   /**

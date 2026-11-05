@@ -5,12 +5,12 @@
  * the member may do on a record is still decided per call (P6).
  */
 import { effectiveFieldPolicy, effectiveOperationPolicy } from '../../shared/core/plugins'
-import type { PluginCall, PluginCallRequest, PluginManifest } from '../../shared/core/plugins'
+import type { PluginCall, PluginCallRequest, PluginManifest, PluginStep } from '../../shared/core/plugins'
 import type { PluginAiCall, PluginAiField, PluginAiOperation, PluginAiTools } from '../../shared/types/plugins'
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
-import { boundStepOf, parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
+import { boundStepOf, parsePluginRunStep, stepAllowsCall, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -54,15 +54,24 @@ const inputsOf = (r: PluginCallRequest): PluginAiCall['inputs'] =>
 
 const toolsOfCall = (name: string, c: PluginCall): PluginAiCall[] => {
   if (c.kind === 'act') return []
-  if (c.kind !== 'document') return [{ name, part: null, label: c.label, inputs: inputsOf(c) }]
-  return ([['page', c.page], ['list', c.list], ['search', c.search]] as const)
-    .flatMap(([part, r]) => (r ? [{ name, part, label: c.label, inputs: inputsOf(r) }] : []))
+  if (c.kind === 'read') return [{ name, part: null, label: c.label, inputs: inputsOf(c), cursor: false }]
+  if (c.kind === 'search') return [{ name, part: null, label: c.label, inputs: inputsOf(c), cursor: c.cursor !== null }]
+  return [
+    { name, part: 'page' as const, label: c.label, inputs: inputsOf(c.page), cursor: false },
+    ...(c.list ? [{ name, part: 'list' as const, label: c.label, inputs: inputsOf(c.list), cursor: c.list.cursor !== null }] : []),
+    ...(c.search ? [{ name, part: 'search' as const, label: c.label, inputs: inputsOf(c.search), cursor: c.search.cursor !== null }] : []),
+  ]
 }
 
-/** The calls the member's AI may ask now: `mayCall` (the gate's own `who`, bound once); a step's run needs `plugin_operations`. The gate still decides each call. */
-function aiCallsOf(manifest: Pick<PluginManifest, 'calls'>, step: { tools: string[] } | null, mayCall: (who: string[]) => boolean): PluginAiCall[] {
-  if (step && !step.tools.includes('plugin_operations')) return []
-  return Object.entries(manifest.calls ?? {}).filter(([, c]) => mayCall(c.who)).flatMap(([name, c]) => toolsOfCall(name, c))
+/**
+ * The calls the member's AI may ask now: `mayCall` (the gate's own `who`, bound once), and
+ * inside a consultation of a step `stepAllowsCall`, the gate's own rule. The gate still
+ * decides each call.
+ */
+function aiCallsOf(manifest: Pick<PluginManifest, 'calls'>, step: PluginStep | null, mayCall: (who: string[]) => boolean): PluginAiCall[] {
+  return Object.entries(manifest.calls ?? {})
+    .filter(([name, c]) => mayCall(c.who) && (!step || stepAllowsCall(step, manifest, name)))
+    .flatMap(([name, c]) => toolsOfCall(name, c))
 }
 
 /** Whether this member's AI passes a call's `who`. Until bound, no call is listed. */
@@ -89,6 +98,7 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
      * sees only that plugin's operations its step allows (`stepAllowsOperation`,
      * the gate's own rule — the gate still decides each call); a run that
      * cannot be read sees none. A core step's run: reads only. An ordinary consultation: as before.
+     * A contract-3 call is listed only where a person is there: never for a run.
      */
     async aiTools(member: Member, scope: 'read' | 'act', runId: string | null = null, conversationId: string | null = null): Promise<Outcome<PluginAiTools>> {
       const out: PluginAiTools['plugins'] = []
@@ -147,7 +157,8 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
           }
           operations.push({ name, label: op.label, kind: op.kind, recordType, decision: op.decision, fields })
         }
-        const calls = aiCallsOf(manifest, step, who => callAccess(member, install.pluginId, who))
+        // An execution run is automatic: no person is there, so no call is listed (the gate refuses them too).
+        const calls = runId ? [] : aiCallsOf(manifest, step, who => callAccess(member, install.pluginId, who))
         if (operations.length > 0 || calls.length > 0) out.push({ id: install.pluginId, label: manifest.label, operations, ...(calls.length > 0 ? { calls } : {}) })
       }
       return ok({ plugins: out })

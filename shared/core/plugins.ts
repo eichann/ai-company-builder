@@ -79,7 +79,7 @@ export {
   PLUGIN_SETTING_KINDS, PLUGIN_STEP_STARTS, SIMILAR_BY, noFlow,
   type PluginSearch, type SimilarBy, type SimilarRule,
   type FlowPart, type PluginSetting,
-  ACTOR_SYSTEM, CALL_ACTORS, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
+  ACTOR_SYSTEM, CALL_ACTORS, EXTERNAL_ID_RE, CALL_FAILURE_KINDS, CALL_NATURES, CALL_RESULT_STATES, DATA_CLASSES, KEEP_RULES,
   type CallFailureKind, type CallNature, type CallResultState, type CallUse, type DataClass, type EventUse, type KeepRule,
   type PluginActCall, type PluginCall, type PluginCallInput, type PluginCallListing, type PluginCallRequest, type PluginCalling, type PluginCursor, type PluginDataField,
   type PluginDocumentCall, type PluginEvent, type PluginPoll, type PluginReadCall, type PluginReturn, type PluginReturnList, type PluginSearchCall,
@@ -95,7 +95,7 @@ export {
 } from './plugin-fingerprint'
 export { SETTING_DURATION_RE, settingDurationMinutes, settingValueProblem } from './plugin-settings'
 export { BUSINESS_V3_KEYS, CONNECTOR_V3_KEYS } from './plugin-call-declaration'
-export { CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, citeLink, keepDeclared, type KeptEntry, type KeptValue } from './plugin-call-answer'
+export { CALL_CURSOR_RE, CALL_OUTSIDE_FOOTER, CALL_OUTSIDE_HEADER, citeLink, keepDeclared, LOGGED_POINTERS_MAX, pointersOf, type KeptEntry, type KeptValue } from './plugin-call-answer'
 export { TYPE_LAYER_WORDS, checkPluginPathTemplate, typeNameLayerProblem } from './plugin-declaration-rules'
 export { parsePluginManifest } from './plugin-manifest'
 export { combineUse, validatePluginPackage } from './plugin-package'

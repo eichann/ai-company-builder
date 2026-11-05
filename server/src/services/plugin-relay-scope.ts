@@ -7,7 +7,9 @@
  *
  * A contract-3 connector's service is closed to the relay altogether, reads too
  * (plugins.md "Contract 3"): its data comes only through the declared calls,
- * each with its `who` and its line in the access log.
+ * each with its `who` and its line in the access log. Closed by the package on
+ * the company's shelf, not by an install, and by the host as well as the service
+ * id, so neither an older generic service nor an alias under another id gets past.
  */
 import { PLUGIN_CONTRACT_V3 } from '../../shared/core/plugins'
 import type { PluginInstallRow } from '../ports/plugins'
@@ -32,16 +34,21 @@ export function createPluginRelayScope(deps: Pick<PluginServiceDeps, 'companyDat
     return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder, personalOwner: null, members: null }))
   }
 
+  /**
+   * The service id, or the host, belongs to a contract-3 connector on this company's shelf: no relay, no generic
+   * relay service (K9). Both hosts come through `parseRelayBaseUrl` (lower case, no trailing dot), so they compare as is.
+   */
+  const relayClosed = (companyId: string, service: string, host: string | null = null): boolean =>
+    shelf.packagesFor(companyId).some(({ pkg: { manifest: m } }) => m.role === 'connector' && m.contract >= PLUGIN_CONTRACT_V3
+      && (m.service === service || (host !== null && m.baseUrl.host === host)))
+
   const closedConnector = (companyId: string, install: PluginInstallRow): boolean => {
     const m = shelf.find(companyId, install.pluginId, install.version)?.pkg.manifest
     return m?.role === 'connector' && m.contract >= PLUGIN_CONTRACT_V3
   }
 
   return {
-    /** The service belongs to a contract-3 connector this company may use: no relay, no generic relay service (K9). */
-    relayClosed(companyId: string, service: string): boolean {
-      return shelf.packagesFor(companyId).some(p => p.pkg.manifest.role === 'connector' && p.pkg.manifest.service === service && p.pkg.manifest.contract >= PLUGIN_CONTRACT_V3)
-    },
+    relayClosed,
 
     /** A contract-3 connector: nothing goes through the relay, so it has no read scope. */
     closedConnector,
@@ -50,13 +57,13 @@ export function createPluginRelayScope(deps: Pick<PluginServiceDeps, 'companyDat
      * The relay's rule for a service a connector manages (plugins.md "The relay and a
      * managed connection"): null = not managed. Writes never pass (declared searches
      * only); reads only for members in the connection's read scope — every managed
-     * install of the service must let them in. An empty scope lets nobody in.
+     * install of the service must let them in. An empty scope lets nobody in. `host`:
+     * where this call would go; `closed`: nothing passes (`relayClosed`), for anyone.
      */
-    relayPolicy(companyId: string, userId: string, service: string): { searchPaths: string[]; mayRead: boolean; connectionIds: string[] } | null {
+    relayPolicy(companyId: string, userId: string, service: string, host: string | null = null): { searchPaths: string[]; mayRead: boolean; connectionIds: string[]; closed?: true } | null {
       const installs = companyData.forCompany(companyId).plugins.installs().filter(i => i.service === service)
+      if (relayClosed(companyId, service, host)) return { searchPaths: [], mayRead: false, connectionIds: installs.map(i => i.connectionId), closed: true }
       const managed = installs.filter(i => i.managedSince !== null)
-      const closed = installs.filter(i => closedConnector(companyId, i))
-      if (closed.length > 0) return { searchPaths: [], mayRead: false, connectionIds: closed.map(i => i.connectionId) }
       if (managed.length === 0) return null
       const connectionIds = managed.map(i => i.connectionId)
       const role = deps.roleOf(companyId, userId)

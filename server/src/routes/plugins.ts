@@ -31,7 +31,7 @@
  *   (conversationId / proposedBy: informational provenance the app reports, never authorizing — records.md)
  *   GET  /plugins/:pluginId/operations/:operationId                   an operation record (its record's readers)
  *   POST /plugins/:pluginId/calls/:call                               a contract-3 read { part?, input?, cursor? } (`who` decides)
- *   GET  /plugins/:pluginId/access-log                                who read what through its calls (owner / admin)
+ *   GET  /plugins/:pluginId/access-log                                who read what through its calls (owner / admin; ?before=<next>&limit=<n>)
  *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only) { conversationId?, proposedBy? }
  *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost (a create: look it up by its correlation value)
  * Creates (milestone 4): log_meeting goes through the record route above ({ title, body?, at, outcome?, note? } on the deal);
@@ -154,7 +154,7 @@ pluginsRoute.post('/plugins/:pluginId/calls/:call', companyMember, serviceBody, 
   return answer(c, await services.pluginCalls.read(c.var.member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('call'), body))
 })
 
-pluginsRoute.get('/plugins/:pluginId/access-log', companyMember, (c) => answer(c, services.pluginCalls.accessLog(c.var.member, c.req.param('pluginId'))))
+pluginsRoute.get('/plugins/:pluginId/access-log', companyMember, (c) => answer(c, services.pluginCalls.accessLog(c.var.member, c.req.param('pluginId'), { before: c.req.query('before'), limit: c.req.query('limit') })))
 
 pluginsRoute.post('/plugins/:pluginId/create/:operation', companyMember, serviceBody, async (c) => {
   const member = c.var.member

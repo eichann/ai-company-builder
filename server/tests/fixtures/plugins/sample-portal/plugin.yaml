@@ -9,7 +9,7 @@ contract: 3
 service: sample-portal
 base_url: https://portal.sample.example/api
 auth: { type: company_key, header: authorization, format: bearer, slots: [read, act] }
-account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment }
+account_info: { method: GET, path: /account, id_field: account_id, environment_field: environment, expected_environment: staging }
 actor: { member_header: X-ACB-Actor, email_header: X-ACB-Actor-Email }
 limits: { per_minute: 60 }
 errors: { map: { STATE_CHANGED: unknown-result, INVALID_INPUT: bad-input, SCOPE_REQUIRED: permission, RATE_LIMITED: temporary } }
@@ -35,6 +35,7 @@ calls:
     path: /people/search
     inputs:
       email: { kind: text, class: personal }
+      person_hint: { kind: id, class: personal, required: false }
     items: results
     returns:
       person_ref: { class: normal, keep: pointer }
@@ -47,6 +48,7 @@ calls:
     inputs:
       id: { kind: id, class: normal }
       include_body: { kind: number, class: normal, required: false }
+      since: { kind: date, class: normal, required: false }
     returns:
       mails:
         each:
@@ -70,6 +72,7 @@ calls:
       items: pages
       cursor: { param: after, next: next_cursor }
       returns:
+        id: { class: normal, keep: pointer }
         title: { class: normal, keep: summary }
     search:
       path: /pages/search

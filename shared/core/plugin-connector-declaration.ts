@@ -7,7 +7,7 @@
 import { builtinBrokerService, isValidBrokerServiceName, parseRelayBaseUrl } from './key-broker'
 import { FIELD_NAME_RE, parseConnectorV3 } from './plugin-call-declaration'
 import {
-  CREATE_CONTENT_SLOTS, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, noFlow,
+  CREATE_CONTENT_SLOTS, EXTERNAL_ID_RE, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, noFlow,
   type CommonPart, type CreateContentSlot, type OperationReach, type PluginEndpoint, type PluginEndpointName, type PluginManifest,
   type PluginObject, type PluginOperation, type PluginSearch, type UndoKind,
 } from './plugin-declaration'
@@ -175,15 +175,19 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
     if (!isYamlMap(e)) err('account_info は { method: GET, path } の形で書いてください')
     else {
       const atV3 = common.contract >= PLUGIN_CONTRACT_V3
-      const v3Only = ['id_field', 'environment_field']
+      const v3Only = ['id_field', 'environment_field', 'expected_environment']
       const reasons = Object.fromEntries(v3Only.map(k => [k, `${k} は contract: ${PLUGIN_CONTRACT_V3} の包みだけに書けます`]))
       unknownKeys('account_info: ', e, ['method', 'path', ...(atV3 ? v3Only : [])], err, reasons)
       const problem = e.method !== 'GET' ? 'account_info の method は GET です' : checkPluginPathTemplate(e.path, 'properties_list')
       if (problem) err(`account_info: ${problem}`)
       else accountInfo = { method: 'GET', path: e.path as string }
       if (atV3 && accountInfo) {
-        for (const k of v3Only) if (e[k] !== undefined && (typeof e[k] !== 'string' || !FIELD_NAME_RE.test(e[k]))) err(`account_info の ${k} は項目名です`)
-        accountInfo = { ...accountInfo, ...(typeof e.id_field === 'string' ? { idField: e.id_field } : {}), ...(typeof e.environment_field === 'string' ? { environmentField: e.environment_field } : {}) }
+        for (const k of ['id_field', 'environment_field']) if (e[k] !== undefined && (typeof e[k] !== 'string' || !FIELD_NAME_RE.test(e[k]))) err(`account_info の ${k} は項目名です`)
+        if (e.expected_environment !== undefined && (typeof e.expected_environment !== 'string' || !EXTERNAL_ID_RE.test(e.expected_environment))) err('account_info の expected_environment は環境の名前（英数字・_・-）です')
+        accountInfo = {
+          ...accountInfo, ...(typeof e.id_field === 'string' ? { idField: e.id_field } : {}), ...(typeof e.environment_field === 'string' ? { environmentField: e.environment_field } : {}),
+          ...(typeof e.expected_environment === 'string' ? { expectedEnvironment: e.expected_environment } : {}),
+        }
       }
     }
   }

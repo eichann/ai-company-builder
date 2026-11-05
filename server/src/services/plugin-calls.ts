@@ -1,20 +1,21 @@
 /**
  * A contract-3 connector's declared reads (plugins.md "Contract 3"): `read`,
- * `search` and `document`. The gate is an operation's — the step's run, the
- * records switch, `active()`, the AI stop, `via`, `who` through `mayRunAt` — and
- * every refusal sends nothing. Then one call through the connector, with the
- * actor's header; the answer goes through the `returns` allow-list
- * (`keepDeclared`), and one line goes to the access log before anything is handed
- * back: a read that cannot be logged is not shown.
+ * `search` and `document`. The gate is an operation's, narrower — a person is
+ * present (no execution run), the records switch, `active()`, the AI stops,
+ * `who` through `mayRunAt`, the member's share of the pace — and every refusal
+ * sends nothing. Then one call through the connector, with the actor's header;
+ * the answer goes through the `returns` allow-list (`keepDeclared`), and one line
+ * goes to the access log before anything is handed back: a read that cannot be
+ * logged is not shown.
  *
  * Nothing of an answer is stored: not in the ledger, an operation record or the
  * log, which holds plain id inputs only. Personal values are shown to whoever
  * passed `who`; a sensitive field only comes through a call declaring it, so its
  * `who` is what guards it.
  */
-import { keepDeclared, citeLink, type KeptEntry, type PluginCall, type PluginCallRequest, type PluginCallListing, type PluginCalling } from '../../shared/core/plugins'
-import { viaOf } from '../../shared/core/record-types'
+import { CALL_CURSOR_RE, keepDeclared, citeLink, pointersOf, type KeptEntry, type PluginCall, type PluginCallRequest, type PluginCallListing, type PluginCalling } from '../../shared/core/plugins'
 import type { AiRunFailureClass } from '../../shared/core/ai-runs'
+import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
 import type { PluginAccessLogEntry, PluginCallAnswer } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -26,18 +27,23 @@ import { notActive, type OperationActor } from './plugin-operation-common'
 import type { PluginOperationService } from './plugin-operations'
 import type { ActivePlugin, PluginService } from './plugins'
 import { PLUGINS_FORBIDDEN, PLUGIN_NOT_FOUND } from './plugin-service-common'
-import { callVia, NOT_VIA } from './record-engine'
 import { RECORDS_DISABLED } from './records'
 
 export const ACCESS_LOG_RETENTION_DAYS = 365
 const ACCESS_LOG_LIMIT = 200
+const ACCESS_LOG_CURSOR_RE = /^\d{4}-\d{2}-\d{2}T[0-9:.]{1,20}Z~[A-Za-z0-9-]{1,64}$/
 const TEXT_INPUT_MAX = 2000
-const CURSOR_MAX = 500
 const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T[0-9:.+Z-]{1,30})?$/
 const EMAIL_RE = /^[^\s@]{1,100}@[^\s@]{1,200}$/
 /** How long a checked account stands: a service's limit is small, and every read asking it too would halve it. */
 const ACCOUNT_CHECK_MS = 5 * 60_000
 const ACTOR_PREFIX = 'acb_member_'
+/** One member's share of the connection's pace: a looping AI leaves the rest for the team. */
+const MEMBER_SHARE = 4
+/** The same pace when the declaration names none. */
+const DEFAULT_PER_MINUTE = 60
+/** The tool kinds whose stop ends a read: this is the AI reaching a service outside, over the web. */
+const STOPPED_BY: readonly AgentStopToolKind[] = ['mcp-external', 'web']
 
 type Part = 'page' | 'list' | 'search' | null
 export type CallActor = OperationActor
@@ -49,7 +55,11 @@ export interface PluginCallDeps {
   plugins: Pick<PluginService, 'active'>
   connector: Pick<PluginConnector, 'callDeclared'>
   gate: PluginOperationService['gate']
-  aiStopped: (companyId: string) => boolean
+  /** The stops in force for this member: the company's and their own, the whole AI or a tool kind. */
+  aiStops: (member: Member) => AgentStopPolicy
+  /** Identifies the key's current value (`<keyId>.<secretUpdatedAt>`); null: no such key. */
+  keyStamp: (companyId: string, keyId: string) => string | null
+  companyIds: () => string[]
   /** The AI's reads also go to the AI action log. */
   recordAiRead: (companyId: string, userId: string, e: { conversationId: string | null; call: string; host: string; path: string; status: number | null; ok: boolean }) => void
 }
@@ -92,23 +102,58 @@ function failureOf(r: Extract<ConnectorResult, { ok: false }>, errors: PluginCal
   return 'temporary'
 }
 
+/** The plain id inputs of a read: what the log may keep of them. A search word, or an id declared personal, is not. */
+function loggedInputs(request: PluginCallRequest, input: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(input).filter((e): e is [string, string] => {
+    const rule = own(request.inputs, e[0])
+    return rule?.kind === 'id' && rule.dataClass === 'normal' && typeof e[1] === 'string'
+  }))
+}
+
 export function createPluginCalls(deps: PluginCallDeps) {
   const { companyData, clock, plugins, connector, gate } = deps
-  /** connection → when its account was last seen right. */
-  const accountSeen = new Map<string, number>()
+  /** connection → the key it was last seen right with, and when. A new key value is checked at once. */
+  const accountSeen = new Map<string, { stamp: string; at: number }>()
+  /** company | connection | member → the reads of the last minute. Refused ones do not count, so it stays bounded. */
+  const memberReads = new Map<string, number[]>()
 
-  /** The account and environment of the key, bound on first sight; another one → refused. Asked as `system`. */
+  /** The member's share of the pace: over it, refused before anything goes out, and no line in the log. */
+  function overMemberShare(member: Member, plugin: ActivePlugin): boolean {
+    const now = clock.nowMs()
+    const key = `${member.companyId}|${plugin.connectionId}|${member.userId}`
+    const recent = (memberReads.get(key) ?? []).filter(t => t > now - 60_000)
+    const over = recent.length >= Math.ceil((plugin.manifest.calling?.limits?.perMinute ?? DEFAULT_PER_MINUTE) / MEMBER_SHARE)
+    memberReads.set(key, over ? recent : [...recent, now])
+    return over
+  }
+
+  /** The AI's stops, as a reason: the whole AI (company or member) or a tool kind that covers this read. */
+  function aiStop(member: Member, actor: CallActor): string | null {
+    if (actor.kind !== 'ai') return null
+    const stops = deps.aiStops(member)
+    return stops.all || stops.tools.some(t => STOPPED_BY.includes(t)) ? 'ai-stopped' : null
+  }
+
+  /**
+   * The account and environment of the key. The package states the environment it must
+   * be (`expected_environment`): stated and the same, or nothing reads. The account is
+   * bound on first sight; another one → refused. Asked as `system`.
+   */
   async function accountRefusal(member: Member, plugin: ActivePlugin, precheck: () => Promise<string | null>) {
     const info = plugin.manifest.accountInfo
     if (!info?.idField || !info.environmentField) return refuse('conflict', 'つなぎ先のアカウントを確かめられません', { code: 'ACCOUNT_UNREADABLE' })
+    if (!info.expectedEnvironment) return refuse('conflict', 'このつなぎ先は、どの環境につなぐかが決められていないため読めません', { code: 'ENVIRONMENT_NOT_STATED' })
     const now = clock.nowMs()
-    if (plugin.accountId !== null && now - (accountSeen.get(plugin.connectionId) ?? -Infinity) < ACCOUNT_CHECK_MS) return null
+    const stamp = deps.keyStamp(member.companyId, plugin.keyId)
+    const seenBefore = accountSeen.get(plugin.connectionId)
+    if (plugin.accountId !== null && stamp !== null && seenBefore?.stamp === `${stamp}.${info.expectedEnvironment}` && now - seenBefore.at < ACCOUNT_CHECK_MS) return null
     const r = await connector.callDeclared(member.companyId, plugin, { method: 'GET', path: info.path, actor: { member: 'system', email: null } }, precheck)
     const id = r.ok && isObj(r.body) ? r.body[info.idField] : undefined
     const environment = r.ok && isObj(r.body) ? r.body[info.environmentField] : undefined
     if (typeof id !== 'string' || typeof environment !== 'string' || !EXTERNAL_ID_RE.test(id) || !EXTERNAL_ID_RE.test(environment)) {
       return refuse('conflict', 'つなぎ先のアカウントを確かめられません', { code: 'ACCOUNT_UNREADABLE' })
     }
+    if (environment !== info.expectedEnvironment) return refuse('conflict', 'つなぎ先の環境が、決められたものと違います。管理者に確かめてください', { code: 'ENVIRONMENT_MISMATCH' })
     const seen = `${id}.${environment}`
     const changed = () => refuse('conflict', 'つなぎ先のアカウントが変わっています。管理者が新しいつなぎ先として始めるまで読めません', { code: 'ACCOUNT_CHANGED' })
     if (plugin.accountId !== null && plugin.accountId !== seen) return changed()
@@ -119,7 +164,7 @@ export function createPluginCalls(deps: PluginCallDeps) {
       })
       if (!bound && repo.install(plugin.connectorId)?.accountId !== seen) return changed()
     }
-    accountSeen.set(plugin.connectionId, now)
+    if (stamp !== null) accountSeen.set(plugin.connectionId, { stamp: `${stamp}.${info.expectedEnvironment}`, at: now })
     return null
   }
 
@@ -138,11 +183,10 @@ export function createPluginCalls(deps: PluginCallDeps) {
       if (!handle.records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const active = await plugins.active(member.companyId, pluginId)
       if (!active.ok) return notActive(active.problem)
-      if (actor.kind === 'ai' && deps.aiStopped(member.companyId)) return refuse('forbidden', '管理者が AI の利用を一時停止しています。', { code: 'ACB_STOPPED' })
+      if (aiStop(member, actor)) return refuse('forbidden', '管理者が AI の利用を一時停止しています。', { code: 'ACB_STOPPED' })
       const plugin = active.plugin
       const call = own(plugin.manifest.calls, name)
       if (!call) return refuse('not-found', 'この呼び出しはありません', { code: 'CALL_NOT_FOUND' })
-      if (!viaOf({}).includes(callVia(actor))) return refuse('forbidden', NOT_VIA.error, { code: NOT_VIA.code })
       if (!gate.mayRunAt(member, actor, call.who, {}, '', { pluginId, recordId: null })) {
         return refuse('forbidden', actor.kind === 'ai' && !call.who.includes('ai') ? 'この呼び出しは AI からはできません' : 'この呼び出しをする権限がありません', { code: 'NOT_ALLOWED' })
       }
@@ -154,65 +198,98 @@ export function createPluginCalls(deps: PluginCallDeps) {
       const problem = inputProblem(target.request, input)
       if (problem) return badInput(problem)
       const cursor = body.cursor
-      if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > CURSOR_MAX || !target.listing?.cursor)) return badInput('cursor は続きのある一覧だけです')
+      if (cursor !== undefined && (typeof cursor !== 'string' || !CALL_CURSOR_RE.test(cursor) || !target.listing?.cursor)) return badInput('cursor は続きのある一覧だけです')
+      if (overMemberShare(member, plugin)) return refuse('rate-limited', '読む回数が多すぎます。少し待ってから、もう一度お試しください', { code: 'CALL_PACED' })
 
       // The checks repeated before every attempt; a stop there is a refusal, not a read.
       const repeated = gate.precheckFor(member, actor, plugin, call.who, null, '', () => true)
       let stopped: string | null = null
-      const precheck = async () => { stopped = await repeated(); return stopped }
+      const precheck = async () => { stopped = aiStop(member, actor) ?? await repeated(); return stopped }
+      const stoppedRefusal = (reason: string | null) => refuse('conflict', 'いまは読めません', { code: 'CALL_STOPPED', reason })
       const account = await accountRefusal(member, plugin, precheck)
-      if (account) return account
+      if (account) return stopped ? stoppedRefusal(stopped) : account
 
       const { id, ...others } = input
       const outsideValues: Record<string, unknown> = Object.fromEntries(Object.entries(others).filter(([, v]) => v !== undefined && v !== null))
       if (cursor !== undefined) outsideValues[target.listing!.cursor!.param] = cursor
+      const out = { sent: false }
       const r = await connector.callDeclared(member.companyId, plugin, {
         method: target.method, path: target.request.path, ...(typeof id === 'string' ? { id } : {}),
         ...(target.method === 'GET' ? { query: Object.fromEntries(Object.entries(outsideValues).map(([k, v]) => [k, String(v)])) } : { body: outsideValues }),
-        actor: { member: `${ACTOR_PREFIX}${member.userId}`, email: verifiedEmail(member) },
+        actor: { member: `${ACTOR_PREFIX}${member.userId}`, email: verifiedEmail(member) }, onSend: () => { out.sent = true },
       }, precheck)
-
-      if (stopped) return refuse('conflict', 'いまは読めません', { code: 'CALL_STOPPED', reason: stopped })
 
       const empty = { call: name, part: target.part, data: null, items: null, next: null, cite: null }
       let answer: PluginCallAnswer
+      let returned: ReturnType<typeof pointersOf> = { ids: [], more: 0 }
       if (r.ok) {
         const kept = keepDeclared(r.body, target.request.returns, target.listing?.items ?? null)
-        const next = target.listing?.cursor && isObj(r.body) && typeof r.body[target.listing.cursor.next] === 'string' ? r.body[target.listing.cursor.next] as string : null
-        const cite = target.part === 'page' && call.kind === 'document' && call.cite && isObj(r.body) ? citeLink(r.body[call.cite], plugin.manifest.baseUrl.host) : null
-        answer = { outcome: 'ok', ...empty, data: kept.data as KeptEntry | null, items: kept.items, next, cite, dropped: kept.dropped }
+        let { dropped } = kept
+        if (kept.items) returned = pointersOf(kept.items, target.request.returns)
+        // The next page's cursor reaches the AI and a URL: only its own shape, else the list ends here.
+        const rawNext = target.listing?.cursor && isObj(r.body) ? r.body[target.listing.cursor.next] : undefined
+        const next = typeof rawNext === 'string' && CALL_CURSOR_RE.test(rawNext) ? rawNext : null
+        if (next === null && rawNext !== undefined && rawNext !== null) dropped++
+        // The link travels only as `cite`, checked: the copy among the fields would be the same value unchecked.
+        const citeField = target.part === 'page' && call.kind === 'document' ? call.cite : null
+        const cite = citeField && isObj(r.body) ? citeLink(r.body[citeField], plugin.manifest.baseUrl.host) : null
+        const data = kept.data as KeptEntry | null
+        if (citeField && data && Object.prototype.hasOwnProperty.call(data, citeField)) {
+          delete data[citeField]
+          if (cite === null) dropped++
+        }
+        answer = { outcome: 'ok', ...empty, data, items: kept.items, next, cite, dropped }
       } else {
         answer = { outcome: 'failed', ...empty, dropped: 0, failure: failureOf(r, plugin.manifest.calling?.errors ?? null), ...(r.code ? { code: r.code } : {}) }
       }
 
-      const refs = Object.fromEntries(Object.entries(input).filter(([k, v]) => {
-        const rule = own(target.request.inputs, k)
-        return rule?.kind === 'id' && rule.dataClass === 'normal' && typeof v === 'string'
-      }))
-      const at = clock.now()
-      handle.plugins.addAccessLog({
-        id: deps.ids.newId(), pluginId, call: target.part ? `${name}.${target.part}` : name, userId: member.userId, actorKind: actor.kind === 'ai' ? 'ai' : 'human',
-        conversationId: actor.conversationId ?? null, runId: actor.runId ?? null, refs: JSON.stringify(refs),
-        status: answer.outcome === 'ok' ? 'ok' : answer.failure!, dropped: answer.dropped, at,
-      }, new Date(clock.nowMs() - ACCESS_LOG_RETENTION_DAYS * 86_400_000).toISOString())
-      if (actor.kind === 'ai') {
+      // One line for a read that went out, however it ended, also one stopped before its next attempt. It
+      // may throw: a read that cannot be logged is not shown. Nothing went out (stopped first, the pace): no line.
+      if (out.sent) {
+        handle.plugins.addAccessLog({
+          id: deps.ids.newId(), pluginId, call: target.part ? `${name}.${target.part}` : name, userId: member.userId, actorKind: actor.kind === 'ai' ? 'ai' : 'human',
+          conversationId: actor.conversationId ?? null, runId: actor.runId ?? null,
+          refs: JSON.stringify({ input: loggedInputs(target.request, input), returned: returned.ids, more: returned.more }),
+          status: stopped ? 'stopped' : answer.outcome === 'ok' ? 'ok' : answer.failure!, dropped: answer.dropped, at: clock.now(),
+        })
+      }
+      if (out.sent && actor.kind === 'ai') {
         deps.recordAiRead(member.companyId, member.userId, {
           conversationId: actor.conversationId ?? null, call: `${pluginId}/${name}`, host: plugin.manifest.baseUrl.host, path: target.request.path, status: r.ok ? r.status : r.status ?? null, ok: r.ok,
         })
       }
-      return ok(answer)
+      return stopped ? stoppedRefusal(stopped) : ok(answer)
     },
 
-    /** GET …/plugins/:pluginId/access-log — owner / admin. */
-    accessLog(member: Member, pluginId: string): Outcome<{ entries: PluginAccessLogEntry[] }> {
+    /**
+     * GET …/plugins/:pluginId/access-log?before=<next>&limit=<n> — owner / admin, newest
+     * first, at most 200 a page; `next` is the `before` of the next page, null at the end.
+     */
+    accessLog(member: Member, pluginId: string, page: { before?: string; limit?: string } = {}): Outcome<{ entries: PluginAccessLogEntry[]; next: string | null }> {
       const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
       if (!allowed.ok) return allowed
       const repo = companyData.forCompany(member.companyId).plugins
       if (typeof pluginId !== 'string' || pluginId.length > 40 || !repo.install(pluginId)) return refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
+      if (page.before !== undefined && !ACCESS_LOG_CURSOR_RE.test(page.before)) return refuse('bad-request', 'before の形が違います', { code: 'BAD_CURSOR' })
+      const limit = page.limit === undefined ? ACCESS_LOG_LIMIT : Number(page.limit)
+      if (!Number.isInteger(limit) || limit < 1 || limit > ACCESS_LOG_LIMIT) return refuse('bad-request', `limit は 1〜${ACCESS_LOG_LIMIT} です`, { code: 'BAD_LIMIT' })
+      const before = page.before === undefined ? null : { at: page.before.split('~')[0], id: page.before.split('~')[1] }
+      const rows = repo.accessLog(pluginId, limit + 1, before)
+      const shown = rows.slice(0, limit)
+      const last = shown.at(-1)
       return ok({
-        entries: repo.accessLog(pluginId, ACCESS_LOG_LIMIT).map(({ at, userId, actorKind, call, refs, status, dropped, conversationId, runId }) =>
-          ({ at, userId, actorKind, call, refs: JSON.parse(refs) as Record<string, string>, status, dropped, conversationId, runId })),
+        entries: shown.map(({ at, userId, actorKind, call, refs, status, dropped, conversationId, runId }) =>
+          ({ at, userId, actorKind, call, refs: JSON.parse(refs) as PluginAccessLogEntry['refs'], status, dropped, conversationId, runId })),
+        next: rows.length > limit && last ? `${last.at}~${last.id}` : null,
       })
+    },
+
+    /** Removes rows past the year, every company through its own handle (`lib/plugin-access-log-retention.ts`). */
+    cleanupAccessLog(): { deleted: number } {
+      const keepFrom = new Date(clock.nowMs() - ACCESS_LOG_RETENTION_DAYS * 86_400_000).toISOString()
+      let deleted = 0
+      for (const companyId of deps.companyIds()) deleted += companyData.forCompany(companyId).plugins.pruneAccessLog(keepFrom)
+      return { deleted }
     },
   }
 }

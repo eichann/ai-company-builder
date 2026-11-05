@@ -36,7 +36,9 @@ per まとまり, who holds which role. The core roles 本人 (`self`), 部署�
   `clear-override`, the ids, who, when). Member ids only. Not the record ledger (its format is
   unchanged): the history table is the ledger of these changes.
 - `holders(company, plugin, role, bundle)`: the まとまり's override when it has one, else the
-  company's assignment (`holdersOf`; never merged), only current members. Fails closed: a plugin
+  company's assignment (`holdersOf`; never merged), only current members. A member removed from the
+  company is taken out of every assignment and override (`forgetMember`, a history line each), so being
+  invited again gives no role back; an override left empty stays (nobody, not the company's). Fails closed: a plugin
   not installed or whose installed version is not on the shelf, an undeclared role, nothing
   assigned → nobody. The plugin's switch does not matter (its types stay the company's).
 - `holdsOnRecord(company, type, record, role, user)` (the engine): the plugin = the installed
