@@ -27,6 +27,9 @@ import {
   DEVICE_ID_RE, FAILURE_CODE_RE, OPERATION_KEY_RE, failureDestination, parseAiRunProcedure, retryDelayMs, type AiRunFailureClass, type AiRunProcedure,
 } from '../../shared/core/ai-runs'
 import { parseClientVersion } from '../../shared/core/client-version'
+import { aiTurnRouteAllowed } from '../../shared/core/ai-turn-routes'
+import { aiTurnRouteScopeApplies } from '../lib/client-version'
+import { notInStep } from './plugin-operation-checks'
 import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'
@@ -419,6 +422,21 @@ export function createAiRunService(deps: AiRunDeps) {
     },
 
     fence,
+
+    /**
+     * The server's scope of a built-in step's token (ai-turns.md, `shared/core/ai-turn-routes.ts`):
+     * a record token bound to a run of a built-in step may use only that step's routes; anything
+     * else is 403 `NOT_IN_STEP` before the handler. `build` is the calling app's self-reported
+     * X-ACB-Client-Version: a build older than `AI_TURN_ROUTE_SCOPE_COMMIT_DATE` (or none) is not
+     * scoped, so released apps keep working. A business plugin's step (the C4 gate) and a missing
+     * run (the token check fences it) are not decided here.
+     */
+    routeRefusal(member: Member, runId: string, route: string, params: Readonly<Record<string, string | undefined>>, build: string | null | undefined): Refusal | null {
+      if (!aiTurnRouteScopeApplies(build)) return null
+      const run = repo(member.companyId).byId(runId)
+      if (!run || run.userId !== member.userId) return null
+      return aiTurnRouteAllowed(run.step, route, params) ? null : notInStep()
+    },
 
     /**
      * An outside operation within a run, by its idempotency key (header

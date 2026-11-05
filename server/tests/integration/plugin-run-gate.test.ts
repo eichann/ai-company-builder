@@ -426,3 +426,33 @@ describe("a built-in step's run creates only the record types its job needs (COR
     expect((await create(runOf('sample-sales__work'), 'task', '手順のタスク')).body?.code).not.toBe('NOT_IN_STEP')
   })
 })
+
+describe("the server scopes a built-in step's token to its routes (shared/core/ai-turn-routes.ts)", () => {
+  const NEW_BUILD = '0.0.1+abc1234.20991231000000'
+  const OLD_BUILD = '0.0.1+abc1234.20261101000000'
+  const ask = async (runId: string | null, method: string, path: string, build: string | null, body?: unknown) => {
+    currentUser.id = null
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Authorization: `Bearer ${await tokenFor(runId)}` }
+    if (build) headers['X-ACB-Client-Version'] = build
+    const res: Response = await app.request(`/api/records-ai${path}`, { method, headers, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
+    return { status: res.status, body: await res.json().catch(() => null) as Json }
+  }
+
+  it('a new build: the step\'s routes and the turn start\'s only; an old build, a consultation and a plugin step as before', async () => {
+    const triage = runOf('inbox-triage')
+    expect((await ask(triage, 'GET', '/types', NEW_BUILD)).status).toBe(200)
+    const query = await ask(triage, 'POST', '/query', NEW_BUILD, { type: 'task' })
+    expect([query.status, query.body.code]).toEqual([403, 'NOT_IN_STEP'])
+    const history = await ask(triage, 'GET', `/item/${recordOf('1000000001')}/history`, NEW_BUILD)
+    expect([history.status, history.body.code]).toEqual([403, 'NOT_IN_STEP'])
+    // An action of another record type than the step's own.
+    const act = await ask(triage, 'POST', `/item/${recordOf('1000000001')}/actions/finish_prep`, NEW_BUILD, { expectedVersion: 1 })
+    expect(act.body.code).toBe('NOT_IN_STEP')
+    // A released app (older build, or none): not scoped.
+    expect((await ask(triage, 'POST', '/query', OLD_BUILD, { type: 'task' })).status).toBe(200)
+    expect((await ask(triage, 'POST', '/query', null, { type: 'task' })).status).toBe(200)
+    // A consultation, and a business plugin's step (its C4 gate decides): not scoped by the table.
+    expect((await ask(null, 'POST', '/query', NEW_BUILD, { type: 'task' })).status).toBe(200)
+    expect((await ask(runOf('sample-sales__work'), 'POST', '/query', NEW_BUILD, { type: 'task' })).status).toBe(200)
+  })
+})
