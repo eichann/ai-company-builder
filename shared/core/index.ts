@@ -23,6 +23,7 @@
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
+ *   outside-text.ts       the one standard for outside text in an AI prompt (blocks that cannot be closed, titles)
  *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *   business-days.ts      business days: weekends, Japanese public holidays (calculated), company holidays
  *   task-settings.ts      the company's task settings (task list departments, reply 目安, auto-run); replyTarget

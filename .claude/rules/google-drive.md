@@ -89,7 +89,8 @@ The AI reads and writes **only** the member's own live picks.
 - `GET /status` → `{ available (Google on + Picker registered), granted, picks }` — the app adds
   the Drive tools only when available. `POST /read { fileId }` (picked file only, else 403
   `DRIVE_NOT_PICKED`): Docs / Slides → text/plain export, Sheets → text/csv, text files as is,
-  marked as outside text (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike`), ≤ 200 000
+  marked as outside text (`DRIVE_TEXT_HEADER` / `FOOTER`, `instructionLike` from `outsideTextFlags`;
+  the text's `【】` → `〔〕`, server and app, `shared/core/outside-text.ts`), ≤ 200 000
   characters; a PDF (≤ 10 MB) as base64 — the app saves it at
   `.personal/google-drive/<id16>-<name>.pdf` (never synced) and returns the path.
 - `POST /put` (act token) `{ folderId, name, kind: pdf|html, sha256, contentBase64, requestKey }`:

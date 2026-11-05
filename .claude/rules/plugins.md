@@ -488,7 +488,7 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   number that is not finite in a plain field is dropped); everything else is left out and counted (`dropped`).
   **Every string but a plain id is wrapped** as outside text (`CALL_OUTSIDE_HEADER` / `_FOOTER`,
   `findInstructionLikeText`, a flag never a filter), whatever its class: a normal title or page text is the
-  service's writing too. A plain id (`EXTERNAL_ID_RE`) stays plain unless `outside: true`. Inside the wrapper
+  service's writing too (the wrapper is `shared/core/outside-text.ts`, the one standard every outside source uses). A plain id (`EXTERNAL_ID_RE`) stays plain unless `outside: true`. Inside the wrapper
   `【` `】` become `〔` `〕`, so no text closes it (`wrapper-spoof` flags a try), and a text is cut at
   `CALL_TEXT_MAX` (20 000), saying so. A list's `next` only in `CALL_CURSOR_RE`, else null and counted. A page's
   `cite` link only when https on the declared host and its default port, no user, ≤ 2000 as handed on (encoded); the field it came from is not also handed

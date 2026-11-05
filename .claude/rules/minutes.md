@@ -348,6 +348,12 @@ state, fields, version } | null, candidates: [{ id, title, typeLabel }], instruc
   「Web で調べる」 uses; it also flags a line addressed to an AI, 「AI へ：…」). A flag, nothing
   removed. The app's tool puts the header above and the footer below the text, then the
   warning and the structured parts (`minutesReadText`, `client/electron/records/tools.ts`).
+- **The block cannot be closed from inside** (`shared/core/outside-text.ts`): the server answers
+  `text` with `【】` → `〔〕` (an older app is covered too) and `instructionLike` from
+  `outsideTextFlags` (+ `wrapper-spoof` when the text spells a block's marker); the app neutralizes
+  again (idempotent, for an older server). `quoteAppearsIn` treats `【】` and `〔〕` alike. Tests:
+  `server/tests/integration/minutes.test.ts` (the seeded follow-up notes spell the footer),
+  `client/tests/outside-text-entry-points.test.ts`.
 - `Cache-Control: no-store`.
 
 ### When Google refuses the text (production, 2026-11-05)
