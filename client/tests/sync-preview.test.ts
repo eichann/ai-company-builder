@@ -11,8 +11,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { parsePorcelainStatus, previewChanges, withScratchIndex } from '../electron/sync/preview'
+
+/** simple-git 4 rejects an explicit env holding guarded keys (a developer's GIT_EDITOR); this test's env is its own. */
+const GUARD_OFF = (env: object) => ({ allowEnvironment: Object.keys(env), unsafe: { allowUnsafeEditor: true } })
 
 const ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' }
 
@@ -50,7 +53,7 @@ test('preview lists added / modified / deleted without changing the index', asyn
   fs.rmSync(path.join(root, '開発部/古い.md'))
   const before = indexBytes(root)
 
-  const changes = await previewChanges(simpleGit(root).env(ENV))
+  const changes = await previewChanges(simpleGit(root, GUARD_OFF(ENV)).env(ENV))
 
   assert.deepEqual([...changes.added].sort(), ['営業部/新フォルダ/メモ.md', '開発部/新規/a.md'].sort())
   // Over a path this checkout does not have: git reports a modification.
@@ -68,9 +71,9 @@ test('the summary stages into a throwaway index copy; the real index is untouche
   write(root, '開発部/設計.md', 'dev v2\n')
   const before = indexBytes(root)
   const staged = await withScratchIndex({
-    git: simpleGit(root).env(ENV),
+    git: simpleGit(root, GUARD_OFF(ENV)).env(ENV),
     repoPath: root,
-    makeGit: env => simpleGit(root).env({ ...ENV, ...env }),
+    makeGit: env => simpleGit(root, GUARD_OFF({ ...ENV, ...env })).env({ ...ENV, ...env }),
     fn: async scratch => {
       await scratch.raw(['add', '--sparse', '.'])
       return scratch.raw(['-c', 'core.quotepath=false', 'diff', '--cached', '--name-only'])

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { folderSizesView, serverFolderSizes } from '../electron/sync/folder-sizes'
 
 function repoWithOrigin(): { root: string; cleanup: () => void } {

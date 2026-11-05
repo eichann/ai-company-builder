@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import simpleGit from 'simple-git'
+import { simpleGit } from 'simple-git'
 import { configureOrigin, ensurePromisorConfig, hasPromisorPacks, setRemoteUrl } from '../electron/sync/remote'
 
 const quiet = { log: () => {}, warn: () => {}, error: () => {} }
