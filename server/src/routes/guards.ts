@@ -111,6 +111,12 @@ function recordToken(needs: 'read' | 'act') {
   return tagged('record-token', createMiddleware<RecordTokenEnv>(async (c, next) => {
     const holder = holderOf(c, needs)
     if (holder instanceof Response) return holder
+    // A built-in 「AI の番」 step's token: only its routes (shared/core/ai-turn-routes.ts, ai-turns.md).
+    if (holder.run) {
+      const route = `${c.req.method} ${c.req.routePath.replace(/^\/api\/records-ai(?=\/)/, '')}`
+      const refused = services.aiRuns.routeRefusal(holder.member, holder.run.id, route, c.req.param(), c.req.header('X-ACB-Client-Version'))
+      if (refused) return c.json(refused.body, 403)
+    }
     c.set('holder', holder)
     await next()
   }))
