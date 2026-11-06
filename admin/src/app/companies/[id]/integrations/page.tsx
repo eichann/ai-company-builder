@@ -13,7 +13,9 @@
 // Two kinds of entry (owner decision 2026-11-01), each used on its own: a
 // connector (HubSpot: version, key, who may read it, on / off) and a business
 // (法人営業: version, on / off and — when it uses a connector — whether it is
-// connected, the mapping and the import).
+// connected, and the mapping and the import when its use has records; a use
+// of calls alone only reads, so it has neither). The outside system is named
+// by the connector's label, never a fixed 「HubSpot」.
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ArrowsClockwise, ClockCounterClockwise, LockSimple, PlugsConnected, Warning } from '@phosphor-icons/react'
@@ -46,6 +48,7 @@ import {
   type PluginDetail,
   type PluginListItem,
   type PluginMappingCheck,
+  type PluginPackageView,
 } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
@@ -165,7 +168,9 @@ function ConnectionStatus({ item }: { item: PluginListItem }) {
   if (!item.install) {
     return (
       <p className="text-sm text-muted-foreground">
-        {`使い始めると、すぐに案件や顧客などの記録が使えます。${connector.label} との行き来（取り込みと書き戻し）には、「${connector.label}」（${connector.minVersion} 以上）も使い始めて、オンにしてください。`}
+        {exchangesRecords(connector)
+          ? `使い始めると、すぐに案件や顧客などの記録が使えます。${connector.label} との行き来（取り込みと書き戻し）には、「${connector.label}」（${connector.minVersion} 以上）も使い始めて、オンにしてください。`
+          : `${connector.label} を読むには、「${connector.label}」（${connector.minVersion} 以上）も使い始めて、オンにしてください。`}
       </p>
     )
   }
@@ -176,6 +181,22 @@ function ConnectionStatus({ item }: { item: PluginListItem }) {
       {connectionStopped(connector.label)}：{PROBLEM_TEXT[problem]}。記録はそのまま使えます。
     </p>
   )
+}
+
+/**
+ * Whether a business's use of its connector imports and writes back records
+ * (a mapping and an import), or only reads through calls (contract 3). An
+ * older server says nothing: records, as before.
+ */
+const exchangesRecords = (connector: { records?: boolean }) => connector.records !== false
+
+/** The line under a business's name: its own description, else what it does with the outside service. */
+function businessDescription(pkg: PluginPackageView | undefined, uses: PluginPackageView['connector']) {
+  if (pkg?.description) return pkg.description
+  if (!uses) return '案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）'
+  return exchangesRecords(uses)
+    ? `案件や顧客などの記録を扱う業務です（外のサービスとは「${uses.label}」でつなぎます）`
+    : `外のサービス「${uses.label}」を使う業務です`
 }
 
 function IntegrationSummary({ item, onOpen }: { item: PluginListItem; onOpen: () => void }) {
@@ -226,6 +247,8 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
   // When it uses a connector, the mapping and the import are its; a connector has neither.
   const business = pkg?.role === 'business'
   const uses = business ? pkg?.connector ?? null : null
+  // Only a use with records has a mapping and an import; a use of calls alone only reads (no 取り込み・書き戻し).
+  const mapped = uses !== null && exchangesRecords(uses)
   const service = broker?.services.find((s) => s.service === pkg?.service)
   const keys = broker?.keys.filter((k) => k.scope === 'company' && k.service === pkg?.service) ?? []
   const [version, setVersion] = useState<string>(install?.version ?? latest?.version ?? '')
@@ -282,7 +305,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         </CardTitle>
         <CardDescription>
           {business ? (
-            uses ? `案件や顧客などの記録を扱う業務です（外のサービスとは「${uses.label}」でつなぎます）` : '案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）'
+            businessDescription(pkg, uses)
           ) : (
             <>
               送り先：{pkg?.host ?? '—'}
@@ -370,15 +393,18 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
             )}
             <p className="text-xs text-muted-foreground">
               {business
-                ? (uses ? `オフにすると、この業務の ${uses.label} との取り込みと書き戻しも、次の1回から止まります。` : 'オフにしても、記録はそのまま残ります。')
+                ? (uses
+                  ? (mapped ? `オフにすると、この業務の ${uses.label} との取り込みと書き戻しも、次の1回から止まります。` : `オフにすると、この業務が ${uses.label} を読むことも、次の1回から止まります。`)
+                  : 'オフにしても、記録はそのまま残ります。')
                 : 'オンにすると、この送り先へは決められた書き戻しだけが届くようになります（オフにしても、自由な書き込みには戻りません）。オフにすると、このつなぎ先を使うすべての業務の取り込みと書き戻しが、次の1回から止まります。'}
             </p>
           </section>
         )}
 
-        {install && d && uses && (
+        {install && d && uses && mapped && (
           <MappingEditor
             pluginId={item.id}
+            system={uses.label}
             detail={d}
             busy={busy}
             nameOf={nameOf}
@@ -388,7 +414,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         )}
 
         {/* Import */}
-        {install && uses && (
+        {install && uses && mapped && (
           <section className="space-y-2">
             <h3 className="text-sm font-medium">取り込む</h3>
             <p className="text-xs text-muted-foreground">読み替え表の範囲の案件を、会社の記録に取り込みます（ファイルは作りません）。</p>
@@ -396,7 +422,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
               <ArrowsClockwise size={14} />
               取り込む
             </Button>
-            {report && <ImportReportView report={report} />}
+            {report && <ImportReportView report={report} system={uses.label} />}
             {accountChanged && (
               <div role="alert" className="space-y-2 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
                 <p>
@@ -431,7 +457,9 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
         onOpenChange={setConfirmOff}
         title="止めますか？"
         description={business
-          ? (uses ? `この業務の ${uses.label} との取り込みと書き戻しが、次の1回から止まります。記録はそのまま残ります。` : '記録はそのまま残ります。')
+          ? (uses
+            ? (mapped ? `この業務の ${uses.label} との取り込みと書き戻しが、次の1回から止まります。記録はそのまま残ります。` : `この業務が ${uses.label} を読むことが、次の1回から止まります。記録はそのまま残ります。`)
+            : '記録はそのまま残ります。')
           : 'このつなぎ先を使うすべての業務の取り込みと書き戻しが、次の1回から止まります。読み替え表と記録はそのまま残ります。'}
         confirmLabel="止める"
         onConfirm={async () => {
@@ -460,6 +488,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
       />
       <AcknowledgeDialog
         request={ack}
+        system={uses?.label ?? labelOf(current)}
         busy={busy}
         onCancel={() => setAck(null)}
         onConfirm={async (fields) => {
@@ -472,7 +501,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
   )
 }
 
-function ImportReportView({ report }: { report: ImportReport }) {
+function ImportReportView({ report, system }: { report: ImportReport; system: string }) {
   return (
     <div className="rounded-xl border px-4 py-3 text-sm" role="status">
       <p className="font-medium">{IMPORT_STATUS_TEXT[report.status]}{report.reason ? `（${describeReason(report.reason)}）` : ''}</p>
@@ -484,13 +513,15 @@ function ImportReportView({ report }: { report: ImportReport }) {
           </li>
         ))}
       </ul>
-      <p className="mt-1 text-xs text-muted-foreground">ここに出ていない案件が HubSpot にない、という意味ではありません（範囲と件数の上限は読み替え表で決まります）。</p>
+      <p className="mt-1 text-xs text-muted-foreground">ここに出ていない案件が {system} にない、という意味ではありません（範囲と件数の上限は読み替え表で決まります）。</p>
     </div>
   )
 }
 
-function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
+function MappingEditor({ pluginId, system, detail, busy, nameOf, onSave, onRestore }: {
   pluginId: string
+  /** The outside system's name (the connector's label). */
+  system: string
   detail: PluginDetail
   busy: boolean
   nameOf: (id: string) => string
@@ -542,7 +573,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        ACB の欄と HubSpot の項目の対応、取り込む範囲、欄ごとの書き戻し方を決めます。保存すると新しい版になり、前の版に戻せます。
+        ACB の欄と {system} の項目の対応、取り込む範囲、欄ごとの書き戻し方を決めます。保存すると新しい版になり、前の版に戻せます。
       </p>
       {detail.mappingErrors.length > 0 && (
         <div role="alert" className="rounded-xl border border-destructive/30 px-4 py-2 text-sm">
@@ -558,7 +589,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
               <thead>
                 <tr className="text-left text-muted-foreground">
                   <th className="py-1 pr-3 font-normal">ACB の欄</th>
-                  <th className="py-1 pr-3 font-normal">HubSpot の項目</th>
+                  <th className="py-1 pr-3 font-normal">{system} の項目</th>
                   <th className="py-1 font-normal">書き戻し</th>
                 </tr>
               </thead>
@@ -570,7 +601,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
                       <span className="ml-1 text-xs text-muted-foreground">{r.object}.{r.field}</span>
                     </td>
                     <td className="py-1.5 pr-3">
-                      <Input aria-label={`${r.field} の HubSpot の項目`} className="h-8" value={r.from}
+                      <Input aria-label={`${r.field} の ${system} の項目`} className="h-8" value={r.from}
                         onChange={(e) => setField(r.object, r.field, { from: e.target.value })} />
                     </td>
                     <td className="py-1.5">
@@ -586,7 +617,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
               </tbody>
             </table>
             <p className="mt-2 text-xs text-muted-foreground">
-              「自動で書き戻す」にした欄は、保存するときに「その欄の変更をきっかけに動く HubSpot のワークフローがないか」の確認をお願いします。
+              「自動で書き戻す」にした欄は、保存するときに「その欄の変更をきっかけに動く {system} のワークフローがないか」の確認をお願いします。
               表で保存すると、文字の中のコメント（# の行）は残りません。
             </p>
           </div>
@@ -600,7 +631,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
       <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={busy || !dirty} onClick={() => onSave(draft)}>保存（新しい版にする）</Button>
         <Button size="sm" variant="outline" disabled={busy || checking} onClick={askOutside}>
-          {checking ? '確かめています…' : 'HubSpot に聞いて確かめる'}
+          {checking ? '確かめています…' : `${system} に聞いて確かめる`}
         </Button>
         {dirty && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft(saved)}>変更を取り消す</Button>}
       </div>
@@ -611,7 +642,7 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
           <ul className="list-disc pl-5">{checkErrors.map((e) => <li key={e}>{e}</li>)}</ul>
         </div>
       )}
-      {check && <CheckResult check={check} />}
+      {check && <CheckResult check={check} system={system} />}
 
       {detail.mappingVersions.length > 1 && (
         <div className="space-y-1">
@@ -635,11 +666,11 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
   )
 }
 
-function CheckResult({ check }: { check: PluginMappingCheck }) {
+function CheckResult({ check, system }: { check: PluginMappingCheck; system: string }) {
   if (!check.reachable) {
     return (
       <div role="status" className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-2 text-sm">
-        HubSpot に聞けませんでした：{describeReason(check.reason)}。保存はできますが、項目名が合っているかは確かめられていません。
+        {system} に聞けませんでした：{describeReason(check.reason)}。保存はできますが、項目名が合っているかは確かめられていません。
       </div>
     )
   }
@@ -648,10 +679,10 @@ function CheckResult({ check }: { check: PluginMappingCheck }) {
   const warnings = entries.flatMap(([, o]) => o.warnings)
   return (
     <div role="status" className="space-y-1 rounded-xl border px-4 py-2 text-sm">
-      {errors.length === 0 && warnings.length === 0 && <p className="font-medium">HubSpot の項目と合っています。</p>}
+      {errors.length === 0 && warnings.length === 0 && <p className="font-medium">{system} の項目と合っています。</p>}
       {errors.length > 0 && (
         <>
-          <p className="font-medium text-destructive">HubSpot と合わないところがあります</p>
+          <p className="font-medium text-destructive">{system} と合わないところがあります</p>
           <ul className="list-disc pl-5">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
         </>
       )}
@@ -665,8 +696,9 @@ function CheckResult({ check }: { check: PluginMappingCheck }) {
   )
 }
 
-function AcknowledgeDialog({ request, busy, onCancel, onConfirm }: {
+function AcknowledgeDialog({ request, system, busy, onCancel, onConfirm }: {
   request: AckRequest | null
+  system: string
   busy: boolean
   onCancel: () => void
   onConfirm: (fields: string[]) => Promise<void>
@@ -678,14 +710,14 @@ function AcknowledgeDialog({ request, busy, onCancel, onConfirm }: {
         <DialogHeader>
           <DialogTitle>自動で書き戻す欄の確認</DialogTitle>
           <DialogDescription>
-            次の欄は、AI の変更がすぐ HubSpot に書き込まれます。HubSpot 側で、その欄の変更をきっかけにメールや通知などが動く設定（ワークフロー）がないかを確かめてください。
-            あとで ACB から前の値を書き戻しても、HubSpot 側で動いたことは元に戻りません。
+            次の欄は、AI の変更がすぐ {system} に書き込まれます。{system} 側で、その欄の変更をきっかけにメールや通知などが動く設定（ワークフロー）がないかを確かめてください。
+            あとで ACB から前の値を書き戻しても、{system} 側で動いたことは元に戻りません。
           </DialogDescription>
         </DialogHeader>
         <ul className="list-disc pl-5 text-sm">{request?.fields.map((f) => <li key={f}>{f}</li>)}</ul>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={checked} onChange={(e) => setChecked(e.target.checked)} />
-          <span>{request?.acknowledgement || 'この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました'}</span>
+          <span>{request?.acknowledgement || `この欄の変更をきっかけに動く ${system} のワークフローがないか確かめました`}</span>
         </label>
         <DialogFooter>
           <Button variant="outline" onClick={() => { setChecked(false); onCancel() }}>やめる</Button>

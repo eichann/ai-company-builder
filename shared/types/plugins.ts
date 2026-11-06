@@ -65,9 +65,12 @@ export interface PluginPackageView {
    * A business plugin: the connector it can use and the oldest version it
    * accepts (the connector's label from the shelf as this company sees it;
    * the id when not there). null for a connector and for a business plugin
-   * that works inside ACB only.
+   * that works inside ACB only. `records`: its use of the connector imports
+   * and writes back records (objects, operations or a recommended mapping:
+   * the admin shows the mapping and the import); false for a use of calls
+   * alone (contract 3), which has neither.
    */
-  connector: { id: string; minVersion: string; label: string } | null
+  connector: { id: string; minVersion: string; label: string; records: boolean } | null
   operations: PluginOperationView[]
   fingerprint: string
   /** Stopped for every company by the operator. */

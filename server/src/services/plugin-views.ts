@@ -25,7 +25,13 @@ function packageView(p: ShelfPackage, stopped: boolean, connector: ShelfPackage 
   return {
     id: m.id, label: m.label, version: m.version, kind: m.kind, role: m.role, description: m.description, service: m.service, host: m.baseUrl.host,
     scopes: m.scopes, operationScopes: m.operationScopes, types: m.types, fingerprint: p.fingerprint, stopped,
-    connector: uses ? { id: uses.connector.id, minVersion: uses.connector.minVersion, label: connector?.pkg.manifest.label ?? uses.connector.id } : null,
+    connector: uses
+      ? {
+        id: uses.connector.id, minVersion: uses.connector.minVersion, label: connector?.pkg.manifest.label ?? uses.connector.id,
+        // Imports and writes back records (a mapping), or only reads through calls (contract 3: no mapping, no import).
+        records: Object.keys(uses.objects).length > 0 || Object.keys(uses.operations).length > 0 || p.recommendedMapping !== null,
+      }
+      : null,
     operations,
   }
 }

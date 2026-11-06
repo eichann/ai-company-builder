@@ -58,7 +58,7 @@ const pkg = {
 /** The business using it: the records' shape, the mapping and the import. */
 const salesPkg = {
   ...pkg, id: 'corporate-sales', label: '法人営業', version: '0.2.0', role: 'business' as const, service: '', host: '', types: ['deal', 'customer'],
-  connector: { id: 'hubspot', minVersion: '0.3.0', label: 'HubSpot' },
+  connector: { id: 'hubspot', minVersion: '0.3.0', label: 'HubSpot', records: true },
 }
 const item: PluginListItem = {
   id: 'hubspot', versions: [pkg],
@@ -441,6 +441,73 @@ describe('つなぎ先 and the business using it, each on its own (owner decisio
     expect(screen.queryByRole('button', { name: '取り込む' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'HubSpot に聞いて確かめる' })).toBeNull()
     expect(calls.some((c) => c.url.includes('/read-scope') || c.url.includes('/mapping'))).toBe(false)
+  })
+})
+
+describe('a business names its own outside service, and shows a mapping and an import only when it has records', () => {
+  /** The card of the one business on the page (the page's own introduction names HubSpot as an example). */
+  const cardOf = async (label: string) => (await screen.findByText(label, { selector: '[data-slot="card-title"]' })).closest('[data-slot="card"]') as HTMLElement
+  const careDetail = (plugin: PluginListItem): PluginDetail => ({ ...salesDetail, plugin, mapping: null, mappingVersions: [], policies: [], labels: {} })
+  const carePkg = {
+    ...salesPkg, id: 'sample-portal-care', label: '見本のお問い合わせ', version: '0.1.0', types: ['inquiry'],
+    connector: { id: 'sample-portal', minVersion: '1.0.0', label: '見本のポータル', records: false },
+  }
+
+  it('a business that only reads through calls (sample-portal-care): no mapping, no import, no HubSpot', async () => {
+    const care: PluginListItem = { id: 'sample-portal-care', versions: [carePkg], install: { ...salesItem.install!, version: '0.1.0', mappingVersion: 0 } }
+    const calls = stubApi(ownerCapabilities, { [`GET ${base}/plugins/sample-portal-care`]: { body: ok(careDetail(care)) } }, false, [care])
+    renderInCompany(<IntegrationsPage />)
+    const card = await cardOf('見本のお問い合わせ')
+    expect(within(card).getByText('外のサービス「見本のポータル」を使う業務です')).toBeInTheDocument()
+    expect(within(card).getByText('見本のポータル とつながっています。')).toBeInTheDocument()
+    expect(within(card).getByText('オフにすると、この業務が 見本のポータル を読むことも、次の1回から止まります。')).toBeInTheDocument()
+    expect(within(card).queryByText(/読み替え表/)).toBeNull()
+    expect(within(card).queryByRole('button', { name: '取り込む' })).toBeNull()
+    expect(within(card).queryByRole('button', { name: /に聞いて確かめる/ })).toBeNull()
+    const text = card.textContent ?? ''
+    for (const word of ['HubSpot', '取り込み', '書き戻し', '案件や顧客', 'プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
+    // Turning it off says the same in the confirmation.
+    await userEvent.click(within(card).getByRole('button', { name: '止める（オフにする）' }))
+    expect(await screen.findByText('この業務が 見本のポータル を読むことが、次の1回から止まります。記録はそのまま残ります。')).toBeInTheDocument()
+    expect(calls.some((c) => c.url.includes('/mapping') || c.url.includes('/import'))).toBe(false)
+  })
+
+  it('a business not yet used that only reads: what reading needs, no records or exchange promised', async () => {
+    const fresh: PluginListItem = { id: 'sample-portal-care', versions: [carePkg], install: null }
+    stubApi(ownerCapabilities, { [`GET ${base}/plugins/sample-portal-care`]: { body: ok(careDetail(fresh)) } }, false, [fresh])
+    renderInCompany(<IntegrationsPage />)
+    const card = await cardOf('見本のお問い合わせ')
+    expect(within(card).getAllByText('見本のポータル を読むには、「見本のポータル」（1.0.0 以上）も使い始めて、オンにしてください。').length).toBeGreaterThan(0)
+    expect(card.textContent).not.toContain('取り込み')
+  })
+
+  it('its own description, when it declares one, is the line under its name', async () => {
+    const described = { ...carePkg, description: '受講生からの相談に答えます' }
+    const care: PluginListItem = { id: 'sample-portal-care', versions: [described], install: { ...salesItem.install!, version: '0.1.0', mappingVersion: 0 } }
+    stubApi(ownerCapabilities, { [`GET ${base}/plugins/sample-portal-care`]: { body: ok(careDetail(care)) } }, false, [care])
+    renderInCompany(<IntegrationsPage />)
+    const card = await cardOf('見本のお問い合わせ')
+    expect(within(card).getByText('受講生からの相談に答えます')).toBeInTheDocument()
+  })
+
+  it('a business with a mapping on another service (sample-crm-sales): its mapping and import, named by its connector', async () => {
+    const crmPkg = { ...salesPkg, id: 'sample-crm-sales', label: '見本の営業', connector: { id: 'sample-crm', minVersion: '0.1.0', label: '見本の CRM', records: true } }
+    const crm: PluginListItem = { ...salesItem, id: 'sample-crm-sales', versions: [crmPkg] }
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins/sample-crm-sales`]: { body: ok({ ...salesDetail, plugin: crm }) },
+      [`POST ${base}/plugins/sample-crm-sales/mapping/check`]: { body: ok({ reachable: false, reason: 'key-rejected', checkedAt: '2026-10-31T00:00:00.000Z', objects: {} }) },
+    }, false, [crm])
+    renderInCompany(<IntegrationsPage />)
+    const card = await cardOf('見本の営業')
+    expect(within(card).getByText('案件や顧客などの記録を扱う業務です（外のサービスとは「見本の CRM」でつなぎます）')).toBeInTheDocument()
+    expect(await within(card).findByRole('columnheader', { name: '見本の CRM の項目' })).toBeInTheDocument()
+    expect(within(card).getByRole('textbox', { name: 'next_step の 見本の CRM の項目' })).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: '取り込む' })).toBeInTheDocument()
+    expect(within(card).getByText('オフにすると、この業務の 見本の CRM との取り込みと書き戻しも、次の1回から止まります。')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: '見本の CRM に聞いて確かめる' }))
+    expect(await within(card).findByText(/見本の CRM に聞けませんでした：/)).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/plugins/sample-crm-sales/mapping/check'))).toBe(true))
+    expect(card.textContent).not.toContain('HubSpot')
   })
 })
 

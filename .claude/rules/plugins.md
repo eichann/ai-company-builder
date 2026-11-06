@@ -1282,8 +1282,24 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   badge stays 「使っています」), before install what the exchange needs; and its mapping and import.
   `CONNECTOR_REQUIRED` shows the server's sentence; 「新しいつなぎ先として始める」 on a business's
   import renews the connector's connection. A business inside ACB only shows version and on / off.
+- **The mapping and the import only for a use with records**: `PluginPackageView.connector.records`
+  (`packageView`, `server/src/services/plugin-views.ts`) is true when the business's use of the
+  connector has `objects` or `operations` or the package has a recommended `mapping.yaml`. A use of
+  calls alone (contract 3, e.g. `sample-portal-care`) is false: no 読み替え表, no 取り込む, and its
+  words say it reads — on / off 「オフにすると、この業務が <service> を読むことも、次の1回から止まります。」,
+  before install 「<service> を読むには、「<service>」（<version> 以上）も使い始めて…」 — never
+  取り込み・書き戻し. An answer without `records` (an older server) is read as true.
+- **The outside system is the connector's label** everywhere on a business's page (the mapping's
+  「<service> の項目」, 「<service> に聞いて確かめる」, the check's answer, the auto acknowledgement's
+  dialog, the import report); 「HubSpot」 appears only where the label is HubSpot (and in the page's
+  general introduction as an example).
+- **The line under a business's name**: its declared `description` when it has one; else, with
+  records, 「案件や顧客などの記録を扱う業務です（外のサービスとは「<service>」でつなぎます）」, for calls
+  alone 「外のサービス「<service>」を使う業務です」, without a connector 「…（外のサービスにはつなぎません）」.
 - No jargon on screen (no プラグイン / 型 / オントロジー; test).
-- Tests: `admin/tests/integrations.test.tsx`; the requests in
+- Tests: `admin/tests/integrations.test.tsx` (「a business names its own outside service…」:
+  calls alone shows no mapping, import or HubSpot; a mapping on another service names it —
+  mutation-checked); `records` in `server/tests/integration/plugin-calls.test.ts`; the requests in
   `server/tests/integration/admin-contract.test.ts`.
 
 ## The app (P7): the AI's tools and the chat card
