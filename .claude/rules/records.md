@@ -362,6 +362,11 @@ Additive over version 12 (three fields, one action, a wider `who`, one new who-e
   `keep_apart` (別のもの: from `proposed`, no state change, the same `who`, arg `apart_by` filled with
   the person acting — `ACTOR_ARGS`); the app hides it on the task card (`NOT_ON_CARD`: it belongs to
   the review list).
+- **A person's create and share** (no type change): never a candidate; the answer may add
+  `similar: { id, title }` (「似ているやることがあります」, minutes.md "Outputs made once") — a hint, nothing
+  written. ［まとめる］ in the app is the person's `dismiss` (案・未着手・引き受け待ち) or `cancel` (other open
+  states) of the **new** one with the note 「「<既存の件名>」とまとめたため」 (`slotMergedNote`), undone
+  with the generic undo; the earlier item is never touched.
 - Migration: `TASK_VERSION` 13 (the "Task version 9" mechanism: the core definition stored once, every
   task's index row moved, no ledger entry). Tests: `server/tests/unit/source-slot-candidates.test.ts`,
   `meeting-proposals.test.ts` — mutation-checked.
@@ -864,7 +869,8 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
   is never confirmed by the answer" (mutation-checked). Clears
   `personal_owner`, sets `folder` (`RecordRepository.setPlace`); ledger action `share`, state
   unchanged, changes `place.personal_owner` / `place.folder` before / after, version + 1
-  (`VERSION_CONFLICT`). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
+  (`VERSION_CONFLICT`). A task linked to a meeting answers `similar` when a live item of that meeting
+  the member reads has a close title ("Task version 13": a hint, never a refusal). Already shared → 409 `NOT_PERSONAL`. **Never undone** (`NOT_UNDOABLE`:
   the folder's readers may have seen it); `place.*` changes never land in the server fields.
 - Tests: `server/tests/unit/record-personal.test.ts` (another member, a manager, an admin and the
   company owner get a missing record's answers on every route; query / count / text / my-turn

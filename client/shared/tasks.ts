@@ -9,6 +9,7 @@ import { argDefaultOf, MESSAGE_TYPE } from '../../shared/core/core-types'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import { actionWho, linkWhoName, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import { restingTask } from '../../shared/core/turn-timing'
+import { RECORD_ID_RE } from '../../shared/core/records'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
 import { incomingClose } from './record-details'
@@ -252,6 +253,12 @@ export interface TaskCreateInput {
   folder?: string | null
   /** What it belongs to (a 案件, a プロジェクト): a record id. */
   bundleId?: string | null
+  /**
+   * The meeting it comes from (a record id; the meeting's card, 「やることを足す」): its `meeting` link.
+   * Not owner-only then — it takes the meeting's 見える範囲 (its people), and the answer may say
+   * 「似ているやることがあります」 (`similar`).
+   */
+  meetingId?: string | null
 }
 
 /** An action the list or the card runs on a record (the server decides who may). */
@@ -286,9 +293,39 @@ export interface RecordLinkInput {
 }
 
 export type TaskWriteResult =
-  /** `entryVersion`: the ledger entry the change made (取り消す undoes it); absent when nothing changed or not known. */
-  | { success: true; recordId: string; entryVersion?: number }
+  /**
+   * `entryVersion`: the ledger entry the change made (取り消す undoes it); absent when nothing changed or not known.
+   * `similar`: made from a meeting or shown to others, and a live item of the same meeting the member reads has a
+   * close title (「似ているやることがあります」, 出どころの枠 §10: a hint, nothing was refused or merged). `state`: the
+   * new record's state after a create.
+   */
+  | { success: true; recordId: string; entryVersion?: number; similar?: SimilarItem; state?: string }
   | { success: false; offline: boolean; code: string | null; error: string }
+
+/** An earlier item the server named as close (only ever one the member reads). */
+export interface SimilarItem {
+  id: string
+  title: string
+}
+
+/** The server's `similar`, checked (a record id and a title), else undefined. */
+export function similarOf(data: unknown): SimilarItem | undefined {
+  const s = typeof data === 'object' && data !== null ? (data as { similar?: unknown }).similar : undefined
+  if (typeof s !== 'object' || s === null) return undefined
+  const { id, title } = s as { id?: unknown; title?: unknown }
+  return typeof id === 'string' && RECORD_ID_RE.test(id) && typeof title === 'string' && title.length > 0 && title.length <= 200 ? { id, title } : undefined
+}
+
+/**
+ * ［まとめる］ (「似ているやることがあります」): how the member's new item is put away, from its state — 要らない
+ * (`dismiss`) where the task allows it (案・未着手・引き受け待ち), else 中止する (`cancel`); null once it is
+ * finished (nothing to put away). Either is taken back with 取り消す; the earlier item is never touched.
+ */
+export function mergeActionFor(state: string | null | undefined): 'dismiss' | 'cancel' | null {
+  if (state === 'proposed' || state === 'todo' || state === 'awaiting_acceptance') return 'dismiss'
+  if (state === 'in_progress' || state === 'review' || state === 'waiting' || state === 'preparing' || state === 'declined') return 'cancel'
+  return null
+}
 
 /** A record's bundle with its kind's name (a record id starts with its type: `deal-…`). */
 function bundleOf(src: TaskSources, recordId: string): TaskListItem['bundle'] {

@@ -24,6 +24,11 @@
  *
  * Compared and answered only within what the caller reads; owner-only records (「あなただけ」) are never
  * compared or mentioned — an owner-only create does not come here at all (the person's own, free).
+ *
+ * A **person's** create, or their showing an owner-only / members-only item to others (share), is
+ * free (§10): never a candidate, never refused, never merged. `similarInSlot` only finds the hint
+ * 「似ているやることがあります」 for the answer — the same rows and the same title rule as the AI's
+ * `similarTo`, so there is one similarity rule.
  */
 import { outputTitleKey } from '../../shared/core/meeting-outputs'
 import { newRecordId } from '../../shared/core/records'
@@ -84,11 +89,8 @@ export function quoteSlotKey(digest: TokenDigest, quote: string): string {
  * (every candidate is new; the title rules still apply).
  */
 export function decideSlot(records: RecordRepository, readable: (r: RecordRow) => boolean, digest: TokenDigest | undefined, q: SlotRequest): SlotDecision {
-  // The candidates the caller may be told about: readable, live, never someone's 「あなただけ」.
-  const seen = (r: RecordRow) => r.removedAt === null && r.personalOwner === null && readable(r)
-  const linked = records.candidates({ types: [q.slot.kind], link: { name: q.slot.linkName, id: q.slot.sourceId } }, SLOT_MAX)
-  const rows = records.byIds(linked.map(r => r.id)).filter(seen)
-    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
+  const seen = seenBy(readable)
+  const rows = slotRows(records, seen, q.slot)
 
   let key: string | null = null
   if (q.quote !== null) key = digest ? quoteSlotKey(digest, q.quote) : null
@@ -108,13 +110,43 @@ export function decideSlot(records: RecordRepository, readable: (r: RecordRow) =
     if (same) return { kind: 'existing', row: same, note: slotSameBasisNote(same.title) }
   }
 
-  const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s.state]))
-  const close = rows.find(r => !GONE_STATES.has(states.get(r.id) ?? '') && slotTitlesClose(r.title, q.title))
+  const close = closeLive(records, rows, q.title)
   return {
     kind: 'new', id, key,
     similarTo: close ? { id: close.id, title: close.title } : null,
     note: close ? slotSimilarNote(close.title) : null,
   }
+}
+
+/**
+ * 「似ているやることがあります」 for a person (出どころの枠 §10, step 4): the oldest live item of the slot
+ * whose title is close to `title`, or null. Only when the caller reads the source record itself, and
+ * only items the caller reads that are nobody's 「あなただけ」 (§9 rule 4: someone's owner-only item is
+ * never compared or named; a members-only one only when the caller is listed — the reader decides).
+ * `self` (a shared record) is never its own match. A hint for the answer: nothing is written.
+ */
+export function similarInSlot(records: RecordRepository, readable: (r: RecordRow) => boolean, q: { slot: SlotRef; title: string; self?: string }): { id: string; title: string } | null {
+  const seen = seenBy(readable)
+  const source = records.byIds([q.slot.sourceId])[0]
+  if (!source || !seen(source)) return null
+  const close = closeLive(records, slotRows(records, seen, q.slot).filter(r => r.id !== q.self), q.title)
+  return close ? { id: close.id, title: close.title } : null
+}
+
+/** What the caller may be told about: readable, live, never someone's 「あなただけ」. */
+const seenBy = (readable: (r: RecordRow) => boolean) => (r: RecordRow) => r.removedAt === null && r.personalOwner === null && readable(r)
+
+/** The slot's records the caller may be told about, oldest first. */
+function slotRows(records: RecordRepository, seen: (r: RecordRow) => boolean, slot: SlotRef): RecordRow[] {
+  const linked = records.candidates({ types: [slot.kind], link: { name: slot.linkName, id: slot.sourceId } }, SLOT_MAX)
+  return records.byIds(linked.map(r => r.id)).filter(seen)
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
+}
+
+/** The first of `rows` not put away whose title is close to `title` (`slotTitlesClose`: the one rule). */
+function closeLive(records: RecordRepository, rows: readonly RecordRow[], title: string): RecordRow | undefined {
+  const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s.state]))
+  return rows.find(r => !GONE_STATES.has(states.get(r.id) ?? '') && slotTitlesClose(r.title, title))
 }
 
 /** The run (else the consultation) a record was made in, from its create entry. */

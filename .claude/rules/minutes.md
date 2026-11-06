@@ -177,8 +177,16 @@ or the decision service stops calling it, or another module uses the older per-m
   records (「あなただけ」) are never compared or mentioned — an owner-only create does not enter the
   slot at all, and an owner-only record is never an answer. Candidates follow the meeting's 見える範囲
   (members-only, "Meetings for their attendees").
-- **Only the AI's creates.** A person's create (session) is free: never compared, never answered with
-  another (§10; 「似ているやることがあります」 for people is a later item).
+- **Only the AI's creates.** A person's create (session) is free: never a candidate, never refused or
+  answered with another (§10). **「似ているやることがあります」** (§10 step 4, owner decision 2026-11-06) is
+  the person's only hint: a person's create with `links.meeting` (not owner-only), and a person's
+  `share` of an owner-only / members-only task linked to a meeting, answer `similar: { id, title }` —
+  the oldest live item of that meeting's slot the caller reads whose title is close (`similarInSlot`,
+  the same rows and `slotTitlesClose` as `similarTo`; put-away ones and the shared item itself left
+  out; only when the caller reads the meeting). Nothing is written (no `similar_to`, no mark): the
+  answer only. Someone's owner-only item is never compared or named; a members-only one only when
+  the caller is listed. **Same source = the same meeting** for now: tasks made from a 連絡 (`interaction`)
+  are §10's step 5 (later). The app: `tasks-ui.md` "Similar items".
 - **An older app** (only the serial `key`, no quote): a serial key counts only inside the same run or
   consultation (the slot key `key:<run, else conversation>:<serial>`), and so does the exact title
   (`outputTitleKey`, the create entry's run / conversation). A second reading's `task:1` is a new
@@ -213,9 +221,12 @@ or the decision service stops calling it, or another module uses the older per-m
   Admin console: 「やることの一覧」→「同じ会議から重複して作られたもの」 (`meeting-duplicates.tsx`).
 - Test: `server/tests/unit/source-slot-candidates.test.ts` (a second reading's reused `task:1` is made;
   one candidate per quote from two attendees' AIs, told only when readable; a close title kept and
-  marked; owner-only never compared or mentioned; a person's create free; decisions by quote; who may
+  marked; owner-only never compared or mentioned; a person's create free and only told 「似ている」 — about
+  a readable item, never someone's owner-only or an unlisted members-only one, never itself on a share,
+  never a put-away one; ［まとめる］'s `dismiss` with its note and undo; decisions by quote; who may
   act; `link:` parsing; the v13 migration once — each guard mutation-checked),
-  `source-slot-one-place.test.ts` (the one place), `server/tests/integration/minutes.test.ts`
+  `source-slot-one-place.test.ts` (the one place; the person's hint from `similarInSlot` in create and
+  share, and `slotTitlesClose` in no other server module), `server/tests/integration/minutes.test.ts`
   「made once (FB 29)」 (an older app: reused inside its consultation, another reading's `task:1` made,
   a same title marked similar; another meeting is unaffected; decisions; the duplicates list and
   merge), `outbound-mail.test.ts` 「the meeting's mail is made once」, `client/tests/records-tools.test.ts`
@@ -354,7 +365,7 @@ or the decision service stops calling it, or another module uses the older per-m
   2026-11-05, 「ごちゃついてるな」): title, when, people (+ 見られる人); 要約; 決めたこと and **one list**
   「やることの案」 (「やること」 with no proposal left: the proposals with their buttons, put-away ones with
   ［戻す］, then the other tasks made from the meeting, each once; its 「議事録を確認する」 only on the
-  right), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
+  right; under it 「＋ やることを足す」 — a task of the meeting made by hand, `tasks-ui.md` "Similar items"), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
   the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members; 「招待した人は
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
   一度招待すると、取り消すことはできません。」) and the 案件 field; then 「つながっているもの」 (the documents

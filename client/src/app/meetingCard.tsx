@@ -3,7 +3,7 @@
 // because features do not import each other.
 import { MeetingPanel } from '../features/minutes/components/MeetingPanel'
 import type { MeetingCardParts } from '../features/records/components/RecordCard'
-import { actOnTask } from '../features/tasks/api'
+import { actOnTask, createTask, undoTaskAction } from '../features/tasks/api'
 import { MinutesReview } from '../features/tasks/components/MinutesReview'
 
 export function renderMeetingPanel(companyId: string, meetingId: string, opts: {
@@ -18,7 +18,9 @@ export function renderMeetingPanel(companyId: string, meetingId: string, opts: {
       summary={parts.summary} outputs={parts.outputs} bundle={parts.bundle}
       renderReview={review => (
         <MinutesReview companyId={companyId} review={review} busy={false} onMeetingCard made={parts.tasks}
-          onAct={async (id, action, at, note) => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }} />
+          onAct={async (id, action, at, note) => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }}
+          onCreate={async title => { const r = await createTask(companyId, { title, meetingId }); opts.onChanged(); parts.onChanged(); return r }}
+          onUndo={async (id, at) => { const r = await undoTaskAction(companyId, id, at, at); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }} />
       )} />
   )
 }

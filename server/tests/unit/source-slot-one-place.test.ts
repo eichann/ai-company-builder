@@ -8,6 +8,8 @@
  *   plugin step's create go through it) and the decision service call `decideSlot`;
  * - the older per-meeting helpers (`findMeetingOutput`, `meetingOutputId`) are used only where listed
  *   below, each with its reason — a new AI path reaching them instead of the slot fails here.
+ * - a person's create and share get 「似ているやることがあります」 from the same module (`similarInSlot`),
+ *   and no other server module compares titles (`slotTitlesClose`): one similarity rule.
  * The behaviour itself (one candidate per quote, nothing lost): `source-slot-candidates.test.ts`.
  */
 import { describe, expect, it } from 'vitest'
@@ -53,5 +55,13 @@ describe('the source slot is decided in one place', () => {
   it('no other module derives or finds a meeting\'s output by the older helpers', () => {
     const users = files.filter(f => /\b(?:findMeetingOutput|meetingOutputId)\b/.test(f.text)).map(f => f.path).sort()
     expect(users.filter(p => !Object.prototype.hasOwnProperty.call(OLDER_HELPERS, p))).toEqual([])
+  })
+
+  it('a person’s hint comes from the slot module, and no other module compares titles', () => {
+    for (const p of ['services/record-engine/create.ts', 'services/record-engine/share.ts']) {
+      const f = files.find(x => x.path === p)
+      expect(f?.text, p).toMatch(/\bsimilarInSlot\(/)
+    }
+    expect(files.filter(f => /\bslotTitlesClose\b/.test(f.text)).map(f => f.path)).toEqual(['services/source-slot-candidates.ts'])
   })
 })

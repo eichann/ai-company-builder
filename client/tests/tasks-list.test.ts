@@ -2,11 +2,13 @@
 // .claude/rules/tasks-ui.md). Guards: each record is shown once and in the right place (a
 // request the member must accept is not 「あなたの番」 work yet, a reply they wait for is not
 // something to do now); what the row's ☑ does (task v9); the one-line add makes a task only the member sees, assigned to them; an action name
-// never reaches the server's URL as a path; records off is no list, not an error.
+// never reaches the server's URL as a path; records off is no list, not an error; a task made from a
+// meeting's card is the meeting's (never owner-only) and 「似ているやることがあります」 passes through only
+// as a record id and a title; ［まとめる］ puts the new one away by an action its state allows.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTasksApi } from '../electron/features/tasks/ipc'
-import { cameBackLine, classifyTasks, defaultWaitUntil, waitChoices, type TaskSources } from '../shared/tasks'
+import { cameBackLine, classifyTasks, defaultWaitUntil, mergeActionFor, waitChoices, type TaskSources } from '../shared/tasks'
 import type { RecordSummary } from '../../shared/types/records'
 import { turnTiming } from '../../shared/core/turn-timing'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
@@ -220,6 +222,44 @@ test('「頼む」 from the one line: shared with the department\'s readers (nev
   assert.equal(h.requests.length, before)
 })
 
+test('「やることを足す」 on a meeting: the meeting\'s task (never owner-only, no folder), and the server\'s 「似ている」 passed on checked', async () => {
+  const made = (similar: unknown) => ({ status: 201, body: { data: { record: { id: 'task-new003', state: 'todo' }, similar } } })
+  let answer = made({ id: 'task-old001', title: '見積を送る' })
+  const h = harness({ '/api/me': { status: 200, body: { data: { id: ME } } } })
+  const api = createTasksApi({
+    baseUrl: () => 'https://acb.test', cookies: () => ['session=abc'], log: { warn: () => {} },
+    fetch: (async (url: string, init: RequestInit) => {
+      h.requests.push({ url, method: String(init.method), body: init.body ? JSON.parse(String(init.body)) : undefined })
+      const a = url.endsWith('/api/me') ? { status: 200, body: { data: { id: ME } } } : answer
+      return new Response(JSON.stringify(a.body), { status: a.status })
+    }) as unknown as typeof fetch,
+  })
+  const r = await api.create('co1', { title: '見積を送る', meetingId: 'meeting-00aa11' })
+  assert.deepEqual(r, { success: true, recordId: 'task-new003', state: 'todo', similar: { id: 'task-old001', title: '見積を送る' } })
+  assert.deepEqual(h.requests.at(-1)?.body, { type: 'task', title: '見積を送る', fields: { assignee: ME }, links: { meeting: 'meeting-00aa11' } })
+  // Anything but a record id and a title is not a hint (nothing else of the server's answer reaches the screen).
+  for (const bad of [{ id: '../x', title: 'a' }, { id: 'task-old001', title: '' }, 'task-old001', null]) {
+    answer = made(bad)
+    assert.deepEqual(await api.create('co1', { title: 'x', meetingId: 'meeting-00aa11' }), { success: true, recordId: 'task-new003', state: 'todo' }, JSON.stringify(bad))
+  }
+  const before = h.requests.length
+  assert.equal((await api.create('co1', { title: 'x', meetingId: '../meeting' })).success, false)
+  assert.equal(h.requests.length, before)
+})
+
+test('［まとめる］ puts the new task away by an action its state allows (取り消す brings it back); a finished one is not offered', () => {
+  const task = coreTypeDefinitions().find(d => d.name === 'task')
+  assert.ok(task)
+  for (const state of task.states) {
+    const action = mergeActionFor(state)
+    if (task.final.includes(state)) { assert.equal(action, null, state); continue }
+    assert.ok(action, state)
+    assert.ok(task.actions[action].from?.includes(state), `${action} from ${state}`)
+  }
+  // 要らない wherever the task allows it, so a just-made one is put away, not stopped.
+  assert.equal(mergeActionFor('todo'), 'dismiss')
+})
+
 test('an action name or record id that is not one never reaches the server', async () => {
   const h = harness({})
   for (const action of ['../share', 'complete/../../x', 'Complete']) {
@@ -254,6 +294,7 @@ test('linking a file sends only a path inside the company folder; taking it away
 test('「部署に出す」 sends only a company folder at the version shown; the server\'s refusal comes back in its words', async () => {
   const h = harness({
     'POST /api/companies/co1/records/item/task-abc123/share': { status: 200, body: { data: { record: { id: 'task-abc123' } } } },
+    'POST /api/companies/co1/records/item/task-sim123/share': { status: 200, body: { data: { record: { id: 'task-sim123' }, similar: { id: 'task-old001', title: '見積を送る' } } } },
     'POST /api/companies/co1/records/item/task-old123/share': { status: 409, body: { code: 'NOT_PERSONAL', error: 'もう部署に出ています。' } },
   })
   for (const bad of ['/Users/me/会社/営業', '../営業', '営業/../../x', '']) {
@@ -262,6 +303,8 @@ test('「部署に出す」 sends only a company folder at the version shown; th
   assert.equal((await h.api.share('co1', '../task-abc123', '営業', 3)).success, false)
   assert.equal(h.requests.length, 0)
   assert.deepEqual(await h.api.share('co1', 'task-abc123', '営業', 3), { success: true, recordId: 'task-abc123' })
+  assert.deepEqual(await h.api.share('co1', 'task-sim123', '営業', 3), { success: true, recordId: 'task-sim123', similar: { id: 'task-old001', title: '見積を送る' } })
+  h.requests.pop()
   assert.deepEqual(h.requests.map(r => [r.url.replace('https://acb.test/api/companies/co1', ''), r.body]), [
     ['/records/item/task-abc123/share', { folder: '営業', expectedVersion: 3 }],
   ])

@@ -7,7 +7,9 @@
 // consultation opens only from the card's button; linking a 案件 says who will see part of it and
 // links only on ［つなぐ］ (from the question's ［はい］ too); a first discovery of many meetings shows two
 // one-line rows and 「ほか N 件」, never taking the pane from the list; the card keeps its order and says
-// each thing once (「ごちゃついてる」, 2026-11-05).
+// each thing once (「ごちゃついてる」, 2026-11-05); 「やることを足す」 makes the meeting's task and a close one
+// is only a quiet line — ［まとめる］ puts the new one away with its note and opens the earlier one,
+// ［元に戻す］ undoes that entry, ［このまま］ keeps both.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -245,4 +247,35 @@ test('a Google permission from before the Docs API: one line on the card, and it
   await page.getByRole('button', { name: '許可をし直す' }).click()
   await expect(page.locator('#log')).toContainText('google minutes')
   await expect(page.getByTestId('record-card')).toContainText('ブラウザで Google の画面を開きました')
+})
+
+test('「やることを足す」: a close item is a quiet line; ［まとめる］ puts the new one away, opens the earlier, and 元に戻す undoes it', async ({ page }) => {
+  const state = await openPreview(page, 'meetings')
+  await finish(page, 'meeting-teirei01')
+  await page.locator('[data-banner="meeting-teirei01"]').getByRole('button', { name: '見る' }).click()
+  const list = page.getByTestId('record-card').getByRole('region', { name: 'やることの案' })
+  await list.getByRole('button', { name: 'やることを足す' }).click()
+  const line = list.getByRole('textbox', { name: 'この会議のやること' })
+  // Nothing close: made, nothing said.
+  await line.fill('名刺を注文する')
+  await line.press('Enter')
+  await expect(page.locator('#log')).toContainText('create 名刺を注文する meeting=meeting-teirei01')
+  await expect(list.getByRole('note', { name: '似ているやること' })).toHaveCount(0)
+  // Close to a proposal: made all the same (never refused), then the line; no dialog.
+  await line.fill('勉強会の会場を押さえる')
+  await line.press('Enter')
+  const hint = list.getByRole('note', { name: '似ているやること' })
+  await expect(hint).toContainText('似ているやることがあります：「11月の勉強会の会場を押さえる」')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await hint.getByRole('button', { name: 'このまま' }).click()
+  await expect(hint).toHaveCount(0)
+  await line.fill('勉強会の会場を押さえる')
+  await line.press('Enter')
+  await hint.getByRole('button', { name: 'まとめる' }).click()
+  await expect(page.locator('#log')).toContainText('act task-hand0001 dismiss@1 「11月の勉強会の会場を押さえる」とまとめたため\nopen task-prop0002')
+  await expect(list.getByRole('status')).toContainText('「11月の勉強会の会場を押さえる」とまとめました')
+  await list.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#log')).toContainText('undo task-hand0001 2@2')
+  await expect(list.getByRole('status')).toHaveCount(0)
+  expectNoPageErrors(state)
 })

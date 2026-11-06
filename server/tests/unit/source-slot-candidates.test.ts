@@ -12,7 +12,11 @@
  * - every reader of the meeting may 足す・要らない・案に戻す・別のもの; a non-reader neither sees nor acts;
  *   the AI never;
  * - decisions take the same identity (meeting, quote);
- * - the task type moves to version 13 once at startup.
+ * - the task type moves to version 13 once at startup;
+ * - a person's create, or their showing an owner-only item to others, is never refused or merged: it
+ *   is only told 「似ているやることがあります」 (`similar`) about a live item of the meeting they read —
+ *   never about someone's owner-only item, a members-only one they are not on, or the shared item itself
+ *   (`similarInSlot`, its calls in record-engine/create.ts and share.ts).
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -26,7 +30,7 @@ import { createRecordEngine, createServiceRecordWriter, type RecordEngine } from
 import { createDecisionService, type DecisionService } from '../../src/services/decisions'
 import type { Member } from '../../src/services/access'
 import { TASK_VERSION } from '../../shared/core/core-types'
-import { slotTitlesClose } from '../../shared/core/source-slot-candidates'
+import { slotMergedNote, slotTitlesClose } from '../../shared/core/source-slot-candidates'
 import { parseTypeFile } from '../../shared/core/record-types'
 
 const TS = '2026-11-06T00:00:00.000Z'
@@ -154,7 +158,7 @@ describe('the identity of a candidate is (meeting, kind, quote)', () => {
     }
   })
 
-  it('a person’s create is free: not compared, never answered with another', () => {
+  it('a person’s create is free: never a candidate, never answered with another', () => {
     const a = ok(homework('u-alice', 'conv-a', '見積を送る', { quote: Q1 })).record
     const byHand = ok(engine.create(m('u-bob'), HUMAN, { type: 'task', title: '見積を送る', fields: { assignee: 'u-bob' }, links: { meeting: meetingId } }))
     expect(byHand.reused).toBeUndefined()
@@ -172,6 +176,71 @@ describe('the identity of a candidate is (meeting, kind, quote)', () => {
     expect(same.note).toContain('同じ根拠')
     const other = ok(await decide('u-bob', 'conv-b', '見積は150万円にする', Q2))
     expect([other.created, other.record.id === a.record.id]).toEqual([true, false])
+  })
+})
+
+describe('a person: 「似ているやることがあります」, a hint only (§10 step 4)', () => {
+  const byHand = (who: string, title: string, extra: Record<string, unknown> = {}) =>
+    engine.create(m(who), HUMAN, { type: 'task', title, fields: { assignee: who }, links: { meeting: meetingId }, ...extra })
+
+  it('a person’s create is made — never refused or merged — and told of a close item of the meeting they read', () => {
+    const a = ok(homework('u-alice', 'conv-a', '見積を送る', { quote: Q1 })).record
+    const made = byHand('u-bob', '見積を送る')
+    expect(made.ok).toBe(true)
+    const b = ok(made)
+    expect(b.reused).toBeUndefined()
+    expect(b.entry).not.toBeNull()
+    expect(b.record.id).not.toBe(a.id)
+    expect(b.similar).toEqual({ id: a.id, title: '見積を送る' })
+    // A hint only: nothing is marked or written on either, and the earlier one is untouched.
+    expect(b.record.fields.similar_to ?? null).toBeNull()
+    expect(stateOf(a.id)?.state).toBe('proposed')
+    expect(linkedTasks().sort()).toEqual([a.id, b.record.id].sort())
+    // A different item, or one put away, is not mentioned.
+    expect(ok(byHand('u-bob', '会場を押さえる')).similar).toBeUndefined()
+  })
+
+  it('a put-away item is not mentioned', async () => {
+    const a = ok(homework('u-alice', 'conv-a', '見積を送る', { quote: Q1 })).record
+    ok(await engine.act(m('u-alice'), HUMAN, a.id, 'dismiss', { expectedVersion: 1 }))
+    expect(ok(byHand('u-bob', '見積を送る')).similar).toBeUndefined()
+  })
+
+  it('someone’s owner-only item, and a members-only one the person is not on, are never compared or named', () => {
+    const own = ok(byHand('u-alice', '見積を送る', { personal: true })).record
+    const narrow = ok(byHand('u-alice', '見積を送る（下書き）', { members: ['u-alice'] })).record
+    // Its owner is not told of their own 「あなただけ」 item either (not in the meeting's slot); her list is.
+    expect(ok(byHand('u-alice', '見積を送る')).similar).toEqual({ id: narrow.id, title: '見積を送る（下書き）' })
+    const b = ok(byHand('u-bob', '見積を送る'))
+    expect(b.similar?.id).not.toBe(own.id)
+    expect(b.similar?.id).not.toBe(narrow.id)
+    expect(JSON.stringify(b)).not.toContain(own.id)
+    expect(JSON.stringify(b)).not.toContain(narrow.id)
+  })
+
+  it('showing an owner-only task to a department is never refused, and is told of a close item — never of itself', () => {
+    const own = ok(byHand('u-alice', '見積を送る', { personal: true })).record
+    const alone = ok(engine.share(m('u-alice'), HUMAN, own.id, { folder: '営業部', expectedVersion: 1 }))
+    expect(alone.similar).toBeUndefined()
+    const a = ok(homework('u-bob', 'conv-b', '見積を送る（修正版）', { quote: Q1 })).record
+    const mine = ok(byHand('u-alice', '修正見積を送る', { personal: true })).record
+    const shared = ok(engine.share(m('u-alice'), HUMAN, mine.id, { folder: '営業部', expectedVersion: 1 }))
+    expect(shared.record.id).toBe(mine.id)
+    // The oldest close one first: the item shared before (readable now), not the one shared here.
+    expect(shared.similar).toEqual({ id: own.id, title: '見積を送る' })
+    expect(JSON.stringify(shared)).not.toContain(a.id)
+  })
+
+  it('［まとめる］ puts the new one away with its note, and it can be taken back', async () => {
+    const a = ok(homework('u-alice', 'conv-a', '見積を送る', { quote: Q1 })).record
+    const b = ok(byHand('u-bob', '見積を送る'))
+    const note = slotMergedNote(b.similar?.title ?? '')
+    expect(note).toBe('「見積を送る」とまとめたため')
+    const away = ok(await engine.act(m('u-bob'), HUMAN, b.record.id, 'dismiss', { expectedVersion: 1, note }))
+    expect(away.record.state).toBe('dismissed')
+    expect(stateOf(a.id)?.state).toBe('proposed')
+    ok(await engine.undo(m('u-bob'), HUMAN, b.record.id, { version: 2, expectedVersion: 2 }))
+    expect(stateOf(b.record.id)?.state).toBe('todo')
   })
 })
 

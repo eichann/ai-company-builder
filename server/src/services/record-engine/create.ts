@@ -21,7 +21,7 @@ import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
 import { slotQuote } from '../../../shared/core/source-slot-candidates'
-import { decideSlot, slotScope } from '../source-slot-candidates'
+import { decideSlot, similarInSlot, slotScope } from '../source-slot-candidates'
 import { meetingMembers, membersList, withNamedPeople } from './members'
 import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
@@ -327,7 +327,8 @@ export function creating(ctx: EngineContext) {
       }
       // What an AI makes from a meeting is a candidate in the meeting's slot (出どころの枠, minutes.md
       // "Outputs made once"): the one place that decides new or already there is source-slot-candidates.
-      // A person's create is free, and so is an owner-only one (「あなただけ」 is never compared).
+      // A person's create is free (only a hint in the answer), and so is an owner-only one (「あなただけ」
+      // is never compared).
       const meetingId = def.links.meeting?.target === 'meeting' ? links.find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
       if (itemKey !== null && !meetingId) return bad('key: only for a record linked to its meeting (links.meeting)', 'KEY_NEEDS_MEETING')
       if (quote !== null && !meetingId) return bad('quote: only for a record linked to its meeting (links.meeting)', 'QUOTE_NEEDS_MEETING')
@@ -348,6 +349,9 @@ export function creating(ctx: EngineContext) {
           fields[SLOT_FIELDS.similarTo] = slot.similarTo.id
         }
         slotNote = slot.note
+      } else if (meetingId && actor.kind === 'human' && personalOwner === null) {
+        // A person's create stays free (§10): never refused or merged, only told 「似ているやることがあります」.
+        similar = similarInSlot(records, r => reader.record(r), { slot: { sourceId: meetingId, linkName: 'meeting', kind: def.name }, title: b.title as string })
       }
       // A proposal (案, task version 11): the AI's homework of a meeting, as the company says.
       const proposal = proposalOf(def.name)

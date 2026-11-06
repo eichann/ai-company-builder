@@ -3,7 +3,8 @@
 //   tasks:list    what waits for the member, the AI, others, and today's done — sorted by
 //                 client/shared/tasks.ts from the server's answers (nothing filtered here)
 //   tasks:archived  the folded 「アーカイブ」: archived tasks, newest first, 20 at a time (two queries merged)
-//   tasks:create  the list's one line: a task of the member's own (owner-only)
+//   tasks:create  the list's one line: a task of the member's own (owner-only); from a meeting's card
+//                 (`meetingId`) one of the meeting's, with the server's 「似ているやることがあります」 (`similar`)
 //   tasks:act     an action on a record (引き受ける, 完了…): the server's engine decides who may
 //   tasks:card    one task's card (what the AI prepared, actions, 経緯, its runs waiting for a person);
 //                 opening it tells the server (POST …/opened), as the record card does
@@ -15,7 +16,8 @@
 //                 taken away (records.md "Linking files later": the server checks the member reads
 //                 both, and refuses a private folder's file for a task outside it)
 //   tasks:share   「部署に出す」: the member's owner-only task shown to a department folder's readers
-//                 (records.md "Owner-only records"; the server checks the owner and the folder)
+//                 (records.md "Owner-only records"; the server checks the owner and the folder), with
+//                 the server's 「似ているやることがあります」 (`similar`) for a task from a meeting
 //   tasks:suggestTags  tags in use that fit a title: a Haiku model through the company's key, else
 //                 the app's own matching (tag-suggest.ts; only the title and the tags are sent)
 //   tasks:undo    「取り消す」 right after the member's own action (POST …/undo; the server allows
@@ -46,8 +48,8 @@ import { linkedPaths } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, TASKS_OFFLINE_TEXT,
-  type ArchivedTasksResult, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
+  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, similarOf, TASKS_OFFLINE_TEXT,
+  type ArchivedTasksResult, type SimilarItem, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
@@ -80,6 +82,12 @@ function holidaysOf(answer: Answer): string[] {
 }
 
 type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: unknown } | null } | null
+
+/** 「似ているやることがあります」: the server's `similar` (checked) added to a success, when it named one. */
+function withSimilar<T extends { success: true }>(result: T, answer: Answer): T & { similar?: SimilarItem } {
+  const similar = similarOf(answer?.json?.data)
+  return similar ? { ...result, similar } : result
+}
 
 export function createTasksApi(deps: TasksDeps) {
   const doFetch = deps.fetch ?? fetch
@@ -282,14 +290,14 @@ export function createTasksApi(deps: TasksDeps) {
       const path = typeof folder === 'string' ? fileLinkPath(folder.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/share`, { folder: path, expectedVersion })
-      return a?.status === 200 ? { success: true, recordId } : failure('share', a)
+      return a?.status === 200 ? withSimilar({ success: true, recordId }, a) : failure('share', a)
     },
 
     /** ［〇〇の人に見せる］: `toBundle` — the server takes the place of the 案件 the task links to. */
     async shareToBundle(companyId: string, recordId: string, expectedVersion: number): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/share`, { toBundle: true, expectedVersion })
-      return a?.status === 200 ? { success: true, recordId } : failure('share to bundle', a)
+      return a?.status === 200 ? withSimilar({ success: true, recordId }, a) : failure('share to bundle', a)
     },
 
     async undo(companyId: string, recordId: string, version: number, expectedVersion: number): Promise<TaskWriteResult> {
@@ -490,6 +498,7 @@ export function createTasksApi(deps: TasksDeps) {
       if (input.assignee != null && (typeof input.assignee !== 'string' || !MEMBER.test(input.assignee))) return BAD_INPUT
       if (input.whenDone != null && input.whenDone !== 'notify' && input.whenDone !== 'check') return BAD_INPUT
       if (input.bundleId != null && (typeof input.bundleId !== 'string' || !RECORD_ID_RE.test(input.bundleId))) return BAD_INPUT
+      if (input.meetingId != null && (typeof input.meetingId !== 'string' || !RECORD_ID_RE.test(input.meetingId))) return BAD_INPUT
       const folder = input.folder == null || input.folder === '' ? null : typeof input.folder === 'string' ? fileLinkPath(input.folder) : null
       if (input.folder != null && input.folder !== '' && !folder) return BAD_INPUT
       const id = await myId()
@@ -503,16 +512,21 @@ export function createTasksApi(deps: TasksDeps) {
         fields.when_done = input.whenDone ?? 'notify'
         if (input.whenDone === 'check') fields.reviewer = id
       }
+      const meetingId = input.meetingId ?? null
+      const links = { ...(input.bundleId ? { bundle: input.bundleId } : {}), ...(meetingId ? { meeting: meetingId } : {}) }
       const body = {
         type: 'task', title, fields,
         // For a 案件・プロジェクト the server gives it that 案件's 見える範囲 (records.md "A task and its
-        // 案件・プロジェクト"): no folder of the screen's then.
-        ...(asking ? (folder && !input.bundleId ? { folder } : {}) : { personal: true }),
-        ...(input.bundleId ? { links: { bundle: input.bundleId } } : {}),
+        // 案件・プロジェクト"), and from a meeting the meeting's (its people): no folder of the screen's then,
+        // and never owner-only from a meeting (its people work on it together).
+        ...(meetingId ? {} : asking ? (folder && !input.bundleId ? { folder } : {}) : { personal: true }),
+        ...(Object.keys(links).length > 0 ? { links } : {}),
       }
       const a = await call(companyId, 'POST', '/records/item', body)
-      const record = (a?.json?.data as { record?: { id?: unknown } } | undefined)?.record
-      if (a?.status === 201 && typeof record?.id === 'string') return { success: true, recordId: record.id }
+      const record = (a?.json?.data as { record?: { id?: unknown; state?: unknown } } | undefined)?.record
+      if (a?.status === 201 && typeof record?.id === 'string') {
+        return withSimilar({ success: true, recordId: record.id, ...(typeof record.state === 'string' ? { state: record.state } : {}) }, a)
+      }
       return failure('create', a)
     },
 

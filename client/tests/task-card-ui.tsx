@@ -8,6 +8,7 @@
 // チームの進め方 on; `?task=todo-own`: the member's own task with チームの進め方 off (返事待ちにする still in 「…」). The wait tests install the page clock (Mon 11-02 or Sat 11-07).
 // `?task=unassigned`: a task the member asked with nobody holding it (「自分が担当する」 heads the 「…」, 「終わったら」, アーカイブ);
 // `?task=archived`: the same task archived (［戻す］, 経緯 「佐藤さんがアーカイブしました」).
+// `?similar=1`: 部署に出す answers 「似ているやることがあります」 (the server's `similar`).
 // The owner-only task links a note in a `.personal/` folder (on this Mac); ［＋ 新しいファイル］ makes one through the
 // screen's `createTodayFile` (`today <name>` in `#acted`, 「既存.md」 answers a taken name), and `file.open` is logged as `open <path>`.
 import { createRoot } from 'react-dom/client'
@@ -157,7 +158,10 @@ installElectronAPI({
   unlinkFileFromTask: async (_c, recordId, companyPath, version) => { show('acted', `unlink ${companyPath}@${version}`); return { success: true, recordId } },
   exists: async (path: string) => path.endsWith('打ち合わせメモ.md'),
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
-  shareTask: async (_c, recordId, folder, version) => { show('acted', `share ${folder}@${version}`); return { success: true, recordId } },
+  shareTask: async (_c, recordId, folder, version) => {
+    show('acted', `share ${folder}@${version}`)
+    return { success: true, recordId, ...(params.get('similar') === '1' ? { similar: { id: 'task-other01', title: 'A社に見積を送る' } } : {}) }
+  },
   getPrivateFolderCreateContext: async () => ({ success: true, context: { role: 'member', managedDepartmentIds: rights === 'manager' ? ['d-dev'] : [], department: null, managerIds: [], members: [] } }),
   createPrivateFolder: async (_c, input) => { show('acted', `private ${input.parentPath}/${input.name}`); return { success: true, scopeId: 'scope-1', path: `${input.parentPath}/${input.name}`, viewerCount: 3 } },
   shareTaskToBundle: async (_c, recordId, version) => { show('acted', `share to bundle@${version}`); return { success: true, recordId } },
@@ -167,6 +171,7 @@ installElectronAPI({
 
 commands.register('file.open', ({ path }) => { show('acted', `open ${path}`) })
 commands.register('folder.reveal', ({ path }) => { show('acted', `reveal ${path}`) })
+commands.register('record.open', ({ recordId }) => { show('acted', `open ${recordId}`) })
 const TODAY = '営業/.personal/inbox/日付別/2026/20261103'
 const createTodayFile = async (name: string) => {
   show('acted', `today ${name}`)

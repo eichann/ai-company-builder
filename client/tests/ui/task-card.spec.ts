@@ -114,6 +114,18 @@ test('「部署に出す」 on an owner-only task sends the chosen department; a
   await expect(page.locator('#acted')).toHaveText('share 経理@3')
   expectNoPageErrors(state)
 
+  // A close item of the same meeting: one quiet line; ［まとめる］ puts this one away (取り消す after) and opens the other.
+  const similarState = await openPreview(page, 'task-card', { similar: '1' })
+  await page.getByRole('button', { name: '部署に出す' }).click()
+  await page.getByRole('group', { name: '部署に出す' }).getByLabel('出す先の部署').selectOption({ label: '経理部' })
+  await page.getByRole('button', { name: 'この部署に出す' }).click()
+  const hint = page.getByRole('note', { name: '似ているやること' })
+  await expect(hint).toContainText('似ているやることがあります：「A社に見積を送る」')
+  await hint.getByRole('button', { name: 'まとめる' }).click()
+  await expect(page.locator('#acted')).toHaveText('share 経理@3,dismiss@3:「A社に見積を送る」とまとめたため,open task-other01')
+  await expect(page.getByRole('button', { name: '取り消す' })).toBeVisible()
+  expectNoPageErrors(similarState)
+
   const sharedState = await openPreview(page, 'task-card', { shared: '1' })
   await expect(page.getByTestId('task-card')).toContainText('A社 見積書')
   await expect(page.getByRole('button', { name: '部署に出す' })).toHaveCount(0)
@@ -402,6 +414,18 @@ test('［〇〇の人に見せる］ on a task only the member sees that belongs
   await form.getByRole('button', { name: '見せる' }).click()
   await expect(page.locator('#acted')).toHaveText('share to bundle@3')
   expectNoPageErrors(state)
+
+  // A close item of the same meeting: one quiet line; ［まとめる］ puts this one away (取り消す after) and opens the other.
+  const similarState = await openPreview(page, 'task-card', { similar: '1' })
+  await page.getByRole('button', { name: '部署に出す' }).click()
+  await page.getByRole('group', { name: '部署に出す' }).getByLabel('出す先の部署').selectOption({ label: '経理部' })
+  await page.getByRole('button', { name: 'この部署に出す' }).click()
+  const hint = page.getByRole('note', { name: '似ているやること' })
+  await expect(hint).toContainText('似ているやることがあります：「A社に見積を送る」')
+  await hint.getByRole('button', { name: 'まとめる' }).click()
+  await expect(page.locator('#acted')).toHaveText('share 経理@3,dismiss@3:「A社に見積を送る」とまとめたため,open task-other01')
+  await expect(page.getByRole('button', { name: '取り消す' })).toBeVisible()
+  expectNoPageErrors(similarState)
 
   const sharedState = await openPreview(page, 'task-card', { shared: '1' })
   await expect(page.getByTestId('task-card')).toContainText('A社 見積書')
