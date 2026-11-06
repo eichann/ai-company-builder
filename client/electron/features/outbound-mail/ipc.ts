@@ -5,13 +5,27 @@
 //   outboundMail:recipients     its verified recipients (sources, typed ones included)
 //   outboundMail:update         a new version (the person's edit)
 //   outboundMail:addRecipient   「あなたが入力」 an address
-//   outboundMail:send           「確かめて送る」 with the hash of the version shown (+ 「返事を待つ」's day)
+//   outboundMail:send           「確かめて送る」 with the hash of the version shown (+ 「返事を待つ」's day,
+//                               + the files shown: outbound-mail.md "Attachments")
 //   outboundMail:resolve        送られていた／送られていなかった after an unknown send
 //   outboundMail:discard        「捨てる」
+//   outboundMail:openAttachment 「開いて確かめる」: the stored PDF downloaded with the session into a
+//                               temporary folder and opened with the OS viewer (the bytes never reach
+//                               the renderer; the session never leaves main)
+//   outboundMail:removeAttachment 「外す」: a new version without that file
 
-import { MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isAwaitReply, isContentHash, type MailAwaitReply, type MailDraftEdit, type OutboundMailResult } from '../../../shared/outbound-mail'
+import { createHash, randomBytes } from 'crypto'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { looksLikePdf, sanitizeAttachmentName } from '../../../../shared/core/mail'
+import {
+  MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isAttachmentId, isAwaitReply, isContentHash, isShownAttachments,
+  type MailAttachmentOpenResult, type MailAwaitReply, type MailDraftEdit, type OutboundMailResult,
+} from '../../../shared/outbound-mail'
 import type { MailRecipientsView, MailRecipientView, OutboundMailView } from '../../../../shared/types/outbound-mail'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import type { DesktopShell } from '../ports'
 
 export interface OutboundMailDeps {
   baseUrl: () => string
@@ -20,7 +34,15 @@ export interface OutboundMailDeps {
   log?: Pick<Console, 'warn'>
   /** Per request (default 60 s: a send re-reads the calendar and HubSpot, then Gmail). */
   timeoutMs?: number
+  /** 「開いて確かめる」 hands the saved PDF to the OS viewer. */
+  shell?: Pick<DesktopShell, 'openPath'>
+  /** Where opened files are saved (default: `<os temp>/acb-mail-files`); older ones are cleared. */
+  filesDir?: () => string
+  now?: () => number
 }
+
+/** Opened files older than this are removed the next time a file is opened. */
+const OPENED_FILE_TTL_MS = 24 * 60 * 60 * 1000
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const REF = /^r[0-9a-f]{24}$/
@@ -34,7 +56,64 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
   const doFetch = deps.fetch ?? fetch
   const log = deps.log ?? console
 
-  async function request(companyId: string, messageId: string, method: 'GET' | 'POST' | 'PUT', suffix: string, body?: unknown, needsDraft = true): Promise<OutboundMailResult> {
+  /**
+   * 「開いて確かめる」: the bytes the server will send, fetched with the session, checked (a PDF whose
+   * sha256 is the one asked for), saved under a fresh folder of the temp directory and opened with the
+   * OS viewer. Nothing of the file reaches the renderer.
+   */
+  async function openAttachment(companyId: string, messageId: string, sha256: string): Promise<MailAttachmentOpenResult> {
+    const refused = { success: false as const, offline: false, error: 'ファイルを開けませんでした。' }
+    if (!COMPANY.test(companyId) || !MESSAGE_ID_RE.test(messageId) || !isAttachmentId(sha256) || !deps.shell) return refused
+    const base = deps.baseUrl().replace(/\/+$/, '')
+    const cookies = deps.cookies()
+    if (!base || cookies.length === 0) return { success: false, offline: true, error: OUTBOUND_MAIL_OFFLINE_TEXT }
+    let res: Response
+    try {
+      res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/outbound/${messageId}/attachments/${sha256}`, {
+        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(deps.timeoutMs ?? 60_000), headers: { Cookie: cookies.join('; ') },
+      })
+    } catch {
+      log.warn('[outbound-mail] attachment: the server could not be reached')
+      return { success: false, offline: true, error: OUTBOUND_MAIL_OFFLINE_TEXT }
+    }
+    if (!res.ok) {
+      const json = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null
+      log.warn(`[outbound-mail] attachment: answered ${res.status}${typeof json?.code === 'string' ? ` ${json.code}` : ''}`)
+      return { success: false, offline: res.status >= 500, error: typeof json?.error === 'string' && res.status < 500 ? json.error : refused.error }
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer().catch(() => new ArrayBuffer(0)))
+    if (!looksLikePdf(bytes) || createHash('sha256').update(bytes).digest('hex') !== sha256) return refused
+    const name = sanitizeAttachmentName(nameFromDisposition(res.headers.get('content-disposition'))) ?? 'file.pdf'
+    try {
+      const root = deps.filesDir?.() ?? path.join(os.tmpdir(), 'acb-mail-files')
+      clearOld(root)
+      const dir = path.join(root, randomBytes(8).toString('hex'))
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+      const file = path.join(dir, name)
+      fs.writeFileSync(file, bytes, { mode: 0o600 })
+      const problem = await deps.shell.openPath(file)
+      if (problem) { log.warn('[outbound-mail] attachment: the viewer did not open'); return refused }
+      return { success: true }
+    } catch {
+      log.warn('[outbound-mail] attachment: could not be saved')
+      return refused
+    }
+  }
+
+  /** Folders of files opened more than a day ago (best effort). */
+  function clearOld(root: string) {
+    const now = deps.now?.() ?? Date.now()
+    let entries: string[] = []
+    try { entries = fs.readdirSync(root) } catch { return }
+    for (const e of entries) {
+      try {
+        const p = path.join(root, e)
+        if (now - fs.statSync(p).mtimeMs > OPENED_FILE_TTL_MS) fs.rmSync(p, { recursive: true, force: true })
+      } catch { /* in use: next time */ }
+    }
+  }
+
+  async function request(companyId: string, messageId: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', suffix: string, body?: unknown, needsDraft = true): Promise<OutboundMailResult> {
     if (!COMPANY.test(companyId) || !MESSAGE_ID_RE.test(messageId)) return BAD
     const base = deps.baseUrl().replace(/\/+$/, '')
     const cookies = deps.cookies()
@@ -90,12 +169,21 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
       if (typeof email !== 'string' || email.length > 254 || (name !== undefined && (typeof name !== 'string' || name.length > 100))) return Promise.resolve(BAD)
       return request(companyId, messageId, 'POST', '/recipients', { email, ...(name ? { name } : {}) })
     },
-    send(companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null) {
+    send(companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null) {
       if (!isContentHash(hash)) return Promise.resolve(BAD)
       // 「返事を待つ」: a day only (the server checks it is today … 180 days ahead); anything else never leaves.
       if (awaitReply !== undefined && awaitReply !== null && !isAwaitReply(awaitReply)) return Promise.resolve(BAD)
-      return request(companyId, messageId, 'POST', '/send', { hash, ...(awaitReply ? { awaitReply: { until: awaitReply.until } } : {}) })
+      // The files the card showed: their sha256 only (the server sends a version with files only when it gets them).
+      if (attachmentsShown !== undefined && attachmentsShown !== null && !isShownAttachments(attachmentsShown)) return Promise.resolve(BAD)
+      return request(companyId, messageId, 'POST', '/send', {
+        hash, ...(awaitReply ? { awaitReply: { until: awaitReply.until } } : {}), ...(attachmentsShown && attachmentsShown.length > 0 ? { attachmentsShown: [...attachmentsShown] } : {}),
+      })
     },
+    removeAttachment(companyId: string, messageId: string, sha256: string, expectedVersion: number) {
+      if (!isAttachmentId(sha256) || !Number.isInteger(expectedVersion) || expectedVersion < 1) return Promise.resolve(BAD)
+      return request(companyId, messageId, 'DELETE', `/attachments/${sha256}?expectedVersion=${expectedVersion}`)
+    },
+    openAttachment,
     resolve(companyId: string, messageId: string, sent: boolean) {
       if (typeof sent !== 'boolean') return Promise.resolve(BAD)
       return request(companyId, messageId, 'POST', '/resolve', { sent })
@@ -104,13 +192,22 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
   }
 }
 
+/** The file name of `Content-Disposition: attachment; filename*=UTF-8''…` (then made plain again by the caller). */
+function nameFromDisposition(header: string | null): string | null {
+  const m = header ? /filename\*=UTF-8''([^;\s]+)/i.exec(header) : null
+  if (!m) return null
+  try { return decodeURIComponent(m[1]) } catch { return null }
+}
+
 export function registerOutboundMailIpc(ipc: IpcRegistrar, deps: OutboundMailDeps) {
   const api = createOutboundMailApi(deps)
   ipc.handle('outboundMail:get', (_event, companyId, messageId) => api.get(companyId, messageId))
   ipc.handle('outboundMail:recipients', (_event, companyId, messageId) => api.recipients(companyId, messageId))
   ipc.handle('outboundMail:update', (_event, companyId, messageId, edit, conversationId) => api.update(companyId, messageId, edit, conversationId))
   ipc.handle('outboundMail:addRecipient', (_event, companyId, messageId, email, name) => api.addRecipient(companyId, messageId, email, name))
-  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash, awaitReply) => api.send(companyId, messageId, hash, awaitReply))
+  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash, awaitReply, attachmentsShown) => api.send(companyId, messageId, hash, awaitReply, attachmentsShown))
+  ipc.handle('outboundMail:openAttachment', (_event, companyId, messageId, sha256) => api.openAttachment(companyId, messageId, sha256))
+  ipc.handle('outboundMail:removeAttachment', (_event, companyId, messageId, sha256, expectedVersion) => api.removeAttachment(companyId, messageId, sha256, expectedVersion))
   ipc.handle('outboundMail:resolve', (_event, companyId, messageId, sent) => api.resolve(companyId, messageId, sent))
   ipc.handle('outboundMail:discard', (_event, companyId, messageId) => api.discard(companyId, messageId))
 }

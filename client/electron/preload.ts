@@ -215,9 +215,11 @@ const api: ElectronAPI = {
   getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),
   updateOutboundMail: (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string) => invoke('outboundMail:update', companyId, messageId, edit, conversationId),
   addOutboundMailRecipient: (companyId: string, messageId: string, email: string, name?: string) => invoke('outboundMail:addRecipient', companyId, messageId, email, name),
-  sendOutboundMail: (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null) => invoke('outboundMail:send', companyId, messageId, hash, awaitReply),
+  sendOutboundMail: (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null) => invoke('outboundMail:send', companyId, messageId, hash, awaitReply, attachmentsShown),
   resolveOutboundMail: (companyId: string, messageId: string, sent: boolean) => invoke('outboundMail:resolve', companyId, messageId, sent),
   discardOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:discard', companyId, messageId),
+  openOutboundMailAttachment: (companyId: string, messageId: string, sha256: string) => invoke('outboundMail:openAttachment', companyId, messageId, sha256),
+  removeOutboundMailAttachment: (companyId: string, messageId: string, sha256: string, expectedVersion: number) => invoke('outboundMail:removeAttachment', companyId, messageId, sha256, expectedVersion),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

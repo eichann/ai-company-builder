@@ -5,7 +5,7 @@
  * in `fixed_payloads` (owner kind `outbound_message`); the state lives in the
  * company map (record type `outbound_message`).
  */
-import type { RecipientSource } from '../../shared/core/mail'
+import type { MailAttachment, RecipientSource } from '../../shared/core/mail'
 
 export interface OutboundRecipientRow {
   ref: string
@@ -37,8 +37,22 @@ export interface OutboundVersionRow {
   version: number
   to: OutboundRecipientRow[]
   cc: OutboundRecipientRow[]
+  /** The PDFs of this version, in order (none for versions made before attachments). */
+  attachments?: MailAttachment[]
   actorKind: 'human' | 'ai'
   createdAt: string
+}
+
+/** A stored attachment of a draft (one per distinct file); `bytes` null once deleted. */
+export interface OutboundAttachmentRow {
+  messageId: string
+  sha256: string
+  name: string
+  size: number
+  bytes: Uint8Array | null
+  addedBy: string
+  addedAt: string
+  bytesDeletedAt: string | null
 }
 
 export type OutboundSendOutcome = 'sending' | 'sent' | 'unknown' | 'not-sent' | 'refused'
@@ -68,6 +82,15 @@ export interface OutboundMailRepository {
 
   insertVersion(row: OutboundVersionRow): void
   version(messageId: string, version: number): OutboundVersionRow | null
+
+  /** Keeps a file's bytes for a draft (once per sha256; a row whose bytes were deleted gets them again). */
+  putAttachment(row: { messageId: string; sha256: string; name: string; size: number; bytes: Uint8Array; addedBy: string; addedAt: string }): void
+  /** A stored file of a draft (with its bytes, null once deleted), or null. */
+  attachment(messageId: string, sha256: string): OutboundAttachmentRow | null
+  /** The sha256 of a draft's files whose bytes were deleted. */
+  deletedAttachmentBytes(messageId: string): string[]
+  /** Deletes the bytes of a draft's files, except those named in `keep`; the rows stay. Returns how many. */
+  deleteAttachmentBytes(messageId: string, at: string, keep?: readonly string[]): number
 
   /** Addresses a person typed for this draft (「あなたが入力」). */
   typedRecipients(messageId: string): OutboundRecipientRow[]

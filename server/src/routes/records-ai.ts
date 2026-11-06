@@ -32,6 +32,8 @@
  *   POST /outbound                        a mail draft (act; mail_draft_create)
  *   GET  /outbound/:messageId             the member's own draft (read; mail_draft_show)
  *   PUT  /outbound/:messageId             a new version of it (act; mail_draft_update)
+ *   POST /outbound/:messageId/attachments a PDF attached (act; the tools' `attachments`)
+ *   DELETE /outbound/:messageId/attachments/:sha256   a file taken off (act)
  *   There is deliberately no send, resolve, discard or typed address here
  *   (outbound-mail.md): sending reaches outside and is a person's, with their session.
  *
@@ -55,6 +57,7 @@ import type { Outcome } from '../services/outcome'
 import type { Member } from '../services/access'
 import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
+import { attachmentBodyLimit } from './mail-attachments'
 import { aiActs, aiReads, serviceBody } from './guards'
 
 export const recordsAiRoute = new Hono()
@@ -230,4 +233,20 @@ recordsAiRoute.put('/outbound/:messageId', aiActs, serviceBody, async (c) => {
   const h = c.var.holder
   const body = c.var.body
   return keyedWrite(c, h, 'mail-draft-version', body, async () => answer(c, await outboundMail.update(h.member, aiActor(h), c.req.param('messageId'), body)))
+})
+
+// The PDF a company Skill wrote, attached by the AI (outbound-mail.md "Attachments"). It still cannot
+// send, and it cannot download a file: the person opens it from the card with their session.
+recordsAiRoute.post('/outbound/:messageId/attachments', aiActs, attachmentBodyLimit, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
+  return keyedWrite(c, h, 'mail-draft-version', body, async () => answer(c, outboundMail.attach(h.member, aiActor(h), c.req.param('messageId'), body)))
+})
+
+recordsAiRoute.delete('/outbound/:messageId/attachments/:sha256', aiActs, async (c) => {
+  const h = c.var.holder
+  const sha256 = c.req.param('sha256')
+  const expected = c.req.query('expectedVersion')
+  return keyedWrite(c, h, 'mail-draft-version', { sha256, expectedVersion: expected ?? null }, async () =>
+    answer(c, outboundMail.detach(h.member, aiActor(h), c.req.param('messageId'), sha256, expected)))
 })

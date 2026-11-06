@@ -39,11 +39,31 @@ const asking: OutboundMailView = {
   linkCount: 0, cc: [], to: [draft.to[0]], awaitReply: { expected: true, defaultUntil: '2099-01-07', chosenUntil: null },
 }
 const askingCard: MailDraftCard = { ...card, id: 'card-2', draft: asking }
+// A proposal with two PDFs the AI attached (outbound-mail.md "Attachments").
+const PROPOSAL = 'c'.repeat(64)
+const ESTIMATE = 'd'.repeat(64)
+const withFiles: OutboundMailView = {
+  ...draft, id: 'outbound_message-0a1b2c3d4e5f6789', subject: '提案書のご送付', body: '鈴木様\n\n提案書をお送りします。\n', linkCount: 0, cc: [], to: [draft.to[0]],
+  version: 3, hash: `sha256:${'f0'.repeat(32)}`, awaitReply: undefined,
+  attachments: [
+    { name: '提案書（株式会社サンプル様）.pdf', size: 1_250_000, sha256: PROPOSAL, bytesDeleted: false },
+    { name: '別紙_見積.pdf', size: 52_000, sha256: ESTIMATE, bytesDeleted: false },
+  ],
+}
+const filesCard: MailDraftCard = { ...card, id: 'card-3', draft: withFiles }
+const afterRemoval: OutboundMailView = { ...withFiles, version: 4, hash: `sha256:${'f1'.repeat(32)}`, attachments: [withFiles.attachments![0]] }
 
-let report: (hash: string, awaitReply: string) => void = () => {}
+let report: (hash: string, awaitReply: string, shown?: string) => void = () => {}
+let opened: (sha256: string) => void = () => {}
 installElectronAPI({
-  sendOutboundMail: async (_companyId, messageId, hash, awaitReply) => {
-    report(hash, JSON.stringify(awaitReply ?? null))
+  openOutboundMailAttachment: async (_companyId, _messageId, sha256) => { opened(sha256); return { success: true } },
+  removeOutboundMailAttachment: async (_companyId, _messageId, sha256, expectedVersion) => (
+    sha256 === ESTIMATE && expectedVersion === withFiles.version
+      ? { success: true, draft: afterRemoval }
+      : { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの変更が先にありました。' }),
+  sendOutboundMail: async (_companyId, messageId, hash, awaitReply, attachmentsShown) => {
+    report(hash, JSON.stringify(awaitReply ?? null), JSON.stringify(attachmentsShown ?? null))
+    if (messageId === withFiles.id) return { success: true, outcome: 'sent', draft: { ...afterRemoval, state: 'sent', sentAt: '2026-11-05T06:52:00Z', providerMessageId: 'gm-2' } }
     const shown = messageId === asking.id ? asking : draft
     return {
       success: true, outcome: 'sent',
@@ -57,19 +77,25 @@ const message: UIMessage = {
   parts: [
     { type: 'text', text: 'お礼メールの下書きを作りました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-1', data: card },
     { type: 'text', text: 'お見積りのメールも用意しました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-2', data: askingCard },
+    { type: 'text', text: '提案書を付けたメールです。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-3', data: filesCard },
   ] as UIMessage['parts'],
 }
 
 function Preview() {
   const [received, setReceived] = useState<string | null>(null)
   const [awaited, setAwaited] = useState<string | null>(null)
-  report = (hash, awaitReply) => { setReceived(hash); setAwaited(awaitReply) }
+  const [files, setFiles] = useState<string | null>(null)
+  const [openedFile, setOpenedFile] = useState<string | null>(null)
+  report = (hash, awaitReply, shown) => { setReceived(hash); setAwaited(awaitReply); setFiles(shown ?? null) }
+  opened = setOpenedFile
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。本番のメールは送りません。</p>
       <section className="mx-auto max-w-xl"><AssistantMessageParts parts={message.parts} isStreaming={false} markdown /></section>
       {received !== null && <p aria-label="受け取った印">{received}</p>}
       {awaited !== null && <p aria-label="受け取った返事待ち">{awaited}</p>}
+      {files !== null && <p aria-label="受け取ったファイル">{files}</p>}
+      {openedFile !== null && <p aria-label="開いたファイル">{openedFile}</p>}
     </main>
   )
 }

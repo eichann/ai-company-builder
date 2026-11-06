@@ -1,11 +1,11 @@
 // The mail card keeps its view / edit / confirm steps in one component: they share the draft
 // shown and the hash the send carries, and splitting them would pass that state around.
 import { memo, useState } from 'react'
-import { CheckCircle, EnvelopeSimple, LinkSimple, Robot, Warning } from '@phosphor-icons/react'
+import { CheckCircle, EnvelopeSimple, FilePdf, LinkSimple, Robot, Warning } from '@phosphor-icons/react'
 import {
-  MAIL_STATE_LABELS, MAIL_WORDS, awaitDayLabel, recipientLine, type MailDraftCard as Card, type OutboundMailResult,
+  MAIL_STATE_LABELS, MAIL_WORDS, awaitDayLabel, fileSizeLabel, recipientLine, type MailDraftCard as Card, type OutboundMailResult,
 } from '../../../../shared/outbound-mail'
-import type { MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
+import type { MailAttachmentView, MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
 import { mailOutbound, type MailOutbound } from '../api'
 
 type Step = 'view' | 'edit' | 'confirm'
@@ -28,6 +28,32 @@ function RecipientList({ label, list }: { label: string; list: MailRecipientView
         {list.map(r => <li key={r.ref} className="ml-1 inline-block text-gray-800 dark:text-zinc-200">
           {recipientLine(r)}
           {r.firstTime && <span className="ml-1 rounded bg-amber-100 px-1 text-[11px] text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">{MAIL_WORDS.firstTime}</span>}
+        </li>)}
+      </ul>
+    </div>
+  )
+}
+
+/**
+ * The PDFs that go with the mail: each one's name and size, 「開いて確かめる」 (the very bytes that
+ * will be sent, opened in the computer's viewer) and, on a draft, 「外す」 (a new version).
+ */
+function AttachmentList({ files, busy, onOpen, onRemove }: {
+  files: readonly MailAttachmentView[]; busy: boolean; onOpen: (f: MailAttachmentView) => void; onRemove: ((f: MailAttachmentView) => void) | null
+}) {
+  if (files.length === 0) return null
+  return (
+    <div className="mt-2 text-xs">
+      <p className="text-gray-500 dark:text-zinc-400">{MAIL_WORDS.attachments}</p>
+      <ul aria-label={MAIL_WORDS.attachments} className="mt-1 space-y-1">
+        {files.map(f => <li key={f.sha256} className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-2 py-1 dark:bg-zinc-900">
+          <FilePdf size={14} aria-hidden className="text-red-600" />
+          <span className="font-medium text-gray-800 dark:text-zinc-200">{f.name}</span>
+          <span className="text-gray-500 dark:text-zinc-400">{fileSizeLabel(f.size)}</span>
+          {f.bytesDeleted
+            ? <span className="text-gray-500 dark:text-zinc-400">{MAIL_WORDS.attachmentGone}</span>
+            : <button type="button" className={BUTTON} disabled={busy} aria-label={`${f.name}を${MAIL_WORDS.openAttachment}`} onClick={() => onOpen(f)}>{MAIL_WORDS.openAttachment}</button>}
+          {onRemove && <button type="button" className={BUTTON} disabled={busy} aria-label={`${f.name}を${MAIL_WORDS.removeAttachment}`} onClick={() => onRemove(f)}>{MAIL_WORDS.removeAttachment}</button>}
         </li>)}
       </ul>
     </div>
@@ -138,7 +164,9 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     setStep('confirm')
   }
   const waitChoice = offer && awaitOn ? { until: awaitDay } : null
-  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash, waitChoice), r => {
+  const files = draft.attachments ?? []
+  // The files this card shows go with the send, so the server knows the person saw them.
+  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash, waitChoice, files.map(f => f.sha256)), r => {
     setDraft(r.draft)
     setStep('view')
     setNotice(r.outcome === 'unknown' ? { tone: 'warn', text: r.message ?? MAIL_WORDS.unknown } : { tone: 'ok', text: slack ? MAIL_WORDS.slackSent : 'メールを送りました。' })
@@ -148,6 +176,21 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
     setNotice(sent ? { tone: 'ok', text: '送られていたと記録しました。' } : { tone: 'ok', text: '下書きに戻しました。送るときは、もう一度「確かめて送る」を押してください。' })
   })
   const discard = () => run(() => outbound.discardOutboundMail(card.companyId, draft.id), r => setDraft(r.draft))
+  const openFile = async (f: MailAttachmentView) => {
+    if (busy) return
+    setBusy(true)
+    setNotice(null)
+    try {
+      const r = await outbound.openOutboundMailAttachment(card.companyId, draft.id, f.sha256)
+      setNotice(r.success ? { tone: 'ok', text: MAIL_WORDS.attachmentOpened } : { tone: r.offline ? 'warn' : 'error', text: r.error })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const removeFile = (f: MailAttachmentView) => run(() => outbound.removeOutboundMailAttachment(card.companyId, draft.id, f.sha256, draft.version), r => {
+    setDraft(r.draft)
+    setNotice({ tone: 'ok', text: `「${f.name}」を外しました。` })
+  })
   const consent = async () => {
     setBusy(true)
     try {
@@ -202,6 +245,8 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
         <>
           {step === 'confirm' && <p className="mt-2 text-xs font-medium text-gray-900 dark:text-zinc-100">{MAIL_WORDS.confirmTitle}</p>}
           <MailContent draft={draft} />
+          <AttachmentList files={files} busy={busy} onOpen={f => void openFile(f)} onRemove={draft.state === 'draft' && step === 'view' ? f => void removeFile(f) : null} />
+          {step === 'confirm' && files.length > 0 && <p className="mt-1 text-[11px] text-gray-600 dark:text-zinc-400">{MAIL_WORDS.attachmentsConfirm}</p>}
         </>
       )}
 

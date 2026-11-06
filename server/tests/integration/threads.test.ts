@@ -302,6 +302,9 @@ describe('a mail reply into the member\'s own conversation', () => {
     // The card lists it as Sato's reply; nobody else sees the 連絡 at all.
     const t = await person('th-sato', 'GET', `/threads/${mailInteraction}`)
     expect(t.body.data.thread.replies).toEqual([{ id: draftId, state: 'draft', channel: 'email' }])
+    // Files go only on a new mail (outbound-mail.md "Attachments"): a reply in a thread takes none.
+    const file = await person('th-sato', 'POST', `/outbound/${draftId}/attachments`, { expectedVersion: 1, name: '提案書.pdf', contentBase64: Buffer.from('%PDF-1.7 x').toString('base64') })
+    expect([file.status, file.body.code]).toEqual([400, 'ATTACHMENT_NOT_HERE'])
   })
 
   it('「確かめて送る」: into the same Gmail thread, with In-Reply-To / References; no new やりとり; the inbox hears it', async () => {
@@ -330,6 +333,8 @@ describe('a Slack reply into the thread', () => {
     expect(made.status, made.text).toBe(201)
     expect(made.body.data.draft).toMatchObject({ channel: 'slack', interactionId: chatInteraction, to: [], cc: [], subject: '' })
     draftId = made.body.data.draft.id
+    const file = await person('th-sato', 'POST', `/outbound/${draftId}/attachments`, { expectedVersion: 1, name: '提案書.pdf', contentBase64: Buffer.from('%PDF-1.7 x').toString('base64') })
+    expect([file.status, file.body.code]).toEqual([400, 'ATTACHMENT_NOT_HERE'])
   })
 
   it('返事を送る off: nothing posted; on: posted once into the thread as the member', async () => {

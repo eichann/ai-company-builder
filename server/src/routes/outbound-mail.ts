@@ -12,7 +12,10 @@
  *   PUT  /outbound/:messageId               a new version
  *   GET  /outbound/:messageId/recipients    the draft's candidates (typed ones included)
  *   POST /outbound/:messageId/recipients    「あなたが入力」 an address
- *   POST /outbound/:messageId/send          「確かめて送る」 { hash }
+ *   POST /outbound/:messageId/attachments   a PDF attached (JSON, the bytes as base64) → a new version
+ *   DELETE /outbound/:messageId/attachments/:sha256?expectedVersion=N   a file taken off → a new version
+ *   GET  /outbound/:messageId/attachments/:sha256   the file's bytes (the person opens what will be sent)
+ *   POST /outbound/:messageId/send          「確かめて送る」 { hash, awaitReply?, attachmentsShown? }
  *   POST /outbound/:messageId/resolve       { sent } after an unknown send
  *   POST /outbound/:messageId/discard       「捨てる」
  *
@@ -27,6 +30,7 @@ import type { Outcome } from '../services/outcome'
 import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 import { companyMember, serviceBody } from './guards'
+import { attachmentAnswer, attachmentBodyLimit } from './mail-attachments'
 
 export const outboundMailRoute = new Hono()
 const { outboundMail } = services
@@ -70,6 +74,22 @@ outboundMailRoute.get('/outbound/:messageId/recipients', companyMember, async (c
 outboundMailRoute.post('/outbound/:messageId/recipients', companyMember, serviceBody, async (c) => {
   const m = c.var.member
   return answer(c, outboundMail.addTyped(m, c.req.param('messageId'), c.var.body))
+})
+
+outboundMailRoute.post('/outbound/:messageId/attachments', companyMember, attachmentBodyLimit, serviceBody, async (c) => {
+  const m = c.var.member
+  const body = c.var.body
+  return answer(c, outboundMail.attach(m, humanWith(body), c.req.param('messageId'), body))
+})
+
+outboundMailRoute.delete('/outbound/:messageId/attachments/:sha256', companyMember, async (c) => {
+  const m = c.var.member
+  return answer(c, outboundMail.detach(m, { kind: 'human' }, c.req.param('messageId'), c.req.param('sha256'), c.req.query('expectedVersion')))
+})
+
+outboundMailRoute.get('/outbound/:messageId/attachments/:sha256', companyMember, async (c) => {
+  const m = c.var.member
+  return attachmentAnswer(c, outboundMail.attachmentFile(m, c.req.param('messageId'), c.req.param('sha256')))
 })
 
 outboundMailRoute.post('/outbound/:messageId/send', companyMember, serviceBody, async (c) => {

@@ -49,7 +49,7 @@ export interface RecordsApiDeps {
 export interface RecordTurnAccess {
   scope: 'read' | 'act'
   /** `timeoutMs`: this request's own limit (default the API's; a Drive upload takes longer). */
-  call(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
+  call(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal, opts?: { timeoutMs?: number }): Promise<unknown>
   /** Revoke the token (the turn ended). */
   close(): Promise<void>
 }
@@ -129,7 +129,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       const conversationId = opts.conversationId
       const tokenId = data.tokenId
       let closed = false
-      const send = (method: 'GET' | 'POST' | 'PUT', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
+      const send = (method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body: unknown, signal?: AbortSignal, ownTimeoutMs?: number) => request(`${root}/api/records-ai${path}`, {
         method,
         headers: {
           Authorization: `Bearer ${token}`,
