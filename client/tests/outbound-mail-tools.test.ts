@@ -145,6 +145,29 @@ test('the card\'s send goes with the session and carries exactly the hash shown;
   assert.equal(seen.length, 2)
 })
 
+test('「それでも送る」: only a one-line reason leaves main; the earlier send of a 409 reaches the card, anything malformed does not', async () => {
+  const seen: Seen[] = []
+  let answer: { status: number; body: unknown } = { status: 200, body: { success: true, data: { outcome: 'sent', draft: draft({ state: 'sent' }) } } }
+  const fetch = (async (url: string, init: RequestInit) => {
+    seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
+    return new Response(JSON.stringify(answer.body), { status: answer.status })
+  }) as unknown as typeof globalThis.fetch
+  const api = createOutboundMailApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch, log: { warn: () => {} } })
+  await api.send('co', draft().id, HASH, null, null, '先方の別の担当者にも送るため')
+  assert.deepEqual(JSON.parse(seen[0].body!), { hash: HASH, resendReason: '先方の別の担当者にも送るため' })
+  for (const bad of ['', '  ', 'a\nb', 'x'.repeat(201), 3] as unknown[]) {
+    assert.equal((await api.send('co', draft().id, HASH, null, null, bad as string)).success, false)
+  }
+  assert.equal(seen.length, 1)
+  const earlier = { messageId: 'outbound_message-0f0f0f0f0f0f0f0f', by: 'm-sato', byName: '佐藤', at: '2026-11-05T06:30:00Z', kind: 'meeting', message: 'この会議のお礼メールは佐藤さんが 11/05 15:30 に送りました' }
+  answer = { status: 409, body: { error: '…', code: 'ALREADY_SENT_FOR_SOURCE', alreadySent: earlier } }
+  const refused = await api.send('co', draft().id, HASH)
+  assert.equal(!refused.success && refused.alreadySent?.message, earlier.message)
+  answer = { status: 409, body: { error: '…', code: 'ALREADY_SENT_FOR_SOURCE', alreadySent: { ...earlier, messageId: '../../x', kind: 'deal' } } }
+  const odd = await api.send('co', draft().id, HASH)
+  assert.equal(!odd.success && odd.alreadySent, undefined)
+})
+
 test('a stored card keeps 「返事を待つ」 as offered; one stored before (or a reply) offers nothing', () => {
   const offered = readMailDraft({ ...draft(), awaitReply: { expected: true, defaultUntil: '2026-11-06', chosenUntil: null } })
   assert.deepEqual(offered?.awaitReply, { expected: true, defaultUntil: '2026-11-06', chosenUntil: null })

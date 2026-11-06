@@ -54,6 +54,7 @@
  * AWAIT_REPLY_DATE (400). An app that sends only `{ hash }` waits for nothing (as before).
  */
 import type { RecipientSource, VerifiedRecipient } from '../core/mail'
+import type { SourceKind } from '../core/source-slots'
 
 export type OutboundMailState = 'draft' | 'sent' | 'unknown' | 'discarded'
 
@@ -156,6 +157,25 @@ export interface MailSendInput {
   awaitReply?: { until: string }
   /** The sha256 of every file attached to the version shown (required, exactly, when it has files). */
   attachmentsShown?: string[]
+  /**
+   * 「それでも送る」: the person's reason (1–200 characters) after the card showed an earlier send on
+   * the same source (409 `ALREADY_SENT_FOR_SOURCE`); kept in the ledger and the send row.
+   */
+  resendReason?: string
+}
+
+/**
+ * An earlier send on the same source that the person may see (409 `ALREADY_SENT_FOR_SOURCE`, and
+ * a new draft's answer): the other mail's record id (［開く］ opens its record card), who and when,
+ * the source's kind and the sentence 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」.
+ */
+export interface MailAlreadySent {
+  messageId: string
+  by: string
+  byName: string | null
+  at: string
+  kind: SourceKind
+  message: string
 }
 
 /** Attaching a PDF: POST /outbound/:messageId/attachments (JSON; the bytes as base64). */

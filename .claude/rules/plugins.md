@@ -1156,6 +1156,12 @@ operations:
   Each: title, status, `assignee` (when the type has that person field), last update, `matchedBy`.
 - Someone who cannot run the create (cannot read its folder, `who`) gets its refusal with nothing
   asked outside. The card and 「同じ」: `approvals.md` (`same-as`).
+- **Pending requests too** (owner decision 2026-11-06): next to these records the card lists other
+  pending requests to create one (`ApprovalView.similarRequests`, built by the approvals service —
+  not part of `similarRecords`): from the same source or sharing a word of the title, only those
+  the viewer may read. A second request from the same source by someone who reads the first is not
+  made at all (`approvals.md` "One pending create per source").
+
 - Tests: `tests/unit/plugins.test.ts` 「similar records before a create of a record」 (the syntax and
   each refusal), `tests/integration/approvals.test.ts` 「similar records before a new deal」 (the
   meeting's 相手, the same domain, HubSpot's search by the company, an unreadable deal left out,

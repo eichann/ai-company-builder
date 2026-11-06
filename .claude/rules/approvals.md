@@ -18,6 +18,7 @@ paths:
   - "client/tests/approval-tools.test.ts"
   - "client/tests/approval-card-ui.tsx"
   - "client/tests/ui/approval-card.spec.ts"
+  - "server/src/services/source-slots.ts"
 ---
 
 # Approval requests with fixed content (承認のお願い, milestone 4 G6)
@@ -68,6 +69,20 @@ member) asked, and the core runs it. Approving is a person's act through their s
   (never names the place).
 - An identical pending request (same payload hash, same requester) is the answer (`existing:
   true`); nothing new is made.
+- **One pending create per source** (owner decision 2026-11-06, design 「出どころの枠」 §9 rule 5 /
+  §10 order 2): a create of a record (`create_deal`: `payload.create`, no record) has a source —
+  its basis meeting, through the one order of `shared/core/source-slots.ts` (`createSourceOf`); an
+  update or a create without a basis has none. A **pending** request of the same operation
+  (`fields.operation`) and the same source key, made by anyone, **that the requester may read** —
+  its place and the source record, through `recordReader` (`slots.heldBy`) — is the answer:
+  `existing: true`, `alreadyRequestedBy` (member id) and `note` 「すでに〇〇さんがお願いを出しています。
+  …まとめました。」 (`alreadyRequestedText`; the AI's tool passes it on). A request the requester cannot
+  read is never met nor mentioned: they get their own. Approvals do not yet take a members-only or
+  private place from their source (records.md "Not yet"), which is why the match is strictly
+  reader-filtered.
+- **No race**: both checks (identical, same source) run inside the transaction that fixes the
+  content and creates the record (`transactions.run`, synchronous; before, an `await` sat between
+  the identical check and the insert), so two requests at the same moment make one.
 - **A move of the stage to or from a closing stage** (owner decision 2026-11-06, `plugins.md` "Field
   policies") is a request even where the stage is `auto` — over the person's route, the AI's token,
   and inside a step's run (with the step's `approvals`; else `NOT_IN_STEP`) — approver at least
@@ -84,7 +99,11 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
 ```
 
 - Who reads a request: its requester, the person asked, whoever qualifies to approve it, owners /
-  admins — and only while they may read its folder (`recordReader`). Anyone else, and another
+  admins — and only while they may read its folder (`recordReader`). **For reading only** (the
+  card `GET …/:approvalId`, the AI's read; `load(…, reading)`), also anyone who reads its folder
+  **and** the source of a create of a record (its basis meeting) — exactly the people a merged
+  request is told of, so the card of the request they were merged into opens; acting on it (approve,
+  send back, withdraw, 「同じ」) and the list stay as before. Anyone else, and another
   company's id, gets the same 404 `APPROVAL_NOT_FOUND` as a request that does not exist.
 - The view: operation label, the record's title, each field before → after (the type's labels and
   `option_labels`, numbers with their % change), the basis (minutes quote; the minutes' title only
@@ -92,7 +111,11 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
   rule, `hash` + `version`, `viewerMayApprove`, `viewerIsRequester`, the outcome (who, when, the
   note, the operation id). A create of a record, while pending, also shows `similar`
   (`similarRecords`, plugins.md "Similar records": up to 5 readable records — title, status, assignee,
-  last update, why — the type's label and whether the outside system was asked).
+  last update, why — the type's label and whether the outside system was asked) and
+  `similarRequests`: other **pending** creates of the same operation the viewer may read (the
+  reading rule above), from the same source (`sameSource: true`) or sharing a word of the title
+  (`titleWords`), oldest first, at most `SIMILAR_MAX` — title, requester, date. The card lists them
+  under 「似ているお願い（まだ承認待ちのもの）」.
 - **Precedents** (design N8, §3-8): earlier approved / sent-back requests of the same company and
   operation sharing a field, whose folder is in the same department; each must be readable by the
   viewer, and so must the record it was about (its fixed payload's `record`, whatever its type) —
@@ -192,7 +215,13 @@ version; a create is never re-sent anyway); retention of approval texts (G8 deci
 
 ## Tests
 
-`server/tests/integration/approvals.test.ts` (against the fake HubSpot; each guard
+`server/tests/integration/approvals.test.ts` 「one pending create per source」 (two members asking
+at the same moment — each held at the plugin's await until the other arrives — make one pending
+request and the second is told who asked; a request the requester cannot read is neither met nor
+mentioned and the similar list shows each viewer only what they read — mutation-checked: the merge,
+the reader filter, the reading rule, the check moved out of the transaction, the similar list's
+reader), and `server/tests/integration/approvals.test.ts` (against the fake HubSpot; each guard
+
 mutation-checked: no AI route and a token is no session, wrong / old hash, no reason, HubSpot
 changed → stale, not the requester / not another department's manager, used once → one PATCH,
 readers, precedents readable incl. counts (record and request separately), dedupe, AI stop,

@@ -38,7 +38,7 @@ import { INSTRUCTION_LIKE_WORDS } from '../../../shared/core/instruction-like'
 import { outsideBracketsNote, outsideTextFlags, wrapOutsideText } from '../../../shared/core/outside-text'
 import { markRecordOutside } from '../../shared/record-outside'
 import { bundleChoiceFor, type MinutesBundleChoiceCard } from '../../shared/minutes-app'
-import { aiMailSummary, readMailDraft, type MailDraftCard } from '../../shared/outbound-mail'
+import { aiMailSummary, readAlreadySent, readMailDraft, type MailDraftCard } from '../../shared/outbound-mail'
 import { MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
@@ -932,7 +932,10 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
           if (options.companyId) options.onMailDraft?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, draft, byAi: true, at: now().toISOString() })
           // The same mail of the same meeting was made before (minutes.md "Outputs made once"): say so.
           const reused = (answer as { reused?: unknown }).reused === true ? { reused: true, note: MEETING_OUTPUT_REUSED_NOTE } : {}
-          return JSON.stringify({ ...aiMailSummary(draft, spec.mailCard === 'shown'), ...reused })
+          // A mail on the same source already went out (one the member may see): the AI may say so; nothing is stopped.
+          const earlier = readAlreadySent((answer as { alreadySent?: unknown }).alreadySent)
+          const sentBefore = earlier ? { alreadySent: `${earlier.message}。送る前に、メンバーにそのメールを確かめてもらってください（送るのはメンバーです）。` } : {}
+          return JSON.stringify({ ...aiMailSummary(draft, spec.mailCard === 'shown'), ...reused, ...sentBefore })
         }
         // The card once per reading: with the first part, never again for the later ones.
         const choice = spec.bundleChoice && !laterPart && options.companyId && answer && typeof answer === 'object'
@@ -1082,7 +1085,8 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if ((answer as Partial<ApprovalRequested> | undefined)?.outcome === 'approval-requested') {
         const requested = answer as ApprovalRequested
         approvalCard(requested.approval.id, 'requested')
-        return JSON.stringify(approvalSummaryForAi(requested.approval, requested.existing === true))
+        return JSON.stringify(approvalSummaryForAi(requested.approval, requested.existing === true, typeof requested.note === 'string' ? requested.note : null))
+
       }
       result = cardFromAnswer(ctx, answer as Parameters<typeof cardFromAnswer>[1])
     } catch (error) {

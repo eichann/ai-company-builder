@@ -152,8 +152,9 @@ silently disappeared. Now (owner decision 2026-11-06 「出どころの枠」 §
 shared, it goes through the source's slot; what a person does is free**): **what an AI makes from a
 meeting is a candidate in that meeting's slot**, decided in one place,
 `services/source-slot-candidates.ts` `decideSlot` (pure half `shared/core/source-slot-candidates.ts`;
-generic shape: source record id + kind + key, so it can join the generic source-slot module of mail
-and approvals later). `server/tests/unit/source-slot-one-place.test.ts` fails when the engine's create
+generic shape: source record id + kind + key, so it can join its sibling `services/source-slots.ts` —
+a source's outside acts: one send per source, one pending create per source, `outbound-mail.md`,
+`approvals.md` — later). `server/tests/unit/source-slot-one-place.test.ts` fails when the engine's create
 or the decision service stops calling it, or another module uses the older per-meeting helpers.
 
 - **Identity = (meeting, kind, normalized quote).** The AI gives the minutes text its output rests

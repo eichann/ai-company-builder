@@ -4,8 +4,9 @@
  * create from a source (today: a task or a decision linked to its meeting) is a new candidate or one
  * that is already there. Every AI path that makes a meeting-linked task or decision goes through
  * `decideSlot` (`server/tests/unit/source-slot-one-place.test.ts`). Generic in its shape — a source
- * record id, a kind (the record type) and a key — so it can merge with the generic source-slot module
- * of outbound mail and approvals later. Pure over the repository (synchronous: the caller's create
+ * record id, a kind (the record type) and a key — so it can merge later with its sibling
+ * `source-slots.ts`, which holds the outside acts of a source (one send per source, one pending
+ * create per source). Pure over the repository (synchronous: the caller's create
  * follows in the same stretch, so two calls at once make one).
  *
  * Identity of a candidate = (source, kind, key):

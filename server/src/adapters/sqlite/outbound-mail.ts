@@ -17,11 +17,12 @@ type AttachmentRow = { message_id: string; sha256: string; name: string; size: n
 type SendRow = {
   id: string; message_id: string; version: number; hash: string; by_user: string; started_at: string; outcome: string
   reason: string | null; provider_message_id: string | null; finished_at: string | null
+  source_key: string | null; resend_reason: string | null
 }
 type TypedRow = { ref: string; email: string; name: string | null }
 
 const MAIL_COLUMNS = 'message_id, author_id, from_email, minutes_id, deal_id, created_at, finished_at, body_deleted_at'
-const SEND_COLUMNS = 'id, message_id, version, hash, by_user, started_at, outcome, reason, provider_message_id, finished_at'
+const SEND_COLUMNS = 'id, message_id, version, hash, by_user, started_at, outcome, reason, provider_message_id, finished_at, source_key, resend_reason'
 
 const toMail = (r: MailRow): OutboundMailRow => ({
   messageId: r.message_id, authorId: r.author_id, fromEmail: r.from_email, meetingId: r.minutes_id, bundleId: r.deal_id,
@@ -60,6 +61,7 @@ function attachmentsOf(text: string | null): MailAttachment[] {
 const toSend = (r: SendRow): OutboundSendRow => ({
   id: r.id, messageId: r.message_id, version: r.version, hash: r.hash, by: r.by_user, startedAt: r.started_at,
   outcome: r.outcome as OutboundSendOutcome, reason: r.reason, providerMessageId: r.provider_message_id, finishedAt: r.finished_at,
+  sourceKey: r.source_key, resendReason: r.resend_reason,
 })
 
 export function sqliteOutboundMailRepository(conn: Database.Database, companyId: string): OutboundMailRepository {
@@ -137,8 +139,8 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
         const busy = conn.prepare("SELECT 1 FROM outbound_sends WHERE company_id = ? AND message_id = ? AND outcome IN ('sending', 'unknown', 'sent') LIMIT 1")
           .get(companyId, row.messageId)
         if (busy) return false
-        conn.prepare(`INSERT INTO outbound_sends (company_id, ${SEND_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, 'sending', NULL, NULL, NULL)`)
-          .run(companyId, row.id, row.messageId, row.version, row.hash, row.by, row.startedAt)
+        conn.prepare(`INSERT INTO outbound_sends (company_id, ${SEND_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, 'sending', NULL, NULL, NULL, ?, ?)`)
+          .run(companyId, row.id, row.messageId, row.version, row.hash, row.by, row.startedAt, row.sourceKey ?? null, row.resendReason ?? null)
         return true
       })()
     },
@@ -154,6 +156,10 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
     resolveSend(id, outcome, at) {
       conn.prepare("UPDATE outbound_sends SET outcome = ?, reason = 'resolved-by-person', finished_at = ? WHERE company_id = ? AND id = ? AND outcome = 'unknown'")
         .run(outcome, at, companyId, id)
+    },
+    sendsForSource(sourceKey) {
+      return (conn.prepare(`SELECT ${SEND_COLUMNS} FROM outbound_sends WHERE company_id = ? AND source_key = ? AND outcome IN ('sending', 'sent')
+        ORDER BY started_at, rowid LIMIT 50`).all(companyId, sourceKey) as SendRow[]).map(toSend)
     },
     sentDomains() {
       const rows = conn.prepare(`SELECT v.to_json, v.cc_json FROM outbound_sends s

@@ -5,8 +5,8 @@
  *
  * The pure half (the server's half is `server/src/services/source-slot-candidates.ts`): how a
  * candidate's identity is read from its basis quote, when two titles are close, and the words the AI
- * and the person get. Named and shaped (source record id + kind + key) so it can join the generic
- * source-slot module of outbound mail and approvals later.
+ * and the person get. Named and shaped (source record id + kind + key) so it can join its sibling
+ * `source-slots.ts` (a source's outside acts: one send, one pending create) later.
  */
 import { MINUTES_QUOTE_MAX, MINUTES_QUOTE_MIN } from './minutes'
 import { outputTitleKey } from './meeting-outputs'

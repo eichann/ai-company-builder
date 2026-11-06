@@ -38,11 +38,13 @@ import {
   awaitReplyDefault, awaitReplyUntilProblem, awaitReplyWaitUntil,
   chatReplyCanonical, chatReplyProblems, countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS,
   MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX, type MailReplyHeaders, type RecipientSource,
+  ALREADY_SENT_OLD_APP_TEXT, alreadySentText, RESEND_REASON_MAX, resendReasonOf,
 } from '../../shared/core/mail'
+import { sourceKey, type Source } from '../../shared/core/source-slots'
 import { MEETING_TYPE } from '../../shared/core/minutes'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import type { MailAttachmentView, MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
+import type { MailAlreadySent, MailAttachmentView, MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { ChatSender, ChatSendResult } from '../ports/chat'
 import type { MailReader, MailSendResult, MailSender, MailThread } from '../ports/mail'
@@ -61,6 +63,7 @@ import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 import { findMeetingOutput } from './meeting-outputs'
 import { MEETING_OUTPUT_REUSED_NOTE } from '../../shared/core/meeting-outputs'
+import { createSourceSlots, type SourceSlots } from './source-slots'
 import { fieldsOf, mailThreadIdOf, threadPointerOf, type ThreadPointer } from './threads'
 
 /** How long a sent / discarded mail's body stays on the server (§9 q9). */
@@ -114,6 +117,8 @@ export interface OutboundMailDeps {
   companyIds: () => string[]
   /** The company's own holidays (`YYYY-MM-DD`): 「返事を待つ」's default day counts business days. */
   holidaysOf?: (companyId: string) => string[]
+  /** 出どころ (services/source-slots.ts): a draft's source and the earlier sends on it the sender may see (default: over `companyData`). */
+  slots?: SourceSlots
 }
 
 /** A new mail sent with 「返事を待つ」 ticked: the inbox starts waiting for their answer (outbound-mail.md "Waiting for their answer"). */
@@ -188,6 +193,7 @@ class WriteFailed extends Error {
 
 export function createOutboundMailService(deps: OutboundMailDeps) {
   const { companyData, writer } = deps
+  const slots = deps.slots ?? createSourceSlots({ companyData })
 
   /** All or nothing: the fixed content, the record and the rows. */
   function tryWrite<T>(fn: () => T): T | ServiceWriteFailed {
@@ -490,6 +496,52 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return refuse('conflict', '下書きを保存できませんでした。', { code: 'MAIL_NOT_SAVED', reason: r.reason })
   }
 
+  /**
+   * The draft's source (outbound-mail.md "One send per source"): a follow-up round, else its
+   * meeting, its 連絡 (thread); none — a mail of a まとまり only, or of nothing — → exempt, sent as
+   * before (owner decision: one deal carries many different mails).
+   */
+  const sourceOfDraft = (companyId: string, mail: OutboundMailRow): Source | null =>
+    slots.sourceOfRecord(companyId, mail.messageId, { meeting: mail.meetingId })
+
+
+  /**
+   * The first send on `source` (sent, or going out now) by anyone that the member may see: they
+   * read the source and that mail's record (the one reader, never what they cannot see). Null
+   * when there is none they may be told of.
+   */
+  function earlierSend(member: Member, source: Source, ownId: string): MailAlreadySent | null {
+    const rows = companyData.forCompany(member.companyId).outbound.sendsForSource(sourceKey(source)).filter(r => r.messageId !== ownId)
+    const first = slots.heldBy(member, source,
+ rows.map(r => ({ recordId: r.messageId, by: r.by, at: r.finishedAt ?? r.startedAt })))[0]
+    if (!first) return null
+    const name = first.by === member.userId ? null : (deps.members(member.companyId).find(m => m.userId === first.by)?.name ?? '')
+    return {
+      messageId: first.recordId, by: first.by, byName: name || null, at: first.at, kind: source.kind,
+      message: alreadySentText(source.kind, name, first.at),
+    }
+  }
+
+  /**
+   * One send per source, checked in the same synchronous stretch as the send row that claims it
+   * (no other request runs in between, so two people pressing at once cannot both pass). An
+   * earlier send the sender may see stops it with 409 `ALREADY_SENT_FOR_SOURCE` unless they gave
+   * a reason (「それでも送る」). Every app gets the 409 — one released before this sends no reason,
+   * so it shows the sentence with 「アプリを新しくして」 and nothing is sent twice silently.
+   */
+  function sourceGate(member: Member, mail: OutboundMailRow, resendReason: string | null): { key: string | null; reason: string | null } | Refusal {
+    const source = sourceOfDraft(member.companyId, mail)
+    if (!source) return { key: null, reason: null }
+    const earlier = earlierSend(member, source, mail.messageId)
+    if (earlier && !resendReason) {
+      return refuse('conflict', `${earlier.message}。${ALREADY_SENT_OLD_APP_TEXT}`, { code: 'ALREADY_SENT_FOR_SOURCE', alreadySent: earlier })
+    }
+    return { key: sourceKey(source), reason: earlier ? resendReason : null }
+  }
+
+  /** The ledger's note of a send that went out after an earlier one on its source was shown. */
+  const resendNote = (reason: string | null | undefined) => (reason ? `同じ件で先に送られたメールがありましたが、それでも送りました。理由：${reason}` : null)
+
   async function sendStep(member: Member, messageId: unknown, rawBody: unknown): Promise<Outcome<MailSendAnswer>> {
     const off = enabled(member.companyId)
     if (off) return off
@@ -497,6 +549,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (!d) return notFound()
     const body = isObj(rawBody) ? rawBody : {}
     if (typeof body.hash !== 'string' || !CONTENT_HASH_RE.test(body.hash)) return bad('hash: the content hash shown on the screen')
+    // 「それでも送る」's reason (an app that knows no such step sends none).
+    const resendGiven = body.resendReason !== undefined && body.resendReason !== null
+    const resendReason = resendGiven ? resendReasonOf(body.resendReason) : null
+    if (resendGiven && !resendReason) return bad(`理由は ${RESEND_REASON_MAX} 文字までの1行で書いてください。`, 'RESEND_REASON_INVALID')
     // 「返事を待つ」 (a new mail only): the day the member picked, checked before anything leaves.
     let waitDay: string | null = null
     if (body.awaitReply !== undefined && body.awaitReply !== null && body.awaitReply !== false) {
@@ -517,7 +573,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const view = viewOf(member.companyId, d.mail, d.mail.messageId)
       return refuse('conflict', '内容が変わりました。もう一度確かめてください。', { code: 'CONTENT_CHANGED', ...(view ? { draft: view } : {}) })
     }
-    if (d.fields.channel === 'slack') return chatSendStep(member, d, version, body.hash, payload.canonical)
+    if (d.fields.channel === 'slack') return chatSendStep(member, d, version, body.hash, payload.canonical, resendReason)
     let content: { from: string; to: string[]; cc: string[]; subject: string; body: string; reply?: MailReplyHeaders; attachments?: MailAttachment[] }
     try { content = JSON.parse(payload.canonical) as typeof content } catch { return notFound() }
     // Files go only when the person was shown each one: the request names them (an app that knows no
@@ -561,10 +617,13 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       }
       fileBytes.push({ name: f.name, bytes })
     }
-    // 5. The operation record, before anything leaves (one send at a time; never twice).
+    // 5. One send per source, then the operation record, before anything leaves (one send at a
+    // time; never twice) — no await in between.
+    const gate = sourceGate(member, d.mail, resendReason)
+    if ('ok' in gate) return gate
     const sendId = deps.ids.newId()
     const startedAt = deps.clock.now()
-    if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash: body.hash, by: member.userId, startedAt, outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null })) {
+    if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash: body.hash, by: member.userId, startedAt, outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null, sourceKey: gate.key, resendReason: gate.reason })) {
       return refuse('conflict', 'このメールはいま送っている途中か、すでに送られています。', { code: 'SEND_IN_PROGRESS' })
     }
     // 6. Gmail, once (a reply: into the member's own conversation, with the thread's ids; files: the upload way).
@@ -589,7 +648,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const gmailId = isObj(result.json) && typeof result.json.id === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.id) ? result.json.id : null
       handle.outbound.finishSend(sendId, 'sent', null, gmailId, at)
       const threadId = isObj(result.json) && typeof result.json.threadId === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(result.json.threadId) ? result.json.threadId : null
-      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId, { threadId, waitDay })
+      return finishSent(member, d.mail, d.recordVersion, at, gmailId, content.to.concat(content.cc), actor, sendId, { threadId, waitDay }, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
       handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.googleReason ?? result.reason, null, at)
@@ -605,6 +664,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     // The choice is kept: 「送られていた」 later starts the waiting as a confirmed send would.
     const moved = writer.transition(member.companyId, {
       recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(waitDay ? { fields: { reply_wait_until: waitDay } } : {}),
+      ...(gate.reason ? { note: resendNote(gate.reason)! } : {}),
     })
     if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
     const view = viewOf(member.companyId, d.mail, d.mail.messageId)
@@ -614,11 +674,11 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   /** The record → sent, the retention clock, and the 「やりとり」 on its まとまり (design §1-6 step 19). */
   function finishSent(
     member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }, sendId: string | null,
-    awaiting: { threadId: string | null; waitDay: string | null },
+    awaiting: { threadId: string | null; waitDay: string | null }, note: string | null = null,
   ): Outcome<MailSendAnswer> {
     const handle = companyData.forCompany(member.companyId)
     const moved = writer.transition(member.companyId, {
-      recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor,
+      recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor, ...(note ? { note } : {}),
       fields: { sent_at: at, ...(gmailId ? { provider_message_id: gmailId } : {}), ...(awaiting.waitDay ? { reply_wait_until: awaiting.waitDay } : {}) },
     })
     if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
@@ -665,7 +725,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   /** 「確かめて送る」 of a Slack reply: the member's permission to reply, the send row first, one post into the thread. */
-  async function chatSendStep(member: Member, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, hash: string, canonical: string): Promise<Outcome<MailSendAnswer>> {
+  async function chatSendStep(member: Member, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, hash: string, canonical: string, resendReason: string | null): Promise<Outcome<MailSendAnswer>> {
     const handle = companyData.forCompany(member.companyId)
     let content: { from: string; thread: { channel: string; ts: string }; body: string }
     try { content = JSON.parse(canonical) as typeof content } catch { return notFound() }
@@ -677,8 +737,11 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (normalizeEmail(account.account) !== normalizeEmail(content.from)) {
       return refuse('conflict', 'Slack の許可が下書きを作ったときと違うアカウントのものです。下書きを作り直してください。', { code: 'FROM_CHANGED' })
     }
+    // One reply per thread: the same gate as a mail, then the send row (no await in between).
+    const gate = sourceGate(member, d.mail, resendReason)
+    if ('ok' in gate) return gate
     const sendId = deps.ids.newId()
-    if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash, by: member.userId, startedAt: deps.clock.now(), outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null })) {
+    if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash, by: member.userId, startedAt: deps.clock.now(), outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null, sourceKey: gate.key, resendReason: gate.reason })) {
       return refuse('conflict', 'この返事はいま送っている途中か、すでに送られています。', { code: 'SEND_IN_PROGRESS' })
     }
     const ref = { channelId: content.thread.channel, threadTs: content.thread.ts }
@@ -693,7 +756,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     const actor = { id: member.userId, kind: 'human' as const, source: null }
     if (result.ok) {
       handle.outbound.finishSend(sendId, 'sent', null, result.ts, at)
-      return finishChatSent(member, d.mail, d.recordVersion, at, result.ts, ref, actor)
+      return finishChatSent(member, d.mail, d.recordVersion, at, result.ts, ref, actor, resendNote(gate.reason))
     }
     if (result.kind === 'not-sent' || result.kind === 'refused' || result.kind === 'rate-limited') {
       handle.outbound.finishSend(sendId, result.kind === 'not-sent' ? 'not-sent' : 'refused', result.reason, null, at)
@@ -706,15 +769,15 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
     // A lost answer or a 5xx: it may have been posted. Never re-sent; the person looks at the thread.
     handle.outbound.finishSend(sendId, 'unknown', result.reason, null, at)
-    const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor })
+    const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'send_unknown', expectedVersion: d.recordVersion, to: 'unknown', actor, ...(gate.reason ? { note: resendNote(gate.reason)! } : {}) })
     if (!moved.ok) logError('outbound-mail', 'unknown state not recorded', undefined, { message: d.mail.messageId, reason: moved.reason })
     const view = viewOf(member.companyId, d.mail, d.mail.messageId)
     return view ? ok({ outcome: 'unknown', draft: view, message: CHAT_UNKNOWN_TEXT }) : notFound()
   }
 
-  function finishChatSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, ts: string | null, ref: { channelId: string; threadTs: string }, actor: { id: string; kind: 'human'; source: null }): Outcome<MailSendAnswer> {
+  function finishChatSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, ts: string | null, ref: { channelId: string; threadTs: string }, actor: { id: string; kind: 'human'; source: null }, note: string | null = null): Outcome<MailSendAnswer> {
     const moved = writer.transition(member.companyId, {
-      recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor,
+      recordId: mail.messageId, action: 'send', expectedVersion: recordVersion, to: 'sent', actor, ...(note ? { note } : {}),
       fields: { sent_at: at, ...(ts ? { provider_message_id: ts } : {}) },
     })
     if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
@@ -941,7 +1004,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     },
 
     /** A new draft (person or their AI): POST /outbound. */
-    async create(member: Member, actor: ActorInput, rawBody: unknown): Promise<Outcome<{ draft: OutboundMailView; reused?: true; note?: string }>> {
+    async create(member: Member, actor: ActorInput, rawBody: unknown): Promise<Outcome<{ draft: OutboundMailView; reused?: true; note?: string; alreadySent?: MailAlreadySent }>> {
       const off = enabled(member.companyId)
       if (off) return off
       const body = isObj(rawBody) ? rawBody : {}
@@ -1006,10 +1069,16 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         return r
       })
       if (!made.ok) return writeFailed(made)
-      return draftAnswer(member, mail)
+      const answer = draftAnswer(member, mail)
+      // The AI is not stopped from drafting; it is told when a mail on the same source already went
+      // out (only one the member may see), so it can say so (outbound-mail.md "One send per source").
+      const source = answer.ok ? sourceOfDraft(member.companyId, mail) : null
+      const earlier = source ? earlierSend(member, source, messageId) : null
+      return answer.ok && earlier ? ok({ ...answer.value, alreadySent: earlier }) : answer
     },
 
     /** GET /outbound/:id — the author's draft. */
+
     get(member: Member, messageId: unknown): Outcome<{ draft: OutboundMailView }> {
       const off = enabled(member.companyId)
       if (off) return off
@@ -1172,10 +1241,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         const v = last ? handle.outbound.version(d.mail.messageId, last.version) : null
         if (v) to = [...v.to, ...v.cc].map(r => r.email)
         const r = d.fields.channel === 'slack'
-          ? finishChatSent(member, d.mail, d.recordVersion, at, null, { channelId: '', threadTs: '' }, actor)
+          ? finishChatSent(member, d.mail, d.recordVersion, at, null, { channelId: '', threadTs: '' }, actor, resendNote(last?.resendReason))
           : finishSent(member, d.mail, d.recordVersion, at, null, to, actor, last?.id ?? null, {
             threadId: null, waitDay: typeof d.fields.reply_wait_until === 'string' ? d.fields.reply_wait_until : null,
-          })
+          }, resendNote(last?.resendReason))
         return r.ok ? ok({ draft: r.value.draft }) : r
       }
       // Not sent: the 「返事を待つ」 of that try is chosen again at the next 確かめて送る.

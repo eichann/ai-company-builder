@@ -35,7 +35,7 @@ const OLDER_HELPERS: Record<string, string> = {
   'services/meeting-outputs.ts': 'defines them (and the admin duplicates list)',
   'services/source-slot-candidates.ts': 'the slot itself',
   'services/minutes-review.ts': 'the server\'s own 「議事録を確認する」, one per meeting: not an AI\'s output',
-  'services/outbound-mail.ts': 'the meeting\'s mail draft: moves to the generic source slots of outbound mail (another lane)',
+  'services/outbound-mail.ts': 'the member\'s own mail draft of a meeting made once (its author\'s); sending is one per source through services/source-slots.ts',
 }
 
 describe('the source slot is decided in one place', () => {

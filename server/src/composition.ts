@@ -104,6 +104,8 @@ import { createGoogleRelay, googleRelayOffered, GOOGLE_RELAY_TOOL } from './serv
 import { createGoogleDriveService } from './services/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
+import { createSourceSlots } from './services/source-slots'
+
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, googleFeaturesOf } from '../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
@@ -434,7 +436,11 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // Approval requests with fixed content (milestone 4 G6, approvals.md): the service writer and the
   // operations' approval seam are handed to it only; its routes take a session (no AI route approves).
   const fixedPayloads = createFixedPayloads(shared)
+  // 出どころ (source-slots.ts): one rule for what work came from, shared by approvals and outbound mail.
+  const sourceSlots = createSourceSlots(shared)
   const approvals = createApprovalService({
+    slots: sourceSlots,
+    memberName: (companyId, userId) => (repos.memberships.listByCompany(companyId).some(m => m.user_id === userId) ? shared.accounts.byIds([userId]).get(userId)?.name ?? null : null),
     ...shared,
     writer: serviceRecords,
     fixed: fixedPayloads,
@@ -587,6 +593,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // (the role メールを送る); the AI drafts only (records-ai routes have no send).
   const outboundMail = createOutboundMailService({
     ...shared,
+    slots: sourceSlots,
     writer: serviceRecords,
     payloads: fixedPayloads,
     digest: text => sha256TokenDigest.digest(text),
