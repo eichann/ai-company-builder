@@ -129,11 +129,22 @@ installElectronAPI({
   },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
-  getTaskProposals: async () => ({ success: true, proposals: [
-    { id: 'task-0000p1', title: '見積を直す', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: '2026-11-07T17:00' },
-    { id: 'task-0000p2', title: 'セキュリティ資料を送る', state: 'proposed', version: 1, assignee: 'u-abe', assigneeName: '阿部', due: null },
-    { id: 'task-0000p3', title: '会食の店を探す', state: 'dismissed', version: 2, assignee: ME, assigneeName: '佐藤', due: null },
-  ] }),
+  // `?proposals=none`: a member the type's `who` does not let press (an older server's type, not the requester).
+  getTaskProposals: async () => {
+    const may = params.get('proposals') === 'none'
+      ? { adopt: false, dismiss: false, proposeAgain: false, keepApart: false }
+      : { adopt: true, dismiss: true, proposeAgain: true, keepApart: true }
+    return { success: true, readerId: ME, readerName: '佐藤', proposals: [
+      { id: 'task-0000p1', title: '見積を直す', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: '2026-11-07T17:00',
+        basis: '来週までに修正した見積をお送りします', addedBy: ME, addedByName: '佐藤', similarTo: null, may },
+      { id: 'task-0000p2', title: 'セキュリティ資料を送る', state: 'proposed', version: 1, assignee: 'u-abe', assigneeName: '阿部', due: null,
+        basis: 'セキュリティの資料もいただけますか', addedBy: 'u-abe', addedByName: '阿部', similarTo: null, may },
+      { id: 'task-0000p4', title: '見積を直して送る', state: 'proposed', version: 1, assignee: ME, assigneeName: '佐藤', due: null,
+        basis: '見積は金額を直してから送る', addedBy: 'u-abe', addedByName: '阿部', similarTo: { id: 'task-0000p1', title: '見積を直す' }, may },
+      { id: 'task-0000p3', title: '会食の店を探す', state: 'dismissed', version: 2, assignee: ME, assigneeName: '佐藤', due: null,
+        basis: null, addedBy: ME, addedByName: '佐藤', similarTo: null, may },
+    ] }
+  },
   actOnTask: async (_c, recordId, input) => {
     if (conflict) return { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの人が先に変えました。' }
     // A tag the server refuses: the card shows its words.

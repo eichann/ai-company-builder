@@ -107,7 +107,8 @@ installElectronAPI({
       ...(m.state === 'read' ? { ai: { working: false, done: { at: '2026-11-04T07:19:00.000Z', text: '読み終えた' } } } : {}),
       viewers: { kind: 'people' as const, text: `${m.members.length}人が見られます`, count: m.members.length } } }
   },
-  getTaskProposals: async (_c, id) => ({ success: true, proposals: [...outputs(find(id)).filter(r => r.type === 'task'), putAway].map(r => ({ id: r.id, kind: 'task' as const, title: r.title, state: r.state === 'dismissed' ? 'dismissed' as const : 'proposed' as const, version: 1, assignee: String(r.fields.assignee), assigneeName: people[String(r.fields.assignee)], due: null })) }),
+  getTaskProposals: async (_c, id) => ({ success: true, proposals: [...outputs(find(id)).filter(r => r.type === 'task'), putAway].map(r => ({ id: r.id, kind: 'task' as const, title: r.title, state: r.state === 'dismissed' ? 'dismissed' as const : 'proposed' as const, version: 1, assignee: String(r.fields.assignee), assigneeName: people[String(r.fields.assignee)], due: null,
+    basis: null, addedBy: null, addedByName: null, similarTo: null, may: { adopt: true, dismiss: true, proposeAgain: true, keepApart: true } })) }),
   getMeetingBundleQuestion: async (_c, id) => ({ success: true, title: find(id).title, canChoose: true, noBundle: params.get('bundle') === 'declined',
     suggested: params.get('bundle') === 'suggest' ? { id: 'deal-bsha0001', title: 'B社 研修導入' } : null }),
   declineMinutesBundle: async (_c, id) => { say(`nobundle ${id}`); return { success: true } },

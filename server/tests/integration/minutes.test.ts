@@ -123,8 +123,8 @@ async function allow(user: string, email: string) {
   expect(page.status, page.text).toBe(200)
 }
 
-async function tokenFor(user: string): Promise<string> {
-  const r = await call(user, 'POST', `${C()}/me/record-tokens`, { conversationId: 'conv-minutes', agent: 'claude-code', scope: 'act' })
+async function tokenFor(user: string, conversationId = 'conv-minutes'): Promise<string> {
+  const r = await call(user, 'POST', `${C()}/me/record-tokens`, { conversationId, agent: 'claude-code', scope: 'act' })
   expect(r.status, r.text).toBe(201)
   return r.body.data.token
 }
@@ -762,8 +762,8 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
   const TITLE = '修正見積（150万円）を鈴木様へ送付'
   let followUpId: string
   let first: string
-  const task = (token: string, meetingId: string, title: string, key?: string) => call(null, 'POST', '/api/records-ai/item', {
-    type: 'task', title, fields: { assignee: 'mn-sato' }, links: { meeting: meetingId }, ...(key ? { key } : {}),
+  const task = (token: string, meetingId: string, title: string, key?: string, quote?: string) => call(null, 'POST', '/api/records-ai/item', {
+    type: 'task', title, fields: { assignee: 'mn-sato' }, links: { meeting: meetingId }, ...(key ? { key } : {}), ...(quote ? { quote } : {}),
   }, token)
   // What the reading made (the server's own 「議事録を確認する」 of a read meeting is not one of them).
   const tasksOf = (meetingId: string) => (db.prepare(`SELECT l.source_id FROM record_links l JOIN record_state s ON s.company_id = l.company_id AND s.record_id = l.source_id
@@ -778,21 +778,36 @@ describe('what a meeting\'s reading makes is made once (FB 29)', () => {
     }
   })
 
-  it('a second reading reuses the task (same key, or the same title written differently); a different item is still made', async () => {
+  it('an older app (serial key, no quote): reused only inside the same consultation; another reading never loses its item', async () => {
     followUpId = minutesRows().find(r => r.title.includes('2回目')).id
     const token = await tokenFor('mn-sato')
     const made = await task(token, salesId, TITLE, 'task:1')
     expect(made.status, made.text).toBe(201)
     first = made.body.data.record.id
-    // The reading run again: the same key (its title reworded), and no key but the same title in other spacing.
+    // A retry inside the same consultation: the same key (its title reworded), and no key but the same title in other spacing.
     const again = await task(await tokenFor('mn-sato'), salesId, '修正見積を鈴木様へ', 'task:1')
     expect([again.status, again.body.data.record.id, again.body.data.reused]).toEqual([200, first, true])
-    expect(again.body.data.note).toContain('すでに作られていた')
+    expect(again.body.data.note).toContain('同じ根拠の案がもうあります')
     const reworded = await task(token, salesId, '修正見積 (１５０万円) を 鈴木様へ送付。')
     expect([reworded.status, reworded.body.data.record.id]).toEqual([200, first])
     const other = await task(token, salesId, 'カリキュラム案を送る', 'task:2')
     expect(other.status, other.text).toBe(201)
     expect(tasksOf(salesId).sort()).toEqual([first, other.body.data.record.id].sort())
+    // A second reading (another consultation) reuses `task:1` for a different item: it is made, never lost.
+    const later = await tokenFor('mn-sato', 'conv-minutes-again')
+    const dates = await task(later, salesId, '次回の日程を決める', 'task:1')
+    expect(dates.status, dates.text).toBe(201)
+    expect(dates.body.data.reused).toBeUndefined()
+    // The same title there is not merged on title alone: kept, and marked similar to the first.
+    const twin = await task(later, salesId, TITLE)
+    expect(twin.status, twin.text).toBe(201)
+    expect(twin.body.data.record.fields.similar_to).toBe(first)
+    expect(twin.body.data.similar).toEqual({ id: first, title: TITLE })
+    // Cleaned up so the later tests count as before (a person's 要らない).
+    const tw = twin.body.data.record
+    expect((await call('mn-sato', 'POST', `${C()}/records/item/${tw.id}/actions/dismiss`, { expectedVersion: tw.version })).status).toBe(200)
+    const dt = dates.body.data.record
+    expect((await call('mn-sato', 'POST', `${C()}/records/item/${dt.id}/actions/dismiss`, { expectedVersion: dt.version })).status).toBe(200)
     // A key needs its meeting.
     const loose = await call(null, 'POST', '/api/records-ai/item', { type: 'task', title: 'x', key: 'task:9' }, token)
     expect([loose.status, loose.body.code]).toEqual([400, 'KEY_NEEDS_MEETING'])

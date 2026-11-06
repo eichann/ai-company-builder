@@ -1,12 +1,16 @@
 // 「議事録を確認する」's own parts (新しい画面のデモ F): the meeting's summary, the AI's proposals (案)
 // with ［全部足す］［選んで足す］［要らない］, and the decisions the AI left with ［確かめる］. Each press is one
-// action at the version shown; the server decides who may. On the meeting's own card: 決めたこと first,
-// and the tasks already made from the meeting join the proposals in one list.
+// action at the version shown; the server decides who may, and a button shows only where its `who`
+// lets the member (task version 13: everyone who reads the meeting, `proposalMay`). Each proposal
+// shows the minutes text it rests on, whose AI added it, and 「似ている案があります」 with ［同じ］ (the
+// newer put away) / ［別のもの］. On the meeting's own card: 決めたこと first, and the tasks already made
+// from the meeting join the proposals in one list.
 import { useState } from 'react'
 import { CheckCircle, Sparkle } from '@phosphor-icons/react'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { MinutesReviewView } from '../../../../shared/task-card'
-import type { TaskProposal } from '../../../../shared/tasks'
+import { proposalsHeadline, type TaskProposal } from '../../../../shared/tasks'
+import { slotSameAsNote } from '../../../../../shared/core/source-slot-candidates'
 import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
@@ -24,8 +28,8 @@ interface Props {
   companyId: string
   review: MinutesReviewView
   busy: boolean
-  /** Runs `action` on record `id` at `version`; null = done, else the reason in words. */
-  onAct: (id: string, action: string, version: number) => Promise<string | null>
+  /** Runs `action` on record `id` at `version` (with a note); null = done, else the reason in words. */
+  onAct: (id: string, action: string, version: number, note?: string) => Promise<string | null>
   /** The meeting's own card shows its summary already: only the proposals and decisions here. */
   onMeetingCard?: boolean
   /** The meeting's own card: its linked tasks, among them the proposals, each listed once. */
@@ -38,15 +42,19 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
   const [error, setError] = useState<string | null>(null)
   const proposals = result?.success ? result.proposals : []
   const open = proposals.filter(p => p.state === 'proposed')
+  const addable = open.filter(p => p.may.adopt)
+  const removable = open.filter(p => p.may.dismiss)
+  const readerId = result?.success ? result.readerId ?? null : null
+  const readerName = result?.success ? result.readerName ?? null : null
   // Until the proposals are read nothing tells which linked task is one.
   const others = result === null ? [] : made.filter(t => !proposals.some(p => p.id === t.id))
   const listTitle = !onMeetingCard ? 'AI のタスクの案' : proposals.length > 0 ? 'やることの案' : 'やること'
   const decisionsTitle = onMeetingCard ? '決めたこと' : '決めたこと（AI が残した）'
   // One by one, each at its own version (the server makes each a task of its own).
-  const act = async (items: Array<{ id: string; version: number }>, action: string) => {
+  const act = async (items: Array<{ id: string; version: number }>, action: string, note?: string) => {
     setError(null)
     for (const p of items) {
-      const failure = await onAct(p.id, action, p.version)
+      const failure = await onAct(p.id, action, p.version, note)
       if (failure) { setError(failure); break }
     }
     setPicking(null)
@@ -58,27 +66,28 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <Sparkle size={14} weight="fill" className="text-accent" />
         <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{listTitle}</h2>
-        {open.length > 0 && !picking && <>
-          <button type="button" disabled={busy} onClick={() => void act(open, 'adopt')} className={MAIN_BUTTON}>全部足す</button>
-          <button type="button" disabled={busy} onClick={() => setPicking(new Set(open.map(p => p.id)))} className={SMALL_BUTTON}>選んで足す</button>
-          <button type="button" disabled={busy} onClick={() => void act(open, 'dismiss')} className={SMALL_BUTTON}>要らない</button>
+        {!picking && <>
+          {addable.length > 0 && <button type="button" disabled={busy} onClick={() => void act(addable, 'adopt')} className={MAIN_BUTTON}>全部足す</button>}
+          {addable.length > 0 && <button type="button" disabled={busy} onClick={() => setPicking(new Set(addable.map(p => p.id)))} className={SMALL_BUTTON}>選んで足す</button>}
+          {removable.length > 0 && <button type="button" disabled={busy} onClick={() => void act(removable, 'dismiss')} className={SMALL_BUTTON}>要らない</button>}
         </>}
         {picking && <button type="button" onClick={() => setPicking(null)} className={SMALL_BUTTON}>選ぶのをやめる</button>}
       </div>
+      {result?.success && proposals.length > 0 && <p className="mb-1.5 text-[11.5px] text-gray-500">{proposalsHeadline(readerName, open.length)}</p>}
       {result === null && <p className="text-[12px] text-gray-400">{CALM.loading}</p>}
       {result && !result.success && <p role="alert" className="text-[12px] text-gray-500">{result.error}</p>}
       {result?.success && proposals.length === 0 && others.length === 0 && <p className="text-[12px] text-gray-400">案はありません。</p>}
       <ul className="space-y-1.5">
         {proposals.map(p => (
-          <ProposalRow key={p.id} p={p} busy={busy} picked={picking?.has(p.id) ?? null}
+          <ProposalRow key={p.id} p={p} busy={busy} picked={picking?.has(p.id) ?? null} readerId={readerId}
             onPick={on => setPicking(s => { const next = new Set(s); if (on) next.add(p.id); else next.delete(p.id); return next })}
-            onAct={action => void act([p], action)} />
+            onAct={(action, note) => void act([p], action, note)} />
         ))}
         {others.map(t => <MadeRow key={t.id} t={t} />)}
       </ul>
       {picking && (
         <div className="mt-2 flex gap-2">
-          <button type="button" disabled={busy || picking.size === 0} onClick={() => void act(open.filter(p => picking.has(p.id)), 'adopt')} className={MAIN_BUTTON}>選んだものを足す</button>
+          <button type="button" disabled={busy || picking.size === 0} onClick={() => void act(addable.filter(p => picking.has(p.id)), 'adopt')} className={MAIN_BUTTON}>選んだものを足す</button>
         </div>
       )}
       {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
@@ -129,22 +138,40 @@ function MadeRow({ t }: { t: RecordViewSummary }) {
   )
 }
 
-function ProposalRow({ p, busy, picked, onPick, onAct }: { p: TaskProposal; busy: boolean; picked: boolean | null; onPick: (on: boolean) => void; onAct: (action: string) => void }) {
+function ProposalRow({ p, busy, picked, readerId, onPick, onAct }: {
+  p: TaskProposal; busy: boolean; picked: boolean | null; readerId: string | null
+  onPick: (on: boolean) => void; onAct: (action: string, note?: string) => void
+}) {
   const away = p.state === 'dismissed'
   const sub = [p.assigneeName ? `${p.assigneeName}さん` : null, shortDue(p.due)].filter(Boolean).join('・')
+  // Whose AI added it, when not the one that read the meeting (another attendee's consultation).
+  const origin = p.addedBy && p.addedBy !== readerId ? `${p.addedByName ?? 'メンバー'}さんの AI が追加` : null
   return (
     <li className={`rounded-lg border px-3 py-2 text-[12.5px] ${away ? 'border-gray-100 opacity-60 dark:border-zinc-800' : 'border-gray-200 dark:border-zinc-700'}`}>
       <div className="flex items-center gap-2">
-        {picked !== null && !away && <input type="checkbox" aria-label={`${p.title} を選ぶ`} checked={picked} onChange={e => onPick(e.target.checked)} />}
+        {picked !== null && !away && p.may.adopt && <input type="checkbox" aria-label={`${p.title} を選ぶ`} checked={picked} onChange={e => onPick(e.target.checked)} />}
         <ThingIcon kind="task" size={13} label="" />
         <span className={`min-w-0 flex-1 truncate font-medium ${away ? 'line-through' : ''}`}>{p.title}</span>
         {sub && <span className="whitespace-nowrap text-[11px] text-gray-500">{sub}</span>}
         {picked === null && !away && <>
-          <button type="button" disabled={busy} onClick={() => onAct('adopt')} className={SMALL_BUTTON}>足す</button>
-          <button type="button" disabled={busy} onClick={() => onAct('dismiss')} className={QUIET}>要らない</button>
+          {p.may.adopt && <button type="button" disabled={busy} onClick={() => onAct('adopt')} className={SMALL_BUTTON}>足す</button>}
+          {p.may.dismiss && <button type="button" disabled={busy} onClick={() => onAct('dismiss')} className={QUIET}>要らない</button>}
         </>}
-        {away && <><Chip>しまった</Chip><button type="button" disabled={busy} onClick={() => onAct('propose_again')} className={QUIET}>戻す</button></>}
+        {away && <><Chip>しまった</Chip>{p.may.proposeAgain && <button type="button" disabled={busy} onClick={() => onAct('propose_again')} className={QUIET}>戻す</button>}</>}
       </div>
+      {(p.basis || origin) && (
+        <div className="mt-1 flex flex-wrap items-baseline gap-x-2 pl-5 text-[11px] text-gray-500 dark:text-zinc-400">
+          {p.basis && <span className="min-w-0 truncate" title={p.basis}>「{p.basis}」</span>}
+          {origin && <span className="whitespace-nowrap">{origin}</span>}
+        </div>
+      )}
+      {p.similarTo && !away && (
+        <div role="note" className="mt-1.5 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-2 py-1 pl-5 text-[11.5px] text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+          <span className="min-w-0 flex-1">似ている案があります：「{p.similarTo.title}」</span>
+          {p.may.dismiss && <button type="button" disabled={busy} onClick={() => onAct('dismiss', slotSameAsNote(p.similarTo?.title ?? ''))} className={QUIET}>同じ</button>}
+          {p.may.keepApart && <button type="button" disabled={busy} onClick={() => onAct('keep_apart')} className={QUIET}>別のもの</button>}
+        </div>
+      )}
     </li>
   )
 }

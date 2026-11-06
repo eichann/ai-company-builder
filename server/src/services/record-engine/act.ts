@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, INTERFACES, isSystemOnly, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
+import { actionWho, INTERFACES, isSystemOnly, linkWhoName, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -16,6 +16,7 @@ import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../.
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
+import { linkAllowed } from '../record-access'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
@@ -35,9 +36,12 @@ export const AI_ONLY_OWNER_FIELDS = ['assignee', 'next_actor', 'requested_by'] a
  * `holdsRole(name)`: whether `member` holds the business role `role:<name>` on this record (plan C3,
  * services/plugin-roles.ts); without it a `role:` entry matches no one (fails closed).
  * `existing`: false only for a record not made yet (a plugin's create), where nobody's record is touched.
+ * `readsLink(name)`: whether `member` reads the record this record's link `name` points to — the
+ * who-entry `link:<name>` (task version 13: 「その会議を読める人」); without it such an entry matches
+ * no one (fails closed).
  */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean,
-  holdsRole?: (role: string) => boolean, existing = true): boolean {
+  holdsRole?: (role: string) => boolean, existing = true, readsLink?: (link: string) => boolean): boolean {
   // `who: [system]`: only the server's own services (the service writer) — never through here.
   if (isSystemOnly(who)) return false
   if (actor.kind === 'ai' && !who.includes('ai')) return false
@@ -51,6 +55,7 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     (w === 'admin' && FULL_ACCESS_ROLES.has(member.role)) ||
     (w === 'dept_manager' && managesPlace) ||
     (w.startsWith(ROLE_WHO_PREFIX) && holdsRole?.(w.slice(ROLE_WHO_PREFIX.length)) === true) ||
+    (linkWhoName(w) !== null && readsLink?.(linkWhoName(w) as string) === true) ||
     values[w] === member.userId)
 }
 
@@ -105,7 +110,14 @@ export function acting(ctx: EngineContext) {
       const manages = (userId: string) => who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
       // `role:<name>` (plan C3): held on this record (its plugin, its まとまり), by the one resolution.
       const holds = (userId: string) => (role: string) => ctx.roles()?.holdsOnRecord(member.companyId, row.type, row.id, role, userId) === true
-      let byWho = mayAct(who, member, actor, current.fields, manages(member.userId), holds(member.userId))
+      // `link:<name>` (task version 13): the member reads the record that link points to (their own
+      // reader; a public → private link is never followed). Only asked when `who` names one.
+      const readsLink = (name: string) => {
+        if (!who.some(w => linkWhoName(w) === name)) return false
+        const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
+        return targets.length > 0 && records.byIds(targets).some(r => r.removedAt === null && reader.record(r) && linkAllowed(row, r))
+      }
+      let byWho = mayAct(who, member, actor, current.fields, manages(member.userId), holds(member.userId), true, readsLink)
       // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
       // or department they stand in for — never the absentee's role (no admin powers), and every
       // read check above and below stays the delegate's own.

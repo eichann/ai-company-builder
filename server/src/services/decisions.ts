@@ -33,8 +33,9 @@ import type { TokenDigest } from '../ports/key-broker'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { findMeetingOutput } from './meeting-outputs'
 import { MEETING_OUTPUT_REUSED_NOTE } from '../../shared/core/meeting-outputs'
+import { slotQuote } from '../../shared/core/source-slot-candidates'
+import { decideSlot, slotScope } from './source-slot-candidates'
 import { recordReader } from './record-access'
 import { ASSIGNEE_CANNOT_READ, type ActorInput, type ServiceRecordWriter } from './record-engine'
 import { currentTypes } from './record-index'
@@ -86,7 +87,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
-      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key']
+      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key', 'quote']
       for (const k of Object.keys(b)) if (!known.includes(k)) return bad(`Unknown key: ${k}`)
       const title = line(b.title, TITLE_MAX, true)
       if (!title) return bad(`title: 1–${TITLE_MAX} characters on one line`)
@@ -99,6 +100,9 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (b.exception !== undefined && typeof b.exception !== 'boolean') return bad('exception: true or false')
       const givenKey = line(b.key, KEY_MAX, false)
       if (givenKey === null) return bad(`key: up to ${KEY_MAX} characters`)
+      // The basis quote (the source's slot, minutes.md "Outputs made once"): its identity in the meeting's slot.
+      const quote = b.quote === undefined || b.quote === null ? null : slotQuote(b.quote)
+      if (b.quote !== undefined && b.quote !== null && quote === null) return bad('quote: the minutes text it rests on, copied as is (6–300 characters)', 'BAD_QUOTE')
       if (b.folder !== undefined && typeof b.folder !== 'string') return bad('folder: a department folder')
 
       // Links: readable records of the type the link names (`bundle`: of any type implementing it).
@@ -133,10 +137,14 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       const wanted = typeof b.folder === 'string' ? normalizeRepoPath(b.folder) : null
       const department = wanted ? handle.departments.folders().find(d => nameKey(d.folder) === nameKey(wanted)) : undefined
       const perms: PermissionRepository = { getMemberRole: () => member.role, listScopes: () => scopes }
+      if (quote !== null && !links.meeting) return bad('quote: only for a decision linked to its meeting (links.meeting)', 'QUOTE_NEEDS_MEETING')
+      // What an AI records from a meeting is a candidate in the meeting's slot (出どころの枠): the slot
+      // module decides new or already there. A person's decision keeps the key rule below.
+      const bySlot = links.meeting !== undefined && actor.kind === 'ai'
       // A meeting's item key is that meeting's: another meeting's `1` is never this one.
-      const key = givenKey !== undefined && links.meeting && !givenKey.startsWith(`${links.meeting}:`) ? `${links.meeting}:${givenKey}` : givenKey
+      let key = givenKey !== undefined && links.meeting && !givenKey.startsWith(`${links.meeting}:`) ? `${links.meeting}:${givenKey}` : givenKey
       // With a key, the id is the key's: two calls at once still make one record.
-      const id = key !== undefined
+      let id = key !== undefined && !bySlot
         ? newRecordId('decision', deps.tokenDigest.digest(`decision-key:${key}`).slice(0, 24))
         : newRecordId('decision', deps.ids.newToken().slice(0, 16))
       const folder = department?.folder ?? null
@@ -146,8 +154,18 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         && linked.every(r => r.folder === null || isSameOrAncestorPath(r.folder, folder)))
       if (!placeOk) return bad(DECISION_PLACE_REFUSED.error, DECISION_PLACE_REFUSED.code)
 
+      if (bySlot) {
+        const slot = decideSlot(records, r => reader.record(r), deps.tokenDigest, {
+          slot: { sourceId: links.meeting as string, linkName: 'meeting', kind: 'decision' }, title, quote, serialKey: givenKey ?? null, scope: slotScope(actor),
+        })
+        if (slot.kind === 'existing') {
+          return ok({ record: recordSummaries(records, [slot.row]).get(slot.row.id) as RecordSummary, created: false, reused: true, note: slot.note })
+        }
+        if (slot.id !== null) id = slot.id
+        key = slot.key !== null ? `${links.meeting}:${slot.key}` : undefined
+      }
       // The same item once: an earlier decision with this key is the answer.
-      if (key !== undefined) {
+      if (key !== undefined && !bySlot) {
         const earlier = records.candidates({ types: ['decision'], fields: [{ name: 'source_key', values: [key] }] }, 1)[0]
           ?? (records.find(id) ? { id } : undefined)
         if (earlier) {
@@ -155,11 +173,6 @@ export function createDecisionService(deps: DecisionServiceDeps) {
           if (!row) return refuse('conflict', 'この目印の決めたことは、すでにほかの場所にあります', { code: 'KEY_TAKEN' })
           return ok({ record: recordSummaries(records, [row]).get(row.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
         }
-      }
-      // The same title from the same meeting is the same item (a reading run again, without a key).
-      if (links.meeting) {
-        const same = findMeetingOutput(records, r => reader.record(r), { type: 'decision', meetingId: links.meeting, title })
-        if (same) return ok({ record: recordSummaries(records, [same]).get(same.id) as RecordSummary, created: false, reused: true, note: MEETING_OUTPUT_REUSED_NOTE })
       }
 
       const meeting = links.meeting ? linked.find(r => r.id === links.meeting) : undefined

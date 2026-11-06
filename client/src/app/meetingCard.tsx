@@ -18,7 +18,7 @@ export function renderMeetingPanel(companyId: string, meetingId: string, opts: {
       summary={parts.summary} outputs={parts.outputs} bundle={parts.bundle}
       renderReview={review => (
         <MinutesReview companyId={companyId} review={review} busy={false} onMeetingCard made={parts.tasks}
-          onAct={async (id, action, at) => { const r = await actOnTask(companyId, id, { action, expectedVersion: at }); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }} />
+          onAct={async (id, action, at, note) => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); opts.onChanged(); parts.onChanged(); return r.success ? null : r.error }} />
       )} />
   )
 }

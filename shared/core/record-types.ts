@@ -296,6 +296,17 @@ export const isSystemOnly = (who: readonly string[]): boolean => who.length > 0 
 export const ROLE_REF_RE = /^role:[a-z][a-z0-9_]{0,39}$/
 
 /**
+ * `link:<name>` in an action's `who` (task version 13, owner decision 2026-11-06 「出どころの枠」 §10):
+ * a member who reads the record this record's link `<name>` points to — 「その会議を読める人」 for a
+ * meeting's proposals. The link must be a record link of the type (not a file link). Never the AI
+ * unless `who` also lists `ai`; a delegate qualifies only on their own reading.
+ */
+export const LINK_WHO_RE = /^link:[a-z][a-z0-9_]{0,39}$/
+export const LINK_WHO_PREFIX = 'link:'
+/** The link a `link:<name>` who-entry names, or null for any other entry. */
+export const linkWhoName = (w: string): string | null => (LINK_WHO_RE.test(w) ? w.slice(LINK_WHO_PREFIX.length) : null)
+
+/**
  * What an interface asks of a type that claims it (`implements`): server
  * fields of these kinds, a choice field offering at least these options, and
  * — `finishes` — final states (whether one is finished must be answerable).
@@ -595,8 +606,10 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       const who = list(a.who)
       // `role:<name>` (plan C3): a business role, held by whom the company assigns (plugin-roles.ts);
       // a plugin package may name only roles it declares (validatePluginPackage).
-      const whoOk = !!who && who.length > 0 && who.every(w => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w) || ROLE_REF_RE.test(w)))
-      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} か role:<役割の名前> で書いてください`)
+      // `link:<name>` (task version 13): who reads the record that record link points to.
+      const linkWhoOk = (w: string) => { const l = linkWhoName(w); return l !== null && links[l] !== undefined && links[l].target !== 'file' }
+      const whoOk = !!who && who.length > 0 && who.every(w => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w) || ROLE_REF_RE.test(w) || linkWhoOk(w)))
+      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} か role:<役割の名前> か link:<記録へのつながりの名前> で書いてください`)
       const notify = list(a.notify)
       const notifyOk = !!notify && notify.every(n => typeof n === 'string' && (personFields.has(n) || args[n] === 'person'))
       if (!notifyOk) err(`操作「${aname}」の notify は人の欄か人の引数の名前で書いてください`)

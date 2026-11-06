@@ -296,13 +296,27 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   await expect(card.getByRole('button', { name: '確認を終える' })).toBeVisible()
   const proposals = card.getByRole('region', { name: 'AI のタスクの案' })
   await expect(proposals).toContainText('見積を直す佐藤さん・11/7 17:00')
+  // Who read it and how many are open; each proposal's basis, and whose AI added it when not the reader's.
+  await expect(proposals).toContainText('佐藤さんの AI が読みました・案 3 件')
+  const first = proposals.getByRole('listitem').filter({ hasText: '見積を直す佐藤さん' })
+  await expect(first).toContainText('「来週までに修正した見積をお送りします」')
+  await expect(first).not.toContainText('AI が追加')
+  await expect(proposals.getByRole('listitem').filter({ hasText: 'セキュリティ資料を送る' })).toContainText('阿部さんの AI が追加')
   await proposals.getByRole('button', { name: '全部足す' }).click()
-  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1')
+  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1,adopt@1')
 
   await proposals.getByRole('button', { name: '選んで足す' }).click()
   await proposals.getByLabel('見積を直す を選ぶ').uncheck()
   await proposals.getByRole('button', { name: '選んだものを足す' }).click()
-  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1,adopt@1')
+  await expect(page.locator('#acted')).toHaveText('adopt@1,adopt@1,adopt@1,adopt@1,adopt@1')
+
+  // 「似ている案があります」: ［同じ］ puts the newer away with a note, ［別のもの］ keeps both.
+  const similar = proposals.getByRole('listitem').filter({ hasText: '見積を直して送る' }).getByRole('note')
+  await expect(similar).toContainText('似ている案があります：「見積を直す」')
+  await similar.getByRole('button', { name: '同じ' }).click()
+  await expect(page.locator('#acted')).toContainText('dismiss@1:「見積を直す」と同じ案のため')
+  await similar.getByRole('button', { name: '別のもの' }).click()
+  await expect(page.locator('#acted')).toContainText('keep_apart@1')
 
   await proposals.getByRole('listitem').filter({ hasText: '会食の店を探す' }).getByRole('button', { name: '戻す' }).click()
   await expect(page.locator('#acted')).toContainText('propose_again@2')
@@ -311,6 +325,17 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   await expect(decisions.getByRole('listitem').filter({ hasText: '4月から始める' }).getByRole('button')).toHaveCount(1)
   await decisions.getByRole('listitem').filter({ hasText: '窓口は3つにする' }).getByRole('button', { name: '確かめる' }).click()
   await expect(page.locator('#acted')).toContainText('confirm@3')
+  expectNoPageErrors(state)
+})
+
+test('「議事録を確認する」: the proposal buttons follow the type\'s who — none where the member may not press', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { task: 'review', proposals: 'none' })
+  const proposals = page.getByTestId('task-card').getByRole('region', { name: 'AI のタスクの案' })
+  await expect(proposals).toContainText('見積を直す')
+  await expect(proposals).toContainText('似ている案があります')
+  for (const name of ['全部足す', '選んで足す', '要らない', '足す', '戻す', '同じ', '別のもの']) {
+    await expect(proposals.getByRole('button', { name, exact: true })).toHaveCount(0)
+  }
   expectNoPageErrors(state)
 })
 

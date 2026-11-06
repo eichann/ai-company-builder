@@ -126,8 +126,11 @@ test('the first message names the minutes by id and carries no minutes text; the
   const message = minutesFirstMessage(held)
   assert.ok(message.includes(MINUTES_ID))
   assert.ok(message.includes('minutes_read'))
-  // Each output names its meeting and item, and a reading run again is told to reuse what it finds (FB 29).
-  assert.ok(message.includes('task:1') && message.includes('decision:1') && message.includes('reused'))
+  // Each output names its meeting and its basis quote (the meeting's slot), never a serial key; a candidate
+  // already there with the same basis is reused and said, a close title kept as similar.
+  assert.ok(message.includes('quote') && message.includes('reused') && message.includes('同じ根拠の案がもうあります') && message.includes('similar'))
+  assert.ok(message.includes('key（「task:1」などの通し番号）は付けないでください'))
+  assert.ok(!message.includes('decision:1'))
   assert.ok(!message.includes(held.text))
   const day = `${new Date(held.meetingAt).getMonth() + 1}/${new Date(held.meetingAt).getDate()}`
   assert.equal(minutesConsultationTitle(held), `A社 商談 のあと（${day}）`)
