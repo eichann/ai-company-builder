@@ -3,19 +3,20 @@
 // action at the version shown; the server decides who may, and a button shows only where its `who`
 // lets the member (task version 13: everyone who reads the meeting, `proposalMay`). Each proposal
 // shows the minutes text it rests on, whose AI added it, and 「似ている案があります」 with ［同じ］ (the
-// newer put away) / ［別のもの］. On the meeting's own card: 決めたこと first, and the tasks already made
-// from the meeting join the proposals in one list.
+// newer put away) / ［別のもの］. On the meeting's own card: 決めたこと first, the tasks already made
+// from the meeting join the proposals in one list, and 「やることを足す」 makes one by hand.
 import { useState } from 'react'
 import { CheckCircle, Sparkle } from '@phosphor-icons/react'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { MinutesReviewView } from '../../../../shared/task-card'
-import { proposalsHeadline, type TaskProposal } from '../../../../shared/tasks'
+import { proposalsHeadline, type TaskProposal, type TaskWriteResult } from '../../../../shared/tasks'
 import { slotSameAsNote } from '../../../../../shared/core/source-slot-candidates'
 import { CALM } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useTaskProposals } from '../hooks/useTaskProposals'
+import { MeetingTaskAdd } from './MeetingTaskAdd'
 
 const QUIET = 'inline-flex shrink-0 items-center rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
@@ -34,9 +35,13 @@ interface Props {
   onMeetingCard?: boolean
   /** The meeting's own card: its linked tasks, among them the proposals, each listed once. */
   made?: readonly RecordViewSummary[]
+  /** The meeting's own card: 「やることを足す」 (a task of this meeting by the member, `MeetingTaskAdd`). */
+  onCreate?: (title: string) => Promise<TaskWriteResult>
+  /** 元に戻す after ［まとめる］ there: the entry at `version` undone; null = done. */
+  onUndo?: (id: string, version: number) => Promise<string | null>
 }
 
-export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = false, made = [] }: Props) {
+export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = false, made = [], onCreate, onUndo }: Props) {
   const { result, reload } = useTaskProposals(companyId, review.meetingId)
   const [picking, setPicking] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +96,12 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
         </div>
       )}
       {error && <p role="alert" className="mt-1 text-[12px] text-red-600 dark:text-red-400">{error}</p>}
+      {onCreate && onUndo && (
+        <MeetingTaskAdd busy={busy}
+          onCreate={async title => { const r = await onCreate(title); reload(); return r }}
+          onAct={async (id, action, at, note) => { const failure = await onAct(id, action, at, note); reload(); return failure }}
+          onUndo={async (id, at) => { const failure = await onUndo(id, at); reload(); return failure }} />
+      )}
     </section>
   )
   const decisionList = (

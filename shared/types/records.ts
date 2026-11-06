@@ -10,7 +10,9 @@
  *   POST /records/query      any member    RecordQuery → RecordQueryResult (records of an old connection only with includeOldConnection)
  *   GET  /records/item/:recordId  any member  → RecordDetail
  *   GET  /records/my-turn    any member    → RecordQueryResult (「あなたの番」, 4-4)
- *   POST /records/item       any member    CreateRecordRequest → 201 { record, entry } (server-only record)
+ *   POST /records/item       any member    CreateRecordRequest → 201 { record, entry, similar? } (server-only record;
+ *                                          `similar` { id, title }: made from a meeting, a live item of it the
+ *                                          caller reads has a close title — 「似ているやることがあります」, a hint only)
  *   POST /records/item/:recordId/actions/:action   ActionRequest → { record, entry }
  *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
  *   POST /records/item/:recordId/file-links        FileLinkRequest → FileLinkResult (link a file later)
@@ -18,7 +20,7 @@
  *   POST /records/item/:recordId/record-links        RecordLinkRequest → RecordLinkResult (link a record later)
  *   POST /records/item/:recordId/record-links/remove RecordLinkRequest → RecordLinkResult (remove that link;
  *                                                  取り消す = POST …/undo { version: entry.version, expectedVersion })
- *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry } (owner-only / members-only → a folder; session only)
+ *   POST /records/item/:recordId/share             ShareRecordRequest → { record, entry, similar? } (owner-only / members-only → a folder; session only)
  *   POST /records/item/:recordId/members           InviteRecordMembersRequest → { record, entry, added } (members-only; session only)
  *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
  *   GET  /records/item/:recordId/versions/:version → ReplayedState

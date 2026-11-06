@@ -58,3 +58,11 @@ export function slotSimilarNote(title: string): string {
 export function slotSameAsNote(title: string): string {
   return `「${title}」と同じ案のため`
 }
+
+/**
+ * The note of ［まとめる］ on a person's new item that is close to an earlier one (「似ているやることが
+ * あります」, §10 step 4): the new one is put away with it, the earlier one kept.
+ */
+export function slotMergedNote(title: string): string {
+  return `「${title}」とまとめたため`
+}

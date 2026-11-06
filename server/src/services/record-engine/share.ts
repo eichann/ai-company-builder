@@ -16,6 +16,7 @@ import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
 import { BUNDLE_PLACED_TYPES, linkedBundle } from './bundle-place'
 import { pathKey } from '../../../shared/core/paths'
+import { similarInSlot } from '../source-slot-candidates'
 
 /** The ledger action of sharing an owner-only or members-only record to a folder. */
 export const SHARE_ACTION = 'share'
@@ -57,9 +58,11 @@ export function sharing(ctx: EngineContext) {
      * with `toBundle`, that まとまり's place). Only its owner / a listed member — nobody
      * else can even find it — and only the person, with their session (the route has no AI
      * twin). A ledger entry `share` with `place.personal_owner` (or `place.members`) /
-     * `place.folder` before / after; never undone.
+     * `place.folder` before / after; never undone. Made from a meeting (its `meeting` link): the answer
+     * adds `similar` when a live item of that meeting the member reads has a close title
+     * (「似ているやることがあります」, 出どころの枠 §10 — a hint only, the share is never refused).
      */
-    share(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+    share(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry; similar?: { id: string; title: string } }> {
       const found = readable(member, recordId)
       if (!found.ok) return found
       const { records, reader, row } = found
@@ -118,7 +121,9 @@ export function sharing(ctx: EngineContext) {
       })
       if (!written) return conflict(STALE, 'VERSION_CONFLICT')
       changed(member.companyId, row.id)
-      return ok({ record: summaryOf(records, row.id), entry })
+      const meetingId = def.links.meeting?.target === 'meeting' ? records.linksFrom([row.id]).find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
+      const similar = meetingId ? similarInSlot(records, r => reader.record(r), { slot: { sourceId: meetingId, linkName: 'meeting', kind: row.type }, title: row.title, self: row.id }) : null
+      return ok({ record: summaryOf(records, row.id), entry, ...(similar ? { similar } : {}) })
     },
 
     /**

@@ -63,14 +63,18 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   done. `own` = the member asked it of themselves (requester and assignee).
   Each item also carries the interfaces its type implements (`implements`, from `/records/types`):
   a plugin's peek lists by them (`plugin-frame.md` "The four slots").
-- `tasks:create(companyId, { title, due?, tags?, assignee?, whenDone?, folder?, bundleId? })`: the
+- `tasks:create(companyId, { title, due?, tags?, assignee?, whenDone?, folder?, bundleId?, meetingId? })`: the
   list's one line makes a task **only the member sees** (`personal: true`, assignee = the member;
   `records.md` "Owner-only records"). With another member as `assignee` it is **「頼む」** (task v9):
   never owner-only (they could not read it), shown to the readers of `folder` (the department on
   screen; 全社 = none, the whole company), `when_done` (`notify` = 知らせるだけ by default, `check` =
   確かめてから with the member as `reviewer`). `bundleId` links what it belongs to; 「頼む」 with one sends
-  no folder (the server gives it the 案件's 見える範囲, `records.md` "A task and its 案件・プロジェクト"). Main
-  sends only a member id, a `fileLinkPath`-checked folder and a record id.
+  no folder (the server gives it the 案件's 見える範囲, `records.md` "A task and its 案件・プロジェクト").
+  `meetingId` (the meeting card's 「やることを足す」, "Similar items" below) links `meeting` and is never
+  owner-only and sends no folder (the meeting's people see it). The answer carries the new record's
+  `state` and the server's `similar`, checked by `similarOf` (a record id and a title, else dropped);
+  `tasks:share` / `tasks:shareToBundle` carry `similar` the same way. Main
+  sends only a member id, a `fileLinkPath`-checked folder and record ids.
 - `tasks:bundleKinds(companyId)` → `BundleKindsAnswer`: `GET /records/bundle-kinds` as the server
   answered it (`records.md` "Bundle kinds": what each department makes and the names — a plugin's
   案件・番組, the core's 「プロジェクト」 or the company's name). Renderer port `BundleKindReads`
@@ -370,6 +374,31 @@ the app"), from `tasks:proposals` (`minutes.md` "The AI's proposals"):
 - Tests: `client/tests/tasks-list.test.ts` (「a meeting's proposals: the buttons follow the type's who…」),
   `tests/ui/task-card.spec.ts` (「議事録を確認する」: the headline, the basis, 「〇〇さんの AI が追加」, ［同じ］
   with its note, ［別のもの］; `?proposals=none`: no button).
+
+## Similar items (「似ているやることがあります」, 出どころの枠 §10 step 4, owner decision 2026-11-06)
+
+A person's create and share are free; when the server names a live item of the same meeting with a
+close title (`similar`, `minutes.md` "Outputs made once"), one quiet amber line — never a dialog —
+says 「似ているやることがあります：「…」」 with ［まとめる］［このまま］ (`SimilarHint.tsx`):
+
+- **Where**: the meeting card's 「やることの案」 list gains 「＋ やることを足す」 (`MeetingTaskAdd.tsx`, given by
+  `src/app/meetingCard.tsx` through `MinutesReview`'s `onCreate` / `onUndo`; the review task's card has
+  none): one line, Enter makes the member's task of that meeting (`tasks:create` with `meetingId`).
+  And the task card after 「部署に出す」 / ［〇〇の人に見せる］ (`TaskCard`'s notice). The list's one line
+  (`QuickAdd`) makes 「あなただけ」 tasks with no meeting: never compared, so no hint there.
+- **［まとめる］**: the **new** item is put away — `mergeActionFor(state)` (`client/shared/tasks.ts`):
+  `dismiss` (要らない) from 案・未着手・引き受け待ち, `cancel` (アーカイブ) from the other open states, none
+  once finished (then only ［このまま］) — with the note 「「<既存の件名>」とまとめたため」 (`slotMergedNote`),
+  then the earlier item opens (`record.open`). Reversible: the card's ［取り消す］, the add line's
+  ［元に戻す］ (`tasks:undo` of that one entry). The earlier item is never changed.
+- **［このまま］** (or nothing): both stay; nothing is stored, so the hint is not asked again for that
+  press. The `keep_apart` / `similar_to` marks are not used: they are the AI's proposals' (`proposed`
+  only; a create naming `similar_to` is refused).
+- Tests: `client/tests/tasks-list.test.ts` (「やることを足す」 sends the meeting link, never owner-only;
+  `similar` passed only as an id and a title; ［まとめる］'s action allowed from every open state of the
+  core task, none when finished), `tests/ui/meetings.spec.ts` (「やることを足す」: no line when nothing is
+  close, the line without a dialog, ［このまま］, ［まとめる］ with its note and the earlier one opened,
+  ［元に戻す］), `tests/ui/task-card.spec.ts` (「部署に出す」 then ［まとめる］ with ［取り消す］).
 
 ## The archive (アーカイブ, owner decision 2026-11-03)
 

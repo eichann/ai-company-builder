@@ -7,6 +7,7 @@
 // meetings at once, and a long list below. `?bundle=suggest`: the server suggests one 案件 for the
 // card's question (`?bundle=declined`: 案件はない was chosen). `window.__acbMeetings.finish(id)`: the
 // member's AI finished reading (what the runner does in the app). Presses show in `#log`.
+// 「やることを足す」 answers 「似ている」 for a title close to a proposal (the server decides in the app).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -17,6 +18,7 @@ import type { RecordSummary } from '../../shared/types/records'
 import { MeetingBanners } from '../src/features/minutes/components/MeetingBanners'
 import { useMeetingArrivals } from '../src/features/minutes/hooks/useMeetingArrivals'
 import { RecordCard } from '../src/features/records/components/RecordCard'
+import { useCommandHandler } from '../src/shared/commands/commands'
 import { renderMeetingPanel } from '../src/app/meetingCard'
 import { renderRecordBundleField } from '../src/app/recordBundleField'
 import { recordDetailOf } from '../shared/record-details'
@@ -97,6 +99,13 @@ installElectronAPI({
     tell()
     return { success: true, recordId: id }
   },
+  // 「やることを足す」: a title close to a proposal is answered with it (the server's similarInSlot, tested there).
+  createTask: async (_c, input) => {
+    say(`create ${input.title} meeting=${input.meetingId ?? ''}`)
+    const close = outputs(find(String(input.meetingId))).find(r => r.type === 'task' && (r.title.includes(input.title) || input.title.includes(r.title)))
+    return { success: true, recordId: 'task-hand0001', state: 'todo', ...(close ? { similar: { id: close.id, title: close.title } } : {}) }
+  },
+  actOnTask: async (_c, id, input) => { say(`act ${id} ${input.action}@${input.expectedVersion} ${input.note ?? ''}`.trim()); return { success: true, recordId: id } },
   setMeetingAutoSeries: async (_c, id, auto) => { say(`auto ${id} ${auto}`); if (auto) autoSeries.add(id); else autoSeries.delete(id); tell(); return { success: true } },
   inviteToRecord: async (_c, id, add, at) => { say(`invite ${id} ${add.join(',')}@${at}`); return { success: true, added: add } },
   getRecordCard: async (_c, id) => {
@@ -122,6 +131,7 @@ installElectronAPI({
 
 function Preview() {
   const { arrivals, reload } = useMeetingArrivals('co')
+  useCommandHandler('record.open', ({ recordId }) => say(`open ${recordId}`))
   const [open, setOpen] = useState<string | null>(null)
   return (
     <main className="flex min-h-screen bg-white text-gray-900">

@@ -7,7 +7,8 @@ import { InputDialog } from '../../../shared/ui/InputDialog'
 import { runCommand } from '../../../shared/commands/commands'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary, RemovableLink } from '../../../../shared/record-views'
-import type { BundleChoice, RecordLinkInput, TaskActInput } from '../../../../shared/tasks'
+import { mergeActionFor, type BundleChoice, type RecordLinkInput, type SimilarItem, type TaskActInput } from '../../../../shared/tasks'
+import { slotMergedNote } from '../../../../../shared/core/source-slot-candidates'
 import type { BundleKind } from '../../../../../shared/types/records'
 import { CALM, ONLY_YOU } from '../../../../shared/thing-words'
 import { RecordMarks } from '../../records/components/RecordRows'
@@ -35,6 +36,7 @@ import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
 import { TagField } from './TagField'
 import { WaitBand } from './WaitParts'
+import { SimilarHint } from './SimilarHint'
 
 interface Props {
   companyId: string
@@ -87,6 +89,8 @@ type Notice =
   /** `undo`: the ledger entry 取り消す reverses (on this task, or on the other record holding a link). */
   | { kind: 'done'; text: string; undo: { recordId: string; version: number } | null }
   | { kind: 'conflict'; since: number }
+  /** 「似ているやることがあります」 after 部署に出す / 〇〇の人に見せる (the server named one; tasks-ui.md "Similar items"). */
+  | { kind: 'similar'; similar: SimilarItem }
 
 /**
  * A task's card (stage 2 S7c, 新しい画面のデモ C): one main action beside the title, the rest
@@ -168,8 +172,17 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   })
   const share = (folder: string) => change(async () => {
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
+    if (r.success && r.similar) setNotice({ kind: 'similar', similar: r.similar })
     return r.success ? null : r.error
   })
+  // ［まとめる］: this one is put away with the note (取り消す brings it back), the earlier one opens.
+  const merge = (similar: SimilarItem) => {
+    const action = mergeActionFor(card.record.state)
+    if (!action) return
+    void runSteps([{ action, note: slotMergedNote(similar.title) }], `「${similar.title}」とまとめました`).then(failure => {
+      if (failure === null) void runCommand('record.open', { recordId: similar.id })
+    })
+  }
   // 「議事録を確認する」: the meeting's summary, the AI's proposals and its decisions, each pressed on its own record.
   const review = card.review && <MinutesReview companyId={companyId} review={card.review} busy={busy}
     onAct={(id, action, at, note) => change(async () => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); return r.success ? null : r.error })} />
@@ -180,6 +193,8 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     {...(card.canSetBundle ? { onLinkBundle: (b: BundleChoice) => linkBundle(b) } : {})} />
   const top = notice?.kind === 'conflict'
     ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
+    : notice?.kind === 'similar'
+      ? <SimilarHint similar={notice.similar} busy={busy} onMerge={mergeActionFor(card.record.state) ? () => merge(notice.similar) : null} onKeep={() => setNotice(null)} />
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
@@ -210,6 +225,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     } : undefined}
     onShowToBundle={() => change(async () => {
       const r = await shareTaskToBundle(companyId, recordId, version)
+      if (r.success && r.similar) setNotice({ kind: 'similar', similar: r.similar })
       return r.success ? null : r.error
     })}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
