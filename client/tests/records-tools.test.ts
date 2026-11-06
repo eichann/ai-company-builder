@@ -106,6 +106,14 @@ test('service-owned types: records_create never offers them, approvals / message
   assert.ok(!read!.specs.some(s => s.name === 'decisions_record'))
 })
 
+test('decisions_record: a decision of a meeting for its attendees goes without a folder (the server refuses one there)', async () => {
+  const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const decision = act!.specs.find(s => s.name === 'decisions_record')!
+  const input = { title: 't', why: 'w', source: 's', links: { meeting: 'meeting-abc123' }, quote: '来月から週次で進めることにします' }
+  assert.equal(decision.schema.safeParse(input).success, true)
+  assert.deepEqual(decision.request(input).body, input)
+})
+
 test('a tool refuses what its schema refuses before calling the server (a required note)', async () => {
   const { api, seen } = fakeServer('act')
   const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
