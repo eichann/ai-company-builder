@@ -479,7 +479,12 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   must be the package's `expected_environment` (none stated → 409 `ENVIRONMENT_NOT_STATED`, another → 409
   `ENVIRONMENT_MISMATCH`); the account is bound as `<id>.<environment>`, another one → 409 `ACCOUNT_CHANGED`.
   A check stands 5 minutes per connection and key value (`<keyId>.<secretUpdatedAt>`): a replaced key is
-  checked at once.
+  checked at once. **An account that cannot be read says why** (409 `ACCOUNT_UNREADABLE` +
+  `details` `PluginCallFailureDetails` { `reason: 'account-check'`, `kind` (the connector's, or
+  `unreadable` for a 2xx without the declared fields), `status` when the service answered, `cause`
+  the connector's fixed word }), and the sentence names the status in plain words: 403 →
+  「つなぎ先が 403 を返しました（入口で断られています）」, 401 → 鍵が受け付けられていません, no answer →
+  届きませんでした. Before (staging 2026-11-06), a load balancer's 403 was only 「確かめられません」.
 - **The way out** (`connector.callDeclared`): the id through `EXTERNAL_ID_RE`, the key revealed before each
   attempt and only into `auth.header`, the pace of `limits`, read retries as for any read. Every read sends
   the actor header `acb_member_<id>` (`system` on the account check) and the email header only with the
@@ -494,9 +499,15 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   `cite` link only when https on the declared host and its default port, no user, ≤ 2000 as handed on (encoded); the field it came from is not also handed
   on. A sensitive field reaches only whoever passes the `who` of the call declaring it. **Nothing of an answer
   is stored**: not in the ledger, an operation row or the log.
-- **A failure** is `{ outcome: 'failed', failure, code? }`: `failure` is a core class, from `errors.map` for
+- **A failure** is `{ outcome: 'failed', failure, code?, details }`: `failure` is a core class, from `errors.map` for
   the answer's top-level `code` (a plain word, else none), else by status (401 / 403 permission, other 4xx
-  bad-input, rest temporary).
+  bad-input, rest temporary); `details` the same shape as the account's (`reason: 'call'`).
+- **Diagnosable without leaking**: a failed account check or call logs one line, `[plugins] <account-check |
+  call> failed: company=<id> plugin=<id> kind=… status=… cause=…` — the stage, the status and fixed words,
+  never a body, a header value or the key. Test: `plugin-calls.test.ts` 「an account check refused in front
+  of the service says 403…」 and 「a refusal in front of the service is a failure with its stage and status…」
+  (the fake portal's `failNext({ status: 403, gateway: true })`, an HTML 403 like a load balancer's;
+  mutation-checked: details, status, sentence, log).
 - **`plugin_access_log`** (company handle): one line per read that went out (`onSend`), however it ended — a
   read stopped before its next attempt too (`status: stopped`); nothing went out, no line. Member, actor kind,
   the AI's conversation and run (a person's row keeps none: their app's conversation id is self-reported), call, `refs` `{ input, returned, more }`: the plain id inputs (`kind: id`, `class:
@@ -528,7 +539,8 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
 - **The practice service**: `server/tests/fakes/portal/` (`pnpm fake:portal`, staging port 14013) behaves as
   a contract-3 service must, and holds a client to it (actor header on every call, search by POST, flat
   errors, `{id}` an `EXTERNAL_ID_RE`). Faults: a 429 with `Retry-After`, an undeclared field, an
-  instruction-like name. A real service's host, base path and paths are never in this repository: the
+  instruction-like name; `requireUserAgent` (on in `plugin-calls.test.ts`) refuses a request without a
+  `User-Agent` with an HTML 403, as the load balancer in front of a real service did. A real service's host, base path and paths are never in this repository: the
   private kit config's `portal` line gives them (`ACB_FAKE_PORTAL_HOST` / `_SERVICE`, `FAKE_PORTAL_BASE_PATH`,
   `FAKE_PORTAL_ALIASES`); without it the fake stands in for the fixture's made-up host.
 - Test: `tests/unit/plugin-contract-v3.test.ts` with `fixtures/plugins/sample-portal` and

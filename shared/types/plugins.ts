@@ -295,6 +295,21 @@ export interface PluginCallAnswer {
   /** `failed`: the core's failure class, and the outside's code when it gave one. */
   failure?: 'temporary' | 'permission' | 'bad-input' | 'unknown-result'
   code?: string
+  /** `failed`: the stage, kind and status (never a body, header or key), so an admin can tell a gateway's 403 from a lost connection. */
+  details?: PluginCallFailureDetails
+}
+
+/**
+ * Why a contract-3 call (or the account check before it) did not give what was needed:
+ * `reason` the stage, `kind` the connector's (`not-sent`, `refused`, `server-error`…, or
+ * `unreadable` for a 2xx without the declared fields), `status` the service's HTTP status when
+ * it answered, `cause` the connector's fixed word (`not-permitted`, `dns`, `unreadable-answer`…).
+ */
+export interface PluginCallFailureDetails {
+  reason: 'account-check' | 'call'
+  kind: 'not-sent' | 'unknown' | 'refused' | 'rate-limited' | 'server-error' | 'unreadable'
+  status?: number
+  cause: string
 }
 
 /** Reads refused for the member's share of the pace, counted per member and hour (`hour`: `YYYY-MM-DDTHH`, UTC). */

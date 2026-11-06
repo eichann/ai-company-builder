@@ -13,7 +13,10 @@ export interface UpstreamRequest {
   method: string
   /** Path and query, starting with '/'. */
   path: string
-  /** Header name (lower case) → value; already contains the real credential. */
+  /**
+   * Header name (lower case) → value; already contains the real credential. Without a
+   * `user-agent` the adapter adds ACB's (`ACB_USER_AGENT`); a caller's own is sent as is.
+   */
   headers: Record<string, string>
   /** The request body, streamed; null for none. */
   body: AsyncIterable<Uint8Array> | null

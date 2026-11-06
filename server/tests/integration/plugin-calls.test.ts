@@ -17,7 +17,11 @@
  * - each member has a share of the pace; every stop of the AI ends the next attempt;
  * - the relay is closed for the service and its host, reads too, and it gets no read scope;
  * - a member who leaves holds no role;
- * - a business plugin of calls alone runs without a mapping.
+ * - a business plugin of calls alone runs without a mapping;
+ * - every request names ACB as its client (the fake, like the load balancer in front of a
+ *   real service, refuses one without a User-Agent), and a refusal in front of the service
+ *   is reported with its stage and status — the account check's 403 is not just
+ *   "unreadable" — in the answer and the log, never a body or the key.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -31,6 +35,7 @@ import { PORTAL_SEED } from '../fakes/portal/seed'
 import { PLUGIN_FIXTURES } from '../helpers/plugin-packages'
 import { citeLink } from '../../../shared/core/plugins'
 import { createPluginConnector } from '../../src/services/plugin-connector'
+import { ACB_USER_AGENT } from '../../src/adapters/upstream-https'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -75,7 +80,7 @@ async function call(opts: { user?: string; token?: string; method: string; path:
 }
 
 beforeAll(async () => {
-  fake = createFakePortal({ environment: 'staging', accountId: 'sample-account' })
+  fake = createFakePortal({ environment: 'staging', accountId: 'sample-account', requireUserAgent: true })
   fake.addKey(KEY, Object.values(PORTAL_SCOPES))
   server = serve({ fetch: fake.fetch, port: 0, hostname: '127.0.0.1' })
   await new Promise(r => setTimeout(r, 50))
@@ -144,6 +149,29 @@ describe('what comes back', () => {
     const active = await services.plugins.active(CO, 'sample-portal-care')
     expect(active.ok, JSON.stringify(active)).toBe(true)
     expect(active.plugin.mappingVersion).toBe(0)
+  })
+
+  it('every request names ACB as its client, and only ACB', async () => {
+    expect((await diagnose()).ok).toBe(true)
+    expect(fake.requests().length).toBeGreaterThan(0)
+    expect(new Set(fake.requests().map(r => r.userAgent))).toEqual(new Set([ACB_USER_AGENT]))
+  })
+
+  it('a refusal in front of the service is a failure with its stage and status, logged without the key or the page', async () => {
+    expect((await diagnose()).ok).toBe(true)
+    const warn = vi.mocked(console.warn)
+    warn.mockClear()
+    fake.failNext({ status: 403, gateway: true })
+    try {
+      const r = await diagnose()
+      expect(r.value.outcome).toBe('failed')
+      expect(r.value.failure).toBe('permission')
+      expect(r.value.details).toEqual({ reason: 'call', kind: 'refused', status: 403, cause: 'not-permitted' })
+      const lines = warn.mock.calls.map(a => a.map(String).join(' ')).join('\n')
+      expect(lines).toContain('[plugins] call failed')
+      expect(lines).toContain('status=403')
+      for (const secret of [KEY, '<html', 'Forbidden']) expect(lines).not.toContain(secret)
+    } finally { fake.clearFaults() }
   })
 
   it('a field nobody declared is never handed on, and is counted', async () => {
@@ -645,8 +673,37 @@ describe('the account and its environment', () => {
     for (const next of [{ accountId: 'sample account' }, { accountId: 'a.b' }, { environment: 'stag ing' }]) {
       later(10)
       fake.setAccount(next)
-      try { expect((await diagnose()).body?.code, JSON.stringify(next)).toBe('ACCOUNT_UNREADABLE') } finally { fake.setAccount({ accountId: 'sample-account', environment: 'staging' }) }
+      try {
+        const r = await diagnose()
+        expect(r.body?.code, JSON.stringify(next)).toBe('ACCOUNT_UNREADABLE')
+        expect(r.body?.details).toEqual({ reason: 'account-check', kind: 'unreadable', status: 200, cause: 'unexpected-answer' })
+      } finally { fake.setAccount({ accountId: 'sample-account', environment: 'staging' }) }
     }
+  })
+
+  it('an account check refused in front of the service says 403, not just unreadable, and logs no secret', async () => {
+    later(10)
+    const warn = vi.mocked(console.warn)
+    warn.mockClear()
+    fake.failNext({ status: 403, gateway: true })
+    try {
+      const before = asked().length
+      const r = await diagnose()
+      expect(r.body?.code).toBe('ACCOUNT_UNREADABLE')
+      expect(r.body?.details).toEqual({ reason: 'account-check', kind: 'refused', status: 403, cause: 'not-permitted' })
+      expect(r.body?.error).toBe('つなぎ先のアカウントを確かめられません。つなぎ先が 403 を返しました（入口で断られています）')
+      // Refused at the account: the read itself was not asked.
+      expect(asked().length).toBe(before)
+      const lines = warn.mock.calls.map(a => a.map(String).join(' ')).join('\n')
+      expect(lines).toContain('[plugins] account-check failed')
+      expect(lines).toContain('status=403')
+      for (const secret of [KEY, '<html', 'Forbidden']) {
+        expect(lines).not.toContain(secret)
+        expect(JSON.stringify(r.body)).not.toContain(secret)
+      }
+    } finally { fake.clearFaults() }
+    later(10)
+    expect((await diagnose()).ok).toBe(true)
   })
 })
 

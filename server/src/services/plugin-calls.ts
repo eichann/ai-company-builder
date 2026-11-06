@@ -16,7 +16,7 @@
 import { CALL_CURSOR_RE, keepDeclared, citeLink, pointersOf, type KeptEntry, type PluginCall, type PluginCallRequest, type PluginCallListing, type PluginCalling } from '../../shared/core/plugins'
 import type { AiRunFailureClass } from '../../shared/core/ai-runs'
 import type { AgentStopPolicy, AgentStopToolKind } from '../../shared/types/agent-stop'
-import type { PluginAccessLogEntry, PluginCallAnswer, PluginPacedCount } from '../../shared/types/plugins'
+import type { PluginAccessLogEntry, PluginCallAnswer, PluginCallFailureDetails, PluginPacedCount } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { Member } from './access'
@@ -104,6 +104,31 @@ function failureOf(r: Extract<ConnectorResult, { ok: false }>, errors: PluginCal
   return 'temporary'
 }
 
+/**
+ * Why a call to the service did not give what was needed, for the log and the answer: the stage,
+ * the connector's kind and fixed word, the status — never a body, a header value or a key.
+ */
+function failureDetails(stage: 'account-check' | 'call', r: ConnectorResult): PluginCallFailureDetails {
+  if (r.ok) return { reason: stage, kind: 'unreadable', status: r.status, cause: 'unexpected-answer' }
+  return { reason: stage, kind: r.kind, ...(r.status !== undefined ? { status: r.status } : {}), cause: r.reason }
+}
+
+/** The account check's sentence: what the admin can act on, in plain words. */
+function accountUnreadableText(d: PluginCallFailureDetails): string {
+  const head = 'つなぎ先のアカウントを確かめられません'
+  if (d.kind === 'unreadable') return `${head}。つなぎ先の答えから、アカウントと環境を読み取れませんでした`
+  if (d.status === 403) return `${head}。つなぎ先が 403 を返しました（入口で断られています）`
+  if (d.status === 401) return `${head}。つなぎ先が 401 を返しました（鍵が受け付けられていません）`
+  if (d.status !== undefined) return `${head}。つなぎ先が ${d.status} を返しました`
+  if (d.kind === 'not-sent' || d.kind === 'unknown') return `${head}。つなぎ先に届きませんでした`
+  return head
+}
+
+/** One line for a failed call: ids and fixed words only (the details above), never what was read or sent. */
+function logFailure(companyId: string, pluginId: string, d: PluginCallFailureDetails) {
+  console.warn(`[plugins] ${d.reason} failed: company=${companyId} plugin=${pluginId} kind=${d.kind} status=${d.status ?? '-'} cause=${d.cause}`)
+}
+
 /** The plain id inputs of a read: what the log may keep of them. A search word, or an id declared personal, is not. */
 function loggedInputs(request: PluginCallRequest, input: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(input).filter((e): e is [string, string] => {
@@ -153,7 +178,10 @@ export function createPluginCalls(deps: PluginCallDeps) {
     const id = r.ok && isObj(r.body) ? r.body[info.idField] : undefined
     const environment = r.ok && isObj(r.body) ? r.body[info.environmentField] : undefined
     if (typeof id !== 'string' || typeof environment !== 'string' || !EXTERNAL_ID_RE.test(id) || !EXTERNAL_ID_RE.test(environment)) {
-      return refuse('conflict', 'つなぎ先のアカウントを確かめられません', { code: 'ACCOUNT_UNREADABLE' })
+      // The stage and the status, so a gateway's 403 is not just "unreadable" (staging, 2026-11-06).
+      const details = failureDetails('account-check', r)
+      logFailure(member.companyId, plugin.connectorId, details)
+      return refuse('conflict', accountUnreadableText(details), { code: 'ACCOUNT_UNREADABLE', details })
     }
     if (environment !== info.expectedEnvironment) return refuse('conflict', 'つなぎ先の環境が、決められたものと違います。管理者に確かめてください', { code: 'ENVIRONMENT_MISMATCH' })
     const seen = `${id}.${environment}`
@@ -246,7 +274,9 @@ export function createPluginCalls(deps: PluginCallDeps) {
         }
         answer = { outcome: 'ok', ...empty, data, items: kept.items, next, cite, dropped }
       } else {
-        answer = { outcome: 'failed', ...empty, dropped: 0, failure: failureOf(r, plugin.manifest.calling?.errors ?? null), ...(r.code ? { code: r.code } : {}) }
+        const details = failureDetails('call', r)
+        logFailure(member.companyId, pluginId, details)
+        answer = { outcome: 'failed', ...empty, dropped: 0, failure: failureOf(r, plugin.manifest.calling?.errors ?? null), ...(r.code ? { code: r.code } : {}), details }
       }
 
       // One line for a read that went out, however it ended, also one stopped before its next attempt. It

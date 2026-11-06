@@ -16,6 +16,11 @@
  * URL). Errors are one flat shape `{ code, summary, details? }`; every answer has
  * fixed fields, an unused one null.
  *
+ * In front, like the load balancer before a real service (staging 2026-11-06),
+ * `requireUserAgent` answers a request without a `User-Agent` with 403 and an
+ * HTML page; `failNext({ status: 403, gateway: true })` does so once for any
+ * request.
+ *
  * Faults: `fail(...)` — a 429 with `Retry-After`, or a 500; `extraField(...)` — an
  * answer carrying a field nobody declared. `PORTAL_SEED.instructionLike` is a
  * person whose name is written to look like an instruction. `/__fake/*` does the
@@ -46,6 +51,8 @@ export interface FakePortalOptions {
   rateLimit?: number | true
   /** A real package's path → this fake's path, `{id}` kept: `/a/{id}/b` → `/people/{id}/mail`. */
   aliases?: Record<string, string>
+  /** A request without `User-Agent` is refused in front of the API: 403 with an HTML page. */
+  requireUserAgent?: boolean
 }
 
 /** What a test may look at: what arrived, never compared to anything the fake was told to return. */
@@ -55,10 +62,14 @@ export interface PortalRequest {
   actor: string | null
   email: string | null
   authorization: string | null
+  userAgent: string | null
   body: string
 }
 
-type Fault = { status: 429; retryAfter: number } | { status: 500 } | { status: 409; code: string }
+type Fault = { status: 429; retryAfter: number } | { status: 500 } | { status: 409; code: string } | { status: 403; gateway: true }
+
+/** What a load balancer answers when it refuses: a page, not the API's JSON. */
+const GATEWAY_403 = '<html><head><title>403 Forbidden</title></head><body><center><h1>403 Forbidden</h1></center></body></html>'
 
 export function createFakePortal(options: FakePortalOptions = {}) {
   const seed = options.seed ?? defaultPortalSeed()
@@ -94,8 +105,10 @@ export function createFakePortal(options: FakePortalOptions = {}) {
     requests.push({
       method: c.req.method, path: new URL(c.req.url).pathname + new URL(c.req.url).search,
       actor: c.req.header(PORTAL_ACTOR_HEADER) ?? null, email: c.req.header(PORTAL_EMAIL_HEADER) ?? null,
-      authorization: c.req.header('authorization') ?? null, body: await c.req.raw.clone().text(),
+      authorization: c.req.header('authorization') ?? null, userAgent: c.req.header('user-agent') ?? null, body: await c.req.raw.clone().text(),
     })
+    const gateway = faults[0]?.status === 403 ? faults.shift() : undefined
+    if (gateway || (options.requireUserAgent && !c.req.header('user-agent'))) return c.html(GATEWAY_403, 403)
     const auth = c.req.header('authorization') ?? ''
     const key = auth.startsWith('Bearer ') ? auth.slice('Bearer '.length) : ''
     if (!keys.has(key)) return fail(c, 401, 'UNAUTHORIZED', '鍵がありません')

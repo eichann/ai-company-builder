@@ -322,6 +322,16 @@ the sign-in.
    in the history; each use logs `[broker] … allowed by the company's exception`). The connection
    goes to the checked address (no DNS-rebinding window), TLS verified against the host name,
    `BROKER_UPSTREAM_TIMEOUT_SECONDS` (600) for the headers. Failures → 502 / 504.
+   **A User-Agent on every request** (`withUserAgent`, `ACB_USER_AGENT` = `AICompanyBuilder/1.0`):
+   added when the caller set none (any case of the name), so the relay, the key check, the
+   plugin connector, the Google / Slack clients and the practice way out
+   (`adapters/upstream-practice.ts`) all send one. Node's `https.request` sends none, and a
+   load balancer in front of a connector's API (`awselb/2.0`, staging 2026-11-06) answered every
+   such request 403 with an HTML page. The value names the product only — never a company,
+   member, key or host. **The relay forwards a script's own `user-agent` as it was** (it never
+   dropped it), so the adapter adds ACB's only when the script sent none. Test:
+   `broker-relay-https.test.ts` 「names ACB as the client…」 and the route's script agent
+   (mutation-checked: the default, the case-insensitive check, the relay's forwarding).
 6. **Answer**: streamed as is. Redirects are never followed: a `Location` /
    `x-goog-upload-url` / `content-location` to one of the key's hosts is rewritten to
    `<PUBLIC_URL>/api/broker/<service>/…` (without `key=`); a redirect elsewhere → 502
@@ -632,7 +642,8 @@ who decided, stop-all → `stopped` on the next call and resume, member and toke
 (mutation-checked), an app cannot forge a relay record), `tests/integration/broker-relay-https.test.ts` (real HTTPS to a
 local provider with its own certificate: internal address refused before connecting and allowed
 by the exception, one internal answer among several refuses, one DNS lookup, TLS checked against
-the name, the whole route end to end — SSRF guard mutation-checked), `tests/unit/net-ranges.test.ts`
+the name, ACB's User-Agent when none and a caller's own kept, the whole route end to end — SSRF
+guard mutation-checked), `tests/unit/net-ranges.test.ts`
 (every internal form refused, public ones pass),
 `tests/unit/broker-relay-definition.test.ts` (K9 ids, base URLs, header names and formats that
 would open the relay are refused), `tests/integration/broker-relay-generic.test.ts` (K9: owner/admin
