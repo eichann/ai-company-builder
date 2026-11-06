@@ -75,10 +75,13 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   // lane C ▼
   /** The member's records at a plugin's ai_turn step, as last listed (company → record → turn). */
   const pluginTurns = new Map<string, Map<string, QueuedPluginStep>>()
-  /** Plugin step runs this app holds: record → the state it started at (settle: moved on = done). */
-  const pluginStarts = new Map<string, string>()
-  /** The tool ceiling of each plugin step's consultation (the chat server asks it). */
-  const pluginTools = new Map<string, { step: string; access: PluginStepToolAccess }>()
+  /**
+   * Plugin step runs this app holds: record → the state it started at and when (settle: moved on =
+   * done; a person's step run by itself: done when its やること for the record came — what it made).
+   */
+  const pluginStarts = new Map<string, { state: string; at: string; auto: boolean }>()
+  /** The tool ceiling and deliverable folder of each plugin step's consultation (the chat server asks them). */
+  const pluginTools = new Map<string, { step: string; access: PluginStepToolAccess; deliverableFolder: string }>()
   // lane C ▲
 
   function release(companyId: string, recordId: string) {
@@ -144,6 +147,20 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
 
   // lane C ▼
+  /** Whether a やること linked to the record (its まとまり), with its preparation, was made or changed since `at`: what a step run by itself hands over. */
+  async function madeSince(companyId: string, recordId: string, at: string): Promise<boolean> {
+    const r = await session(companyId, 'POST', '/records/query', { type: 'task', link: { name: 'bundle', id: recordId }, limit: 20 })
+    const records = r?.status === 200 ? (r.data as { records?: unknown } | undefined)?.records : undefined
+    if (!Array.isArray(records)) return false
+    const since = Date.parse(at)
+    // What the run made: a やること carrying its preparation (確かめる点), changed since the claim.
+    return records.some(x => {
+      const r = typeof x === 'object' && x !== null ? x as { updatedAt?: unknown; fields?: { prep_summary?: unknown } } : null
+      return !!r && typeof r.updatedAt === 'string' && Date.parse(r.updatedAt) >= since
+        && typeof r.fields?.prep_summary === 'string' && r.fields.prep_summary.trim() !== ''
+    })
+  }
+
   /**
    * A business plugin's step (plugin-steps.md): the server's run of `<pluginId>__<step>` is the
    * claim (the step has no claim action); the claim's pin names the procedure, read on this PC
@@ -156,7 +173,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     if (!now) return { claimed: false, reason: 'unavailable' }
     const claimed = await session(companyId, 'POST', '/ai-run-claims', { recordId, step: turn.runStep, deviceId: deps.deviceId, conversationId })
     if (!claimed || claimed.status >= 500) return { claimed: false, reason: 'unavailable' }
-    const run = claimed.status < 300 ? (claimed.data as { run?: { id?: unknown; generation?: unknown; procedure?: { pin?: unknown } | null } } | undefined)?.run : undefined
+    const run = claimed.status < 300 ? (claimed.data as { run?: { id?: unknown; generation?: unknown; updatedAt?: unknown; procedure?: { pin?: unknown } | null } } | undefined)?.run : undefined
     if (!run || typeof run.id !== 'string' || typeof run.generation !== 'number') return { claimed: false, reason: 'taken' }
     hold(companyId, recordId, conversationId, { id: run.id, generation: run.generation })
     const giveBack = async (code: string): Promise<AiTurnClaimResult> => {
@@ -170,11 +187,17 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     const text = await (deps.readProcedure?.(companyId, pin, step.procedure, companyRoot) ?? Promise.resolve(null)).catch(() => null)
     // Not on this PC yet (the package not fetched, the Skill not synced): tried again later.
     if (text === null) return giveBack('PROCEDURE_NOT_HERE')
-    pluginStarts.set(heldKey(companyId, recordId), now.state)
-    pluginTools.set(conversationId, { step: turn.runStep, access: pluginStepToolAccess(step, now.type) })
+    // A person's step only runs by itself when the company chose so: then nothing that reaches outside.
+    const auto = turn.auto && step.start === 'person'
+    if (turn.auto !== auto) return giveBack('STEP_NOT_READABLE')
+    const deliverableFolder = step.deliverableFolder ?? turn.deliverableFolder
+    // The server's time of the claim (what the record's times are compared with), else this PC's.
+    const at = typeof run.updatedAt === 'string' && !Number.isNaN(Date.parse(run.updatedAt)) ? run.updatedAt : new Date().toISOString()
+    pluginStarts.set(heldKey(companyId, recordId), { state: now.state, at, auto })
+    pluginTools.set(conversationId, { step: turn.runStep, access: pluginStepToolAccess(step, now.type, { automatic: auto }), deliverableFolder })
     return {
       claimed: true, version: now.version,
-      message: pluginStepFirstMessage({ label: step.label, recordId, version: now.version, procedure: text, source: pin.source }),
+      message: pluginStepFirstMessage({ label: step.label, recordId, version: now.version, procedure: text, source: pin.source, deliverableFolder, auto }),
     }
   }
   // lane C ▲
@@ -202,6 +225,11 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     pluginStepTools(conversationId: string, step: string): PluginStepToolAccess | null {
       const known = pluginTools.get(conversationId)
       return known && isPluginRunStep(step) && known.step === step ? known.access : null
+    },
+
+    /** The deliverable folder of a plugin step's run this app holds (its writes go only there); null for any other consultation. */
+    pluginStepWriteArea(conversationId: string): string | null {
+      return pluginTools.get(conversationId)?.deliverableFolder ?? null
     },
     // lane C ▲
 
@@ -297,12 +325,13 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     /** After the automatic turn: finished, failed, or still in progress → back to 「AI の番」. */
     async settle(companyId: string, recordId: string): Promise<AiTurnSettleResult> {
       // lane C ▼
-      const startedAt = pluginStarts.get(heldKey(companyId, recordId))
-      if (startedAt !== undefined && COMPANY.test(companyId)) {
+      const started = pluginStarts.get(heldKey(companyId, recordId))
+      if (started !== undefined && COMPANY.test(companyId)) {
         // A plugin step is done when the record left the step's state; otherwise it is tried again later.
+        // A person's step run by itself leaves the record where it is: done when it handed over what it made.
         pluginStarts.delete(heldKey(companyId, recordId))
         const record = await recordOf(companyId, recordId)
-        if (record && record.state !== startedAt) {
+        if (record && (started.auto ? await madeSince(companyId, recordId, started.at) : record.state !== started.state)) {
           await finishRun(companyId, recordId, null)
           return settled('done', record)
         }

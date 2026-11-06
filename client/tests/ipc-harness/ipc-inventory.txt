@@ -163,6 +163,9 @@ contract.invoke outboundMail:update
 contract.invoke pluginOperations:reconcile
 contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
+contract.invoke pluginSteps:continuation
+contract.invoke pluginSteps:continue
+contract.invoke pluginSteps:deliverables
 contract.invoke pluginSteps:onRecord
 contract.invoke pluginSteps:start
 contract.invoke plugins:bridge
@@ -335,6 +338,7 @@ contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'han
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
 contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
 contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
+contract.type ElectronAPI.continueStep = continueStep: Invoke<'pluginSteps:continue'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
 contract.type ElectronAPI.createBundle = createBundle: Invoke<'tasks:createBundle'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
@@ -471,6 +475,8 @@ contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirector
 contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
 contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
+contract.type ElectronAPI.readStepContinuation = readStepContinuation: Invoke<'pluginSteps:continuation'>
+contract.type ElectronAPI.readStepDeliverables = readStepDeliverables: Invoke<'pluginSteps:deliverables'>
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
 contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
@@ -804,6 +810,9 @@ contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': {
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
+contract.type IpcInvokeChannels.'pluginSteps:continuation' = 'pluginSteps:continuation': { args: [companyId: string, recordId: string]; result: PluginStepContinuation | null }
+contract.type IpcInvokeChannels.'pluginSteps:continue' = 'pluginSteps:continue': { args: [companyId: string, recordId: string, companyRoot?: string]; result: PluginStepContinueResult }
+contract.type IpcInvokeChannels.'pluginSteps:deliverables' = 'pluginSteps:deliverables': { args: [companyId: string, recordId: string]; result: StepDeliverablesView | null }
 contract.type IpcInvokeChannels.'pluginSteps:onRecord' = 'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
 contract.type IpcInvokeChannels.'pluginSteps:start' = 'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
 contract.type IpcInvokeChannels.'plugins:bridge' = 'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
@@ -1080,6 +1089,9 @@ main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, mess
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
+main.handle pluginSteps:continuation @ features/plugin-steps/ipc.ts (companyId, recordId)
+main.handle pluginSteps:continue @ features/plugin-steps/ipc.ts (companyId, recordId, companyRoot)
+main.handle pluginSteps:deliverables @ features/plugin-steps/ipc.ts (companyId, recordId)
 main.handle pluginSteps:onRecord @ features/plugin-steps/ipc.ts (companyId, recordId)
 main.handle pluginSteps:start @ features/plugin-steps/ipc.ts (companyId, recordId, pluginId, step, companyRoot)
 main.handle plugins:bridge @ features/plugins/bridge-ipc.ts (companyId, plugin, op, args)
@@ -1198,6 +1210,8 @@ preload connectGoogleAll -> invoke google:connectAll($0)
 preload connectGoogleAll : (companyId: string) => Promise<GoogleConnectResult>
 preload connectSlack -> invoke slack:connect($0, $1)
 preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
+preload continueStep -> invoke pluginSteps:continue($0, $1, $2)
+preload continueStep : (companyId: string, recordId: string, companyRoot?: string | undefined) => Promise<PluginStepContinueResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload createBundle -> invoke tasks:createBundle($0, $1)
@@ -1470,6 +1484,10 @@ preload readFile -> invoke fs:readFile($0)
 preload readFile : (path: string) => Promise<string | null>
 preload readFileBinary -> invoke fs:readFileBinary($0)
 preload readFileBinary : (path: string) => Promise<ArrayBuffer | null>
+preload readStepContinuation -> invoke pluginSteps:continuation($0, $1)
+preload readStepContinuation : (companyId: string, recordId: string) => Promise<PluginStepContinuation | null>
+preload readStepDeliverables -> invoke pluginSteps:deliverables($0, $1)
+preload readStepDeliverables : (companyId: string, recordId: string) => Promise<StepDeliverablesView | null>
 preload reconcilePluginOperation -> invoke pluginOperations:reconcile($0, $1, $2)
 preload reconcilePluginOperation : (companyId: string, pluginId: string, operationId: string) => Promise<PluginOperationResult>
 preload reconcileTaskRun -> invoke tasks:reconcile($0, $1, $2, $3)

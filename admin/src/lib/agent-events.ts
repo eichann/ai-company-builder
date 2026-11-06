@@ -93,6 +93,7 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'skill-file': 'スキルのファイル（直せる人だけ）',
   'agent-config': 'AI の設定ファイル（管理者だけ）',
   'record-file': '記録のファイルの状態・id の書き換え',
+  'deliverable-folder': '手順の成果物の置き場所の外への保存',
 }
 
 /** The AI sandbox's mark on a call (「AI の囲い」). */

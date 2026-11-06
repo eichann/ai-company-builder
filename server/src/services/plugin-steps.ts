@@ -21,6 +21,14 @@
  *   version, narrowed by the pinned version's — a company Skill never adds
  *   any, and an older pin never widens what the installed version allows.
  *
+ * - **Starting by itself** (owner decisions 2026-11-06): a company may choose 「自動で始める」 for a
+ *   `start: person` step (`plugin_step_settings`; the button by default). It is then the member's
+ *   「AI の番」 only after a meeting of the record was read (`plugin_step_requests`, answered by the
+ *   run that finishes), with the automatic ceiling: nothing that reaches outside
+ *   (`automaticStepCeiling`). The declaration never changes.
+ * - **The deliverable folder**: the step's folder under `<department>/.personal/` — the company's
+ *   setting, else from its label — is handed to the app, which lets the step write only there.
+ *
  * Read by the server, never taken from the app. Pins of open work keep their
  * versions listed for the apps (`pinnedVersions` → C2's distribution).
  */
@@ -31,8 +39,9 @@ import {
   type PluginManifest, type PluginStep, type PluginStepProcedurePin,
 } from '../../shared/core/plugins'
 import { MEETING_BUNDLE_LINKED_ACTION } from '../../shared/core/minutes'
+import { automaticStepCeiling, deliverableFolderOf, deliverableFolderProblem } from '../../shared/core/plugin-step-runs'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import type { PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
+import type { PluginStepContinuationView, PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
@@ -59,6 +68,8 @@ const RECORDS_DISABLED = { error: 'この会社では記録の機能が有効に
 const RECORD_NOT_FOUND = { error: '記録が見つかりません', code: 'RECORD_NOT_FOUND' } as const
 /** Work listed per call (a member's 「AI の番」 of plugin steps). */
 const TURNS_SHOWN = 500
+/** A やること in these states waits for nobody: no 「続きをする」. */
+const CLOSED_TASK_STATES: readonly string[] = ['done', 'cancelled', 'dismissed']
 
 export interface PluginStepDeps {
   companyData: CompanyDataSource
@@ -126,6 +137,49 @@ export function createPluginStepService(deps: PluginStepDeps) {
     return { row, state: s?.state ?? '', fields: parseFields(s?.fields), version: s?.version ?? 0 }
   }
 
+  /** The company's setting of a step (absent: the button, the folder from the label). */
+  const settingOf = (companyId: string, pluginId: string, name: string) =>
+    repo(companyId).stepSettings(pluginId)[name] ?? { autoStart: false, deliverableFolder: null }
+  /** A `start: person` step the company starts by itself. */
+  const startsByItself = (companyId: string, pluginId: string, name: string, step: PluginStep) =>
+    step.start === 'person' && settingOf(companyId, pluginId, name).autoStart
+
+  /**
+   * 「続きをする」 (owner decision 2026-11-06, option B): the newest open やること linked to the record
+   * (or the やること itself) that carries a preparation and was **made by a run** of a business
+   * plugin's `start: person` step on that record — only an automatic run makes one (a person's
+   * consultation has no run). Marked by what is already kept: the task's first ledger entry's
+   * `runId` and that run's step. Offered only while the record is at the step's state, the step
+   * installed and the member may read both.
+   */
+  function continuationOf(member: Member, rec: { row: RecordRow; state: string; fields: Record<string, unknown> }): PluginStepContinuationView | null {
+    const handle = companyData.forCompany(member.companyId)
+    const isTask = rec.row.type === 'task'
+    const bundleId = isTask
+      ? handle.records.linksFrom([rec.row.id]).find(l => l.name === 'bundle' && l.targetId !== null)?.targetId ?? null
+      : rec.row.id
+    if (!bundleId) return null
+    const bundle = isTask ? readable(member, bundleId) : rec
+    if (!bundle) return null
+    const taskIds = isTask ? [rec.row.id] : handle.records.linksTo([bundleId]).filter(l => l.name === 'bundle').map(l => l.sourceId)
+    const found: Array<{ view: PluginStepContinuationView; at: string }> = []
+    for (const taskId of [...new Set(taskIds)].slice(0, 200)) {
+      const task = taskId === rec.row.id ? rec : readable(member, taskId)
+      if (!task || task.row.type !== 'task' || CLOSED_TASK_STATES.includes(task.state)) continue
+      const prep = task.fields.prep_summary
+      if (typeof prep !== 'string' || prep.trim() === '') continue
+      const runId = handle.records.ledger(taskId)[0]?.runId
+      const run = runId ? handle.aiRuns.byId(runId) : null
+      const bound = run ? parsePluginRunStep(run.step) : null
+      if (!run || !bound || run.recordId !== bundleId) continue
+      const inst = installedStep(member.companyId, bound.pluginId, bound.step)
+      if (!inst || inst.step.start !== 'person' || !atStep(bundle, inst.step)) continue
+      found.push({ view: { recordId: bundleId, pluginId: bound.pluginId, step: bound.step, label: inst.step.label, taskId }, at: task.row.updatedAt })
+    }
+    found.sort((a, b) => b.at.localeCompare(a.at))
+    return found[0]?.view ?? null
+  }
+
   const atStep = (rec: { row: RecordRow; state: string }, step: PluginStep) => rec.row.type === step.for.type && rec.state === step.for.state
   const turnPeople = (member: Member) => [member.userId, ...deps.actsFor(member.companyId, member.userId)]
   const isMine = (member: Member, fields: Record<string, unknown>) => {
@@ -187,8 +241,9 @@ export function createPluginStepService(deps: PluginStepDeps) {
     return depth < 2 ? pinFor(member, rec, pluginId, stepName, depth + 1) : refuse('conflict', PROCEDURE_UNAVAILABLE.error, { code: PROCEDURE_UNAVAILABLE.code })
   }
 
-  const stepView = (pluginId: string, name: string, step: PluginStep): PluginStepView => ({
+  const stepView = (companyId: string, pluginId: string, name: string, step: PluginStep): PluginStepView => ({
     pluginId, step: name, label: step.label, start: step.start, procedure: step.procedure.default, tools: [...step.tools], connectorRoles: [...step.connectorRoles],
+    deliverableFolder: deliverableFolderOf(name, step.label, settingOf(companyId, pluginId, name).deliverableFolder),
   })
 
   /** A record's pin of a step (none before its first run) and the step it runs: the installed one narrowed by the pinned version's. */
@@ -207,9 +262,14 @@ export function createPluginStepService(deps: PluginStepDeps) {
     const m = installedManifest(member.companyId, pluginId)
     if (!m) return refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
     const chosen = repo(member.companyId).stepSkills(pluginId)
+    const settings = repo(member.companyId).stepSettings(pluginId)
+    const own = <T>(o: Record<string, T>, k: string): T | null => Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null
     return ok({
       steps: Object.entries(m.steps).map(([name, s]) => ({
-        step: name, label: s.label, overridable: s.procedure.overridable, skill: Object.prototype.hasOwnProperty.call(chosen, name) ? chosen[name] : null,
+        step: name, label: s.label, overridable: s.procedure.overridable, skill: own(chosen, name),
+        start: s.start, autoStart: s.start === 'person' && (own(settings, name)?.autoStart ?? false),
+        deliverableFolder: deliverableFolderOf(name, s.label, own(settings, name)?.deliverableFolder),
+        deliverableFolderChosen: own(settings, name)?.deliverableFolder ?? null,
       })),
     })
   }
@@ -241,6 +301,16 @@ export function createPluginStepService(deps: PluginStepDeps) {
       const bundleId = handle.records.linksFrom([done.recordId]).find(l => l.name === 'bundle' && l.targetId)?.targetId
       const bundle = bundleId ? readable(member, bundleId) : null
       if (!bundleId || !bundle) return
+      // A person's step the company starts by itself is asked for now; it runs once the まとまり is at its state.
+      for (const i of handle.plugins.installs()) {
+        if (!i.enabled) continue
+        const m = shelf.find(member.companyId, i.pluginId, i.version)?.pkg.manifest
+        if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2) continue
+        for (const [name, step] of Object.entries(m.steps)) {
+          if (step.for.type !== bundle.row.type || !startsByItself(member.companyId, i.pluginId, name, step)) continue
+          repo(member.companyId).request({ recordId: bundleId, pluginId: i.pluginId, step: name, at: clock.now(), meetingId: done.recordId })
+        }
+      }
       const states = new Set<string>()
       for (const i of handle.plugins.installs()) {
         if (!i.enabled) continue
@@ -274,8 +344,17 @@ export function createPluginStepService(deps: PluginStepDeps) {
       if (!rec) return 'not-found'
       const bound = parsePluginRunStep(runStep)
       const inst = bound ? installedStep(member.companyId, bound.pluginId, bound.step) : null
-      if (!inst || inst.step.start !== 'ai_turn' || !atStep(rec, inst.step) || !isMine(member, rec.fields)) return 'not-ai-turn'
-      return 'yes'
+      if (!inst || !atStep(rec, inst.step) || !isMine(member, rec.fields)) return 'not-ai-turn'
+      if (inst.step.start === 'ai_turn') return 'yes'
+      // A person's step: only when the company starts it by itself and a meeting asked for it.
+      return bound && startsByItself(member.companyId, bound.pluginId, bound.step, inst.step)
+        && repo(member.companyId).openRequest(recordId, bound.pluginId, bound.step) ? 'yes' : 'not-ai-turn'
+    },
+
+    /** A run of a plugin step finished as done: it answers the request that started it (a later meeting's stays open). */
+    afterDoneRun(member: Member, run: { recordId: string; step: string; createdAt: string }): void {
+      const bound = parsePluginRunStep(run.step)
+      if (bound) repo(member.companyId).answerRequest(run.recordId, bound.pluginId, bound.step, run.createdAt, clock.now())
     },
 
     /** The pin a claim of `<pluginId>__<step>` runs with (pinned now when it is the work's first run). */
@@ -297,10 +376,12 @@ export function createPluginStepService(deps: PluginStepDeps) {
       if (!bound) return null
       const inst = installedStep(companyId, bound.pluginId, bound.step)
       if (!inst) return false
+      // A run of a `start: person` step is always the automatic one: nothing that reaches outside.
+      const ceiling = (s: PluginStep) => s.start === 'person' || inst.step.start === 'person' ? automaticStepCeiling(s) : s
       const pin = parseAiRunProcedure(run.procedure)?.pin
-      if (!pin || pin.source !== 'plugin' || pin.version === inst.version) return inst.step
+      if (!pin || pin.source !== 'plugin' || pin.version === inst.version) return ceiling(inst.step)
       const pinned = await pinnedVersionStep(companyId, pin, bound.step)
-      return pinned === false ? false : narrowed(inst.step, pinned)
+      return pinned === false ? false : ceiling(narrowed(inst.step, pinned))
     },
 
     /**
@@ -312,13 +393,26 @@ export function createPluginStepService(deps: PluginStepDeps) {
       const handle = companyData.forCompany(member.companyId)
       if (!handle.records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const steps: Array<{ pluginId: string; name: string; step: PluginStep }> = []
+      const byItself: Array<{ pluginId: string; name: string; step: PluginStep }> = []
       for (const i of handle.plugins.installs()) {
         if (!i.enabled) continue
         const m = shelf.find(member.companyId, i.pluginId, i.version)?.pkg.manifest
         if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2) continue
-        for (const [name, step] of Object.entries(m.steps)) if (step.start === 'ai_turn') steps.push({ pluginId: i.pluginId, name, step })
+        for (const [name, step] of Object.entries(m.steps)) {
+          if (step.start === 'ai_turn') steps.push({ pluginId: i.pluginId, name, step })
+          else if (startsByItself(member.companyId, i.pluginId, name, step)) byItself.push({ pluginId: i.pluginId, name, step })
+        }
       }
-      if (steps.length === 0) return ok({ turns: [] })
+      // A person's step the company starts by itself: the records a meeting asked it for, at its state, the member's.
+      const asked: PluginStepTurn[] = []
+      for (const st of byItself) {
+        for (const recordId of handle.pluginSteps.openRequests(st.pluginId, st.name)) {
+          const rec = readable(member, recordId)
+          if (!rec || !atStep(rec, st.step) || !isMine(member, rec.fields)) continue
+          asked.push({ recordId, version: rec.version, ...stepView(member.companyId, st.pluginId, st.name, automaticStepCeiling(st.step)), auto: true })
+        }
+      }
+      if (steps.length === 0) return ok({ turns: asked.slice(0, TURNS_SHOWN) })
       const ids = turnPeople(member)
       const reader = recordReader(member, handle.scopes.listWithRules())
       const types = [...new Set(steps.map(s => s.step.for.type))]
@@ -333,18 +427,19 @@ export function createPluginStepService(deps: PluginStepDeps) {
         const s = states.get(row.id)
         for (const st of steps) {
           if (row.type !== st.step.for.type || (s?.state ?? '') !== st.step.for.state) continue
-          turns.push({ recordId: row.id, version: s?.version ?? 0, ...stepView(st.pluginId, st.name, st.step) })
+          turns.push({ recordId: row.id, version: s?.version ?? 0, ...stepView(member.companyId, st.pluginId, st.name, st.step) })
         }
       }
-      return ok({ turns: turns.slice(0, TURNS_SHOWN) })
+      return ok({ turns: [...turns, ...asked].slice(0, TURNS_SHOWN) })
     },
 
     /**
      * GET /me/plugin-steps/records/:recordId — the steps that apply to a record now (its card's
      * buttons; the app's automatic run reads its step here after the claim): each with the work's
-     * pin (null before its first run) and the step it runs (narrowed by the pinned version).
+     * pin (null before its first run) and the step it runs (narrowed by the pinned version); and
+     * `continuation` — where an automatic run of a person's step prepared something (「続きをする」).
      */
-    stepsOn(member: Member, recordId: string): Outcome<{ steps: PluginStepOnRecord[] }> {
+    stepsOn(member: Member, recordId: string): Outcome<{ steps: PluginStepOnRecord[]; continuation: PluginStepContinuationView | null }> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const rec = readable(member, recordId)
       if (!rec) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
@@ -356,10 +451,10 @@ export function createPluginStepService(deps: PluginStepDeps) {
         for (const [name, step] of Object.entries(m.steps)) {
           if (!atStep(rec, step)) continue
           const on = pinnedOn(member.companyId, recordId, i.pluginId, name, step)
-          out.push({ ...stepView(i.pluginId, name, on.step), pin: on.pin })
+          out.push({ ...stepView(member.companyId, i.pluginId, name, on.step), pin: on.pin })
         }
       }
-      return ok({ steps: out })
+      return ok({ steps: out, continuation: continuationOf(member, rec) })
     },
 
     /**
@@ -377,7 +472,7 @@ export function createPluginStepService(deps: PluginStepDeps) {
       if (!atStep(rec, inst.step)) return refuse('conflict', NOT_AT_STEP.error, { code: NOT_AT_STEP.code })
       const pinned = await pinFor(member, rec, pluginId, stepName)
       if (!pinned.ok) return pinned
-      return ok({ recordId, version: rec.version, pin: pinned.value.pin, ...stepView(pluginId, stepName, pinned.value.step) })
+      return ok({ recordId, version: rec.version, pin: pinned.value.pin, ...stepView(member.companyId, pluginId, stepName, pinned.value.step) })
     },
 
     /**
@@ -408,6 +503,21 @@ export function createPluginStepService(deps: PluginStepDeps) {
       const was = r.consultationStep(member.userId, conversationId)
       if (was && was.recordId === recordId && was.pluginId === pluginId && was.step === step) return ok({ bound: true })
       return refuse('conflict', 'この相談はもう別の手順のための相談です', { code: 'CONSULTATION_BOUND' })
+    },
+
+    /**
+     * GET /me/plugin-steps/consultations/:conversationId — the step the member's consultation is
+     * bound to, with its deliverable folder (the app lets that consultation write only there), or
+     * null: not bound, someone else's, another company's — one answer.
+     */
+    consultationOf(member: Member, conversationId: string): Outcome<{ step: { recordId: string; pluginId: string; step: string; deliverableFolder: string } | null }> {
+      if (typeof conversationId !== 'string' || conversationId.length === 0 || conversationId.length > 200) return ok({ step: null })
+      const bound = repo(member.companyId).consultationStep(member.userId, conversationId)
+      if (!bound) return ok({ step: null })
+      const inst = installedStep(member.companyId, bound.pluginId, bound.step)
+      // The plugin turned off or gone: the folder from the step's name (writes stay narrow).
+      const folder = deliverableFolderOf(bound.step, inst?.step.label ?? bound.step, settingOf(member.companyId, bound.pluginId, bound.step).deliverableFolder)
+      return ok({ step: { ...bound, deliverableFolder: folder } })
     },
 
     /**
@@ -454,6 +564,39 @@ export function createPluginStepService(deps: PluginStepDeps) {
         if (!await deps.skillTree(member.companyId, skill)) return refuse('conflict', STEP_SKILL_MISSING.error, { code: STEP_SKILL_MISSING.code })
       }
       repo(member.companyId).setStepSkill(pluginId, stepName, skill, clock.now(), member.userId)
+      return stepSkills(member, pluginId)
+    },
+
+    /**
+     * PUT /plugins/:pluginId/step-settings/:step { autoStart?: boolean, deliverableFolder?: name | null } —
+     * owner / admin: how the company runs a step. `autoStart` only for a `start: person` step (400
+     * `STEP_NOT_PERSON`; an `ai_turn` step starts by itself already); the folder one folder name
+     * (400 `DELIVERABLE_FOLDER_INVALID`), null = from the step's label. A value left out is kept.
+     */
+    setStepSettings(member: Member, pluginId: string, stepName: string, body: unknown): Outcome<PluginStepSkillsView> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const m = installedManifest(member.companyId, pluginId)
+      if (!m) return refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
+      const b = typeof body === 'object' && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : null
+      if (!b || Object.keys(b).some(k => k !== 'autoStart' && k !== 'deliverableFolder') || Object.keys(b).length === 0) {
+        return refuse('bad-request', 'autoStart (true / false) and / or deliverableFolder (a folder name or null)')
+      }
+      if (b.autoStart !== undefined && typeof b.autoStart !== 'boolean') return refuse('bad-request', 'autoStart is true or false')
+      const step = stepOf(m, stepName)
+      if (!step) return refuse('not-found', PLUGIN_STEP_NOT_FOUND.error, { code: PLUGIN_STEP_NOT_FOUND.code })
+      if (b.autoStart === true && step.start !== 'person') {
+        return refuse('bad-request', 'この手順はもともと自動で始まります', { code: 'STEP_NOT_PERSON' })
+      }
+      if (b.deliverableFolder !== undefined && b.deliverableFolder !== null) {
+        const problem = deliverableFolderProblem(b.deliverableFolder)
+        if (problem) return refuse('bad-request', problem, { code: 'DELIVERABLE_FOLDER_INVALID' })
+      }
+      const was = settingOf(member.companyId, pluginId, stepName)
+      repo(member.companyId).setStepSetting(pluginId, stepName, {
+        autoStart: b.autoStart === undefined ? was.autoStart : b.autoStart,
+        deliverableFolder: b.deliverableFolder === undefined ? was.deliverableFolder : b.deliverableFolder as string | null,
+      }, clock.now(), member.userId)
       return stepSkills(member, pluginId)
     },
   }

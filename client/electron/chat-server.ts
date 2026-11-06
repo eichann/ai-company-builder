@@ -89,6 +89,11 @@ export interface ChatServerConfig extends AgentHost {
    */
   bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
   pluginStepTools?: (conversationId: string, step: string) => AiTurnToolCeiling | null
+  /**
+   * A business plugin step's run or consultation (plugin-steps.md "The deliverable folder"): the
+   * folder under `<department>/.personal/` its writes are held to this turn; null = an ordinary one.
+   */
+  stepWriteArea?: (companyId: string, conversationId: string) => Promise<string | null>
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; department?: string | null; largeContext?: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * The consultation's topic as stored (chat history): the task its new files are linked to
@@ -374,11 +379,12 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authenticationError) return c.json({ error: authenticationError }, 401)
     const references = !aiTurnStep && connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
-    const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
+    const companyGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
+    let writeGuard = companyGuard
     // What this conversation has read from private folders (private-read-guard.ts).
     // Kept per conversation across turns; a conversation the app no longer
     // remembers (restart, reopened from history) is re-marked from its visible tool calls.
-    const privateContext: PrivateReadContext | undefined = writeGuard ? { root: writeGuard.root, getPrivateFolders: () => writeGuard.getPrivateFolders?.() } : undefined
+    const privateContext: PrivateReadContext | undefined = companyGuard ? { root: companyGuard.root, getPrivateFolders: () => companyGuard.getPrivateFolders?.() } : undefined
     const privateState = appSessionId ? privateReadStateFor(appSessionId) : createPrivateReadState()
     if (!privateState.seeded) {
       privateState.seeded = true
@@ -451,6 +457,14 @@ export async function startChatServer(config: ChatServerConfig) {
     if (requestedPluginStep && (!companyId || !appSessionId || !config.bindPluginStep
       || !await config.bindPluginStep(companyId, appSessionId, requestedPluginStep).catch(() => false))) {
       return c.json({ error: 'この手順の相談を始められませんでした。少し待ってからもう一度ためしてください。', code: 'PLUGIN_STEP_NOT_BOUND' }, 409)
+    }
+    // A step's run or consultation writes only inside its deliverable folder (write-guard.ts `writeArea`).
+    const stepArea = writeGuard && companyId && appSessionId && config.stepWriteArea
+      ? await config.stepWriteArea(companyId, appSessionId).catch(() => null) : null
+    if (writeGuard && stepArea) writeGuard = { ...writeGuard, writeArea: { folder: stepArea } }
+    else if (aiTurnStep && requestedStep !== undefined && !isAiTurnStep(requestedStep)) {
+      // A business plugin step's run without its deliverable folder would write unchecked: never.
+      return c.json({ error: 'この AI では AI の番を自動で進められません。', code: 'AI_TURN_NOT_SUPPORTED' }, 400)
     }
     const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({

@@ -55,6 +55,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'git:sync': { args: [IN, 'co', 'msg'], paths: [0] },
   'aiTurns:claim': { args: ['co', 'deal-0a1b2c3d4e5f', 1, 'conv-guard-0001', IN], paths: [4] },
   'pluginSteps:start': { args: ['co', 'deal-0a1b2c3d4e5f', 'sample-sales', 'prepare', IN], paths: [4] },
+  'pluginSteps:continue': { args: ['co', 'deal-0a1b2c3d4e5f', IN], paths: [2] },
   'git:autoSync': { args: [IN, 'co', 'receive', { unsavedEdits: false, needsMember: false, offline: false }], paths: [0] },
   'git:preview': { args: [IN], paths: [0] },
   'git:generateSummary': { args: [IN], paths: [0] },

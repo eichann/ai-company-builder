@@ -99,6 +99,8 @@ events through it), the read shapes and the limits. The admin re-exports the rea
   and `no-deletion` (the Google relay refused a clear / delete, `google-connector.md` "The relay");
   a broker target may carry `operation` (the relay's call, e.g. `values.append`). Filter `tool`
   (exact) on the repository's `page` serves the relay's own record lists.
+- Guard reason `deliverable-folder`: a business plugin step's write outside its deliverable
+  folder (`chat-write-guard.md`; admin label 「手順の成果物の置き場所の外への保存」).
 - Guard reasons `type-definition` and `record-file`: the chat write guard's company-map refusals
   (`records.md`); an older server drops the unknown reason and keeps the event.
 

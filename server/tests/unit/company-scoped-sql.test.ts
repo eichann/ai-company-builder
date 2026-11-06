@@ -146,6 +146,8 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_step_pins: ['adapters/sqlite/plugin-steps.ts'],
   plugin_step_skills: ['adapters/sqlite/plugin-steps.ts'],
   plugin_step_consultations: ['adapters/sqlite/plugin-steps.ts'],
+  plugin_step_settings: ['adapters/sqlite/plugin-steps.ts'],
+  plugin_step_requests: ['adapters/sqlite/plugin-steps.ts'],
   // Business roles (plugin-roles.md).
   plugin_role_assignments: ['adapters/sqlite/plugin-roles.ts'],
   plugin_role_overrides: ['adapters/sqlite/plugin-roles.ts'],

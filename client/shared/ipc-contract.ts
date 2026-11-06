@@ -63,7 +63,8 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▼
 // lane B ▲
 // lane C ▼
-import type { PluginStepButton, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
+import type { PluginStepButton, PluginStepContinuation, PluginStepContinueResult, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
+import type { StepDeliverablesView } from './step-deliverables'
 // lane C ▲
 
 // ---------------------------------------------------------------------------
@@ -762,6 +763,12 @@ export interface IpcInvokeChannels {
   'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
   /** A person starts a step: the server pins the work's procedure; main answers the consultation's first message. */
   'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
+  /** 「続きをする」: where an automatic run of a person's step prepared something (a deal or its やること), or null. */
+  'pluginSteps:continuation': { args: [companyId: string, recordId: string]; result: PluginStepContinuation | null }
+  /** 「続きをする」 pressed: the person's consultation of that step, with what the automatic run left. */
+  'pluginSteps:continue': { args: [companyId: string, recordId: string, companyRoot?: string]; result: PluginStepContinueResult }
+  /** What a step made for a record (its やること's 確かめる点, files, mail draft) for the record's card. */
+  'pluginSteps:deliverables': { args: [companyId: string, recordId: string]; result: StepDeliverablesView | null }
   // lane C ▲
 }
 
@@ -1135,5 +1142,8 @@ export interface ElectronAPI {
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>
+  readStepDeliverables: Invoke<'pluginSteps:deliverables'>
+  readStepContinuation: Invoke<'pluginSteps:continuation'>
+  continueStep: Invoke<'pluginSteps:continue'>
   // lane C ▲
 }

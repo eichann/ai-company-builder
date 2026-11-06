@@ -60,7 +60,10 @@ people:
   owners:
     "75123001": ps-member
 `
-/** The steps of a version: `work` (automatic) gets plugin_operations from 0.2.0 on; `prepare` is a person's; `fixed` is not overridable. */
+/**
+ * The steps of a version: `work` (automatic) gets plugin_operations from 0.2.0 on; `prepare` is a person's; `fixed` is not
+ * overridable; `propose` is a person's a company may start by itself (with tools that reach outside, which that run never gets).
+ */
 const steps = (workTools: string) => `
 steps:
   work:
@@ -82,6 +85,13 @@ steps:
     start: person
     procedure: { default: steps/fixed.md }
     tools: [records]
+  propose:
+    label: 提案を用意する
+    for: { type: deal, state: open }
+    start: person
+    procedure: { default: steps/propose.md, overridable: true }
+    tools: [records, plugin_operations, files_write, web_research]
+    connector_roles: [mail.read, mail.send]
   reflect_meeting:
     label: 会議を案件に反映する
     for: { type: deal, state: after_meeting }
@@ -166,7 +176,7 @@ actions:
     if (version !== '0.1.0') cpSync(base, dir, { recursive: true })
     writeFileSync(join(dir, 'plugin.yaml'), manifest.replace('version: 0.1.0', `version: ${version}`) + steps(tools) + upgrade)
     mkdirSync(join(dir, 'steps'), { recursive: true })
-    for (const s of ['work', 'prepare', 'fixed', 'reflect']) writeFileSync(join(dir, 'steps', `${s}.md`), `# ${s} ${version}\n`)
+    for (const s of ['work', 'prepare', 'fixed', 'reflect', 'propose']) writeFileSync(join(dir, 'steps', `${s}.md`), `# ${s} ${version}\n`)
   }
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_FAKE_HUBSPOT_URL: `http://127.0.0.1:${port}`,
@@ -304,7 +314,7 @@ describe('a company Skill as an overridable step’s procedure', () => {
     expect(await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'fixed', { skill: SKILL })).toMatchObject({ ok: false, body: { code: 'STEP_NOT_OVERRIDABLE' } })
     expect(await services.pluginSteps.setStepSkill(member, 'sample-sales', 'prepare', { skill: SKILL })).toMatchObject({ ok: false, kind: 'forbidden' })
     const set = await services.pluginSteps.setStepSkill(owner, 'sample-sales', 'prepare', { skill: SKILL })
-    expect(set.value.steps).toEqual(expect.arrayContaining([{ step: 'prepare', label: '提案書を用意する', overridable: true, skill: SKILL }]))
+    expect(set.value.steps).toEqual(expect.arrayContaining([expect.objectContaining({ step: 'prepare', label: '提案書を用意する', overridable: true, skill: SKILL })]))
   })
 
   it('pins the Skill by its tree id; a later change of the Skill does not move the work; the step’s tools stay the ceiling', async () => {
@@ -329,7 +339,7 @@ describe("a person's start", () => {
     const d = recordOf('1000000007')
     expect(await services.pluginSteps.startPerson(member, d, 'sample-sales', 'work')).toMatchObject({ ok: false, body: { code: 'PLUGIN_STEP_NOT_FOUND' } })
     const on = services.pluginSteps.stepsOn(member, d)
-    expect(on.value.steps.map((s: Json) => `${s.step}:${s.start}`).sort()).toEqual(['fixed:person', 'prepare:person', 'work:ai_turn'])
+    expect(on.value.steps.map((s: Json) => `${s.step}:${s.start}`).sort()).toEqual(['fixed:person', 'prepare:person', 'propose:person', 'work:ai_turn'])
     db.prepare("UPDATE record_state SET state = 'won' WHERE company_id = ? AND record_id = ?").run(CO, d)
     try {
       expect(await services.pluginSteps.startPerson(member, d, 'sample-sales', 'prepare')).toMatchObject({ ok: false, body: { code: 'NOT_AT_STEP' } })
@@ -367,6 +377,11 @@ describe("a person's consultation: the plugin's power stays the step's", () => {
     // Never rebound to another step; another member's consultation of the same id is not bound.
     expect(services.pluginSteps.bindConsultation(member, { conversationId: conv, recordId: d, pluginId: 'sample-sales', step: 'fixed' })).toMatchObject({ ok: false, body: { code: 'CONSULTATION_BOUND' } })
     expect(await services.pluginRunGate.allowsConnectorRole(owner, null, 'mail.read', conv)).toBe(true)
+    // The app asks which step it is (its writes go only to the step's deliverable folder): only its own member is told.
+    expect(services.pluginSteps.consultationOf(member, conv).value.step).toEqual({ recordId: d, pluginId: 'sample-sales', step: 'prepare', deliverableFolder: '提案書を用意する' })
+    expect(services.pluginSteps.consultationOf(owner, conv).value.step).toBeNull()
+    expect(services.pluginSteps.consultationOf(outsider, conv).value.step).toBeNull()
+    expect(services.pluginSteps.consultationOf(member, 'conv-never-bound').value.step).toBeNull()
   })
 })
 
@@ -501,5 +516,192 @@ describe("the core's minutes reading writes nothing of a business plugin", () =>
     const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ps-minutes', runId }
     expect(await services.pluginOperations.run(member, ai, 'sample-sales', deal, 'update_deal', { expectedVersion: version, fields: { next_step: '見積' } })).toEqual(NOT_IN_STEP)
     expect(await services.pluginOperations.run(member, ai, 'sample-sales', deal, 'refresh_deal', {})).not.toEqual(NOT_IN_STEP)
+  })
+})
+
+describe('a person\'s step the company starts by itself (「自動で始める」)', () => {
+  const stateOf = (id: string) => (db.prepare('SELECT state, version FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, id) as Json)
+  const setState = (id: string, state: string) => db.prepare('UPDATE record_state SET state = ?, version = version + 1 WHERE company_id = ? AND record_id = ?').run(state, CO, id)
+  let n = 0
+  function readMeeting(bundle: string) {
+    const handle = companyData.forCompany(CO)
+    ensureCoreTypes(handle.records, ts())
+    const id = `meeting-auto${String(++n).padStart(8, '0')}`
+    const typeVersion = (db.prepare("SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'meeting'").get(CO) as Json).v
+    handle.records.upsert({ id, type: 'meeting', typeVersion, scopeId: null, path: null, folder: null, personalOwner: null, members: null, title: `商談 ${n}`, summary: '', createdAt: ts(), updatedAt: ts(), removedAt: null })
+    handle.records.writeState({ recordId: id, state: 'reading', fields: JSON.stringify({ assignee: member.userId }), version: 1, updatedAt: ts() }, 0)
+    handle.records.replaceLinks(id, [{ sourceId: id, name: 'bundle', position: 0, targetId: bundle, targetPath: null }])
+    const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: `conv-auto-${n}`, runId: null }
+    return services.recordEngine.act(member, ai, id, 'finish_reading', { expectedVersion: 1, args: { summary_text: '要約' } })
+  }
+  const proposeTurns = (who: Json = member) => (services.pluginSteps.turns(who).value.turns as Json[]).filter(t => t.step === 'propose')
+  /** Give back any run of the record still held, so another step may claim it (one run per record). */
+  function release(recordId: string) {
+    for (const r of companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]) {
+      if (r.recordId === recordId && r.state === 'running') services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
+    }
+  }
+  /** Give back every running run of the record and make it claimable again (one run per record). */
+  function giveBack(recordId: string) {
+    for (const r of companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]) {
+      if (r.recordId !== recordId || r.state !== 'running') continue
+      services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
+      services.aiRuns.retry(member, r.id)
+    }
+  }
+  const claimPropose = (who: Json, recordId: string, k: string) =>
+    services.aiRuns.claim(who, { recordId, step: 'sample-sales__propose', deviceId: `device-auto-${k}`, conversationId: `conv-auto-run-${k}` })
+
+  it('is the button by default: a meeting read asks nothing and the step is never the AI\'s turn', async () => {
+    const deal = recordOf('1000000001')
+    release(deal)
+    const view = services.pluginSteps.stepSkills(owner, 'sample-sales').value.steps.find((x: Json) => x.step === 'propose')
+    expect(view).toMatchObject({ start: 'person', autoStart: false, deliverableFolder: '提案を用意する', deliverableFolderChosen: null })
+    setState(deal, 'talking')
+    expect(await readMeeting(deal)).toMatchObject({ ok: true })
+    setState(deal, 'open')
+    expect(proposeTurns()).toEqual([])
+    expect(await claimPropose(member, deal, 'default')).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+  })
+
+  it('only an owner / admin chooses it, only for a person\'s step, with a folder name for the deliverables', async () => {
+    expect(services.pluginSteps.setStepSettings(member, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: false, kind: 'forbidden' })
+    expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'work', { autoStart: true })).toMatchObject({ ok: false, body: { code: 'STEP_NOT_PERSON' } })
+    for (const bad of ['a/b', '..', '.hidden', '', 'x'.repeat(61), 42]) {
+      expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { deliverableFolder: bad }), String(bad)).toMatchObject({ ok: false, kind: 'bad-request' })
+    }
+    expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { other: 1 })).toMatchObject({ ok: false, kind: 'bad-request' })
+    expect(services.pluginSteps.setStepSettings(outsider, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: false, kind: 'not-found' })
+    const set = services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { deliverableFolder: '提案書' })
+    expect(set.value.steps.find((x: Json) => x.step === 'propose')).toMatchObject({ autoStart: false, deliverableFolder: '提案書', deliverableFolderChosen: '提案書' })
+    // The member's app gets the folder with the step (the card and the run).
+    const on = services.pluginSteps.stepsOn(member, recordOf('1000000001')).value.steps as Json[]
+    expect(on.find(x => x.step === 'propose').deliverableFolder).toBe('提案書')
+    expect(on.find(x => x.step === 'prepare').deliverableFolder).toBe('提案書を用意する')
+  })
+
+  it('chosen: after a meeting it is the assignee\'s AI turn at its state, without anything that reaches outside, once per meeting', async () => {
+    const deal = recordOf('1000000001')
+    release(deal)
+    expect(services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true }).value.steps.find((x: Json) => x.step === 'propose').autoStart).toBe(true)
+    // Not before a meeting asks for it.
+    db.prepare("DELETE FROM plugin_step_requests WHERE company_id = ? AND record_id = ?").run(CO, deal)
+    expect(proposeTurns()).toEqual([])
+    setState(deal, 'talking')
+    expect(await readMeeting(deal)).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('after_meeting')
+    // Asked, but not at its state yet (the meeting's own step comes first).
+    expect(proposeTurns()).toEqual([])
+    setState(deal, 'open')
+    const [turn] = proposeTurns()
+    expect(turn).toMatchObject({ recordId: deal, start: 'person', auto: true, deliverableFolder: '提案書' })
+    expect(turn.tools.sort()).toEqual(['files_write', 'plugin_operations', 'records'])
+    expect(turn.connectorRoles).toEqual(['mail.read'])
+    // Not someone else's turn (not the assignee).
+    expect(proposeTurns(owner)).toEqual([])
+    expect(await claimPropose(owner, deal, 'owner')).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+    // The run's ceiling on the server: no sending role either.
+    const claimed = await claimPropose(member, deal, 'a')
+    expect(claimed, JSON.stringify(claimed)).toMatchObject({ ok: true })
+    const run = claimed.value.run
+    expect(await services.pluginRunGate.allowsConnectorRole(member, run.id, 'mail.read')).toBe(true)
+    expect(await services.pluginRunGate.allowsConnectorRole(member, run.id, 'mail.send')).toBe(false)
+    expect(await services.pluginRunGate.allowsConnectorRole(member, run.id, 'mail')).toBe(false)
+    // Finished: answered, no longer a turn until the next meeting.
+    expect(services.aiRuns.finish(member, run.id, { generation: run.generation, outcome: 'done' })).toMatchObject({ ok: true })
+    expect(proposeTurns()).toEqual([])
+    expect(await claimPropose(member, deal, 'b')).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+    setState(deal, 'talking')
+    expect(await readMeeting(deal)).toMatchObject({ ok: true })
+    setState(deal, 'open')
+    expect(proposeTurns().map(t => t.recordId)).toEqual([deal])
+    // A failed run leaves it asked (tried again later).
+    const again = await claimPropose(member, deal, 'c')
+    expect(services.aiRuns.finish(member, again.value.run.id, { generation: again.value.run.generation, outcome: 'failed', failure: { class: 'temporary' } })).toMatchObject({ ok: true })
+    expect(proposeTurns().map(t => t.recordId)).toEqual([deal])
+    // Turned back to the button: nothing runs by itself.
+    services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    expect(proposeTurns()).toEqual([])
+    expect(services.aiRuns.retry(member, again.value.run.id)).toMatchObject({ ok: true })
+    expect(await claimPropose(member, deal, 'd')).toMatchObject({ ok: false, body: { code: 'NOT_AI_TURN' } })
+    db.prepare("DELETE FROM plugin_step_requests WHERE company_id = ? AND record_id = ?").run(CO, deal)
+  })
+
+  it('what the run made reaches the deal as one やること: its questions and files for the member, no trace of their .personal files for anyone else', async () => {
+    const deal = recordOf('1000000001')
+    const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-auto-report', runId: null }
+    const file = '営業部/.personal/提案書/2026-11-06_A社/提案書.pdf'
+    const made = await services.recordEngine.createByAi(member, ai, {
+      type: 'task', title: '提案を用意する：A社', folder: '営業部',
+      fields: { assignee: member.userId, prep_summary: '・予算の上限を確かめてください' }, links: { bundle: deal, files: [file] },
+    })
+    expect(made, JSON.stringify(made)).toMatchObject({ ok: true })
+    const id = made.value.record.id
+    const linked = async (who: Json) => (await services.records.query(who, { type: 'task', link: { name: 'bundle', id: deal } })).value.records.map((r: Json) => r.id)
+    const files = async (who: Json) => (await services.records.get(who, id)).value.links.flatMap((l: Json) => l.path !== undefined ? [l.path] : [])
+    expect(await linked(member)).toContain(id)
+    expect((await services.records.get(member, id)).value.record.fields.prep_summary).toContain('予算')
+    expect(await files(member)).toEqual([file])
+    // Someone else who reads the deal and the task: the task, never the member's own file.
+    expect(await linked(owner)).toContain(id)
+    expect(await files(owner)).toEqual([])
+  })
+
+  it('「続きをする」 only where an automatic run prepared something: on the deal and on its やること, never for a consultation\'s', async () => {
+    const deal = recordOf('1000000001')
+    const continuationOn = (who: Json, id: string) => services.pluginSteps.stepsOn(who, id).value?.continuation ?? null
+    // The earlier test's やること was made in a consultation (no run): nothing to continue.
+    expect(continuationOn(member, deal)).toBeNull()
+    giveBack(deal)
+    services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+    setState(deal, 'talking')
+    expect(await readMeeting(deal)).toMatchObject({ ok: true })
+    setState(deal, 'open')
+    const claimed = await claimPropose(member, deal, 'cont')
+    expect(claimed, JSON.stringify(claimed)).toMatchObject({ ok: true })
+    const run = claimed.value.run
+    const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: run.conversationId, runId: run.id }
+    const made = await services.recordEngine.createByAi(member, ai, {
+      type: 'task', title: '提案を用意する：B社', folder: '営業部',
+      fields: { assignee: member.userId, prep_summary: '・残り（PDF にすること）は「続きをする」で一緒に仕上げます' }, links: { bundle: deal },
+    })
+    expect(made, JSON.stringify(made)).toMatchObject({ ok: true })
+    const taskId = made.value.record.id
+    expect(services.aiRuns.finish(member, run.id, { generation: run.generation, outcome: 'done' })).toMatchObject({ ok: true })
+    const want = { recordId: deal, pluginId: 'sample-sales', step: 'propose', label: '提案を用意する', taskId }
+    expect(continuationOn(member, deal)).toEqual(want)
+    expect(continuationOn(member, taskId)).toEqual(want)
+    // The continuation is the person's start of the same step: it works on the deal, with the step's folder.
+    expect((await services.pluginSteps.startPerson(member, deal, 'sample-sales', 'propose')).value).toMatchObject({ step: 'propose', deliverableFolder: '提案書' })
+    // Not at the step's state, or the やること finished: nothing to continue.
+    setState(deal, 'won')
+    expect(continuationOn(member, deal)).toBeNull()
+    setState(deal, 'open')
+    db.prepare("UPDATE record_state SET state = 'done' WHERE company_id = ? AND record_id = ?").run(CO, taskId)
+    expect(continuationOn(member, deal)).toBeNull()
+    expect(continuationOn(member, taskId)).toBeNull()
+    services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    db.prepare("DELETE FROM plugin_step_requests WHERE company_id = ? AND record_id = ?").run(CO, deal)
+    // An ai_turn step's run is not a person's step: its やること offers no continuation.
+    const other = recordOf('1000000002')
+    const was = stateOf(other).state
+    setState(other, 'open')
+    giveBack(other)
+    const work = await claim(other)
+    expect(work, JSON.stringify(work)).toMatchObject({ ok: true })
+    const workAi = { kind: 'ai' as const, source: 'claude-code', conversationId: work.value.run.conversationId, runId: work.value.run.id }
+    const byWork = await services.recordEngine.createByAi(member, workAi, {
+      type: 'task', title: '案件を進める：C社', folder: '営業部', fields: { assignee: member.userId, prep_summary: '・確かめる点' }, links: { bundle: other },
+    })
+    expect(byWork, JSON.stringify(byWork)).toMatchObject({ ok: true })
+    expect(continuationOn(member, other)).toBeNull()
+    expect(services.aiRuns.finish(member, work.value.run.id, { generation: work.value.run.generation, outcome: 'failed', failure: { class: 'permission' } })).toMatchObject({ ok: true })
+    expect(services.aiRuns.retry(member, work.value.run.id)).toMatchObject({ ok: true })
+    setState(other, was)
+  })
+
+  it('another company: the setting is the same 404 as none, and its requests are not here', () => {
+    expect(services.pluginSteps.setStepSettings(outsider, 'sample-sales', 'propose', { autoStart: true })).toMatchObject({ ok: false, kind: 'not-found' })
+    expect(services.pluginSteps.turns(outsider).value?.turns ?? []).toEqual([])
   })
 })

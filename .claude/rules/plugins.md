@@ -223,7 +223,7 @@ steps:
   prepare_proposal:
     label: 提案書を用意する
     for: { type: deal, state: open }     # the plugin's or a core type, a non-final state
-    start: person                        # person: opens a consultation; ai_turn: automatic (C5)
+    start: person                        # person: opens a consultation (a company may start it by itself: plugin-steps.md); ai_turn: automatic (C5)
     procedure: { default: steps/proposal.md, overridable: true }
     tools: [records, plugin_operations, files_read, files_write]
     connector_roles: [mail.read]

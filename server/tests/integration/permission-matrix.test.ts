@@ -556,9 +556,11 @@ const MATRIX: Row[] = [
   // 「AI の番」 of steps, the steps on a record and a person's start are any member's (the record decides: 404 here).
   r('GET /api/companies/:companyId/plugins/:pluginId/step-skills', w => ({ path: `${C(w)}/plugins/no-such-plugin/step-skills` }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/plugins/:pluginId/step-skills/:step', w => ({ path: `${C(w)}/plugins/no-such-plugin/step-skills/work`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/step-settings/:step', w => ({ path: `${C(w)}/plugins/no-such-plugin/step-settings/work`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/plugin-step-turns', w => ({ path: `${C(w)}/me/plugin-step-turns` }), MEMBERS),
   r('GET /api/companies/:companyId/me/plugin-steps/records/:recordId', w => ({ path: `${C(w)}/me/plugin-steps/records/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/plugin-steps/consultations', w => ({ path: `${C(w)}/me/plugin-steps/consultations`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/me/plugin-steps/consultations/:conversationId', w => ({ path: `${C(w)}/me/plugin-steps/consultations/conv-none` }), MEMBERS),
   r('POST /api/companies/:companyId/me/plugin-steps/records/:recordId/:pluginId/:step/start', w => ({ path: `${C(w)}/me/plugin-steps/records/deal-nosuch01/no-such-plugin/work/start`, body: {} }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
@@ -702,6 +704,7 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/plugins/:pluginId/roles/:role/bundles/:recordId', (w, id) => ({ path: `${C(w)}/plugins/other-sales/roles/approver/bundles/${id}`, body: { userIds: [] } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/plugins/:pluginId/step-skills', (w, id) => ({ path: `${C(w)}/plugins/${id}/step-skills` }), w => w.other.plugin, 'no-such-plugin'),
   x('PUT /api/companies/:companyId/plugins/:pluginId/step-skills/:step', (w, id) => ({ path: `${C(w)}/plugins/${id}/step-skills/work`, body: { skill: null } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/step-settings/:step', (w, id) => ({ path: `${C(w)}/plugins/${id}/step-settings/work`, body: { autoStart: false } }), w => w.other.plugin, 'no-such-plugin'),
   x('GET /api/companies/:companyId/me/plugin-steps/records/:recordId', (w, id) => ({ path: `${C(w)}/me/plugin-steps/records/${id}` }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/me/plugin-steps/records/:recordId/:pluginId/:step/start', (w, id) => ({ path: `${C(w)}/me/plugin-steps/records/${id}/other-sales/work/start`, body: {} }), w => w.other.record, 'deal-nosuch01'),
   // lane C ▲
@@ -712,6 +715,7 @@ const CROSS: CrossRow[] = [
  * other route with a parameter beyond the company must have a CROSS row.
  */
 const NOT_OBJECT_IDS: Record<string, string> = {
+  'GET /api/companies/:companyId/me/plugin-steps/consultations/:conversationId': "the caller's own consultation id, looked up only among their own bindings in this company; anyone else's is null (plugin-steps.test.ts)",
   'GET /api/oauth/:provider/callback': 'a provider name, not an object: the company comes from the state, found only inside it (member-oauth.test.ts)',
   'GET /api/invitations/:token': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'POST /api/invitations/:token/accept': 'an invitation link: the token finds the company (control plane; invitations tests)',

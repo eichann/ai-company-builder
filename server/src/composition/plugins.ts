@@ -57,6 +57,7 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
     isPluginStep: step => parsePluginRunStep(step) !== null,
     turnOf: (member, recordId, step) => pluginSteps.turnOf(member, recordId, step),
     pinForRun: (member, recordId, step) => pluginSteps.pinForRun(member, recordId, step),
+    afterDoneRun: (member, run) => pluginSteps.afterDoneRun(member, run),
   })
   const runStepOf: RunStepOf = (companyId, run) => pluginSteps.stepOfRun(companyId, run)
   deps.pluginOperations.usePinnedSteps(runStepOf)

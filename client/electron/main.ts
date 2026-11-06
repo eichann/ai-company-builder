@@ -82,6 +82,7 @@ import { servePluginFiles } from './electron-adapter'
 // lane C ▼
 import { createProcedureReader } from './features/ai-turns/procedures'
 import { createPersonStepBinder, registerPluginStepsIpc } from './features/plugin-steps/ipc'
+import { createStepWriteAreas } from './features/plugin-steps/write-areas'
 import { registerAppCommandsIpc } from './features/app-commands/ipc'
 // lane C ▲
 
@@ -401,6 +402,9 @@ registerPluginScreensIpc(ipc, {
 // lane B ▲
 // lane C ▼
 registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots })
+// Where a step's run or consultation may write: its deliverable folder (plugin-steps.md).
+const stepWriteAreas = createStepWriteAreas({ baseUrl: getServerApiUrl, cookies: session.cookies, automatic: conversationId => aiTurnClaims.pluginStepWriteArea(conversationId) })
+const bindPersonStep = createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // lane C ▲
 
 registerAuthIpc(ipc, {
@@ -510,7 +514,13 @@ app.whenReady().then(async () => {
       ...serverConfig,
       pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step),
       // A person step's consultation: its AI's plugin power is that step's (plugin-steps.md).
-      bindPluginStep: createPersonStepBinder({ baseUrl: getServerApiUrl, cookies: session.cookies }),
+      bindPluginStep: async (companyId, conversationId, step) => {
+        const bound = await bindPersonStep(companyId, conversationId, step)
+        stepWriteAreas.forget(companyId, conversationId)
+        return bound
+      },
+      // A step's run or consultation writes only inside its deliverable folder (plugin-steps.md).
+      stepWriteArea: (companyId, conversationId) => stepWriteAreas.areaOf(companyId, conversationId),
     })
     chatServerInfo = { port: result.port, authToken: result.authToken }
     chatTurns = result.turns

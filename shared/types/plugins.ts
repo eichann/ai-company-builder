@@ -349,6 +349,11 @@ export interface PluginStepView {
   procedure: string
   tools: string[]
   connectorRoles: string[]
+  /**
+   * The step's deliverable folder (plugin-steps.md "The deliverable folder"): whatever runs the
+   * step writes files only under `<department>/.personal/<this>/`. Absent from an older server.
+   */
+  deliverableFolder?: string
 }
 
 /** GET …/me/plugin-steps/records/:recordId: a step at the record's state, with the work's pin (null before its first run). */
@@ -356,11 +361,29 @@ export interface PluginStepOnRecord extends PluginStepView {
   pin: PluginStepProcedurePin | null
 }
 
+/**
+ * On GET …/me/plugin-steps/records/:recordId (a deal or a やること): where an automatic run of a
+ * person's step prepared something — its やること — so the card offers 「続きをする」 (the person's
+ * consultation of that step and record). null when there is none.
+ */
+export interface PluginStepContinuationView {
+  recordId: string
+  pluginId: string
+  step: string
+  label: string
+  taskId: string
+}
+
 /** GET …/me/plugin-step-turns: one record waiting at a `start: ai_turn` step (the member's 「AI の番」). */
 export interface PluginStepTurn extends PluginStepView {
   recordId: string
   /** The record's version now. */
   version: number
+  /**
+   * A `start: person` step the company starts by itself (「自動で始める」, plugin-steps.md "Starting by
+   * itself"): `start` stays `person`, so an app that does not know this leaves the turn alone.
+   */
+  auto?: true
 }
 
 /**
@@ -375,7 +398,15 @@ export interface PluginStepStartView extends PluginStepView {
 
 /** GET / PUT …/plugins/:pluginId/step-skills (owner/admin): the company's Skill per overridable step. */
 export interface PluginStepSkillsView {
-  steps: Array<{ step: string; label: string; overridable: boolean; skill: string | null }>
+  steps: Array<{
+    step: string; label: string; overridable: boolean; skill: string | null
+    /** How the step is declared to start, and the company's choice for a `start: person` one (false = the button). */
+    start?: PluginStepStart
+    autoStart?: boolean
+    /** The deliverable folder in force, and the company's own choice (null = from the step's label). */
+    deliverableFolder?: string
+    deliverableFolderChosen?: string | null
+  }>
 }
 
 /**
