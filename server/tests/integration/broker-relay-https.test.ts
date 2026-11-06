@@ -11,6 +11,9 @@
  * - TLS is verified against the destination's name, not the address.
  * - Through the whole route: the provider receives the real key and never the
  *   token; the caller never sees the key.
+ * - Every request names a client: ACB's user agent when the caller set none (a
+ *   load balancer refused requests without one, staging 2026-11-06), the caller's
+ *   own — a script's through the relay — kept as is.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -36,7 +39,7 @@ let dir: string
 let server: Server
 let port: number
 let ca: Buffer
-const hits: Array<{ host?: string; key?: string; auth?: string; path?: string }> = []
+const hits: Array<{ host?: string; key?: string; auth?: string; path?: string; userAgent?: string }> = []
 const logs: string[] = []
 
 beforeAll(async () => {
@@ -46,7 +49,7 @@ beforeAll(async () => {
     '-addext', `subjectAltName=DNS:${HOST}`, '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')], { stdio: 'ignore' })
   ca = readFileSync(join(dir, 'cert.pem'))
   server = createServer({ key: readFileSync(join(dir, 'key.pem')), cert: ca }, (req, res) => {
-    hits.push({ host: req.headers.host, key: req.headers['x-goog-api-key'] as string | undefined, auth: req.headers.authorization, path: req.url })
+    hits.push({ host: req.headers.host, key: req.headers['x-goog-api-key'] as string | undefined, auth: req.headers.authorization, path: req.url, userAgent: req.headers['user-agent'] })
     req.resume()
     req.on('end', () => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"candidates":[]}') })
   })
@@ -108,6 +111,20 @@ describe('the relay over HTTPS', () => {
     expect(await up.send(request('other.fake-upstream.test', ['other.fake-upstream.test']))).toEqual({ ok: false, reason: 'tls' })
   })
 
+  it('names ACB as the client when the caller did not, and keeps a caller\'s own', async () => {
+    const { ACB_USER_AGENT } = await import('../../src/adapters/upstream-https')
+    // The product and its version only: nothing of a company, member, key or host.
+    expect(ACB_USER_AGENT).toMatch(/^AICompanyBuilder\/[0-9][0-9A-Za-z.+-]*$/)
+    const up = await adapter(async () => [{ address: '127.0.0.1', family: 4 }])
+    expect((await up.send(request(HOST, [HOST]))).ok).toBe(true)
+    expect(hits.at(-1)!.userAgent).toBe(ACB_USER_AGENT)
+    for (const name of ['user-agent', 'User-Agent']) {
+      const own = { ...request(HOST, [HOST]), headers: { 'x-goog-api-key': FAKE_KEY, [name]: 'my-script/2.0' } }
+      expect((await up.send(own)).ok).toBe(true)
+      expect(hits.at(-1)!.userAgent, name).toBe('my-script/2.0')
+    }
+  })
+
   it('through the route: refused until the company allows the internal host; the provider gets the key, never the token', async () => {
     const dbModule = await import('../../src/db')
     dbModule.initDatabase()
@@ -131,7 +148,7 @@ describe('the relay over HTTPS', () => {
     const { brokerRelayRoutes } = await import('../../src/routes/broker-relay')
     const app = new Hono().route('/api/broker', brokerRelayRoutes(services.brokerRelay))
     const call = () => app.request('http://acb.test/api/broker/fake-ai/v1beta/models/gemini-2.5-flash:generateContent', {
-      method: 'POST', headers: { 'x-goog-api-key': token, 'content-type': 'application/json' }, body: '{"contents":[]}',
+      method: 'POST', headers: { 'x-goog-api-key': token, 'content-type': 'application/json', 'user-agent': 'google-genai-sdk/1.0 node' }, body: '{"contents":[]}',
     })
 
     const before = hits.length
@@ -145,7 +162,8 @@ describe('the relay over HTTPS', () => {
     const text = await res.text()
     expect(res.status).toBe(200)
     expect(text).toBe('{"candidates":[]}')
-    expect(hits.at(-1)).toMatchObject({ key: FAKE_KEY, path: '/v1beta/models/gemini-2.5-flash:generateContent' })
+    // The script's own user agent goes upstream as it was (the relay always forwarded it).
+    expect(hits.at(-1)).toMatchObject({ key: FAKE_KEY, path: '/v1beta/models/gemini-2.5-flash:generateContent', userAgent: 'google-genai-sdk/1.0 node' })
     expect(JSON.stringify(hits)).not.toContain(token)
     expect(text).not.toContain(FAKE_KEY)
     expect(logs.join('\n')).not.toContain(FAKE_KEY)

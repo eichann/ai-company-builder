@@ -10,6 +10,7 @@
  * Nothing is logged here (no header, no body, no key). A request whose key
  * is not a practice key (`pat-fake-…`) is not sent at all
  * (`practice-real-secret`): a real secret never reaches the practice copy.
+ * Like the real way out, a request without a `user-agent` gets ACB's.
  */
 import { request as httpRequest, type IncomingMessage } from 'http'
 import { request as httpsRequest } from 'https'
@@ -18,6 +19,7 @@ import { isPracticeSecret } from '../../shared/core/key-broker'
 import { isPracticeGoogleSecret } from '../../shared/core/google'
 import { isPracticeSlackSecret } from '../../shared/core/slack'
 import type { UpstreamClient } from '../ports/upstream'
+import { withUserAgent } from './upstream-https'
 
 /** Headers that carry a key (the built-in services' and the usual ones). */
 const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key']
@@ -46,7 +48,7 @@ export function practiceUpstream(real: UpstreamClient, upstreams: readonly Pract
           port: target.port,
           method: req.method,
           path: req.path,
-          headers: { ...req.headers, host: `${target.hostname}:${target.port}` },
+          headers: { ...withUserAgent(req.headers), host: `${target.hostname}:${target.port}` },
           agent: false,
           signal: req.signal,
         }, (res: IncomingMessage) => {

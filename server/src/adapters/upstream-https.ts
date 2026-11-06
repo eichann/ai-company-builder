@@ -4,6 +4,12 @@
  * exception, then connect to that very address with TLS verified against the
  * host name — so a second DNS answer (rebinding) can never change where the
  * key goes. No redirects are followed; nothing is logged here.
+ *
+ * Every request names ACB as its client (`ACB_USER_AGENT`) unless the caller
+ * set its own `user-agent`: some gateways (an AWS load balancer in front of a
+ * connector's API, staging 2026-11-06) answer 403 with an HTML page to a
+ * request without one. The value names the product only — never a company,
+ * member or key.
  */
 import { request } from 'https'
 import { lookup as dnsLookup } from 'dns/promises'
@@ -11,6 +17,18 @@ import type { IncomingMessage } from 'http'
 import { isIP } from 'net'
 import { isPrivateAddress } from '../lib/net-ranges'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
+
+/** What the way out says it is, when the caller did not say. ACB only: no company, member, key or host. */
+export const ACB_USER_AGENT = 'AICompanyBuilder/1.0'
+
+/**
+ * The headers with ACB's user agent added when none is there (any case of the
+ * name). A caller's own value — a script's through the relay — is kept as is.
+ */
+export function withUserAgent(headers: Record<string, string>): Record<string, string> {
+  if (Object.keys(headers).some(name => name.toLowerCase() === 'user-agent')) return headers
+  return { ...headers, 'user-agent': ACB_USER_AGENT }
+}
 
 export interface HttpsUpstreamOptions {
   /** DNS resolution (default: the system resolver, every address). */
@@ -55,7 +73,7 @@ export function httpsUpstream(options: HttpsUpstreamOptions = {}): UpstreamClien
           servername: isIP(req.host) ? undefined : req.host,
           method: req.method,
           path: req.path,
-          headers: { ...req.headers, host: req.host },
+          headers: { ...withUserAgent(req.headers), host: req.host },
           agent: false,
           ...(options.ca ? { ca: options.ca } : {}),
           signal: req.signal,
