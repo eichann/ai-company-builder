@@ -7,7 +7,7 @@ import type { BundleChoice } from '../../../../shared/tasks'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { useBundleChoices } from '../hooks/useBundleChoices'
 import { similarBundles } from '../similarBundles'
-import type { BundlePlace } from '../model'
+import { mayMakePrivateBundle, type BundlePlace } from '../model'
 
 const FIELD = 'w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-[13px] dark:border-zinc-700 dark:bg-zinc-900'
 
@@ -27,14 +27,19 @@ export interface NewBundlePlaces {
   defaultFolder: string | null
 }
 
-export function NewBundleDialog({ companyId, word, source, places, onCreate, onPick, onClose }: {
+export function NewBundleDialog({ companyId, word, source, places, privateRights, onCreate, onPick, onClose }: {
   companyId: string
   word: string
   source: NewBundleSource
   /** 「〇〇部の案件」 and ［変える］; absent = the department on screen, as the caller decides. */
   places?: NewBundlePlaces
+  /**
+   * 「公開（会社のみんな）」／「非公開（参加者だけ）」: the member's private-folder rights (undefined while read,
+   * null = not known). Absent = no choice offered.
+   */
+  privateRights?: { role: string; managedDepartmentIds: readonly string[] } | null
   /** null = made and linked; else the reason in words. `place`: the department chosen (with `places`). */
-  onCreate: (title: string, withHomework: boolean, place: BundlePlace | null) => Promise<string | null>
+  onCreate: (title: string, withHomework: boolean, place: BundlePlace | null, isPrivate: boolean) => Promise<string | null>
   /** ［そちらにつなぐ］: link the similar one instead. */
   onPick: (bundle: BundleChoice) => Promise<string | null>
   onClose: () => void
@@ -47,6 +52,12 @@ export function NewBundleDialog({ companyId, word, source, places, onCreate, onP
   const [folder, setFolder] = useState<string | null>(places?.defaultFolder ?? null)
   const [changing, setChanging] = useState(false)
   const place = places ? places.choices.find(c => c.folder === folder) ?? places.choices[0] ?? null : null
+  const [wantsPrivate, setWantsPrivate] = useState(false)
+  const kindWord = place?.kind?.name ?? word
+  // Offered wherever the department can be chosen (the window of a task, a meeting or a 来た連絡).
+  const offersPrivate = places !== undefined
+  const privateAllowed = !!place && !!privateRights && mayMakePrivateBundle(place, privateRights)
+  const isPrivate = wantsPrivate && privateAllowed
   const similar = choices?.success ? similarBundles(title, choices.bundles) : []
   const run = async (fn: () => Promise<string | null>) => {
     setBusy(true)
@@ -85,6 +96,18 @@ export function NewBundleDialog({ companyId, word, source, places, onCreate, onP
                 {places!.choices.length > 1 && <button type="button" onClick={() => setChanging(true)} className={SMALL_BUTTON}>変える</button>}</p>}
           </div>
         )}
+        {offersPrivate && place && (
+          <div role="radiogroup" aria-label="見られる人" className="space-y-1 text-[12.5px]"><span className="text-[12px] text-gray-500">見られる人</span>
+            <label className="flex items-center gap-2"><input type="radio" name="bundle-visibility" checked={!isPrivate} onChange={() => setWantsPrivate(false)} />公開（会社のみんな）</label>
+            <label className={`flex items-center gap-2 ${privateAllowed ? '' : 'text-gray-400'}`}>
+              <input type="radio" name="bundle-visibility" checked={isPrivate} disabled={!privateAllowed} onChange={() => setWantsPrivate(true)} />非公開（参加者だけ）
+            </label>
+            {privateRights === undefined
+              ? <p className="pl-5 text-[11px] text-gray-400">確かめています…</p>
+              : !privateAllowed && <p className="pl-5 text-[11px] text-gray-500">非公開の{kindWord}は、部署の管理役か管理者に作ってもらってください</p>}
+            {isPrivate && <p className="pl-5 text-[11px] text-gray-500">あなたと部署の管理役が参加者になります。ほかの人は、作ったあと{kindWord}の画面で足せます。</p>}
+          </div>
+        )}
         <div className="text-[12px]"><span className="text-gray-500">相手</span>
           <p className="py-1 text-[13px]">{source.counterpart?.title ?? <span className="text-gray-400">なし</span>}</p>
           {source.counterpart && <span className="text-[10.5px] text-gray-400">参加者から入れました</span>}</div>
@@ -96,7 +119,7 @@ export function NewBundleDialog({ companyId, word, source, places, onCreate, onP
         {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0, place))} className={MAIN_BUTTON}>作る</button>
+          <button type="button" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0, place, isPrivate))} className={MAIN_BUTTON}>作る</button>
         </div>
       </div>
     </div>

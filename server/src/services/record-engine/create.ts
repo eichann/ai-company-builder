@@ -1,10 +1,10 @@
 /** Creating a record that lives on the server (records.md "The state engine"). */
 import { SERVICE_OWNED_TYPES } from '../../../shared/core/core-types'
-import { canReadPrivateScope, findPrivateScope } from '../../../shared/core/permissions'
+import { canReadPrivateScope, findPrivateScope, FULL_ACCESS_ROLES } from '../../../shared/core/permissions'
 import { noTurnStates } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
-import { normalizeRepoPath } from '../../../shared/core/paths'
+import { isSameOrAncestorPath, normalizeRepoPath, pathKey } from '../../../shared/core/paths'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordLinkRow } from '../../ports/records'
 import type { Member } from '../access'
@@ -207,7 +207,14 @@ export function creating(ctx: EngineContext) {
       }
       let folder: string | null = null
       if (b.folder !== undefined && b.folder !== null) {
-        const f = placeFolder(member, def.name, b.folder, reader)
+        // A 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): a まとまり made by a person in its own
+        // private folder — exactly that folder, by someone who may manage it (owner/admin, the
+        // department's manager: who may create a private folder there). Anything else stays refused.
+        const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+        const ownPrivate = (f: string) => actor.kind === 'human' && def.implements.includes('bundle')
+          && scopes.some(s => s.repoId !== null && pathKey(s.path) === pathKey(f))
+          && (FULL_ACCESS_ROLES.has(member.role) || deps.managedFolders(member.companyId, member.userId).some(d => isSameOrAncestorPath(d, f) && pathKey(d) !== pathKey(f)))
+        const f = placeFolder(member, def.name, b.folder, reader, ownPrivate)
         if (typeof f !== 'string') return f
         folder = f
       }

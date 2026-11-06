@@ -41,3 +41,19 @@ export type RecordActions = ElectronPort<'actOnTask'>
 export function actOnRecord(companyId: string, recordId: string, action: string, expectedVersion: number, writes: RecordActions = window.electronAPI) {
   return writes.actOnTask(companyId, recordId, { action, expectedVersion })
 }
+
+/**
+ * 参加者 of a 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): who reads its private folder
+ * (the full list only for those who may change it), the company's members to add, and the change itself.
+ * A person's press only (never the chat).
+ */
+export type ParticipantPorts = ElectronPort<'getPrivateFolderMembers' | 'setPrivateFolderMembers' | 'getMyPrivateFolders' | 'getPrivateFolderCreateContext'>
+
+export function participantPorts(ports: ParticipantPorts = window.electronAPI) {
+  return {
+    members: (companyId: string, scopeId: string) => ports.getPrivateFolderMembers(companyId, scopeId),
+    setMembers: (companyId: string, scopeId: string, input: { viewers: string[]; editors: string[] }) => ports.setPrivateFolderMembers(companyId, scopeId, input),
+    readable: (companyId: string) => ports.getMyPrivateFolders(companyId),
+    companyMembers: (companyId: string, path: string) => ports.getPrivateFolderCreateContext(companyId, path),
+  }
+}

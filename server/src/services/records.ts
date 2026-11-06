@@ -12,6 +12,7 @@
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import { aiTurnStates, noTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, fileLinkShown, RECORD_ID_RE } from '../../shared/core/records'
+import { pathKey } from '../../shared/core/paths'
 import { turnsOf } from '../../shared/core/record-turns'
 import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
 import type {
@@ -616,8 +617,13 @@ export function createRecordService(deps: RecordServiceDeps) {
       const files = deps.recordFiles && filePaths.length > 0
         ? await missingPaths(deps.recordFiles, member.companyId, filePaths, scopes)
         : null
+      // A 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): the private folder that is its
+      // 見える範囲, for its participants' card. The caller reads the record, so they read that folder.
+      const own = row.path === null && row.folder !== null && types.get(row.type)?.definition.implements.includes('bundle')
+        ? scopes.find(s => s.repoId !== null && pathKey(s.path) === pathKey(row.folder as string)) : undefined
       return ok({
         record: sums.get(row.id)!,
+        ...(own ? { privateFolder: { scopeId: own.id, path: own.path } } : {}),
         links: links.map((l): RecordLinkView => ({
           ...(l.id
             ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }

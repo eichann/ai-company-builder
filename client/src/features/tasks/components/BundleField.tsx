@@ -10,6 +10,7 @@ import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useBundleChoices } from '../hooks/useBundleChoices'
 import { NewBundleDialog, type NewBundlePlaces, type NewBundleSource } from './NewBundleDialog'
+import { privateBundleRights } from '../api'
 import type { BundlePlace } from '../model'
 
 /** A meeting's 「どの〇〇の会議ですか？」, asked in the field while none is linked. */
@@ -41,11 +42,18 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
   newFrom?: NewBundleSource
   /** Which department's 〇〇 it becomes (the creator's own by default) and the others to choose from. */
   places?: NewBundlePlaces
-  onCreate?: (title: string, withHomework: boolean, place: BundlePlace | null) => Promise<string | null>
+  /** `isPrivate`: 「非公開（参加者だけ）」 chosen (offered with `places`, to who may make a private folder there). */
+  onCreate?: (title: string, withHomework: boolean, place: BundlePlace | null, isPrivate: boolean) => Promise<string | null>
   question?: BundleQuestion
 }) {
   const [picking, setPicking] = useState(false)
   const [making, setMaking] = useState(false)
+  // Read when the window opens (who may make a 非公開 one); undefined while read, null = not known.
+  const [rights, setRights] = useState<{ role: string; managedDepartmentIds: string[] } | null | undefined>(undefined)
+  const openMaking = () => {
+    setMaking(true)
+    if (places) { setRights(undefined); void privateBundleRights(companyId).then(setRights, () => setRights(null)) }
+  }
   const [error, setError] = useState<string | null>(null)
   const [pressing, setPressing] = useState(false)
   if (!bundle && !canSet) return null
@@ -69,14 +77,14 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
           <span className="ml-auto flex flex-wrap items-center justify-end gap-1">
             {asked?.yes && <button type="button" disabled={off} onClick={() => void press(asked.yes!)} className={SMALL_BUTTON}>はい</button>}
             <button type="button" disabled={off} onClick={() => setPicking(true)} className={SMALL_BUTTON}>{bundle ? '変える' : asked?.pick ?? `${name}につなぐ`}</button>
-            {!bundle && newFrom && onCreate && <button type="button" disabled={off} onClick={() => setMaking(true)} className={SMALL_BUTTON}>新しい{name}にする</button>}
+            {!bundle && newFrom && onCreate && <button type="button" disabled={off} onClick={openMaking} className={SMALL_BUTTON}>新しい{name}にする</button>}
             {asked?.none && <button type="button" disabled={off} onClick={() => void press(asked.none!.press)} className={QUIET}>{asked.none.label}</button>}
             {bundle && canRemove && <button type="button" disabled={off} onClick={() => void onRemove().then(setError)} className={QUIET}>外す</button>}
           </span>
         )}
       </div>
       {error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
-      {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} {...(places ? { places } : {})} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
+      {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} {...(places ? { places, privateRights: rights } : {})} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
       {picking && <BundlePicker companyId={companyId} word={name} current={bundle?.id ?? null} onClose={() => setPicking(false)} onChoose={onSet} />}
     </div>
   )

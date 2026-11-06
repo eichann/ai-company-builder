@@ -653,3 +653,20 @@ test('a folder from the tree is linked; linked folders open in the tree, say who
   await expect(page.locator('#acted')).toContainText('reveal /Users/me/company/経理/月次')
   expectNoPageErrors(state)
 })
+
+test('新しい〇〇: 非公開（参加者だけ） makes its private folder in the department first, for who may', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { bundle: 'none', places: '1', rights: 'manager' })
+  await page.getByTestId('task-card').getByRole('button', { name: '新しい案件にする' }).click()
+  const dialog = page.getByRole('dialog', { name: '新しい案件にする' })
+  await dialog.getByRole('radio', { name: '非公開（参加者だけ）' }).check()
+  await dialog.getByRole('button', { name: '作る' }).click()
+  await expect(page.locator('#acted')).toHaveText('private 開発部/A社-見積書を-150万円-で作り直す,create project A社 見積書を 150万円 で作り直す folder=開発部/A社-見積書を-150万円-で作り直す,link task-0000aa bundle=deal-0009zz@3')
+  expectNoPageErrors(state)
+
+  const member = await openPreview(page, 'task-card', { bundle: 'none', places: '1', rights: 'member' })
+  await page.getByTestId('task-card').getByRole('button', { name: '新しい案件にする' }).click()
+  const plain = page.getByRole('dialog', { name: '新しい案件にする' })
+  await expect(plain.getByRole('radio', { name: '非公開（参加者だけ）' })).toBeDisabled()
+  await expect(plain).toContainText('非公開のプロジェクトは、部署の管理役か管理者に作ってもらってください')
+  expectNoPageErrors(member)
+})

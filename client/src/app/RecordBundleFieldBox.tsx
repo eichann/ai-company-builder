@@ -13,9 +13,9 @@ import { useMeetingBundleQuestion } from '../features/minutes/hooks/useMeetingBu
 import { ConfirmDialog } from '../shared/ui/ConfirmDialog'
 import type { BundleFieldContext } from '../features/records/components/RecordCard'
 import { BundleField, type BundleQuestion } from '../features/tasks/components/BundleField'
-import { createBundle, linkMeetingBundle, setRecordLink } from '../features/tasks/api'
+import { createBundle, createPrivateBundleFolder, linkMeetingBundle, setRecordLink } from '../features/tasks/api'
 import type { NewBundlePlaces } from '../features/tasks/components/NewBundleDialog'
-import type { BundlePlace } from '../features/tasks/model'
+import { privateBundleFolderNames, type BundlePlace } from '../features/tasks/model'
 
 /** Waiting for the member's answer to 「…に見えます」: the link goes on only with ［つなぐ］. */
 type Asking = { title: string; message: string; answer: (yes: boolean) => void }
@@ -88,10 +88,17 @@ export function RecordBundleFieldBox({ companyId, ctx, kind, folder, onListChang
           counterpart, homework: homework.length,
         },
         ...(places ? { places } : {}),
-        onCreate: async (title: string, withHomework: boolean, place: BundlePlace | null) => {
+        onCreate: async (title: string, withHomework: boolean, place: BundlePlace | null, isPrivate: boolean) => {
           const madeKind = place?.kind ?? kind
           if (!await agreed(null, madeKind.name)) return null
-          const made = await createBundle(companyId, { type: madeKind.type, title, folder: place ? place.folder : folder, counterpart: counterpart?.id ?? null })
+          let into = place ? place.folder : folder
+          // 非公開（参加者だけ）: its own private folder first (records.md "Private 案件・プロジェクト").
+          if (isPrivate) {
+            const pf = await createPrivateBundleFolder(companyId, into ?? '', privateBundleFolderNames(title, madeKind.name))
+            if ('error' in pf) return pf.error
+            into = pf.path
+          }
+          const made = await createBundle(companyId, { type: madeKind.type, title, folder: into, counterpart: counterpart?.id ?? null })
           if (!made.success) return made.error
           const failure = await link({ id: made.recordId, title })
           if (failure) return failure

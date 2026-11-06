@@ -613,6 +613,14 @@ the chosen department's folder, then the task's `bundle` link to it. **Which dep
 department (所属: the one on screen when it is theirs, else their first in the tabs' order; none or not known → the one on
 screen, 全社 offered then) — with ［変える］ among the departments (`bundlePlacesOf` in `model.ts`, composed by AppShell
 from the departments, `bundleKinds` and `useTodayFolder`'s `myDepartmentIds`; also on a meeting's / 来た連絡's field).
+**見られる人** in the same window (owner decision 2026-11-06, `records.md` "Private 案件・プロジェクト"): 「公開（会社のみんな）」 /
+「非公開（参加者だけ）」 — the latter only for who may create a private folder in the chosen department (`mayMakePrivateBundle`:
+owner / admin, that department's managers; rights read from `privateFolders:createContext` when the window opens), else
+disabled with 「非公開の〇〇は、部署の管理役か管理者に作ってもらってください」. 非公開 first makes the private folder
+(`createPrivateBundleFolder`, names from `privateBundleFolderNames`), then the 案件 in it. **A 非公開 案件's card**
+(`ProjectParticipants.tsx` in the records feature): 「見られる人：『〇〇』の参加者（N人）」, the participants' names
+(「ほかに管理者 N人」), and for whoever the server gave the full list ［参加者を足す］ (any member of the company) and
+×「〇〇さんを外す」 after 「…パソコンにあるこの〇〇のフォルダも消えます（同期していない変更も消えます）」.
 **A task seen by more people than the 案件** (the server's `WIDER_THAN_BUNDLE` on ［〇〇につなぐ］, ［変える］, the tag
 hint's ［案件につなぐ］ or a new one): the card asks 「このやることは、〇〇より多くの人に見えています。〇〇と同じ人たちだけに
 見えるようにしますか？」 — ［同じ人たちだけにする］ links again with `narrow` (no ［取り消す］: it is never undone), ［つながない］

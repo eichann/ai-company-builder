@@ -284,6 +284,12 @@ export interface BundleKindsResult {
 export interface RecordDetail {
   record: RecordSummary
   links: RecordLinkView[]
+  /**
+   * A 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): the private folder that is its
+   * 見える範囲 (its participants are that folder's readers). Only on a まとまり placed exactly there;
+   * whoever reads the record reads the folder. Absent otherwise and from older servers.
+   */
+  privateFolder?: { scopeId: string; path: string }
 }
 
 /**

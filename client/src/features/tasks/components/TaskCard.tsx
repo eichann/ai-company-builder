@@ -16,7 +16,7 @@ import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/c
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, createBundle, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToBundle, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
+import { actOnTask, createBundle, createPrivateBundleFolder, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToBundle, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
@@ -29,7 +29,7 @@ import { TaskActions } from './TaskActions'
 import { BundleField } from './BundleField'
 import { ShowToBundle } from './ShowToBundle'
 import type { NewBundlePlaces } from './NewBundleDialog'
-import type { BundlePlace } from '../model'
+import { privateBundleFolderNames, type BundlePlace } from '../model'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
@@ -196,8 +196,15 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     } } : {})}
     companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
     {...(bundlePlaces ? { bundlePlaces } : {})}
-    onCreateBundle={bundleKind ? async (title: string, place: BundlePlace | null) => {
-      const made = await createBundle(companyId, { type: place?.kind?.type ?? bundleKind.type, title, folder: place ? place.folder : bundleFolder })
+    onCreateBundle={bundleKind ? async (title: string, place: BundlePlace | null, isPrivate: boolean) => {
+      let folder = place ? place.folder : bundleFolder
+      // 非公開（参加者だけ）: its own private folder first, inside the department (records.md "Private 案件・プロジェクト").
+      if (isPrivate) {
+        const made = await createPrivateBundleFolder(companyId, folder ?? '', privateBundleFolderNames(title, place?.kind?.name ?? bundleKind.name))
+        if ('error' in made) return made.error
+        folder = made.path
+      }
+      const made = await createBundle(companyId, { type: place?.kind?.type ?? bundleKind.type, title, folder })
       if (!made.success) return made.error
       return linkBundle({ id: made.recordId, title, typeLabel: place?.kind?.name ?? bundleKind.name })
     } : undefined}
@@ -238,7 +245,7 @@ interface BodyProps {
   onNewFile?: (name: string) => Promise<{ error: string } | { linkError: string | null }>
   companyId: string
   bundleWord: string
-  onCreateBundle?: (title: string, place: BundlePlace | null) => Promise<string | null>
+  onCreateBundle?: (title: string, place: BundlePlace | null, isPrivate: boolean) => Promise<string | null>
   bundlePlaces?: NewBundlePlaces
   /** ［〇〇の人に見せる］ on a task only the member (or a list) sees that belongs to a 案件・プロジェクト. */
   onShowToBundle: () => Promise<string | null>
@@ -364,7 +371,7 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
 
       <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle}
         {...(bundlePlaces ? { places: bundlePlaces } : {})}
-        {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string, _h: boolean, place: BundlePlace | null) => onCreateBundle(title, place) } : {})} />
+        {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string, _h: boolean, place: BundlePlace | null, isPrivate: boolean) => onCreateBundle(title, place, isPrivate) } : {})} />
       {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />

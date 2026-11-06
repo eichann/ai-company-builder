@@ -172,8 +172,10 @@ contract.invoke plugins:bridge
 contract.invoke plugins:screens
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
+contract.invoke privateFolders:members
 contract.invoke privateFolders:mine
 contract.invoke privateFolders:reservedPathRefusal
+contract.invoke privateFolders:setMembers
 contract.invoke recordViews:card
 contract.invoke recordViews:find
 contract.invoke recordViews:findHome
@@ -402,6 +404,7 @@ contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => strin
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPluginScreens = getPluginScreens: Invoke<'plugins:screens'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
+contract.type ElectronAPI.getPrivateFolderMembers = getPrivateFolderMembers: Invoke<'privateFolders:members'>
 contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:card'>
 contract.type ElectronAPI.getRecordThread = getRecordThread: Invoke<'threads:get'>
 contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
@@ -509,6 +512,7 @@ contract.type ElectronAPI.setGoogleRelay = setGoogleRelay: Invoke<'google:setRel
 contract.type ElectronAPI.setMeetingAutoSeries = setMeetingAutoSeries: Invoke<'minutes:autoSeries'>
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
+contract.type ElectronAPI.setPrivateFolderMembers = setPrivateFolderMembers: Invoke<'privateFolders:setMembers'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
 contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFeature'>
 contract.type ElectronAPI.setWorkSwitch = setWorkSwitch: Invoke<'workSwitches:set'>
@@ -821,8 +825,10 @@ contract.type IpcInvokeChannels.'plugins:bridge' = 'plugins:bridge': { args: [co
 contract.type IpcInvokeChannels.'plugins:screens' = 'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
+contract.type IpcInvokeChannels.'privateFolders:members' = 'privateFolders:members': { args: [companyId: string, scopeId: string]; result: PrivateFolderMembersResult }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null }
+contract.type IpcInvokeChannels.'privateFolders:setMembers' = 'privateFolders:setMembers': { args: [companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest]; result: PrivateFolderMembersResult }
 contract.type IpcInvokeChannels.'recordViews:card' = 'recordViews:card': { args: [companyId: string, recordId: string]; result: RecordCardResult }
 contract.type IpcInvokeChannels.'recordViews:find' = 'recordViews:find': { args: [companyId: string, text: string, today: string]; result: FindResult }
 contract.type IpcInvokeChannels.'recordViews:findHome' = 'recordViews:findHome': { args: [companyId: string, today: string, from: string, to: string]; result: FindHomeResult }
@@ -1101,8 +1107,10 @@ main.handle plugins:bridge @ features/plugins/bridge-ipc.ts (companyId, plugin, 
 main.handle plugins:screens @ features/plugins/screens.ts (companyId)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
+main.handle privateFolders:members @ features/private-folders/ipc.ts (companyId: string, scopeId: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
 main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts (targetPath: string)
+main.handle privateFolders:setMembers @ features/private-folders/ipc.ts (companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest)
 main.handle recordViews:card @ features/record-views/ipc.ts (companyId, recordId)
 main.handle recordViews:find @ features/record-views/ipc.ts (companyId, text, today)
 main.handle recordViews:findHome @ features/record-views/ipc.ts (companyId, today, from, to)
@@ -1340,6 +1348,8 @@ preload getPluginScreens -> invoke plugins:screens($0)
 preload getPluginScreens : (companyId: string) => Promise<PluginScreensResult>
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
 preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
+preload getPrivateFolderMembers -> invoke privateFolders:members($0, $1)
+preload getPrivateFolderMembers : (companyId: string, scopeId: string) => Promise<PrivateFolderMembersResult>
 preload getRecordCard -> invoke recordViews:card($0, $1)
 preload getRecordCard : (companyId: string, recordId: string) => Promise<RecordCardResult>
 preload getRecordThread -> invoke threads:get($0, $1)
@@ -1554,6 +1564,8 @@ preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
 preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
 preload setPermissionMode : (mode: "auto" | "default" | "bypassPermissions") => Promise<boolean>
+preload setPrivateFolderMembers -> invoke privateFolders:setMembers($0, $1, $2)
+preload setPrivateFolderMembers : (companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest) => Promise<PrivateFolderMembersResult>
 preload setServerUrl -> invoke config:setServerUrl($0)
 preload setServerUrl : (url: string) => Promise<boolean>
 preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)

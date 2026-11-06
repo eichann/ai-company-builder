@@ -71,8 +71,19 @@ const bundleLinks: RecordCardLink[] = [...tasks, approval].map(r => ({ label: '�
 const record = kind === 'slack' ? slack : kind === 'bundle' ? deal : meeting
 const opened: string[] = []
 const slackCard = () => ({ record: view(slack), version: slack.version, detail: recordDetailOf(slack, people, ME) ?? undefined, fields: [], history: [], links, viewers: { kind: 'only-you' as const, text: 'あなただけ', count: 1 } })
+// `&private=edit|read`: a 非公開 案件 (records.md "Private 案件・プロジェクト") — its 参加者, editable or only named.
+const privateMode = params.get('private')
+let participantRules = [
+  { userId: 'u-sato', name: '佐藤', email: null, role: 'member', canWrite: true, via: 'rule' as const },
+  { userId: 'u-abe', name: '阿部', email: null, role: 'member', canWrite: false, via: 'rule' as const },
+  { userId: 'u-admin', name: '管理', email: null, role: 'admin', canWrite: true, via: 'role' as const },
+]
+const participantsNow = () => ({
+  names: participantRules.filter(m => m.via === 'rule').map(m => m.name), admins: 1, members: privateMode === 'edit' ? participantRules : null,
+})
 const card = kind === 'bundle'
   ? {
+    ...(privateMode ? { privateFolder: { scopeId: 'scope-1', path: '営業部/A社研修' } } : {}),
     record: { ...view(deal), typeLabel: '案件', thing: 'bundle' as const },
     detail: bundleDetailOf(deal, [...tasks, approval], 'u-sato', people),
     fields: [], history: [{ at: '2026-11-05T06:38:00.000Z', text: 'AI：まとまりの分を終える（承認のお願い 1件を作りました）', ai: true }], links: bundleLinks,
@@ -81,7 +92,16 @@ const card = kind === 'bundle'
   : { record: view(record), version: 3, detail: recordDetailOf(record, people) ?? undefined, fields: [], history: [], links, viewers: kind === 'slack' ? { kind: 'only-you' as const, text: 'あなただけ', count: 1 } : { kind: 'department' as const, text: '営業部のみんな', count: 4 } }
 
 installElectronAPI({
-  getRecordCard: async () => ({ success: true, card: kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : card }),
+  getRecordCard: async () => ({ success: true, card: kind === 'slack' ? slackCard() : kind === 'reply' ? replyCard() : privateMode && kind === 'bundle'
+    ? { ...card, participants: participantsNow(), viewers: { kind: 'private-folder' as const, text: `『A社 研修導入』の参加者（${participantRules.length}人）`, count: participantRules.length } } : card }),
+  getPrivateFolderCreateContext: async () => ({ success: true, context: { role: 'member', managedDepartmentIds: ['d-sales'], department: { id: 'd-sales', name: '営業部', folder: '営業部' }, managerIds: [], members: [
+    { userId: 'u-sato', name: '佐藤', email: null, role: 'member' }, { userId: 'u-kato', name: '加藤', email: null, role: 'member' }, { userId: 'u-admin', name: '管理', email: null, role: 'admin' },
+  ] } }),
+  setPrivateFolderMembers: async (_c, scopeId, input) => {
+    say(`members ${scopeId} viewers=${input.viewers.join('|')} editors=${input.editors.join('|')}`)
+    participantRules = [...input.viewers.map(id => ({ userId: id, name: id === 'u-kato' ? '加藤' : id === 'u-abe' ? '阿部' : '佐藤', email: null, role: 'member', canWrite: input.editors.includes(id), via: 'rule' as const })), participantRules.at(-1)!]
+    return { success: true, members: participantRules }
+  },
   actOnTask: async (_c, recordId, input) => {
     say(`act ${recordId} ${input.action}@${input.expectedVersion}`)
     if (recordId === reply.id) {
