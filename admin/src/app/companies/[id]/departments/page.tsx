@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -61,6 +61,9 @@ export default function DepartmentsPage() {
   const [managersFor, setManagersFor] = useState<Department | null>(null)
   const [deleting, setDeleting] = useState<{ department: Department; files: number; folders: number } | null>(null)
   const [importing, setImporting] = useState(false)
+  // A department just created: open 「所属する人を変える」 for it (nobody belongs yet).
+  const [membersFor, setMembersFor] = useState<string | null>(null)
+  const membersOpened = useCallback(() => setMembersFor(null), [])
 
   const sorted = useMemo(
     () => [...(departments.data ?? [])].sort((a, b) => a.sortOrder - b.sortOrder),
@@ -231,7 +234,13 @@ export default function DepartmentsPage() {
 
       {/* 所属する人・不在と代わりの人 (管理画面の見直し 2-3: here, one place; was on 「やることの一覧」). */}
       <div className="mt-6">
-        <MembershipCard departments={departments.data} error={departments.error} onRetry={departments.reload} />
+        <MembershipCard
+          departments={departments.data}
+          error={departments.error}
+          onRetry={departments.reload}
+          openFor={membersFor}
+          onOpened={membersOpened}
+        />
       </div>
 
       {isAdmin && (
@@ -241,7 +250,10 @@ export default function DepartmentsPage() {
             onOpenChange={setFormOpen}
             companyId={companyId}
             department={editing}
-            onSaved={() => departments.reload()}
+            onSaved={(saved) => {
+              if (!editing) setMembersFor(saved.id)
+              departments.reload()
+            }}
           />
           <ManagersDialog
             open={managersFor !== null}

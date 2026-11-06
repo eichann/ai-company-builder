@@ -1,14 +1,14 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, Plus, UserCircle } from '@phosphor-icons/react'
+import { Check, Plus, UserCircle, UsersThree } from '@phosphor-icons/react'
 
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Member } from '@/lib/api'
-import { editorKey, ROLE_MEMBER_EDITOR, type Editor } from '@/lib/edit-access'
+import { departmentEditorName, editorKey, ROLE_MEMBER_EDITOR, type Editor } from '@/lib/edit-access'
 import { isAdminRole } from '@/lib/format'
 
 /**
@@ -16,18 +16,23 @@ import { isAdminRole } from '@/lib/format'
  * or individual members, searchable. Picking toggles and keeps the list open
  * so several can be chosen in a row. Owners and admins are not offered — they
  * can always edit. Managers of the department are marked 「管理役」 so they
- * are easy to find (being a manager grants no file access by itself).
+ * are easy to find (being a manager grants no file access by itself). Inside
+ * a department, 「〇〇に所属する人」 is offered too: whoever belongs to it at
+ * the time (所属, set on 部署), not a fixed list.
  */
 export function EditorPicker({
   members,
   chosen,
   managerIds,
+  department,
   disabled,
   onToggle,
 }: {
   members: Member[]
   chosen: Editor[]
   managerIds: string[]
+  /** The department this place is in (memberCount null while loading). */
+  department?: { id: string; name: string; memberCount: number | null }
   disabled?: boolean
   onToggle: (editor: Editor) => void
 }) {
@@ -72,6 +77,30 @@ export function EditorPicker({
                 {check(keys.has(editorKey(ROLE_MEMBER_EDITOR)))}
               </CommandItem>
             </CommandGroup>
+            {department && (
+              <CommandGroup heading="部署">
+                {(() => {
+                  const editor: Editor = { subjectType: 'department', subjectId: department.id }
+                  const on = keys.has(editorKey(editor))
+                  return (
+                    <CommandItem
+                      value={`部署 所属 ${department.name} department`}
+                      onSelect={() => onToggle(editor)}
+                      data-chosen={on || undefined}
+                    >
+                      <UsersThree size={18} className="text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block">{departmentEditorName(department.name)}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          所属を変えると、編集できる人も変わります{department.memberCount !== null ? `（いまは${department.memberCount}人）` : ''}
+                        </span>
+                      </span>
+                      {check(on)}
+                    </CommandItem>
+                  )
+                })()}
+              </CommandGroup>
+            )}
             <CommandGroup heading="メンバー">
               {sorted.map((m) => {
                 const name = m.name || m.email || '名前未設定'

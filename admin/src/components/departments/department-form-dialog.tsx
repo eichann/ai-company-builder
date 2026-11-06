@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Warning } from '@phosphor-icons/react'
+import { Info, Warning } from '@phosphor-icons/react'
 
 import { DEPARTMENT_COLORS, DEPARTMENT_ICONS, DepartmentIcon } from '@/components/app/department-icon'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,15 @@ import { departmentsApi, type Department } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { isValidFolderName, suggestFolderName } from '@/lib/folder-name'
 import { cn } from '@/lib/utils'
+
+/**
+ * Who may do what in a department created now (owner decision 2026-11-06,
+ * server: services/departments.ts create): everyone reads, the people who
+ * belong to it edit. Nobody belongs at first, so until someone is added only
+ * owners and admins edit; the page opens 「所属する人を変える」 right after.
+ */
+export const NEW_DEPARTMENT_ACCESS_TEXT =
+  'この部署のフォルダは全員が見られ、編集できるのは部署に所属する人（とオーナー・管理者）だけです。作った直後はまだだれも所属していないため、所属する人を決めるまでは、オーナーと管理者だけが編集できます。人に見せたくないものは、部署の中に非公開フォルダを作ってそこに置いてください。'
 
 /** Create (department = null) or edit a department. */
 export function DepartmentFormDialog({
@@ -123,6 +132,15 @@ function DepartmentForm({
             : '部署ごとに共有フォルダが作られ、メンバーのPCには次回の同期で表示されます。'}
         </DialogDescription>
       </DialogHeader>
+
+      {!editing && (
+        <p className="flex gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-foreground">
+          <Info size={16} className="mt-px shrink-0 text-muted-foreground" />
+          <span>
+            {NEW_DEPARTMENT_ACCESS_TEXT}
+          </span>
+        </p>
+      )}
 
       <div className="flex items-start gap-4">
         <DepartmentIcon icon={icon} color={color} className="mt-6 size-10 rounded-lg" />

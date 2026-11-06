@@ -16,7 +16,8 @@ export const taskSchema = `
     );
 
     -- Department membership (所属する部署, stage 2 S6): who belongs to a
-    -- department. Separate from folder permissions (changes nobody's access).
+    -- department. A rule may name it (subject 'department', shared/core/permissions.ts):
+    -- then who belongs decides who writes there (new departments start so).
     -- A row's company is its department's (trigger below).
     CREATE TABLE IF NOT EXISTS department_members (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

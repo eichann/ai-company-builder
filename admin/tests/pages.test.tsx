@@ -10,7 +10,7 @@ import SecurityAlertsPage from '@/app/companies/[id]/alerts/page'
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { ErrorState } from '@/components/app/states'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { COMPANY_ID, busyOverview, homeOf, managerCapabilities, ok, quietOverview } from './fixtures'
+import { COMPANY_ID, busyOverview, departments, homeOf, managerCapabilities, ok, quietOverview } from './fixtures'
 import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -226,6 +226,36 @@ describe('部署', () => {
     expect(await screen.findByText('あなたが管理役')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '部署を追加' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /を並べ替え/ })).not.toBeInTheDocument()
+  })
+
+  it('a new department: says who edits and who reads, then asks who belongs to it at once', async () => {
+    const created = { ...departments[0], id: 'd_new', name: '広報部', folder: '広報部', sortOrder: 3 }
+    let list = departments
+    const members = Object.fromEntries(
+      [...departments, created].map((d) => [`GET ${base}/departments/${d.id}/members`, { body: ok({ members: [], canEdit: true }) }])
+    )
+    const { calls } = mockApi({
+      ...companyRoutes(),
+      ...members,
+      [`GET ${base}/departments/d_new/managers`]: { body: ok({ managers: [] }) },
+      [`GET ${base}/departments?flat=true`]: () => ({ body: ok(list) }),
+      [`POST ${base}/departments`]: () => {
+        list = [...departments, created]
+        return { status: 201, body: ok(created) }
+      },
+    })
+    renderInCompany(<DepartmentsPage />)
+    await screen.findByRole('list', { name: '部署の一覧' })
+    await userEvent.click(screen.getAllByRole('button', { name: '部署を追加' })[0])
+    const form = await screen.findByRole('dialog', { name: '部署を追加' })
+    expect(within(form).getByText(/編集できるのは部署に所属する人（とオーナー・管理者）だけです/)).toHaveTextContent(
+      /だれも所属していないため、所属する人を決めるまでは、オーナーと管理者だけが編集できます。人に見せたくないものは、部署の中に非公開フォルダ/
+    )
+    await userEvent.type(within(form).getByLabelText('部署名'), '広報部')
+    await userEvent.click(within(form).getByRole('button', { name: '部署を追加' }))
+
+    expect(await screen.findByRole('dialog', { name: '「広報部」に所属する人' })).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/departments'))).toBe(true)
   })
 
   it('shows an empty state with the next action', async () => {

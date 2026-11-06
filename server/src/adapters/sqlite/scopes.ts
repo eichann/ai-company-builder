@@ -25,6 +25,7 @@ import {
   skillEditorPlaces,
   listSkillEditorIds,
   replaceScopeRules,
+  seedDepartmentMemberWriting,
   syncCompanyScopes,
   updateRuleAccess,
   upsertScopeRule,
@@ -55,6 +56,7 @@ export function sqliteScopeRepository(conn: Database.Database, companyId: string
     ensureDepartmentScope: (departmentId, folder, createdBy) => {
       ensureDepartmentScope(conn, companyId, departmentId, folder, createdBy)
     },
+    seedDepartmentMemberWriting: (departmentId, createdBy) => seedDepartmentMemberWriting(conn, companyId, departmentId, createdBy),
     syncCompanyScopes: () => syncCompanyScopes(conn, companyId),
     moveScopeSubtree: (fromPath, toPath) => moveScopeSubtree(conn, companyId, fromPath, toPath),
     deleteDepartmentScopes: (departmentId, folder) => deleteDepartmentScopes(conn, companyId, departmentId, folder),

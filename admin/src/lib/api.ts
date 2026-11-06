@@ -409,11 +409,13 @@ export type EffectiveSummary = 'everyone-rw' | 'everyone-r' | 'restricted'
 
 export interface PermissionRule {
   id: string
-  subjectType: 'everyone' | 'role' | 'user'
+  subjectType: 'everyone' | 'role' | 'department' | 'user'
   subjectId: string | null
   subjectLabel: string
   canRead: boolean
   canWrite: boolean
+  /** 'department' only: who belongs to it now (所属), for the preview. */
+  memberIds?: string[]
 }
 
 export interface PermissionScope {
@@ -447,6 +449,7 @@ export type RuleInput = RuleSubject & { canWrite: boolean }
 export type RuleSubject =
   | { subjectType: 'everyone'; subjectId: null }
   | { subjectType: 'role'; subjectId: 'member' }
+  | { subjectType: 'department'; subjectId: string }
   | { subjectType: 'user'; subjectId: string }
 
 export interface ScopeRulesResult {
@@ -1006,15 +1009,22 @@ export const departmentsApi = {
       body: { userIds },
     }),
 
-  /** Who belongs to the department (所属する部署); changes nobody's folder access. */
+  /**
+   * Who belongs to the department (所属する部署). In a department created since
+   * 2026-11-06 they are the ones who may edit its files (everyone else reads).
+   */
   getMembers: (companyId: string, departmentId: string) =>
     getData(`${deptBase(companyId)}/${enc(departmentId)}/members`, departmentMembersSchema),
 
-  /** Owner/admin, or a manager of this department; replaces the set. */
-  setMembers: (companyId: string, departmentId: string, userIds: string[]) =>
+  /**
+   * Owner/admin, or a manager of this department; replaces the set. Someone
+   * losing edit access on an outdated app → 409 OUTDATED_CLIENTS
+   * (outdatedClientsOf); `force` is for owners/admins.
+   */
+  setMembers: (companyId: string, departmentId: string, userIds: string[], { force = false }: ForceOption = {}) =>
     getData(`${deptBase(companyId)}/${enc(departmentId)}/members`, departmentMembersSchema, {
       method: 'PUT',
-      body: { userIds },
+      body: force ? { userIds, force: true } : { userIds },
     }),
 }
 

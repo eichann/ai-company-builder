@@ -183,6 +183,8 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),
   r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.accounting}/members`, body: {} }), [400, 400, 403, 403, 404, 401], 'outside the manager\'s department'),
+  r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: { userIds: [], force: true } }), [200, 200, 403, 403, 404, 401],
+    'saving despite outdated apps (who belongs decides who writes in a new department): owners and admins only; nobody belongs, so nothing changes'),
 
   // Files (read-only views)
   r('GET /api/companies/:companyId/folder-sizes', w => ({ path: `${C(w)}/folder-sizes`, query: `path=${encodeURIComponent('営業部')}` }), MEMBERS),

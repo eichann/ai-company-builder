@@ -192,7 +192,9 @@ Deletions are always allowed except where noted (they are how something gets uns
   of the tip's files. 200 commits / 50,000 lines check in under a second
   (`push-check-performance.test.ts`); `secret-scan-hook.test.ts`.
 - **Write permission** (`[WRITE_DENIED]`): every changed path (adds, edits, deletes, both sides
-  of a rename) must pass `resolveAccess(pusher, path).write` (`shared/core/permissions.ts`), also
+  of a rename) must pass `resolveAccess(pusher, path).write` (`shared/core/permissions.ts`; a
+  department rule's `memberIds` — who belongs — travel in the snapshot with the rules, so a
+  member of a new department who does not belong to it meets this same marker), also
   as a disk folds it (`diskKey`: macOS/Windows check `Sales/x` and `ſales/x` out into `sales/`); owner/admin always pass;
   scopes sorted with `foldScopePaths` so row order never matters. The company repo's check
   ignores private scopes. Test: `write-permission-hook.test.ts`.

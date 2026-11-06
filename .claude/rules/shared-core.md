@@ -27,7 +27,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 |---|---|
 | `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold: naming a place), `diskKey` (Unicode case folding, exactly what APFS does: where a spelling lands), `lookalikeKey` (diskKey over NFKC, without default-ignorables: testing protected names only), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
 | `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
-| `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
+| `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … Rule subjects by precedence on the deciding scope: `user` > `department` (the people who belong to it, 所属: `memberIds` filled by whoever reads the rules — the server's permission store, the push snapshot, the admin console's preview; absent = nobody) > `role` > `everyone` |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`); compared as `diskKey`s |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md` / `AGENTS.override.md` and `.claude/rules/*.md` (`RULES_FILE_PATTERN`): names, who may change them |
 | `skill-files.ts` | everything under `.claude/skills|agents|commands` and `.agents/skills` (`SKILL_FOLDERS`, `SKILL_FOLDER_PATTERN`): `isSkillFile`, who may change it (`mayChangeSkillFile`, `skillFileAllowed`, `SkillEditing`) |
@@ -91,7 +91,7 @@ the draft with `resolveAccess` itself, the deciding place as the one scope with 
 ## Parity tests (what can still drift is held together by tests, not review)
 
 - `client/tests/rule-parity-write-access.test.ts` — seeded generated companies
-  (`RULE_PARITY_SEEDS`, default 600): the chat guard's decision from `/me/write-access` +
+  (`RULE_PARITY_SEEDS`, default 600; everyone / role / department / user rules): the chat guard's decision from `/me/write-access` +
   `/me/scopes` + `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
   gate, and the push gate must not depend on scope order.
 - `client/tests/rule-parity-names.test.ts` — path keys, department folder names, skill names and

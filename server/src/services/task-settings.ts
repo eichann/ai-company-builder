@@ -6,10 +6,13 @@
  * - Settings: every member reads them (the app needs them to show the task
  *   list and the reply 目安); only owners and admins change them.
  * - Membership: every member sees who belongs to a department; owners, admins
- *   and that department's managers change it. Belonging changes nobody's
- *   folder access (that stays the permission rules: departments get an
- *   `everyone: read + write` rule on creation, so "can write" cannot tell who
- *   belongs).
+ *   and that department's managers change it. Belonging is also a rule
+ *   subject (shared/core/permissions.ts 'department'): a department created
+ *   since 2026-11-06 lets only the people who belong to it write, so changing
+ *   who belongs changes who writes there. The change therefore runs under the
+ *   permission editor's outdated-app guard (409 OUTDATED_CLIENTS, `force`
+ *   for owners/admins), like a rule change. In departments without such a
+ *   rule (older ones) belonging changes nobody's folder access.
  */
 import { defaultTaskSettings, parseTaskSettings, type TaskSettings } from '../../shared/core/task-settings'
 import type { DepartmentMembersView, TaskSettingsView } from '../../shared/types/task-settings'
@@ -23,16 +26,25 @@ import { ok, refuse, type Outcome } from './outcome'
 export const TASK_SETTINGS_FORBIDDEN = 'Only owners and admins can change the task settings'
 export const DEPARTMENT_MEMBERS_FORBIDDEN = 'Only owners, admins and this department\'s managers can change who belongs to it'
 export const MAX_DEPARTMENT_MEMBERS = 1000
+/** The permission editor's answer to a manager's `force` (routes/permission-rules.ts parseForce). */
+export const FORCE_NOT_ALLOWED_ERROR = 'Only owners and admins can save despite outdated apps'
 
 export interface TaskSettingsDeps {
   companyData: CompanyDataSource
   memberships: MembershipRepository
   accounts: AccountDirectory
   clock: Clock
+  /**
+   * The permission editor's outdated-app guard (services/permission-editor.ts
+   * guardWrite): runs `mutate` in a transaction and refuses with 409
+   * OUTDATED_CLIENTS when someone losing write access under `roots` is on an
+   * app that cannot recover from [WRITE_DENIED].
+   */
+  guardWrite<T>(actor: Member, force: boolean, roots: string[], mutate: () => T): Outcome<T>
 }
 
 export function createTaskSettingsService(deps: TaskSettingsDeps) {
-  const { companyData, memberships, accounts, clock } = deps
+  const { companyData, memberships, accounts, clock, guardWrite } = deps
   const handle = (companyId: string) => companyData.forCompany(companyId)
 
   /**
@@ -130,8 +142,12 @@ export function createTaskSettingsService(deps: TaskSettingsDeps) {
     },
 
     /**
-     * PUT …/departments/:id/members `{ userIds }` (owner/admin, or a manager
-     * of this department): replaces who belongs. Every one must be a member.
+     * PUT …/departments/:id/members `{ userIds, force? }` (owner/admin, or a
+     * manager of this department): replaces who belongs. Every one must be a
+     * member. Who belongs may decide who writes (department rules), so the
+     * change runs under the outdated-app guard over the whole company (a
+     * department rule may sit on any folder); `force: true` is for
+     * owners/admins only (403 FORCE_NOT_ALLOWED otherwise).
      * Check order: who → department → body → rules.
      */
     setDepartmentMembers(member: Member, departmentId: string, body: unknown): Outcome<DepartmentMembersView> {
@@ -145,7 +161,12 @@ export function createTaskSettingsService(deps: TaskSettingsDeps) {
       if (unique.length > MAX_DEPARTMENT_MEMBERS) return refuse('bad-request', `A department can have at most ${MAX_DEPARTMENT_MEMBERS} members`)
       const current = new Set(memberships.listByCompany(member.companyId).map(m => m.user_id))
       if (unique.some(id => !current.has(id))) return refuse('bad-request', 'Every user must be a member of this company')
-      handle(member.companyId).tasks.replaceDepartmentMembers(departmentId, unique, member.userId, clock.now())
+      const force = (body as { force?: unknown }).force === true
+      if (force && !hasFullAccess(member.role)) return refuse('forbidden', FORCE_NOT_ALLOWED_ERROR, { code: 'FORCE_NOT_ALLOWED' })
+      const done = guardWrite(member, force, [''], () => {
+        handle(member.companyId).tasks.replaceDepartmentMembers(departmentId, unique, member.userId, clock.now())
+      })
+      if (!done.ok) return done
       return ok(membersView(member, departmentId))
     },
   }

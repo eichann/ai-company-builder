@@ -4,7 +4,8 @@
  * A *scope* is a node a rule can attach to: the whole company (path ''), a
  * department folder, or any other folder inside the company repository. A
  * *rule* on a scope grants read and/or write to a subject: everyone in the
- * company, a role (owner / admin / member), or one user.
+ * company, a role (owner / admin / member), the people who belong to one
+ * department (所属, department_members), or one user.
  *
  *   scopes        (company_id, path)  kind company | department | folder
  *   scope_rules   (scope_id, subject_type, subject_id, can_read, can_write)
@@ -18,10 +19,21 @@
  *      `everyone: read + write` on the company scope, which reproduces the
  *      original fully-open behaviour.)
  *   3. Evaluate only that scope's rules, by precedence:
- *        user rules for this user  >  role rules for the user's role  >  everyone
+ *        user rules for this user  >  department rules of a department the
+ *        user belongs to  >  role rules for the user's role  >  everyone
  *      The most specific subject type that has at least one matching rule
  *      decides; several matching rules of that type are unioned. So a user rule
- *      can narrow (or widen) what `everyone` gets on the same scope.
+ *      can narrow (or widen) what `everyone` gets on the same scope, and a
+ *      department rule gives the people who belong to it more (or less) than
+ *      everyone else.
+ *
+ * A department rule names the department (subjectId = department id); who
+ * belongs is not stored on the rule but resolved when the rules are read
+ * (`memberIds`, filled by the permission store from department_members). So
+ * the rule always means "whoever belongs now": changing who belongs changes
+ * who it grants, and nothing can drift. A department rule without `memberIds`
+ * matches nobody. A new department (POST /departments) starts with
+ * `everyone: read` + `department: read + write` (server/src/services/departments.ts).
  *   4. If nothing there grants anything, deny (reason 'no-rule').
  *
  * Being a department manager (department_managers) grants NO file access in
@@ -38,15 +50,20 @@ import { compareScopePaths, isSameOrAncestorPath, normalizeRepoPath } from './pa
 import type { WriteAccessScope } from './write-access'
 
 export type ScopeKind = 'company' | 'department' | 'folder'
-export type SubjectType = 'everyone' | 'role' | 'user'
+export type SubjectType = 'everyone' | 'role' | 'department' | 'user'
 
 export interface ScopeRule {
   id: string
   subjectType: SubjectType
-  /** Role name for 'role', user id for 'user', null for 'everyone'. */
+  /** Role name for 'role', department id for 'department', user id for 'user', null for 'everyone'. */
   subjectId: string | null
   canRead: boolean
   canWrite: boolean
+  /**
+   * 'department' only: the user ids that belong to the department (所属),
+   * resolved from department_members when the rules are read. Absent = nobody.
+   */
+  memberIds?: readonly string[]
 }
 
 export interface ScopeWithRules {
@@ -113,6 +130,8 @@ export function findGoverningScope<T extends { path: string; rules: unknown[] }>
 export function applicableRules(rules: ScopeRule[], userId: string, role: string): ScopeRule[] {
   const userRules = rules.filter(r => r.subjectType === 'user' && r.subjectId === userId)
   if (userRules.length > 0) return userRules
+  const departmentRules = rules.filter(r => r.subjectType === 'department' && (r.memberIds ?? []).includes(userId))
+  if (departmentRules.length > 0) return departmentRules
   const roleRules = rules.filter(r => r.subjectType === 'role' && r.subjectId === role)
   if (roleRules.length > 0) return roleRules
   return rules.filter(r => r.subjectType === 'everyone')

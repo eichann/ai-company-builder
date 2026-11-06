@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { Eye, Info, LockSimple, User, UserCircle, X } from '@phosphor-icons/react'
+import { Eye, Info, LockSimple, User, UserCircle, UsersThree, X } from '@phosphor-icons/react'
 
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EditorPicker } from '@/components/permissions/editor-picker'
@@ -32,6 +32,7 @@ import {
   sameDraft,
   subjectName,
   type AccessDraft,
+  type DepartmentLookup,
   type EditMode,
   type Editor,
 } from '@/lib/edit-access'
@@ -78,10 +79,10 @@ function departmentOf(path: string, departments: Department[]): Department | und
   return departments.find((d) => path !== '' && isSameOrAncestorPath(d.folder.normalize('NFC'), path))
 }
 
-function draftLabel(draft: AccessDraft, members: Member[]): string {
+function draftLabel(draft: AccessDraft, members: Member[], departments: DepartmentLookup): string {
   if (draft.mode === 'inherit') return '上の階層と同じ'
   if (draft.mode === 'everyone') return '全員'
-  return describeRules(rulesFromDraft(draft).map((r, i) => ({ ...r, id: String(i), subjectLabel: '', canRead: true })), members)
+  return describeRules(rulesFromDraft(draft).map((r, i) => ({ ...r, id: String(i), subjectLabel: '', canRead: true })), members, departments)
 }
 
 /**
@@ -121,11 +122,27 @@ export function ScopeEditor({
     departmentsApi.getManagers(companyId, department!.id)
   )
   const managerIds = (managers.data?.managers ?? []).map((m) => m.userId)
+  // Who belongs to the department here (所属): offered as 「〇〇に所属する人」 and used by the preview.
+  const belonging = useQuery(department ? `department-members:${companyId}:${department.id}` : null, () =>
+    departmentsApi.getMembers(companyId, department!.id)
+  )
 
   const isRoot = node.path === ''
   const ownRules = useMemo(() => (node.scope && !node.scope.inherited ? node.scope.rules : []), [node.scope])
   const inherited = useMemo(() => inheritedFor(node.path, node.scope, scopes), [node.path, node.scope, scopes])
   const saved = useMemo(() => draftFromRules(ownRules), [ownRules])
+  const departmentId = department?.id
+  const belongingNow = belonging.data
+  const departmentLookup = useMemo((): DepartmentLookup => {
+    const fromRules = new Map<string, string[]>()
+    for (const s of scopes) {
+      for (const r of s.rules) if (r.subjectType === 'department' && r.subjectId && r.memberIds) fromRules.set(r.subjectId, r.memberIds)
+    }
+    return {
+      name: (id) => departments.find((d) => d.id === id)?.name,
+      memberIds: (id) => (id === departmentId && belongingNow ? belongingNow.members.map((m) => m.userId) : fromRules.get(id)),
+    }
+  }, [scopes, departments, departmentId, belongingNow])
 
   const [draft, setDraft] = useState<AccessDraft>(() => {
     if (saved.draft.mode === 'specific') return saved.draft
@@ -143,12 +160,12 @@ export function ScopeEditor({
   // Who can edit as saved, and under the draft — computed the same way.
   const access = (d: AccessDraft) =>
     d.mode === 'inherit'
-      ? previewAccess(members, inherited?.rules ?? [], inherited?.path ?? '')
-      : previewAccess(members, rulesFromDraft(d), node.path)
+      ? previewAccess(members, inherited?.rules ?? [], inherited?.path ?? '', departmentLookup)
+      : previewAccess(members, rulesFromDraft(d), node.path, departmentLookup)
   const draftPreview = dirty ? access(draft) : null
 
   const overriddenBelow = scopes.filter((s) => s.path !== node.path && isSameOrAncestorPath(node.path, s.path) && !s.inherited).length
-  const inheritedText = inherited ? describeRules(inherited.rules, members) : '全員'
+  const inheritedText = inherited ? describeRules(inherited.rules, members, departmentLookup) : '全員'
   const inheritedFromName = inherited ? nameOf(inherited.path) : ''
 
   const update = (next: AccessDraft) => {
@@ -195,11 +212,11 @@ export function ScopeEditor({
   }
 
   const save = () => {
-    const before = ownRules.length > 0 || isRoot ? previewAccess(members, ownRules, node.path) : access({ mode: 'inherit', editors: [] })
+    const before = ownRules.length > 0 || isRoot ? previewAccess(members, ownRules, node.path, departmentLookup) : access({ mode: 'inherit', editors: [] })
     const after = access(draft)
     const lost = losingEdit(before, after)
     const previous = rulesAsInputs(ownRules)
-    const label = draftLabel(draft, members)
+    const label = draftLabel(draft, members, departmentLookup)
     const rules = rulesFromDraft(draft)
     const run = async (force = false) => {
       setBusy(true)
@@ -244,7 +261,7 @@ export function ScopeEditor({
     })
   }
 
-  const chosenLabel = (e: Editor) => (e.subjectType === 'role' ? '役割: メンバー' : subjectName(e, members))
+  const chosenLabel = (e: Editor) => (e.subjectType === 'role' ? '役割: メンバー' : subjectName(e, members, departmentLookup))
 
   return (
     <Card className="gap-0 py-0">
@@ -274,7 +291,7 @@ export function ScopeEditor({
             <p className="flex gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs">
               <Info size={16} className="mt-px shrink-0 text-warning" />
               <span>
-                ここには以前の画面で作った細かい設定（{ownRules.map((r) => `${subjectName(r, members)}: ${r.canWrite ? '編集できる' : '閲覧のみ'}`).join('、')}）があります。下の選択で保存すると置き換わります。
+                ここには以前の画面で作った細かい設定（{ownRules.map((r) => `${subjectName(r, members, departmentLookup)}: ${r.canWrite ? '編集できる' : '閲覧のみ'}`).join('、')}）があります。下の選択で保存すると置き換わります。
               </span>
             </p>
           )}
@@ -317,7 +334,7 @@ export function ScopeEditor({
                 <ul className="flex flex-wrap items-center gap-1.5" aria-label="編集できる人">
                   {draft.editors.map((e) => {
                     const label = chosenLabel(e)
-                    const Icon = e.subjectType === 'role' ? UserCircle : User
+                    const Icon = e.subjectType === 'role' ? UserCircle : e.subjectType === 'department' ? UsersThree : User
                     return (
                       <li
                         key={editorKey(e)}
@@ -344,6 +361,11 @@ export function ScopeEditor({
                       members={members}
                       chosen={draft.editors}
                       managerIds={managerIds}
+                      department={
+                        department && !privateRoot
+                          ? { id: department.id, name: department.name, memberCount: belonging.data?.members.length ?? null }
+                          : undefined
+                      }
                       disabled={!editable || busy}
                       onToggle={toggleEditor}
                     />
@@ -395,7 +417,7 @@ export function ScopeEditor({
           aria-label="未保存の変更"
         >
           <span className="text-sm">
-            未保存の変更：<span className="font-medium">{draftLabel(draft, members)}</span>
+            未保存の変更：<span className="font-medium">{draftLabel(draft, members, departmentLookup)}</span>
           </span>
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={discard} disabled={busy}>

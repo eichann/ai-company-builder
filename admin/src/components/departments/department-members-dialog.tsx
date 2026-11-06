@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Check, Trash } from '@phosphor-icons/react'
 
 import { ErrorState, ListSkeleton } from '@/components/app/states'
+import { OutdatedClientsDialog, useOutdatedClients } from '@/components/permissions/outdated-clients-dialog'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,10 @@ import { roleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/task-settings'
 import { useQuery } from '@/lib/use-query'
 import { cn } from '@/lib/utils'
+
+/** 409 OUTDATED_CLIENTS when someone taken out of a department would lose edit access there. */
+const MEMBERS_OUTDATED_MESSAGE =
+  '次のメンバーは古いアプリを使っています。所属から外すと、その部署のフォルダに変更を送れなくなり、同期が止まってしまいます。先にアプリを更新してもらってください。'
 
 /** Multi-select of company members who belong to one department (所属する部署). */
 export function DepartmentMembersDialog({
@@ -92,14 +97,20 @@ function MembersForm({
       return next
     })
 
-  const save = async () => {
+  // 409 OUTDATED_CLIENTS: in a department where only the people who belong edit,
+  // someone taken off would lose edit access on an app that cannot recover from it.
+  const { catchOutdated, dialogProps: outdatedDialog } = useOutdatedClients()
+
+  const save = async (force = false) => {
     setBusy(true)
     try {
-      const view = await departmentsApi.setMembers(companyId, department.id, [...selected])
+      const view = await departmentsApi.setMembers(companyId, department.id, [...selected], { force })
       toast.success(`「${department.name}」に所属する人を更新しました`)
       onSaved(view)
     } catch (err) {
+      if (!force && catchOutdated(err, () => save(true))) return
       toast.error('所属する人を更新できませんでした', { description: describeError(err) })
+      if (force) throw err
     } finally {
       setBusy(false)
     }
@@ -110,7 +121,7 @@ function MembersForm({
       <DialogHeader className="p-6 pb-4">
         <DialogTitle>「{department.name}」に所属する人</DialogTitle>
         <DialogDescription>
-          所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。フォルダを見られる人・編集できる人は変わりません。1人が複数の部署に所属できます。
+所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。新しく作った部署では、所属する人だけがその部署のフォルダを編集できます（オーナーと管理者はいつでも編集できます。見るのは全員できます）。1人が複数の部署に所属できます。
         </DialogDescription>
       </DialogHeader>
       <Command className="border-y" loop>
@@ -159,11 +170,12 @@ function MembersForm({
           <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
             キャンセル
           </Button>
-          <Button type="button" onClick={save} disabled={busy}>
+          <Button type="button" onClick={() => void save().catch(() => {})} disabled={busy}>
             {busy ? '保存しています…' : '保存'}
           </Button>
         </div>
       </DialogFooter>
+      <OutdatedClientsDialog {...outdatedDialog} description={MEMBERS_OUTDATED_MESSAGE} />
     </>
   )
 }

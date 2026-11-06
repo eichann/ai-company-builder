@@ -190,6 +190,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const repoStore = localRepoStore()
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
+  const permissionEditor = createPermissionEditorService({
+    ...repos,
+    ...shared,
+    repoStore,
+    managedFolders: permissionViews.managedFolders,
+  })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
   // Staging only: HubSpot's connections may go to the fake HubSpot (never in production: lib/config.ts).
   const practice = options.practiceUpstreams ?? PRACTICE_UPSTREAMS
@@ -235,7 +241,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
   // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
-  const taskSettings = createTaskSettingsService({ ...repos, ...shared })
+  // Who belongs to a department may decide who writes there (department rules): membership changes take the rule editor's outdated-app guard.
+  const taskSettings = createTaskSettingsService({ ...repos, ...shared, guardWrite: permissionEditor.guardWrite })
   // Each member's own 受信を読む / AI が自動で進める within the company's (自分の設定, tasks.md).
   const readingConnected = (companyId: string, userId: string) => {
     const connectors = shared.companyData.forCompany(companyId).connectors
@@ -758,12 +765,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
           .map(p => ({ id: p.id, label: p.versions.at(-1)?.label ?? p.id, problem: p.install!.problem as string }))
       },
     }),
-    permissionEditor: createPermissionEditorService({
-      ...repos,
-      ...shared,
-      repoStore,
-      managedFolders: permissionViews.managedFolders,
-    }),
+    permissionEditor,
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
     agentEvents,
     agentSandbox,

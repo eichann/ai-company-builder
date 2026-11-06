@@ -14,7 +14,7 @@ import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
 import { migrateNotificationsForUser, notificationSchema } from './schema/notifications'
 import { outboundMailSchema } from './schema/outbound-mail'
-import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
+import { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
@@ -37,7 +37,7 @@ import { pluginRoleSchema } from './schema/plugin-roles'
 // lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateInvitationClaims } from './schema/company'
-export { migrateRuleAndManagerCompanies } from './schema/permissions'
+export { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies } from './schema/permissions'
 export { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables } from './schema/plugins'
 export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
@@ -143,6 +143,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateMemberAbsenceHistory(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
+  // After it: the rebuild keeps company_id and recreates its triggers.
+  migrateDepartmentRuleSubject(conn)
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Google features the admin turned off for the company (google-connector.md).

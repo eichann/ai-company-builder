@@ -29,7 +29,9 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 
 - Server: `GET /api/companies/:companyId/me/write-access` → `{ version, role, all, scopes: [{
   path, write, private? }] }` (`writeAccessSummary`, `shared/core/permissions.ts`; ETag =
-  version, `If-None-Match` → 304). `all: true` for owner/admin or when nothing restricts the
+  version, `If-None-Match` → 304). The server resolves every rule subject (department rules
+  included) into `write` per scope, so the app never evaluates a subject itself: released apps
+  follow new subjects and membership changes on their next fetch. `all: true` for owner/admin or when nothing restricts the
   member; `private: true` marks a readable private folder; unreadable ones are omitted.
 - Client: `evaluateWrite` (`shared/core/write-access.ts`, the same code the server uses) decides
   exactly like `resolveAccess` + the push gate: NFC, the deepest listed scope decides, and the
