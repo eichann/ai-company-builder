@@ -149,6 +149,9 @@ describe('what comes back', () => {
     const active = await services.plugins.active(CO, 'sample-portal-care')
     expect(active.ok, JSON.stringify(active)).toBe(true)
     expect(active.plugin.mappingVersion).toBe(0)
+    // The admin page shows no mapping or import for it (`connector.records`); the connector's label names the service.
+    const listed = (await services.plugins.list(owner)).value.plugins as Json[]
+    expect(listed.find(p => p.id === 'sample-portal-care').versions[0].connector).toMatchObject({ id: 'sample-portal', records: false })
   })
 
   it('every request names ACB as its client, and only ACB', async () => {

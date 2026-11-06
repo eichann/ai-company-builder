@@ -490,7 +490,7 @@ describe('two roles: a connector is a shared part, a business plugin uses it (ow
     const listed = (await services.plugins.list(third)).value.plugins as Json[]
     expect(listed.find(p => p.id === 'crm-hub').versions[0]).toMatchObject({ role: 'connector', types: [], connector: null })
     expect(listed.find(p => p.id === 'crm-sales').versions[0]).toMatchObject({
-      role: 'business', types: ['deal', 'customer'], service: '', connector: { id: 'crm-hub', minVersion: '0.1.0', label: '見本の CRM' },
+      role: 'business', types: ['deal', 'customer'], service: '', connector: { id: 'crm-hub', minVersion: '0.1.0', label: '見本の CRM', records: true },
     })
   })
 
