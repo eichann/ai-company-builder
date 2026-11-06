@@ -14,6 +14,8 @@ import { membersList } from './members'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
+import { BUNDLE_PLACED_TYPES, linkedBundle } from './bundle-place'
+import { pathKey } from '../../../shared/core/paths'
 
 /** The ledger action of sharing an owner-only or members-only record to a folder. */
 export const SHARE_ACTION = 'share'
@@ -51,7 +53,8 @@ export function sharing(ctx: EngineContext) {
     /**
      * 「部署に出す／案件につなぐ」 (records.md "Owner-only records", "Members-only records"): an
      * owner-only or members-only record becomes visible to the readers of `folder` (a department
-     * folder the member reads, never a private one). Only its owner / a listed member — nobody
+     * folder the member reads, never a private one — except the folder of the まとまり it links to; or,
+     * with `toBundle`, that まとまり's place). Only its owner / a listed member — nobody
      * else can even find it — and only the person, with their session (the route has no AI
      * twin). A ledger entry `share` with `place.personal_owner` (or `place.members`) /
      * `place.folder` before / after; never undone.
@@ -68,9 +71,22 @@ export function sharing(ctx: EngineContext) {
       const parsed = bodyOf(body)
       if (!('b' in parsed)) return parsed
       const { b, expected, note } = parsed
-      if (b.folder === undefined || b.folder === null) return bad('folder: the department folder whose readers will see it', 'FOLDER_REQUIRED')
-      const folder = placeFolder(member, row.type, b.folder, reader)
-      if (typeof folder !== 'string') return folder
+      // ［プロジェクトの人に見せる］ (records.md "A task and its 案件・プロジェクト"): the まとまり the task
+      // links to gives the place — its folder, a private one included (the member reads the まとまり, so
+      // its folder), or the whole company. `toBundle: true` names it without a path.
+      const bundle = BUNDLE_PLACED_TYPES.includes(row.type) ? linkedBundle(records, def, records.linksFrom([row.id]), r => reader.record(r)) : null
+      let folder: string | null
+      if (b.toBundle === true) {
+        if (!bundle) return bad('つながっている案件・プロジェクトがありません', 'NO_BUNDLE')
+        if (bundle.personalOwner !== null || bundle.members !== null) return conflict('つなぐ先は見る人を選んだものなので、ここからは見せられません', 'BUNDLE_NOT_PLACED')
+        folder = bundle.folder
+      } else {
+        if (b.folder === undefined || b.folder === null) return bad('folder: the department folder whose readers will see it', 'FOLDER_REQUIRED')
+        const bundleFolder = bundle && bundle.personalOwner === null && bundle.members === null ? bundle.folder : null
+        const placed = placeFolder(member, row.type, b.folder, reader, f => bundleFolder !== null && pathKey(f) === pathKey(bundleFolder))
+        if (typeof placed !== 'string') return placed
+        folder = placed
+      }
       const current = stateOf(records, row, def)
       // A members-only record's assignee / reviewer may be someone other than the member sharing it:
       // they must still read it in its new place (as on create; the place is never named).

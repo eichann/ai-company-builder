@@ -35,6 +35,10 @@ const conflict = params.get('conflict') === '1'
 const reviewing = params.get('task') === 'review'
 // `?bundle=none`: no 案件 yet, in a department that makes 案件 (［案件につなぐ］［新しい案件にする］).
 const noBundle = params.get('bundle') === 'none'
+// A task wider than the 案件 it is linked to (records.md "A task and its 案件・プロジェクト"): refused until narrowed.
+const wider = params.get('wider') === '1'
+// 「新しい〇〇にする」 with the member's own department (開発部) first.
+const withPlaces = params.get('places') === '1'
 // 返事待ち (task version 12): waiting, given back by the clock, or a plain task to make wait.
 const waitMode = ['waiting', 'back', 'todo-team', 'todo-own'].includes(params.get('task') ?? '') ? params.get('task') : null
 const plainTodo = waitMode === 'todo-team' || waitMode === 'todo-own'
@@ -116,7 +120,11 @@ installElectronAPI({
     own: { id, title: id === 'task-0000bb' ? '会場を押さえる' : 'A社 見積書を 150万円 で作り直す', thing: 'task' as const, typeLabel: null, kindName: 'やること' }, bundle: null,
   }])) }),
   createBundle: async (_c, input) => { show('acted', `create ${input.type} ${input.title} folder=${input.folder ?? ''}`); return { success: true, recordId: 'deal-0009zz' } },
-  linkRecordToRecord: async (_c, recordId, input) => { show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
+  linkRecordToRecord: async (_c, recordId, input) => {
+    show('acted', `link ${recordId} ${input.link}=${input.target}@${input.expectedVersion}${input.narrow ? ' narrow' : ''}`)
+    if (wider && !input.narrow) return { success: false, offline: false, code: 'WIDER_THAN_BUNDLE', error: 'このやることは、つなぐ先より多くの人に見えています。' }
+    return { success: true, recordId, entryVersion: input.expectedVersion + 1 }
+  },
   unlinkRecordFromRecord: async (_c, recordId, input) => { show('acted', `unlink ${recordId} ${input.link}=${input.target}@${input.expectedVersion}`); return { success: true, recordId, entryVersion: input.expectedVersion + 1 } },
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-0001ab', title: 'A社 問い合わせ対応の効率化', typeLabel: '案件' }, { id: 'deal-0002cd', title: 'B社 新人研修', typeLabel: '案件' }] }),
   getTaskProposals: async () => ({ success: true, proposals: [
@@ -137,6 +145,7 @@ installElectronAPI({
   exists: async (path: string) => path.endsWith('打ち合わせメモ.md'),
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => { show('acted', `share ${folder}@${version}`); return { success: true, recordId } },
+  shareTaskToBundle: async (_c, recordId, version) => { show('acted', `share to bundle@${version}`); return { success: true, recordId } },
   suggestTaskTags: async (_c, title, inUse) => ({ source: 'ai', tags: title.includes('見積') ? inUse.filter(t => t === '経理') : [] }),
   reconcileTaskRun: async (_c, runId, key, isDone) => { show('acted', `reconcile ${runId} ${key} ${isDone}`); return { success: true, recordId: '' } },
 })
@@ -159,6 +168,10 @@ function Preview() {
         onConsult={(r, fresh) => show('acted', `consult ${r.id}${fresh ? ' fresh' : ''}`)}
         onNudge={r => show('acted', `nudge ${r.id}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
+        {...(withPlaces ? { bundlePlaces: { defaultFolder: '開発部', choices: [
+          { folder: '営業部', name: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' as const } },
+          { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const } },
+        ] } } : {})}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />
     </main>

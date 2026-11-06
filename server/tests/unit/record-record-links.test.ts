@@ -186,9 +186,11 @@ describe('nothing about an unseen record leaks', () => {
   it('removing a target the caller cannot see answers like one not linked', () => {
     const closed = effort('経理の', m('u-alice'), '経理')
     const t = task({ related: [] })
-    ok(link(m('u-alice'), t.id, { link: 'bundle', target: closed.id, expectedVersion: 1 }))
-    const unseen = unlink(m('u-mallory'), t.id, { link: 'bundle', target: closed.id, expectedVersion: 2 })
-    const notLinked = unlink(m('u-mallory'), t.id, { link: 'bundle', target: 'effort-0000000000000000', expectedVersion: 2 })
+    // A link made before a task followed its まとまり's place (a company-wide task, a 経理 まとまり):
+    // linking it now is refused as wider (records.md "A task and its 案件・プロジェクト").
+    source.forCompany('a').records.replaceLinks(t.id, [{ sourceId: t.id, name: 'bundle', position: 0, targetId: closed.id, targetPath: null }])
+    const unseen = unlink(m('u-mallory'), t.id, { link: 'bundle', target: closed.id, expectedVersion: 1 })
+    const notLinked = unlink(m('u-mallory'), t.id, { link: 'bundle', target: 'effort-0000000000000000', expectedVersion: 1 })
     expect(unseen).toEqual(notLinked)
     expect(unseen).toMatchObject({ ok: false, kind: 'not-found', body: { code: 'LINK_NOT_FOUND' } })
     expect(linkedIds(t.id, 'bundle')).toEqual([closed.id])

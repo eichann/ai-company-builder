@@ -52,7 +52,9 @@ or who can see it. So:
 - Company-files views treat an unreadable private folder exactly as a nonexistent path
   (`company-files.md`). So does placing a server record (`folder` on create / share): inside a
   private folder, unreadable or missing → one 400 `FOLDER_NOT_PLACEABLE` (audit B-M1, `records.md`
-  "Where a record may be placed").
+  "Where a record may be placed"). The one exception: a task shown to (or made for) the 案件・プロジェクト
+  it links to takes that 案件's private folder, for a reader of the 案件 only (`records.md` "A task and
+  its 案件・プロジェクト"); the refusal for anything else stays the same one answer.
 - 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
   (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
   path inside an unreadable folder is answered as if the folder did not exist.

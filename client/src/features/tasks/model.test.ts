@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
+import { bundleListWord, bundlePlacesOf, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -172,4 +172,21 @@ test('延ばす offers more days, each different, past ones left out, holidays a
     const dues = list.map(c => (c.due.slice(0, 10) === NOW.date ? c.due : c.due.slice(0, 10)))
     assert.equal(new Set(dues).size, dues.length)
   }
+})
+
+test('a new 案件・プロジェクト belongs to the creator’s department: on screen when theirs, else their first; none → on screen', () => {
+  const departments = [{ id: 's', name: '営業部', folder: '営業部' }, { id: 'd', name: '開発部', folder: '開発部' }]
+  const kinds = {
+    core: { type: 'project', name: 'プロジェクト' },
+    departments: [{ id: 's', folder: '営業部', kind: { type: 'deal', name: '案件' } }],
+    kinds: [],
+  } as unknown as Parameters<typeof bundlePlacesOf>[1]
+  const fromOther = bundlePlacesOf(departments, kinds, ['d'], '営業部')
+  assert.equal(fromOther.defaultFolder, '開発部')
+  assert.deepEqual(fromOther.choices.map(c => [c.name, c.kind?.name]), [['営業部', '案件'], ['開発部', 'プロジェクト']])
+  assert.equal(bundlePlacesOf(departments, kinds, ['s', 'd'], '開発部').defaultFolder, '開発部')
+  // Belonging nowhere on 全社: the whole company, offered as a choice.
+  const owner = bundlePlacesOf(departments, kinds, [], '')
+  assert.equal(owner.defaultFolder, null)
+  assert.deepEqual(owner.choices.at(-1), { folder: null, name: '全社', kind: { type: 'project', name: 'プロジェクト' } })
 })

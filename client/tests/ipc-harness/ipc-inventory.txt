@@ -205,6 +205,7 @@ contract.invoke tasks:proposals
 contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
 contract.invoke tasks:share
+contract.invoke tasks:shareToBundle
 contract.invoke tasks:suggestTags
 contract.invoke tasks:undo
 contract.invoke tasks:unlinkFile
@@ -513,6 +514,7 @@ contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFe
 contract.type ElectronAPI.setWorkSwitch = setWorkSwitch: Invoke<'workSwitches:set'>
 contract.type ElectronAPI.settleAiTurn = settleAiTurn: Invoke<'aiTurns:settle'>
 contract.type ElectronAPI.shareTask = shareTask: Invoke<'tasks:share'>
+contract.type ElectronAPI.shareTaskToBundle = shareTaskToBundle: Invoke<'tasks:shareToBundle'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
 contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
@@ -852,6 +854,7 @@ contract.type IpcInvokeChannels.'tasks:proposals' = 'tasks:proposals': { args: [
 contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:shareToBundle' = 'tasks:shareToBundle': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
 contract.type IpcInvokeChannels.'tasks:undo' = 'tasks:undo': { args: [companyId: string, recordId: string, version: number, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
@@ -1131,6 +1134,7 @@ main.handle tasks:proposals @ features/tasks/ipc.ts (companyId, meetingId)
 main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
 main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
+main.handle tasks:shareToBundle @ features/tasks/ipc.ts (companyId, recordId, expectedVersion)
 main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
 main.handle tasks:undo @ features/tasks/ipc.ts (companyId, recordId, version, expectedVersion)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
@@ -1560,6 +1564,8 @@ preload settleAiTurn -> invoke aiTurns:settle($0, $1)
 preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
 preload shareTask -> invoke tasks:share($0, $1, $2, $3)
 preload shareTask : (companyId: string, recordId: string, folder: string, expectedVersion: number) => Promise<TaskWriteResult>
+preload shareTaskToBundle -> invoke tasks:shareToBundle($0, $1, $2)
+preload shareTaskToBundle : (companyId: string, recordId: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload signIn -> invoke auth:signIn($0, $1)
 preload signIn : (email: string, password: string) => Promise<AuthResult>
 preload signOut -> invoke auth:signOut()

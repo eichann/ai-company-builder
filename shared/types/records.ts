@@ -384,7 +384,17 @@ export interface FileLinkRequest {
  * anyone but the owner cannot find the record (404 RECORD_NOT_FOUND).
  */
 export interface ShareRecordRequest {
-  folder: string
+  /**
+   * The folder whose readers will see it. A private folder only when it is the folder of the
+   * 案件・プロジェクト the task links to (records.md "A task and its 案件・プロジェクト").
+   */
+  folder?: string
+  /**
+   * ［プロジェクトの人に見せる］: the place of the 案件・プロジェクト the task links to (its folder, or the
+   * whole company) instead of `folder`. None linked → 400 NO_BUNDLE; one shown to a list or its
+   * owner only → 409 BUNDLE_NOT_PLACED.
+   */
+  toBundle?: true
   expectedVersion: number
   note?: string
   proposedBy?: 'ai'
@@ -413,6 +423,13 @@ export interface RecordLinkRequest {
   link: string
   target: string
   expectedVersion: number
+  /**
+   * A task linked to a 案件・プロジェクト is never seen by more people than it (records.md "A task and
+   * its 案件・プロジェクト"): a wider task is refused (400 WIDER_THAN_BUNDLE) unless the person asks
+   * to narrow it to the 案件's place with `narrow: true` — in the same entry (`place.*` changes: never
+   * undone). Someone the task names who could not read it then → 400 NAMED_PERSON_CANNOT_READ.
+   */
+  narrow?: true
   note?: string
   proposedBy?: 'ai'
   conversationId?: string

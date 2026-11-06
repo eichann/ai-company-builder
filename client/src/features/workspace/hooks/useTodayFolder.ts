@@ -10,6 +10,8 @@ export interface TodayFolder extends TodayFolderChoice<DepartmentConfig> {
   chosenId: string | null
   /** What おまかせ uses (the first 所属 department downloaded here). */
   defaultDepartment: DepartmentConfig | null
+  /** The departments the member belongs to (所属); null = not known (offline, an older server). */
+  myDepartmentIds: readonly string[] | null
   choose: (departmentId: string | null) => void
   /** Today's folder (company path) at this moment; null = no department downloaded. */
   folderNow: () => string | null
@@ -53,5 +55,5 @@ export function useTodayFolder(
     return abs ? { folder, department } : { error: '今日のフォルダを作れませんでした。もう一度試してください。' }
   }, [department, rootPath])
   const defaultDepartment = choice.chosen ? todayFolderDepartment({ departments, chosenId: null, myDepartmentIds, isDownloaded }).department : department
-  return { ...choice, defaultDepartment, choices: departments.filter(d => d.folder && isDownloaded(d.folder)), chosenId, choose, folderNow, ensure }
+  return { ...choice, defaultDepartment, myDepartmentIds, choices: departments.filter(d => d.folder && isDownloaded(d.folder)), chosenId, choose, folderNow, ensure }
 }

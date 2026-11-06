@@ -16,7 +16,7 @@ import { consultationLinks, type LinkedConsultation } from '../../../shared/ui/c
 import { LinkedColumn, type LinkedRow } from '../../../shared/ui/LinkedColumn'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
-import { actOnTask, createBundle, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
+import { actOnTask, createBundle, linkFileToTask, reconcileTaskRun, retryTaskRun, setRecordLink, shareTaskToBundle, shareTaskToFolder, undoTaskAction, unlinkFileFromTask } from '../api'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useTaskCard, type CardLook } from '../hooks/useTaskCard'
@@ -27,6 +27,10 @@ import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { MinutesReview } from './MinutesReview'
 import { TaskActions } from './TaskActions'
 import { BundleField } from './BundleField'
+import { ShowToBundle } from './ShowToBundle'
+import type { NewBundlePlaces } from './NewBundleDialog'
+import type { BundlePlace } from '../model'
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 import { ConflictNotice, DoneNotice, DueAndTags, OriginLine } from './TaskHead'
 import { TaskFiles } from './TaskFiles'
 import { TagField } from './TagField'
@@ -63,8 +67,10 @@ interface Props {
   onChanged?: () => void
   /** What the department on screen makes as its 案件・プロジェクト (`tasks:bundleKinds`): its name for ［〇〇につなぐ］ and the kind ［新しい〇〇にする］ makes; null until known. */
   bundleKind?: BundleKind | null
-  /** The department's folder a new one is put in (全社: none). */
+  /** The department's folder a new one is put in (全社: none) when `bundlePlaces` is not given. */
   bundleFolder?: string | null
+  /** 「新しい〇〇にする」's departments and default (the member's own department, records.md "A task and its 案件・プロジェクト"). */
+  bundlePlaces?: NewBundlePlaces
   /** Read: its title and kind, for its tab in the middle. */
   onLoaded?: (look: CardLook) => void
   /**
@@ -87,10 +93,12 @@ type Notice =
  * behind 「…」; what the AI prepared, the source, 経緯 and 「つながっているもの」. What is offered
  * comes from the type; the server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPrepared, renderSource, renderSections, shareFolders = [], onConsult, onNudge, consultations = [], tagsInUse = [], team, onChanged, bundleKind = null, bundleFolder = null, bundlePlaces, onLoaded, createTodayFile, onDetachConsultation, notDownloadedFolderOf }: Props) {
   const { result, reload, personalHere } = useTaskCard(companyId, recordId, onLoaded, rootPath, knownVersion)
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  // 「〇〇と同じ人たちだけに見えるようにしますか？」: a task wider than the 案件 it is being linked to.
+  const [narrowing, setNarrowing] = useState<{ word: string; answer: (yes: boolean) => void } | null>(null)
   // A file, folder, record or consultation dropped on 「つながっているもの」 is linked (owner decision 2026-11-03).
   const linkDrop = useLinkDrop({ companyId, rootPath, targetWord: 'やること', onChanged: () => { reload(); onChanged?.() } })
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />{CALM.loading}</div>
@@ -135,6 +143,25 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
     setNotice({ kind: 'done', text: done, undo: r.entryVersion ? { recordId: source, version: r.entryVersion } : null })
     return null
   })
+  // Linking to a 案件・プロジェクト: a task seen by more people than it is narrowed only on the
+  // member's yes (records.md "A task and its 案件・プロジェクト"); a no leaves it unlinked.
+  const linkBundle = (b: { id: string; title: string; typeLabel?: string }) => change(async () => {
+    const input = { link: 'bundle', target: b.id, expectedVersion: version }
+    const r = await setRecordLink(companyId, recordId, input, false)
+    if (r.success) {
+      setNotice({ kind: 'done', text: `「${b.title}」につなぎました`, undo: r.entryVersion ? { recordId, version: r.entryVersion } : null })
+      return null
+    }
+    if (r.code !== 'WIDER_THAN_BUNDLE') return r.error
+    const word = b.typeLabel ?? bundleKind?.name ?? 'プロジェクト'
+    const yes = await new Promise<boolean>(resolve => setNarrowing({ word, answer: v => { setNarrowing(null); resolve(v) } }))
+    if (!yes) return null
+    const narrowed = await setRecordLink(companyId, recordId, { ...input, narrow: true }, false)
+    if (!narrowed.success) return narrowed.error
+    // Narrowing is never undone (it would show the task to more people again): no 取り消す.
+    setNotice({ kind: 'done', text: `「${b.title}」につなぎ、${word}と同じ人たちだけに見えるようにしました`, undo: null })
+    return null
+  })
   const fileLink = (companyPath: string, remove: boolean) => change(async () => {
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
@@ -150,13 +177,13 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   const tagField = <TagField companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} canEdit={card.canSetTags} busy={busy}
     onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])}
     bundleType={bundleFolder ? bundleKind?.type : undefined} linkedBundleId={card.bundle?.id ?? null}
-    {...(card.canSetBundle ? { onLinkBundle: (b: BundleChoice) => recordLink(recordId, { link: 'bundle', target: b.id, expectedVersion: version }, false, `「${b.title}」につなぎました`) } : {})} />
+    {...(card.canSetBundle ? { onLinkBundle: (b: BundleChoice) => linkBundle(b) } : {})} />
   const top = notice?.kind === 'conflict'
     ? <ConflictNotice lines={card.history.filter(h => h.version !== undefined && h.version > notice.since).reverse()} />
     : notice?.kind === 'done'
       ? <DoneNotice text={notice.text} busy={busy} onUndo={notice.undo ? () => void undo(notice.undo!) : null} />
       : null
-  return <CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
+  return <><CardBody card={card} top={top} team={team ?? card.teamMode} review={review} tagField={tagField} rootPath={rootPath} busy={busy} shareFolders={card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} onNudge={onNudge} consultations={consultations} onDetachConsultation={onDetachConsultation} renderPrepared={renderPrepared} renderSource={renderSource} renderSections={renderSections} onRun={runSteps}
     linkDrop={linkDrop} notDownloadedFolderOf={notDownloadedFolderOf}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)} personalHere={personalHere}
     {...(card.record.personal && createTodayFile ? { onNewFile: async (name: string) => {
@@ -168,19 +195,25 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
       return { linkError: failure }
     } } : {})}
     companyId={companyId} bundleWord={bundleKind?.name ?? 'プロジェクト'}
-    onCreateBundle={bundleKind ? (title: string) => change(async () => {
-      const made = await createBundle(companyId, { type: bundleKind.type, title, folder: bundleFolder })
+    {...(bundlePlaces ? { bundlePlaces } : {})}
+    onCreateBundle={bundleKind ? async (title: string, place: BundlePlace | null) => {
+      const made = await createBundle(companyId, { type: place?.kind?.type ?? bundleKind.type, title, folder: place ? place.folder : bundleFolder })
       if (!made.success) return made.error
-      const r = await setRecordLink(companyId, recordId, { link: 'bundle', target: made.recordId, expectedVersion: version }, false)
-      if (!r.success) return r.error
-      setNotice({ kind: 'done', text: `「${title}」を作り、このやることを入れました`, undo: null })
-      return null
-    }) : undefined}
+      return linkBundle({ id: made.recordId, title, typeLabel: place?.kind?.name ?? bundleKind.name })
+    } : undefined}
+    onShowToBundle={() => change(async () => {
+      const r = await shareTaskToBundle(companyId, recordId, version)
+      return r.success ? null : r.error
+    })}
     onUnlinkRecord={(l, label) => recordLink(l.source, { link: l.link, target: l.target, expectedVersion: l.sourceVersion }, true, `「${label}」とのつながりを外しました`)}
-    onSetBundle={b => recordLink(recordId, { link: 'bundle', target: b.id, expectedVersion: version }, false, `「${b.title}」につなぎました`)}
+    onSetBundle={b => linkBundle(b)}
     onRemoveBundle={() => card.bundle ? recordLink(recordId, { link: 'bundle', target: card.bundle.id, expectedVersion: version }, true, `「${card.bundle.title}」から外しました`) : Promise.resolve(null)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
+    <ConfirmDialog isOpen={narrowing !== null} title={`${narrowing?.word ?? ''}につなぐ`}
+      message={`このやることは、${narrowing?.word ?? ''}より多くの人に見えています。${narrowing?.word ?? ''}と同じ人たちだけに見えるようにしますか？（しない場合は、つなぎません）`}
+      confirmText="同じ人たちだけにする" cancelText="つながない" confirmOnEnter={false}
+      onConfirm={() => narrowing?.answer(true)} onCancel={() => narrowing?.answer(false)} /></>
 }
 
 interface BodyProps {
@@ -205,7 +238,10 @@ interface BodyProps {
   onNewFile?: (name: string) => Promise<{ error: string } | { linkError: string | null }>
   companyId: string
   bundleWord: string
-  onCreateBundle?: (title: string) => Promise<string | null>
+  onCreateBundle?: (title: string, place: BundlePlace | null) => Promise<string | null>
+  bundlePlaces?: NewBundlePlaces
+  /** ［〇〇の人に見せる］ on a task only the member (or a list) sees that belongs to a 案件・プロジェクト. */
+  onShowToBundle: () => Promise<string | null>
   onUnlinkRecord: (link: RemovableLink, label: string) => Promise<string | null>
   onSetBundle: (bundle: BundleChoice) => Promise<string | null>
   onRemoveBundle: () => Promise<string | null>
@@ -220,7 +256,7 @@ interface BodyProps {
   review: ReactNode
 }
 
-function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
+function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSource, renderSections, onRun, onRetry, onReconcile, linkDrop, notDownloadedFolderOf, onLinkFile, onUnlinkFile, personalHere, onNewFile, companyId, bundleWord, onCreateBundle, bundlePlaces, onShowToBundle, onUnlinkRecord, onSetBundle, onRemoveBundle, shareFolders, onShare, onConsult, onNudge, consultations, onDetachConsultation, tagField, review }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -327,7 +363,9 @@ function CardBody({ card, top, team, rootPath, busy, renderPrepared, renderSourc
       )}
 
       <BundleField companyId={companyId} bundle={card.bundle} word={bundleWord} canSet={card.canSetBundle} busy={busy} onSet={onSetBundle} onRemove={onRemoveBundle}
-        {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string) => onCreateBundle(title) } : {})} />
+        {...(bundlePlaces ? { places: bundlePlaces } : {})}
+        {...(onCreateBundle ? { newFrom: { title: record.title, titleNote: 'やることの件名から入れました', counterpart: null, homework: 0 }, onCreate: (title: string, _h: boolean, place: BundlePlace | null) => onCreateBundle(title, place) } : {})} />
+      {card.bundle && (record.personal || record.membersOnly) && <ShowToBundle bundle={card.bundle} busy={busy} onShow={onShowToBundle} />}
       <DueAndTags card={card} now={now} busy={busy} tagField={tagField}
         onPostpone={postpone ? due => void onRun([{ action: 'set_due', args: { due } }], card.names.requester && !card.roles.requester ? `期限を延ばしました。頼んだ${card.names.requester}さんに知らせました` : '期限を延ばしました') : null} />
       {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300"><span className="mr-1.5 text-[11px] text-gray-500">目的</span>{card.purpose}</p>}

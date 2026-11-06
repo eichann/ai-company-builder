@@ -10,6 +10,7 @@ import { isBusinessDay, nextBusinessDay } from '../../../../shared/core/business
 import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
+import { defaultBundleFolder } from '../../../../shared/core/bundle-place'
 
 /** 番ごと ｜ 〇〇ごと (what the items belong to: 案件, プロジェクト…) ｜ 日付ごと. */
 export type ListMode = 'turn' | 'bundle' | 'date'
@@ -197,6 +198,31 @@ export function bundleListWord(items: readonly TaskListItem[], companyWord = '�
 export function departmentBundleKind(kinds: BundleKindsResult | null | undefined, folder: string | null | undefined): BundleKind | null {
   if (!kinds) return null
   return kinds.departments.find(d => d.folder === folder)?.kind ?? kinds.core
+}
+
+/** A department a new 案件・プロジェクト may belong to (null folder = 全社), with what it makes there. */
+export interface BundlePlace {
+  folder: string | null
+  name: string
+  kind: BundleKind | null
+}
+
+/**
+ * Where 「新しい〇〇にする」 puts a new one (records.md "A task and its 案件・プロジェクト"): the
+ * departments in the tabs' order — plus 全社 when that is the default — and the default, the
+ * creator's own department (`defaultBundleFolder`, the server's rule for the AI too).
+ */
+export function bundlePlacesOf(
+  departments: ReadonlyArray<{ id: string; name: string; folder: string }>,
+  kinds: BundleKindsResult | null | undefined,
+  mine: readonly string[] | null,
+  onScreen: string | null,
+): { choices: BundlePlace[]; defaultFolder: string | null } {
+  const listed = departments.filter(d => d.folder)
+  const defaultFolder = defaultBundleFolder({ departments: listed, mine, onScreen: onScreen || null })
+  const choices: BundlePlace[] = listed.map(d => ({ folder: d.folder, name: d.name, kind: departmentBundleKind(kinds, d.folder) }))
+  if (defaultFolder === null) choices.push({ folder: null, name: '全社', kind: kinds?.core ?? null })
+  return { choices, defaultFolder }
 }
 
 /** Tags in use, most used first, with how many items carry each. */

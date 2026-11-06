@@ -53,6 +53,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `business-days.ts` | business days: weekends, Japanese public holidays calculated from the law (no network; `LAW_EXCEPTIONS` for year-specific changes), company holidays, `nextBusinessDay` (`tasks.md`) |
 | `viewers.ts` | 見られる人: the phrase for who can see a record or a file (`viewersLabel`, `records.md` "Who can see it") |
+| `bundle-place.ts` | which department a new 案件・プロジェクト belongs to by default (`defaultBundleFolder`: the creator's 所属; `records.md` "A task and its 案件・プロジェクト") |
 | `task-settings.ts` | the company's task settings (`parseTaskSettings`, defaults, `workSwitchPoliciesOf`) and `replyTarget` (返事の目安, Japan time) (`tasks.md`) |
 | `work-switches.ts` | each member's own 受信を読む / AI が自動で進める within the company's (`workSwitchOn`, `chooseWorkSwitch`; `tasks.md`) |
 | `absences.ts` | absence and the delegate (代わりの人): `delegation(periods, day)` → `actsFor` / `coverOf` (the one resolution, no chains), `parseAbsenceInput` (`records.md` "Absence and the delegate") |

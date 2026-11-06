@@ -559,6 +559,7 @@ export interface IpcInvokeChannels {
   /** 「もう一度」 on a run held for a person. */
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+  'tasks:shareToBundle': { args: [companyId: string, recordId: string, expectedVersion: number]; result: TaskWriteResult }
   /** Tags in use that fit a title (AI through the company's key, else local matching); only suggestions. */
   'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
@@ -1021,6 +1022,7 @@ export interface ElectronAPI {
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>
+  shareTaskToBundle: Invoke<'tasks:shareToBundle'>
   suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   undoTaskAction: Invoke<'tasks:undo'>

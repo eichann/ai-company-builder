@@ -28,6 +28,7 @@ paths:
   - "server/tests/integration/record-tokens.test.ts"
   - "server/src/ports/records.ts"
   - "shared/core/viewers.ts"
+  - "shared/core/bundle-place.ts"
   - "shared/types/viewers.ts"
   - "server/src/services/viewers.ts"
   - "server/src/routes/viewers.ts"
@@ -822,7 +823,8 @@ unchanged. Column added by `migrateRecordPersonalOwner` (nullable, no data migra
 - **Share** 「部署に出す／案件につなぐ」: `POST /records/item/:recordId/share { folder,
   expectedVersion, note? }` (contract `ShareRecordRequest`), **session only** (no AI route). Only
   the owner (nobody else finds it); `folder` as on create (a company path the owner reads, not in a
-  private folder; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`).
+  private folder — except the folder of the 案件・プロジェクト the task links to, or `toBundle`: "A task and
+  its 案件・プロジェクト"; for a deal, the deal's folder), required (400 `FOLDER_REQUIRED`).
   **Where a record may be placed (audit B-M1)**: a `folder` inside a private folder (readable or
   not), one the member cannot read, and one that is not a folder of the company repository's shared
   branch all get **one** answer, 400 `FOLDER_NOT_PLACEABLE` (`placeFolder`, and the routes'
@@ -929,7 +931,9 @@ the department's list). Now `POST /api/records-ai/item` (tool `records_create`) 
 `recordEngine.createByAi` (`services/record-engine/create.ts` `aiPlacement`), which fills the
 defaults before the ordinary `create` (and its checks) — only for a type implementing `request`
 with a server `assignee`, and never for a meeting's output (`links.meeting`: minutes.md keeps its
-own place). A person's create (session) gets no defaults.
+own place). A person's create (session) gets no defaults. A request made for a 案件・プロジェクト
+(`links.bundle`) gets no `defaultFolder` (it takes the 案件's place), and a new 案件・プロジェクト without a
+folder the creator's own department ("A task and its 案件・プロジェクト").
 
 - **About the member alone** — no `personal`, no `folder`, and no assignee or the member
   themself → `personal: true` (owner-only, above), assignee = the member (their turn). A business
@@ -979,6 +983,56 @@ own place). A person's create (session) gets no defaults.
 - App: IPC `viewers:get(companyId, { records?, files? })` → `ViewersResult`
   (`client/electron/features/viewers/ipc.ts`, `client/shared/viewers.ts`;
   `client/tests/viewers-ipc.test.ts`).
+
+### A task and its 案件・プロジェクト (projects that span departments, owner decision 2026-11-06)
+
+No new kind of permission: a task is seen by the readers of its own 見える範囲 (the whole company, a
+department folder, a private folder's readers, owner-only, members-only), and **a task that belongs to
+a まとまり is never seen by more people than the まとまり** (`services/record-engine/bundle-place.ts`).
+Words on screen: 見える範囲 / 見られる人, never 置き場所.
+
+- **"Wider"** is the existing reader evaluation (`placeWithin`): the task is within the まとまり when
+  every member who reads the task (`recordReader`) also reads the まとまり. Instead of every
+  membership it asks representatives that cover every distinct answer: each user a rule names, each
+  member of a department a rule names, both records' lists and owner, plus one plain member and one
+  owner/admin nothing names. An owner-only task is never wider (its owner reads the まとまり to link it;
+  the explicit branch is also covered by the general rule). A members-only task is within when all its
+  members read the まとまり. Only `task` (`BUNDLE_PLACED_TYPES`); meetings and other types keep their own
+  rules.
+- **Made for a まとまり** (create with its `bundle` link — the list's line, the card's 「頼む」, the AI's
+  `records_create`): no place given → the まとまり's (`placeOfRow`: folder, private folder included,
+  owner, list); `personal: true` stays owner-only (the owner wants personal tasks linkable to a
+  project; the AI's 「about the member alone」 default still applies); a place given (a folder, a list,
+  a meeting's list) that is wider → 400 `WIDER_THAN_BUNDLE`. The AI's create with a `bundle` link gets
+  no `defaultFolder`. The app's 「頼む」 with a まとまり sends no folder (`tasks:create`).
+- **Linked later** (`record-links` link of the `bundle` link, the action `set_bundle`): a wider task →
+  400 `WIDER_THAN_BUNDLE`, nothing written. The person may ask to narrow (`narrow: true`, the card's
+  「〇〇と同じ人たちだけに見えるようにしますか？」): the task takes the まとまり's place in the same entry as
+  the link (`place.*` + `links.bundle`, so **never undone** — undoing would widen it again). Refused
+  when someone the task names (担当・頼んだ人・確かめる人…) could not read it there (400
+  `NAMED_PERSON_CANNOT_READ`), and toward a members-only まとまり (a list cannot be given to an existing
+  record: `WIDER_THAN_BUNDLE`). `set_bundle` (the AI's tool) never narrows.
+- **Widening is the person's own act** — ［〇〇の人に見せる］ on an owner-only / members-only task that
+  links to a まとまり: `share` (session only) with the まとまり's folder, or `toBundle: true` (its place: its
+  folder or the whole company; none linked → 400 `NO_BUNDLE`, a まとまり shown to a list or its owner
+  only → 409 `BUNDLE_NOT_PLACED`). `placeFolder` takes a private folder **only** when it is the folder of
+  the まとまり the task links to and the member reads that まとまり; anything else inside a private folder
+  keeps the one answer `FOLDER_NOT_PLACEABLE` (a member taken off the participants gets it too). The
+  route's first check (`checkPlace`) leaves a private folder the member reads to the engine (it is not in
+  the company repository); an unreadable one still answers like a missing folder.
+- **The department a new まとまり belongs to** (`defaultBundleFolder`, `shared/core/bundle-place.ts`, one
+  copy for the server and the app): the creator's own department (所属) — the one on screen when it is
+  theirs, else their first in the tabs' order; belonging to none (an owner) or not known → the one on
+  screen (全社 = the whole company). The AI's create of a type implementing `bundle` without a folder
+  gets it (`aiPlacement`, `defaultFolder` = the screen's); the app's 「新しい〇〇にする」 shows 「〇〇部の
+  案件」 with ［変える］ (`tasks-ui.md`).
+- **No leaks**: a まとまり the member cannot read answers as missing everywhere (`BAD_LINK`, the create's
+  link check run first), and every refusal above names no place or title.
+- Tests: `server/tests/unit/record-bundle-place.test.ts` (the default department, inherit on create, an
+  owner-only task stays owner-only, wider refused or narrowed, named people kept, set_bundle, the share
+  to the まとまり's folder for a linked task of a reader only, no name to a non-reader, the route's first
+  check) — mutation-checked; `client/src/features/tasks/model.test.ts` (`bundlePlacesOf`),
+  `client/tests/ui/task-card.spec.ts` (the dialog's department, the narrowing question, ［〇〇の人に見せる］).
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 
@@ -1170,7 +1224,8 @@ clock's, a separate service writing through the service writer: `notifications.m
   id>[・AI 経由]）：<note>` — ids, never names (13.10). After the state is written and outside it:
   a failure is logged, the state stands.
 - Server-only records (`POST /records/item`, types with storage `server` / `either`): title,
-  summary, optional folder (not inside a private folder yet), server fields, links; the id is
+  summary, optional folder (not inside a private folder, except a task's 案件・プロジェクト's own: "A
+  task and its 案件・プロジェクト"), server fields, links; the id is
   `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
 
 ## Execution runs (stage 2 S10b, owner decision 2026-11-01)
