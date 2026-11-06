@@ -150,7 +150,15 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
           <button type="button" disabled={busy} onClick={() => setDistinct(true)} className={PLAIN_BUTTON}>別の{similar.typeLabel}として作る</button>
         </div>}
       </div>}
+      {view.similarRequests && view.similarRequests.length > 0 && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
+        <p className="text-gray-500 dark:text-zinc-400">似ているお願い（まだ承認待ちのもの）</p>
+        <ul aria-label="似ているお願い" className="mt-0.5 space-y-0.5">{view.similarRequests.map(x => <li key={x.approvalId}>
+          <span className="font-medium text-gray-900 dark:text-zinc-100">{x.title || '（名前なし）'}</span>
+          <span className="text-[11px] text-gray-500 dark:text-zinc-400">{`・${nameOf(names, x.requestedBy)}さんのお願い・${x.createdAt.slice(0, 10)}${x.sameSource ? '・同じ会議から' : ''}`}</span>
+        </li>)}</ul>
+      </div>}
       {view.basis.quote && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
+
         <p className="text-gray-500 dark:text-zinc-400">理由（{view.basis.meetingTitle ? `会議「${view.basis.meetingTitle}」の議事録` : '議事録'}の引用）</p>
         <blockquote className="mt-0.5 border-l-2 border-gray-300 pl-2 dark:border-zinc-600">{view.basis.quote}</blockquote>
       </div>}

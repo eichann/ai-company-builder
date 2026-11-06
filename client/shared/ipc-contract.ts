@@ -632,7 +632,8 @@ export interface IpcInvokeChannels {
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
   'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
-  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null, resendReason?: string | null]; result: OutboundMailResult }
+
   'outboundMail:openAttachment': { args: [companyId: string, messageId: string, sha256: string]; result: MailAttachmentOpenResult }
   'outboundMail:removeAttachment': { args: [companyId: string, messageId: string, sha256: string, expectedVersion: number]; result: OutboundMailResult }
   'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }

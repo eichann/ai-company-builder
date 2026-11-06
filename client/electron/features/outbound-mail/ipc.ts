@@ -6,7 +6,9 @@
 //   outboundMail:update         a new version (the person's edit)
 //   outboundMail:addRecipient   「あなたが入力」 an address
 //   outboundMail:send           「確かめて送る」 with the hash of the version shown (+ 「返事を待つ」's day,
-//                               + the files shown: outbound-mail.md "Attachments")
+//                               + the files shown: outbound-mail.md "Attachments", + 「それでも送る」's
+//                               reason after an earlier send on the same source: "One send per source")
+
 //   outboundMail:resolve        送られていた／送られていなかった after an unknown send
 //   outboundMail:discard        「捨てる」
 //   outboundMail:openAttachment 「開いて確かめる」: the stored PDF downloaded with the session into a
@@ -20,7 +22,7 @@ import os from 'os'
 import path from 'path'
 import { looksLikePdf, sanitizeAttachmentName } from '../../../../shared/core/mail'
 import {
-  MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isAttachmentId, isAwaitReply, isContentHash, isShownAttachments,
+  MESSAGE_ID_RE, OUTBOUND_MAIL_OFFLINE_TEXT, isAttachmentId, isAwaitReply, isContentHash, isResendReason, isShownAttachments, readAlreadySent,
   type MailAttachmentOpenResult, type MailAwaitReply, type MailDraftEdit, type OutboundMailResult,
 } from '../../../shared/outbound-mail'
 import type { MailRecipientsView, MailRecipientView, OutboundMailView } from '../../../../shared/types/outbound-mail'
@@ -130,7 +132,7 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
       log.warn(`[outbound-mail] ${suffix || 'draft'}: the server could not be reached`)
       return { success: false, offline: true, code: null, error: OUTBOUND_MAIL_OFFLINE_TEXT }
     }
-    const json = (await res.json().catch(() => null)) as { data?: Data; error?: unknown; code?: unknown; needsGoogleConsent?: unknown; draft?: OutboundMailView } | null
+    const json = (await res.json().catch(() => null)) as { data?: Data; error?: unknown; code?: unknown; needsGoogleConsent?: unknown; draft?: OutboundMailView; alreadySent?: unknown } | null
     const data = json?.data
     if (res.ok && data && (data.draft || !needsDraft)) {
       return {
@@ -147,6 +149,7 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
       error: typeof json?.error === 'string' && (res.status < 500 || SAID_BY_SERVER.has(code ?? '')) ? json.error : `サーバーでエラーが起きました（HTTP ${res.status}）。`,
       ...(json?.needsGoogleConsent === 'mail' ? { needsGoogleConsent: 'mail' as const } : {}),
       ...(json?.draft ? { draft: json.draft } : {}),
+      ...(code === 'ALREADY_SENT_FOR_SOURCE' ? { alreadySent: readAlreadySent(json?.alreadySent) ?? undefined } : {}),
     }
   }
 
@@ -169,14 +172,17 @@ export function createOutboundMailApi(deps: OutboundMailDeps) {
       if (typeof email !== 'string' || email.length > 254 || (name !== undefined && (typeof name !== 'string' || name.length > 100))) return Promise.resolve(BAD)
       return request(companyId, messageId, 'POST', '/recipients', { email, ...(name ? { name } : {}) })
     },
-    send(companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null) {
+    send(companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null, resendReason?: string | null) {
       if (!isContentHash(hash)) return Promise.resolve(BAD)
       // 「返事を待つ」: a day only (the server checks it is today … 180 days ahead); anything else never leaves.
       if (awaitReply !== undefined && awaitReply !== null && !isAwaitReply(awaitReply)) return Promise.resolve(BAD)
       // The files the card showed: their sha256 only (the server sends a version with files only when it gets them).
       if (attachmentsShown !== undefined && attachmentsShown !== null && !isShownAttachments(attachmentsShown)) return Promise.resolve(BAD)
+      // 「それでも送る」: one line of the person's own words (the server checks it again).
+      if (resendReason !== undefined && resendReason !== null && !isResendReason(resendReason)) return Promise.resolve(BAD)
       return request(companyId, messageId, 'POST', '/send', {
         hash, ...(awaitReply ? { awaitReply: { until: awaitReply.until } } : {}), ...(attachmentsShown && attachmentsShown.length > 0 ? { attachmentsShown: [...attachmentsShown] } : {}),
+        ...(resendReason ? { resendReason } : {}),
       })
     },
     removeAttachment(companyId: string, messageId: string, sha256: string, expectedVersion: number) {
@@ -205,7 +211,8 @@ export function registerOutboundMailIpc(ipc: IpcRegistrar, deps: OutboundMailDep
   ipc.handle('outboundMail:recipients', (_event, companyId, messageId) => api.recipients(companyId, messageId))
   ipc.handle('outboundMail:update', (_event, companyId, messageId, edit, conversationId) => api.update(companyId, messageId, edit, conversationId))
   ipc.handle('outboundMail:addRecipient', (_event, companyId, messageId, email, name) => api.addRecipient(companyId, messageId, email, name))
-  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash, awaitReply, attachmentsShown) => api.send(companyId, messageId, hash, awaitReply, attachmentsShown))
+  ipc.handle('outboundMail:send', (_event, companyId, messageId, hash, awaitReply, attachmentsShown, resendReason) => api.send(companyId, messageId, hash, awaitReply, attachmentsShown, resendReason))
+
   ipc.handle('outboundMail:openAttachment', (_event, companyId, messageId, sha256) => api.openAttachment(companyId, messageId, sha256))
   ipc.handle('outboundMail:removeAttachment', (_event, companyId, messageId, sha256, expectedVersion) => api.removeAttachment(companyId, messageId, sha256, expectedVersion))
   ipc.handle('outboundMail:resolve', (_event, companyId, messageId, sent) => api.resolve(companyId, messageId, sent))

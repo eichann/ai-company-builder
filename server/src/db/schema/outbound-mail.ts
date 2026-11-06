@@ -97,3 +97,16 @@ export function migrateOutboundAttachments(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(outbound_mail_versions)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('attachments_json')) conn.exec('ALTER TABLE outbound_mail_versions ADD COLUMN attachments_json TEXT')
 }
+
+/**
+ * One send per source (outbound-mail.md "One send per source", owner decision 2026-11-06): each
+ * send row keeps the draft's source at the send (`source_key`) and, when an earlier send on it was
+ * shown, the person's reason (`resend_reason`). Nullable and additive: rows from before have no
+ * source, and an older build ignores both columns.
+ */
+export function migrateOutboundSendSources(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(outbound_sends)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('source_key')) conn.exec('ALTER TABLE outbound_sends ADD COLUMN source_key TEXT')
+  if (!cols.has('resend_reason')) conn.exec('ALTER TABLE outbound_sends ADD COLUMN resend_reason TEXT')
+  conn.exec('CREATE INDEX IF NOT EXISTS idx_outbound_sends_source ON outbound_sends(company_id, source_key)')
+}

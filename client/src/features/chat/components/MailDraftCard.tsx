@@ -5,7 +5,10 @@ import { CheckCircle, EnvelopeSimple, FilePdf, LinkSimple, Robot, Warning } from
 import {
   MAIL_STATE_LABELS, MAIL_WORDS, awaitDayLabel, fileSizeLabel, recipientLine, type MailDraftCard as Card, type OutboundMailResult,
 } from '../../../../shared/outbound-mail'
-import type { MailAttachmentView, MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
+import { RESEND_REASON_MAX } from '../../../../../shared/core/mail'
+
+import type { MailAlreadySent, MailAttachmentView, MailRecipientView, OutboundMailView } from '../../../../../shared/types/outbound-mail'
+import { runCommand, useCommandAvailable } from '../../../shared/commands/commands'
 import { mailOutbound, type MailOutbound } from '../api'
 
 type Step = 'view' | 'edit' | 'confirm'
@@ -86,6 +89,28 @@ function MailContent({ draft }: { draft: OutboundMailView }) {
   )
 }
 
+/**
+ * A mail on the same meeting / 連絡 / 件 that someone (or the member) already sent — only one the
+ * member may see (outbound-mail.md "One send per source"): ［開く］ its card, then send anyway with
+ * a reason, or not at all.
+ */
+function EarlierSend({ earlier, reason, onReason, busy }: { earlier: MailAlreadySent; reason: string; onReason: (v: string) => void; busy: boolean }) {
+  const canOpen = useCommandAvailable('record.open')
+  return (
+    <div role="group" aria-label="先に送られたメール" className={`w-full rounded-lg border px-2 py-1.5 text-xs ${NOTICE_CLASS.warn}`}>
+      <p className="flex flex-wrap items-center gap-2 font-medium text-gray-900 dark:text-zinc-100">
+        <Warning size={13} weight="bold" aria-hidden className="text-amber-500" />{earlier.message}
+        {canOpen && <button type="button" className={BUTTON} onClick={() => { void runCommand('record.open', { recordId: earlier.messageId }) }}>{MAIL_WORDS.alreadySentOpen}</button>}
+      </p>
+      <p className="mt-1 text-gray-700 dark:text-zinc-300">{MAIL_WORDS.alreadySentAsk}</p>
+      <label className="mt-1 block text-gray-700 dark:text-zinc-300">{MAIL_WORDS.resendReason}
+        <input value={reason} disabled={busy} maxLength={RESEND_REASON_MAX} onChange={e => onReason(e.target.value)} placeholder={MAIL_WORDS.resendReasonPlaceholder}
+          className="mt-0.5 w-full rounded border border-gray-300 px-2 py-1 dark:border-zinc-600 dark:bg-zinc-900" />
+      </label>
+    </div>
+  )
+}
+
 /** Today on this PC's calendar (`YYYY-MM-DD`): the date picker's first day. */
 function localDay(): string {
   const d = new Date()
@@ -113,6 +138,9 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
   // Confirm step: 「返事を待つ」 (a new mail only), pre-ticked when the AI marked the draft.
   const [awaitOn, setAwaitOn] = useState(false)
   const [awaitDay, setAwaitDay] = useState('')
+  // An earlier send on the same source (the server's 409): shown above the send, with a reason box.
+  const [earlier, setEarlier] = useState<MailAlreadySent | null>(null)
+  const [resendReason, setResendReason] = useState('')
 
   const run = async (fn: () => Promise<OutboundMailResult>, onOk: (r: Extract<OutboundMailResult, { success: true }>) => void) => {
     if (busy) return
@@ -124,6 +152,7 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
       if (r.draft) setDraft(r.draft)
       if (r.needsGoogleConsent === 'mail') setNeedsConsent(true)
       if (r.code === 'CONTENT_CHANGED') setStep('view')
+      if (r.alreadySent) { setEarlier(r.alreadySent); return }
       setNotice({ tone: r.offline ? 'warn' : 'error', text: r.error })
     } finally {
       setBusy(false)
@@ -166,7 +195,8 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
   const waitChoice = offer && awaitOn ? { until: awaitDay } : null
   const files = draft.attachments ?? []
   // The files this card shows go with the send, so the server knows the person saw them.
-  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash, waitChoice, files.map(f => f.sha256)), r => {
+  const send = () => run(() => outbound.sendOutboundMail(card.companyId, draft.id, draft.hash, waitChoice, files.map(f => f.sha256), earlier ? resendReason.trim() : null), r => {
+    setEarlier(null)
     setDraft(r.draft)
     setStep('view')
     setNotice(r.outcome === 'unknown' ? { tone: 'warn', text: r.message ?? MAIL_WORDS.unknown } : { tone: 'ok', text: slack ? MAIL_WORDS.slackSent : 'メールを送りました。' })
@@ -278,9 +308,12 @@ export const MailDraftCard = memo(function MailDraftCard({ card, outbound = mail
               <p className="mt-1 pl-5 text-[11px] text-gray-500 dark:text-zinc-400">{awaitDay ? MAIL_WORDS.awaitReplyNote : MAIL_WORDS.awaitReplyPickDay}</p>
             </>}
           </fieldset>}
+          {earlier && <EarlierSend earlier={earlier} reason={resendReason} onReason={setResendReason} busy={busy} />}
           <span className="w-full text-[11px] text-gray-600 dark:text-zinc-400">{MAIL_WORDS.confirmNote}</span>
-          <button type="button" className={PRIMARY} disabled={busy || (!!waitChoice && !awaitDay)} onClick={() => void send()}>{busy ? '送っています…' : MAIL_WORDS.confirmSend}</button>
-          <button type="button" className={BUTTON} disabled={busy} onClick={() => setStep('view')}>やめる</button>
+          <button type="button" className={PRIMARY} disabled={busy || (!!waitChoice && !awaitDay) || (!!earlier && resendReason.trim() === '')} onClick={() => void send()}>
+            {busy ? '送っています…' : earlier ? MAIL_WORDS.resendButton : MAIL_WORDS.confirmSend}
+          </button>
+          <button type="button" className={BUTTON} disabled={busy} onClick={() => setStep('view')}>{earlier ? MAIL_WORDS.dontSend : 'やめる'}</button>
         </>}
         {draft.state === 'unknown' && <>
           <button type="button" className={BUTTON} disabled={busy} onClick={() => void resolve(true)}>{MAIL_WORDS.wasSent}</button>

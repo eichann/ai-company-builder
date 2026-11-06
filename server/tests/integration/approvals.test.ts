@@ -527,6 +527,74 @@ describe('similar records before a new deal (plugins.md "Similar records")', () 
     expect((await person('ap-member', 'POST', `/${approval.id}/approve`, { hash: approval.hash, reason: '別の取引' })).body.code).toBe('NOT_PENDING')
   })
 
+  /** `user`'s AI asks for a new deal from the meeting (approvals.md "One pending create per source"). */
+  async function asks(user: string, meetingId: string, title: string) {
+    const r = await call({
+      token: await tokenFor(user), method: 'POST', path: '/api/records-ai/plugins/sample-sales/create/create_deal',
+      body: { title, fields: { next_step: '提案書を送る' }, note: '議事録で新しい研修の相談があったため', basis: { meetingId, quote: '新しい研修も相談したい' } },
+    })
+    expect(r.status, JSON.stringify(r.body)).toBe(202)
+    return r.body.data as Json
+  }
+  const pendingFrom = (meetingId: string) => (db.prepare(`SELECT r.id FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
+    JOIN fixed_payloads f ON f.company_id = r.company_id AND f.owner_kind = 'approval' AND f.owner_id = r.id
+    WHERE r.company_id = ? AND r.type = 'approval' AND s.state = 'pending' AND f.canonical LIKE ?`).all(CO, `%${meetingId}%`) as Json[]).map(r => r.id)
+
+  it('two members ask at the same moment for a new deal from the same meeting: one pending request, the second told who asked', async () => {
+    const meeting = meetingWith(customerOf('2000000001'))
+    // Hold each request at every await of the plugin until the other one is there too, so both have
+    // passed their checks before either writes: only the check inside the insert's transaction holds.
+    const active = services.plugins.active.bind(services.plugins)
+    let waiting: Array<() => void> = []
+    const spy = vi.spyOn(services.plugins, 'active').mockImplementation(async (...args: unknown[]) => {
+      await new Promise<void>(resolve => {
+        waiting.push(resolve)
+        if (waiting.length >= 2) { const all = waiting; waiting = []; all.forEach(r => r()) } else setTimeout(() => { waiting = waiting.filter(r => r !== resolve); resolve() }, 200)
+      })
+      return active(...args)
+    })
+    let a: Json, b: Json
+    try {
+      [a, b] = await Promise.all([asks('ap-member', meeting, '研修の新規案件'), asks('ap-boss2', meeting, '研修の新しい案件（AI の名前）')])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(a.approval.id).toBe(b.approval.id)
+    expect(pendingFrom(meeting)).toEqual([a.approval.id])
+    const [made, merged] = a.existing ? [b, a] : [a, b]
+    expect(made.existing).toBe(false)
+    expect(merged).toMatchObject({ existing: true, alreadyRequestedBy: made.approval.requestedBy })
+    expect(merged.note).toContain('すでに')
+    // The one told reads the request it was merged into (the card), but cannot act on it as the requester.
+    const asker = made.approval.requestedBy === 'ap-member' ? 'ap-boss2' : 'ap-member'
+    expect((await person(asker, 'GET', `/${a.approval.id}`)).status).toBe(200)
+    expect((await person(asker, 'POST', `/${a.approval.id}/withdraw`)).status).not.toBe(200)
+    expect(stateOf(a.approval.id).state).toBe('pending')
+  })
+
+  it('a request the requester cannot read is never met nor mentioned: they get their own; the similar list shows only what each may read', async () => {
+    const meeting = meetingWith(customerOf('2000000001'))
+    const first = await asks('ap-member', meeting, '別の研修案件')
+    // A request in a place 田中 (ap-boss2) cannot read (approvals do not take a restricted place yet: made so here).
+    db.prepare('UPDATE records SET personal_owner = ? WHERE company_id = ? AND id = ?').run('ap-member', CO, first.approval.id)
+    try {
+      const own = await asks('ap-boss2', meeting, '別の研修案件')
+      expect(own.existing).toBe(false)
+      expect(own.alreadyRequestedBy).toBeUndefined()
+      expect(own.approval.id).not.toBe(first.approval.id)
+      expect(JSON.stringify(own)).not.toContain(first.approval.id)
+      expect(pendingFrom(meeting).sort()).toEqual([first.approval.id, own.approval.id].sort())
+      // 「似ている取引」 lists other pending creates the viewer reads: the member sees ap-boss2's, ap-boss2 never the hidden one.
+      const mine = (await person('ap-member', 'GET', `/${first.approval.id}`)).body.data.approval
+      expect(mine.similarRequests.map((x: Json) => [x.approvalId, x.sameSource])).toEqual([[own.approval.id, true]])
+      const theirs = (await person('ap-boss2', 'GET', `/${own.approval.id}`)).body.data.approval
+      expect(theirs.similarRequests.map((x: Json) => x.approvalId)).not.toContain(first.approval.id)
+      expect(JSON.stringify(theirs)).not.toContain(first.approval.id)
+    } finally {
+      db.prepare('UPDATE records SET personal_owner = NULL WHERE company_id = ? AND id = ?').run(CO, first.approval.id)
+    }
+  })
+
   it('an approver (here an owner) may say 「同じ」 too; without linkMeeting the meeting is left as it was', async () => {
     const meeting = meetingWith(customerOf('2000000001'))
     const approval = await aiAsksNewDeal(meeting, '新規開拓プランW')

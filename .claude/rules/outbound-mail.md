@@ -31,6 +31,8 @@ paths:
   - "client/tests/threads-ipc.test.ts"
   - "client/tests/record-thread-ui.*"
   - "client/tests/ui/record-thread.spec.ts"
+  - "shared/core/source-slots.ts"
+  - "server/src/services/source-slots.ts"
 ---
 
 # Outbound mail (milestone 4 G8: お礼メールを確かめて送る; the type is 「送るもの」)
@@ -104,8 +106,10 @@ In this order, nothing sent unless all pass:
    read): unreadable → 409 `RECIPIENTS_UNVERIFIABLE` 「…確かめられないため送れません…」;
    gone → 409 `RECIPIENT_GONE` + `goneRefs`;
 5. each attached file is read again from storage and must match the version (size, sha256, `%PDF-`),
-   else 409 `ATTACHMENT_CHANGED`; then the send row (`outbound_sends`, outcome `sending`) is written
-   **before** Gmail is called — at most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`;
+   else 409 `ATTACHMENT_CHANGED`; then **one send per source** ("One send per source" below: 409
+   `ALREADY_SENT_FOR_SOURCE` unless a reason was given) and, in the same synchronous stretch, the
+   send row (`outbound_sends`, outcome `sending`, with the source's key) is written **before** Gmail
+   is called — at most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`;
 6. the RFC 2822 message (`lib/mail-message.ts`: UTF-8, RFC 2047 subject words ≤ 60 characters,
    base64 body, From = the version's, To / Cc from the version; it throws on anything that is not
    one plain address or a subject with a control character — no header injection) →
@@ -129,6 +133,62 @@ The AI emergency stop does not block a person's send (design §4-5); the Google 
 does stop the AI's drafting: every record token is refused while the company's AI is stopped
 (403 `ACB_STOPPED`, `records.md`).
 `POST …/discard` (draft / unknown → `discarded`) is the person's too.
+
+## One send per source (owner decision 2026-11-06, design 「出どころの枠」 §10 order 1)
+
+Two attendees could each send the client a thank-you mail. Sending reaches outside, so it is
+**not hard-blocked**: the earlier send is shown and a one-line reason lets it go.
+
+- **The source** (出どころ, `shared/core/source-slots.ts` `resolveSource`, read through
+  `services/source-slots.ts` `sourceOfRecord` — the one module approvals use too): a **follow-up
+  round** first — the draft's `task` link or a record linking it as `prepared` (a 返事のお願い's
+  nudge) whose type has a clock (`WAIT_OVER`) and whose newest clock `wait_over` is newer than its
+  last move into the waiting state; key `follow-up:<record>@<that entry's version>`, so a nudge
+  (催促) never meets the thank-you mail or the reply it follows up, and a later round is a new
+  source — else the draft's **meeting**, else its **連絡** (`thread`: one reply per thread, Slack
+  replies too), else its **まとまり** (`bundle`). None of these → no source, exempt.
+- **At the send** (both channels, right before the send row, no `await` between): the sends on the
+  same source key that are `sent` or `sending` (`outbound.sendsForSource`, by anyone, the draft's
+  own left out) and that the **sender may see** — they read the source record **and** that mail's
+  record, through `recordReader` (`slots.heldBy`; owner decision B: one they cannot read is neither
+  mentioned nor a reason to stop them). The first one found → 409 `ALREADY_SENT_FOR_SOURCE` with
+  `alreadySent { messageId, by, byName, at, kind, message }` (contract `MailAlreadySent`;
+  `message` 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」, Japan time,
+  `shared/core/mail.ts` `alreadySentText`: 連絡への返事・この件の催促・この件のメール by kind,
+  「あなた」 for the sender's own). Nothing is sent, no send row.
+- **To proceed**: the same send with `resendReason` (1–200 characters, one line, NFC-trimmed:
+  `resendReasonOf`; anything else → 400 `RESEND_REASON_INVALID` before anything is read). The
+  reason is kept on the send row (`resend_reason`) and as the ledger note of the `send` (or
+  `send_unknown`; 「送られていた」 copies it) entry. Each send row keeps its `source_key`
+  (`migrateOutboundSendSources`, additive, nullable; rows from before have none and are never
+  matched).
+- **Released apps** (the compatibility choice): the gate applies to every request — there is no
+  capability flag an older app could leave out. An app that knows no 「それでも送る」 gets the 409
+  and shows its `error` as is: the sentence + 「それでも送るときは、アプリを新しくしてから、理由をひとこと
+  書いて送ってください。何も送っていません。」 (`ALREADY_SENT_OLD_APP_TEXT`). So nothing is ever sent a
+  second time without the person having seen the first; an older app cannot send it at all until
+  updated.
+- **The AI** is not stopped from drafting: `POST /outbound`'s answer carries `alreadySent` (only a
+  mail the member may see), and `mail_draft_create` tells the AI the sentence and to have the member
+  look at it. The AI never sends.
+- **The card** (`MailDraftCard`, confirm step): on the 409 it shows 「先に送られたメール」 — the
+  sentence, ［開く］ (`record.open` on the other mail's record, readable by the sender), 「送る前に、先に
+  送られたメールを確かめてください…」 and the box 「それでも送る理由」; 「それでも送る」 stays disabled until a
+  reason is written, 「送らない」 closes the step. IPC `outboundMail:send`'s 6th argument
+  (`resendReason`; main lets only `isResendReason` leave) and the failure's `alreadySent`
+  (`readAlreadySent`: a record id and a known kind, else dropped).
+- Not yet: sends made before the column are not matched (no backfill); the bundle source also
+  covers later mails of the same 案件 (the reason box is the way through).
+
+Tests: `server/tests/integration/outbound-mail.test.ts` 「one send per source」 (the second sender
+sees who and when, passes only with a reason kept in the ledger and the send row; an older app's
+`{ hash }` gets the 409 and nothing leaves; two presses at the same moment → one mail; a sender who
+cannot read the earlier mail is neither told nor stopped; a nudge is its own source, one per round —
+each mutation-checked: the gate, the claim reader, the follow-up round, an `await` between the check
+and the send row), `server/tests/unit/source-slots.test.ts` (the order, the key, the sentence and the
+reason), `client/tests/outbound-mail-tools.test.ts` (only a one-line reason leaves main; a malformed
+`alreadySent` never reaches the card), `client/tests/ui/mail-draft-card.spec.ts` (the earlier send
+shown, sent only with the reason written).
 
 ## Replies into the same thread (stage 3 A4)
 
@@ -349,7 +409,8 @@ GET|POST /outbound/:messageId/recipients   —
 POST /outbound/:messageId/attachments      POST /outbound/:messageId/attachments (act; tools' `attachments`)
 DELETE /outbound/:messageId/attachments/:sha256   DELETE (act)
 GET /outbound/:messageId/attachments/:sha256      —   (no route: the person opens what will be sent)
-POST /outbound/:messageId/send             —   (no route: the AI cannot send; { hash, awaitReply?, attachmentsShown? })
+POST /outbound/:messageId/send             —   (no route: the AI cannot send; { hash, awaitReply?, attachmentsShown?, resendReason? })
+
 POST /outbound/:messageId/resolve          —
 POST /outbound/:messageId/discard          —
 ```

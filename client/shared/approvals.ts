@@ -81,10 +81,13 @@ export function namedMembers(v: ApprovalView): string[] {
 }
 
 /** What the AI is told when its request became an approval request (it must not claim the change happened). */
-export function approvalSummaryForAi(v: ApprovalView, existing: boolean): Record<string, unknown> {
+export function approvalSummaryForAi(v: ApprovalView, existing: boolean, note: string | null = null): Record<string, unknown> {
   return {
     outcome: 'approval-requested',
-    instruction: (existing ? 'The same request was already waiting; nothing new was made. ' : '') +
+    // Someone else's request on the same source answered (approvals.md "One pending create per source"): say so.
+    ...(note ? { note } : {}),
+    instruction: (note ? 'Someone else already asked for the same thing from the same source; their request is the one waiting, and nothing new was made. Tell the member who asked (the note). ' : existing ? 'The same request was already waiting; nothing new was made. ' : '') +
+
       'NOT written yet: a person must approve it first. Tell the member it is waiting for approval (the card in the chat shows to whom). ' +
       'You cannot approve, send back or withdraw it. Do not say it was updated.',
     approvalId: v.id, recordTitle: v.recordTitle, state: v.state,

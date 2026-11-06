@@ -52,8 +52,15 @@ const withFiles: OutboundMailView = {
 }
 const filesCard: MailDraftCard = { ...card, id: 'card-3', draft: withFiles }
 const afterRemoval: OutboundMailView = { ...withFiles, version: 4, hash: `sha256:${'f1'.repeat(32)}`, attachments: [withFiles.attachments![0]] }
+// A colleague already sent this meeting's thank-you (outbound-mail.md "One send per source").
+const second: OutboundMailView = { ...draft, id: 'outbound_message-5e5e5e5e5e5e5e5e', subject: '商談のお礼（2通目）', cc: [], to: [draft.to[0]], linkCount: 0, awaitReply: undefined }
+const secondCard: MailDraftCard = { ...card, id: 'card-4', draft: second }
+const EARLIER = {
+  messageId: 'outbound_message-0f0f0f0f0f0f0f0f', by: 'm-sato', byName: '佐藤', at: '2026-11-05T06:30:00Z', kind: 'meeting' as const,
+  message: 'この会議のお礼メールは佐藤さんが 11/05 15:30 に送りました',
+}
 
-let report: (hash: string, awaitReply: string, shown?: string) => void = () => {}
+let report: (hash: string, awaitReply: string, shown?: string, reason?: string) => void = () => {}
 let opened: (sha256: string) => void = () => {}
 installElectronAPI({
   openOutboundMailAttachment: async (_companyId, _messageId, sha256) => { opened(sha256); return { success: true } },
@@ -61,8 +68,12 @@ installElectronAPI({
     sha256 === ESTIMATE && expectedVersion === withFiles.version
       ? { success: true, draft: afterRemoval }
       : { success: false, offline: false, code: 'VERSION_CONFLICT', error: 'ほかの変更が先にありました。' }),
-  sendOutboundMail: async (_companyId, messageId, hash, awaitReply, attachmentsShown) => {
-    report(hash, JSON.stringify(awaitReply ?? null), JSON.stringify(attachmentsShown ?? null))
+  sendOutboundMail: async (_companyId, messageId, hash, awaitReply, attachmentsShown, resendReason) => {
+    report(hash, JSON.stringify(awaitReply ?? null), JSON.stringify(attachmentsShown ?? null), resendReason ?? undefined)
+    if (messageId === second.id && !resendReason) {
+      return { success: false, offline: false, code: 'ALREADY_SENT_FOR_SOURCE', error: `${EARLIER.message}。それでも送るときは、アプリを新しくしてから…`, alreadySent: EARLIER }
+    }
+    if (messageId === second.id) return { success: true, outcome: 'sent', draft: { ...second, state: 'sent', sentAt: '2026-11-05T06:52:00Z', providerMessageId: 'gm-3' } }
     if (messageId === withFiles.id) return { success: true, outcome: 'sent', draft: { ...afterRemoval, state: 'sent', sentAt: '2026-11-05T06:52:00Z', providerMessageId: 'gm-2' } }
     const shown = messageId === asking.id ? asking : draft
     return {
@@ -78,6 +89,7 @@ const message: UIMessage = {
     { type: 'text', text: 'お礼メールの下書きを作りました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-1', data: card },
     { type: 'text', text: 'お見積りのメールも用意しました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-2', data: askingCard },
     { type: 'text', text: '提案書を付けたメールです。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-3', data: filesCard },
+    { type: 'text', text: 'お礼メールをもう1通作りました。' }, { type: MAIL_DRAFT_PART_TYPE, id: 'mail-draft-card-4', data: secondCard },
   ] as UIMessage['parts'],
 }
 
@@ -86,7 +98,8 @@ function Preview() {
   const [awaited, setAwaited] = useState<string | null>(null)
   const [files, setFiles] = useState<string | null>(null)
   const [openedFile, setOpenedFile] = useState<string | null>(null)
-  report = (hash, awaitReply, shown) => { setReceived(hash); setAwaited(awaitReply); setFiles(shown ?? null) }
+  const [reason, setReason] = useState<string | null>(null)
+  report = (hash, awaitReply, shown, why) => { setReceived(hash); setAwaited(awaitReply); setFiles(shown ?? null); setReason(why ?? null) }
   opened = setOpenedFile
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
@@ -96,6 +109,8 @@ function Preview() {
       {awaited !== null && <p aria-label="受け取った返事待ち">{awaited}</p>}
       {files !== null && <p aria-label="受け取ったファイル">{files}</p>}
       {openedFile !== null && <p aria-label="開いたファイル">{openedFile}</p>}
+      {reason !== null && <p aria-label="受け取った理由">{reason}</p>}
+
     </main>
   )
 }
