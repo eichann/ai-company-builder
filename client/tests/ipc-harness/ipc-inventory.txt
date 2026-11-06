@@ -811,7 +811,7 @@ contract.type IpcInvokeChannels.'outboundMail:openAttachment' = 'outboundMail:op
 contract.type IpcInvokeChannels.'outboundMail:recipients' = 'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:removeAttachment' = 'outboundMail:removeAttachment': { args: [companyId: string, messageId: string, sha256: string, expectedVersion: number]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:resolve' = 'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
-contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null, resendReason?: string | null]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
@@ -1093,7 +1093,7 @@ main.handle outboundMail:openAttachment @ features/outbound-mail/ipc.ts (company
 main.handle outboundMail:recipients @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:removeAttachment @ features/outbound-mail/ipc.ts (companyId, messageId, sha256, expectedVersion)
 main.handle outboundMail:resolve @ features/outbound-mail/ipc.ts (companyId, messageId, sent)
-main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply, attachmentsShown)
+main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply, attachmentsShown, resendReason)
 main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, messageId, edit, conversationId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
@@ -1546,8 +1546,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
-preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3, $4)
-preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined, attachmentsShown?: string[] | null | undefined) => Promise<OutboundMailResult>
+preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3, $4, $5)
+preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined, attachmentsShown?: string[] | null | undefined, resendReason?: string | null | undefined) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)

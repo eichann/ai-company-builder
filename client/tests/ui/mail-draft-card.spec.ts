@@ -64,6 +64,26 @@ test('「返事を待つ」: pre-ticked when the AI marked the mail, the day can
   expectNoPageErrors(state)
 })
 
+test('a mail on the same meeting already sent: the card shows who and when, and sends only with the reason written (「それでも送る」)', async ({ page }) => {
+  const state = await openPreview(page, 'mail-draft-card')
+  const card = page.getByRole('group', { name: 'メール：商談のお礼（2通目）' })
+  await card.getByRole('button', { name: '確かめて送る' }).click()
+  await card.getByRole('button', { name: 'この内容で送る' }).click()
+  // The server said someone sent one: nothing went, the card shows it with a reason box.
+  const earlier = card.getByRole('group', { name: '先に送られたメール' })
+  await expect(earlier).toContainText('この会議のお礼メールは佐藤さんが 11/05 15:30 に送りました')
+  await expect(card).toHaveAttribute('data-state', 'draft')
+  const anyway = card.getByRole('button', { name: 'それでも送る' })
+  await expect(anyway).toBeDisabled()
+  await expect(card.getByRole('button', { name: '送らない' })).toBeEnabled()
+  await earlier.getByLabel('それでも送る理由').fill('先方の別の担当者にも送るため')
+  await anyway.click()
+  await expect(page.getByLabel('受け取った理由')).toHaveText('先方の別の担当者にも送るため')
+  await expect(card).toHaveAttribute('data-state', 'sent')
+  await expect(card.getByRole('group', { name: '先に送られたメール' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('attached PDFs: each shown with its size, opened as stored, one taken off; the confirm step lists them again and the send names exactly those shown', async ({ page }) => {
   const state = await openPreview(page, 'mail-draft-card')
   const card = page.getByRole('group', { name: 'メール：提案書のご送付' })

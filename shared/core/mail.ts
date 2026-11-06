@@ -20,6 +20,7 @@
  */
 import { addBusinessDays, addDays, isCalendarDate } from './business-days'
 import { canonicalJson } from './fixed-content'
+import type { SourceKind } from './source-slots'
 import { japanDateTime } from './task-settings'
 
 export const RECIPIENT_SOURCES = ['calendar', 'hubspot', 'member', 'typed', 'thread'] as const
@@ -263,3 +264,43 @@ export function awaitReplyUntilProblem(until: unknown, now: Date): string | null
 
 /** The stored 返事の見込み of a picked day (`wait_until`, the company's clock): that day's morning. */
 export const awaitReplyWaitUntil = (until: string) => `${until}T${AWAIT_REPLY_TIME}`
+
+/** 「それでも送る」's reason: one line, 1–200 characters (outbound-mail.md "One send per source"). */
+export const RESEND_REASON_MAX = 200
+
+/** The reason as kept (NFC, trimmed), or null when it is not one. */
+export function resendReasonOf(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const v = raw.normalize('NFC').trim()
+  // eslint-disable-next-line no-control-regex
+  return v.length >= 1 && v.length <= RESEND_REASON_MAX && !/[\u0000-\u001f\u007f\u2028\u2029]/.test(v) ? v : null
+}
+
+/** What was sent on the same source, by the source's kind (`shared/core/source-slots.ts`). */
+const ALREADY_SENT_WHAT: Record<SourceKind, string> = {
+  meeting: 'この会議のお礼メール',
+  thread: 'この連絡への返事',
+  'follow-up': 'この件の催促',
+}
+
+
+/** 「11/06 15:30」 in Japan time. */
+export function shortJapanTime(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const { date, minutes } = japanDateTime(d)
+  return `${date.slice(5, 7)}/${date.slice(8, 10)} ${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
+/**
+ * 「この会議のお礼メールは佐藤さんが 11/06 15:30 に送りました」: `who` is the sender's display name,
+ * null for the person asking (「あなた」), `''` when the name is not known (「ほかの人」).
+ */
+export function alreadySentText(kind: SourceKind, who: string | null, at: string): string {
+  const by = who === null ? 'あなた' : who === '' ? 'ほかの人' : `${who}さん`
+  const when = shortJapanTime(at)
+  return `${ALREADY_SENT_WHAT[kind]}は${by}が${when ? ` ${when} に` : ''}送りました`
+}
+
+/** What a released app (which knows no 「それでも送る」) shows, as is, after the sentence. */
+export const ALREADY_SENT_OLD_APP_TEXT = 'それでも送るときは、アプリを新しくしてから、理由をひとこと書いて送ってください。何も送っていません。'

@@ -1,6 +1,8 @@
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
-import { ATTACHMENT_LIMITS, RECIPIENT_SOURCE_LABELS, RECIPIENT_SOURCES, sanitizeAttachmentName, SHA256_HEX_RE, type RecipientSource } from '../../shared/core/mail'
-import type { MailAttachmentView, MailRecipientsView, MailRecipientView, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
+import { ATTACHMENT_LIMITS, RECIPIENT_SOURCE_LABELS, RECIPIENT_SOURCES, RESEND_REASON_MAX, resendReasonOf, sanitizeAttachmentName, SHA256_HEX_RE, type RecipientSource } from '../../shared/core/mail'
+import { SOURCE_KINDS }
+ from '../../shared/core/source-slots'
+import type { MailAlreadySent, MailAttachmentView, MailRecipientsView, MailRecipientView, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 
 /**
  * The chat's mail card (milestone 4 G8, `.claude/rules/outbound-mail.md`): when
@@ -57,6 +59,12 @@ export const MAIL_WORDS = {
   attachmentGone: '送ってから30日たったため、サーバーから消しました',
   attachmentsConfirm: '付いているファイルも、このまま送ります。中身は「開いて確かめる」で見られます。',
   attachmentOpened: 'ファイルを開きました。',
+  alreadySentOpen: '開く',
+  alreadySentAsk: '送る前に、先に送られたメールを確かめてください。それでも送るときは、理由をひとこと書いてください（経緯に残ります）。',
+  resendReason: 'それでも送る理由',
+  resendReasonPlaceholder: '例：先方から別の担当者にも送ってほしいと言われたため',
+  resendButton: 'それでも送る',
+  dontSend: '送らない',
 } as const
 
 /** `1234567` → 「1.2 MB」 (the card's size of a file). */
@@ -177,7 +185,7 @@ export type MailAttachmentOpenResult = { success: true } | { success: false; off
 /** The answer of the card's own actions (IPC `outboundMail:*`), sent with the person's session. */
 export type OutboundMailResult =
   | { success: true; draft: OutboundMailView; outcome?: 'sent' | 'unknown'; message?: string; recipients?: MailRecipientsView; recipient?: MailRecipientView }
-  | { success: false; offline: boolean; code: string | null; error: string; needsGoogleConsent?: 'mail'; draft?: OutboundMailView }
+  | { success: false; offline: boolean; code: string | null; error: string; needsGoogleConsent?: 'mail'; draft?: OutboundMailView; alreadySent?: MailAlreadySent }
 
 /** A version change the card makes (the person's own edit). */
 export interface MailDraftEdit {
@@ -213,6 +221,25 @@ export function isAttachmentId(v: unknown): v is string {
 export function isShownAttachments(v: unknown): v is string[] {
   return Array.isArray(v) && v.length <= ATTACHMENT_LIMITS.count && v.every(isAttachmentId)
 }
+/** 「それでも送る」's reason as main lets it leave: one line, 1–200 characters (the server's own rule). */
+export function isResendReason(v: unknown): v is string {
+  return typeof v === 'string' && v.length <= RESEND_REASON_MAX * 2 && resendReasonOf(v) !== null
+}
+
+/** The earlier send of a 409 `ALREADY_SENT_FOR_SOURCE`, or null when it is not one. */
+export function readAlreadySent(v: unknown): MailAlreadySent | null {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  if (typeof o.messageId !== 'string' || !RECORD_ID.test(o.messageId) || typeof o.by !== 'string' || typeof o.at !== 'string' || typeof o.message !== 'string') return null
+  if (!(SOURCE_KINDS as readonly unknown[]).includes(o.kind)) return null
+  return {
+    messageId: o.messageId, by: o.by, byName: typeof o.byName === 'string' ? o.byName : null, at: o.at,
+    kind: o.kind as MailAlreadySent['kind'], message: o.message.slice(0, 300),
+  }
+}
+const RECORD_ID = /^outbound_message-[0-9a-z]{6,32}$/
+
 export function isContentHash(v: unknown): v is string {
+
   return typeof v === 'string' && CONTENT_HASH_RE.test(v)
 }

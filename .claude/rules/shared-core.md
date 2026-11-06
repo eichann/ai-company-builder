@@ -44,6 +44,9 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 | `fixed-content.ts` | `canonicalJson` (sorted keys, NFC, nothing trimmed): what the server hashes (`sha256:…`) to fix approved / sent content; the app only echoes a hash |
 | `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
+| `source-slots.ts` | 出どころ: `resolveSource` (follow-up round → meeting → thread; none — a まとまり alone included — = exempt)
+, `sourceKey` / `parseSourceKey`, `sourceRecordId`; the reader-filtered lookup is the server's `services/source-slots.ts` (`outbound-mail.md` "One send per source", `approvals.md`) |
+
 | `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks`, attachments (`ATTACHMENT_LIMITS`, `sanitizeAttachmentName`, `looksLikePdf`, `attachmentListProblems`) |
 | `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
 | `calendar.ts` | 「今日の予定」: the neutral `CalendarEvent`, `CalendarTodayReason`, `dayWindow` (the company's day), `DEFAULT_COMPANY_TIME_ZONE` (`calendar.md`) |

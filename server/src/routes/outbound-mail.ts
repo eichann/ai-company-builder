@@ -15,7 +15,7 @@
  *   POST /outbound/:messageId/attachments   a PDF attached (JSON, the bytes as base64) → a new version
  *   DELETE /outbound/:messageId/attachments/:sha256?expectedVersion=N   a file taken off → a new version
  *   GET  /outbound/:messageId/attachments/:sha256   the file's bytes (the person opens what will be sent)
- *   POST /outbound/:messageId/send          「確かめて送る」 { hash, awaitReply?, attachmentsShown? }
+ *   POST /outbound/:messageId/send          「確かめて送る」 { hash, awaitReply?, attachmentsShown?, resendReason? }
  *   POST /outbound/:messageId/resolve       { sent } after an unknown send
  *   POST /outbound/:messageId/discard       「捨てる」
  *

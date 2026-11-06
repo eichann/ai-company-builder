@@ -858,3 +858,155 @@ describe('attachments: a PDF fixed with the version (outbound-mail.md "Attachmen
     for (const word of ['提案書（株式会社サンプル様）', '別紙_見積', '%PDF-', encodeURIComponent('提案書')]) expect(logs).not.toContain(word)
   })
 })
+
+describe('one send per source: what was already sent is shown, a reason lets it go (outbound-mail.md "One send per source")', () => {
+  let writer: Json
+  let satoToken: string, tanakaToken: string
+  const sendRow = (messageId: string) => db.prepare('SELECT source_key, resend_reason, outcome FROM outbound_sends WHERE company_id = ? AND message_id = ? ORDER BY started_at DESC LIMIT 1').get(CO, messageId) as Json
+
+  /** A sales meeting of the company (both members read 営業部), no まとまり: its source is the meeting. */
+  function meeting(title: string): string {
+    const made = writer.create(CO, {
+      type: 'meeting', title, folder: '営業部', state: 'received', fields: { assignee: 'm-sato', external_count: 1 },
+      links: {}, actor: { id: 'm-sato', kind: 'human', source: null },
+    })
+    expect(made.ok, JSON.stringify(made)).toBe(true)
+    return made.record.id
+  }
+  /** The member's AI drafts a mail about `context` to 阿部 (a member: no calendar or HubSpot read is needed to send it). */
+  async function drafted(token: string, context: Record<string, unknown>) {
+    const refs = (await ai(token, 'POST', '/outbound-recipients', context)).body.data.recipients as Json[]
+    const to = refs.find(x => x.source === 'member' && x.email === EMAILS['m-owner']).ref
+    const made = await ai(token, 'POST', '/outbound', { ...context, toRefs: [to], subject: `本日のお礼 ${Math.random()}`, body: '本日はありがとうございました。' })
+    expect(made.status, made.text).toBe(201)
+    return made.body.data as Json
+  }
+  const send = (user: string, d: Json, extra: Record<string, unknown> = {}) => person(user, 'POST', `/outbound/${d.id}/send`, { hash: d.hash, ...extra })
+
+  beforeAll(async () => {
+    const { createServiceRecordWriter } = await import('../../src/services/record-engine')
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
+    const { systemClock, randomIds } = await import('../../src/adapters/system')
+    writer = createServiceRecordWriter({
+      companyData: sqliteCompanyData(db), transactions: sqliteTransactions(db), clock: systemClock, ids: randomIds,
+      isMember: () => true, roleOf: () => 'member', notify: () => {},
+    })
+    await allow('m-sato', ['mail'])
+    await allow('m-tanaka', ['mail'])
+    satoToken = await tokenFor('m-sato')
+    tanakaToken = await tokenFor('m-tanaka')
+  })
+
+  it('the second sender sees who sent and when, and passes only with a reason (kept in the ledger and the send row)', async () => {
+    const m = meeting('お礼を送る商談')
+    const first = (await drafted(satoToken, { meetingId: m })).draft
+    expect((await send('m-sato', first)).body.data?.outcome).toBe('sent')
+    expect(sendRow(first.id).source_key).toBe(`meeting:${m}`)
+
+    // 田中's AI is not stopped from drafting; it is told 佐藤 sent one (it can read that mail).
+    const made = await drafted(tanakaToken, { meetingId: m })
+    expect(made.alreadySent).toMatchObject({ messageId: first.id, by: 'm-sato', byName: '佐藤 健', kind: 'meeting' })
+    const second = made.draft
+    const sent = sentCount()
+    const r = await send('m-tanaka', second)
+    expect([r.status, r.body.code]).toEqual([409, 'ALREADY_SENT_FOR_SOURCE'])
+    expect(r.body.alreadySent).toMatchObject({ messageId: first.id, by: 'm-sato', byName: '佐藤 健', kind: 'meeting' })
+    expect(r.body.alreadySent.message).toMatch(/^この会議のお礼メールは佐藤 健さんが \d\d\/\d\d \d\d:\d\d に送りました$/)
+    expect(sentCount()).toBe(sent)
+    expect(stateOf(second.id).state).toBe('draft')
+    // Not a reason: refused before anything leaves.
+    for (const bad of ['', '   ', 'x'.repeat(201), '一行目\n二行目', 42]) {
+      expect((await send('m-tanaka', second, { resendReason: bad })).body.code, String(bad)).toBe('RESEND_REASON_INVALID')
+    }
+    expect(sentCount()).toBe(sent)
+
+    const reason = '先方の別の担当者にも送ってほしいと言われたため'
+    const passed = await send('m-tanaka', second, { resendReason: reason })
+    expect(passed.body.data?.outcome, passed.text).toBe('sent')
+    expect(sentCount()).toBe(sent + 1)
+    expect(sendRow(second.id)).toMatchObject({ source_key: `meeting:${m}`, resend_reason: reason, outcome: 'sent' })
+    const entry = services.recordEngine.history(owner, second.id).value.entries.at(-1)
+    expect(entry).toMatchObject({ action: 'send', actorId: 'm-tanaka' })
+    expect(entry.note).toContain(reason)
+  })
+
+  it('an app that knows no 「それでも送る」 sends nothing a second time: it gets the 409 with a sentence asking to update', async () => {
+    const m = meeting('古いアプリの商談')
+    const first = (await drafted(satoToken, { meetingId: m })).draft
+    expect((await send('m-sato', first)).body.data?.outcome).toBe('sent')
+    const second = (await drafted(tanakaToken, { meetingId: m })).draft
+    const sent = sentCount()
+    // A released app sends `{ hash }` (and maybe the files shown), never a reason.
+    const r = await send('m-tanaka', second)
+    expect(r.status).toBe(409)
+    expect(r.body.error).toContain('アプリを新しくして')
+    expect(r.body.error).toContain('何も送っていません')
+    expect(sentCount()).toBe(sent)
+  })
+
+  it('two people pressing 「確かめて送る」 at the same moment: exactly one mail leaves', async () => {
+    const m = meeting('同時に押した商談')
+    const a = (await drafted(satoToken, { meetingId: m })).draft
+    const b = (await drafted(tanakaToken, { meetingId: m })).draft
+    const sent = sentCount()
+    const results = await Promise.all([send('m-sato', a), send('m-tanaka', b)])
+    expect(results.map(x => x.body.data?.outcome ?? x.body.code).sort()).toEqual(['ALREADY_SENT_FOR_SOURCE', 'sent'])
+    expect(sentCount()).toBe(sent + 1)
+  })
+
+  it('a sender who cannot read the earlier mail is neither told nor stopped (owner decision B)', async () => {
+    const m = meeting('自分だけのやることから送った商談')
+    // 佐藤's own task (あなただけ): his mail for it stays his alone, whatever the meeting.
+    const task = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '自分の段取り', personal: true, fields: { assignee: 'm-sato' } })
+    expect(task.status, task.text).toBe(201)
+    const hidden = (await drafted(satoToken, { meetingId: m, taskId: task.body.data.record.id })).draft
+    expect((db.prepare('SELECT personal_owner FROM records WHERE company_id = ? AND id = ?').get(CO, hidden.id) as Json).personal_owner).toBe('m-sato')
+    expect((await send('m-sato', hidden)).body.data?.outcome).toBe('sent')
+
+    const made = await drafted(tanakaToken, { meetingId: m })
+    expect(made.alreadySent).toBeUndefined()
+    const r = await send('m-tanaka', made.draft)
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(JSON.stringify(r.body)).not.toContain(hidden.id)
+  })
+
+  it('a mail of a まとまり only has no source: two people send on the same deal, no reason asked (owner decision: one deal, many different mails)', async () => {
+    const first = (await drafted(satoToken, { bundleId })).draft
+    const second = (await drafted(tanakaToken, { bundleId })).draft
+    expect(first.meetingId).toBeNull()
+    expect((await send('m-sato', first)).body.data?.outcome).toBe('sent')
+    const sent = sentCount()
+    const r = await send('m-tanaka', second)
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(sentCount()).toBe(sent + 1)
+    expect(sendRow(first.id).source_key).toBeNull()
+    expect(sendRow(second.id)).toMatchObject({ source_key: null, resend_reason: null })
+  })
+
+  it('a nudge (催促) is its own source: it never meets the thank-you mail of the meeting, and one nudge per round', async () => {
+    const m = meeting('催促する商談')
+    const thanks = (await drafted(satoToken, { meetingId: m })).draft
+    expect((await send('m-sato', thanks)).body.data?.outcome).toBe('sent')
+    // 佐藤's task waits for their answer; the clock gives it back (返事の見込みを過ぎた).
+    const task = await person('m-sato', 'POST', '/records/item', { type: 'task', title: '返事をもらう', folder: '営業部', fields: { assignee: 'm-sato' } })
+    expect(task.status, task.text).toBe(201)
+    const taskId = task.body.data.record.id as string
+    const waited = await person('m-sato', 'POST', `/records/item/${taskId}/actions/wait`, { expectedVersion: stateOf(taskId).version, args: { waiting_on: '先方', wait_until: '2026-01-05' } })
+    expect(waited.status, waited.text).toBe(200)
+    const { CLOCK_ACTOR, WAIT_OVER_ACTION } = await import('../../../shared/core/core-types')
+    const over = writer.transition(CO, { recordId: taskId, action: WAIT_OVER_ACTION, expectedVersion: stateOf(taskId).version, to: 'todo', actor: CLOCK_ACTOR })
+    expect(over.ok, JSON.stringify(over)).toBe(true)
+
+    const nudge = (await drafted(satoToken, { meetingId: m, taskId })).draft
+    const r = await send('m-sato', nudge)
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(sendRow(nudge.id).source_key).toMatch(new RegExp(`^follow-up:${taskId}@\\d+$`))
+    // A second nudge in the same round: the soft gate, in its own words.
+    const again = (await drafted(satoToken, { meetingId: m, taskId })).draft
+    const twice = await send('m-sato', again)
+    expect([twice.status, twice.body.code]).toEqual([409, 'ALREADY_SENT_FOR_SOURCE'])
+    expect(twice.body.alreadySent).toMatchObject({ messageId: nudge.id, kind: 'follow-up', byName: null })
+    expect(twice.body.alreadySent.message).toMatch(/^この件の催促はあなたが/)
+  })
+})

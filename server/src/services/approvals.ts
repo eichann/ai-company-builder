@@ -41,10 +41,11 @@ import { externalToAcb } from '../../shared/core/plugins'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import type { FieldDef, TypeDefinition } from '../../shared/core/record-types'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
+import { resolveSource, sourceKey, type Source } from '../../shared/core/source-slots'
 import type {
-  ApprovalFieldView, ApprovalListItem, ApprovalMaterial, ApprovalPrecedent, ApprovalRequested, ApprovalState, ApprovalView, SameAsResult, SimilarRecords,
+  ApprovalFieldView, ApprovalListItem, ApprovalMaterial, ApprovalPrecedent, ApprovalRequested, ApprovalState, ApprovalView, SameAsResult, SimilarRecords, SimilarRequest,
 } from '../../shared/types/approvals'
-import { CONTENT_CHANGED_TEXT } from '../../shared/types/approvals'
+import { alreadyRequestedText, CONTENT_CHANGED_TEXT, SIMILAR_MAX } from '../../shared/types/approvals'
 import type { PluginFieldValue, PluginOperationRecordView } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -60,6 +61,8 @@ import { recordReader } from './record-access'
 import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
 import { currentTypes, ensureCoreTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
+import { titleWords } from './plugin-operation-similar'
+import { createSourceSlots, type SourceSlots } from './source-slots'
 
 const TYPE = 'approval'
 export const APPROVAL_NOT_FOUND = { error: '承認のお願いが見つかりません', code: 'APPROVAL_NOT_FOUND' }
@@ -106,6 +109,10 @@ export interface ApprovalDeps {
   actsFor?: (companyId: string, userId: string) => string[]
   /** The plugin as installed (labels, mapping) even while stopped; null when unknown. Display only. */
   plugin: (companyId: string, pluginId: string) => Promise<ActivePlugin | null>
+  /** 出どころ (services/source-slots.ts): a create's source and the pending requests on it the requester may see (default: over `companyData`). */
+  slots?: SourceSlots
+  /** A member's display name (「すでに〇〇さんがお願いを出しています」); none → 「ほかの人」. */
+  memberName?: (companyId: string, userId: string) => string | null
 }
 
 interface Loaded {
@@ -153,8 +160,19 @@ export interface ApprovalRoleHolders {
 
 const roleOfSpec = (s: ApproverSpec): string | null => (s.startsWith('role:') ? s.slice('role:'.length) : null)
 
+/**
+ * The source of a create of a record (plugins.md "Creates": `create_deal`) — its meeting (the
+ * basis), by the one order of `shared/core/source-slots.ts` — or null: an update, or a create
+ * from nothing, has none (each request stands alone, as before).
+ */
+export function createSourceOf(payload: PluginApprovalPayload): Source | null {
+  if (!payload.create || payload.record !== null) return null
+  return resolveSource({ meeting: payload.basis?.meetingId ?? null })
+}
+
 export function createApprovalService(deps: ApprovalDeps) {
   const { companyData, writer, fixed, operations } = deps
+  const slots = deps.slots ?? createSourceSlots({ companyData })
   /** Business roles' holders, bound once by composition/plugins.ts (`useRoles`); none until then (a role then falls back to owners / admins). */
   let roles: ApprovalRoleHolders | null = null
   /** Bound once by composition (`useMeetingLink`); without it 「同じ」 never links the meeting. */
@@ -239,8 +257,13 @@ export function createApprovalService(deps: ApprovalDeps) {
     }
   }
 
-  /** The request, when `member` may read it (else null: the same as one that does not exist). */
-  function load(member: Member, id: string): Loaded | null {
+  /**
+   * The request, when `member` may read it (else null: the same as one that does not exist).
+   * `reading`: looking at it (the card, the list) — then also a pending-or-done create of a record
+   * whose source the member reads, in a place they read (the same people a merged request is told
+   * of: "One pending create per source"); acting on it stays with the requester and approvers.
+   */
+  function load(member: Member, id: string, reading = false): Loaded | null {
     const handle = companyData.forCompany(member.companyId)
     if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) return null
     const row = handle.records.byIds([id])[0]
@@ -249,7 +272,57 @@ export function createApprovalService(deps: ApprovalDeps) {
     const a = parse(member.companyId, handle, row)
     if (!a) return null
     const involved = a.requestedBy === member.userId || a.fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role) || qualifies(member, a)
-    return involved ? a : null
+    if (involved) return a
+    if (!reading) return null
+    const fp = payloadOf(member.companyId, row.id)
+    const source = fp ? createSourceOf(fp.payload) : null
+    return source && slots.readsSource(member, source) ? a : null
+  }
+
+  /**
+   * Pending requests of the same operation creating a record from the same source, made by
+   * anyone, that `member` may read — the place of the request and the source (`slots.heldBy`) —
+   * oldest first. Synchronous: run in the same stretch as the insert it decides.
+   */
+  function pendingOnSource(member: Member, operation: string, source: Source) {
+    const handle = companyData.forCompany(member.companyId)
+    const key = sourceKey(source)
+    const rows = handle.records.candidates({ types: [TYPE], states: ['pending'], fields: [{ name: 'operation', values: [operation] }] }, SCAN_MAX)
+    const claims = handle.records.byIds(rows.map(r => r.id)).flatMap(r => {
+      const fp = payloadOf(member.companyId, r.id)
+      const s = fp ? createSourceOf(fp.payload) : null
+      if (!s || sourceKey(s) !== key) return []
+      const by = str(parse(member.companyId, handle, r)?.fields.requested_by ?? null) ?? ''
+      return [{ recordId: r.id, by, at: r.createdAt }]
+    })
+    return slots.heldBy(member, source, claims)
+  }
+
+  /**
+   * Other pending creates of the same operation the viewer may read, from the same source or with a
+   * word of the title in common (「似ている取引」: two people asking for the same new deal).
+   */
+  function similarRequests(viewer: Member, a: Loaded, payload: PluginApprovalPayload): SimilarRequest[] {
+    const handle = companyData.forCompany(viewer.companyId)
+    const op = str(a.fields.operation)
+    if (!op || !payload.create) return []
+    const source = createSourceOf(payload)
+    const words = titleWords(payload.create.title)
+    const rows = handle.records.candidates({ types: [TYPE], states: ['pending'], fields: [{ name: 'operation', values: [op] }] }, SCAN_MAX)
+    const out: SimilarRequest[] = []
+    for (const r of rows) {
+      if (r.id === a.row.id) continue
+      const other = load(viewer, r.id, true)
+      const fp = other ? payloadOf(viewer.companyId, r.id) : null
+      if (!other || !fp?.payload.create || fp.payload.record !== null) continue
+      const otherSource = createSourceOf(fp.payload)
+      const sameSource = !!source && !!otherSource && sourceKey(source) === sourceKey(otherSource)
+      const title = fp.payload.create.title
+      if (!sameSource && !words.some(w => title.normalize('NFC').includes(w))) continue
+      out.push({ approvalId: r.id, title, requestedBy: other.requestedBy, createdAt: other.row.createdAt, sameSource })
+    }
+    out.sort((x, y) => (x.createdAt < y.createdAt ? -1 : x.createdAt > y.createdAt ? 1 : 0))
+    return out.slice(0, SIMILAR_MAX)
   }
 
   function payloadOf(companyId: string, id: string): { payload: PluginApprovalPayload; hash: string; version: number } | null {
@@ -367,9 +440,11 @@ export function createApprovalService(deps: ApprovalDeps) {
     }
     // Before approving a new record: what already looks like it (only records the viewer may read).
     let similar: ApprovalView['similar'] = null
+    let requests: SimilarRequest[] | null = null
     if (payload.create && payload.record === null && a.state === 'pending') {
       const found = await operations.similarRecords(viewer, payload.plugin.id, payload.operation, { title: payload.create.title, meetingId: a.meeting ?? payload.basis?.meetingId ?? null }).catch(() => null)
       similar = found && found.ok ? found.value : null
+      requests = similarRequests(viewer, a, payload)
     }
     const pending = a.state === 'pending'
     return {
@@ -378,7 +453,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       systemLabel: plugin?.manifest.label ?? payload.plugin.id,
       recordId: aboutRow && reader.record(aboutRow) ? aboutRow.id : null,
       recordTitle: aboutRow && reader.record(aboutRow) ? aboutRow.title : null,
-      changes: fieldViews(payload, def), create, similar,
+      changes: fieldViews(payload, def), create, similar, similarRequests: requests,
       basis: {
         meetingId: meetingRow && reader.record(meetingRow) ? meetingRow.id : null,
         meetingTitle: meetingRow && reader.record(meetingRow) ? meetingRow.title : null,
@@ -493,18 +568,9 @@ export function createApprovalService(deps: ApprovalDeps) {
       const canonical = approvalPayloadCanonical(payload)
       const proposed = isObj(body) && typeof body.note === 'string' && body.note.trim() !== '' ? body.note.trim().slice(0, 2000) : null
 
-      // The same content asked by the same person and still pending: that request is the answer.
       const opName = `${pluginId}.${operation}`
       const hashNow = fixedHash(canonical)
-      const same = handle.records.candidates({
-        types: [TYPE], states: ['pending'],
-        fields: [{ name: 'payload_hash', values: [hashNow] }, { name: 'requested_by', values: [member.userId] }],
-      }, 5)[0]
-      if (same) {
-        const a = load(member, same.id)
-        const v = a ? await view(member, a) : null
-        if (v) return ok({ outcome: 'approval-requested', approval: v, existing: true })
-      }
+      const source = createSourceOf(payload)
 
       const place = { id: 'approval-0000000000000000', type: TYPE, scopeId: null, path: null, folder: folder ?? null, personalOwner: null, members: null }
       // The work's まとまり: the record when it is one, else the record's own `bundle` link (a role's override).
@@ -516,8 +582,22 @@ export function createApprovalService(deps: ApprovalDeps) {
       const title = titleOf(payload, def, plugin?.manifest.operations[operation]?.label ?? operation)
       const id = newRecordId(TYPE, deps.ids.newToken().slice(0, 16))
       let failure: Refusal | null = null
+      // What answers instead of a new request: decided in the same transaction as the insert, so two
+      // requests at the same moment cannot both pass the check (approvals.md "Making a request").
+      let existing: { id: string; by: string } | null = null
       try {
         deps.transactions.run(() => {
+          // The same content asked by the same person and still pending: that request is the answer.
+          const same = handle.records.candidates({
+            types: [TYPE], states: ['pending'],
+            fields: [{ name: 'payload_hash', values: [hashNow] }, { name: 'requested_by', values: [member.userId] }],
+          }, 5)[0]
+          if (same && load(member, same.id)) { existing = { id: same.id, by: member.userId }; return }
+          // A create from the same source asked by anyone and still pending, that the requester may read
+          // (one pending create per source): that request is the answer. One they cannot read is never
+          // met nor mentioned — they get their own.
+          const shared = source ? pendingOnSource(member, opName, source)[0] : undefined
+          if (shared) { existing = { id: shared.recordId, by: shared.by }; return }
           // The core types are stored by every index run; a company whose map was never indexed gets them here.
           ensureCoreTypes(handle.records, deps.clock.now())
           const fixedNow = fixed.fix(member.companyId, 'approval', id, canonical)
@@ -540,6 +620,15 @@ export function createApprovalService(deps: ApprovalDeps) {
         logError('approvals', 'Recording an approval request failed', err, { company: member.companyId })
         return refuse('conflict', '承認のお願いを記録できませんでした', { code: 'APPROVAL_NOT_RECORDED' })
       }
+      const found = existing as { id: string; by: string } | null
+      if (found) {
+        const a = load(member, found.id, true)
+        const v = a ? await view(member, a) : null
+        if (!v) return refuse('conflict', '承認のお願いを記録できませんでした', { code: 'APPROVAL_NOT_RECORDED' })
+        if (found.by === member.userId) return ok({ outcome: 'approval-requested', approval: v, existing: true })
+        const name = deps.memberName?.(member.companyId, found.by) ?? null
+        return ok({ outcome: 'approval-requested', approval: v, existing: true, alreadyRequestedBy: found.by, note: alreadyRequestedText(name) })
+      }
       const a = load(member, id)
       const v = a ? await view(member, a) : null
       if (!v) return refuse('conflict', '承認のお願いを記録できませんでした', { code: 'APPROVAL_NOT_RECORDED' })
@@ -548,7 +637,8 @@ export function createApprovalService(deps: ApprovalDeps) {
 
     async get(member: Member, id: string): Promise<Outcome<{ approval: ApprovalView }>> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
-      const a = load(member, id)
+      const a = load(member, id, true)
+
       const v = a ? await view(member, a) : null
       return v ? ok({ approval: v }) : notFound()
     },

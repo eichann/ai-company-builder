@@ -70,6 +70,10 @@ export interface OutboundSendRow {
   reason: string | null
   providerMessageId: string | null
   finishedAt: string | null
+  /** The draft's source at the send (`shared/core/source-slots.ts` `sourceKey`); null: none, or sent before sources were kept. */
+  sourceKey?: string | null
+  /** 「それでも送る」's reason, when an earlier send on the same source was shown (≤ 200 characters). */
+  resendReason?: string | null
 }
 
 export interface OutboundMailRepository {
@@ -106,6 +110,11 @@ export interface OutboundMailRepository {
   lastSend(messageId: string): OutboundSendRow | null
   /** Settles an `unknown` send (the person said whether it was sent). */
   resolveSend(id: string, outcome: 'sent' | 'not-sent', at: string): void
+  /**
+   * Sends on a source that went out or are going out now (`sent`, `sending`), oldest first: what
+   * 「もう送りました」 is judged from (the caller applies the reader).
+   */
+  sendsForSource(sourceKey: string): OutboundSendRow[]
   /** Lower-case domains of every recipient of a send that went out (sent). */
   sentDomains(): string[]
 }

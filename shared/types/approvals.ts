@@ -64,6 +64,12 @@ export interface ApprovalView {
   create: { title: string; fields: Array<{ label: string; shown: string }> } | null
   /** A create of a record, while pending: similar records already in ACB that the viewer may read (design §6-3, plugins.md "Similar records"), so a duplicate is noticed before approving; null otherwise. */
   similar: SimilarRecords | null
+  /**
+   * A create of a record, while pending: other pending requests to create one that the viewer may
+   * read — from the same source, or with a word of the title in common — so two requests for the
+   * same new record are noticed (approvals.md "One pending create per source"); absent from an older server.
+   */
+  similarRequests?: SimilarRequest[] | null
   /** Where the request came from: the quote of a meeting's minutes (when the viewer may read the meeting, its title too). */
   basis: { meetingId: string | null; meetingTitle: string | null; quote: string | null }
   precedents: { total: number; items: ApprovalPrecedent[] }
@@ -118,6 +124,18 @@ export interface SimilarRecords {
 /** At most this many similar records are shown. */
 export const SIMILAR_MAX = 5
 
+/** Another pending request to create a record (never one the viewer cannot read). */
+export interface SimilarRequest {
+  approvalId: string
+  /** What it would make (the create's title). */
+  title: string
+  /** Who asked (member id). */
+  requestedBy: string
+  createdAt: string
+  /** From the same meeting (the same source) as this request. */
+  sameSource: boolean
+}
+
 /** What 「これと同じ…です（作らない）」 answers (POST …/approvals/:id/same-as). */
 export interface SameAsResult {
   approval: ApprovalView
@@ -144,7 +162,20 @@ export interface ApprovalRequested {
   approval: ApprovalView
   /** true when an identical pending request already existed (nothing new was made). */
   existing: boolean
+  /**
+   * Someone else's pending request on the same source answered instead (one pending create per
+   * source, among people who can read it): who asked (member id), and the sentence
+   * 「すでに〇〇さんがお願いを出しています」.
+   */
+  alreadyRequestedBy?: string
+  note?: string
 }
+
+/** 「すでに〇〇さんがお願いを出しています」 (`name` null: 「ほかの人」). */
+export function alreadyRequestedText(name: string | null): string {
+  return `すでに${name ? `${name}さん` : 'ほかの人'}がお願いを出しています。新しいお願いは作らず、そのお願いにまとめました。`
+}
+
 
 /** The words the card shows when the fixed content changed before approving (409 CONTENT_CHANGED). */
 export const CONTENT_CHANGED_TEXT = '内容が変わりました。もう一度確かめてください'
