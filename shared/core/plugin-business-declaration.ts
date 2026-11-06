@@ -8,7 +8,7 @@
 import { CORE_TYPE_FILES } from './core-types'
 import { parseCallUses, parseEventUses } from './plugin-call-declaration'
 import {
-  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS, SIMILAR_BY,
+  FIELD_POLICIES, PLUGIN_ACTORS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ID_RE, ROLE_WHO_PREFIX, noFlow, PLUGIN_VERSION_RE, SIMILAR_BY,
   type CommonPart, type ConnectorUse, type FieldPolicy, type OperationUse, type PluginManifest, type SimilarBy,
 } from './plugin-declaration'
 import { strList, typeNameLayerProblem, unknownKeys } from './plugin-declaration-rules'
@@ -114,7 +114,6 @@ export function parseBusiness(raw: { [k: string]: YamlValue }, err: (m: string) 
   if (!isYamlMap(rawDefaults)) err('field_policy_defaults は「欄の名前: auto / prior / off」の形で書いてください')
   else for (const [f, p] of Object.entries(rawDefaults)) {
     if (!ONTOLOGY_NAME_RE.test(f) || !FIELD_POLICIES.includes(p as FieldPolicy)) err(`field_policy_defaults の「${f}」は auto / prior / off です`)
-    else if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) err(`field_policy_defaults の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`)
     else fieldPolicyDefaults[f] = p as FieldPolicy
   }
 

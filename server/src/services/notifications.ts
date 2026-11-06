@@ -22,6 +22,10 @@
  *   business day, counts only — built when read) and a due on the next
  *   business day (`due_tomorrow`, the clock, to the assignee, once per due
  *   value). Fresh ones carry `desktop`: the app's Mac notification.
+ * - An AI's automatic change (`ai_changed`, owner decision 2026-11-06): a plugin
+ *   operation the AI ran that was applied without approval tells the record's
+ *   assignee (also when it was their own AI) what changed, why and how to undo
+ *   it; the morning summary lists the ones not yet 確かめた (`aiChangesToCheck`).
  * - The push channel carries only `{ kind: 'notifications', version }`, a
  *   fresh value: the app asks again; it never acts on the signal.
  */
@@ -293,6 +297,32 @@ export function repliedDoneOf(userId: string, change: RecordChange, final: Reado
     && str(fields.assignee) === userId && entry.toState !== null && final.has(entry.toState)
 }
 
+/**
+ * Whether this entry is an AI's automatic change of a record `userId` is the assignee of
+ * (`ai_changed`, owner decision 2026-11-06: 「モノは AI が自動で変え、人に知らせて［元に戻す］を出す」):
+ * a plugin operation's confirmed write (`receipt.kind: written`, its operation id) whose actor is an
+ * AI and that nobody approved (`receipt.approvedBy` absent — an approved one is the approver's
+ * decision, told as `approval_result`). The member is told even when the AI was their own (an
+ * automatic step ran with nobody there). Only the assignee, and only while they can read the record
+ * (`recordChange`'s check). Once per operation (dedupe key `ai_changed:<operation id>`).
+ */
+export function aiChangedOf(userId: string, change: RecordChange): string | null {
+  const { entry, fields } = change
+  const receipt = entry.receipt
+  if (entry.actorKind !== 'ai' || !receipt || receipt.kind !== 'written' || typeof receipt.operationId !== 'string' || receipt.approvedBy) return null
+  return str(fields.assignee) === userId ? receipt.operationId : null
+}
+
+/** A value as the member reads it in a notice: a choice by its label, cut short. */
+function shownValue(v: LedgerValue | undefined, labels: Record<string, string> | undefined): string {
+  if (v === null || v === undefined || v === '') return '（なし）'
+  const s = typeof v === 'string' ? (labels?.[v] ?? v) : String(v)
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s
+}
+
+/** How many AI changes not yet 確かめた the morning summary names by title (the rest are counted). */
+export const AI_CHANGES_NAMED = 3
+
 export function createNotificationService(deps: NotificationServiceDeps) {
   const { companyData, clock } = deps
 
@@ -463,6 +493,30 @@ export function createNotificationService(deps: NotificationServiceDeps) {
   }
 
   /**
+   * 「AI が変えた・まだ確かめていない」 (owner decision 2026-11-06): the member's `ai_changed` notices
+   * since their last morning summary before `today` (all kept ones when there was none) that are
+   * not 確かめた — the notice still unread (opening it, or 「すべて読んだ」, is 確かめた) and the
+   * change not written back (by anyone) — about a record they can read now. Newest first.
+   */
+  function aiChangesToCheck(companyId: string, handle: CompanyData, userId: string, mayRead: (userId: string, rec: RecordAccessRow) => boolean, today: string) {
+    const rows = handle.notifications.list(userId, ROWS_READ)
+    const last = rows.find(r => r.kind === 'morning_summary' && (r.dedupeKey?.split(':')[1] ?? '') < today)
+    const fresh = rows.filter(r => r.kind === 'ai_changed' && r.readAt === null && (!last || r.createdAt >= last.createdAt))
+    const recs = new Map(handle.records.byIds([...new Set(fresh.map(r => r.recordId))]).map(r => [r.id, r]))
+    const titles: string[] = []
+    let total = 0
+    for (const r of fresh) {
+      const rec = recs.get(r.recordId)
+      if (!rec || rec.removedAt !== null || !mayRead(userId, rec)) continue
+      const op = handle.plugins.operation(r.dedupeKey?.slice('ai_changed:'.length) ?? '')
+      if (op?.undoneBy) continue
+      total++
+      if (titles.length < AI_CHANGES_NAMED && !titles.includes(rec.title)) titles.push(rec.title)
+    }
+    return { total, titles }
+  }
+
+  /**
    * 「今日のあなたの番」: on a business day between MORNING_SUMMARY_FROM and
    * MORNING_SUMMARY_UNTIL (company time), one notice per member who has
    * something in 「あなたの番」 and is not absent today (`morning_summary:<day>`;
@@ -479,7 +533,7 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     const rows: NotificationRow[] = []
     for (const userId of (deps.membersOf?.(companyId) ?? []).filter(u => !done.has(u)).slice(0, limit)) {
       if (deps.coverOf?.(companyId, userId)) continue // absent today: their delegate has it
-      if (turnCounts(companyId, handle, userId, mayRead, today).total === 0) continue
+      if (turnCounts(companyId, handle, userId, mayRead, today).total === 0 && aiChangesToCheck(companyId, handle, userId, mayRead, today).total === 0) continue
       rows.push({
         id: deps.ids.newId(), userId, kind: 'morning_summary', recordId: '', recordVersion: 0, action: '', actorId: null, actorKind: null,
         dedupeKey: key, createdAt: clock.now(), readAt: null,
@@ -569,11 +623,17 @@ export function createNotificationService(deps: NotificationServiceDeps) {
     return { due, when: due.slice(0, 10) === addDays(today, 1) ? '明日' : dueText(due.slice(0, 10)) }
   }
 
-  /** The morning summary's words: 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」. */
-  function morningText(c: { total: number; dueToday: number; overdue: number }): string {
-    if (c.total === 0) return '今日のあなたの番は、いまはありません'
+  /**
+   * The morning summary's words: 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」, then — while
+   * there are any — 「AI が変えた・まだ確かめていない 2件：「A社」「B社」」.
+   */
+  function morningText(c: { total: number; dueToday: number; overdue: number }, ai: { total: number; titles: string[] } = { total: 0, titles: [] }): string {
     const parts = [...(c.dueToday > 0 ? [`期限が今日 ${c.dueToday}件`] : []), ...(c.overdue > 0 ? [`期限を過ぎた ${c.overdue}件`] : [])]
-    return `今日のあなたの番 ${c.total}件${parts.length > 0 ? `（${parts.join('・')}）` : ''}`
+    const turn = c.total === 0 ? '今日のあなたの番は、いまはありません' : `今日のあなたの番 ${c.total}件${parts.length > 0 ? `（${parts.join('・')}）` : ''}`
+    if (ai.total === 0) return turn
+    const named = ai.titles.map(t => `「${t}」`).join('')
+    const more = ai.total > ai.titles.length ? `ほか` : ''
+    return `${turn}。AI が変えた・まだ確かめていない ${ai.total}件：${named}${more}`
   }
 
   function textFor(row: NotificationRow, t: string, actor: string, def: TypeDefinition | undefined, entry: () => LedgerEntry | undefined): string {
@@ -616,6 +676,18 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         return `来た連絡から、やることを作りました：${t}`
       case 'minutes_arrived':
         return `議事録が届きました：${t}`
+      case 'ai_changed': {
+        const e = entry()
+        const what = (e?.changes ?? []).filter(c => c.field !== 'state').map(c => {
+          const f = def?.fields[c.field]
+          return `${f?.label ?? c.field} ${shownValue(c.before, f?.optionLabels)} → ${shownValue(c.after, f?.optionLabels)}`
+        })
+        const note = (e?.note ?? '').trim()
+        const why = note ? `。理由：${note.length > 120 ? `${note.slice(0, 120)}…` : note}` : ''
+        return what.length > 0
+          ? `${actor}が${t}を自動で変えました：${what.join('、')}${why}`
+          : `${actor}が${t}について、つないでいるサービスに自動で記録しました${why}`
+      }
       case 'replied_done':
         return `返事をしたので完了にしました：${t}`
       case 'mail_left_inbox':
@@ -683,13 +755,20 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const fromMessage = !asked && fromMessageOf(userId, change, def, ledgerOf, originIdsOf)
         // Their own AI completed what their reply finished (the inbox's reply check, owner FB #19).
         const repliedDone = !asked && !fromMessage && repliedDoneOf(userId, change, final)
-        // Never the actor — except their own AI handing them what someone else asked, or what it
-        // made them from a message that came in (they did not do that).
-        if (userId === change.entry.actorId && !((asked || fromMessage || repliedDone) && change.entry.actorKind === 'ai')) continue
+        // An AI changed their record automatically (owner decision 2026-11-06): told with ［元に戻す］.
+        const aiChanged = !asked && !fromMessage && !repliedDone ? aiChangedOf(userId, change) : null
+        // Never the actor — except their own AI handing them what someone else asked, what it
+        // made them from a message that came in, or what it changed automatically (they did not do that).
+        if (userId === change.entry.actorId && !((asked || fromMessage || repliedDone || aiChanged) && change.entry.actorKind === 'ai')) continue
         // A meeting's minutes arrived (minutes.md): once per meeting and member, whoever's calendar found it.
-        const arrived = !asked && !fromMessage && !repliedDone && minutesArrivedOf(change)
-        const kind = asked ? 'asked' : fromMessage ? 'from_message' : repliedDone ? 'replied_done' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
-        const base = arrived
+        const arrived = !asked && !fromMessage && !repliedDone && !aiChanged && minutesArrivedOf(change)
+        const kind = asked ? 'asked' : fromMessage ? 'from_message' : repliedDone ? 'replied_done' : aiChanged ? 'ai_changed' : arrived ? 'minutes_arrived' : noticeKind(userId, change, final)
+        const base = aiChanged
+          ? {
+            recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
+            actorKind: change.entry.actorKind, dedupeKey: `ai_changed:${aiChanged}`, createdAt: now, readAt: null,
+          }
+          : arrived
           ? {
             recordId: change.entry.recordId, recordVersion: change.entry.version, action: change.entry.action, actorId: change.entry.actorId,
             actorKind: change.entry.actorKind, dedupeKey: `minutes_arrived:${change.entry.recordId}`, createdAt: now, readAt: null,
@@ -805,14 +884,16 @@ export function createNotificationService(deps: NotificationServiceDeps) {
       const today = local.slice(0, 10)
       let counts: ReturnType<typeof turnCounts> | null = null
       const countsNow = () => (counts ??= turnCounts(member.companyId, handle, member.userId, (_, rec) => reader.record(rec), today))
+      let aiToCheck: ReturnType<typeof aiChangesToCheck> | null = null
+      const aiNow = () => (aiToCheck ??= aiChangesToCheck(member.companyId, handle, member.userId, (_, rec) => reader.record(rec), today))
       const dueStates = new Map(handle.records.states(shown.filter(r => r.kind === 'due_tomorrow').map(r => r.recordId)).map(st => [st.recordId, st]))
       const items: NotificationItem[] = shown.map(r => {
         const read = r.readAt !== null
         if (r.kind === 'morning_summary') {
           const day = r.dedupeKey?.split(':')[1] ?? ''
           // Built when read: today's shows the turn as it is now; an older one only says what it was.
-          const text = day === today ? morningText(countsNow()) : `${dueText(day)}の「今日のあなたの番」（朝の知らせ）`
-          const desktop = day === today && !read && local.slice(11, 16) < MORNING_SUMMARY_UNTIL && countsNow().total > 0
+          const text = day === today ? morningText(countsNow(), aiNow()) : `${dueText(day)}の「今日のあなたの番」（朝の知らせ）`
+          const desktop = day === today && !read && local.slice(11, 16) < MORNING_SUMMARY_UNTIL && (countsNow().total > 0 || aiNow().total > 0)
             ? { title: text, body: 'やることの一覧で確かめてください' } : undefined
           return { id: r.id, kind: r.kind, recordId: '', recordType: '', recordTitle: '', version: 0, text, createdAt: r.createdAt, read, ...(desktop ? { desktop } : {}) }
         }
@@ -837,9 +918,19 @@ export function createNotificationService(deps: NotificationServiceDeps) {
             desktop = { title: `${personText(r.actorId, names)}から頼まれました`, body: rec.title }
           }
         }
+        // The AI's automatic change: the operation for ［元に戻す］, and whether it was written back already.
+        let aiChange: NotificationItem['aiChange']
+        if (r.kind === 'ai_changed') {
+          const op = handle.plugins.operation(r.dedupeKey?.slice('ai_changed:'.length) ?? '')
+          if (op && op.recordId === rec.id) {
+            aiChange = { pluginId: op.pluginId, operationId: op.id, undone: op.undoneBy !== null }
+            if (aiChange.undone) text = `${text}（元に戻しました）`
+          }
+        }
         return {
           id: r.id, kind: r.kind as NotificationKind, recordId: rec.id, recordType: rec.type, recordTitle: rec.title,
           version: r.recordVersion, text, createdAt: r.createdAt, read, ...(r.forUserId ? { forUserId: r.forUserId } : {}), ...(desktop ? { desktop } : {}),
+          ...(aiChange ? { aiChange } : {}),
         }
       })
       return ok({ available: true, unread: visible.filter(r => r.readAt === null).length, items })

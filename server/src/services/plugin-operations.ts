@@ -148,7 +148,9 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       const note = noted.note
       const asked = b.fields as Record<string, AcbValue>
       const names = Object.keys(asked)
-      const policy = notAuto(plugin, operation, names)
+      // A move to or from a closing stage (won / lost) asks first even where the field is automatic.
+      const writeValues = () => ({ asked, current: valuesOf(member.companyId, recordId).fields })
+      const policy = notAuto(plugin, operation, names, writeValues())
       if (policy.off.length > 0) return refuse('bad-request', `書き戻さない欄です：${policy.off.join('、')}（何も変えていません）`, { code: 'FIELD_NOT_WRITABLE', fields: policy.off })
       if (policy.prior.length > 0) return (await approvalStepRefusal(member, actor, pluginId)) ?? approvalRequired(policy.prior)
       const pkg = { manifest: plugin.manifest, types: plugin.types }
@@ -157,7 +159,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       if (valuesOf(member.companyId, recordId).version !== b.expectedVersion) {
         return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: valuesOf(member.companyId, recordId).version })
       }
-      const precheck = precheckFor(member, actor, plugin, op.who, recordId, place, fieldsAuto(operation, names))
+      const precheck = precheckFor(member, actor, plugin, op.who, recordId, place, fieldsAuto(operation, names, writeValues))
 
       return serialised(`${member.companyId}|${plugin.connectionId}|${link.object}|${link.externalId}`, async () => {
         const account = await importer.verifyAccount(member.companyId, plugin, precheck)

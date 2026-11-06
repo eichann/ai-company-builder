@@ -68,11 +68,11 @@
  *   plugin-fingerprint.ts            fingerprint v2 and the signature slot (signature.yaml)
  *   plugin-package.ts                validatePluginPackage, combineUse
  *   plugin-mapping.ts                the mapping: parsePluginMapping, checkMappingAgainstProperties
- *   plugin-policies.ts               approverFor, effectiveFieldPolicy, effectiveOperationPolicy
+ *   plugin-policies.ts               approverFor, effectiveFieldPolicy, effectiveOperationPolicy, closingMoveFields
  *   plugin-values.ts                 externalToAcb, acbToExternal
  */
 export {
-  CREATE_CONTENT_SLOTS, FIELD_POLICIES, asksFirst, moneyField, writeAsksFirst, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, ROLE_WHO_PREFIX, roleOfWho, PLUGIN_ID_RE, PLUGIN_VERSION_RE, PRIOR_ONLY_FIELDS,
+  CREATE_CONTENT_SLOTS, FIELD_POLICIES, asksFirst, moneyField, writeAsksFirst, PLUGIN_ACTORS, PLUGIN_CONTRACT, PLUGIN_CONTRACTS, PLUGIN_CONTRACT_V2, PLUGIN_CONTRACT_V3, PLUGIN_ENDPOINTS, ROLE_WHO_PREFIX, roleOfWho, PLUGIN_ID_RE, PLUGIN_VERSION_RE, CLOSING_FIELDS,
   comparePluginVersions, connectorName, pluginAvailableTo,
   type ConnectorUse, type CreateContentSlot, type FieldPolicy, type OperationKind, type OperationReach, type OperationUse, type PluginEndpoint,
   type PluginEndpointName, type PluginKind, type PluginManifest, type PluginObject, type PluginOperation, type PluginPackage, type PluginParsed,
@@ -103,7 +103,7 @@ export {
   DEFAULT_APPROVERS, MAPPING_IMPORT_MAX, MAPPING_SECTIONS, checkMappingAgainstProperties, parsePluginMapping,
   type ExternalPropertyInfo, type MappingField, type MappingObject, type PluginMapping,
 } from './plugin-mapping'
-export { approverFor, effectiveFieldPolicy, effectiveOperationPolicy } from './plugin-policies'
+export { approverFor, closingMoveFields, closingMoveProperties, effectiveFieldPolicy, effectiveOperationPolicy } from './plugin-policies'
 export { acbToExternal, externalToAcb, type AcbValue, type ExternalProperties } from './plugin-values'
 export { companyExtensionConflicts } from './plugin-type-upgrade'
 export { PLUGIN_PACKAGE_DIR_RE, isPluginPackagePath } from './plugin-package-paths'

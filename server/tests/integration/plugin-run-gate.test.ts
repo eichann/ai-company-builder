@@ -339,6 +339,50 @@ describe("a write whose policy is prior becomes a request in a step's run only w
   })
 })
 
+describe("a move to a closing stage in a step's run is only an approval request, with the step's approvals (owner 2026-11-06)", () => {
+  // The package here makes update_deal move money; this forges a company whose stage is automatic with closing
+  // stages (the shape of 法人営業 0.4.1), as the approval seam's tests forge a field turned off.
+  const versionOf = (id: string) => (db.prepare('SELECT version FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, id) as Json).version as number
+  const STAGE = { from: 'dealstage', write: true, values: { appointmentscheduled: 'first_meeting', qualifiedtobuy: 'proposal', presentationscheduled: 'quote', decisionmakerboughtin: 'final' }, people: null }
+  const body = (stage: string) => ({ expectedVersion: versionOf(recordOf('1000000001')), fields: { stage }, note: '議事録にもとづく' })
+  const forged = () => {
+    const real = services.plugins.active.bind(services.plugins)
+    return vi.spyOn(services.plugins, 'active').mockImplementation(async (...args: Json[]) => {
+      const r = await (real as Json)(...args)
+      if (!r.ok || r.plugin.pluginId !== 'sample-sales') return r
+      const { manifest, mapping } = r.plugin
+      const deal = mapping.objects.deal
+      return { ok: true, plugin: {
+        ...r.plugin,
+        manifest: { ...manifest, operations: { ...manifest.operations, update_deal: { ...manifest.operations.update_deal, movesMoney: false } } },
+        mapping: { ...mapping, objects: { ...mapping.objects, deal: { ...deal, fields: { ...deal.fields, stage: STAGE } } }, policy: { ...mapping.policy, stage: 'auto' }, closingStages: ['final'] },
+      } }
+    })
+  }
+
+  it("without approvals: the gate's one answer for a closing move, while an open move is written; with approvals a request", async () => {
+    const spy = forged()
+    try {
+      const work = runOf('sample-sales__work')
+      // Bring the stage in (the mapping in force here does not read it).
+      expect((await refresh(null)).ok).toBe(true)
+      const approvals = approvalCount()
+      const before = fake.requests.filter(q => q.method === 'PATCH').length
+      expect(await services.pluginOperations.run(member, aiIn(work), 'sample-sales', recordOf('1000000001'), 'update_deal', body('final'))).toEqual(NOT_IN_STEP)
+      expect(await services.approvals.request(member, aiIn(work), 'sample-sales', recordOf('1000000001'), 'update_deal', body('final'))).toEqual(NOT_IN_STEP)
+      expect(approvalCount()).toBe(approvals)
+      expect(fake.requests.filter(q => q.method === 'PATCH').length).toBe(before)
+      const asked = await services.approvals.request(member, aiIn(runOf('sample-sales__ask')), 'sample-sales', recordOf('1000000001'), 'update_deal', body('final'))
+      expect(asked, JSON.stringify(asked)).toMatchObject({ ok: true, value: { outcome: 'approval-requested' } })
+      expect(approvalCount()).toBe(approvals + 1)
+      expect(fake.requests.filter(q => q.method === 'PATCH').length).toBe(before)
+      // An open move in the same run is written at once (auto).
+      const open = await services.pluginOperations.run(member, aiIn(work), 'sample-sales', recordOf('1000000001'), 'update_deal', body('quote'))
+      expect(open, JSON.stringify(open)).toMatchObject({ ok: true, value: { operation: { state: 'applied' } } })
+    } finally { spy.mockRestore() }
+  })
+})
+
 describe("the AI's tool list of a step's run is its step's operations", () => {
   it("a consultation lists them all; a step what its step allows; a step without plugin_operations, another plugin's none", async () => {
     const all = await toolNames(null)

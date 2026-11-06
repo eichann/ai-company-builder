@@ -10,7 +10,7 @@ import { approvalReasonProblem, type ApprovalFieldChange, type ApproverSpec, typ
 import { acbToExternal, approverFor, effectiveFieldPolicy, externalToAcb, type AcbValue } from '../../shared/core/plugins'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
-import { createPolicy, notAuto, placeOf, type OperationChecks } from './plugin-operation-checks'
+import { closingFieldsOf, createPolicy, notAuto, placeOf, type OperationChecks } from './plugin-operation-checks'
 import {
   conflict, isObj, isoOf, notActive, notFound, operationOff, rawOf, stripTitle,
   type OperationActor, type OperationView, type PluginOperationDeps, type Serialised,
@@ -107,9 +107,12 @@ export function createOperationApprovals(
       if (!isObj(b.fields) || Object.keys(b.fields).length === 0 || Object.keys(b.fields).length > 30) return refuse('bad-request', 'fields: { <field>: value } (1–30)')
       const asked = b.fields as Record<string, AcbValue>
       const names = Object.keys(asked)
-      const policy = notAuto(plugin, operation, names)
+      // A move to or from a closing stage (won / lost) is an approval request even where the field is automatic.
+      const writeValues = { asked, current: valuesOf(member.companyId, recordId).fields }
+      const policy = notAuto(plugin, operation, names, writeValues)
       if (policy.off.length > 0) return refuse('bad-request', `書き戻さない欄です：${policy.off.join('、')}（何も変えていません）`, { code: 'FIELD_NOT_WRITABLE', fields: policy.off })
       if (policy.prior.length === 0) return conflict('この変更は承認なしで書けます', 'APPROVAL_NOT_NEEDED')
+      const closing = closingFieldsOf(plugin, operation, names, writeValues)
       const pkg = { manifest: plugin.manifest, types: plugin.types }
       const rules = plugin.mapping.objects[op.object]?.fields ?? {}
       const translated = acbToExternal(pkg, plugin.mapping, op.object, asked)
@@ -143,7 +146,7 @@ export function createOperationApprovals(
             ...head(plugin), accountId: link.accountId, record: { id: recordId, version: now.version }, object: link.object,
             externalId: link.externalId, changes, create: null,
           },
-          approver: approverFor(plugin.manifest, plugin.mapping, operation, asked), folder: place,
+          approver: approverFor(plugin.manifest, plugin.mapping, operation, asked, closing), folder: place,
         })
       })
     },

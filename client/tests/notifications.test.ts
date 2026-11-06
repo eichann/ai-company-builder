@@ -216,6 +216,21 @@ test('the server’s fresh notices are Mac notifications once per PC — also on
   watcher.stop()
 })
 
+test('an AI change notice keeps the operation ［元に戻す］ sends only when it is plain ids; anything else is dropped from it', async () => {
+  const base = { kind: 'ai_changed', recordId: 'deal-cccccc03', recordType: 'deal', recordTitle: '研修導入', version: 4, text: 'AliceさんのAIが「研修導入」を自動で変えました', createdAt: '2026-11-06T01:00:00Z', read: false }
+  const good = { ...base, id: 'n-ai1', aiChange: { pluginId: 'corporate-sales', operationId: 'op-0123abcd', undone: false } }
+  const bad = { ...base, id: 'n-ai2', aiChange: { pluginId: '../x', operationId: 'op/../../undo', undone: false } }
+  const server: Server = { turn: [], notices: { available: true, unread: 2, items: [good, bad] }, calls: [] }
+  const watcher = createNotificationsWatcher({
+    baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},
+    fetch: fakeServer(server), log: quiet, setInterval: () => 0, clearInterval: () => {},
+  })
+  await watcher.watch('co')
+  const items = watcher.state('co').notices.items
+  assert.deepEqual(items.map(i => [i.id, i.aiChange ?? null]), [['n-ai1', { pluginId: 'corporate-sales', operationId: 'op-0123abcd', undone: false }], ['n-ai2', null]])
+  watcher.stop()
+})
+
 test('records off: no title bar parts; refusals of bad input', async () => {
   const watcher = createNotificationsWatcher({
     baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], onChanged: () => {},

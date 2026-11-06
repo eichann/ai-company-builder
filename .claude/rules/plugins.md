@@ -618,11 +618,29 @@ GET  /api/companies/:companyId/plugins/:pluginId/access-log    owner / admin
   writes nothing; milestone 4 makes an approval request instead: `approvals.md`), `off`. The business plugin's `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
-- **`stage` is written only after an approval** (`PRIOR_ONLY_FIELDS`; milestone 3 never wrote it,
-  milestone 4 design §9 q2 allows `prior` because div's 確度 is HubSpot's stage): moving the stage
-  can make a deal won / lost. A mapping may say `write: true`; an `auto` default or policy for it is
-  refused; at run time it is at least `prior` whatever is stored, and so is any field read from the
-  same outside property.
+- **Things are written automatically; people and money need approval** (owner decisions 2026-11-04 /
+  2026-11-06, plan §14-27): an AI's change of a thing happens without asking, its assignee is told
+  and offered ［元に戻す］ (`notifications.md` `ai_changed`); prior approval only for what reaches
+  people, moves money or cannot be undone.
+- **`stage` asks first only to or from a closing stage** (`CLOSING_FIELDS` in
+  `plugin-declaration.ts`; replaces 節目4 §9 q2's "stage always asks first"): the stage may be `auto`
+  (a default or the company's policy), written at once and undoable with 「変更前の値を書き戻す」 — but
+  a write that moves it **to** one of the mapping's `closing_stages` (受注・失注) **or away from one**
+  (reopening a won deal; undoing an approved close) is `prior`, approved by at least a department
+  manager (`closingMoveFields` / `closingMoveProperties` in `plugin-policies.ts`, used by the run, the
+  precheck before the send, the undo and `prepareApproval`; `approverFor`'s `closing`). **Judged on
+  the outside property**: any written field whose outside property is the stage's, with a value the
+  stage's `values` read as a closing stage, is the same move (div's 確度 on HubSpot's `dealstage`).
+  **A mapping without `closing_stages`** cannot tell a closing move apart, so there the stage stays
+  `prior` (the safest rule): `policy: { stage: auto }` is refused by `parsePluginMapping` (「受注・失注
+  になる段階（closing_stages）を書くまで…」), and a default or stored `auto` is clamped to `prior` at
+  run time (`effectiveFieldPolicy`), also for a field read from the same property. The package's
+  `field_policy_defaults` may say `stage: auto` (its recommended mapping names the closing stages).
+  The `auto` stage needs the admin's acknowledgement like any `auto` field. Tests:
+  `tests/unit/plugins.test.ts` 「the stage may be automatic only with closing stages…」,
+  `tests/integration/plugin-operations.test.ts` 「the stage moves by itself except to or from a
+  closing stage…」 (route, AI token, the seam, reopening, undo, notice), `plugin-run-gate.test.ts`
+  「a move to a closing stage in a step's run…」 — mutation-checked.
 - **Who approves** a `prior` field or create (milestone 4, design §3-4 / §9 q3; `approverFor`,
   `shared/core/approvals.ts`): the mapping's `approval_by { <field or create op>: self |
   dept_manager | admin }`, else `DEFAULT_APPROVERS` (stage / confidence `self`, amount / closed
@@ -973,7 +991,7 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   the record imported through the current connection; `who` (`viewer` → can read; `ai` only
   where listed and only for what the member may do: the engine's `mayAct`); **the AI's reason
   for a decision operation** (`REASON_REQUIRED`; people may leave it out); every field `auto`
-  (a `prior` field — `stage` at best, milestone 4 — → 409 `APPROVAL_REQUIRED`, an `off` one → 400
+  (a `prior` field — or the stage moved to or from a closing stage — → 409 `APPROVAL_REQUIRED`, an `off` one → 400
   `FIELD_NOT_WRITABLE`; **one such field refuses the whole request**, review §6.3); values
   translatable; `expectedVersion` current. A create: its policy `auto` (`prior` → 409
   `APPROVAL_REQUIRED`, `off` → 400 `OPERATION_OFF`), below. **Over HTTP an `APPROVAL_REQUIRED`
@@ -1005,8 +1023,10 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   connection, the records switch, the member's membership and right to act, the AI stop, and
   every field still `auto` under the mapping in force (§6.5).
 - **「変更前の値を書き戻す」** (`UNDO_LABEL`; undo, people only — no AI route): only an `applied`
-  update not yet undone, by its actor (an AI's change: the member it acted for) or an owner /
-  admin, re-checked like a new write (stops, membership, `who`, policy), on the **same connection
+  update not yet undone, by its actor (an AI's change: the member it acted for), **the record's
+  assignee for an AI's change nobody approved** (they are told of it, owner decision 2026-11-06) or
+  an owner / admin, re-checked like a new write (stops, membership, `who`, policy — writing back
+  to or from a closing stage is not automatic: 409 `APPROVAL_REQUIRED`), on the **same connection
   and account** (else `ACCOUNT_CHANGED`), serialised, and only while HubSpot still holds exactly
   what ACB wrote (else 409 `CHANGED_OUTSIDE` with the current values). It sends the stored raw
   previous values to the stored properties — never re-read through the current mapping (§6.1) —
@@ -1019,7 +1039,9 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   take the app's informational provenance `conversationId` / `proposedBy`
   (`selfReportedProvenance`, records.md "Provenance"); it lands on the ledger entry and never
   authorizes anything.
-- Notices: the engine's `records` signal (kind + version, no content) to the record's assignee.
+- Notices: the engine's `records` signal (kind + version, no content) to the record's assignee; an
+  AI's write applied without approval (update or attached create) is also the `ai_changed` notice to
+  the assignee — what changed, the AI's reason, ［元に戻す］ (`notifications.md`).
 - Kill switches, each from the next call (5 levels): the operator's stop file (the connector: every
   use of it; the business plugin: its own), the company's switch of either, the key's stop /
   「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the mapping), the
@@ -1240,7 +1262,9 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   on / off (off with a confirmation; the server's `problem` in plain words), the mapping as a
   table (ACB field by its Japanese name from the business plugin's types — `PluginDetail.labels` — with
   the identifier in small print, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
-  `stage` is shown as not writable) or as YAML for advanced use, versions with 「この版に戻す」,
+  the stage offers 「自動で書き戻す」 only when the mapping names `closing_stages`, with the line
+  「自動にしても、受注・失注にする（そこから戻す）ときは承認が要ります」, else 「受注・失注になる段階
+  （closing_stages）を書くまで、自動にはできません」 — `autoUnavailable` / `closingNote`) or as YAML for advanced use, versions with 「この版に戻す」,
   「HubSpot に聞いて確かめる」 on the text being edited, import with its report (and
   「新しいつなぎ先として始める」 after `ACCOUNT_CHANGED`), the history.
 - The table edits the YAML (`admin/src/lib/integrations.ts`): parsed with `yaml-lite`, one field

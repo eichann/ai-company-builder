@@ -5,7 +5,7 @@
 // The server decides: everything here is for the screen (`plugins.md`).
 
 import { isYamlMap, parseYamlLite, type YamlValue } from '../../../shared/core/yaml-lite'
-import { MAPPING_SECTIONS, PRIOR_ONLY_FIELDS } from '../../../shared/core/plugins'
+import { CLOSING_FIELDS, MAPPING_SECTIONS } from '../../../shared/core/plugins'
 import type { FieldPolicy, ImportReport, PluginFieldPolicyView, PluginProblem } from './api'
 
 /** Why it does not run, for people (no jargon). */
@@ -129,8 +129,12 @@ export interface MappingRow {
   /** The outside property. */
   from: string
   choice: WriteChoice
-  /** The field is written back only after an approval, never automatically (the stage: it can make a deal won / lost). */
-  priorOnly: boolean
+  /**
+   * A field some of whose values close the work (the stage: won / lost). null for any other field.
+   * `stagesNamed`: the mapping lists them (`closing_stages`), so the field may be automatic while a
+   * move to or from one of them still asks first; without them it is never automatic.
+   */
+  closing: { stagesNamed: boolean } | null
 }
 
 type YamlMap = { [key: string]: YamlValue }
@@ -156,6 +160,7 @@ export function mappingRows(text: string, policies: PluginFieldPolicyView[]): { 
   if (!isYamlMap(parsed.value)) return { ok: false, error: '読み替え表の形ではありません' }
   const doc = parsed.value
   const policy = isYamlMap(doc.policy) ? doc.policy : {}
+  const stagesNamed = Array.isArray(doc.closing_stages) && doc.closing_stages.length > 0
   const rows: MappingRow[] = []
   for (const object of objectNames(doc)) {
     const fields = (doc[object] as YamlMap).fields
@@ -165,7 +170,7 @@ export function mappingRows(text: string, policies: PluginFieldPolicyView[]): { 
       rows.push({
         object, field, from: typeof rule.from === 'string' ? rule.from : '',
         choice: choiceOf(field, rule.write === true, policy, policies),
-        priorOnly: PRIOR_ONLY_FIELDS.includes(field),
+        closing: CLOSING_FIELDS.includes(field) ? { stagesNamed } : null,
       })
     }
   }
@@ -237,4 +242,15 @@ function block(v: YamlMap, indent: number, depth: number): string[] {
 /** A mapping value as YAML: sections in block form, each field's rule on one line. */
 export function mappingToYaml(doc: YamlMap): string {
   return `${block(doc, 0, 0).join('\n')}\n`
+}
+
+/** A row whose 「自動で書き戻す」 is not offered: a closing field (stage) while the mapping names no closing stages. */
+export const autoUnavailable = (r: Pick<MappingRow, 'closing'>) => r.closing !== null && !r.closing.stagesNamed
+
+/** The line under a closing field's choice (the stage), or null. */
+export function closingNote(r: Pick<MappingRow, 'closing'>): string | null {
+  if (!r.closing) return null
+  return r.closing.stagesNamed
+    ? '自動にしても、受注・失注にする（そこから戻す）ときは承認が要ります'
+    : '受注・失注になる段階（closing_stages）を書くまで、自動にはできません'
 }

@@ -57,6 +57,10 @@ export const NOTIFICATION_KINDS = [
   // A meeting's minutes arrived (minutes.md "Meetings for their attendees"): once per meeting, to
   // each member on its list. An app released before it shows the server's text and lists no switch.
   'minutes_arrived',
+  // An AI changed a record the member is the assignee of, automatically (a plugin operation applied
+  // with `auto` fields, nobody approved it; owner decision 2026-11-06): what changed, the AI's reason
+  // and ［元に戻す］. Told although their own AI was the actor. An app released before it shows the text.
+  'ai_changed',
   'others',
 ] as const
 export type NotificationKind = typeof NOTIFICATION_KINDS[number]
@@ -93,6 +97,7 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   // lane C ▼
   // ── lane C ▲
   minutes_arrived: '出た会議の議事録が届いた',
+  ai_changed: '担当している記録を AI が自動で変えた（元に戻せます）',
   others: 'そのほかの動き（担当になった・差し戻された・中止されたなど）',
 }
 
@@ -125,6 +130,7 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   // lane C ▼
   // ── lane C ▲
   minutes_arrived: true,
+  ai_changed: true,
   others: false,
 }
 
@@ -167,6 +173,11 @@ export interface NotificationItem {
    * 12 hours). The server's words; the app shows each notice id once.
    */
   desktop?: { title: string; body: string }
+  /**
+   * `ai_changed` only: the plugin operation the AI ran, for ［元に戻す］ (the operation's undo through the
+   * member's session; the server re-checks everything). `undone`: it was written back already.
+   */
+  aiChange?: { pluginId: string; operationId: string; undone: boolean }
   createdAt: string
   read: boolean
 }

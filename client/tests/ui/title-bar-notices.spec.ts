@@ -110,3 +110,16 @@ test('mail closed here because it was archived in Gmail, and mail archived there
   await expect(page.locator('#opened')).toHaveText('')
   expectNoPageErrors(state)
 })
+
+test('「AI が変えました」 offers ［元に戻す］ through its operation (the outside system too), not once it was written back', async ({ page }) => {
+  const state = await openPreview(page, 'title-bar-notices', { undo: 'ai' })
+  await page.getByRole('button', { name: /^起きたこと/ }).click()
+  const list = page.getByRole('menu', { name: '起きたこと' })
+  await expect(list).toContainText('理由：先方が予算を確保したため')
+  await expect(list.getByRole('button', { name: '元に戻す' })).toHaveCount(1)
+  await list.getByRole('button', { name: '元に戻す' }).click()
+  await expect(page.locator('#undone')).toHaveText('corporate-sales|op-preview01')
+  await expect(list).toContainText('元に戻しました')
+  await expect(page.locator('#opened')).toHaveText('')
+  expectNoPageErrors(state)
+})

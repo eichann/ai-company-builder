@@ -108,6 +108,19 @@ a plugin can never draw a notice (§2-2).
     Both rows have **［元に戻す］** like `replied_done` (`UNDOABLE_NOTIFICATION_KINDS`): the assignee may
     undo those entries (`UNDO_BY_ASSIGNEE`); undoing `archived_there` puts the mail back. On by default.
     Test: `tests/ui/title-bar-notices.spec.ts` (`?undo=mail`), `google-inbox-archive.test.ts` (the words).
+  - `ai_changed` 「AliceさんのAIが「A社 研修」を自動で変えました：確度 B（中） → A（高）、次のアクション … 。
+    理由：…」 (owner decision 2026-11-06, `aiChangedOf`; on by default): an AI's plugin operation applied
+    **without approval** (`receipt.kind: written` with its operation id, no `approvedBy`) on a record
+    whose **assignee** is the member — told although it was their own AI (an automatic step ran with
+    nobody there), only while they can read the record (checked when written and when read), once per
+    operation (`ai_changed:<operation id>`). Text built when read from the ledger entry: each field
+    by its label (choices by `option_labels`) before → after, the AI's note as the reason (≤ 120
+    characters); an attached create (a meeting logged) says it recorded to the connected service. The
+    item carries `aiChange { pluginId, operationId, undone }`; the bell's row has **［元に戻す］** while
+    not undone — the app's `pluginOperations:undo` with the member's session (`undoNoticedAiChange`),
+    which the server allows the assignee for exactly such a change (`plugins.md` 「変更前の値を書き戻す」)
+    and re-checks like any undo; once written back the text ends 「（元に戻しました）」. An app released
+    before it shows the text without the button (its watcher drops nothing it does not know).
   - `morning_summary` 「今日のあなたの番 5件（期限が今日 2件・期限を過ぎた 1件）」: the server clock,
     on a company business day (weekends, Japanese holidays, the company's days off: none) from
     `MORNING_SUMMARY_FROM` 08:30 until `MORNING_SUMMARY_UNTIL` 15:00 company time, one per member
@@ -118,7 +131,14 @@ a plugin can never draw a notice (§2-2).
     server down until after 15:00 skips the day (no evening greeting). **No record and no counts
     stored** (`recordId` ''; `RECORDLESS_NOTIFICATION_KINDS`): the counts are built when read —
     today's shows 「あなたの番」 as it is now, an older one only 「11月4日の「今日のあなたの番」（朝の知らせ）」.
-    Opening it shows the task list.
+    Opening it shows the task list. **「AI が変えた・まだ確かめていない」** (owner decision 2026-11-06,
+    `aiChangesToCheck`): today's text adds 「。AI が変えた・まだ確かめていない 2件：「A社」「B社」」 (up to
+    `AI_CHANGES_NAMED` titles, then ほか) — the member's `ai_changed` notices since their last morning
+    summary before today (all kept ones when there was none) that are not **確かめた**, about a record
+    they read now. **確かめた** = the notice was read (opened in the bell, which marks it read, or
+    「すべて読んだ」) or the change was written back (by anyone). Opening the record elsewhere does not
+    count (simple and visible: the bell's dot is the same state). A member with no turn but such
+    changes still gets the morning notice (and its Mac notification).
   - `due_tomorrow` 「「…」は明日（11月5日）が期限です」: the server clock, from `DUE_TOMORROW_FROM`
     09:00 of **the last business day before the due's day** (`dueTomorrowDays`: today a business
     day, the due's day after today and not after the next business day — a Monday or
@@ -290,6 +310,11 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
 
 ## Tests
 
+`server/tests/integration/plugin-operations.test.ts` 「the stage moves by itself…」 (`ai_changed` to
+the assignee only — also their own AI's, another member's AI's; its text, reason and operation; the
+assignee's undo and another member's refusal; gone when they cannot read; the morning section listed,
+cleared by reading and by undoing — mutation-checked), `client/tests/notifications.test.ts` (the
+operation kept only as plain ids),
 `server/tests/unit/notifications.test.ts` (one morning summary per business day per member with
 a turn — none on a holiday, a weekend, before 08:30 or first run after 15:00, never twice, counts
 built when read, gone when the kind is off; only this week's turn counted — a member with only

@@ -4,7 +4,7 @@ import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS, UNDOABLE_NOTIFICATION_KIN
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
-import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedChange } from '../api'
+import { getNoticeSettings, markNoticesRead, setNoticeSetting, undoNoticedAiChange, undoNoticedChange } from '../api'
 
 const ICON_BUTTON = 'relative p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 const PANEL = 'absolute right-0 top-full z-30 mt-1 w-80 max-h-[70vh] overflow-y-auto rounded-lg border border-gray-200 bg-white text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-900'
@@ -70,9 +70,10 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
   )
   const toggle = (which: Open) => { setError(null); setOpen(open === which ? null : which) }
   // What the member's own AI did for them (a task their reply finished): ［元に戻す］ undoes that entry.
-  const undo = async (id: string, recordId: string, version: number) => {
+  const undo = async (id: string, recordId: string, version: number, aiChange?: { pluginId: string; operationId: string }) => {
     setError(null)
-    const r = await undoNoticedChange(companyId, recordId, version)
+    // An AI's automatic change is undone through its operation (the outside system too); the others by their entry.
+    const r = aiChange ? await undoNoticedAiChange(companyId, aiChange.pluginId, aiChange.operationId) : await undoNoticedChange(companyId, recordId, version)
     if (r?.success) {
       setUndone(u => new Set([...u, id]))
       void markNoticesRead(companyId, [id])
@@ -159,12 +160,12 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
                 </span>
                 <span className="text-xs text-gray-400">{new Date(item.createdAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </button>
-              {UNDOABLE_NOTIFICATION_KINDS.includes(item.kind) && (
+              {(UNDOABLE_NOTIFICATION_KINDS.includes(item.kind) || (item.aiChange && !item.aiChange.undone)) && (
                 undone.has(item.id)
                   ? <span className="absolute bottom-2 right-3 text-[11.5px] text-gray-500 dark:text-zinc-400">元に戻しました</span>
                   : (
                     <button type="button" className="absolute bottom-1.5 right-3 rounded border border-gray-300 px-2 py-0.5 text-[11.5px] hover:bg-gray-50 dark:border-zinc-600 dark:hover:bg-zinc-800"
-                      onClick={() => void undo(item.id, item.recordId, item.version)}>
+                      onClick={() => void undo(item.id, item.recordId, item.version, item.aiChange)}>
                       元に戻す
                     </button>
                   )

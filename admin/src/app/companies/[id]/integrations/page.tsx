@@ -56,7 +56,9 @@ import {
   PROBLEM_TEXT,
   connectionStopped,
   WRITE_CHOICE_LABELS,
+  autoUnavailable,
   changeMappingField,
+  closingNote,
   describeReason,
   integrationRefusal,
   mappingRows,
@@ -572,10 +574,10 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
                     <td className="py-1.5">
                       <select aria-label={`${r.field} の書き戻し`} className="h-8 rounded-md border bg-transparent px-2 text-sm" value={r.choice}
                         onChange={(e) => setField(r.object, r.field, { choice: e.target.value as WriteChoice })}>
-                        {(Object.keys(WRITE_CHOICE_LABELS) as WriteChoice[]).filter((c) => !(r.priorOnly && c === 'auto'))
+                        {(Object.keys(WRITE_CHOICE_LABELS) as WriteChoice[]).filter((c) => !(autoUnavailable(r) && c === 'auto'))
                           .map((c) => <option key={c} value={c}>{WRITE_CHOICE_LABELS[c]}</option>)}
                       </select>
-                      {r.priorOnly && <p className="mt-1 text-xs text-muted-foreground">受注・失注につながるため、自動にはできません</p>}
+                      {closingNote(r) && <p className="mt-1 text-xs text-muted-foreground">{closingNote(r)}</p>}
                     </td>
                   </tr>
                 ))}
