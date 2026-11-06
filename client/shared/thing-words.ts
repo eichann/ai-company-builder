@@ -31,6 +31,12 @@ export const THING_NAMES: Readonly<Record<Exclude<ThingKind, 'bundle' | 'other'>
   folder: 'フォルダ',
 }
 
+/**
+ * A 「決めたこと」 not confirmed yet (decision version 6, owner decision 2026-11-07): an AI's proposal,
+ * not a decision until the person who decides says 「そうです」 — named apart on every screen.
+ */
+export const DECISION_PROPOSAL_NAME = '決めたことの案'
+
 /** A record as far as its look goes: its type, the type's label and interfaces, its state. */
 export interface ThingRecord {
   type: string
@@ -67,6 +73,7 @@ export function thingName(r: ThingRecord): string {
   const kind = thingKindOf(r)
   if (kind === 'outbound' && r.channel === 'slack') return '送る Slack の返事'
   if (kind === 'counterpart' || kind === 'bundle' || kind === 'other') return label(r.typeLabel) ?? (kind === 'counterpart' ? THING_NAMES.counterpart : '記録')
+  if (kind === 'decision' && r.state === 'unconfirmed') return DECISION_PROPOSAL_NAME
   return THING_NAMES[kind]
 }
 
@@ -105,7 +112,7 @@ const STATE_WORDS: Readonly<Record<string, Readonly<Record<string, string>>>> = 
     received: '届いた', handled: '対応済み', unsure: '確認待ち', unclaimed: '部署の番', excluded: 'やることにしなかった', replied: '返事のあとを確かめる',
   },
   meeting: { arrived: '議事録が届いた', received: '届いた', reading: 'AI が読んでいる', read: 'AI が読み終えた', failed: '読めなかった', skipped: '読まない' },
-  decision: { unconfirmed: 'まだ確かめていない', confirmed: '確かめた', retracted: '取り消した' },
+  decision: { unconfirmed: 'まだ決まっていない（案）', confirmed: '決まった', retracted: '取り下げた' },
   outbound_message: { draft: '下書き', sent: '送った', unknown: '届いたか分からない', discarded: 'やめた（しまった）' },
   approval: {
     pending: '承認待ち', approved: '承認した', sent_back: '差し戻した', stale: '中身が変わったので使えない',

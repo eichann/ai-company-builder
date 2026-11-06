@@ -333,10 +333,18 @@ test('「議事録を確認する」: the summary, the AI\'s proposals added all
   await proposals.getByRole('listitem').filter({ hasText: '会食の店を探す' }).getByRole('button', { name: '戻す' }).click()
   await expect(page.locator('#acted')).toContainText('propose_again@2')
 
-  const decisions = card.getByRole('region', { name: '決めたこと（AI が残した）' })
-  await expect(decisions.getByRole('listitem').filter({ hasText: '4月から始める' }).getByRole('button')).toHaveCount(1)
-  await decisions.getByRole('listitem').filter({ hasText: '窓口は3つにする' }).getByRole('button', { name: '確かめる' }).click()
+  // 決めたことの案 (decision version 6) apart from 決めたこと; ［そうです］［違う］ only where the server says the member may.
+  const proposed = card.getByRole('region', { name: '決めたことの案' })
+  await expect(proposed).toContainText('阿部さんはこの会議を見られません')
+  await expect(proposed.getByRole('listitem').filter({ hasText: '4月から始める' }).getByRole('button', { name: 'そうです' })).toHaveCount(0)
+  await expect(proposed.getByRole('listitem').filter({ hasText: '4月から始める' }).getByRole('button', { name: '違う' })).toHaveCount(0)
+  await expect(proposed.getByRole('listitem').filter({ hasText: '4月から始める' })).toContainText('責任者の確認待ち')
+  await expect(proposed).not.toContainText('見積は今月中に出す')
+  await expect(card.getByRole('region', { name: '決めたこと', exact: true })).toContainText('見積は今月中に出す')
+  await proposed.getByRole('listitem').filter({ hasText: '窓口は3つにする' }).getByRole('button', { name: 'そうです' }).click()
   await expect(page.locator('#acted')).toContainText('confirm@3')
+  await proposed.getByRole('listitem').filter({ hasText: '窓口は3つにする' }).getByRole('button', { name: '違う' }).click()
+  await expect(page.locator('#acted')).toContainText('reject@3')
   expectNoPageErrors(state)
 })
 

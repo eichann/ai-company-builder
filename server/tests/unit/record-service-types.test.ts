@@ -247,11 +247,11 @@ describe('decisions', () => {
     expect(r.created).toBe(true)
     expect(r.record).toMatchObject({
       type: 'decision', state: 'unconfirmed', title: '試験さんの案で窓口を3つにする', path: null,
-      fields: { recorded_by: 'ai', decided_by: null, owner: 'u-bob', important: false, why: 'チャット窓口も最初から入れたいとの要望', source: '議事録 2026-11-05' },
+      fields: { recorded_by: 'ai', decided_by: null, owner: null, important: false, why: 'チャット窓口も最初から入れたいとの要望', source: '議事録 2026-11-05' },
     })
     expect(source.forCompany('a').records.find(r.record.id)).toMatchObject({ path: null, folder: '営業部', scopeId: null })
     expect(source.forCompany('a').records.ledger(r.record.id)[0]).toMatchObject({ actorId: 'u-alice', actorKind: 'ai', conversationId: 'conv-1' })
-    // The minutes' assignee (owner) confirms; the AI cannot.
+    // The deal has no 責任者, so a reader of the meeting confirms (decision version 6); the AI cannot.
     expect(await engine.act(m('u-bob'), AI, r.record.id, 'confirm', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
     expect(ok(await engine.act(m('u-bob'), HUMAN, r.record.id, 'confirm', { expectedVersion: 1 })).record.state).toBe('confirmed')
 

@@ -1,13 +1,13 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { actionWho, INTERFACES, isSystemOnly, linkWhoName, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
+import { actionWho, INTERFACES, isSystemOnly, linkPersonWho, linkWhoName, OK_FIELDS, viaOf, type ActionDef, type TypeDefinition } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordFileRepo } from '../../ports/record-files'
-import type { RecordLinkRow } from '../../ports/records'
+import type { RecordLinkRow, RecordRepository, RecordRow } from '../../ports/records'
 import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
@@ -16,7 +16,7 @@ import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../.
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
 import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
-import { linkAllowed } from '../record-access'
+import { linkAllowed, type RecordReader } from '../record-access'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
@@ -39,9 +39,13 @@ export const AI_ONLY_OWNER_FIELDS = ['assignee', 'next_actor', 'requested_by'] a
  * `readsLink(name)`: whether `member` reads the record this record's link `name` points to — the
  * who-entry `link:<name>` (task version 13: 「その会議を読める人」); without it such an entry matches
  * no one (fails closed).
+ * `linkedPeople(link, field)`: the members held in person field `field` of the records this record's
+ * link `link` points to — the who-entry `link:<link>.<field>` (decision version 6: 「まとまりの責任者」,
+ * `link:bundle.owner`); without it such an entry matches no one (fails closed).
  */
 export function mayAct(who: string[], member: Member, actor: ActorInput, values: Record<string, LedgerValue>, managesPlace: boolean,
-  holdsRole?: (role: string) => boolean, existing = true, readsLink?: (link: string) => boolean): boolean {
+  holdsRole?: (role: string) => boolean, existing = true, readsLink?: (link: string) => boolean,
+  linkedPeople?: (link: string, field: string) => readonly string[]): boolean {
   // `who: [system]`: only the server's own services (the service writer) — never through here.
   if (isSystemOnly(who)) return false
   if (actor.kind === 'ai' && !who.includes('ai')) return false
@@ -56,7 +60,53 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     (w === 'dept_manager' && managesPlace) ||
     (w.startsWith(ROLE_WHO_PREFIX) && holdsRole?.(w.slice(ROLE_WHO_PREFIX.length)) === true) ||
     (linkWhoName(w) !== null && readsLink?.(linkWhoName(w) as string) === true) ||
+    (linkPersonWho(w) !== null && (linkedPeople?.(linkPersonWho(w)!.link, linkPersonWho(w)!.field) ?? []).includes(member.userId)) ||
     values[w] === member.userId)
+}
+
+/**
+ * The members `who` names on this record itself (its person fields and `link:<link>.<field>`
+ * entries), each kept only when they can read the record (`canRead`). Empty = the record has none of
+ * its own people for the action, so `who_fallback` applies (decision version 6: no まとまり, a まとまり
+ * without a 責任者, or a 責任者 who cannot read it — never widening who reads it). The same answer
+ * whoever asks: it never depends on the caller.
+ */
+export function ownPeopleOf(who: readonly string[], def: TypeDefinition, values: Record<string, LedgerValue>,
+  linkedPeople: (link: string, field: string) => readonly string[], canRead: (userId: string) => boolean): { readers: string[]; cannotRead: string[] } {
+  const named = new Set<string>()
+  for (const w of who) {
+    const lp = linkPersonWho(w)
+    if (lp) for (const id of linkedPeople(lp.link, lp.field)) named.add(id)
+    else if (def.fields[w]?.kind === 'person' && typeof values[w] === 'string' && values[w] !== '') named.add(values[w] as string)
+  }
+  const readers: string[] = []
+  const cannotRead: string[] = []
+  for (const id of named) (canRead(id) ? readers : cannotRead).push(id)
+  return { readers, cannotRead }
+}
+
+/** `who` with `who_fallback` added when the record has none of its own people who read it (`ownPeopleOf`). */
+export function whoWithFallback(action: ActionDef, who: string[], own: { readers: string[] }): string[] {
+  return action.whoFallback && own.readers.length === 0 ? [...who, ...action.whoFallback.filter(w => !who.includes(w))] : who
+}
+
+/**
+ * The person field `field` of the live records this record's link `name` points to and may follow
+ * (`linkAllowed`): the members a `link:<name>.<field>` who-entry names. Read from stored values, never
+ * through the caller's reader — whether the 責任者 exists is the same answer for everyone.
+ */
+export function linkedPeopleOf(records: RecordRepository, row: RecordRow, name: string, field: string): string[] {
+  const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
+  if (targets.length === 0) return []
+  const live = records.byIds(targets).filter(r => r.removedAt === null && linkAllowed(row, r))
+  const out: string[] = []
+  for (const s of records.states(live.map(r => r.id))) {
+    try {
+      const v = (JSON.parse(s.fields) as Record<string, LedgerValue>)[field]
+      if (typeof v === 'string' && v !== '') out.push(v)
+    } catch { /* no value */ }
+  }
+  return [...new Set(out)]
 }
 
 /** The company's `YYYY-MM-DDTHH:MM` when the engine was built without `companyDay` (the default zone). */
@@ -71,7 +121,75 @@ export const NOT_VIA = { error: 'この操作はここからはできません�
 
 export function acting(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, stateOf, historyLine, tell, summaryOf } = ctx
+
+  /**
+   * Duty 2 (who), shared by `act` and `whoMay`: whether `member` may run `action` on `row` now, as
+   * themselves or as the delegate of an absent member (`onBehalfOf`), and the record's own people for
+   * it (`own`: who `who` names on the record itself, split by whether they can read it).
+   */
+  function decideWho(member: Member, actor: ActorInput, records: RecordRepository, reader: RecordReader, row: RecordRow, def: TypeDefinition,
+    action: ActionDef, fields: Record<string, LedgerValue>): { byWho: boolean; onBehalfOf: string | null; own: { readers: string[]; cannotRead: string[] } } {
+    const place = row.path ?? row.folder ?? ''
+    // `link:<name>.<field>` (decision version 6): the person a linked record names (a まとまり's 責任者).
+    const linkedPeople = (name: string, field: string) => linkedPeopleOf(records, row, name, field)
+    // `who_unless` (task version 9: the assignee does not complete a task to be checked first).
+    const written = actionWho(action, fields)
+    // `who_fallback` (decision version 6): only while the record has none of its own people who read it.
+    const own = ownPeopleOf(written, def, fields, linkedPeople, id => canRead(member.companyId, id, row))
+    const who = whoWithFallback(action, written, own)
+    const manages = (userId: string) => who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
+    // `role:<name>` (plan C3): held on this record (its plugin, its まとまり), by the one resolution.
+    const holds = (userId: string) => (role: string) => ctx.roles()?.holdsOnRecord(member.companyId, row.type, row.id, role, userId) === true
+    // `link:<name>` (task version 13): the member reads the record that link points to (their own
+    // reader; a public → private link is never followed). Only asked when `who` names one.
+    const readsLink = (name: string) => {
+      if (!who.some(w => linkWhoName(w) === name)) return false
+      const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
+      return targets.length > 0 && records.byIds(targets).some(r => r.removedAt === null && reader.record(r) && linkAllowed(row, r))
+    }
+    if (mayAct(who, member, actor, fields, manages(member.userId), holds(member.userId), true, readsLink, linkedPeople)) return { byWho: true, onBehalfOf: null, own }
+    // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
+    // or department they stand in for — never the absentee's role (no admin powers), and every
+    // read check above and below stays the delegate's own.
+    for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
+      if (mayAct(who, { ...member, userId: absentee, role: 'member' }, actor, fields, manages(absentee), holds(absentee), true, undefined, linkedPeople)) {
+        return { byWho: true, onBehalfOf: absentee, own }
+      }
+    }
+    return { byWho: false, onBehalfOf: null, own }
+  }
+
   return {
+    /**
+     * Which of `actions` the member (a person, by hand) may run on the record now, from its current
+     * state — the engine's own answer (duties 1 and 2), for a screen to show only buttons that work —
+     * and the record's own people for those actions (`responsible`: who `who` names on the record
+     * itself, e.g. a decision's まとまりの責任者; `cannotRead`: those of them who cannot read it). Null
+     * when the record is not one the member reads (the same as missing).
+     */
+    whoMay(member: Member, recordId: string, actions: readonly string[]): { may: Record<string, boolean>; responsible: string[]; cannotRead: string[] } | null {
+      const opened = open(member)
+      if (!opened) return null
+      const { records, reader } = opened
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
+      if (!row || serviceStateOnly(row.type)) return null
+      const def = currentTypes(records).get(row.type)?.definition
+      if (!def) return null
+      const current = stateOf(records, row, def)
+      const may: Record<string, boolean> = {}
+      const responsible = new Set<string>()
+      const cannotRead = new Set<string>()
+      for (const name of actions) {
+        const action = Object.prototype.hasOwnProperty.call(def.actions, name) ? def.actions[name] : undefined
+        if (!action) { may[name] = false; continue }
+        const decided = decideWho(member, { kind: 'human' }, records, reader, row, def, action, current.fields)
+        decided.own.readers.forEach(id => responsible.add(id))
+        decided.own.cannotRead.forEach(id => cannotRead.add(id))
+        may[name] = decided.byWho && (!action.from || (current.state !== null && action.from.includes(current.state))) && viaOf(action).includes('screen')
+      }
+      return { may, responsible: [...responsible], cannotRead: [...cannotRead] }
+    },
+
     /** Run an action of the record's type. */
     async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>> {
       const opened = open(member)
@@ -104,33 +222,7 @@ export function acting(ctx: EngineContext) {
         return conflict('いまの状態ではこの操作はできません', 'ACTION_NOT_ALLOWED_IN_STATE', { state: current.state })
       }
       // Duty 2: who?
-      const place = row.path ?? row.folder ?? ''
-      // `who_unless` (task version 9: the assignee does not complete a task to be checked first).
-      const who = actionWho(action, current.fields)
-      const manages = (userId: string) => who.includes('dept_manager') && deps.managedFolders(member.companyId, userId).some(f => isSameOrAncestorPath(f, place))
-      // `role:<name>` (plan C3): held on this record (its plugin, its まとまり), by the one resolution.
-      const holds = (userId: string) => (role: string) => ctx.roles()?.holdsOnRecord(member.companyId, row.type, row.id, role, userId) === true
-      // `link:<name>` (task version 13): the member reads the record that link points to (their own
-      // reader; a public → private link is never followed). Only asked when `who` names one.
-      const readsLink = (name: string) => {
-        if (!who.some(w => linkWhoName(w) === name)) return false
-        const targets = records.linksFrom([row.id]).filter(l => l.name === name && l.targetId !== null).map(l => l.targetId as string)
-        return targets.length > 0 && records.byIds(targets).some(r => r.removedAt === null && reader.record(r) && linkAllowed(row, r))
-      }
-      let byWho = mayAct(who, member, actor, current.fields, manages(member.userId), holds(member.userId), true, readsLink)
-      // …or as the delegate of an absent member (records.md "Absence and the delegate"): the turn
-      // or department they stand in for — never the absentee's role (no admin powers), and every
-      // read check above and below stays the delegate's own.
-      let onBehalfOf: string | null = null
-      if (!byWho) {
-        for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
-          if (mayAct(who, { ...member, userId: absentee, role: 'member' }, actor, current.fields, manages(absentee), holds(absentee))) {
-            byWho = true
-            onBehalfOf = absentee
-            break
-          }
-        }
-      }
+      const { byWho, onBehalfOf } = decideWho(member, actor, records, reader, row, def, action, current.fields)
       // …or, for a person `ok_from` names (never the AI), with a statement of whose OK it was.
       const withOk = !byWho && actor.kind === 'human' && (action.okFrom ?? []).some(w => current.fields[w] === member.userId)
       if (!byWho && !withOk) {

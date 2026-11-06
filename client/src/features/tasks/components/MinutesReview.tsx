@@ -1,5 +1,7 @@
 // 「議事録を確認する」's own parts (新しい画面のデモ F): the meeting's summary, the AI's proposals (案)
-// with ［全部足す］［選んで足す］［要らない］, and the decisions the AI left with ［確かめる］. Each press is one
+// with ［全部足す］［選んで足す］［要らない］, and the decisions the AI left: 「決めたことの案」 with ［そうです］［違う］
+// (decision version 6: shown only to whom the server says may — the まとまり's 責任者, else the meeting's
+// readers) apart from the confirmed 「決めたこと」. Each press is one
 // action at the version shown; the server decides who may, and a button shows only where its `who`
 // lets the member (task version 13: everyone who reads the meeting, `proposalMay`). Each proposal
 // shows the minutes text it rests on, whose AI added it, and 「似ている案があります」 with ［同じ］ (the
@@ -8,10 +10,10 @@
 import { useState } from 'react'
 import { CheckCircle, Sparkle } from '@phosphor-icons/react'
 import type { RecordViewSummary } from '../../../../shared/record-views'
-import type { MinutesReviewView } from '../../../../shared/task-card'
+import { cannotReadLine, type MinutesReviewView } from '../../../../shared/task-card'
 import { proposalsHeadline, type TaskProposal, type TaskWriteResult } from '../../../../shared/tasks'
 import { slotSameAsNote } from '../../../../../shared/core/source-slot-candidates'
-import { CALM } from '../../../../shared/thing-words'
+import { CALM, DECISION_PROPOSAL_NAME } from '../../../../shared/thing-words'
 import { runCommand } from '../../../shared/commands/commands'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
@@ -54,7 +56,7 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
   // Until the proposals are read nothing tells which linked task is one.
   const others = result === null ? [] : made.filter(t => !proposals.some(p => p.id === t.id))
   const listTitle = !onMeetingCard ? 'AI のタスクの案' : proposals.length > 0 ? 'やることの案' : 'やること'
-  const decisionsTitle = onMeetingCard ? '決めたこと' : '決めたこと（AI が残した）'
+  const decisionsTitle = '決めたこと'
   // One by one, each at its own version (the server makes each a task of its own).
   const act = async (items: Array<{ id: string; version: number }>, action: string, note?: string) => {
     setError(null)
@@ -65,7 +67,11 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
     setPicking(null)
     reload()
   }
-  const unconfirmed = review.decisions.filter(d => d.mine && d.state === 'unconfirmed')
+  // 決めたことの案 (decision version 6): not a decision until the person who decides says 「そうです」.
+  const proposed = review.decisions.filter(d => d.state === 'unconfirmed')
+  const decided = review.decisions.filter(d => d.state === 'confirmed')
+  const confirmable = proposed.filter(d => d.may.confirm)
+  const cannotRead = cannotReadLine(proposed.flatMap(d => d.cannotRead))
   const proposalList = (
     <section aria-label={listTitle}>
       <div className="mb-2 flex flex-wrap items-center gap-1.5">
@@ -105,23 +111,45 @@ export function MinutesReview({ companyId, review, busy, onAct, onMeetingCard = 
     </section>
   )
   const decisionList = (
-      <section aria-label={decisionsTitle}>
-        <div className="mb-2 flex items-center gap-1.5">
-          <ThingIcon kind="decision" size={14} label="" />
-          <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{decisionsTitle}</h2>
-          {unconfirmed.length > 1 && <button type="button" disabled={busy} onClick={() => void act(unconfirmed, 'confirm')} className={SMALL_BUTTON}>まとめて確かめた</button>}
-        </div>
-        <ul className="space-y-1 text-[13px]">
-          {review.decisions.map(d => (
-            <li key={d.id} className="flex items-center gap-2">
-              <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
-              {d.state === 'confirmed'
-                ? <Chip tone="green"><CheckCircle size={11} weight="fill" />確かめた</Chip>
-                : d.mine && <button type="button" disabled={busy} onClick={() => void act([d], 'confirm')} className={SMALL_BUTTON}>確かめる</button>}
-            </li>
-          ))}
-        </ul>
-      </section>
+    <>
+      {proposed.length > 0 && (
+        <section aria-label={DECISION_PROPOSAL_NAME}>
+          <div className="mb-1 flex items-center gap-1.5">
+            <ThingIcon kind="decision" size={14} label="" />
+            <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{DECISION_PROPOSAL_NAME}</h2>
+            {confirmable.length > 1 && <button type="button" disabled={busy} onClick={() => void act(confirmable, 'confirm')} className={SMALL_BUTTON}>まとめてそうです</button>}
+          </div>
+          <p className="mb-1.5 text-[11.5px] text-gray-500">AI が議事録から拾った案です。決める立場の人が「そうです」と確かめると、決めたことになります。</p>
+          {cannotRead && <p className="mb-1.5 text-[11.5px] text-gray-500">{cannotRead}</p>}
+          <ul className="space-y-1 text-[13px]">
+            {proposed.map(d => (
+              <li key={d.id} className="flex items-center gap-2">
+                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
+                {d.may.confirm && <button type="button" disabled={busy} onClick={() => void act([d], 'confirm')} className={SMALL_BUTTON}>そうです</button>}
+                {d.may.reject && <button type="button" disabled={busy} onClick={() => void act([d], 'reject')} className={QUIET}>違う</button>}
+                {!d.may.confirm && <Chip>責任者の確認待ち</Chip>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {decided.length > 0 && (
+        <section aria-label={decisionsTitle}>
+          <div className="mb-2 flex items-center gap-1.5">
+            <ThingIcon kind="decision" size={14} label="" />
+            <h2 className="mr-auto text-[13px] font-semibold text-gray-700 dark:text-zinc-200">{decisionsTitle}</h2>
+          </div>
+          <ul className="space-y-1 text-[13px]">
+            {decided.map(d => (
+              <li key={d.id} className="flex items-center gap-2">
+                <button type="button" onClick={() => runCommand('record.open', { recordId: d.id })} className="min-w-0 truncate text-left hover:text-accent hover:underline">{d.title}</button>
+                <Chip tone="green"><CheckCircle size={11} weight="fill" />決まった</Chip>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
   )
   const hasDecisions = review.decisions.length > 0
   return (

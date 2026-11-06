@@ -2,8 +2,8 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
-import { TASK_VERSION } from '../../shared/core/core-types'
+import { migrateCompanyBundleParts, migrateCompanyCoreInterfaceLinks, migrateCompanyDecisionVersion, migrateCompanyOutsideTimes, migrateCompanyTaskVersion } from '../adapters/sqlite/records'
+import { DECISION_VERSION, TASK_VERSION } from '../../shared/core/core-types'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox, migrateSecondOpinionSetting } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -135,6 +135,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateBundleParts(conn)
   // Tasks to the core version (9: 完了 from any state, 「終わったら」; 10: origin links) — records.md "Task version 9".
   migrateTaskVersion(conn)
+  migrateDecisionVersion(conn)
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
@@ -236,6 +237,15 @@ export function migrateTaskVersion(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const moved = migrateCompanyTaskVersion(conn, id, at)
     if (moved > 0 && conn === sqlite) console.log(`[records] task version ${TASK_VERSION}: ${moved} task(s) moved in company ${id}`)
+  }
+}
+
+/** Every company's decisions move to the core decision version (`DECISION_VERSION`), idempotent. */
+export function migrateDecisionVersion(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyDecisionVersion(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] decision version ${DECISION_VERSION}: ${moved} decision(s) moved in company ${id}`)
   }
 }
 

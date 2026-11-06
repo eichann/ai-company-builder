@@ -64,9 +64,16 @@ const reviewCard = taskCardOf({
   detail: { record: rec('task-0000rv', 'task', '議事録を確認する：A社 研修導入のお打ち合わせ', 'todo', { assignee: ME, requested_by: ME, task_kind: 'minutes_review' }),
     links: [{ name: 'meeting', direction: 'out', fixed: true, record: meeting }] },
   meeting: { record: meeting, links: [
-    { name: 'meeting', direction: 'in', record: rec('decision-000001', 'decision', '窓口は3つにする', 'unconfirmed', { owner: ME }) },
-    { name: 'meeting', direction: 'in', record: rec('decision-000002', 'decision', '4月から始める', 'unconfirmed', { owner: 'u-abe' }) },
-  ] },
+    { name: 'meeting', direction: 'in', record: rec('decision-000001', 'decision', '窓口は3つにする', 'unconfirmed', {}) },
+    { name: 'meeting', direction: 'in', record: rec('decision-000002', 'decision', '4月から始める', 'unconfirmed', {}) },
+    { name: 'meeting', direction: 'in', record: rec('decision-000003', 'decision', '見積は今月中に出す', 'confirmed', { decided_by: 'u-abe' }) },
+  ], decisionChecks: {
+    // The server's answer (decision version 6): the member decides the first (a meeting reader, no 責任者 who reads it);
+    // the second waits for its 責任者; 阿部さん (a 責任者) cannot read this meeting.
+    'decision-000001': { may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: ['u-abe'] },
+    'decision-000002': { may: { confirm: false, reject: false, retract: false }, responsible: ['u-tanaka'], cannotRead: [] },
+    'decision-000003': { may: { confirm: false, reject: false, retract: false }, responsible: [], cannotRead: [] },
+  } },
 })
 const waitEntries = [
   { version: 1, action: 'create', actorId: 'u-abe', actorKind: 'human', at: '2026-11-02T00:00:00.000Z', note: '', fromState: null, toState: 'todo', changes: [] },

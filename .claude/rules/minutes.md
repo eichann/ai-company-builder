@@ -108,7 +108,8 @@ access itself: `google-connector.md` (G3).
 3. **Reading** — the AI (tool `minutes_read`) or the app reads the text (below), runs
    `meeting__start_reading`, makes the outputs with the existing tools (`records_create` task —
    assignee = attending member ids, due within a year —, `decisions_record` linking meeting /
-   bundle, the mail draft (G8)), each citing the minutes text it rests on, then
+   bundle — 「決めたことの案」 with `said_by` / `objection`, never a postponement or an expectation, confirmed
+   by the まとまり's 責任者 or else the meeting's readers, `records.md` "A person confirms it" —, the mail draft (G8)), each citing the minutes text it rests on, then
    `meeting__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The basis quote is checked by the
    app against the minutes its turn read (`quoteAppearsIn`, "Outputs made once" below); the server

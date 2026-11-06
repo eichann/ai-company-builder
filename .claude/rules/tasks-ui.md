@@ -371,9 +371,18 @@ the app"), from `tasks:proposals` (`minutes.md` "The AI's proposals"):
   要らない・戻す・同じ・別のもの (the list came through the meeting); an older server's type shows them to
   the proposal's requester only (roles are not known to the app) and never 別のもの. ［全部足す］
   ［選んで足す］［要らない］ act on the proposals the member may press. The server decides each press.
+- **The decisions** (decision version 6, `records.md` "A person confirms it"): **「決めたことの案」**
+  (unconfirmed) apart from **「決めたこと」** (confirmed, chip 決まった). Each 案 has ［そうです］ (`confirm`)
+  and ［違う］ (`reject`, no note) only where the server's `decisionChecks` says the member may
+  (`reviewOf` → `MinutesReviewDecision.may`; an older server sends none: the decision's `owner` may
+  confirm, as before), else the chip 「責任者の確認待ち」; ［まとめてそうです］ with two or more. A 責任者 who
+  cannot read the meeting: 「〇〇さんはこの会議を見られません。…」 (`cannotReadLine`, names from the members
+  list — main asks it only then, `meetings.ts` `namesOf`). The record card and the meeting's plain lists
+  name an unconfirmed one 「決めたことの案」 too (`thingName`, `MeetingOutputs`).
 - Tests: `client/tests/tasks-list.test.ts` (「a meeting's proposals: the buttons follow the type's who…」),
   `tests/ui/task-card.spec.ts` (「議事録を確認する」: the headline, the basis, 「〇〇さんの AI が追加」, ［同じ］
-  with its note, ［別のもの］; `?proposals=none`: no button).
+  with its note, ［別のもの］; 決めたことの案 apart, ［そうです］［違う］ only where allowed, 「…見られません」;
+  `?proposals=none`: no button), `client/tests/task-card.test.ts` (`reviewOf`).
 
 ## Similar items (「似ているやることがあります」, 出どころの枠 §10 step 4, owner decision 2026-11-06)
 

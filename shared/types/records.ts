@@ -120,6 +120,31 @@ export const OLD_CONNECTION_LABEL = '前のつなぎ先から取り込んだも�
  */
 export const DECISION_EXCEPTION_NOTICE = '例外（この件だけ）：つながった件だけの判断です。ほかの件の前例にしないでください。'
 
+/**
+ * A 「決めたこと」 not confirmed yet (state `unconfirmed`, decision version 6, owner decision
+ * 2026-11-07 「決めたことを人が確かめる」): an AI's 「決めたことの案」, not a decision until the person
+ * who decides says so. Carried as `proposalNotice` wherever the AI reads it (`recordSummaries`), so it
+ * is never used as a precedent.
+ */
+export const DECISION_PROPOSAL_NOTICE = 'まだ確かめていない案：決める立場の人が「そうです」と確かめるまでは決めたことではありません。前例や根拠として使わないでください。'
+
+/** The decision actions a screen asks about (`RecordDetail.decisionChecks`). */
+export const DECISION_CHECK_ACTIONS = ['confirm', 'reject', 'retract'] as const
+
+/**
+ * Who may say 「そうです」/「違う」 on a decision, as the server answers it for the caller
+ * (`GET /records/item/:id`, decision version 6): `may` — the engine's own answer per action, so a
+ * screen shows only buttons that work. `responsible` — the 責任者 of its まとまり who read it (they
+ * decide); `cannotRead` — a 責任者 who cannot read it (a meeting for its attendees they did not
+ * attend): never widened, the meeting's readers decide instead and the screen says
+ * 「〇〇さんはこの会議を見られません」. Both are member ids, given only when the caller reads that まとまり.
+ */
+export interface DecisionCheck {
+  may: { confirm: boolean; reject: boolean; retract: boolean }
+  responsible: string[]
+  cannotRead: string[]
+}
+
 export interface RecordSummary {
   id: string
   type: string
@@ -152,6 +177,11 @@ export interface RecordSummary {
    * `DECISION_EXCEPTION_NOTICE`. Absent for every other record.
    */
   exceptionNotice?: string
+  /**
+   * A decision not confirmed yet (`state: unconfirmed`): `DECISION_PROPOSAL_NOTICE` (「まだ確かめていない
+   * 案」). Absent for every other record.
+   */
+  proposalNotice?: string
   /**
    * Owner-only (「持ち主だけ」, records.md "Owner-only records"): only the member
    * reading it sees it — it reaches nobody else, owners and admins included.
@@ -292,6 +322,11 @@ export interface RecordDetail {
    * whoever reads the record reads the folder. Absent otherwise and from older servers.
    */
   privateFolder?: { scopeId: string; path: string }
+  /**
+   * Decision version 6: for the record itself when it is a decision, and for every decision among
+   * `links`, keyed by its id — who may confirm (`DecisionCheck`). Absent from older servers.
+   */
+  decisionChecks?: Record<string, DecisionCheck>
 }
 
 /**

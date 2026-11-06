@@ -624,7 +624,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
   })
 
-  const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor })
+  const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles, actsFor, whoMay: (member, recordId, actions) => recordEngine.whoMay(member, recordId, actions) })
   // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
   const aiRuns = createAiRunService({
     ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId, step) => records.aiTurnOf(member, recordId, step),

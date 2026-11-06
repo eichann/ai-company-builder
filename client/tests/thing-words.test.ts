@@ -73,3 +73,9 @@ test('search hits and cards carry the plain name and the per-type state', () => 
   assert.equal(v.typeLabel, 'やること')
   assert.equal(v.stateLabel, '確かめてもらっている')
 })
+
+test('a decision not confirmed yet is 「決めたことの案」 on every screen, apart from a confirmed one (decision version 6)', () => {
+  assert.equal(thingName({ type: 'decision', state: 'unconfirmed' }), '決めたことの案')
+  assert.equal(thingName({ type: 'decision', state: 'confirmed' }), '決めたこと')
+  assert.equal(thingName({ type: 'decision', state: 'retracted' }), '決めたこと')
+})

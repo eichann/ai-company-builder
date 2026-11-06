@@ -114,6 +114,21 @@ test('decisions_record: a decision of a meeting for its attendees goes without a
   assert.deepEqual(decision.request(input).body, input)
 })
 
+test('decisions_record (decision version 6): who said it and whether anyone objected reach the server; the AI is told to pick up A and C, never a postponement or an expectation, and that an unconfirmed decision is no precedent', async () => {
+  const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const decision = act!.specs.find(s => s.name === 'decisions_record')!
+  const input = { title: 't', why: 'w', source: 's', links: { meeting: 'meeting-abc123' }, said_by: '高杉さん', objection: 'none' }
+  assert.equal(decision.schema.safeParse(input).success, true)
+  assert.deepEqual(decision.request(input).body, input)
+  assert.equal(decision.schema.safeParse({ ...input, objection: 'maybe' }).success, false)
+  assert.equal(decision.schema.safeParse({ ...input, said_by: 'あ'.repeat(61) }).success, false)
+  for (const words of ['決める立場の人', '反対しなかった', '次回決めよう', '見込み', 'said_by', 'objection']) assert.ok(decision.description.includes(words), words)
+  assert.ok(act!.instructions.includes('まだ確かめていない案') && act!.instructions.includes('前例や根拠に使わない'))
+  // The minutes' first message says the same.
+  const first = minutesFirstMessage({ id: 'meeting-abcdef123456', title: '定例', meetingAt: null })
+  for (const words of ['反対しなかった', 'said_by', 'objection', '次回決めよう', 'たぶん A 社', '決めたことの案']) assert.ok(first.includes(words), words)
+})
+
 test('a tool refuses what its schema refuses before calling the server (a required note)', async () => {
   const { api, seen } = fakeServer('act')
   const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)

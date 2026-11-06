@@ -109,6 +109,21 @@ export function createMeetingsApi(deps: MeetingsDeps) {
     return d?.record && Array.isArray(d.links) ? d : null
   }
 
+  /**
+   * The names of the 責任者 who cannot read this meeting's decisions (`decisionChecks`, decision version 6),
+   * for 「〇〇さんはこの会議を見られません」: the members list is asked only when there is one.
+   */
+  async function namesOf(companyId: string, detail: RecordDetail): Promise<Record<string, string>> {
+    const ids = new Set(Object.values(detail.decisionChecks ?? {}).flatMap(c => c.cannotRead))
+    if (ids.size === 0) return {}
+    const a = await call(companyId, 'GET', '/members')
+    const out: Record<string, string> = {}
+    for (const m of (a?.status === 200 && Array.isArray(a.json?.data) ? a.json.data : []) as Array<{ userId?: unknown; name?: unknown }>) {
+      if (typeof m.userId === 'string' && ids.has(m.userId) && typeof m.name === 'string' && m.name.trim()) out[m.userId] = m.name.trim().slice(0, 100)
+    }
+    return out
+  }
+
   /** The reading's outputs of a read meeting, looked up once per version. */
   async function made(companyId: string, item: MeetingArrival, detail?: RecordDetail | null): Promise<MeetingArrivalView['made']> {
     if (item.status !== 'read') return null
@@ -176,7 +191,7 @@ export function createMeetingsApi(deps: MeetingsDeps) {
       return {
         success: true,
         meeting: { ...item, made: await made(companyId, item, detail) },
-        review: status === 'read' && mine ? reviewOf(detail, mine) : null,
+        review: status === 'read' && mine ? reviewOf(detail, mine, await namesOf(companyId, detail)) : null,
         ...(google?.status === 200 && ((google.json?.data as { renew?: unknown } | undefined)?.renew as unknown[] | undefined)?.includes('minutes') ? { renewGoogle: true as const } : {}),
       }
     },

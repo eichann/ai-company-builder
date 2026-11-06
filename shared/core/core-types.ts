@@ -123,7 +123,17 @@
  * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
  * the `minutes` type; the 議事録 is the meeting's content, read where it is),
  * `approval` (承認のお願い), `outbound_message` (送るもの) and `decision`
- * (決めたこと). Their records are made only by the server's own services
+ * (決めたこと). `decision` version 6 (owner decision 2026-11-07 「決めたことを人が確かめる」,
+ * additive): what the AI records is 「決めたことの案」 until a person confirms it. Fields `said_by`
+ * (who said it, as the minutes name them: outside text) and `objection` (反対なし / 反対あり /
+ * 分からない), sent by the AI. Who confirms (`confirm` 決めたことにする — the app's ［そうです］, `reject`
+ * 違う with an optional note while unconfirmed, `retract` 取り消す of a confirmed one with a note) is the
+ * 責任者 of the linked まとまり (`link:bundle.owner`: the `bundle` interface's `owner`), a department
+ * manager or an admin; with no 責任者 who reads the decision, `who_fallback`: every reader of its
+ * meeting (`link:meeting`), else whoever recorded it (`owner`, now 残した人: only set without a
+ * meeting). The meeting's assignee has no part of it any more. `decided_by` is the confirmer
+ * (`ACTOR_ARGS`), null until then.
+ * Their records are made only by the server's own services
  * (`SERVICE_OWNED_TYPES`); `approval` and `outbound_message` change state only
  * through those services too (`SERVICE_STATE_TYPES`, `SERVICE_TRANSITIONS`),
  * because approving checks a content hash and runs an operation, and sending
@@ -363,7 +373,7 @@ final: [sent, discarded]
 `,
   decision: `---
 label: 決めたこと
-version: 5
+version: 6
 storage: server
 fields:
   title:       { label: 件名, kind: text, source: file }
@@ -373,8 +383,10 @@ fields:
   important:   { label: 大事, kind: boolean, source: server }
   exception:   { label: 例外（この件だけ）, kind: boolean, source: server }
   decided_by:  { label: 決めた人, kind: person, source: server }
-  owner:       { label: 確かめる人, kind: person, source: server }
+  owner:       { label: 残した人, kind: person, source: server }
   source_key:  { label: 元の項目の目印, kind: text, source: server }
+  said_by:     { label: 言った人（議事録から）, kind: text, source: server }
+  objection:   { label: 反対, kind: choice, options: [none, raised, unknown], option_labels: { none: 反対なし, raised: 反対あり, unknown: 分からない }, source: server }
 links:
   bundle:      { label: まとまり, interface: bundle, cardinality: one, inverse: decisions }
   meeting:     { label: 会議, target: meeting, cardinality: one, inverse: decisions, origin: true }
@@ -383,13 +395,16 @@ states: [unconfirmed, confirmed, retracted]
 initial: unconfirmed
 final: [confirmed, retracted]
 actions:
-  confirm: { label: 確かめる, from: [unconfirmed], to: confirmed, who: [owner, dept_manager, admin], note: optional, decision: true }
-  retract: { label: 取り消す, from: [unconfirmed, confirmed], to: retracted, who: [owner, dept_manager, admin], note: required, decision: true }
-  set_exception: { label: 例外（この件だけ）を切り替える, from: [unconfirmed, confirmed], who: [owner, dept_manager, admin], args: { exception: boolean }, note: optional }
+  confirm: { label: 決めたことにする, from: [unconfirmed], to: confirmed, who: [link:bundle.owner, dept_manager, admin], who_fallback: [link:meeting, owner], args: { decided_by: person }, note: optional, decision: true }
+  reject:  { label: 違う, from: [unconfirmed], to: retracted, who: [link:bundle.owner, dept_manager, admin], who_fallback: [link:meeting, owner], note: optional, decision: true }
+  retract: { label: 取り消す, from: [confirmed], to: retracted, who: [link:bundle.owner, dept_manager, admin], who_fallback: [link:meeting, owner], note: required, decision: true }
+  set_exception: { label: 例外（この件だけ）を切り替える, from: [unconfirmed, confirmed], who: [link:bundle.owner, dept_manager, admin], who_fallback: [link:meeting, owner], args: { exception: boolean }, note: optional }
 ---
 # 決めたこと
 
-商談などで決まったことの記録。サーバーだけが持ち（ファイルにはしません）、置いた部署のフォルダを読める人だけが見られます。
+会議などで決まったことの記録。サーバーだけが持ち（ファイルにはしません）、置いた部署のフォルダを読める人だけが見られます（出席者だけの会議からのものは、その会議の人だけ）。
+AI が残したものは「決めたことの案」です。決める立場の人が「そうです」と確かめるまでは決めたことではなく、前例にもしません。
+確かめるのは、つながっているまとまり（案件・プロジェクト）の責任者・部署の管理役・管理者です。まとまりがない・責任者がいない・責任者がこの記録を見られないときは、その会議を読める人（会議がなければ残した人）が確かめます。
 「例外（この件だけ）」の決めたことは、つながった件だけの判断です（例「今回の見積は特別に20%値引きしてよい」）。ほかの件の前例にはしません。
 `,
   reply_request: `---
@@ -643,6 +658,12 @@ export const ACCEPTANCE: Readonly<Record<string, {
 export const TASK_VERSION = 13
 
 /**
+ * The decision version every decision is moved to at startup (decision version 6, the
+ * `TASK_VERSION` mechanism: adapters/sqlite/records.ts `migrateCompanyCoreTypeVersion`). Additive.
+ */
+export const DECISION_VERSION = 6
+
+/**
  * Proposals (案, task version 11): a record of `type` that the member's **AI** creates with its
  * `origin` link set (the meeting it is homework of) starts in `state` when the company proposes
  * (TaskSettings.meetingTasks `propose`, the default), else as before (`create`). A person's
@@ -818,6 +839,8 @@ export const ACTOR_ARGS: Readonly<Record<string, Readonly<Record<string, readonl
   interaction: { settle: ['settled_by'] },
   // Task version 13: 「別のもの」 on a proposal marked similar records who said so.
   task: { keep_apart: ['apart_by'] },
+  // Decision version 6: 「決めた人」 is the person who confirmed it (owner decision 2026-11-07).
+  decision: { confirm: ['decided_by'] },
 }
 
 /** Whether the engine fills this argument with the person acting (`ACTOR_ARGS`). */
