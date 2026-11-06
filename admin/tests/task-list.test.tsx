@@ -156,6 +156,35 @@ describe('仕事の進め方・会社の暦', () => {
     expect(await within(dialog).findByText('代わりの人が見られないものが 2 件あります。部署の管理役に知らせました。')).toBeInTheDocument()
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ userId: 'u_member', from: '2026-11-02', until: '2026-11-06', delegateId: 'u_owner' })
   })
+
+  it('taking someone out of a department where only its people edit: an outdated app is explained, and an owner can still save', async () => {
+    const tanaka = { userId: 'u_member', name: '田中 太郎', email: 'tanaka@example.com' }
+    const outdated = {
+      error: 'outdated',
+      code: 'OUTDATED_CLIENTS',
+      canForce: true,
+      members: [{ userId: 'u_member', name: '田中 太郎', email: 'tanaka@example.com', role: 'member', clientVersion: null, version: '不明', lastSeenAt: null }],
+    }
+    const calls = stubApi(ownerCapabilities, (id) => ({ members: id === 'd_sales' ? [tanaka] : [], canEdit: true }), {
+      [`PUT ${base}/departments/d_sales/members`]: (call) =>
+        (call.body as { force?: boolean }).force === true ? { body: ok({ members: [], canEdit: true }) } : { status: 409, body: outdated },
+    })
+    // Opened by itself, as right after the department was created.
+    renderInCompany(<MembershipCard departments={departments} error={null} onRetry={() => {}} openFor="d_sales" onOpened={() => {}} />)
+    const dialog = await screen.findByRole('dialog', { name: '「営業部」に所属する人' })
+    expect(within(dialog).getByText(/新しく作った部署では、所属する人だけがその部署のフォルダを編集できます/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('option', { name: /田中 太郎/ }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    const warning = await screen.findByRole('dialog', { name: 'アプリの更新が必要なメンバーがいます' })
+    expect(within(warning).getByText(/所属から外すと、その部署のフォルダに変更を送れなくなり/)).toBeInTheDocument()
+    expect(within(warning).getByText(/田中 太郎/)).toBeInTheDocument()
+    await userEvent.click(within(warning).getByRole('button', { name: 'それでも保存する' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([
+      { userIds: [] },
+      { userIds: [], force: true },
+    ]))
+  })
 })
 
 // 「記録とやることの一覧を使う」 (records.md "Off per company"): the per-company records switch at the top

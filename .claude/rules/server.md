@@ -173,6 +173,13 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   department is gone now runs per company (`syncCompanyScopes`). Test:
   `tests/unit/rule-manager-company-migration.test.ts` on `tests/fixtures/app-schema-before-rule-companies.sql`
   (the schema before, frozen): per-company counts equal before and after.
+- The rule subject `department` (2026-11-06, `migrateDepartmentRuleSubject`, after the above):
+  `scope_rules`' CHECK listed only everyone / role / user, which SQLite cannot alter, so the
+  table is rebuilt once (rows with their rowid, ids and company kept; indexes and the company
+  triggers made again) and triggers `scope_rules_department_insert|update` keep a department
+  rule naming a department of its own company. An older build keeps working on the database
+  (it never writes such a rule; its push checker refuses a snapshot holding one: `[HOOK_ERROR]`,
+  never a wrong allow). Test: `tests/unit/department-rule-subject-migration.test.ts`.
 - The company id given to `forCompany` comes from the server: `member.companyId` (the membership
   `services/access.ts` looked up for the signed-in account), a company the service just created,
   a key-broker token row, or a job looping over the companies registry — never a value taken
@@ -412,8 +419,15 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   (`/overview`, `/permissions`, `/me/capabilities`, `/me/write-access`, `managedFolders` for
   git-http's snapshot). Editor: `services/permission-editor.ts` (`canEditPath`, subjects, the
   outdated-app guard `guardWrite` — mutation + write-loss check in one `transactions.run`,
-  rolled back by throwing, 409 `OUTDATED_CLIENTS`). With the default seed (`everyone: read + write` on the company
-  scope) nothing is restricted. Managers (`departments/:id/managers`) may manage their
+  rolled back by throwing, 409 `OUTDATED_CLIENTS`; also run by `PUT …/departments/:id/members`,
+  since who belongs decides who writes under a department rule). With the default seed
+  (`everyone: read + write` on the company scope) nothing is restricted. Rule subjects:
+  `everyone`, `role`, `department` (the people who belong to it, 所属; `parseSubject` takes only
+  a department of the actor's company — another company's id answers 400 `Unknown department`
+  like one that exists nowhere — and a trigger refuses a row naming another company's
+  department or none; who belongs is read from `department_members` with the rules as
+  `memberIds`, never stored on the rule; deleting the department deletes the rules naming it;
+  labelled 「〇〇に所属する人」), `user`. Managers (`departments/:id/managers`) may manage their
   departments' private folders and instruction files, and the skill files in their departments.
 - 「Skill を直せる人」 (`skill_editors`, `department_id` NULL = the whole company; `ScopeRepository`,
   `departments.replaceSkillEditors`, `permissionViews.skillEditing`): who else may change skill
@@ -443,6 +457,13 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `sort_order`) whose folder is among them. Nothing is ever pulled or checked out: a synchronous
   `git pull` of the old working clone on every list call once froze the whole process (all API
   and git-http traffic) for 42 s on a 7.7 GB clone.
+- Access of a department created through `POST /departments` (owner decision 2026-11-06):
+  its scope gets `everyone: read` + `department <id>: read + write` in the same transaction as
+  the row (`seedDepartmentMemberWriting`, only when the scope has no rules yet): everyone reads,
+  only the people who belong (`tasks.md` "Department membership") and owner/admin write; nobody
+  belongs at first. Older departments and the company's default departments keep inheriting
+  `everyone: read + write`; nothing is migrated. Test:
+  `tests/integration/department-member-writing.test.ts`.
 - Mutations have no working tree (`lib/bare-commit.ts`): a department folder is one entry of the
   shared branch's root tree, so create adds an entry (`.gitkeep`, `.personal/.gitignore` blobs,
   `mktree`), rename relabels it (its tree is reused), delete drops it; `commit-tree` (parent = the

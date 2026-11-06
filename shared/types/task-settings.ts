@@ -25,8 +25,10 @@ export interface DepartmentMember {
 
 /**
  * GET|PUT /api/companies/:id/departments/:departmentId/members (every member
- * reads; owner/admin and that department's managers change). Belonging to a
- * department changes nobody's folder access.
+ * reads; owner/admin and that department's managers change). Where a rule
+ * names the department (subject 'department'; every department created since
+ * 2026-11-06), the people who belong are the ones who write there. PUT takes
+ * `force: true` (owner/admin) past 409 OUTDATED_CLIENTS.
  */
 export interface DepartmentMembersView {
   members: DepartmentMember[]

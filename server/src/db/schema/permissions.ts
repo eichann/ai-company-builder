@@ -25,7 +25,7 @@ export const permissionSchema = `
     CREATE TABLE IF NOT EXISTS scope_rules (
       id TEXT PRIMARY KEY,
       scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
-      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'user')),
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'user')),
       subject_id TEXT,
       can_read INTEGER NOT NULL DEFAULT 0,
       can_write INTEGER NOT NULL DEFAULT 0,
@@ -219,4 +219,65 @@ export function migrateRuleAndManagerCompanies(conn: Database.Database): {
     }
     return done
   })()
+}
+
+/**
+ * The rule subject 'department' (the people who belong to a department, 所属;
+ * shared/core/permissions.ts). Two parts, both idempotent:
+ *
+ * - A database created before it has `CHECK (subject_type IN ('everyone',
+ *   'role', 'user'))` on scope_rules, which SQLite cannot alter: the table is
+ *   rebuilt once with the wider CHECK (rows, ids, created_at/by and company_id
+ *   kept; rowid order kept, so rules stay oldest first), then its indexes and
+ *   the company triggers are created again (migrateRuleAndManagerCompanies).
+ *   Only the CHECK is widened, so an older server build keeps working on the
+ *   database; it never inserts a department rule, and one it reads matches no
+ *   one there (its push checker refuses an unknown subject: [HOOK_ERROR],
+ *   never a wrong allow).
+ * - Triggers: a department rule names a department of the rule's own company
+ *   (never another company's, never none), and keeps naming one.
+ *
+ * Runs after migrateRuleAndManagerCompanies (needs company_id).
+ */
+export function migrateDepartmentRuleSubject(conn: Database.Database): { rebuilt: boolean } {
+  const sql = (conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'scope_rules'`).get() as { sql: string } | undefined)?.sql ?? ''
+  const rebuilt = sql !== '' && !sql.includes("'department'")
+  conn.transaction(() => {
+    if (rebuilt) {
+      conn.exec(`
+        CREATE TABLE scope_rules_rebuilt (
+          id TEXT PRIMARY KEY,
+          scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
+          subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'department', 'user')),
+          subject_id TEXT,
+          can_read INTEGER NOT NULL DEFAULT 0,
+          can_write INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          company_id TEXT REFERENCES companies(id) ON DELETE CASCADE
+        );
+        INSERT INTO scope_rules_rebuilt (rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id)
+          SELECT rowid, id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by, company_id FROM scope_rules;
+        DROP TABLE scope_rules;
+        ALTER TABLE scope_rules_rebuilt RENAME TO scope_rules;
+        CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);
+      `)
+      // Indexes and company triggers went with the old table.
+      migrateRuleAndManagerCompanies(conn)
+    }
+    conn.exec(`
+      CREATE TRIGGER IF NOT EXISTS scope_rules_department_insert BEFORE INSERT ON scope_rules
+      WHEN NEW.subject_type = 'department' AND NOT EXISTS (
+        SELECT 1 FROM departments WHERE id = NEW.subject_id
+          AND company_id = COALESCE(NEW.company_id, (SELECT company_id FROM scopes WHERE id = NEW.scope_id)))
+      BEGIN SELECT RAISE(ABORT, 'a department rule names a department of the same company'); END;
+
+      CREATE TRIGGER IF NOT EXISTS scope_rules_department_update BEFORE UPDATE OF subject_type, subject_id, company_id, scope_id ON scope_rules
+      WHEN NEW.subject_type = 'department' AND NOT EXISTS (
+        SELECT 1 FROM departments WHERE id = NEW.subject_id AND company_id = NEW.company_id)
+      BEGIN SELECT RAISE(ABORT, 'a department rule names a department of the same company'); END;
+    `)
+  })()
+  if (rebuilt) console.log('[db] scope_rules rebuilt for department rules')
+  return { rebuilt }
 }

@@ -298,7 +298,9 @@ departmentsRoute.put('/:id/managers', companyMember, serviceBody, async (c) => {
 // Department membership (所属する部署, stage 2 S6, .claude/rules/tasks.md)
 //
 // Who belongs to a department: any member reads; owner/admin and that
-// department's managers replace it. Belonging changes nobody's folder access.
+// department's managers replace it. Where a rule names the department (every
+// department created since 2026-11-06), who belongs decides who writes there,
+// so a change runs the outdated-app guard (409 OUTDATED_CLIENTS, `force`).
 // ============================================================================
 
 // GET /api/companies/:companyId/departments/:id/members - any member (read-only)

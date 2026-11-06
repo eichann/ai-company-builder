@@ -9,7 +9,8 @@ export interface ScopeRecord {
   departmentId: string | null
 }
 
-export type NewRule = Omit<ScopeRule, 'id'>
+/** A rule to store (a department rule's `memberIds` is never stored: who belongs is read when the rules are). */
+export type NewRule = Omit<ScopeRule, 'id' | 'memberIds'>
 
 /**
  * One company's permission scopes, rules and department managers, from its
@@ -21,7 +22,7 @@ export type NewRule = Omit<ScopeRule, 'id'>
  * transaction, it joins it).
  */
 export interface ScopeRepository {
-  /** Every scope with its rules (rules oldest first). */
+  /** Every scope with its rules (rules oldest first; a department rule with who belongs now, `memberIds`). */
   listWithRules(): ScopeWithRules[]
   /** Department ids the user manages, by the departments' sort_order. */
   managedDepartmentIds(userId: string): string[]
@@ -47,11 +48,17 @@ export interface ScopeRepository {
   ensureCompanyScope(createdBy: string | null): string
   /** The department's scope at its folder (no rules: inherits). */
   ensureDepartmentScope(departmentId: string, folder: string, createdBy: string | null): void
-  /** One scope per department; repairs drift. */
+  /**
+   * A department created now: `everyone: read` + `department: read + write`
+   * on its scope (only the people who belong to it write), unless the scope
+   * already has rules. Returns whether it seeded them.
+   */
+  seedDepartmentMemberWriting(departmentId: string, createdBy: string | null): boolean
+  /** One scope per department; repairs drift (also removes rules naming a department that is gone). */
   syncCompanyScopes(): void
   /** A department folder was renamed: its scope and every scope under it move (rules stay attached). */
   moveScopeSubtree(fromPath: string, toPath: string): void
-  /** A department was deleted: its scope subtree, their rules and its managers go (its skill editors by the foreign key). */
+  /** A department was deleted: its scope subtree, their rules, rules naming it and its managers go (its skill editors by the foreign key). */
   deleteDepartmentScopes(departmentId: string, folder: string): void
   /** Remove every rule naming the user (private folders included). Returns how many. */
   deleteUserRules(userId: string): number

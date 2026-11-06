@@ -24,7 +24,14 @@
  *   rules and scopes of folders under it, and the department's managers) when
  *   the department is deleted. The FOREIGN KEYs also cascade, so a department
  *   deleted by an older server build that does not know about scopes does not
- *   leave rows behind either; startup seeding repairs anything else.
+ *   leave rows behind either; startup seeding repairs anything else. A
+ *   department created through POST /departments gets `everyone: read` +
+ *   `department: read + write` (seedDepartmentMemberWriting); older ones and
+ *   the company's default departments have no rules (they inherit).
+ * - department rules (subject 'department') name a department of the same
+ *   company (trigger); who belongs is read from department_members whenever
+ *   rules are read (`memberIds`), never stored on the rule. Deleting the
+ *   department deletes the rules naming it.
  */
 import type Database from 'better-sqlite3'
 import {
@@ -64,6 +71,42 @@ interface RuleRow {
   subject_id: string | null
   can_read: number
   can_write: number
+}
+
+/**
+ * Who belongs to each department of the company (department_members; a row's
+ * company is its department's, by trigger), for the department rules.
+ */
+function departmentMemberIds(conn: Conn, companyId: string): Map<string, string[]> {
+  const rows = conn.prepare(`
+    SELECT department_id, user_id FROM department_members WHERE company_id = ? ORDER BY created_at, user_id
+  `).all(companyId) as Array<{ department_id: string; user_id: string }>
+  const byDepartment = new Map<string, string[]>()
+  for (const r of rows) {
+    const list = byDepartment.get(r.department_id) ?? []
+    list.push(r.user_id)
+    byDepartment.set(r.department_id, list)
+  }
+  return byDepartment
+}
+
+/** A stored rule as the model sees it; a department rule gets who belongs now. */
+function toRule(r: RuleRow, members: () => Map<string, string[]>): ScopeRule {
+  const rule: ScopeRule = {
+    id: r.id,
+    subjectType: r.subject_type,
+    subjectId: r.subject_id,
+    canRead: r.can_read === 1,
+    canWrite: r.can_write === 1,
+  }
+  if (r.subject_type === 'department') rule.memberIds = members().get(r.subject_id ?? '') ?? []
+  return rule
+}
+
+/** Read department_members at most once, and only when a department rule needs it. */
+function lazyMembers(conn: Conn, companyId: string): () => Map<string, string[]> {
+  let cached: Map<string, string[]> | null = null
+  return () => (cached ??= departmentMemberIds(conn, companyId))
 }
 
 /** Remove a scope of the company and its rules. */
@@ -136,6 +179,25 @@ export function ensureDepartmentScope(
 }
 
 /**
+ * A department created now (POST /departments, owner decision 2026-11-06):
+ * everyone reads, only the people who belong to it write —
+ * `everyone: read` + `department <id>: read + write` on its scope. Only when
+ * that scope has no rules yet: rules someone already set there are kept.
+ * Departments created before, and the company's default departments, are not
+ * touched. Call after ensureDepartmentScope.
+ */
+export function seedDepartmentMemberWriting(conn: Conn, companyId: string, departmentId: string, createdBy: string | null): boolean {
+  return conn.transaction(() => {
+    const scope = conn.prepare(`SELECT id FROM scopes WHERE department_id = ? AND company_id = ?`)
+      .get(departmentId, companyId) as { id: string } | undefined
+    if (!scope || listScopeRules(conn, companyId, scope.id).length > 0) return false
+    insertRule(conn, companyId, scope.id, { subjectType: 'everyone', subjectId: null, canRead: true, canWrite: false }, createdBy)
+    insertRule(conn, companyId, scope.id, { subjectType: 'department', subjectId: departmentId, canRead: true, canWrite: true }, createdBy)
+    return true
+  })()
+}
+
+/**
  * Bring one company's scopes in line with its departments: company scope,
  * one scope per department, no scope or manager left for a department that no
  * longer exists. Idempotent.
@@ -153,6 +215,12 @@ export function syncCompanyScopes(conn: Conn, companyId: string): void {
         AND (department_id IS NULL OR department_id NOT IN (SELECT id FROM departments WHERE company_id = ?))
     `).all(companyId, companyId) as Array<{ id: string }>
     for (const o of orphans) deleteScopeAndRules(conn, companyId, o.id)
+    // Rules naming a department that is gone (it would grant nobody anything).
+    conn.prepare(`
+      DELETE FROM scope_rules
+      WHERE company_id = ? AND subject_type = 'department'
+        AND (subject_id IS NULL OR subject_id NOT IN (SELECT id FROM departments WHERE company_id = ?))
+    `).run(companyId, companyId)
     // Managers of departments that are gone (older builds, foreign_keys disabled).
     conn.prepare(`
       DELETE FROM department_managers
@@ -208,6 +276,7 @@ export function deleteDepartmentScopes(conn: Conn, companyId: string, department
       .get(companyId, ...ids.map(i => i.id)) as { n: number }
     if (privateInside.n > 0) throw new Error('A private folder is inside this department; make it public first')
     for (const { id } of ids) deleteScopeAndRules(conn, companyId, id)
+    conn.prepare(`DELETE FROM scope_rules WHERE subject_type = 'department' AND subject_id = ? AND company_id = ?`).run(departmentId, companyId)
     conn.prepare(`DELETE FROM department_managers WHERE department_id = ? AND company_id = ?`).run(departmentId, companyId)
   })()
 }
@@ -222,15 +291,10 @@ export function listScopesWithRules(conn: Conn, companyId: string): ScopeWithRul
     SELECT * FROM scope_rules WHERE company_id = ? ORDER BY created_at ASC, rowid ASC
   `).all(companyId) as RuleRow[]
   const byScope = new Map<string, ScopeRule[]>()
+  const members = lazyMembers(conn, companyId)
   for (const r of rules) {
     const list = byScope.get(r.scope_id) ?? []
-    list.push({
-      id: r.id,
-      subjectType: r.subject_type,
-      subjectId: r.subject_id,
-      canRead: r.can_read === 1,
-      canWrite: r.can_write === 1,
-    })
+    list.push(toRule(r, members))
     byScope.set(r.scope_id, list)
   }
   return scopes.map(s => ({
@@ -427,13 +491,8 @@ export function listScopeRules(conn: Conn, companyId: string, scopeId: string): 
     SELECT * FROM scope_rules WHERE scope_id = ? AND company_id = ?
     ORDER BY created_at ASC, rowid ASC
   `).all(scopeId, companyId) as RuleRow[]
-  return rows.map(r => ({
-    id: r.id,
-    subjectType: r.subject_type,
-    subjectId: r.subject_id,
-    canRead: r.can_read === 1,
-    canWrite: r.can_write === 1,
-  }))
+  const members = lazyMembers(conn, companyId)
+  return rows.map(r => toRule(r, members))
 }
 
 /** A rule with the scope it belongs to, or null when it is not a rule of `companyId`. */
@@ -462,8 +521,12 @@ export function ensureFolderScope(conn: Conn, companyId: string, path: string, c
   return getScopeByPath(conn, companyId, path)!
 }
 
-/** Add a rule to a scope of the company (a scope of another company: the insert trigger refuses it). */
-function insertRule(conn: Conn, companyId: string, scopeId: string, rule: Omit<ScopeRule, 'id'>, createdBy: string | null): string {
+/**
+ * Add a rule to a scope of the company (a scope of another company, or a
+ * department rule naming another company's department: the insert triggers
+ * refuse it). `memberIds` is never stored: it is read from department_members.
+ */
+function insertRule(conn: Conn, companyId: string, scopeId: string, rule: Omit<ScopeRule, 'id' | 'memberIds'>, createdBy: string | null): string {
   const id = newId()
   conn.prepare(`
     INSERT INTO scope_rules (id, company_id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)

@@ -118,7 +118,7 @@ function wire() {
   const roleOf = (co: string, userId: string) => ((MEMBERS[co] ?? []).includes(userId) ? (userId === 'u-owner' ? 'owner' : 'member') : null)
   const isMember = (co: string, userId: string) => (MEMBERS[co] ?? []).includes(userId)
   const accounts = { byIds: (ids: string[]) => new Map(ids.map(id => [id, { email: `${id}@example.com`, name: id }])) }
-  const taskSettings = createTaskSettingsService({ ...shared, accounts: accounts as never, memberships: { listByCompany: () => [] } as never })
+  const taskSettings = createTaskSettingsService({ ...shared, accounts: accounts as never, memberships: { listByCompany: () => [] } as never, guardWrite: (_a, _f, _r, mutate) => ({ ok: true as const, value: mutate() }) })
   absences = createAbsenceService({ ...shared, accounts, memberships: { roleOf }, timeZoneOf: () => 'Asia/Tokyo' })
   const actsFor = (co: string, userId: string) => absences.actsFor(co, userId)
   notices = createNotificationService({

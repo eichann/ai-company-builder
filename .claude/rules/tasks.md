@@ -152,16 +152,26 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 
 ## Department membership (所属する部署, `GET|PUT …/departments/:id/members`)
 
-- A new, explicit concept: who belongs to a department, separate from folder permissions
-  (departments get an `everyone: read + write` rule on creation, so "can write" cannot mean
-  "belongs"). Belonging changes nobody's access. One person may belong to several departments.
-  Used later for: which departments' task lists a person sees, the shared inbox being the
-  department's turn, managers moving a leaver's tasks (S13).
+- A new, explicit concept: who belongs to a department. One person may belong to several
+  departments. Used for: which departments' task lists a person sees, the shared inbox being
+  the department's turn, managers moving a leaver's tasks (S13) — and **who writes** in a
+  department created since 2026-11-06 (owner decision): `POST /departments` gives its scope
+  `everyone: read` + `department <id>: read + write` (rule subject `department`,
+  `shared/core/permissions.ts`; `seedDepartmentMemberWriting`), so everyone reads, only the
+  people who belong (plus owner/admin) write, and changing who belongs changes who writes.
+  Nobody belongs at first, so until someone is added only owner/admin write there. Departments
+  created before, and the company's default departments, keep their rules (none: they inherit
+  `everyone: read + write`); nothing was migrated.
 - `department_members` (behind the handle; a trigger refuses a row whose company is not its
   department's; `ON DELETE CASCADE` with the department). Any member reads; owner/admin and
   **that department's** managers replace the set (`{ userIds }`, members of the company only,
-  ≤ 1000). Check order: who → department exists → body. A member removed from the company is
-  removed from every department of it (`services/companies.ts` `removeMember`).
+  ≤ 1000, `force?`). Check order: who → department exists → body. The change runs under the
+  permission editor's outdated-app guard over the whole company (`guardWrite`, roots `['']`:
+  a department rule may sit on any folder), so taking someone out of a department where only
+  its people write answers 409 `OUTDATED_CLIENTS` while their app cannot recover from
+  `[WRITE_DENIED]`; `force: true` is owner/admin only (a manager's → 403 `FORCE_NOT_ALLOWED`).
+  A member removed from the company is removed from every department of it
+  (`services/companies.ts` `removeMember`).
 - Starts empty for every department: nobody belongs until an admin or manager says so.
 - Absences (代わりの人, `records.md` "Absence and the delegate") are stored next to it
   (`member_absences`, same repository) and use it: a department's managers set the absences of
@@ -180,11 +190,20 @@ due date from `replyTarget`); everyone on the page sees who belongs to each depa
 「所属する人を変える」 where the server says `canEdit`; there, each member also gets
 「不在・代わりの人」 (their absences, the delegate, add / remove; `/absences` with `userId`). Managers set membership here rather than in
 the desktop app: the admin console already serves managers (permissions, private folders), so it
-was the smaller change. Test: `admin/tests/task-list.test.tsx`.
+was the smaller change. The card and the dialog say that in a new department only the people
+who belong edit; a 409 `OUTDATED_CLIENTS` opens the outdated-app dialog (「それでも保存する」 for
+owners/admins). Creating a department (「部署を追加」, `department-form-dialog.tsx`
+`NEW_DEPARTMENT_ACCESS_TEXT`) says in one line who reads, who edits, that nobody belongs yet,
+and that secrets go into a private folder inside the department; right after creating, the
+page opens 「所属する人を変える」 for it. Tests: `admin/tests/task-list.test.tsx`,
+`admin/tests/pages.test.tsx` (部署).
 
 ## Tests
 
 `server/tests/integration/task-settings.test.ts` (roles, manager only in their own department,
-cross-company, leaver), `tests/unit/task-settings-core.test.ts` (holidays 2026–2030, every
+cross-company, leaver), `department-member-writing.test.ts` (a new department: who belongs
+writes, anyone else is refused at push and by `/me/write-access`, everyone reads; adding /
+removing changes it behind the outdated-app guard; an older department is unchanged; another
+company's department or membership never counts), `tests/unit/task-settings-core.test.ts` (holidays 2026–2030, every
 `replyTarget` case), `tests/unit/company-data.test.ts` (handle isolation), permission-matrix rows
 and `CROSS` rows for both member routes, admin contract.

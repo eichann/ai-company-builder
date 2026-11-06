@@ -132,7 +132,10 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     /**
      * Create the folder (a commit on the shared branch), then the row and its permission
-     * scope (no rules: inherits from the company). Throws when git fails.
+     * scope, in one transaction. The scope starts with `everyone: read` + `department:
+     * read + write` (owner decision 2026-11-06): everyone reads; only the people who
+     * belong to it (所属, PUT /:id/members) and owners/admins write. So until someone is
+     * added, only owners and admins write there. Throws when git fails.
      */
     async create(member: Member, body: CreateDepartmentInput): Promise<Outcome<DepartmentRow>> {
       const { companyId, userId } = member
@@ -143,19 +146,22 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       const id = ids.newId()
       const timestamp = clock.now()
       const departments = departmentsOf(member)
-      departments.insert({
-        id,
-        name: body.name.trim(),
-        nameEn: body.nameEn || null,
-        folder: body.folder.trim(),
-        icon: body.icon || 'Folder',
-        color: body.color || '#6366f1',
-        description: body.description || null,
-        sortOrder: nextSortOrder(member),
-        createdAt: timestamp,
-        createdBy: userId,
+      transactions.run(() => {
+        departments.insert({
+          id,
+          name: body.name.trim(),
+          nameEn: body.nameEn || null,
+          folder: body.folder.trim(),
+          icon: body.icon || 'Folder',
+          color: body.color || '#6366f1',
+          description: body.description || null,
+          sortOrder: nextSortOrder(member),
+          createdAt: timestamp,
+          createdBy: userId,
+        })
+        scopesOf(companyId).ensureDepartmentScope(id, body.folder.trim(), userId)
+        scopesOf(companyId).seedDepartmentMemberWriting(id, userId)
       })
-      scopesOf(companyId).ensureDepartmentScope(id, body.folder.trim(), userId)
 
       return ok(departments.find(id)!)
     },

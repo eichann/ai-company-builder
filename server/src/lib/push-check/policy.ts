@@ -78,7 +78,7 @@ export type WriteGate =
   | { kind: 'deny-all' }
   | { kind: 'check'; canWrite: (path: string) => boolean }
 
-const SUBJECT_TYPES: ReadonlySet<string> = new Set<SubjectType>(['everyone', 'role', 'user'])
+const SUBJECT_TYPES: ReadonlySet<string> = new Set<SubjectType>(['everyone', 'role', 'department', 'user'])
 
 function invalid(what: string): never {
   throw new Error(`invalid push policy: ${what}`)
@@ -108,7 +108,8 @@ export function parsePushPolicy(text: string): PushPolicy {
       const x = r as Record<string, unknown>
       if (typeof x !== 'object' || x === null || typeof x.subjectType !== 'string' || !SUBJECT_TYPES.has(x.subjectType)
         || (x.subjectId !== null && typeof x.subjectId !== 'string')
-        || typeof x.canRead !== 'boolean' || typeof x.canWrite !== 'boolean') {
+        || typeof x.canRead !== 'boolean' || typeof x.canWrite !== 'boolean'
+        || (x.memberIds !== undefined && (!Array.isArray(x.memberIds) || !x.memberIds.every(m => typeof m === 'string')))) {
         invalid(`scopes[${i}].rules[${j}]`)
       }
       return {
@@ -117,6 +118,8 @@ export function parsePushPolicy(text: string): PushPolicy {
         subjectId: x.subjectId as string | null,
         canRead: x.canRead as boolean,
         canWrite: x.canWrite as boolean,
+        // A department rule: who belongs, read by git-http with the rules (absent = nobody).
+        ...(x.subjectType === 'department' ? { memberIds: (x.memberIds as string[] | undefined) ?? [] } : {}),
       }
     })
     return {

@@ -166,6 +166,30 @@ describe('per-place edit choice', () => {
     expect(closed.find((m) => m.userId === 'u_other')).toMatchObject({ read: false, write: false, reason: 'no-rule' })
   })
 
+  it('a new department\'s rules (everyone reads, the people who belong edit) round-trip and preview by who belongs', () => {
+    // As the server sends them for a department created now.
+    const sales = { ...rule('department', 'd_sales', true), subjectLabel: '営業部に所属する人', memberIds: ['u_member'] }
+    const saved = [rule('everyone', null, false), sales]
+    const { draft, custom } = draftFromRules(saved)
+    // Saving the editor unchanged keeps the department rule, never a fixed list of people.
+    expect(custom).toBe(false)
+    expect(rulesFromDraft(draft)).toEqual([
+      { subjectType: 'everyone', subjectId: null, canWrite: false },
+      { subjectType: 'department', subjectId: 'd_sales', canWrite: true },
+    ])
+    expect(describeRules(saved, members)).toBe('指定した人だけ（営業部に所属する人）')
+    const others = [...members, { ...members[2], id: 'm4', userId: 'u_other', email: 'other@example.com', name: '山田 次郎' }]
+    const preview = previewAccess(others, saved, '営業部')
+    expect(preview.find((m) => m.userId === 'u_member')).toMatchObject({ read: true, write: true, decidedBy: { subjectType: 'department' } })
+    expect(preview.find((m) => m.userId === 'u_other')).toMatchObject({ read: true, write: false })
+    // A draft carries no memberIds: who belongs comes from the lookup (nobody when unknown).
+    const lookup = { name: () => '営業部', memberIds: (id: string) => (id === 'd_sales' ? ['u_other'] : undefined) }
+    const drafted = previewAccess(others, rulesFromDraft(draft), '営業部', lookup)
+    expect(drafted.find((m) => m.userId === 'u_other')?.write).toBe(true)
+    expect(drafted.find((m) => m.userId === 'u_member')?.write).toBe(false)
+    expect(previewAccess(others, rulesFromDraft(draft), '営業部').find((m) => m.userId === 'u_other')?.write).toBe(false)
+  })
+
   it('describes a rule set in one line', () => {
     expect(describeRules([rule('everyone', null, true)], members)).toBe('全員')
     expect(describeRules([rule('everyone', null, false), rule('user', 'u_member', true)], members)).toBe('指定した人だけ（田中 太郎）')

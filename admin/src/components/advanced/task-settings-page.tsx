@@ -807,7 +807,20 @@ function HolidaysCard({ draft, change }: CardProps) {
 }
 
 /** Who belongs to each department (所属, tasks.md); on 「部署」 (管理画面の見直し 2-4: one place). */
-export function MembershipCard({ departments, error, onRetry }: { departments: Department[] | undefined; error: unknown; onRetry: () => void }) {
+export function MembershipCard({
+  departments,
+  error,
+  onRetry,
+  openFor,
+  onOpened,
+}: {
+  departments: Department[] | undefined
+  error: unknown
+  onRetry: () => void
+  /** A department whose 「所属する人を変える」 should open by itself (one just created). */
+  openFor?: string | null
+  onOpened?: () => void
+}) {
   const { companyId } = useCompany()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const ids = departments?.map((d) => d.id) ?? []
@@ -817,6 +830,11 @@ export function MembershipCard({ departments, error, onRetry }: { departments: D
   })
   const [editing, setEditing] = useState<Department | null>(null)
   const [absent, setAbsent] = useState<DepartmentMember | null>(null)
+  // Right after a department is created nobody belongs yet (only owners and admins could edit there):
+  // its 「所属する人を変える」 opens by itself once everything it needs has loaded.
+  const requested =
+    openFor && members.data && membership.data?.[openFor]?.canEdit ? (departments?.find((d) => d.id === openFor) ?? null) : null
+  const shown = editing ?? requested
 
   const nameOf = (m: { name: string | null; email: string | null; userId: string }) => m.name || m.email || '名前未設定'
 
@@ -828,7 +846,7 @@ export function MembershipCard({ departments, error, onRetry }: { departments: D
           それぞれの部署に、だれが所属していますか？
         </CardTitle>
         <CardDescription>
-          所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。フォルダを見られる人・編集できる人は変わりません（それは「フォルダ」で決めます）。1人が複数の部署に所属できます。
+所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。新しく作った部署では、所属する人だけがその部署のフォルダを編集できます（オーナーと管理者はいつでも編集できます。見るのは全員できます）。1人が複数の部署に所属できます。
         </CardDescription>
       </CardHeader>
       {error && !departments ? (
@@ -889,14 +907,18 @@ export function MembershipCard({ departments, error, onRetry }: { departments: D
         </ul>
       )}
       <DepartmentMembersDialog
-        open={editing !== null}
-        onOpenChange={(o) => !o && setEditing(null)}
+        open={shown !== null}
+        onOpenChange={(o) => {
+          if (o) return
+          setEditing(null)
+          if (openFor) onOpened?.()
+        }}
         companyId={companyId}
-        department={editing}
-        current={editing ? (membership.data?.[editing.id]?.members ?? []).map((m) => m.userId) : []}
+        department={shown}
+        current={shown ? (membership.data?.[shown.id]?.members ?? []).map((m) => m.userId) : []}
         members={(members.data ?? []) as Member[]}
         onSaved={(view) => {
-          const id = editing?.id
+          const id = shown?.id
           if (id) membership.setData((prev) => ({ ...(prev ?? {}), [id]: view }))
         }}
       />

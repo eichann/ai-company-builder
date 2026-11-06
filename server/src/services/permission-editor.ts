@@ -93,9 +93,15 @@ function latestOf(...values: Array<string | null | undefined>): string | null {
   return best
 }
 
-function subjectLabel(r: Pick<ScopeRule, 'subjectType' | 'subjectId'>, users: Map<string, AccountSummary>): string {
+/** How a department rule reads: 「営業部に所属する人」. */
+export function departmentSubjectLabel(name: string | undefined): string {
+  return `${name ?? '（削除された部署）'}に所属する人`
+}
+
+function subjectLabel(r: Pick<ScopeRule, 'subjectType' | 'subjectId'>, users: Map<string, AccountSummary>, departmentName: (id: string) => string | undefined): string {
   if (r.subjectType === 'everyone') return '全員'
   if (r.subjectType === 'role') return ROLE_LABELS[r.subjectId ?? ''] ?? r.subjectId ?? ''
+  if (r.subjectType === 'department') return departmentSubjectLabel(departmentName(r.subjectId ?? ''))
   const u = r.subjectId ? users.get(r.subjectId) : undefined
   return u?.name || u?.email || r.subjectId || ''
 }
@@ -131,15 +137,19 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
     return priv ? { scopeId: priv.id, scopePath: priv.path, root: priv.path === path } : null
   }
 
-  function serializeRules(rules: ScopeRule[]) {
+  const departmentNameOf = (companyId: string) => (id: string) => companyData.forCompany(companyId).departments.find(id)?.name
+
+  function serializeRules(companyId: string, rules: ScopeRule[]) {
     const users = accounts.byIds(rules.filter(r => r.subjectType === 'user' && r.subjectId).map(r => r.subjectId!))
     return rules.map(r => ({
       id: r.id,
       subjectType: r.subjectType,
       subjectId: r.subjectId,
-      subjectLabel: subjectLabel(r, users),
+      subjectLabel: subjectLabel(r, users, departmentNameOf(companyId)),
       canRead: r.canRead,
       canWrite: r.canWrite,
+      // Who belongs (any member may read it: GET /departments/:id/members), for the editor's preview.
+      ...(r.subjectType === 'department' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
     }))
   }
 
@@ -165,6 +175,12 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
         if (id !== 'member') return { error: 'Unknown role' }
         return { subjectType: 'role', subjectId: 'member' }
       }
+      if (type === 'department') {
+        // A department of this company only (another company's id is unknown here, as is a deleted one).
+        if (typeof id !== 'string' || id.length === 0 || id.length > 200) return { error: 'subjectId must be a department ID' }
+        if (!companyData.forCompany(actor.companyId).departments.exists(id)) return { error: 'Unknown department' }
+        return { subjectType: 'department', subjectId: id }
+      }
       if (type === 'user') {
         if (typeof id !== 'string' || id.length === 0 || id.length > 200) return { error: 'subjectId must be a user ID' }
         const role = memberships.roleOf(actor.companyId, id)
@@ -172,7 +188,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
         if (hasFullAccess(role)) return { error: FULL_ACCESS_SUBJECT }
         return { subjectType: 'user', subjectId: id }
       }
-      return { error: 'subjectType must be everyone, role or user' }
+      return { error: 'subjectType must be everyone, role, department or user' }
     },
 
     /** Does the folder exist — in the company repository, or inside its private folder's repository? */
@@ -212,7 +228,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       const rules = scope ? scopesOf(companyId).rulesOf(scope.id) : []
       return {
         scope: scope ? { id: scope.id, path: scope.path, kind: scope.kind, inherited: rules.length === 0 } : null,
-        rules: serializeRules(rules),
+        rules: serializeRules(companyId, rules),
       }
     },
 
@@ -289,7 +305,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
             scopeId: governing!.id,
             path: governing!.path,
             subjectType: decided[0].subjectType,
-            subjectLabel: subjectLabel(decided[0], users),
+            subjectLabel: subjectLabel(decided[0], users, departmentNameOf(companyId)),
           },
         }
       })

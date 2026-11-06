@@ -201,13 +201,16 @@ describe('departments API keeps scopes in sync', () => {
 
   let deptId: string
 
-  it('create adds an inheriting department scope', async () => {
+  it('create adds a department scope where everyone reads and the people who belong write', async () => {
     const res = await json('POST', base, { name: 'コンテンツ', folder: 'コンテンツ' })
     expect(res.status).toBe(201)
     deptId = ((await res.json()) as { data: { id: string } }).data.id
     const s = scopesOf(db, CO).find(x => x.department_id === deptId)!
     expect(s).toMatchObject({ path: 'コンテンツ', kind: 'department', repo_id: null, created_by: 'ps-owner' })
-    expect(rulesOf(db, s.id)).toEqual([])
+    expect(rulesOf(db, s.id).map(r => [r.subject_type, r.subject_id, r.can_read, r.can_write]).sort()).toEqual([
+      ['department', deptId, 1, 1],
+      ['everyone', null, 1, 0],
+    ])
   })
 
   it('folder rename moves the department scope and the folder scopes under it, rules attached', async () => {
@@ -256,5 +259,7 @@ describe('departments API keeps scopes in sync', () => {
     const deptCount = (db.prepare('SELECT COUNT(*) AS n FROM departments WHERE company_id = ?').get(id) as { n: number }).n
     expect(deptCount).toBeGreaterThan(0)
     expect(scopes.filter(s => s.kind === 'department')).toHaveLength(deptCount)
+    // The company's default departments are not created by an admin: they inherit (everyone: read + write).
+    expect(scopes.filter(s => s.kind === 'department').flatMap(s => rulesOf(db, s.id))).toEqual([])
   })
 })

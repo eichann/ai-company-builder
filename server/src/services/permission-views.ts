@@ -22,6 +22,7 @@ import {
 } from '../../shared/core/permissions'
 import type { SkillEditing } from '../../shared/core/skill-files'
 import type { Member } from './access'
+import { departmentSubjectLabel } from './permission-editor'
 import { ok, refuse, type Outcome } from './outcome'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -141,9 +142,11 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
         for (const r of s.rules) if (r.subjectType === 'user' && r.subjectId) userIds.add(r.subjectId)
       }
       const users = accounts.byIds([...userIds])
+      const departmentNames = new Map(companyData.forCompany(companyId).departments.listUnordered().map(d => [d.id, d.name]))
       const label = (r: ScopeRule): string => {
         if (r.subjectType === 'everyone') return '全員'
         if (r.subjectType === 'role') return ROLE_LABELS[r.subjectId ?? ''] ?? r.subjectId ?? ''
+        if (r.subjectType === 'department') return departmentSubjectLabel(departmentNames.get(r.subjectId ?? ''))
         const u = r.subjectId ? users.get(r.subjectId) : undefined
         return u?.name || u?.email || r.subjectId || ''
       }
@@ -154,6 +157,8 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
         subjectLabel: label(r),
         canRead: r.canRead,
         canWrite: r.canWrite,
+        // Who belongs (any member may read it: GET /departments/:id/members), for the editor's preview.
+        ...(r.subjectType === 'department' ? { memberIds: [...(r.memberIds ?? [])] } : {}),
       })
 
       // Rules whose folder is gone from the shared branch (renamed or removed by a

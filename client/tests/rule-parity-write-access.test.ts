@@ -13,7 +13,8 @@
 // app's path checker — i.e. checkWritePath + decideReservedWrite in
 // client/electron/write-guard.ts, wired like features/private-folders/guards.ts guardView.
 //
-// Generated: scope trees with everyone / role / user rules, private folders,
+// Generated: scope trees with everyone / role / department / user rules (a
+// department rule carries who belongs, as the server reads it), private folders,
 // owner / admin / members (a department manager is a member: managing grants
 // no file access), Japanese names, A–Z case variants, NFC and NFD spellings,
 // deep paths. Seeded, so a failure names its seed and the world.
@@ -95,11 +96,18 @@ function generateWorld(seed: number): World {
     const canRead = chance(0.7)
     return { canRead, canWrite: chance(canRead ? 0.6 : 0.15) }
   }
+  // Who belongs to each department (所属): the same for every rule naming it, as the server reads it.
+  const belongs = new Map(['d1', 'd2'].map(d => [d, ['u-m1', 'u-m2', 'u-m3', 'u-admin'].filter(() => chance(0.5))]))
   const randomRules = (min: number): ScopeRule[] => {
     const n = min + Math.floor(r() * 4)
     const rules: ScopeRule[] = []
     for (let i = 0; i < n; i++) {
-      const kind = pick(['everyone', 'everyone', 'role', 'user', 'user'] as const)
+      const kind = pick(['everyone', 'everyone', 'role', 'department', 'user', 'user'] as const)
+      if (kind === 'department') {
+        const department = pick(['d1', 'd2'])
+        rules.push({ id: `r${++seq}`, subjectType: kind, subjectId: department, ...flags(), memberIds: belongs.get(department)! })
+        continue
+      }
       const subjectId = kind === 'everyone' ? null : kind === 'role' ? pick(['member', 'member', 'admin']) : pick(['u-m1', 'u-m2', 'u-m3'])
       rules.push({ id: `r${++seq}`, subjectType: kind, subjectId, ...flags() })
     }
@@ -247,7 +255,7 @@ const KNOWN_DIFFERENCES: Array<{ id: string; describe: string; matches: (m: Mism
 function describeMismatch(m: Mismatch): string {
   return [
     `seed ${m.seed}: ${m.user} (${m.role}) writes ${JSON.stringify(m.path)}: server ${m.server.write} (${m.server.via}), client ${m.client}`,
-    `  scopes: ${JSON.stringify(m.scopes.map(s => ({ path: s.path, private: s.repoId !== null, rules: s.rules.map(r => `${r.subjectType}${r.subjectId ? `:${r.subjectId}` : ''}=${r.canRead ? 'r' : '-'}${r.canWrite ? 'w' : '-'}`) })))}`,
+    `  scopes: ${JSON.stringify(m.scopes.map(s => ({ path: s.path, private: s.repoId !== null, rules: s.rules.map(r => `${r.subjectType}${r.subjectId ? `:${r.subjectId}` : ''}${r.memberIds ? `[${r.memberIds.join(',')}]` : ''}=${r.canRead ? 'r' : '-'}${r.canWrite ? 'w' : '-'}`) })))}`,
   ].join('\n')
 }
 
