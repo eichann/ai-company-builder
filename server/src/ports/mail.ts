@@ -113,8 +113,10 @@ export interface MailSender {
   /**
    * Sends an RFC 5322 message (base64url) once; never retried. `threadId`: a reply
    * into the member's own conversation (its headers carry In-Reply-To / References).
+   * `upload`: the message carries attachments and goes as bytes through the provider's
+   * upload way (Gmail's media upload); without it, exactly the plain send as before.
    */
-  send(companyId: string, userId: string, raw: string, options?: { threadId?: string }): Promise<MailSendResult>
+  send(companyId: string, userId: string, raw: string, options?: { threadId?: string; upload?: boolean }): Promise<MailSendResult>
 }
 
 /**

@@ -292,7 +292,7 @@ export function declineMinutesBundle(companyId: string, minutesId: string, write
  * version shown), settles an unknown send or discards — through main, with their session. Sending
  * reaches outside the company; 「メールを送る許可」 opens Google's page in the member's browser.
  */
-export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle'>
+export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle' | 'openOutboundMailAttachment' | 'removeOutboundMailAttachment'>
 
 /** Reading one draft as the server holds it now (a task's 「AI が用意したもの」 shows the latest). */
 export type MailReads = ElectronPort<'getOutboundMail'>

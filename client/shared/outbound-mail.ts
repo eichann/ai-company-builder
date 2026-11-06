@@ -1,6 +1,6 @@
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
-import { RECIPIENT_SOURCE_LABELS, RECIPIENT_SOURCES, type RecipientSource } from '../../shared/core/mail'
-import type { MailRecipientsView, MailRecipientView, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
+import { ATTACHMENT_LIMITS, RECIPIENT_SOURCE_LABELS, RECIPIENT_SOURCES, sanitizeAttachmentName, SHA256_HEX_RE, type RecipientSource } from '../../shared/core/mail'
+import type { MailAttachmentView, MailRecipientsView, MailRecipientView, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 
 /**
  * The chat's mail card (milestone 4 G8, `.claude/rules/outbound-mail.md`): when
@@ -51,7 +51,20 @@ export const MAIL_WORDS = {
   awaitReplyNote: '相手から返事が来たら AI が中身を確かめます。来なければ、その日に AI が催促の下書きを用意します（送るのはあなたです）。',
   awaitReplyPickDay: '知らせる日を選んでください。',
   waitingReply: (day: string) => `相手の返事を待っています（来なければ ${day}の朝に知らせます）。`,
+  attachments: '付いているファイル',
+  openAttachment: '開いて確かめる',
+  removeAttachment: '外す',
+  attachmentGone: '送ってから30日たったため、サーバーから消しました',
+  attachmentsConfirm: '付いているファイルも、このまま送ります。中身は「開いて確かめる」で見られます。',
+  attachmentOpened: 'ファイルを開きました。',
 } as const
+
+/** `1234567` → 「1.2 MB」 (the card's size of a file). */
+export function fileSizeLabel(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  if (bytes >= 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${bytes} バイト`
+}
 
 export const MAIL_STATE_LABELS: Record<OutboundMailState, string> = {
   draft: '下書き',
@@ -96,7 +109,22 @@ export function readMailDraft(data: unknown): OutboundMailView | undefined {
     meetingId: nul(d.meetingId, 80), bundleId: nul(d.bundleId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),
     lastChangedBy: d.lastChangedBy === 'ai' ? 'ai' : 'human', updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt.slice(0, 40) : '',
     ...readAwaitReply(d.awaitReply),
+    attachments: readAttachments(d.attachments),
   }
+}
+
+/** The files of a version as the server listed them (none: an older server, a stored card from before, or a malformed list). */
+function readAttachments(v: unknown): MailAttachmentView[] {
+  if (!Array.isArray(v) || v.length > ATTACHMENT_LIMITS.count) return []
+  const out: MailAttachmentView[] = []
+  for (const x of v) {
+    if (!x || typeof x !== 'object') return []
+    const a = x as Record<string, unknown>
+    if (typeof a.name !== 'string' || sanitizeAttachmentName(a.name) !== a.name || typeof a.size !== 'number' || !Number.isInteger(a.size) || a.size <= 0
+      || typeof a.sha256 !== 'string' || !SHA256_HEX_RE.test(a.sha256)) return []
+    out.push({ name: a.name, size: a.size, sha256: a.sha256, bytesDeleted: a.bytesDeleted === true })
+  }
+  return out
 }
 
 /** 「返事を待つ」 as the server offered it (absent: not offered — a reply, Slack, an older server or a card stored before). */
@@ -128,6 +156,8 @@ export function aiMailSummary(draft: OutboundMailView, shown = false): Record<st
     to: draft.to.map(r => ({ ref: r.ref, email: r.email, name: r.name, source: r.source })),
     cc: draft.cc.map(r => ({ ref: r.ref, email: r.email, name: r.name, source: r.source })),
     subject: draft.subject, body: draft.body,
+    // Names and sizes only (never a path): the member opens each file on the card.
+    attachments: (draft.attachments ?? []).map(a => ({ name: a.name, size: a.size })),
     instruction: shown ? SHOWN_INSTRUCTION[draft.state] : 'The draft is shown to the member as a card. It is NOT sent: only the member sends it, from the card (「確かめて送る」). Never say it was sent. To change it, call mail_draft_update with this version as expectedVersion.',
   }
 }
@@ -140,6 +170,9 @@ const SHOWN_INSTRUCTION: Record<OutboundMailState, string> = {
 }
 
 export const OUTBOUND_MAIL_OFFLINE_TEXT = 'サーバーに接続できないため、いまは操作できません（オフラインの可能性があります）。'
+
+/** 「開いて確かめる」: the file was saved on this PC and handed to the viewer, or why not. */
+export type MailAttachmentOpenResult = { success: true } | { success: false; offline: boolean; error: string }
 
 /** The answer of the card's own actions (IPC `outboundMail:*`), sent with the person's session. */
 export type OutboundMailResult =
@@ -173,6 +206,13 @@ export function awaitDayLabel(day: string): string {
 
 /** Validation of what the renderer passes to main (main checks again before calling the server). */
 export const MESSAGE_ID_RE = /^outbound_message-[0-9a-z]{6,32}$/
+export function isAttachmentId(v: unknown): v is string {
+  return typeof v === 'string' && SHA256_HEX_RE.test(v)
+}
+/** The files the person was shown, as the send names them (each a sha256; at most the limit). */
+export function isShownAttachments(v: unknown): v is string[] {
+  return Array.isArray(v) && v.length <= ATTACHMENT_LIMITS.count && v.every(isAttachmentId)
+}
 export function isContentHash(v: unknown): v is string {
   return typeof v === 'string' && CONTENT_HASH_RE.test(v)
 }

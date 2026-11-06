@@ -13,7 +13,7 @@ import { connectorSchema, migrateConnectorProviders, migrateGooglePicker } from 
 import { contentStoreSchema } from './schema/content-store'
 import { fixedPayloadSchema, migrateFixedPayloads } from './schema/fixed-payloads'
 import { migrateNotificationsForUser, notificationSchema } from './schema/notifications'
-import { outboundMailSchema } from './schema/outbound-mail'
+import { migrateOutboundAttachments, outboundMailSchema } from './schema/outbound-mail'
 import { migrateDepartmentRuleSubject, migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordLinkCreator, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers, recordSchema } from './schema/records'
@@ -42,6 +42,7 @@ export { migratePluginInstallKeyReference, migratePluginOperationCreates, migrat
 export { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, migrateRecordViewers } from './schema/records'
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
+export { migrateOutboundAttachments } from './schema/outbound-mail'
 export { migrateAiRunColumns } from './schema/ai-runs'
 export { migrateMemberAbsenceHistory, migrateMemberWorkSwitches } from './schema/tasks'
 export { migrateSkillUseColumns } from './schema/skill-uses'
@@ -137,6 +138,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateConnectorProviders(conn)
   migrateGooglePicker(conn)
   migrateFixedPayloads(conn)
+  // PDFs attached to outbound mail, per version (outbound-mail.md "Attachments").
+  migrateOutboundAttachments(conn)
   migrateRecordContents(conn)
   migrateNotificationsForUser(conn)
   // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").

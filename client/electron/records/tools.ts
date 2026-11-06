@@ -44,6 +44,7 @@ import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { shortText, type ToolDisplay } from '../../shared/tool-display'
 import { actionToolDisplay, pluginOperationDisplay, recordToolDisplay } from '../../shared/acb-tool-displays'
 import { RecordsApiError, type RecordTurnAccess } from './api'
+import type { MailAttachmentRead } from './mail-attachments'
 import { RECORD_ID_RE } from '../../../shared/core/records'
 
 export const RECORDS_SERVER = 'acb_records'
@@ -94,7 +95,7 @@ export interface RecordToolSpec extends RecordToolDescriptor {
   /** A connector's update or create: its outcome becomes a card in the reply. */
   card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>>; kind?: 'update' | 'create' }
   /** The server call for a validated input. */
-  request(input: Record<string, unknown>): { method: 'GET' | 'POST' | 'PUT'; path: string; body?: unknown }
+  request(input: Record<string, unknown>): { method: 'GET' | 'POST' | 'PUT' | 'DELETE'; path: string; body?: unknown }
   /** The tool's text from the server's answer and the tool's input (default: the answer as JSON, cut at MAX_OUTPUT). */
   format?(answer: unknown, input: Record<string, unknown>, turn: { minutesChars: number }): string
   /** Reading minutes: when no まとまり is linked and not exactly one candidate, the app's 「どのまとまりの会議ですか？」 card. */
@@ -321,6 +322,11 @@ export const MAIL_LOOKUP_TOOL: RecordToolSpec = {
 }
 
 const mailId = z.string().regex(/^outbound_message-[0-9a-z]{6,32}$/)
+/** PDFs on this PC to attach (outbound-mail.md "Attachments"): main reads them, the AI names the paths. */
+const mailAttachments = z.array(z.object({
+  path: z.string().min(1).max(500).describe('会社フォルダの中の PDF のパス（例「営業部/.personal/提案書/2026-11-06_A社/提案書.pdf」） / a PDF path in the company folder'),
+}).strict()).max(3)
+const ATTACHMENTS_SAY = 'attachments は PDF だけ（3 つまで・合わせて 10 MB まで）。会社フォルダの中のパスで渡す（.personal/ の中も可。Skill が作った提案書など）。付けても送られない：メンバーがカードで中身を開いて確かめてから送る。'
 
 /**
  * Show an existing draft again, unchanged: a new card with its current state at this point of the
@@ -345,14 +351,16 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
       toRefs: z.array(mailRef).min(1).max(20).optional().describe('mail_recipients の ref（メールでは必須。Slack への返事にはない） / refs from mail_recipients (required for a mail; none for a Slack reply)'),
       ccRefs: z.array(mailRef).max(20).optional(),
       subject: z.string().min(1).max(200).optional().describe('メールの件名（Slack への返事にはない） / a mail\'s subject (none for a Slack reply)'),
-      body: z.string().min(1).max(20000).describe('テキストだけ（添付なし） / plain text only, no attachments'),
+      body: z.string().min(1).max(20000).describe('本文はテキストだけ（PDF は attachments で付ける） / plain text only (PDFs go in attachments)'),
       taskId: recordRef('task').optional().describe('このメールが関わるやること（タスクについての相談ならそのタスクの id）。相手の返事を待つとき、そのタスクにつながる / the task this mail is for (in a consultation about a task, its id); a waited answer links to it'),
       expectsReply: z.boolean().optional().describe('新しく送るメールで、相手に返事をもらう必要があるなら true（質問・お願い・日程調整など）。送る画面の「返事を待つ」に最初からチェックが入る。返事には使わない / true for a new mail that asks for an answer (a question, a request, scheduling): pre-ticks 「返事を待つ」 on the send screen; not for replies'),
+      attachments: mailAttachments.optional().describe(`付けるファイル。${ATTACHMENTS_SAY}新しく送るメールだけ（返事や Slack には付けられない） / PDFs to attach (paths in the company folder, .personal/ allowed); new mails only; NOT sent — the member checks them`),
     }).strict(),
     description: 'メールの下書きを作る（送らない）。来た連絡への返事は interactionId を渡す：メールなら同じスレッドへの返信（宛先は mail_recipients のスレッドの相手から）、Slack ならそのスレッドへの返事（本文だけ）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。' +
       '新しく送るメールが相手の返事を必要とするなら expectsReply: true（メンバーが送るときに「返事を待つ」を選べ、返事が来なければ催促を用意する流れになる）。\n' +
       'Create a mail draft (NOT sent). To answer an incoming message pass interactionId: a mail replies in its thread (recipients from mail_recipients\' thread), a Slack message gets a reply in its thread (body only). It appears as a card; only the member sends it from the card. Never say it was sent. ' +
-      'For a new mail that needs their answer set expectsReply: true (the member may then choose 「返事を待つ」 when sending; silence leads to a follow-up draft).',
+      'For a new mail that needs their answer set expectsReply: true (the member may then choose 「返事を待つ」 when sending; silence leads to a follow-up draft). ' +
+      `${ATTACHMENTS_SAY} / attachments: PDFs only (≤ 3, 10 MB together), paths in the company folder (.personal/ is fine: a proposal a Skill wrote); attaching sends nothing — the member opens each file on the card and sends.`,
     request: input => ({ method: 'POST', path: '/outbound', body: input }),
   },
   {
@@ -364,8 +372,9 @@ export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
       toRefs: z.array(mailRef).min(1).max(20).optional(), ccRefs: z.array(mailRef).max(20).optional(),
       subject: z.string().min(1).max(200).optional(), body: z.string().min(1).max(20000).optional(),
       expectsReply: z.boolean().optional().describe('相手の返事が要るメールか（「返事を待つ」の最初のチェック） / whether the mail needs their answer (pre-ticks 「返事を待つ」)'),
+      attachments: mailAttachments.optional().describe('付いているファイルを、ちょうどこの一覧にする（空の配列で全部外す。渡さなければそのまま） / the files the draft carries become exactly this list ([] removes all; leave out to keep them)'),
     }).strict(),
-    description: 'メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。メンバーに頼まれた変更だけにする。前の下書きを見せたいだけなら mail_draft_show。\nChange a mail draft (a new version; NOT sent). Pass only what changes, and only what the member asked for; to just show a draft again use mail_draft_show.',
+    description: `メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。メンバーに頼まれた変更だけにする。前の下書きを見せたいだけなら mail_draft_show。${ATTACHMENTS_SAY}\nChange a mail draft (a new version; NOT sent). Pass only what changes, and only what the member asked for; to just show a draft again use mail_draft_show. attachments: PDFs only; the member checks them before sending.`,
     request: input => {
       const { id, ...rest } = input
       return { method: 'PUT', path: `/outbound/${enc(String(id))}`, body: rest }
@@ -752,7 +761,7 @@ export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECOR
   `記録の答えの people は、答えに出てくる人の id と名前の対応です（会社のメンバーだけ）。メンバーへの返事では人を名前で呼び（「佐藤さんの番です」）、id は見せないでください。people に無い id は、名前の分からない人です（会社のメンバーではないなど）。名前を推測せず、そう伝えてください。道具に人を渡すときは id を使います。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
-  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。` +
+  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。提案書などの PDF を付けるときは mail_draft_create / mail_draft_update の attachments に会社フォルダの中のパスを渡します（PDF だけ。付けても送られず、メンバーがカードでファイルを開いて確かめてから送ります）。` +
   `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「引き受ける」「受けられない」は本人だけができます（AI はできません）。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
   `過去の決めたことを前例として使うときは、exception: true（exceptionNotice「例外（この件だけ）」つき）の決めたことを、ほかの件に当てはめないでください。それはつながった件だけの判断です。一回限りの判断を decisions_record で残すときは exception: true にしてください。`
 
@@ -812,6 +821,11 @@ export interface RecordToolsOptions {
   onRecordChanged?: () => void
   /** `records_create` made a record (the server answered it): its id and type (a task becomes the consultation's topic). */
   onRecordCreated?: (record: { id: unknown; type: unknown }) => void
+  /**
+   * Reads a PDF the AI names for a mail draft (`records/mail-attachments.ts`, bound to the
+   * consultation's company folder); absent = no company folder, no files can be attached.
+   */
+  readMailAttachment?: (path: string) => MailAttachmentRead
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -869,6 +883,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (!spec) return JSON.stringify({ error: 'この道具はありません。' })
       const parsed = spec.schema.safeParse(input ?? {})
       if (!parsed.success) return JSON.stringify({ error: '入力が正しくありません。', issues: parsed.error.issues.slice(0, 5).map(i => `${i.path.join('.')}: ${i.message}`) })
+      if (spec.mailCard === 'changed' && parsed.data.attachments !== undefined) return mailWithFiles(spec, parsed.data)
       const req = spec.request(parsed.data)
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
       if (spec.approvalCard) return showApproval(req)
@@ -916,6 +931,71 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
 
   function changed() {
     try { options.onRecordChanged?.() } catch { /* the list's own looks catch up */ }
+  }
+
+  /**
+   * mail_draft_create / mail_draft_update with `attachments` (outbound-mail.md "Attachments"):
+   * every file is read and checked here first (nothing is made when one cannot be attached), then
+   * the draft is made or changed, files no longer listed are taken off and new ones uploaded, each
+   * a new version. Nothing is sent; the card shows the files for the member to open.
+   */
+  async function mailWithFiles(spec: RecordToolSpec, input: Record<string, unknown>): Promise<string> {
+    const { attachments, ...rest } = input as { attachments: Array<{ path: string }> } & Record<string, unknown>
+    if (!options.readMailAttachment) return JSON.stringify({ error: 'この相談には会社フォルダがないため、ファイルを付けられません。' })
+    const files: Array<{ name: string; bytes: Uint8Array; sha256: string }> = []
+    for (const a of attachments) {
+      const read = options.readMailAttachment(a.path)
+      if ('error' in read) return JSON.stringify({ error: `${read.error}（${a.path}）何も変えていません。` })
+      if (!files.some(f => f.sha256 === read.sha256)) files.push(read)
+    }
+    if (files.reduce((n, f) => n + f.bytes.byteLength, 0) > 10 * 1024 * 1024) return JSON.stringify({ error: '付けるファイルは、合わせて 10 MB までです。何も変えていません。' })
+    const isUpdate = spec.name === 'mail_draft_update'
+    let draft: ReturnType<typeof readMailDraft>
+    let reused = false
+    try {
+      // Only the files change: no text edit (a new version would say nothing new).
+      const onlyFiles = isUpdate && Object.keys(rest).every(k => k === 'id' || k === 'expectedVersion')
+      const answer = onlyFiles
+        ? await access.call('GET', `/outbound/${enc(String(rest.id))}`, undefined, signal)
+        : await (async () => { const req = spec.request(rest); return access.call(req.method, req.path, req.body, signal) })()
+      draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
+      reused = (answer as { reused?: unknown } | undefined)?.reused === true
+      if (draft && onlyFiles && draft.version !== rest.expectedVersion) {
+        return JSON.stringify({ error: 'ほかの変更が先にありました。下書きを読み直してください。', code: 'VERSION_CONFLICT', version: draft.version })
+      }
+    } catch (error) {
+      if (error instanceof RecordsApiError) return JSON.stringify(refusalForAi(error))
+      throw error
+    }
+    if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
+    changed()
+    let problem: string | null = null
+    try {
+      const wanted = new Set(files.map(f => f.sha256))
+      if (isUpdate) {
+        for (const a of draft.attachments ?? []) {
+          if (wanted.has(a.sha256) || !draft) continue
+          const off = await access.call('DELETE', `/outbound/${enc(draft.id)}/attachments/${a.sha256}?expectedVersion=${draft.version}`, undefined, signal)
+          draft = readMailDraft((off as { draft?: unknown } | undefined)?.draft) ?? draft
+        }
+      }
+      for (const f of files) {
+        if (!draft || (draft.attachments ?? []).some(a => a.sha256 === f.sha256)) continue
+        const on = await access.call('POST', `/outbound/${enc(draft.id)}/attachments`, {
+          expectedVersion: draft.version, name: f.name, contentBase64: Buffer.from(f.bytes).toString('base64'),
+        }, signal, { timeoutMs: 120_000 })
+        draft = readMailDraft((on as { draft?: unknown } | undefined)?.draft) ?? draft
+      }
+    } catch (error) {
+      if (!(error instanceof RecordsApiError)) throw error
+      problem = error.message
+    }
+    if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
+    if (options.companyId) options.onMailDraft?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, draft, byAi: true, at: now().toISOString() })
+    return JSON.stringify({
+      ...aiMailSummary(draft), ...(reused ? { reused: true, note: MEETING_OUTPUT_REUSED_NOTE } : {}),
+      ...(problem ? { attachmentProblem: `ファイルを付けきれませんでした：${problem}（カードには、いま付いているファイルだけが出ています）` } : {}),
+    })
   }
 
   async function readTask(recordId: string) {

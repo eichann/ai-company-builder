@@ -26,7 +26,7 @@ import { betterAuthAccountDirectory, betterAuthAccountIdByEmail } from './adapte
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
 import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
-import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
+import { processCompanyLock, randomIds, sha256Bytes, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
@@ -590,6 +590,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     writer: serviceRecords,
     payloads: fixedPayloads,
     digest: text => sha256TokenDigest.digest(text),
+    digestBytes: sha256Bytes,
     members: companyId => {
       const ids = repos.memberships.listByCompany(companyId).map(m => m.user_id)
       const accounts = shared.accounts.byIds(ids)

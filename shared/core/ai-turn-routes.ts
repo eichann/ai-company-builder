@@ -27,6 +27,8 @@ export const AI_ROUTES = [
   'POST /plugins/:pluginId/create/:operation', 'GET /plugins/:pluginId/operations/:operationId',
   'GET /approvals', 'GET /approvals/:approvalId',
   'POST /outbound-recipients', 'POST /outbound', 'GET /outbound/:messageId', 'PUT /outbound/:messageId',
+  // PDFs on a draft (outbound-mail.md "Attachments"): a consultation's tools only — no built-in step grants them.
+  'POST /outbound/:messageId/attachments', 'DELETE /outbound/:messageId/attachments/:sha256',
   'GET /threads/:recordId',
   'GET /identities/records/:recordId', 'POST /identities/proposals',
   'GET /inbox/items/:recordId', 'POST /inbox/items/:recordId/judgement', 'POST /inbox/items/:recordId/reply-check',

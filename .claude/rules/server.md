@@ -295,6 +295,7 @@ GET  /api/config                                  setup state (no auth)
                                                                 (Google: google-connector.md)
                               POST /outbound-recipients, POST /outbound,
                               GET|PUT /outbound/:messageId, GET|POST …/recipients,
+                              POST …/attachments, GET|DELETE …/attachments/:sha256,
                               POST …/send, POST …/resolve, POST …/discard  outbound-mail.ts
                                                                 (送るもの: outbound-mail.md)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
@@ -311,8 +312,9 @@ GET  /api/config                                  setup state (no auth)
                               GET /minutes/:recordId/text, POST /minutes/:recordId/bundle,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId,
-                              POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId
-                              (drafts only: no send) — the AI's
+                              POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId,
+                              POST /outbound/:messageId/attachments, DELETE …/attachments/:sha256
+                              (drafts only: no send, no download) — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts
                                                                 (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
@@ -603,8 +605,9 @@ no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
   records / smartNotes / transcripts (`docsDestination`), Drive v3 file metadata
   (`version`, `modifiedTime`) and text export (BOM + CRLF, 10 MB → 403
   `exportSizeLimitExceeded`; with only `drive.meet.readonly` a file Meet did not create is 404),
-  Gmail `messages.send` (stored decoded in `fake.sent`; a From that is not the token's account
-  is refused), and Sheets v4 (spreadsheets.get / batchUpdate, values get / batchGet / update /
+  Gmail `messages.send` and its media upload `/upload/gmail/…/messages/send?uploadType=media`
+  (stored decoded in `fake.sent` with `via`, the raw message and its attachments; a From that is
+  not the token's account is refused), and Sheets v4 (spreadsheets.get / batchUpdate, values get / batchGet / update /
   batchUpdate / append / clear / batchClear; scopes per token, each spreadsheet's editors and
   readers → 403 PERMISSION_DENIED; `fake.spreadsheet(id)`). Google's paths on one origin, so a practice redirect maps Google's hosts by path
   (the table is in `fake-google.ts`). Practice values: secrets `fake-google-secret-…`, tokens

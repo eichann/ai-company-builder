@@ -252,6 +252,12 @@ export function googleFeaturesToAsk(requested: readonly GoogleFeature[], company
 const GMAIL_ID = '[A-Za-z0-9_-]{1,200}'
 const GMAIL_READ_RE = /^\/gmail\/v1\/users\/me\/(messages|threads|history|profile|labels)(\/[A-Za-z0-9_-]{1,200})?$/
 const GMAIL_SEND_PATH = '/gmail/v1/users/me/messages/send'
+/**
+ * A mail with PDFs attached (outbound-mail.md "Attachments"): `messages.send`'s media upload, the
+ * message as `message/rfc822` bytes. The JSON `raw` form caps the request far below 10 MB of files;
+ * the upload endpoint takes up to 35 MB. Same scope, same one message, only to `users/me`.
+ */
+export const GMAIL_UPLOAD_SEND_PATH = '/upload/gmail/v1/users/me/messages/send'
 /** One message's labels (never a whole conversation: a reply ACB has not read yet must stay in the inbox). */
 const GMAIL_MODIFY_RE = new RegExp(`^/gmail/v1/users/me/messages/${GMAIL_ID}/modify$`)
 
@@ -281,9 +287,11 @@ function isLabelBody(body: unknown, key: 'removeLabelIds' | 'addLabelIds'): bool
  * `POST messages/<id>/modify` (one message, never a thread) whose body is `{ removeLabelIds: ['INBOX'] }` or
  * `{ addLabelIds: ['INBOX'] }` — never trash, delete, a draft, a send, a read, any other label or a
  * batch. `gmail.modify` is accepted for no other API, and no other API may name a Gmail path. Only
- * `users/me`.
+ * `users/me`. One upload: `POST /upload/gmail/v1/users/me/messages/send?uploadType=media` with
+ * `gmail.send` and a `message/rfc822` body (a mail with attachments) — no other query, no other
+ * upload path.
  */
-export function gmailCallAllowed(req: { api: string; method: string; path: string; scope: string; body?: unknown }): boolean {
+export function gmailCallAllowed(req: { api: string; method: string; path: string; scope: string; body?: unknown; query?: Record<string, string | string[]>; rawContentType?: string }): boolean {
   if (req.scope === GOOGLE_SCOPE.gmailModify) {
     return req.api === 'gmail' && req.method === 'POST' && GMAIL_MODIFY_RE.test(req.path)
       && (isLabelBody(req.body, 'removeLabelIds') || isLabelBody(req.body, 'addLabelIds'))
@@ -292,6 +300,11 @@ export function gmailCallAllowed(req: { api: string; method: string; path: strin
   // under another API is still a Gmail call, and ACB makes none that way.
   if (req.api !== 'gmail') return !mentionsGmail(req.path)
   if (req.method === 'GET') return req.scope === GOOGLE_SCOPE.gmailReadonly && GMAIL_READ_RE.test(req.path)
+  if (req.path === GMAIL_UPLOAD_SEND_PATH) {
+    const q = req.query ?? {}
+    return req.method === 'POST' && req.scope === GOOGLE_SCOPE.gmailSend && req.rawContentType === 'message/rfc822'
+      && Object.keys(q).length === 1 && q.uploadType === 'media'
+  }
   return req.method === 'POST' && req.path === GMAIL_SEND_PATH && req.scope === GOOGLE_SCOPE.gmailSend
 }
 

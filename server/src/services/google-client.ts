@@ -438,7 +438,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       if (!path) return notSent('bad-path')
       // The one place every Gmail call passes (owner decision 2026-11-05): `gmail.modify` only ever
       // takes a thread out of the inbox or puts it back; no other Gmail write but a send.
-      if (!gmailCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, body: req.rawBody ? undefined : req.body })) {
+      if (!gmailCallAllowed({ api: req.api, method: req.method, path: req.path, scope: req.scope, body: req.rawBody ? undefined : req.body, query: req.query, rawContentType: req.rawBody?.contentType })) {
         return notSent('call-not-allowed')
       }
       // `drive.metadata.readonly` (the relay's owner lookup, B-H1) reads one file's owners, nothing else.

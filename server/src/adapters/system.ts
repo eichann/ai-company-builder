@@ -23,3 +23,6 @@ export const processCompanyLock: CompanyLock = {
 export const sha256TokenDigest: TokenDigest = {
   digest: (token) => createHash('sha256').update(token, 'utf8').digest('hex'),
 }
+
+/** sha256 (hex) of bytes: an outbound mail attachment's fingerprint (outbound-mail.md "Attachments"). */
+export const sha256Bytes = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex')
