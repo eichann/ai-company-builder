@@ -541,6 +541,14 @@ describe('a person\'s step the company starts by itself (「自動で始める�
       if (r.recordId === recordId && r.state === 'running') services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
     }
   }
+  /** Give back every running run of the record and make it claimable again (one run per record). */
+  function giveBack(recordId: string) {
+    for (const r of companyData.forCompany(CO).aiRuns.openOf(member.userId) as Json[]) {
+      if (r.recordId !== recordId || r.state !== 'running') continue
+      services.aiRuns.finish(member, r.id, { generation: r.generation, outcome: 'failed', failure: { class: 'permission' } })
+      services.aiRuns.retry(member, r.id)
+    }
+  }
   const claimPropose = (who: Json, recordId: string, k: string) =>
     services.aiRuns.claim(who, { recordId, step: 'sample-sales__propose', deviceId: `device-auto-${k}`, conversationId: `conv-auto-run-${k}` })
 
@@ -637,6 +645,59 @@ describe('a person\'s step the company starts by itself (「自動で始める�
     // Someone else who reads the deal and the task: the task, never the member's own file.
     expect(await linked(owner)).toContain(id)
     expect(await files(owner)).toEqual([])
+  })
+
+  it('「続きをする」 only where an automatic run prepared something: on the deal and on its やること, never for a consultation\'s', async () => {
+    const deal = recordOf('1000000001')
+    const continuationOn = (who: Json, id: string) => services.pluginSteps.stepsOn(who, id).value?.continuation ?? null
+    // The earlier test's やること was made in a consultation (no run): nothing to continue.
+    expect(continuationOn(member, deal)).toBeNull()
+    giveBack(deal)
+    services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: true })
+    setState(deal, 'talking')
+    expect(await readMeeting(deal)).toMatchObject({ ok: true })
+    setState(deal, 'open')
+    const claimed = await claimPropose(member, deal, 'cont')
+    expect(claimed, JSON.stringify(claimed)).toMatchObject({ ok: true })
+    const run = claimed.value.run
+    const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: run.conversationId, runId: run.id }
+    const made = await services.recordEngine.createByAi(member, ai, {
+      type: 'task', title: '提案を用意する：B社', folder: '営業部',
+      fields: { assignee: member.userId, prep_summary: '・残り（PDF にすること）は「続きをする」で一緒に仕上げます' }, links: { bundle: deal },
+    })
+    expect(made, JSON.stringify(made)).toMatchObject({ ok: true })
+    const taskId = made.value.record.id
+    expect(services.aiRuns.finish(member, run.id, { generation: run.generation, outcome: 'done' })).toMatchObject({ ok: true })
+    const want = { recordId: deal, pluginId: 'sample-sales', step: 'propose', label: '提案を用意する', taskId }
+    expect(continuationOn(member, deal)).toEqual(want)
+    expect(continuationOn(member, taskId)).toEqual(want)
+    // The continuation is the person's start of the same step: it works on the deal, with the step's folder.
+    expect((await services.pluginSteps.startPerson(member, deal, 'sample-sales', 'propose')).value).toMatchObject({ step: 'propose', deliverableFolder: '提案書' })
+    // Not at the step's state, or the やること finished: nothing to continue.
+    setState(deal, 'won')
+    expect(continuationOn(member, deal)).toBeNull()
+    setState(deal, 'open')
+    db.prepare("UPDATE record_state SET state = 'done' WHERE company_id = ? AND record_id = ?").run(CO, taskId)
+    expect(continuationOn(member, deal)).toBeNull()
+    expect(continuationOn(member, taskId)).toBeNull()
+    services.pluginSteps.setStepSettings(owner, 'sample-sales', 'propose', { autoStart: false })
+    db.prepare("DELETE FROM plugin_step_requests WHERE company_id = ? AND record_id = ?").run(CO, deal)
+    // An ai_turn step's run is not a person's step: its やること offers no continuation.
+    const other = recordOf('1000000002')
+    const was = stateOf(other).state
+    setState(other, 'open')
+    giveBack(other)
+    const work = await claim(other)
+    expect(work, JSON.stringify(work)).toMatchObject({ ok: true })
+    const workAi = { kind: 'ai' as const, source: 'claude-code', conversationId: work.value.run.conversationId, runId: work.value.run.id }
+    const byWork = await services.recordEngine.createByAi(member, workAi, {
+      type: 'task', title: '案件を進める：C社', folder: '営業部', fields: { assignee: member.userId, prep_summary: '・確かめる点' }, links: { bundle: other },
+    })
+    expect(byWork, JSON.stringify(byWork)).toMatchObject({ ok: true })
+    expect(continuationOn(member, other)).toBeNull()
+    expect(services.aiRuns.finish(member, work.value.run.id, { generation: work.value.run.generation, outcome: 'failed', failure: { class: 'permission' } })).toMatchObject({ ok: true })
+    expect(services.aiRuns.retry(member, work.value.run.id)).toMatchObject({ ok: true })
+    setState(other, was)
   })
 
   it('another company: the setting is the same 404 as none, and its requests are not here', () => {

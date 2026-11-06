@@ -17,6 +17,7 @@ paths:
   - "client/shared/step-deliverables.ts"
   - "client/tests/plugin-step-auto-start.test.ts"
   - "client/tests/step-deliverable*.test.ts"
+  - "client/tests/step-continue.test.ts"
 ---
 
 # A plugin's steps run as AI turns (stage 4a, lane C: C5)
@@ -178,12 +179,13 @@ The first message (automatic) and the person's first message say where to save.
 
 A step hands over what it made as **one やること** for the member, linked to the record: the AI's
 `records_create` of a `task` with `links.bundle` = the record, `links.prepared` = its mail draft
-(the PDF attached from the deliverable folder, `outbound-mail.md` "Attachments"), `fields.prep_summary`
+(the files it could make attached from the deliverable folder, `outbound-mail.md` "Attachments"), `fields.prep_summary`
 = 確かめる点, and its files linked (`records_link_file`) — existing types, links and tools, no new
 syntax (`deliverablesReport` in `client/shared/ai-turn-steps/plugin.ts` tells the automatic run).
 Its `.personal/` file links are the maker's alone (`records.md` "Links into .personal/"). The
-automatic run is `done` only when a やること linked to the record changed after the claim (the
-server's claim time; `madeSince` in `claims.ts`), else `UNFINISHED` (retried, then a person). The
+automatic run is `done` only when a やること linked to the record, with a non-empty `prep_summary`,
+changed after the claim (the server's claim time; `madeSince` in `claims.ts`), else `UNFINISHED`
+(retried, then a person). The
 record's card shows the newest open one with a preparation at its top (`pluginSteps:deliverables`,
 `client/shared/step-deliverables.ts`; `StepDeliverables` in `src/features/plugin-steps/`, above
 `RecordCard`, `tasks-ui.md`): 確かめる点, the files (open in the app) and the mail draft
@@ -201,6 +203,46 @@ record's card shows the newest open one with a preparation at its top (`pluginSt
   (inside allowed, everything else refused, a link cannot lead out), `client/tests/step-deliverables.test.ts`
   (the card gets the newest open やること's 確かめる点, files and draft; nothing otherwise),
   `admin/tests/step-runs.test.tsx` — mutation-checked.
+
+## Prepare only, then 「続きをする」 (owner decision 2026-11-06, option B)
+
+An automatic run has no shell, so it cannot run a procedure's scripts (a company Skill's PDF build).
+It **only prepares**, and the member finishes in their own consultation.
+
+- **What the core tells the run** (`client/shared/ai-turn-steps/plugin.ts`, generic for every
+  business plugin step; the company Skill is passed on unchanged and overridden only in what the run
+  cannot do anyway): every automatic plugin step run gets `AUTOMATIC_NO_SHELL_RULE` (no scripts or
+  commands, skip such parts of the procedure); a person's step run by itself also gets
+  `PREPARE_ONLY_RULE` (gather the materials, write the draft — e.g. the HTML — into the deliverable
+  folder, write 確かめる点, one of which says plainly that the rest — scripts, the PDF — needs
+  「続きをする」 by the person).
+- **The mark** (no new field): the やること's first ledger entry carries the `runId` of the run that
+  made it (`records.md` "Execution runs"), and that run's step is `<pluginId>__<step>`. `GET
+  /me/plugin-steps/records/:recordId` answers, beside `steps`, **`continuation`**
+  (`PluginStepContinuationView`: `recordId` = the deal, `pluginId`, `step`, `label`, `taskId`) for a
+  deal or for the やること itself: the newest open (not done / cancelled / dismissed) やること linked
+  by `bundle` with a `prep_summary`, made by a run of an installed `start: person` step **on that
+  deal**, while the deal is at the step's state and the member reads both (`continuationOf` in
+  `services/plugin-steps.ts`). A consultation's やること (no run), an `ai_turn` step's run, a finished
+  やること or a deal moved on → null.
+- **The button** 「続きをする」 (`CONTINUE_LABEL`; `ContinueStepButton` in
+  `src/features/plugin-steps/`, above the deal's card and above the やること's `TaskCard` in AppShell;
+  read through `pluginSteps:continuation`, again on every records signal). Pressing it:
+  `pluginSteps:continue` (main; the company folder validated by `AllowedRoots` before any server
+  call) = **the person's start of that step on the deal** (`POST …/start`, the work's pin, the
+  procedure read on this PC) plus what the run left — the やること, its files, 確かめる点 and mail
+  drafts (`pluginStepContinueMessage`) — and `pluginStep`, which `chat.newConsultation` binds on the
+  first turn (`POST /me/plugin-steps/consultations`), so the C4 gate and the deliverable folder guard
+  hold as for any person's start. The member's consultation has their normal tools: the procedure's
+  scripts run with the person there. No new runtime.
+- Tests: `server/tests/integration/plugin-steps.test.ts` 「続きをする」 (only after an automatic
+  run's やること, on the deal and on the やること; none for a consultation's or an `ai_turn` run's;
+  none when the deal moved on or the やること is done; the person's start of the step works with its
+  folder), `client/tests/step-continue.test.ts` (the automatic first message's no-shell and
+  prepare-only rules, the procedure unchanged; the continuation parsed strictly; 「続きをする」 starts
+  the same step on the deal, bound, with the folder and what the run left; nothing offered or
+  started without a continuation; an outside company folder refused first),
+  `client/tests/plugin-step-auto-start.test.ts` (done only with a `prep_summary`) — mutation-checked.
 
 ## The app
 

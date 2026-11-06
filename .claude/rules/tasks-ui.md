@@ -217,7 +217,8 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    (`records.md` "Owner-only records"; main sends only a `fileLinkPath`-checked company folder; the
    server checks the owner and the folder). A task already shared offers nothing.
 2. **AI が用意したもの** (a business plugin step's やること is also shown at the top of its record's —
-   the deal's — card, with its files: `StepDeliverables`, `plugin-steps.md` "What the step made"):
+   the deal's — card, with its files: `StepDeliverables`, `plugin-steps.md` "What the step made";
+   one an automatic run made also gets 「続きをする」 above the card, `ContinueStepButton`):
    `prep_summary` and each `prepared` link drawn by the screen with the
    consultation's own cards (`renderPrepared`): a mail draft through `PreparedMailCard` (chat
    feature: reads the draft now, so the latest version is checked and sent — the person sends), an

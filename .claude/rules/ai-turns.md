@@ -344,6 +344,10 @@ ceiling, the first message).
   `UNFINISHED` (the server retries later, then a person). A person's step the company starts by
   itself (`auto` in the turns, `plugin-steps.md` "Starting by itself") leaves the record where it
   is: `done` when a やること linked to it changed after the claim (what it made), else `UNFINISHED`.
+- **No shell, said by the core**: every plugin step run's first message carries
+  `AUTOMATIC_NO_SHELL_RULE`; a person's step run by itself also `PREPARE_ONLY_RULE` and is done only
+  when its やること with a `prep_summary` came — the member finishes with 「続きをする」
+  (`plugin-steps.md` "Prepare only, then 「続きをする」").
 - **Started by itself** (`auto`): the queue takes a `start: person` turn only with `auto: true`;
   its ceiling is `automaticStepCeiling` (no `web_research`, `pluginStepToolAccess(…, { automatic
   })`), its first message says where to save and how to hand over (`deliverablesReport`).

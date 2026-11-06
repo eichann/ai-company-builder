@@ -393,6 +393,8 @@ const api: ElectronAPI = {
   listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
   startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),
   readStepDeliverables: (companyId: string, recordId: string) => invoke('pluginSteps:deliverables', companyId, recordId),
+  readStepContinuation: (companyId: string, recordId: string) => invoke('pluginSteps:continuation', companyId, recordId),
+  continueStep: (companyId: string, recordId: string, companyRoot?: string) => invoke('pluginSteps:continue', companyId, recordId, companyRoot),
   // lane C ▲
 }
 

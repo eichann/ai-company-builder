@@ -147,14 +147,18 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   }
 
   // lane C ▼
-  /** Whether a やること linked to the record (its まとまり) was made or changed since `at`: what a step run by itself hands over. */
+  /** Whether a やること linked to the record (its まとまり), with its preparation, was made or changed since `at`: what a step run by itself hands over. */
   async function madeSince(companyId: string, recordId: string, at: string): Promise<boolean> {
     const r = await session(companyId, 'POST', '/records/query', { type: 'task', link: { name: 'bundle', id: recordId }, limit: 20 })
     const records = r?.status === 200 ? (r.data as { records?: unknown } | undefined)?.records : undefined
     if (!Array.isArray(records)) return false
     const since = Date.parse(at)
-    return records.some(x => typeof x === 'object' && x !== null && typeof (x as { updatedAt?: unknown }).updatedAt === 'string'
-      && Date.parse((x as { updatedAt: string }).updatedAt) >= since)
+    // What the run made: a やること carrying its preparation (確かめる点), changed since the claim.
+    return records.some(x => {
+      const r = typeof x === 'object' && x !== null ? x as { updatedAt?: unknown; fields?: { prep_summary?: unknown } } : null
+      return !!r && typeof r.updatedAt === 'string' && Date.parse(r.updatedAt) >= since
+        && typeof r.fields?.prep_summary === 'string' && r.fields.prep_summary.trim() !== ''
+    })
   }
 
   /**

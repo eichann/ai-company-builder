@@ -3,6 +3,8 @@
 //   pluginSteps:start     a person starts one: the server pins the work's procedure (its first run)
 //                         and answers it; main reads the pinned text on this PC (procedures.ts) and
 //                         answers the consultation's first message. Nothing else leaves main.
+//   pluginSteps:continuation / continue  「続きをする」: where an automatic run prepared something,
+//                         and the person's consultation of that step that finishes it
 //   pluginSteps:deliverables  what a step made for a record (its やること's 確かめる点, files, mail
 //                         draft: shared/step-deliverables.ts), read with the session, for its card
 // The consultation is the member's own (their rights, their tools); the server's pin is what the
@@ -13,7 +15,8 @@ import type { PathGuard } from '../ports'
 import type { RecordDetail, RecordSummary } from '../../../../shared/types/records'
 import { deliverableTaskOf, stepDeliverablesOf, type StepDeliverablesView } from '../../../shared/step-deliverables'
 import {
-  parsePluginStepsOn, parseProcedurePin, pluginStepConsultationTitle, pluginStepPersonMessage, stepDeliverableFolder, type PluginStepProcedurePin, type PluginStepButton,
+  parsePluginStepContinuation, parsePluginStepsOn, parseProcedurePin, pluginStepConsultationTitle, pluginStepContinueMessage, pluginStepPersonMessage,
+  stepDeliverableFolder, type PluginStepButton, type PluginStepContinuation, type PluginStepContinueResult, type PluginStepProcedurePin, type PluginStepStartResult,
 } from '../../../shared/ai-turn-steps/plugin'
 
 export interface PluginStepsIpcDeps {
@@ -90,22 +93,24 @@ export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDe
     return detail?.record && Array.isArray(detail.links) ? stepDeliverablesOf(detail) : null
   })
 
-  ipc.handle('pluginSteps:start', async (_event, companyId, recordId, pluginId, step, companyRoot) => {
+  /** A person's start of a step: the server pins it, main reads the pinned procedure on this PC and makes the first message. */
+  async function startStep(companyId: unknown, recordId: unknown, pluginId: unknown, step: unknown, companyRoot: unknown): Promise<PluginStepStartResult> {
     // The company folder (a company Skill pinned as the procedure is read there): checked first.
     let root: string | null = null
     if (companyRoot !== undefined && companyRoot !== null) {
-      try { root = deps.paths.validate(String(companyRoot)) } catch { return { ok: false, error: NOT_STARTED } as const }
+      try { root = deps.paths.validate(String(companyRoot)) } catch { return { ok: false, error: NOT_STARTED } }
     }
-    if (![companyId, recordId, pluginId, step].every(v => typeof v === 'string') || !COMPANY.test(companyId) || !ID.test(recordId) || !ID.test(pluginId) || !ID.test(step)) {
-      return { ok: false, error: NOT_STARTED } as const
+    if (typeof companyId !== 'string' || typeof recordId !== 'string' || typeof pluginId !== 'string' || typeof step !== 'string'
+      || !COMPANY.test(companyId) || !ID.test(recordId) || !ID.test(pluginId) || !ID.test(step)) {
+      return { ok: false, error: NOT_STARTED }
     }
     const r = await session(companyId, 'POST', `/me/plugin-steps/records/${encodeURIComponent(recordId)}/${encodeURIComponent(pluginId)}/${encodeURIComponent(step)}/start`)
-    if (!r || r.status >= 300) return { ok: false, error: r?.error ?? NOT_STARTED } as const
+    if (!r || r.status >= 300) return { ok: false, error: r?.error ?? NOT_STARTED }
     const view = r.data as { label?: unknown; procedure?: unknown; version?: unknown; pin?: unknown; deliverableFolder?: unknown } | undefined
     const pin = parseProcedurePin(view?.pin)
-    if (!pin || typeof view?.label !== 'string' || typeof view.procedure !== 'string') return { ok: false, error: NOT_STARTED } as const
+    if (!pin || typeof view?.label !== 'string' || typeof view.procedure !== 'string') return { ok: false, error: NOT_STARTED }
     const text = await deps.readProcedure(companyId, pin, view.procedure, root).catch(() => null)
-    if (text === null) return { ok: false, error: NOT_HERE } as const
+    if (text === null) return { ok: false, error: NOT_HERE }
     return {
       ok: true,
       title: pluginStepConsultationTitle(view.label),
@@ -113,6 +118,47 @@ export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDe
         label: view.label, recordId, procedure: text, source: pin.source,
         deliverableFolder: stepDeliverableFolder({ step, label: view.label, deliverableFolder: view.deliverableFolder }),
       }),
-    } as const
+    }
+  }
+
+  /** Where an automatic run prepared something for the record (a deal or its やること), as the server says; null otherwise. */
+  async function continuationOf(companyId: unknown, recordId: unknown): Promise<PluginStepContinuation | null> {
+    if (typeof companyId !== 'string' || !COMPANY.test(companyId) || typeof recordId !== 'string' || !ID.test(recordId)) return null
+    const r = await session(companyId, 'GET', `/me/plugin-steps/records/${encodeURIComponent(recordId)}`)
+    return r?.status === 200 ? parsePluginStepContinuation(r.data) : null
+  }
+
+  ipc.handle('pluginSteps:start', (_event, companyId, recordId, pluginId, step, companyRoot) => startStep(companyId, recordId, pluginId, step, companyRoot))
+
+  ipc.handle('pluginSteps:continuation', (_event, companyId, recordId) => continuationOf(companyId, recordId))
+
+  /**
+   * 「続きをする」: the person's start of the same step on the same record (pinned, bound on the
+   * consultation's first turn, its deliverable folder held), with what the automatic run left.
+   */
+  ipc.handle('pluginSteps:continue', async (_event, companyId, recordId, companyRoot): Promise<PluginStepContinueResult> => {
+    // The company folder first, before any server call (as for a person's start).
+    if (companyRoot !== undefined && companyRoot !== null) {
+      try { deps.paths.validate(String(companyRoot)) } catch { return { ok: false, error: NOT_STARTED } }
+    }
+    const c = await continuationOf(companyId, recordId)
+    if (!c) return { ok: false, error: NOT_STARTED }
+    const started = await startStep(companyId, c.recordId, c.pluginId, c.step, companyRoot)
+    if (!started.ok) return started
+    const d = await session(String(companyId), 'GET', `/records/item/${encodeURIComponent(c.taskId)}`)
+    const detail = d?.status === 200 ? d.data as RecordDetail | undefined : undefined
+    const left = detail?.record && Array.isArray(detail.links) ? stepDeliverablesOf(detail) : null
+    return {
+      ok: true,
+      title: started.title,
+      message: pluginStepContinueMessage({
+        person: started.message,
+        left: {
+          taskId: c.taskId, questions: left?.questions ?? null, files: left?.files.map(f => f.path) ?? [],
+          drafts: left?.prepared.filter(p => p.type === 'outbound_message').map(p => ({ id: p.id, title: p.title })) ?? [],
+        },
+      }),
+      pluginStep: { recordId: c.recordId, pluginId: c.pluginId, step: c.step },
+    }
   })
 }

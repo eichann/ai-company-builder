@@ -41,7 +41,7 @@ import {
 import { MEETING_BUNDLE_LINKED_ACTION } from '../../shared/core/minutes'
 import { automaticStepCeiling, deliverableFolderOf, deliverableFolderProblem } from '../../shared/core/plugin-step-runs'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import type { PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
+import type { PluginStepContinuationView, PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, PluginStepTurn, PluginStepView } from '../../shared/types/plugins'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
@@ -68,6 +68,8 @@ const RECORDS_DISABLED = { error: 'この会社では記録の機能が有効に
 const RECORD_NOT_FOUND = { error: '記録が見つかりません', code: 'RECORD_NOT_FOUND' } as const
 /** Work listed per call (a member's 「AI の番」 of plugin steps). */
 const TURNS_SHOWN = 500
+/** A やること in these states waits for nobody: no 「続きをする」. */
+const CLOSED_TASK_STATES: readonly string[] = ['done', 'cancelled', 'dismissed']
 
 export interface PluginStepDeps {
   companyData: CompanyDataSource
@@ -141,6 +143,42 @@ export function createPluginStepService(deps: PluginStepDeps) {
   /** A `start: person` step the company starts by itself. */
   const startsByItself = (companyId: string, pluginId: string, name: string, step: PluginStep) =>
     step.start === 'person' && settingOf(companyId, pluginId, name).autoStart
+
+  /**
+   * 「続きをする」 (owner decision 2026-11-06, option B): the newest open やること linked to the record
+   * (or the やること itself) that carries a preparation and was **made by a run** of a business
+   * plugin's `start: person` step on that record — only an automatic run makes one (a person's
+   * consultation has no run). Marked by what is already kept: the task's first ledger entry's
+   * `runId` and that run's step. Offered only while the record is at the step's state, the step
+   * installed and the member may read both.
+   */
+  function continuationOf(member: Member, rec: { row: RecordRow; state: string; fields: Record<string, unknown> }): PluginStepContinuationView | null {
+    const handle = companyData.forCompany(member.companyId)
+    const isTask = rec.row.type === 'task'
+    const bundleId = isTask
+      ? handle.records.linksFrom([rec.row.id]).find(l => l.name === 'bundle' && l.targetId !== null)?.targetId ?? null
+      : rec.row.id
+    if (!bundleId) return null
+    const bundle = isTask ? readable(member, bundleId) : rec
+    if (!bundle) return null
+    const taskIds = isTask ? [rec.row.id] : handle.records.linksTo([bundleId]).filter(l => l.name === 'bundle').map(l => l.sourceId)
+    const found: Array<{ view: PluginStepContinuationView; at: string }> = []
+    for (const taskId of [...new Set(taskIds)].slice(0, 200)) {
+      const task = taskId === rec.row.id ? rec : readable(member, taskId)
+      if (!task || task.row.type !== 'task' || CLOSED_TASK_STATES.includes(task.state)) continue
+      const prep = task.fields.prep_summary
+      if (typeof prep !== 'string' || prep.trim() === '') continue
+      const runId = handle.records.ledger(taskId)[0]?.runId
+      const run = runId ? handle.aiRuns.byId(runId) : null
+      const bound = run ? parsePluginRunStep(run.step) : null
+      if (!run || !bound || run.recordId !== bundleId) continue
+      const inst = installedStep(member.companyId, bound.pluginId, bound.step)
+      if (!inst || inst.step.start !== 'person' || !atStep(bundle, inst.step)) continue
+      found.push({ view: { recordId: bundleId, pluginId: bound.pluginId, step: bound.step, label: inst.step.label, taskId }, at: task.row.updatedAt })
+    }
+    found.sort((a, b) => b.at.localeCompare(a.at))
+    return found[0]?.view ?? null
+  }
 
   const atStep = (rec: { row: RecordRow; state: string }, step: PluginStep) => rec.row.type === step.for.type && rec.state === step.for.state
   const turnPeople = (member: Member) => [member.userId, ...deps.actsFor(member.companyId, member.userId)]
@@ -398,9 +436,10 @@ export function createPluginStepService(deps: PluginStepDeps) {
     /**
      * GET /me/plugin-steps/records/:recordId — the steps that apply to a record now (its card's
      * buttons; the app's automatic run reads its step here after the claim): each with the work's
-     * pin (null before its first run) and the step it runs (narrowed by the pinned version).
+     * pin (null before its first run) and the step it runs (narrowed by the pinned version); and
+     * `continuation` — where an automatic run of a person's step prepared something (「続きをする」).
      */
-    stepsOn(member: Member, recordId: string): Outcome<{ steps: PluginStepOnRecord[] }> {
+    stepsOn(member: Member, recordId: string): Outcome<{ steps: PluginStepOnRecord[]; continuation: PluginStepContinuationView | null }> {
       if (!companyData.forCompany(member.companyId).records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const rec = readable(member, recordId)
       if (!rec) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
@@ -415,7 +454,7 @@ export function createPluginStepService(deps: PluginStepDeps) {
           out.push({ ...stepView(member.companyId, i.pluginId, name, on.step), pin: on.pin })
         }
       }
-      return ok({ steps: out })
+      return ok({ steps: out, continuation: continuationOf(member, rec) })
     },
 
     /**

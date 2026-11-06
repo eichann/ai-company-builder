@@ -20,7 +20,7 @@ const turn = (over: Record<string, unknown> = {}) => ({
   procedure: 'steps/proposal.md', tools: ['records', 'files_write'], connectorRoles: [], deliverableFolder: '提案書', ...over,
 })
 
-function fakeServer(opts: { tasks?: Array<{ id: string; updatedAt: string }> } = {}) {
+function fakeServer(opts: { tasks?: Array<{ id: string; updatedAt: string; fields: Record<string, string> }> } = {}) {
   const finished: unknown[] = []
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -83,8 +83,9 @@ test('run by itself: no tool that reaches outside, its writes held to the delive
 
 test('settle: done only when a やること for the record came after the claim; otherwise tried again later', async () => {
   for (const [tasks, outcome] of [
-    [[{ id: 'task-new', updatedAt: '2026-11-06T10:05:00.000Z' }], 'done'],
-    [[{ id: 'task-old', updatedAt: '2026-11-01T09:00:00.000Z' }], 'put-back'],
+    [[{ id: 'task-new', updatedAt: '2026-11-06T10:05:00.000Z', fields: { prep_summary: '・確かめる点' } }], 'done'],
+    [[{ id: 'task-bare', updatedAt: '2026-11-06T10:05:00.000Z', fields: {} }], 'put-back'],
+    [[{ id: 'task-old', updatedAt: '2026-11-01T09:00:00.000Z', fields: { prep_summary: '・前の' } }], 'put-back'],
     [[], 'put-back'],
   ] as const) {
     const server = fakeServer({ tasks: [...tasks] })
