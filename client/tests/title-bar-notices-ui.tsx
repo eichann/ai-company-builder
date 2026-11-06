@@ -52,6 +52,15 @@ if (new URLSearchParams(location.search).get('undo') === 'mail') {
   ] } }
 }
 
+// `?undo=ai`: the AI changed a deal automatically (`ai_changed`, 2026-11-06), and one already written back.
+if (new URLSearchParams(location.search).get('undo') === 'ai') {
+  state = { ...state, notices: { ...state.notices, items: [
+    { id: 'n-ai', kind: 'ai_changed', recordId: 'deal-preview01', recordType: 'deal', recordTitle: 'A社 研修', version: 5, text: '佐藤さんの AIが「A社 研修」を自動で変えました：確度 B（中） → A（高）。理由：先方が予算を確保したため', createdAt: '2026-11-06T07:00:00.000Z', read: true, aiChange: { pluginId: 'corporate-sales', operationId: 'op-preview01', undone: false } },
+    { id: 'n-ai2', kind: 'ai_changed', recordId: 'deal-preview02', recordType: 'deal', recordTitle: 'B社 更新', version: 3, text: '佐藤さんの AIが「B社 更新」を自動で変えました：次のアクション （なし） → 見積を送る（元に戻しました）', createdAt: '2026-11-06T06:00:00.000Z', read: true, aiChange: { pluginId: 'corporate-sales', operationId: 'op-preview02', undone: true } },
+    ...state.notices.items,
+  ] } }
+}
+
 function Preview() {
   const [opened, setOpened] = useState('')
   const [read, setRead] = useState('')
@@ -68,6 +77,10 @@ function Preview() {
       state = { ...state, notices: { ...state.notices, items, unread: items.filter(i => !i.read).length } }
       setTimeout(() => changed.emit({ companyId }), 0)
       return { success: true }
+    },
+    undoPluginOperation: async (_companyId, pluginId, operationId) => {
+      setUndone(`${pluginId}|${operationId}`)
+      return { success: true, operation: { state: 'applied' } as never }
     },
     undoTaskAction: async (_companyId, recordId, version, expectedVersion) => {
       setUndone(`${recordId}|${version}|${expectedVersion}`)

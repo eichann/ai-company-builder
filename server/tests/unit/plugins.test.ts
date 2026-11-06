@@ -24,7 +24,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
-  acbToExternal, approverFor, checkMappingAgainstProperties, combineUse, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
+  acbToExternal, approverFor, checkMappingAgainstProperties, closingMoveFields, combineUse, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
   parsePluginManifest, parsePluginMapping, pluginAvailableTo, typeNameLayerProblem, validatePluginPackage,
   type PluginMapping, type PluginPackage,
 } from '../../../shared/core/plugins'
@@ -308,21 +308,36 @@ describe('a connector is a shared part; a business plugin uses it (owner decisio
 })
 
 describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
-  it('stage is written only after an approval (milestone 4): never an auto default or policy; at least prior at run time', () => {
+  it('the stage may be automatic only with closing stages; a move to or from one always asks first (owner 2026-11-06)', () => {
     const p = crm()
-    const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
+    const STAGE = '    stage: { from: dealstage, write: true, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, closedwon: final } }\n'
+    // Without closing_stages nothing tells a closing move apart: auto is refused and clamped to prior.
+    const noClosing = parsePluginMapping(`deal:\n  fields:\n${STAGE}policy:\n  stage: auto\n`, p)
+    expect(noClosing.ok ? [] : noClosing.errors.join()).toContain('closing_stages')
+    const write = parsePluginMapping(`deal:\n  fields:\n${STAGE}policy:\n  stage: prior\n`, p)
     if (!write.ok) throw new Error(write.errors.join())
-    expect(effectiveFieldPolicy(p, write.value, 'update_deal', 'stage')).toBe('prior')
-    expect(manifestErrors(salesWith('  stage: off', '  stage: auto')).join()).toContain('auto）にできません')
-    const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
-    expect(policy.ok ? [] : policy.errors.join()).toContain('auto）にできません')
-    // Whatever is stored: a mapping object built by hand still answers prior.
     const forged = { ...write.value, policy: { stage: 'auto' as const } }
     expect(effectiveFieldPolicy(p, forged, 'update_deal', 'stage')).toBe('prior')
-    // A field reading the same property as the stage cannot be written automatically either.
-    const shared = parsePluginMapping('deal:\n  fields:\n    next_step: { from: dealstage, write: true }\n    stage: { from: dealstage, write: false, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
+    // The package's default may say auto (a company mapping without closing stages still clamps it).
+    expect(manifestErrors(salesWith('  stage: off', '  stage: auto')).join()).not.toContain('stage')
+    // With closing stages the field is automatic…
+    const closing = parsePluginMapping(`deal:\n  fields:\n${STAGE}policy:\n  stage: auto\nclosing_stages: [final]\n`, p)
+    if (!closing.ok) throw new Error(closing.errors.join())
+    expect(effectiveFieldPolicy(p, closing.value, 'update_deal', 'stage')).toBe('auto')
+    // …but a move to a closing stage, or away from one, is named (and so asks first, at least a department manager).
+    expect(closingMoveFields(p, closing.value, 'update_deal', { stage: 'proposal' }, { stage: 'first_meeting' })).toEqual([])
+    expect(closingMoveFields(p, closing.value, 'update_deal', { stage: 'final' }, { stage: 'proposal' })).toEqual(['stage'])
+    expect(closingMoveFields(p, closing.value, 'update_deal', { stage: 'proposal' }, { stage: 'final' })).toEqual(['stage'])
+    expect(approverFor(p.manifest, closing.value, 'update_deal', { stage: 'proposal' }, ['stage'])).toBe('dept_manager')
+    // Judged on the outside property: another field written to the stage's property cannot close the deal either.
+    const shared = parsePluginMapping('deal:\n  fields:\n    next_step: { from: dealstage, write: true }\n    stage: { from: dealstage, write: false, values: { qualifiedtobuy: proposal, closedwon: final } }\npolicy:\n  stage: auto\n  next_step: auto\nclosing_stages: [final]\n', p)
     if (!shared.ok) throw new Error(shared.errors.join())
-    expect(effectiveFieldPolicy(p, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
+    expect(effectiveFieldPolicy(p, shared.value, 'update_deal', 'next_step')).toBe('auto')
+    expect(closingMoveFields(p, shared.value, 'update_deal', { next_step: 'closedwon' }, {})).toEqual(['next_step'])
+    expect(closingMoveFields(p, shared.value, 'update_deal', { next_step: 'qualifiedtobuy' }, { stage: 'proposal' })).toEqual([])
+    // Without closing stages that field is clamped as before.
+    const sharedNoClosing = { ...shared.value, closingStages: [] }
+    expect(effectiveFieldPolicy(p, sharedNoClosing, 'update_deal', 'next_step')).toBe('prior')
   })
 
   it('the policy is judged on the outside property: an auto field cannot reach what a stricter field reads', () => {

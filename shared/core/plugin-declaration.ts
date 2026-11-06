@@ -19,13 +19,17 @@ import { isMoneyField, type ActionVia, type NoteRule, type TypeDefinition } from
 export const PLUGIN_ACTORS = ['viewer', 'ai', 'dept_manager', 'admin'] as const
 
 /**
- * Fields a plugin writes only after a person approves (milestone 4, design
- * 節目4 §9 q2, replacing milestone 3's "never"): changing `stage` can move a
- * deal to won / lost, so it is never `auto` — an `auto` default or policy is
- * refused, and at run time it is at least `prior` whatever is stored. A
- * mapping may now say `write: true` on it (div's 確度 is HubSpot's stage).
+ * Fields some of whose values close the work (owner decision 2026-11-06,
+ * replacing 節目4 §9 q2's "stage always asks first"): moving `stage` to — or
+ * away from — one of the company mapping's `closing_stages` (won / lost) asks a
+ * person first, at least a department manager; other moves may be `auto`
+ * (written at once, undoable with 「変更前の値を書き戻す」). Judged on the outside
+ * property (`closingMoveFields`, plugin-policies.ts). A mapping without
+ * `closing_stages` cannot tell a closing move apart, so there the field stays
+ * at least `prior` (an `auto` policy for it is refused, a stored or default
+ * `auto` is clamped at run time).
  */
-export const PRIOR_ONLY_FIELDS: readonly string[] = ['stage']
+export const CLOSING_FIELDS: readonly string[] = ['stage']
 
 /**
  * What an attached create (a meeting or a note on a deal) may fill: fixed

@@ -7,7 +7,10 @@
  */
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
-import { PLUGIN_ID_RE, asksFirst, effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep } from '../../shared/core/plugins'
+import {
+  PLUGIN_ID_RE, asksFirst, closingMoveFields, closingMoveProperties, effectiveFieldPolicy, effectiveOperationPolicy,
+  type AcbValue, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep,
+} from '../../shared/core/plugins'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { ONTOLOGY_NAME_RE, viaOf } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
@@ -21,13 +24,35 @@ import { recordReader } from './record-access'
 import { callVia, mayAct, NOT_VIA } from './record-engine'
 import { RECORDS_DISABLED } from './records'
 
-/** Fields that are not `auto` now (prior / off), for this operation and mapping. */
-export function notAuto(plugin: ActivePlugin, operation: string, fields: string[]) {
+/**
+ * What a write would move, for the one value-dependent rule (a move to or from a closing stage asks
+ * first, owner decision 2026-11-06): the ACB values asked (`asked`) or the raw outside values to
+ * write (`raw`, an undo's stored previous values), and the record's values now.
+ */
+export type WriteValues = { asked: Record<string, AcbValue>; current: Record<string, unknown> } | { raw: Record<string, unknown>; current: Record<string, unknown> }
+
+/** The fields of this write that move to or from a closing stage, under the plugin's mapping now. */
+export function closingFieldsOf(plugin: ActivePlugin, operation: string, fields: string[], values: WriteValues): string[] {
+  if ('asked' in values) return closingMoveFields(plugin, plugin.mapping, operation, values.asked, values.current)
+  const op = plugin.manifest.operations[operation]
+  if (!op || op.kind !== 'update') return []
+  const rules = plugin.mapping.objects[op.object]?.fields ?? {}
+  const props = closingMoveProperties(plugin.mapping, op.object, values.raw, values.current)
+  return fields.filter(f => rules[f] && props.includes(rules[f].from))
+}
+
+/**
+ * Fields that are not `auto` now (prior / off), for this operation and mapping. With the write's
+ * values, an `auto` field whose write moves to or from a closing stage is `prior` (at least a
+ * department manager approves: `approverFor`).
+ */
+export function notAuto(plugin: ActivePlugin, operation: string, fields: string[], values?: WriteValues) {
   const prior: string[] = []
   const off: string[] = []
+  const closing = values ? closingFieldsOf(plugin, operation, fields, values) : []
   for (const f of fields) {
     const p = effectiveFieldPolicy(plugin, plugin.mapping, operation, f)
-    if (p === 'prior') prior.push(f)
+    if (p === 'prior' || (p === 'auto' && closing.includes(f))) prior.push(f)
     else if (p !== 'auto') off.push(f)
   }
   return { prior, off }
@@ -42,7 +67,11 @@ export function createPolicy(plugin: ActivePlugin, operation: string, op: Plugin
   return op.createsRecord && p === 'auto' ? 'prior' : p
 }
 
-export const fieldsAuto = (operation: string, fields: string[]) => (p: ActivePlugin) => { const n = notAuto(p, operation, fields); return n.prior.length + n.off.length === 0 }
+/** Every field still `auto` under the plugin's mapping now (the precheck before a send); `values()` read at that moment. */
+export const fieldsAuto = (operation: string, fields: string[], values?: () => WriteValues) => (p: ActivePlugin) => {
+  const n = notAuto(p, operation, fields, values?.())
+  return n.prior.length + n.off.length === 0
+}
 
 /**
  * The business × operation gate (plan C4, plugins.md "The gate of a step's

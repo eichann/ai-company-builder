@@ -6,7 +6,7 @@
  */
 import { APPROVER_RULES, type ApproverRule, type ApproverSpec } from './approvals'
 import { roleRefName } from './plugin-roles'
-import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, asksFirst, moneyField, priorFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
+import { CLOSING_FIELDS, FIELD_POLICIES, asksFirst, moneyField, priorFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
 import { EXTERNAL_NAME_RE, strList, unknownKeys } from './plugin-declaration-rules'
 import { normalizeRepoPath } from './paths'
 import { ONTOLOGY_NAME_RE, type FieldDef, type TypeDefinition } from './record-types'
@@ -49,7 +49,10 @@ export interface PluginMapping {
    * `DEFAULT_APPROVERS`, else `dept_manager`.
    */
   approvalBy: Record<string, ApproverSpec>
-  /** ACB values of `stage` that close a deal (won / lost): moving there needs at least a department manager. */
+  /**
+   * ACB values of `stage` that close the work (won / lost; `CLOSING_FIELDS`): moving there — or away
+   * from there — always asks first, at least a department manager. Empty: `stage` is never `auto`.
+   */
   closingStages: string[]
 }
 
@@ -187,6 +190,14 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     objects[oname] = { visibleToFolder, import: importRule, fields, links }
   }
 
+  const closingStages: string[] = []
+  if (raw.closing_stages !== undefined) {
+    const list = strList(raw.closing_stages)
+    const stageOptions = new Set(Object.values(types).flatMap(t => t.fields.stage?.options ?? []))
+    if (!list || !list.every(v => stageOptions.has(v))) err(`closing_stages は段階（stage）の選択肢の並びです（受注・失注になる段階）`)
+    else closingStages.push(...list)
+  }
+
   const createOps = Object.entries(manifest.operations).filter(([, op]) => op.kind === 'create')
   const policy: Record<string, FieldPolicy> = {}
   const rawPolicy = raw.policy ?? {}
@@ -199,7 +210,11 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
       policy[f] = p as FieldPolicy
       continue
     }
-    if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) { err(`policy の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`); continue }
+    // A closing field (stage) may be automatic only where the mapping says which of its values close the work.
+    if (p === 'auto' && CLOSING_FIELDS.includes(f) && closingStages.length === 0) {
+      err(`policy の「${f}」: 受注・失注になる段階（closing_stages）を書くまで、この欄は承認なし（auto）にできません`)
+      continue
+    }
     if (!Object.values(objects).some(o => o.fields[f])) { err(`policy の「${f}」は読み替え表にない欄です`); continue }
     if (p === 'auto' && Object.entries(objects).some(([on, o]) => o.fields[f] && moneyField(pkg, on, f))) {
       err(`policy の「${f}」: お金の欄（money: true）は「自動」にできません（書くときは必ず承認のお願いになります）`)
@@ -222,14 +237,6 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     }
     if (!createOps.some(([n]) => n === f) && !Object.values(objects).some(o => o.fields[f]?.write)) { err(`approval_by の「${f}」は、書き戻す欄か作る操作の名前です`); continue }
     approvalBy[f] = who as ApproverSpec
-  }
-
-  const closingStages: string[] = []
-  if (raw.closing_stages !== undefined) {
-    const list = strList(raw.closing_stages)
-    const stageOptions = new Set(Object.values(types).flatMap(t => t.fields.stage?.options ?? []))
-    if (!list || !list.every(v => stageOptions.has(v))) err(`closing_stages は段階（stage）の選択肢の並びです（受注・失注になる段階）`)
-    else closingStages.push(...list)
   }
 
   if (errors.length > 0) return { ok: false, errors }

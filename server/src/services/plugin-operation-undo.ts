@@ -21,7 +21,7 @@ import type { ActivePlugin } from './plugins'
 
 export function createOperationUndo(
   deps: Pick<PluginOperationDeps, 'companyData' | 'clock' | 'plugins' | 'connector' | 'writer' | 'importer'> & {
-    checks: Pick<OperationChecks, 'opFor' | 'readable' | 'mayRun' | 'precheckFor'>
+    checks: Pick<OperationChecks, 'opFor' | 'readable' | 'mayRun' | 'precheckFor' | 'valuesOf'>
     records: Pick<OperationRecords, 'newRow' | 'answerFor'>
     sending: Pick<OperationSending, 'readOutside' | 'sendAndSettle'>
     serialised: Serialised
@@ -43,7 +43,12 @@ export function createOperationUndo(
   async function undo(member: Member, pluginId: string, operationId: string, provenance: Pick<OperationActor, 'conversationId' | 'proposedBy'> = {}): Promise<Outcome<RunAnswer>> {
     const op = await checks.opFor(member, pluginId, operationId)
     if (!op) return opNotFound()
-    if (op.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', '自分の（自分の AI の）変更か、管理者だけが書き戻せます', { code: 'NOT_ALLOWED' })
+    // An AI's automatic change (nobody approved it) may also be undone by the record's assignee, who is told of it (知らせ「AI が変えました」).
+    const assigneeOfAiChange = op.actorKind === 'ai' && !op.approvedBy && op.recordId !== null
+      && checks.valuesOf(member.companyId, op.recordId).fields.assignee === member.userId
+    if (op.actorId !== member.userId && !assigneeOfAiChange && !FULL_ACCESS_ROLES.has(member.role)) {
+      return refuse('forbidden', '自分の（自分の AI の）変更か、担当する記録を AI が変えたものか、管理者だけが書き戻せます', { code: 'NOT_ALLOWED' })
+    }
     if (op.operation === 'undo' || op.undoneBy !== null) return conflict('この変更はもう書き戻してあるか、書き戻しそのものです', 'NOT_UNDOABLE')
     if (op.state !== 'applied') {
       return conflict(op.state === 'observed'
@@ -66,9 +71,11 @@ export function createOperationUndo(
     if (!mayRun(member, human, declared.who, recordId, place, plugin.pluginId)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
     const asked = JSON.parse(op.fields) as Record<string, AcbValue>
     const names = Object.keys(asked)
-    const policy = notAuto(plugin, op.operation, names)
+    // Writing back the previous values is a move too: to or from a closing stage it is not automatic.
+    const writeValues = () => ({ raw: JSON.parse(op.previous) as Record<string, unknown>, current: checks.valuesOf(member.companyId, recordId).fields })
+    const policy = notAuto(plugin, op.operation, names, writeValues())
     if (policy.prior.length + policy.off.length > 0) return conflict('いまは自動で書き戻せない欄が含まれています', 'APPROVAL_REQUIRED', { fields: [...policy.prior, ...policy.off] })
-    const precheck = precheckFor(member, human, plugin, declared.who, recordId, place, fieldsAuto(op.operation, names))
+    const precheck = precheckFor(member, human, plugin, declared.who, recordId, place, fieldsAuto(op.operation, names, writeValues))
     const externalId = op.externalId as string
 
     return serialised(`${member.companyId}|${op.connectionId}|${op.object}|${externalId}`, async () => {

@@ -56,6 +56,19 @@ export function undoNoticedChange(companyId: string, recordId: string, version: 
   return writes.undoTaskAction(companyId, recordId, version, version)
 }
 
+/**
+ * ［元に戻す］ on 「AI が変えました」 (`ai_changed`): the AI's plugin operation written back through the
+ * member's session (`pluginOperations:undo`, 「変更前の値を書き戻す」 / 「作ったものを取り消す」); the server
+ * re-checks everything (the assignee, HubSpot unchanged since, the field still automatic).
+ */
+export type NoticeOperationUndo = ElectronPort<'undoPluginOperation'>
+export async function undoNoticedAiChange(companyId: string, pluginId: string, operationId: string, writes: NoticeOperationUndo = window.electronAPI): Promise<{ success: true } | { success: false; error: string }> {
+  const r = await writes.undoPluginOperation(companyId, pluginId, operationId)
+  if (r?.success && r.operation.state === 'applied') return { success: true }
+  if (r?.success) return { success: false, error: '元に戻せたか分かりません。HubSpot で確かめてください。' }
+  return { success: false, error: r?.error ?? '元に戻せませんでした。そのあとに変わったかもしれません。' }
+}
+
 export function setNoticeSetting(companyId: string, kind: string, on: boolean, writes: NoticesWrites = window.electronAPI) {
   return writes.setNotificationSetting(companyId, kind, on)
 }

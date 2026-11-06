@@ -16,7 +16,7 @@ import { describe, expect, it, vi } from 'vitest'
 import IntegrationsPage from '@/app/companies/[id]/integrations/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
 import type { BrokerKeySummary, BrokerView, Capabilities, CoreConnectorsView, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem, SlackAdminView, SlackGrantSummary } from '@/lib/api'
-import { changeMappingField, mappingRows, mappingToYaml } from '@/lib/integrations'
+import { autoUnavailable, changeMappingField, closingNote, mappingRows, mappingToYaml } from '@/lib/integrations'
 import { parseYamlLite } from '../../shared/core/yaml-lite'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { managerCapabilities, ok, ownerCapabilities } from './fixtures'
@@ -194,7 +194,7 @@ describe('the table view of the mapping', () => {
     expect(parseYamlLite(mappingToYaml(odd))).toEqual({ ok: true, value: odd })
   })
 
-  it('a choice sets write and an explicit policy; reading only drops the policy; the stage is never automatic', () => {
+  it('a choice sets write and an explicit policy; reading only drops the policy; the stage is automatic only with closing stages', () => {
     const auto = changeMappingField(MAPPING, 'deal', 'confidence', { choice: 'auto' })
     const rows = mappingRows(auto, [])
     if (!rows.ok) throw new Error(rows.error)
@@ -210,7 +210,16 @@ describe('the table view of the mapping', () => {
     // A policy the text leaves to the package's defaults shows what the server says is in force.
     const fromServer = mappingRows(MAPPING, salesDetail.policies)
     expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'next_step')?.choice).toBe('auto')
-    expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'stage')?.priorOnly).toBe(true)
+    const stage = fromServer.ok ? fromServer.rows.find((r) => r.field === 'stage')! : null
+    expect(stage?.closing).toEqual({ stagesNamed: MAPPING.includes('closing_stages') })
+    // Without closing stages the stage is never offered as automatic; with them it is, and says that won / lost still ask.
+    const without = mappingRows(MAPPING.replace(/^closing_stages:.*$/m, ''), [])
+    const withStages = mappingRows(`${MAPPING.replace(/^closing_stages:.*$/m, '')}\nclosing_stages: [won]\n`, [])
+    const rowOf = (r: typeof without) => (r.ok ? r.rows.find((x) => x.field === 'stage')! : null)
+    expect(autoUnavailable(rowOf(without)!)).toBe(true)
+    expect(closingNote(rowOf(without)!)).toContain('自動にはできません')
+    expect(autoUnavailable(rowOf(withStages)!)).toBe(false)
+    expect(closingNote(rowOf(withStages)!)).toContain('承認が要ります')
   })
 })
 
@@ -235,11 +244,11 @@ describe('つなぎ先', () => {
     for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
   })
 
-  it("the business's mapping as a table: each field by its Japanese name, the stage never automatic, no jargon", async () => {
+  it("the business's mapping as a table: each field by its Japanese name, the stage not automatic without closing stages, no jargon", async () => {
     stubApi(ownerCapabilities, {}, false, [salesItem])
     renderInCompany(<IntegrationsPage />)
     // The mapping table arrives with the detail (its own request).
-    expect(await screen.findByText('受注・失注につながるため、自動にはできません')).toBeInTheDocument()
+    expect(await screen.findByText('受注・失注になる段階（closing_stages）を書くまで、自動にはできません')).toBeInTheDocument()
     const stage = screen.getByRole('combobox', { name: 'stage の書き戻し' })
     expect([...stage.querySelectorAll('option')].map((o) => o.textContent)).not.toContain('自動で書き戻す')
     // Each field by its Japanese name, the identifier only as small print beside it.

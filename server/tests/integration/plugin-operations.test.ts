@@ -696,6 +696,114 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
   })
 })
 
+describe('the stage moves by itself except to or from a closing stage; the assignee is told (owner 2026-11-06)', () => {
+  const member = { companyId: CO, userId: 'op-member', role: 'member' }
+  const other = { companyId: CO, userId: 'op-other', role: 'member' }
+  const DEAL = '1000000010' // assignee op-member
+  const CLOSING = `${MAPPING}policy:\n  stage: auto\nclosing_stages: [final]\n`
+  const noticesOf = (who: Json) => services.notifications.list(who).value.items as Json[]
+  const aiChanges = (who: Json) => noticesOf(who).filter(n => n.kind === 'ai_changed')
+  const morningText = () => noticesOf(member).find(n => n.kind === 'morning_summary')?.text as string | undefined
+  const atQuote = async () => {
+    fake.changeDealOutside(DEAL, { dealstage: 'presentationscheduled' })
+    await person('op-member', 'POST', `/records/${recordOf(DEAL)}/operations/refresh_deal`, {})
+  }
+
+  it('without closing stages the stage cannot be automatic; with them it is saved (acknowledged)', async () => {
+    const refused = await services.plugins.saveMapping(owner, 'sample-sales', { text: `${MAPPING}policy:\n  stage: auto\n`, acknowledgeAuto: [...ACK, 'stage'] })
+    expect(JSON.stringify(refused)).toContain('closing_stages')
+    const saved = await services.plugins.saveMapping(owner, 'sample-sales', { text: CLOSING, acknowledgeAuto: [...ACK, 'stage'] })
+    expect(saved.ok, JSON.stringify(saved)).toBe(true)
+    // What earlier tests' AI changed is 確かめた here (read), so the counts below are this block's.
+    services.notifications.markRead(member, { all: true })
+  })
+
+  it("the AI moves the stage between open stages at once; the assignee alone is told what changed and why, and undoes it", async () => {
+    await atQuote()
+    const id = recordOf(DEAL)
+    const before = aiChanges(member).length
+    const n = patches()
+    const token = await tokenFor('op-member')
+    const r = await ai(token, 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'proposal' }, '先方が提案からやり直したいと言ったため（議事録 11/6）'))
+    expect(r.status, JSON.stringify(r.body)).toBe(200)
+    expect(r.body.data.operation.state).toBe('applied')
+    expect(patches()).toBe(n + 1)
+    expect(fake.deal(DEAL)!.properties.dealstage).toBe('qualifiedtobuy')
+    // Told although it was their own AI: what changed (by label), the reason, and the way back.
+    const notice = aiChanges(member)
+    expect(notice.length).toBe(before + 1)
+    expect(notice[0]).toMatchObject({ recordId: id, aiChange: { pluginId: 'sample-sales', operationId: r.body.data.operation.id, undone: false } })
+    expect(notice[0].text).toContain('段階')
+    expect(notice[0].text).toContain('先方が提案からやり直したい')
+    // Not the assignee: nothing, though they read the deal.
+    expect(aiChanges(other).some(x => x.recordId === id)).toBe(false)
+    // The morning summary lists it until it is 確かめた.
+    const today = (await import('../../src/services/notifications')).companyNow(Date.now(), 'Asia/Tokyo').slice(0, 10)
+    db.prepare("INSERT INTO notifications (company_id, id, user_id, kind, record_id, record_version, action, dedupe_key, created_at) VALUES (?, 'op-morning', 'op-member', 'morning_summary', '', 0, '', ?, ?)")
+      .run(CO, `morning_summary:${today}`, new Date().toISOString())
+    expect(morningText()).toContain('AI が変えた・まだ確かめていない')
+    // The assignee writes it back from the notice.
+    const undo = await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/undo`)
+    expect(undo.body.data.operation.state).toBe('applied')
+    expect(fake.deal(DEAL)!.properties.dealstage).toBe('presentationscheduled')
+    expect(aiChanges(member)[0]).toMatchObject({ aiChange: { undone: true } })
+    expect(morningText()).not.toContain('AI が変えた')
+  })
+
+  it("an unread change keeps the morning summary's section; opening the notice (確かめた) clears it", async () => {
+    await atQuote()
+    const id = recordOf(DEAL)
+    const r = await ai(await tokenFor('op-member'), 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'first_meeting' }, '初回の打合せをやり直すことになったため'))
+    expect(r.body.data.operation.state).toBe('applied')
+    expect(morningText()).toContain('AI が変えた・まだ確かめていない 1件')
+    const notice = aiChanges(member).find(x => x.aiChange?.operationId === r.body.data.operation.id)
+    expect(services.notifications.markRead(member, { ids: [notice.id] }).value.changed).toBe(1)
+    expect(morningText()).not.toContain('AI が変えた')
+    // Losing access to the deal hides the notice too (checked when read).
+    db.prepare("UPDATE scope_rules SET can_read = 0 WHERE company_id = ? AND id = 'op-r2'").run(CO)
+    try {
+      expect(aiChanges(member).some(x => x.recordId === id)).toBe(false)
+    } finally { db.prepare("UPDATE scope_rules SET can_read = 1 WHERE company_id = ? AND id = 'op-r2'").run(CO) }
+    await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/undo`)
+  })
+
+  it("someone else's AI changed the deal: its assignee is told and may write it back; another member may not", async () => {
+    await atQuote()
+    const id = recordOf(DEAL)
+    const r = await ai(await tokenFor('op-owner'), 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'proposal' }, '責任者として段階を見直したため'))
+    expect(r.body.data.operation.state, JSON.stringify(r.body)).toBe('applied')
+    expect(aiChanges(member).find(x => x.aiChange?.operationId === r.body.data.operation.id)?.text).toContain('の AIが')
+    expect(await person('op-other', 'POST', `/operations/${r.body.data.operation.id}/undo`)).toMatchObject({ status: 403, body: { code: 'NOT_ALLOWED' } })
+    const undo = await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/undo`)
+    expect(undo.body.data?.operation.state, JSON.stringify(undo.body)).toBe('applied')
+    expect(fake.deal(DEAL)!.properties.dealstage).toBe('presentationscheduled')
+  })
+
+  it('a move to a closing stage, or away from one, is still an approval request (person route, AI token, the seam), at least a department manager', async () => {
+    await atQuote()
+    const id = recordOf(DEAL)
+    const n = patches()
+    const byPerson = await person('op-member', 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' }))
+    expect(byPerson, JSON.stringify(byPerson.body)).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { approverRule: 'dept_manager' } } } })
+    const byAi = await ai(await tokenFor('op-member'), 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' }, '先方が発注を決めたため'))
+    expect(byAi).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested' } } })
+    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-sales', id, 'update_deal', { expectedVersion: versionOf(id), fields: { stage: 'final' } })
+    expect(prepared).toMatchObject({ ok: true, value: { approver: 'dept_manager' } })
+    // An open move needs none.
+    expect(await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-sales', id, 'update_deal', { expectedVersion: versionOf(id), fields: { stage: 'proposal' } }))
+      .toMatchObject({ ok: false, body: { code: 'APPROVAL_NOT_NEEDED' } })
+    // Away from a closing stage (reopening a won deal) asks too.
+    fake.changeDealOutside(DEAL, { dealstage: 'decisionmakerboughtin' })
+    await person('op-member', 'POST', `/records/${id}/operations/refresh_deal`, {})
+    const reopen = await ai(await tokenFor('op-member'), 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'proposal' }, '先方が見直すと言ったため'))
+    expect(reopen).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested' } } })
+    expect(patches()).toBe(n)
+    await atQuote()
+    // Back to the mapping the other tests use.
+    expect((await services.plugins.saveMapping(owner, 'sample-sales', { text: MAPPING, acknowledgeAuto: ACK })).ok).toBe(true)
+  })
+})
+
 describe('creates and approvals keep keys and other companies out', () => {
   it('no key value in any operation record or ledger entry', () => {
     const rows = JSON.stringify(db.prepare('SELECT * FROM plugin_operations').all()) + JSON.stringify(db.prepare('SELECT * FROM record_ledger').all())

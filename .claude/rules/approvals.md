@@ -68,6 +68,10 @@ member) asked, and the core runs it. Approving is a person's act through their s
   (never names the place).
 - An identical pending request (same payload hash, same requester) is the answer (`existing:
   true`); nothing new is made.
+- **A move of the stage to or from a closing stage** (owner decision 2026-11-06, `plugins.md` "Field
+  policies") is a request even where the stage is `auto` — over the person's route, the AI's token,
+  and inside a step's run (with the step's `approvals`; else `NOT_IN_STEP`) — approver at least
+  `dept_manager`. Other stage moves are written at once and are not requests (`APPROVAL_NOT_NEEDED`).
 - The AI emergency stop stops the AI's requests (`prepareApproval`, and the token as a whole);
   people's requests and approvals go on.
 

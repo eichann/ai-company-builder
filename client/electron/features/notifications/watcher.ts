@@ -43,6 +43,7 @@ const SHOWN_KEEP = 300
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
 const RECORD = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 const NOTICE_ID = /^[A-Za-z0-9-]{1,100}$/
+const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/
 
 type Answer = { status: number; body: { data?: unknown; error?: unknown } | null }
 
@@ -68,10 +69,17 @@ function noticeOf(i: NotificationItem): NotificationItem | null {
   // A notice is about a record, except the kinds about none (the morning summary: '').
   if (!(RECORD.test(i.recordId) || (i.recordId === '' && RECORDLESS.has(i.kind)))) return null
   const d = i.desktop as { title?: unknown; body?: unknown } | undefined
+  const a = i.aiChange as { pluginId?: unknown; operationId?: unknown; undone?: unknown } | undefined
   const out: NotificationItem = { ...i }
   delete out.desktop
+  delete out.aiChange
   if (typeof d === 'object' && d !== null && typeof d.title === 'string' && typeof d.body === 'string') {
     out.desktop = { title: d.title.slice(0, 200), body: d.body.slice(0, 200) }
+  }
+  // An AI's automatic change: the operation ［元に戻す］ sends back (plain ids only; the server decides).
+  if (typeof a === 'object' && a !== null && typeof a.pluginId === 'string' && PLUGIN_ID.test(a.pluginId)
+    && typeof a.operationId === 'string' && NOTICE_ID.test(a.operationId) && typeof a.undone === 'boolean') {
+    out.aiChange = { pluginId: a.pluginId, operationId: a.operationId, undone: a.undone }
   }
   return out
 }
