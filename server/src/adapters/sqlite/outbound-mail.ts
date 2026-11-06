@@ -3,7 +3,7 @@
  * company: every statement binds `company_id = ?` with the handle's id.
  */
 import type Database from 'better-sqlite3'
-import type { RecipientSource } from '../../../shared/core/mail'
+import { RECIPIENT_SOURCES, type RecipientSource } from '../../../shared/core/mail'
 import type {
   OutboundMailRepository, OutboundMailRow, OutboundRecipientRow, OutboundSendOutcome, OutboundSendRow,
 } from '../../ports/outbound-mail'
@@ -26,7 +26,7 @@ const toMail = (r: MailRow): OutboundMailRow => ({
   messageId: r.message_id, authorId: r.author_id, fromEmail: r.from_email, meetingId: r.minutes_id, bundleId: r.deal_id,
   createdAt: r.created_at, finishedAt: r.finished_at, bodyDeletedAt: r.body_deleted_at,
 })
-const SOURCES: readonly string[] = ['calendar', 'hubspot', 'member', 'typed']
+const SOURCES: readonly string[] = RECIPIENT_SOURCES
 function recipientsOf(text: string): OutboundRecipientRow[] {
   try {
     const v = JSON.parse(text) as unknown

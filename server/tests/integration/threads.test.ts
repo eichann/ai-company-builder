@@ -294,6 +294,9 @@ describe('a mail reply into the member\'s own conversation', () => {
     expect(made.status, made.text).toBe(201)
     expect(made.body.data.draft).toMatchObject({ channel: 'email', interactionId: mailInteraction })
     draftId = made.body.data.draft.id
+    // Read back, the reply's recipient keeps its source (so the send re-checks it in the thread).
+    const shown = (await person('th-sato', 'GET', `/outbound/${draftId}`)).body.data.draft
+    expect(shown.to.map((r: Json) => [r.email, r.source])).toEqual([[CLIENT, 'thread']])
     const row = db.prepare('SELECT personal_owner, folder FROM records WHERE company_id = ? AND id = ?').get(CO, draftId) as Json
     expect(row).toEqual({ personal_owner: 'th-sato', folder: null })
     // The card lists it as Sato's reply; nobody else sees the 連絡 at all.
