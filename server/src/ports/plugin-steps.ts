@@ -13,6 +13,12 @@ export interface PluginStepPinRow {
   updatedAt: string
 }
 
+/** How the company runs a step (plugin-steps.md "Starting by itself"); absent = the button, the folder from the step's label. */
+export interface PluginStepSettingRow {
+  autoStart: boolean
+  deliverableFolder: string | null
+}
+
 export interface PluginStepRepository {
   /** The work's pin for a step, or null (never run). */
   pin(recordId: string, pluginId: string, step: string): PluginStepPinRow | null
@@ -33,4 +39,16 @@ export interface PluginStepRepository {
   consultationStep(userId: string, conversationId: string): { recordId: string; pluginId: string; step: string } | null
   /** Bind a member's consultation to a step for good: false when it is bound already (nothing changed). */
   bindConsultation(row: { userId: string; conversationId: string; recordId: string; pluginId: string; step: string; at: string }): boolean
+  /** The company's settings of a plugin's steps: step → setting (steps never set are absent). */
+  stepSettings(pluginId: string): Record<string, PluginStepSettingRow>
+  /** Store a step's setting (both values). */
+  setStepSetting(pluginId: string, step: string, setting: PluginStepSettingRow, at: string, by: string): void
+  /** Ask for a step's automatic run on a record (again: a done request is opened anew). */
+  request(row: { recordId: string; pluginId: string; step: string; at: string; meetingId: string | null }): void
+  /** The record's open request for a step (not answered by a finished run), or null. */
+  openRequest(recordId: string, pluginId: string, step: string): { requestedAt: string; meetingId: string | null } | null
+  /** Records with an open request for a step. */
+  openRequests(pluginId: string, step: string): string[]
+  /** A finished run answers the request made at or before `startedAt` (a later request stays open). */
+  answerRequest(recordId: string, pluginId: string, step: string, startedAt: string, at: string): void
 }

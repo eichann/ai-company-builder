@@ -1220,6 +1220,9 @@ export const pluginsApi = {
   /** The company's Skill for an overridable step (null = the business's own procedure). */
   setStepSkill: (companyId: string, pluginId: string, step: string, skill: string | null) =>
     getData(`${pluginPath(companyId, pluginId)}/step-skills/${enc(step)}`, pluginStepSkillsSchema, { method: 'PUT', body: { skill } }),
+  /** How the company runs a step: 「自動で始める」 for a person's step, the deliverable folder (null = from the step's name). */
+  setStepSettings: (companyId: string, pluginId: string, step: string, body: { autoStart?: boolean; deliverableFolder?: string | null }) =>
+    getData(`${pluginPath(companyId, pluginId)}/step-settings/${enc(step)}`, pluginStepSkillsSchema, { method: 'PUT', body }),
 }
 
 // The Google connection (「つなぎ先」→「Google」, milestone 4 G3): shapes from shared/types/google.ts.

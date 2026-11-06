@@ -14,6 +14,7 @@ import { PLUGIN_ID_RE } from '../../../shared/core/plugin-declaration'
 import { STEP_FILE_RE } from '../../../shared/core/plugin-flow-declaration'
 import { ONTOLOGY_NAME_RE as STEP_NAME_RE } from '../../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../../shared/core/records'
+import { automaticStepCeiling, deliverableFolderOf, deliverableFolderProblem } from '../../../shared/core/plugin-step-runs'
 import { parseProcedurePin } from '../../../shared/core/ai-runs'
 import type { PluginStepProcedurePin } from '../../../shared/core/plugin-declaration'
 import type { PluginStepOnRecord } from '../../../shared/types/plugins'
@@ -44,6 +45,16 @@ export interface QueuedPluginStep {
   step: string
   runStep: PluginRunStep
   label: string
+  /** A `start: person` step the company starts by itself (plugin-steps.md "Starting by itself"): the automatic ceiling, settled by what it made. */
+  auto: boolean
+  /** Where the run may write: `<department>/.personal/<this>/` (the server's, else from the label). */
+  deliverableFolder: string
+}
+
+/** The step's deliverable folder from the server's answer, else the core's default from its label. */
+export function stepDeliverableFolder(v: { step: string; label: string; deliverableFolder?: unknown }): string {
+  const given = typeof v.deliverableFolder === 'string' && deliverableFolderProblem(v.deliverableFolder) === null ? v.deliverableFolder : null
+  return deliverableFolderOf(v.step, v.label, given)
 }
 
 const str = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max
@@ -57,10 +68,15 @@ export function parsePluginStepTurns(data: unknown): QueuedPluginStep[] | null {
     if (typeof t !== 'object' || t === null) continue
     const v = t as Record<string, unknown>
     if (!str(v.recordId, 80) || !RECORD_ID_RE.test(v.recordId) || typeof v.version !== 'number' || !Number.isInteger(v.version) || v.version < 1) continue
-    if (!str(v.pluginId, 40) || !str(v.step, 40) || !str(v.label, 200) || v.start !== 'ai_turn') continue
+    // A person's step only when the server says the company starts it by itself.
+    const auto = v.start === 'person' && v.auto === true
+    if (!str(v.pluginId, 40) || !str(v.step, 40) || !str(v.label, 200) || (v.start !== 'ai_turn' && !auto)) continue
     const runStep = pluginRunStep(v.pluginId, v.step)
     if (!runStep) continue
-    out.push({ recordId: v.recordId, version: v.version, pluginId: v.pluginId, step: v.step, runStep, label: v.label })
+    out.push({
+      recordId: v.recordId, version: v.version, pluginId: v.pluginId, step: v.step, runStep, label: v.label, auto,
+      deliverableFolder: stepDeliverableFolder({ step: v.step, label: v.label, deliverableFolder: v.deliverableFolder }),
+    })
   }
   return out
 }
@@ -78,7 +94,10 @@ export function parsePluginStepsOn(data: unknown): PluginStepOnRecord[] | null {
     const tools = names(v.tools)
     const roles = names(v.connectorRoles)
     if (!tools || !roles) continue
-    out.push({ pluginId: v.pluginId, step: v.step, label: v.label, start: v.start, procedure: v.procedure, tools, connectorRoles: roles, pin: parseProcedurePin(v.pin) })
+    out.push({
+      pluginId: v.pluginId, step: v.step, label: v.label, start: v.start, procedure: v.procedure, tools, connectorRoles: roles, pin: parseProcedurePin(v.pin),
+      deliverableFolder: stepDeliverableFolder({ step: v.step, label: v.label, deliverableFolder: v.deliverableFolder }),
+    })
   }
   return out
 }
@@ -104,7 +123,9 @@ const BUILTIN_TOOLS: Record<string, readonly string[]> = {
   files_write: ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'MultiEdit'],
 }
 
-export function pluginStepToolAccess(step: { pluginId: string; tools: readonly string[] }, recordType: string): PluginStepToolAccess {
+export function pluginStepToolAccess(declared: { pluginId: string; tools: readonly string[] }, recordType: string, options: { automatic?: boolean } = {}): PluginStepToolAccess {
+  // A person's step run by itself never gets a tool that reaches outside (shared/core/plugin-step-runs.ts).
+  const step = options.automatic ? automaticStepCeiling({ ...declared, connectorRoles: [] }) : declared
   const exact = new Set(step.tools.flatMap(t => RECORD_TOOLS[t] ?? []))
   const typeActions = step.tools.includes('records') && STEP_NAME_RE.test(recordType) ? `${recordType}__` : null
   const operations = step.tools.includes('plugin_operations') ? `${step.pluginId}__` : null
@@ -138,6 +159,8 @@ export function pluginStepConsultationTitle(label: string, now = new Date()): st
  */
 export function pluginStepFirstMessage(input: {
   label: string; recordId: string; version: number | null; procedure: string; source: PluginStepProcedurePin['source']
+  /** Where the run may write; with `auto`, also how it reports what it made. */
+  deliverableFolder?: string; auto?: boolean
 }): string {
   return [
     '（アプリが AI の番として自動で始めた相談です。私はいま画面を見ていません。）',
@@ -154,6 +177,28 @@ export function pluginStepFirstMessage(input: {
     '- 使えるのはこの手順の道具だけです。使えない道具や足りない情報があっても止まらず、最後に私へのお願いとしてまとめてください。',
     '- 送る・承認するは人がします。下書きや承認のお願いまでにしてください。',
     '- 「ほかの人が先に変えました」と断られたら、その答えの version でもう一度だけ試してください。',
+    ...(input.deliverableFolder ? [deliverableFolderRule(input.deliverableFolder)] : []),
+    ...(input.auto && input.deliverableFolder ? ['', deliverablesReport(input.recordId, input.label)] : []),
+  ].join('\n')
+}
+
+/** Where a step's run or consultation saves files (the app refuses anywhere else). */
+export function deliverableFolderRule(folder: string): string {
+  return `- ファイルを保存できるのは「（部署のフォルダ）/.personal/${folder}/」の中だけです（その人だけのフォルダで、共有されません）。その中に「日付_相手の名前」のフォルダを作って保存してください。`
+}
+
+/**
+ * How an automatic run reports what it made (plugin-steps.md "What the step made"): one やること for
+ * the member, linked to the record, carrying the files, the mail draft and the points to check —
+ * the card shows it at the top (tasks-ui.md 「AI が用意したもの」). The run counts as done only then.
+ */
+export function deliverablesReport(recordId: string, label: string): string {
+  return [
+    '終わったら、作ったものを1つのやることにまとめて私に渡してください：',
+    `- records_create で type: task、title は「${label}：（相手の名前）」、assignee は私、links.bundle に ${recordId}、links.prepared に作ったメールの下書きの id を入れます。`,
+    '- fields.prep_summary に「確かめる点」（分からなかったこと・私に確かめてほしいこと）を箇条書きで書きます。なければ「確かめる点はありません」と書きます。',
+    '- 作ったファイル（提案書の PDF など）は、そのやることに records_link_file でつなぎます。',
+    '- メールの下書きを作るときは、PDF を attachments に付けます。送るのは私です。',
   ].join('\n')
 }
 
@@ -178,8 +223,9 @@ export type PluginStepStartResult = { ok: true; title: string; message: string }
  * The first message of a consultation a person starts from a step (the member's own message, made
  * by the app): the step, the record and the pinned procedure to follow together.
  */
-export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginStepProcedurePin['source'] }): string {
+export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginStepProcedurePin['source']; deliverableFolder?: string }): string {
   return [
+    ...(input.deliverableFolder ? [`（この相談でファイルを保存できるのは「（部署のフォルダ）/.personal/${input.deliverableFolder}/」の中だけです）`, ''] : []),
     `手順「${input.label}」を、記録 ${input.recordId} について一緒に進めたいです。まず records_get で記録を確かめてから、次の${input.source === 'company_skill' ? '会社の手順書（スキル）' : '手順書'}に沿って進めてください。`,
     '',
     '-----',

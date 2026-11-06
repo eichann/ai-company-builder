@@ -74,6 +74,8 @@ export const GUARD_REASONS = [
   // Agent config only owners/admins may change: .mcp.json, .codex/, and the rest of .claude/ /
   // .agents/ (shared/core/agent-config.ts).
   'agent-config',
+  // A business plugin step's write outside its deliverable folder (<department>/.personal/<folder>/, plugin-steps.md).
+  'deliverable-folder',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 

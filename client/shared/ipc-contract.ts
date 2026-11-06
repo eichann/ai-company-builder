@@ -64,6 +64,7 @@ import type { PluginScreensResult } from './plugin-screens'
 // lane B ▲
 // lane C ▼
 import type { PluginStepButton, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
+import type { StepDeliverablesView } from './step-deliverables'
 // lane C ▲
 
 // ---------------------------------------------------------------------------
@@ -762,6 +763,8 @@ export interface IpcInvokeChannels {
   'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
   /** A person starts a step: the server pins the work's procedure; main answers the consultation's first message. */
   'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
+  /** What a step made for a record (its やること's 確かめる点, files, mail draft) for the record's card. */
+  'pluginSteps:deliverables': { args: [companyId: string, recordId: string]; result: StepDeliverablesView | null }
   // lane C ▲
 }
 
@@ -1135,5 +1138,6 @@ export interface ElectronAPI {
   listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   listPersonSteps: Invoke<'pluginSteps:onRecord'>
   startPersonStep: Invoke<'pluginSteps:start'>
+  readStepDeliverables: Invoke<'pluginSteps:deliverables'>
   // lane C ▲
 }

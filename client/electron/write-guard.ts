@@ -61,7 +61,8 @@ import { isAgentConfig } from '../../shared/core/agent-config'
 import { isSameOrAncestorPath, lookalikeKey, pathKey } from '../../shared/core/paths'
 import { recordFileEditProblem } from '../../shared/core/records'
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
-import { readFileSync } from 'node:fs'
+import { insideDeliverableFolder } from '../../shared/core/plugin-step-runs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
 
@@ -107,6 +108,48 @@ export interface WriteGuard {
   getPrivateFolderView?: () => PrivateFolderView | undefined
   /** The skills kept on this computer (`<folder>/.claude/skills/<name>/`, read when a skill file is written). */
   getPrivateSkills?: () => readonly string[]
+  /**
+   * A business plugin step's run or consultation (plugin-steps.md "The deliverable folder"): every
+   * write must land inside `<department>/.personal/<folder>/` — judged on the path as written and
+   * on where it resolves on disk (links followed), so a link cannot lead out. Anything else,
+   * outside the company folder included, is refused. Absent: an ordinary consultation.
+   */
+  writeArea?: { folder: string }
+}
+
+/** Where a path really lands, relative to the company folder's real path ('/'-separated); null when outside it or unknown. */
+function realRelativePath(root: string, target: string, cwd?: string): string | null {
+  try {
+    const realRoot = realpathSync(root)
+    let existing = path.resolve(cwd && path.isAbsolute(cwd) ? cwd : root, target)
+    const rest: string[] = []
+    while (!existsSync(existing)) {
+      const parent = path.dirname(existing)
+      if (parent === existing) return null
+      rest.unshift(path.basename(existing))
+      existing = parent
+    }
+    const rel = path.relative(realRoot, path.join(realpathSync(existing), ...rest))
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null
+    return rel.split(path.sep).join('/').normalize('NFC')
+  } catch {
+    return null
+  }
+}
+
+/** The message the AI sees when a step's write lands outside its deliverable folder. */
+export function deliverableFolderMessage(folder: string): string {
+  return `この手順では、AI がファイルを保存できるのは「（部署のフォルダ）/.personal/${folder}/」の中だけです（あなただけのフォルダで、ほかの人には共有されません）。たとえば「営業部/.personal/${folder}/2026-11-06_相手の名前/」のように、その中に保存してください。ほかの場所には保存できません。`
+}
+
+/** A step's write: inside its deliverable folder both as written and as it resolves on disk. */
+export function checkDeliverableFolder(guard: WriteGuard, target: string, cwd?: string): GuardDecision {
+  const folder = guard.writeArea?.folder
+  if (folder === undefined) return { deny: false }
+  const rel = repoRelativePath(guard.root, target, cwd)
+  const real = rel === null ? null : realRelativePath(guard.root, target, cwd)
+  if (rel !== null && real !== null && insideDeliverableFolder(rel, folder) && insideDeliverableFolder(real, folder)) return { deny: false }
+  return { deny: true, path: rel ?? target, folder: rel === null ? '' : rel.split('/').slice(0, -1).join('/'), message: deliverableFolderMessage(folder), code: 'deliverable-folder' }
 }
 
 /** Who may change AI instruction files: the member's role and the folders of the departments they manage. */
@@ -175,6 +218,9 @@ const FILE_TOOLS: Record<string, string> = {
 /** Decide for one absolute-or-relative target path. */
 export function checkWritePath(guard: WriteGuard, target: string, cwd?: string): GuardDecision {
   if (!target) return { deny: false }
+  // A step's run or consultation: only its deliverable folder (checked first, outside the company too).
+  const area = checkDeliverableFolder(guard, target, cwd)
+  if (area.deny) return area
   const rel = repoRelativePath(guard.root, target, cwd)
   if (rel === null) return { deny: false } // outside the company: not ours to judge
   // Not downloaded: the member (and the AI) cannot see what teammates keep

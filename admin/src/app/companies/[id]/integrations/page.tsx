@@ -31,6 +31,7 @@ import { GoogleSection } from './google'
 import { SlackSection } from './slack'
 import { ReadScopeSection } from './read-scope'
 import { RolesSection } from './roles'
+import { StepRunsSection } from './step-runs'
 import { StepSkillsSection } from './step-skills'
 import {
   ApiError,
@@ -351,6 +352,7 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
 
         {/* 手順を会社のスキルで (plan C5): an overridable step run with one of the company's Skills. */}
         {install && business && <StepSkillsSection pluginId={item.id} />}
+        {install && business && <StepRunsSection pluginId={item.id} />}
 
         {/* On / off */}
         {install && (

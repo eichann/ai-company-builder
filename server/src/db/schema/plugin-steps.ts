@@ -45,4 +45,30 @@ export const pluginStepSchema = `
       updated_by TEXT NOT NULL,
       PRIMARY KEY (company_id, plugin_id, step)
     );
+
+    -- How the company runs a step (owner decisions 2026-11-06): 「自動で始める」 for a \`start: person\` step
+    -- (absent = the button) and the step's deliverable folder under <department>/.personal/ (absent = from its label).
+    CREATE TABLE IF NOT EXISTS plugin_step_settings (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      step TEXT NOT NULL,
+      auto_start INTEGER NOT NULL DEFAULT 0 CHECK (auto_start IN (0, 1)),
+      deliverable_folder TEXT,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, step)
+    );
+
+    -- A person's step the company starts automatically waits for a reason: a meeting of its まとまり was read.
+    -- One row per record × step; a later meeting asks again (done_at cleared), a finished run answers it.
+    CREATE TABLE IF NOT EXISTS plugin_step_requests (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      plugin_id TEXT NOT NULL,
+      step TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      meeting_id TEXT,
+      done_at TEXT,
+      PRIMARY KEY (company_id, record_id, plugin_id, step)
+    );
 `

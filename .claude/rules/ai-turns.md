@@ -341,7 +341,15 @@ ceiling, the first message).
   tools, `web_research` / `files_read` / `files_write` → Claude Code's built-in tools (the rest stay
   denied). The server's C4 gate decides each call too.
 - **Settle**: the record left the state it was at when claimed → `done`; still there → `temporary`
-  `UNFINISHED` (the server retries later, then a person).
+  `UNFINISHED` (the server retries later, then a person). A person's step the company starts by
+  itself (`auto` in the turns, `plugin-steps.md` "Starting by itself") leaves the record where it
+  is: `done` when a やること linked to it changed after the claim (what it made), else `UNFINISHED`.
+- **Started by itself** (`auto`): the queue takes a `start: person` turn only with `auto: true`;
+  its ceiling is `automaticStepCeiling` (no `web_research`, `pluginStepToolAccess(…, { automatic
+  })`), its first message says where to save and how to hand over (`deliverablesReport`).
+- **Writes only in the deliverable folder** (every plugin step's run): main holds the folder with the
+  ceiling (`pluginStepWriteArea`); the chat server puts it on the turn's write guard (`writeArea`,
+  `chat-write-guard.md`) and refuses the turn without one (`plugin-steps.md` "The deliverable folder").
 - **A person's start** (`start: person`): a record's card (AppShell, above `RecordCard`) shows
   `PersonStepButtons` (`src/features/plugin-steps/`) for the steps at its state
   (`pluginSteps:onRecord` → `GET /me/plugin-steps/records/:id`, person steps only). Pressing one:

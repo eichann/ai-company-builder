@@ -74,6 +74,7 @@ import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { useSeenTasks } from '../features/tasks/hooks/useSeenTasks'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
+import { StepDeliverables } from '../features/plugin-steps/components/StepDeliverables'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
@@ -86,7 +87,7 @@ import { BundleChooser } from '../features/tasks/components/BundleChooser'
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
-import { RecordRow } from '../features/records/components/RecordRows'
+import { FileLinkRow, RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
 import { LazyPluginFileActionDialog as PluginFileActionDialog } from '../features/plugins/components/LazyPluginSlots'
@@ -409,7 +410,7 @@ export function AppShell() {
     // A まとまり chosen from the list or the title bar: a meeting's open card reads again.
     const isMeeting = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
-    const readOnly = <div key={isMeeting ? `${recordId}:${bundleRev}` : recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
+    const readOnly = <div key={isMeeting ? `${recordId}:${bundleRev}` : recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
       renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload)}
       renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.

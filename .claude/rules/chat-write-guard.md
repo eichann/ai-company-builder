@@ -15,6 +15,7 @@ paths:
   - "client/tests/write-access*.test.ts"
   - "client/tests/private-read-guard.test.ts"
   - "client/tests/rule-parity-write-access.test.ts"
+  - "client/tests/step-deliverable-folder.test.ts"
 ---
 
 # Chat write guard (what the AI may write)
@@ -52,6 +53,16 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   / `tee` to a literal path, whose target resolves inside the company root to a read-only
   folder, with a Japanese reason. Hooks run in every permission mode (bypass included) and for
   subagents. The api-key mode's `writeFile` / `executeCommand` use the same check.
+- **A business plugin step's run or consultation** (`WriteGuard.writeArea`, owner decision
+  2026-11-06; `plugin-steps.md` "The deliverable folder"): checked before everything else, every
+  write — outside the company folder too — must land inside `<department>/.personal/<folder>/`
+  (`insideDeliverableFolder`, `shared/core/plugin-step-runs.ts`: a visible top folder, `.personal`,
+  the step's folder, something inside; NFC, A–Z folded), **both as written and where it resolves on
+  disk** (`realpathSync` of the deepest existing part, links followed), so a link cannot lead out.
+  Else guard reason `deliverable-folder` 「この手順では、AI がファイルを保存できるのは「（部署のフォルダ）
+  /.personal/<folder>/」の中だけです…」. The only line for `.personal` (never synced: no server check
+  behind it). Bash: literal redirect / `tee` targets as below; an automatic run has no shell at all.
+  Test: `client/tests/step-deliverable-folder.test.ts` (mutation-checked).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
@@ -118,7 +129,9 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - Claude Code permission deny rules (`disallowedTools: ['Edit(...)']`) are deliberately not used:
   deny beats allow, so a writable folder inside a read-only one cannot be expressed; matching is
   case/NFD-sensitive; and the provider ignores `disallowedTools` whenever `allowedTools` is set.
-- Not covered: other Bash writes (`cp`, `mv`, `sed -i`, scripts, `cd x && … > y`) and Codex.
+- Not covered: other Bash writes (`cp`, `mv`, `sed -i`, scripts, `cd x && … > y`) and Codex —
+  also inside a person's step consultation (its deliverable folder holds the file tools and literal
+  redirects; the automatic run has no shell).
   Unknown access (offline, server error) blocks nothing and is logged. Paths are judged
   lexically (no symlink resolution).
 - Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in the file tree

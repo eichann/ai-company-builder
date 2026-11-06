@@ -6,11 +6,13 @@
  *
  *   GET  /plugins/:pluginId/step-skills                             owner/admin: each step, overridable, the company's Skill
  *   PUT  /plugins/:pluginId/step-skills/:step                       owner/admin: { skill: name | null } (overridable steps only)
+ *   PUT  /plugins/:pluginId/step-settings/:step                     owner/admin: { autoStart?, deliverableFolder? } (how the company runs it)
  *   GET  /me/plugin-step-turns                                      the member's records waiting at a `start: ai_turn` step
  *   GET  /me/plugin-steps/records/:recordId                         the steps at the record's state (its card)
  *   POST /me/plugin-steps/records/:recordId/:pluginId/:step/start   a `start: person` step: pins the work's procedure, answers it
  *   POST /me/plugin-steps/consultations                         { conversationId, recordId, pluginId, step }: that consultation's
  *                                                               plugin power is the step's, for good (the C4 gate)
+ *   GET  /me/plugin-steps/consultations/:conversationId         the step a consultation is bound to + its deliverable folder (or null)
  *
  * The automatic steps are claimed through POST /ai-run-claims (routes/ai-runs.ts)
  * as `<pluginId>__<step>`.
@@ -38,6 +40,9 @@ pluginStepsRoute.get('/plugins/:pluginId/step-skills', companyMember, (c) =>
 pluginStepsRoute.put('/plugins/:pluginId/step-skills/:step', companyMember, serviceBody, async (c) =>
   answer(c, await pluginSteps.setStepSkill(c.var.member, c.req.param('pluginId'), c.req.param('step'), c.var.body)))
 
+pluginStepsRoute.put('/plugins/:pluginId/step-settings/:step', companyMember, serviceBody, (c) =>
+  answer(c, pluginSteps.setStepSettings(c.var.member, c.req.param('pluginId'), c.req.param('step'), c.var.body)))
+
 pluginStepsRoute.get('/me/plugin-step-turns', companyMember, (c) =>
   answer(c, pluginSteps.turns(c.var.member)))
 
@@ -46,6 +51,9 @@ pluginStepsRoute.get('/me/plugin-steps/records/:recordId', companyMember, (c) =>
 
 pluginStepsRoute.post('/me/plugin-steps/records/:recordId/:pluginId/:step/start', companyMember, async (c) =>
   answer(c, await pluginSteps.startPerson(c.var.member, c.req.param('recordId'), c.req.param('pluginId'), c.req.param('step'))))
+
+pluginStepsRoute.get('/me/plugin-steps/consultations/:conversationId', companyMember, (c) =>
+  answer(c, pluginSteps.consultationOf(c.var.member, c.req.param('conversationId'))))
 
 pluginStepsRoute.post('/me/plugin-steps/consultations', companyMember, serviceBody, (c) =>
   answer(c, pluginSteps.bindConsultation(c.var.member, c.var.body)))

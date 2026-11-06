@@ -69,6 +69,8 @@ export interface PluginStepRuns {
   isPluginStep(step: string): boolean
   turnOf(member: Member, recordId: string, step: string): AiTurnCheck
   pinForRun(member: Member, recordId: string, step: string): Promise<Outcome<PluginStepProcedurePin>>
+  /** A plugin step's run finished as done (a person's step started by itself answers what asked for it). */
+  afterDoneRun?(member: Member, run: { recordId: string; step: string; createdAt: string }): void
 }
 
 /** Who sends an outside operation within a run: the holder of a run-bound record token. */
@@ -332,6 +334,9 @@ export function createAiRunService(deps: AiRunDeps) {
         if (!save(r, run, next)) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
         return ok({ run: view(r, next) })
       })
+      if (finished.ok && finished.value.run.state === 'done' && pluginSteps?.isPluginStep(run.step)) {
+        try { pluginSteps.afterDoneRun?.(member, { recordId: run.recordId, step: run.step, createdAt: run.createdAt }) } catch { /* asked again by the next meeting */ }
+      }
       if (finished.ok && cls !== null) {
         try { deps.afterFailedRun?.(member, { id: run.id, recordId: run.recordId, step: run.step }) } catch { /* the 30-minute rule catches up */ }
       }
