@@ -339,6 +339,51 @@ test('no 案件 yet: 〇〇 is the department\'s kind; ［新しい案件にす�
   expectNoPageErrors(state)
 })
 
+// A task and its 案件・プロジェクト (records.md "A task and its 案件・プロジェクト", owner decision 2026-11-06).
+test('［新しい〇〇にする］ says whose department it belongs to — the member\'s own first — and can change it', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { bundle: 'none', places: '1' })
+  await page.getByTestId('task-card').getByRole('button', { name: '新しい案件にする' }).click()
+  const dialog = page.getByRole('dialog', { name: '新しい案件にする' })
+  await expect(dialog).toContainText('開発部のプロジェクト')
+  await dialog.getByRole('button', { name: '変える' }).click()
+  await dialog.getByLabel('部署').selectOption({ label: '営業部の案件' })
+  await expect(dialog).toContainText('営業部の案件')
+  await dialog.getByRole('button', { name: '作る' }).click()
+  await expect(page.locator('#acted')).toHaveText('create deal A社 見積書を 150万円 で作り直す folder=営業部,link task-0000aa bundle=deal-0009zz@3')
+  expectNoPageErrors(state)
+})
+
+test('a task seen by more people than the 案件: linked only after 「同じ人たちだけに」; つながない links nothing', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { bundle: 'none', wider: '1' })
+  const field = page.getByTestId('task-card').getByRole('group', { name: '案件' })
+  await field.getByRole('button', { name: '案件につなぐ' }).click()
+  await page.getByRole('dialog', { name: '案件につなぐ' }).getByRole('button', { name: /B社 新人研修/ }).click()
+  await expect(page.getByText('案件と同じ人たちだけに見えるようにしますか？')).toBeVisible()
+  await page.getByRole('button', { name: 'つながない' }).click()
+  await expect(page.locator('#acted')).toHaveText('link task-0000aa bundle=deal-0002cd@3')
+  await field.getByRole('button', { name: '案件につなぐ' }).click()
+  await page.getByRole('dialog', { name: '案件につなぐ' }).getByRole('button', { name: /B社 新人研修/ }).click()
+  await page.getByRole('button', { name: '同じ人たちだけにする' }).click()
+  await expect(page.locator('#acted')).toHaveText('link task-0000aa bundle=deal-0002cd@3,link task-0000aa bundle=deal-0002cd@3,link task-0000aa bundle=deal-0002cd@3 narrow')
+  await expect(page.getByTestId('task-card')).toContainText('案件と同じ人たちだけに見えるようにしました')
+  expectNoPageErrors(state)
+})
+
+test('［〇〇の人に見せる］ on a task only the member sees that belongs to a 案件; a shared task does not offer it', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  await page.getByRole('button', { name: /の人に見せる$/ }).click()
+  const form = page.getByRole('group', { name: /の人に見せる$/ })
+  await expect(form).toContainText('あとから元には戻せません')
+  await form.getByRole('button', { name: '見せる' }).click()
+  await expect(page.locator('#acted')).toHaveText('share to bundle@3')
+  expectNoPageErrors(state)
+
+  const sharedState = await openPreview(page, 'task-card', { shared: '1' })
+  await expect(page.getByTestId('task-card')).toContainText('A社 見積書')
+  await expect(page.getByRole('button', { name: /の人に見せる$/ })).toHaveCount(0)
+  expectNoPageErrors(sharedState)
+})
+
 // 返事待ち with its 見込み (task version 12, tasks-ui.md "返事待ち and its 見込み"). Screenshots for the PR:
 // SCREENSHOTS=<dir> writes the wait chooser and the came-back card there.
 const shots = process.env.SCREENSHOTS

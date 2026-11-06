@@ -199,10 +199,13 @@ test('「頼む」 from the one line: shared with the department\'s readers (nev
   const h = harness({ '/api/me': { status: 200, body: { data: { id: ME } } }, 'POST /api/companies/co1/records/item': { status: 201, body: { data: { record: { id: 'task-new002' } } } } })
   const sent = () => h.requests.filter(q => q.url.endsWith('/records/item')).at(-1)?.body
   await h.api.create('co1', { title: '見積を直す', assignee: 'u-tanaka', whenDone: 'check', folder: '営業部', bundleId: 'deal-a00001' })
+  // For a 案件 the server gives it the 案件's 見える範囲: the screen's department is not sent.
   assert.deepEqual(sent(), {
-    type: 'task', title: '見積を直す', folder: '営業部', links: { bundle: 'deal-a00001' },
+    type: 'task', title: '見積を直す', links: { bundle: 'deal-a00001' },
     fields: { assignee: 'u-tanaka', when_done: 'check', reviewer: ME },
   })
+  await h.api.create('co1', { title: '見積を直す', assignee: 'u-tanaka', folder: '営業部' })
+  assert.equal((sent() as { folder?: string }).folder, '営業部')
   // 知らせるだけ is the default; 全社 (no folder) is the whole company, as records made before.
   await h.api.create('co1', { title: '資料を送る', assignee: 'u-tanaka' })
   assert.deepEqual(sent(), { type: 'task', title: '資料を送る', fields: { assignee: 'u-tanaka', when_done: 'notify' } })

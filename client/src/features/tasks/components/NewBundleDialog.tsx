@@ -7,6 +7,7 @@ import type { BundleChoice } from '../../../../shared/tasks'
 import { MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { useBundleChoices } from '../hooks/useBundleChoices'
 import { similarBundles } from '../similarBundles'
+import type { BundlePlace } from '../model'
 
 const FIELD = 'w-full rounded-md border border-gray-200 bg-white px-2 py-1 text-[13px] dark:border-zinc-700 dark:bg-zinc-900'
 
@@ -20,12 +21,20 @@ export interface NewBundleSource {
   homework: number
 }
 
-export function NewBundleDialog({ companyId, word, source, onCreate, onPick, onClose }: {
+/** Where a new one may go and where it goes unless the member changes it (the creator's own department). */
+export interface NewBundlePlaces {
+  choices: BundlePlace[]
+  defaultFolder: string | null
+}
+
+export function NewBundleDialog({ companyId, word, source, places, onCreate, onPick, onClose }: {
   companyId: string
   word: string
   source: NewBundleSource
-  /** null = made and linked; else the reason in words. */
-  onCreate: (title: string, withHomework: boolean) => Promise<string | null>
+  /** 「〇〇部の案件」 and ［変える］; absent = the department on screen, as the caller decides. */
+  places?: NewBundlePlaces
+  /** null = made and linked; else the reason in words. `place`: the department chosen (with `places`). */
+  onCreate: (title: string, withHomework: boolean, place: BundlePlace | null) => Promise<string | null>
   /** ［そちらにつなぐ］: link the similar one instead. */
   onPick: (bundle: BundleChoice) => Promise<string | null>
   onClose: () => void
@@ -35,6 +44,9 @@ export function NewBundleDialog({ companyId, word, source, onCreate, onPick, onC
   const [withHomework, setWithHomework] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [folder, setFolder] = useState<string | null>(places?.defaultFolder ?? null)
+  const [changing, setChanging] = useState(false)
+  const place = places ? places.choices.find(c => c.folder === folder) ?? places.choices[0] ?? null : null
   const similar = choices?.success ? similarBundles(title, choices.bundles) : []
   const run = async (fn: () => Promise<string | null>) => {
     setBusy(true)
@@ -63,6 +75,16 @@ export function NewBundleDialog({ companyId, word, source, onCreate, onPick, onC
         <label className="block text-[12px]"><span className="text-gray-500">名前</span>
           <input aria-label="名前" value={title} onChange={e => setTitle(e.target.value)} className={FIELD} />
           <span className="text-[10.5px] text-gray-400">{source.titleNote}</span></label>
+        {place && (
+          <div className="text-[12px]"><span className="text-gray-500">どこの{word}</span>
+            {changing
+              ? <select aria-label="部署" value={place.folder ?? ''} onChange={e => { setFolder(e.target.value || null); setChanging(false) }} className={FIELD}>
+                {places!.choices.map(c => <option key={c.folder ?? ''} value={c.folder ?? ''}>{c.name}の{c.kind?.name ?? word}</option>)}
+              </select>
+              : <p className="flex items-center gap-2 py-1 text-[13px]">{place.name}の{place.kind?.name ?? word}
+                {places!.choices.length > 1 && <button type="button" onClick={() => setChanging(true)} className={SMALL_BUTTON}>変える</button>}</p>}
+          </div>
+        )}
         <div className="text-[12px]"><span className="text-gray-500">相手</span>
           <p className="py-1 text-[13px]">{source.counterpart?.title ?? <span className="text-gray-400">なし</span>}</p>
           {source.counterpart && <span className="text-[10.5px] text-gray-400">参加者から入れました</span>}</div>
@@ -74,7 +96,7 @@ export function NewBundleDialog({ companyId, word, source, onCreate, onPick, onC
         {error && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className={SMALL_BUTTON}>やめておく</button>
-          <button type="button" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0))} className={MAIN_BUTTON}>作る</button>
+          <button type="button" disabled={busy || !title.trim()} onClick={() => void run(() => onCreate(title.trim(), withHomework && source.homework > 0, place))} className={MAIN_BUTTON}>作る</button>
         </div>
       </div>
     </div>

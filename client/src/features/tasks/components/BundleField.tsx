@@ -9,7 +9,8 @@ import { runCommand } from '../../../shared/commands/commands'
 import { SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useBundleChoices } from '../hooks/useBundleChoices'
-import { NewBundleDialog, type NewBundleSource } from './NewBundleDialog'
+import { NewBundleDialog, type NewBundlePlaces, type NewBundleSource } from './NewBundleDialog'
+import type { BundlePlace } from '../model'
 
 /** A meeting's 「どの〇〇の会議ですか？」, asked in the field while none is linked. */
 export interface BundleQuestion {
@@ -24,7 +25,7 @@ export interface BundleQuestion {
 
 const QUIET = 'inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11.5px] text-gray-500 hover:bg-gray-100 hover:text-accent disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800'
 
-export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, onCreate, question }: {
+export function BundleField({ companyId, bundle, word, canSet, canRemove = true, busy, onSet, onRemove, newFrom, places, onCreate, question }: {
   companyId: string
   bundle: RecordViewSummary | null
   /** The kind's name where none is linked yet (「案件」「プロジェクト」). */
@@ -38,7 +39,9 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
   onRemove: () => Promise<string | null>
   /** 「新しい〇〇にする」 while none is linked: what the window starts from, and making it (null = done). */
   newFrom?: NewBundleSource
-  onCreate?: (title: string, withHomework: boolean) => Promise<string | null>
+  /** Which department's 〇〇 it becomes (the creator's own by default) and the others to choose from. */
+  places?: NewBundlePlaces
+  onCreate?: (title: string, withHomework: boolean, place: BundlePlace | null) => Promise<string | null>
   question?: BundleQuestion
 }) {
   const [picking, setPicking] = useState(false)
@@ -73,7 +76,7 @@ export function BundleField({ companyId, bundle, word, canSet, canRemove = true,
         )}
       </div>
       {error && <p role="alert" className="mt-1 text-[11.5px] text-red-600 dark:text-red-400">{error}</p>}
-      {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
+      {making && newFrom && onCreate && <NewBundleDialog companyId={companyId} word={name} source={newFrom} {...(places ? { places } : {})} onCreate={onCreate} onPick={onSet} onClose={() => setMaking(false)} />}
       {picking && <BundlePicker companyId={companyId} word={name} current={bundle?.id ?? null} onClose={() => setPicking(false)} onChoose={onSet} />}
     </div>
   )

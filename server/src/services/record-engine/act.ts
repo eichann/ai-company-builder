@@ -15,6 +15,7 @@ import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
 import { acceptanceOf, argDefaultOf, argDefaultValue, isActorArg } from '../../../shared/core/core-types'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../shared/core/calendar'
 import { applyAcceptance } from './acceptance'
+import { BUNDLE_PLACED_TYPES, bundleLinkName, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
@@ -194,6 +195,13 @@ export function acting(ctx: EngineContext) {
             // One answer for another type, an unreadable record, another company's and a missing id.
             const label = l.targetIsInterface ? (INTERFACES[l.target]?.label ?? l.target) : (types.get(l.target)?.definition.label ?? l.target)
             return refuse('bad-request', `つながり「${l.label}」には、あなたが見られる「${label}」の記録だけをつなげます`, { code: 'BAD_LINK', link: name })
+          }
+          // A task never seen by more people than its まとまり (records.md "A task and its 案件・プロジェクト"):
+          // the action only links; narrowing is the person's, on the card (record-links' `narrow`).
+          if (BUNDLE_PLACED_TYPES.includes(row.type) && name === bundleLinkName(def) && ids.length > 0) {
+            const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+            const wider = records.byIds(ids).some(t => !placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), row, t))
+            if (wider) return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
           }
           linkChanges.push({ name, targets: ids })
         }

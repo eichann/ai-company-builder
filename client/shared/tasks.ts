@@ -241,6 +241,8 @@ export interface RecordLinkInput {
   link: string
   target: string
   expectedVersion: number
+  /** The member said yes to 「〇〇と同じ人たちだけに見えるようにしますか？」 (records.md "A task and its 案件・プロジェクト"). */
+  narrow?: boolean
 }
 
 export type TaskWriteResult =

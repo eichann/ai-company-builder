@@ -68,8 +68,9 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   `records.md` "Owner-only records"). With another member as `assignee` it is **「頼む」** (task v9):
   never owner-only (they could not read it), shown to the readers of `folder` (the department on
   screen; 全社 = none, the whole company), `when_done` (`notify` = 知らせるだけ by default, `check` =
-  確かめてから with the member as `reviewer`). `bundleId` links what it belongs to. Main sends only a
-  member id, a `fileLinkPath`-checked folder and a record id.
+  確かめてから with the member as `reviewer`). `bundleId` links what it belongs to; 「頼む」 with one sends
+  no folder (the server gives it the 案件's 見える範囲, `records.md` "A task and its 案件・プロジェクト"). Main
+  sends only a member id, a `fileLinkPath`-checked folder and a record id.
 - `tasks:bundleKinds(companyId)` → `BundleKindsAnswer`: `GET /records/bundle-kinds` as the server
   answered it (`records.md` "Bundle kinds": what each department makes and the names — a plugin's
   案件・番組, the core's 「プロジェクト」 or the company's name). Renderer port `BundleKindReads`
@@ -607,7 +608,16 @@ member reads, `tasks:bundles`; a `one` link is replaced) ［外す］; none → 
 the type's `bundle` link is not an origin one and the task is not finished (`canSetBundle`). 〇〇 is
 the department's kind's name (`bundleKind` from AppShell, `tasks:bundleKinds`; 「プロジェクト」 until known). While none is linked the
 task also offers ［新しい〇〇にする］ (`NewBundleDialog`, the name from its title, no 宿題): `tasks:createBundle` of that kind in
-the department's folder, then the task's `bundle` link to it.
+the chosen department's folder, then the task's `bundle` link to it. **Which department** (owner decision 2026-11-06,
+`records.md` "A task and its 案件・プロジェクト"): the dialog says 「開発部のプロジェクト」 — by default the member's own
+department (所属: the one on screen when it is theirs, else their first in the tabs' order; none or not known → the one on
+screen, 全社 offered then) — with ［変える］ among the departments (`bundlePlacesOf` in `model.ts`, composed by AppShell
+from the departments, `bundleKinds` and `useTodayFolder`'s `myDepartmentIds`; also on a meeting's / 来た連絡's field).
+**A task seen by more people than the 案件** (the server's `WIDER_THAN_BUNDLE` on ［〇〇につなぐ］, ［変える］, the tag
+hint's ［案件につなぐ］ or a new one): the card asks 「このやることは、〇〇より多くの人に見えています。〇〇と同じ人たちだけに
+見えるようにしますか？」 — ［同じ人たちだけにする］ links again with `narrow` (no ［取り消す］: it is never undone), ［つながない］
+leaves it unlinked. **［〇〇の人に見せる］** (`ShowToBundle.tsx`) on an owner-only or members-only task with a 案件: after
+「あとから元には戻せません」, `tasks:shareToBundle` → `POST …/share { toBundle: true }`.
 `tasks:linkRecord` / `tasks:unlinkRecord` → `POST …/record-links[/remove] { link, target,
 expectedVersion }` (main checks the link name and both ids before any request) and answer the ledger
 entry's version; each change says what it did with ［取り消す］ (`tasks:undo` of that entry, on the

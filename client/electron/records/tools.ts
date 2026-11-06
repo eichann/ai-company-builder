@@ -419,9 +419,11 @@ function fileLinkTools(typeNames: string[]): RecordToolSpec[] {
  */
 const PLACEMENT_WORDS = 'やること（依頼）の置き場所：メンバー本人だけのこと（ほかの人の名前が出ない、部署に置くよう言われていない）なら、personal も assignee も folder も省く（本人だけに見える自分用になり、担当は本人）。' +
   'ほかの人に頼む・担当にするときは assignee にその人の id（部署は相談を始めた部署になる）。「部署のやることにして」と言われたら personal: false（担当を言われなければ本人）。ほかの部署を名指しされたときだけ folder。' +
+  '案件・プロジェクト（links.bundle）のやることは、その案件と同じ人たちに見える場所に入る（folder は省く。案件より多くの人に見える場所は断られる）。新しい案件・プロジェクトは、folder を省くとメンバーの所属する部署に入る。' +
   '作ったあとは、どこに入れたかを必ずメンバーに伝える（答えの placed と tellMember）。\n'
 const PLACEMENT_WORDS_EN = ' Placement of a request (task): about the member alone (no other person named, no department asked for) → leave personal, assignee and folder out (it becomes owner-only, assigned to the member). ' +
   'Someone else as assignee → their id in fields.assignee (it goes to the department the consultation is in). "Make it the department\'s" → personal: false. folder only when the member names another department. ' +
+  'A task for a 案件・プロジェクト (links.bundle) goes where that 案件 is seen (leave folder out; a place seen by more people is refused). A new 案件・プロジェクト without folder goes to the member\'s own department. ' +
   'Afterwards always tell the member where it went (the answer\'s placed / tellMember).'
 
 /** records_create's answer, with the sentence that tells the member where it went. */

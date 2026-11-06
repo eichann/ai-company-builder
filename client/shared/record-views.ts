@@ -33,6 +33,8 @@ export interface RecordViewSummary {
   updatedAt: string
   /** Owner-only (「あなただけ」): only the member reading it sees it. */
   personal?: true
+  /** Members-only (「この人たちだけ」): only the members on its list see it. */
+  membersOnly?: true
   /** A decision marked 例外（この件だけ）: never a precedent for another case. */
   exception?: true
   /** How it is shown (its icon, `ThingIcon`); `typeLabel` is its name. */
@@ -184,6 +186,7 @@ export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): 
     id: r.id, type: r.type, typeLabel: thingName({ type: r.type, typeLabel: def?.label, implements: def?.implements, state: r.state }), kind: recordKindOf(r.type, def),
     title: r.title || '（名前なし）', summary: r.summary, stateLabel: stateLabel(r.state, r.type), updatedAt: r.updatedAt,
     ...(r.personal ? { personal: true as const } : {}),
+    ...(r.membersOnly ? { membersOnly: true as const } : {}),
     ...(r.exceptionNotice ? { exception: true as const } : {}),
     thing: thingKindOf({ type: r.type, implements: def?.implements, state: r.state }),
     ...(def?.implements.includes('request') && r.state !== null && def.final.includes(r.state) ? { finished: true as const } : {}),

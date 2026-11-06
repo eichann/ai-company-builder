@@ -14,12 +14,16 @@ import { ConfirmDialog } from '../shared/ui/ConfirmDialog'
 import type { BundleFieldContext } from '../features/records/components/RecordCard'
 import { BundleField, type BundleQuestion } from '../features/tasks/components/BundleField'
 import { createBundle, linkMeetingBundle, setRecordLink } from '../features/tasks/api'
+import type { NewBundlePlaces } from '../features/tasks/components/NewBundleDialog'
+import type { BundlePlace } from '../features/tasks/model'
 
 /** Waiting for the member's answer to 「…に見えます」: the link goes on only with ［つなぐ］. */
 type Asking = { title: string; message: string; answer: (yes: boolean) => void }
 
-export function RecordBundleFieldBox({ companyId, ctx, kind, folder, onListChanged }: {
+export function RecordBundleFieldBox({ companyId, ctx, kind, folder, onListChanged, places }: {
   companyId: string; ctx: BundleFieldContext; kind: BundleKind | null; folder: string | null
+  /** 「新しい〇〇にする」's departments, the member's own first (records.md "A task and its 案件・プロジェクト"). */
+  places?: NewBundlePlaces
   /** The meeting's question was answered: 「どの〇〇の会議か」 leaves あなたの番. */
   onListChanged?: () => void
 }) {
@@ -83,9 +87,11 @@ export function RecordBundleFieldBox({ companyId, ctx, kind, folder, onListChang
           title: record.title, titleNote: record.type === 'meeting' ? '会議の名前から入れました' : '連絡の件名から入れました',
           counterpart, homework: homework.length,
         },
-        onCreate: async (title: string, withHomework: boolean) => {
-          if (!await agreed(null, kind.name)) return null
-          const made = await createBundle(companyId, { type: kind.type, title, folder, counterpart: counterpart?.id ?? null })
+        ...(places ? { places } : {}),
+        onCreate: async (title: string, withHomework: boolean, place: BundlePlace | null) => {
+          const madeKind = place?.kind ?? kind
+          if (!await agreed(null, madeKind.name)) return null
+          const made = await createBundle(companyId, { type: madeKind.type, title, folder: place ? place.folder : folder, counterpart: counterpart?.id ?? null })
           if (!made.success) return made.error
           const failure = await link({ id: made.recordId, title })
           if (failure) return failure

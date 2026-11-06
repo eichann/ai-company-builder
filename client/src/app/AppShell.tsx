@@ -80,7 +80,7 @@ import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordBundleField } from './recordBundleField'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
-import { companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
+import { bundlePlacesOf, companyPathOf, departmentBundleKind, listShownFor, tagCounts } from '../features/tasks/model'
 import { meetingBundleWords } from '../../shared/tasks'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
@@ -396,6 +396,8 @@ export function AppShell() {
   // What the department on screen makes as its 案件・プロジェクト (全社: the company's own kind; records.md "Bundle kinds").
   const bundleKinds = taskList.data?.bundleKinds
   const deptBundleKind = departmentBundleKind(bundleKinds, effectiveDeptFolder)
+  // 「新しい〇〇にする」 puts it in the member's own department (所属) by default (records.md "A task and its 案件・プロジェクト").
+  const bundlePlaces = bundlePlacesOf(departments, bundleKinds, today.myDepartmentIds, effectiveDeptFolder || null)
   const bundleWord = deptBundleKind?.name ?? 'プロジェクト'
   const meetingWords = meetingBundleWords(bundleWord)
   // A linked folder left out on this computer is marked on the cards (download-choices.md).
@@ -406,14 +408,14 @@ export function AppShell() {
     if (recordId.startsWith('task-')) {
       // Keyed by id only: a new version (the AI linked a file, a press in the list) updates it in place.
       // 「続きをする」 sits above a やること an automatic step run handed over (plugin-steps.md).
-      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf}
+      return <div key={recordId}><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><TaskCard knownVersion={taskList.data?.items.find(i => i.id === recordId)?.version} onLoaded={look => noteRecordLook(recordId, look)} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} renderSections={plugins.renderSections} shareFolders={shareFolders} onConsult={consultAbout} onNudge={draftNudge} consultations={recordConsultations.get(recordId)} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} bundleKind={deptBundleKind} bundleFolder={effectiveDeptFolder || null} bundlePlaces={bundlePlaces} createTodayFile={createTodayFile} notDownloadedFolderOf={notDownloadedFolderOf}
         onDetachConsultation={sessionId => { void patchChatSession(currentCompany.id, sessionId, { topicRecordId: null }).catch(() => {}) }} /></div>
     }
     // A まとまり chosen from the list or the title bar: a meeting's open card reads again.
     const isMeeting = recordId.startsWith('meeting-') || recordId.startsWith('minutes-')
     // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
     const readOnly = <div key={isMeeting ? `${recordId}:${bundleRev}` : recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><ContinueStepButton companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><StepDeliverables companyId={currentCompany.id} recordId={recordId} renderPrepared={renderPrepared} renderFile={f => <FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} />} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderSections={plugins.renderSections} renderSource={record => renderRecordSource(currentCompany.id, record)} renderApproval={id => approvalCard(id, '')} consultations={recordConsultations.get(recordId)} onConsult={consultAbout} notDownloadedFolderOf={notDownloadedFolderOf}
-      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload)}
+      renderBundleField={ctx => renderRecordBundleField(currentCompany.id, ctx, deptBundleKind, effectiveDeptFolder || null, taskList.reload, bundlePlaces)}
       renderMeeting={(r, parts) => renderMeetingPanel(currentCompany.id, r.id, { parts, members: (taskList.data?.members ?? []).filter(p => p.id !== taskList.data?.me), onConsult: m => consultAbout(m), onChanged: () => { meetings.reload(); taskList.reload() } })} onLoaded={r => noteRecordLook(recordId, { title: r.title, type: r.type, typeLabel: r.typeLabel, ...(r.kind === 'bundle' ? { implements: ['bundle'] } : {}) })} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {

@@ -30,7 +30,7 @@ export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
 export type BundleKindReads = ElectronPort<'getBundleKinds'>
 export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle' | 'declineMinutesBundle'>
 /** 「部署に出す」: the member's owner-only task shown to a department's readers (the server checks owner and folder). */
-export type TaskShareWrites = ElectronPort<'shareTask'>
+export type TaskShareWrites = ElectronPort<'shareTask' | 'shareTaskToBundle'>
 /** Tags in use that fit a title: main asks a Haiku model through the company's key (only the title and the tags), else matches locally. */
 export type TagSuggestionReads = ElectronPort<'suggestTaskTags'>
 /** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
@@ -128,6 +128,11 @@ export function declineMeetingBundle(companyId: string, meetingId: string, write
 /** `folder`: a department folder as the company names it (`営業`). Never undone. */
 export function shareTaskToFolder(companyId: string, recordId: string, folder: string, expectedVersion: number, writes: TaskShareWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.shareTask(companyId, recordId, folder, expectedVersion)
+}
+
+/** ［〇〇の人に見せる］: shown to the people of the 案件・プロジェクト it belongs to (the server finds where that is). */
+export function shareTaskToBundle(companyId: string, recordId: string, expectedVersion: number, writes: TaskShareWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.shareTaskToBundle(companyId, recordId, expectedVersion)
 }
 
 /** Only suggestions: the member chooses. Never fails (no AI → the app's own matching). */

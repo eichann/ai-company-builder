@@ -60,17 +60,20 @@ export function engineContext(deps: RecordEngineDeps) {
 
   /**
    * A folder a server-only record may be placed in (its readers' place): a
-   * company path outside every private folder that the member reads. Every
+   * company path the member reads, outside every private folder unless `privateAllowed` says so. Every
    * refusal is one answer (`FOLDER_NOT_PLACEABLE`), also the one `checkPlace`
    * gives for a folder that is not there: a private folder's name is never
    * confirmed to someone who cannot read it (audit B-M1).
    */
-  function placeFolder(member: Member, type: string, raw: unknown, reader: RecordReader): string | Outcome<never> {
+  function placeFolder(member: Member, type: string, raw: unknown, reader: RecordReader, privateAllowed?: (folder: string) => boolean): string | Outcome<never> {
     const f = typeof raw === 'string' ? normalizeRepoPath(raw) : null
     if (!f) return bad('folder must be a company path')
     const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
-    // Server-only records outside private folders for now (their links and reads assume a public place).
-    if (findPrivateScope(scopes, f) || !reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null, members: null })) {
+    // A private folder only where the caller allows it (a task shown to its まとまり's folder, a まとまり
+    // made in its own private folder: records.md "A task and its 案件・プロジェクト"), and then only
+    // for a reader — the same one answer as every other refusal.
+    const priv = findPrivateScope(scopes, f)
+    if ((priv && !privateAllowed?.(f)) || !reader.record({ id: '', type, scopeId: null, path: null, folder: f, personalOwner: null, members: null })) {
       return bad(FOLDER_NOT_PLACEABLE.error, FOLDER_NOT_PLACEABLE.code)
     }
     return f

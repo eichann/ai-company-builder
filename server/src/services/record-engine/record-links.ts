@@ -12,17 +12,20 @@ import { ok, refuse, type Outcome } from '../outcome'
 import { linkAllowed } from '../record-access'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
+import type { RecordAccessRow } from '../../ports/records'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { bad, conflict, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { NOTE_MAX, provenance } from './values'
+import { BUNDLE_PLACED_TYPES, bundleLinkName, NAMED_PERSON_CANNOT_READ, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
+import { placeOfRow } from './service-writer'
 
 /** A link that says where the record came from (`origin: true`): history, never changed by hand. */
 export const LINK_IS_ORIGIN = { error: 'このつながりは、この記録がどこから来たかを表すので外せません', code: 'LINK_IS_ORIGIN' } as const
 
 export function recordLinking(ctx: EngineContext) {
-  const { transactions, clock, open, stateOf, summaryOf, changed } = ctx
+  const { deps, companyData, transactions, clock, open, canRead, stateOf, summaryOf, changed } = ctx
   return {
     /**
      * Link a record to this one (`link`), or remove that link (`unlink`). Any record link of the
@@ -70,6 +73,7 @@ export function recordLinking(ctx: EngineContext) {
       const mine = allLinks.filter(x => x.name === name)
       const before = mine.map(x => x.targetId).filter((t): t is string => t !== null)
       let after: string[]
+      let targetRow: RecordAccessRow | null = null
       if (op === 'link') {
         const t = records.byIds([target]).find(r => r.removedAt === null)
         const fits = !!t && (l.targetIsInterface ? types.get(t.type)?.definition.implements.includes(l.target) === true : t.type === l.target)
@@ -79,6 +83,7 @@ export function recordLinking(ctx: EngineContext) {
           return refuse('bad-request', `つながり「${l.label}」には、あなたが見られる「${label}」の記録だけをつなげます`, { code: 'BAD_LINK', link: name })
         }
         if (before.includes(target)) return ok({ record: summaryOf(records, row.id), entry: null, changed: false })
+        targetRow = t
         after = l.cardinality === 'one' ? [target] : [...before, target]
         if (after.length > MAX_LINK_TARGETS) return bad(`At most ${MAX_LINK_TARGETS} records per link`, 'TOO_MANY_LINKS')
       } else {
@@ -89,18 +94,42 @@ export function recordLinking(ctx: EngineContext) {
       }
 
       const current = stateOf(records, row, def)
+      // A task never seen by more people than its まとまり (records.md "A task and its 案件・プロジェクト"):
+      // a wider task is linked only when the person asks to narrow it to the まとまり's place
+      // (`narrow: true`, the card's 「プロジェクトと同じ人たちだけに見えるようにしますか？」) — in the same entry.
+      let narrowTo: { folder: string | null; personalOwner: string | null } | null = null
+      if (targetRow && BUNDLE_PLACED_TYPES.includes(row.type) && name === bundleLinkName(def)) {
+        const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+        if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), row, targetRow)) {
+          const from = placeOfRow(targetRow)
+          // A list cannot be given to a record that has none (never quietly wider): refused as wider.
+          if (b.narrow !== true || 'members' in from) return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
+          narrowTo = 'personalOwner' in from ? { folder: null, personalOwner: from.personalOwner } : { folder: from.folder, personalOwner: null }
+          const place = { ...row, ...narrowTo, members: null }
+          const named = Object.entries(current.fields).filter(([f, v]) => def.fields[f]?.kind === 'person' && typeof v === 'string' && v !== '')
+          if (named.some(([, v]) => !canRead(member.companyId, v as string, place))) return bad(NAMED_PERSON_CANNOT_READ.error, NAMED_PERSON_CANNOT_READ.code)
+        }
+      }
       const expected = b.expectedVersion as number
       if (expected !== current.version) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: current.version })
       const nextLinks = withLinkTargets(row.id, allLinks, name, l.target, after)
       const at = clock.now()
+      // Narrowed: `place.*` changes, so the entry is never undone (undoing it would widen the task again).
+      const placeChanges = narrowTo === null ? [] : [
+        row.members !== null
+          ? { field: 'place.members', before: row.members.join(',') || null, after: null }
+          : { field: 'place.personal_owner', before: row.personalOwner, after: narrowTo.personalOwner },
+        { field: 'place.folder', before: row.folder, after: narrowTo.folder },
+      ]
       const entry: LedgerEntry = {
         recordId: row.id, version: current.version + 1, action: op === 'link' ? 'link_record' : 'unlink_record', fromState: current.state, toState: current.state,
         actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note,
-        changes: [{ field: `links.${name}`, before: linkLedgerValue(l.target, mine), after: linkLedgerValue(l.target, nextLinks.filter(x => x.name === name)) }],
+        changes: [...placeChanges, { field: `links.${name}`, before: linkLedgerValue(l.target, mine), after: linkLedgerValue(l.target, nextLinks.filter(x => x.name === name)) }],
         attachments: [], decision: null, isDecision: false, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
       }
       const written = transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: current.state, fields: JSON.stringify(current.fields), version: entry.version, updatedAt: at }, expected)) return false
+        if (narrowTo) records.setPlace(row.id, narrowTo, at)
         records.replaceLinks(row.id, nextLinks)
         records.appendLedger(entry)
         return true

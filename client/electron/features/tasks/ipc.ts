@@ -272,6 +272,13 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId } : failure('share', a)
     },
 
+    /** ［〇〇の人に見せる］: `toBundle` — the server takes the place of the 案件 the task links to. */
+    async shareToBundle(companyId: string, recordId: string, expectedVersion: number): Promise<TaskWriteResult> {
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/share`, { toBundle: true, expectedVersion })
+      return a?.status === 200 ? { success: true, recordId } : failure('share to bundle', a)
+    },
+
     async undo(companyId: string, recordId: string, version: number, expectedVersion: number): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       if (!Number.isInteger(version) || version < 2 || !Number.isInteger(expectedVersion) || expectedVersion < version) return BAD_INPUT
@@ -279,11 +286,12 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 || a?.status === 201 ? { success: true, recordId } : failure('undo', a)
     },
 
-    async linkRecord(companyId: string, recordId: string, input: { link: string; target: string; expectedVersion: number }, remove: boolean): Promise<TaskWriteResult> {
+    async linkRecord(companyId: string, recordId: string, input: { link: string; target: string; expectedVersion: number; narrow?: boolean }, remove: boolean): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return BAD_INPUT
       if (!input || typeof input.link !== 'string' || !ACTION.test(input.link) || typeof input.target !== 'string' || !RECORD_ID_RE.test(input.target) || !Number.isInteger(input.expectedVersion)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/record-links${remove ? '/remove' : ''}`,
-        { link: input.link, target: input.target, expectedVersion: input.expectedVersion })
+        // `narrow` only on the member's yes to 「〇〇と同じ人たちだけに見えるようにしますか？」.
+        { link: input.link, target: input.target, expectedVersion: input.expectedVersion, ...(!remove && input.narrow === true ? { narrow: true } : {}) })
       if (a?.status !== 200 && a?.status !== 201) return failure(remove ? 'unlink record' : 'link record', a)
       const entry = (a.json?.data as { entry?: { version?: unknown } | null } | undefined)?.entry
       return { success: true, recordId, ...(typeof entry?.version === 'number' ? { entryVersion: entry.version } : {}) }
@@ -484,7 +492,9 @@ export function createTasksApi(deps: TasksDeps) {
       }
       const body = {
         type: 'task', title, fields,
-        ...(asking ? (folder ? { folder } : {}) : { personal: true }),
+        // For a 案件・プロジェクト the server gives it that 案件's 見える範囲 (records.md "A task and its
+        // 案件・プロジェクト"): no folder of the screen's then.
+        ...(asking ? (folder && !input.bundleId ? { folder } : {}) : { personal: true }),
         ...(input.bundleId ? { links: { bundle: input.bundleId } } : {}),
       }
       const a = await call(companyId, 'POST', '/records/item', body)
@@ -529,6 +539,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
   ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
     api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
+  ipc.handle('tasks:shareToBundle', (_event, companyId, recordId, expectedVersion) =>
+    api.shareToBundle(typeof companyId === 'string' ? companyId : '', recordId, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
   ipc.handle('tasks:createBundle', (_event, companyId, input) => api.createBundle(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:linkRecord', (_event, companyId, recordId, input) => api.linkRecord(typeof companyId === 'string' ? companyId : '', recordId, input, false))

@@ -1,6 +1,6 @@
 /** Creating a record that lives on the server (records.md "The state engine"). */
 import { SERVICE_OWNED_TYPES } from '../../../shared/core/core-types'
-import { findPrivateScope } from '../../../shared/core/permissions'
+import { canReadPrivateScope, findPrivateScope } from '../../../shared/core/permissions'
 import { noTurnStates } from '../../../shared/core/record-types'
 import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
@@ -22,7 +22,10 @@ import { checkValue, provenance } from './values'
 import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
 import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
 import { meetingMembers, membersList, withNamedPeople } from './members'
+import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
+import { defaultBundleFolder } from '../../../shared/core/bundle-place'
+import { BUNDLE_PLACED_TYPES, bundleLinkName, linkedBundle, placeWithin, WIDER_THAN_BUNDLE } from './bundle-place'
 import { notInStep } from '../plugin-operation-checks'
 
 export function creating(ctx: EngineContext) {
@@ -41,9 +44,23 @@ export function creating(ctx: EngineContext) {
     if (rest.members !== undefined && rest.members !== null) return rest
     const opened = open(member)
     const def = opened && typeof rest.type === 'string' ? currentTypes(opened.records).get(rest.type)?.definition : undefined
+    // A new まとまり (案件・プロジェクト) belongs to the member's own department (所属) unless the AI names
+    // one (records.md "A task and its 案件・プロジェクト"): the one on screen when it is theirs, else their first.
+    if (opened && def && def.implements.includes('bundle') && (rest.folder === undefined || rest.folder === null) && rest.personal !== true) {
+      const handle = companyData.forCompany(member.companyId)
+      const folder = defaultBundleFolder({
+        departments: handle.departments.list().map(d => ({ id: d.id, folder: d.folder })),
+        mine: handle.tasks.departmentIdsOf(member.userId),
+        onScreen: typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : null,
+      })
+      return folder !== null ? { ...rest, folder } : rest
+    }
     if (!opened || !def || !def.implements.includes('request') || def.fields.assignee?.source !== 'server') return rest
     const links = rest.links
     if (typeof links === 'object' && links !== null && (links as Record<string, unknown>).meeting !== undefined) return rest
+    // Made for a まとまり: it takes the まとまり's place (create), never the consultation's department.
+    const bundleLink = bundleLinkName(def)
+    const forBundle = bundleLink !== null && typeof links === 'object' && links !== null && (links as Record<string, unknown>)[bundleLink] != null
     if (rest.fields !== undefined && (typeof rest.fields !== 'object' || rest.fields === null || Array.isArray(rest.fields))) return rest
     const fields = { ...(rest.fields as Record<string, unknown> | undefined) }
     const said = fields.assignee
@@ -54,7 +71,7 @@ export function creating(ctx: EngineContext) {
     if (noAssignee) fields.assignee = member.userId
     if (rest.personal === true) return { ...rest, fields }
     if (rest.personal === undefined && !folderSaid && !someoneElse && personalAllowed) return { ...rest, personal: true, fields }
-    const folder = folderSaid ? rest.folder : typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : undefined
+    const folder = folderSaid ? rest.folder : !forBundle && typeof defaultFolder === 'string' && defaultFolder.trim() !== '' ? defaultFolder : undefined
     return { ...rest, fields, ...(folder !== undefined ? { folder } : {}) }
   }
 
@@ -122,6 +139,11 @@ export function creating(ctx: EngineContext) {
       const raw = (placed as Record<string, unknown>).folder
       const f = typeof raw === 'string' ? normalizeRepoPath(raw) : null
       if (!f) return ok(null)
+      // A private folder the member reads is not in the company repository: the engine alone decides
+      // there (`placeFolder` allows only a まとまり's own one). An unreadable one still gets the answer below.
+      const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+      const priv = findPrivateScope(scopes, f)
+      if (priv && canReadPrivateScope(priv, member.userId, member.role)) return ok(null)
       let exists: boolean | null
       try { exists = await deps.folderExists(member.companyId, f) } catch { exists = null }
       return exists === false ? bad(FOLDER_NOT_PLACEABLE.error, FOLDER_NOT_PLACEABLE.code) : ok(null)
@@ -162,7 +184,7 @@ export function creating(ctx: EngineContext) {
       const itemKey = typeof b.key === 'string' ? b.key.normalize('NFC').trim() : null
       // `personal: true` = owner-only (「持ち主だけ」): the creator alone sees it, never with a folder.
       if (b.personal !== undefined && typeof b.personal !== 'boolean') return bad('personal must be true or false')
-      const personalOwner = b.personal === true ? member.userId : null
+      let personalOwner = b.personal === true ? member.userId : null
       // A business plugin's types (deal, customer) are the place other records take their readers
       // from (approvals, minutes, sent mail): never owner-only — also when a company extends one.
       if (personalOwner !== null && records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')) {
@@ -264,6 +286,24 @@ export function creating(ctx: EngineContext) {
         if (folder !== null) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
         if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')
         members = withNamedPeople([member.userId, ...inherited], def, fields)
+      }
+      // A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task
+      // and its 案件・プロジェクト"): with no place of its own it takes the まとまり's (`placeOfRow`'s three
+      // kinds); a place given is kept only when it is within. Owner-only stays owner-only.
+      if (BUNDLE_PLACED_TYPES.includes(def.name) && personalOwner === null) {
+        const bundle = linkedBundle(records, def, links, r => reader.record(r))
+        if (bundle && folder === null && members === null) {
+          const from = placeOfRow(bundle)
+          if ('personalOwner' in from) personalOwner = from.personalOwner
+          else if ('members' in from) members = [...from.members]
+          else folder = from.folder
+        } else if (bundle) {
+          const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
+          const task = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+          if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), task, bundle)) {
+            return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
+          }
+        }
       }
       const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members }
       if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, place)) {
