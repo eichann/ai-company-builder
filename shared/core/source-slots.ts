@@ -9,12 +9,13 @@
  *      round of waiting (`<record id>@<version of the clock's entry>`), so a nudge never meets the
  *      thank-you mail or the reply it follows up;
  *   2. `meeting`   — the meeting it is about;
- *   3. `thread`    — the 連絡 it answers (one thread);
- *   4. `bundle`    — the まとまり (a 案件, a プロジェクト).
- * Nothing of these: no source (exempt from every per-source rule).
+ *   3. `thread`    — the 連絡 it answers (one thread).
+ * Nothing of these: no source (exempt from every per-source rule). A まとまり (a 案件, a プロジェクト)
+ * is **not** a source (owner decision 2026-11-06): on one deal people send many different things
+ * (a proposal, a quote another day), so "already sent for this deal" would stop every one of them.
  */
 
-export const SOURCE_KINDS = ['follow-up', 'meeting', 'thread', 'bundle'] as const
+export const SOURCE_KINDS = ['follow-up', 'meeting', 'thread'] as const
 export type SourceKind = typeof SOURCE_KINDS[number]
 
 export interface Source {
@@ -23,12 +24,11 @@ export interface Source {
   id: string
 }
 
-/** What a piece of work links to; each a record id or nothing. */
+/** What a piece of work links to; each a record id or nothing (a まとまり link is not one: see above). */
 export interface SourceLinks {
   followUp?: string | null
   meeting?: string | null
   interaction?: string | null
-  bundle?: string | null
 }
 
 /** The source of a piece of work, by the order above; null when it has none. */
@@ -36,8 +36,8 @@ export function resolveSource(links: SourceLinks): Source | null {
   if (links.followUp) return { kind: 'follow-up', id: links.followUp }
   if (links.meeting) return { kind: 'meeting', id: links.meeting }
   if (links.interaction) return { kind: 'thread', id: links.interaction }
-  if (links.bundle) return { kind: 'bundle', id: links.bundle }
   return null
+
 }
 
 /** The stored form: `<kind>:<id>`. */

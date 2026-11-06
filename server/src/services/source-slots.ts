@@ -54,11 +54,11 @@ export function createSourceSlots(deps: SourceSlotsDeps) {
     followUpOf,
 
     /**
-     * The source of a record by its own links (`meeting`, `interaction`, `bundle`) and, for a
-     * follow-up, the waiting records it was made for: its `task` link and whatever links it as
-     * `prepared` (a 返事のお願い's nudge). `extra` names links a caller keeps elsewhere.
+     * The source of a record by its own links (`meeting`, `interaction`; a `bundle` link is not a
+     * source) and, for a follow-up, the waiting records it was made for: its `task` link and
+     * whatever links it as `prepared` (a 返事のお願い's nudge). `extra` names links a caller keeps elsewhere.
      */
-    sourceOfRecord(companyId: string, recordId: string, extra: { meeting?: string | null; bundle?: string | null } = {}): Source | null {
+    sourceOfRecord(companyId: string, recordId: string, extra: { meeting?: string | null } = {}): Source | null {
       const records = deps.companyData.forCompany(companyId).records
       const links = records.linksFrom([recordId])
       const first = (name: string) => links.find(l => l.name === name && l.targetId)?.targetId ?? null
@@ -70,8 +70,8 @@ export function createSourceSlots(deps: SourceSlotsDeps) {
         followUp: waiting.length > 0 ? followUpOf(companyId, waiting) : null,
         meeting: extra.meeting ?? first('meeting'),
         interaction: first('interaction'),
-        bundle: extra.bundle ?? first('bundle'),
       })
+
     },
 
     /** Whether the member reads the source's own record. */

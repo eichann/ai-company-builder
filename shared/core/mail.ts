@@ -281,8 +281,8 @@ const ALREADY_SENT_WHAT: Record<SourceKind, string> = {
   meeting: 'この会議のお礼メール',
   thread: 'この連絡への返事',
   'follow-up': 'この件の催促',
-  bundle: 'この件のメール',
 }
+
 
 /** 「11/06 15:30」 in Japan time. */
 export function shortJapanTime(iso: string): string {

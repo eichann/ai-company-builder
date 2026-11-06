@@ -498,10 +498,12 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
 
   /**
    * The draft's source (outbound-mail.md "One send per source"): a follow-up round, else its
-   * meeting, its 連絡 (thread), its まとまり; none → exempt.
+   * meeting, its 連絡 (thread); none — a mail of a まとまり only, or of nothing — → exempt, sent as
+   * before (owner decision: one deal carries many different mails).
    */
   const sourceOfDraft = (companyId: string, mail: OutboundMailRow): Source | null =>
-    slots.sourceOfRecord(companyId, mail.messageId, { meeting: mail.meetingId, bundle: mail.bundleId })
+    slots.sourceOfRecord(companyId, mail.messageId, { meeting: mail.meetingId })
+
 
   /**
    * The first send on `source` (sent, or going out now) by anyone that the member may see: they

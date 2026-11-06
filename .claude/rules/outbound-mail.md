@@ -146,7 +146,10 @@ Two attendees could each send the client a thank-you mail. Sending reaches outsi
   last move into the waiting state; key `follow-up:<record>@<that entry's version>`, so a nudge
   (催促) never meets the thank-you mail or the reply it follows up, and a later round is a new
   source — else the draft's **meeting**, else its **連絡** (`thread`: one reply per thread, Slack
-  replies too), else its **まとまり** (`bundle`). None of these → no source, exempt.
+  replies too). None of these → no source, exempt: **a mail linked only to a まとまり (a 案件, a
+  プロジェクト), or to nothing, has no source** — no check, no reason needed, sent as before (owner
+  decision 2026-11-06: on one deal people send many different mails — a proposal, a quote another
+  day — and "already sent for this deal" would stop every one).
 - **At the send** (both channels, right before the send row, no `await` between): the sends on the
   same source key that are `sent` or `sending` (`outbound.sendsForSource`, by anyone, the draft's
   own left out) and that the **sender may see** — they read the source record **and** that mail's
@@ -154,7 +157,7 @@ Two attendees could each send the client a thank-you mail. Sending reaches outsi
   mentioned nor a reason to stop them). The first one found → 409 `ALREADY_SENT_FOR_SOURCE` with
   `alreadySent { messageId, by, byName, at, kind, message }` (contract `MailAlreadySent`;
   `message` 「この会議のお礼メールは〇〇さんが MM/DD HH:MM に送りました」, Japan time,
-  `shared/core/mail.ts` `alreadySentText`: 連絡への返事・この件の催促・この件のメール by kind,
+  `shared/core/mail.ts` `alreadySentText`: 連絡への返事・この件の催促 by kind,
   「あなた」 for the sender's own). Nothing is sent, no send row.
 - **To proceed**: the same send with `resendReason` (1–200 characters, one line, NFC-trimmed:
   `resendReasonOf`; anything else → 400 `RESEND_REASON_INVALID` before anything is read). The
@@ -177,15 +180,16 @@ Two attendees could each send the client a thank-you mail. Sending reaches outsi
   reason is written, 「送らない」 closes the step. IPC `outboundMail:send`'s 6th argument
   (`resendReason`; main lets only `isResendReason` leave) and the failure's `alreadySent`
   (`readAlreadySent`: a record id and a known kind, else dropped).
-- Not yet: sends made before the column are not matched (no backfill); the bundle source also
-  covers later mails of the same 案件 (the reason box is the way through).
+- Not yet: sends made before the column are not matched (no backfill).
 
 Tests: `server/tests/integration/outbound-mail.test.ts` 「one send per source」 (the second sender
 sees who and when, passes only with a reason kept in the ledger and the send row; an older app's
 `{ hash }` gets the 409 and nothing leaves; two presses at the same moment → one mail; a sender who
-cannot read the earlier mail is neither told nor stopped; a nudge is its own source, one per round —
-each mutation-checked: the gate, the claim reader, the follow-up round, an `await` between the check
-and the send row), `server/tests/unit/source-slots.test.ts` (the order, the key, the sentence and the
+cannot read the earlier mail is neither told nor stopped; a nudge is its own source, one per round;
+two mails of the same まとまり only both go without a reason — each mutation-checked: the gate, the
+claim reader, the follow-up round, an `await` between the check and the send row, a まとまり taken
+as a source),
+ `server/tests/unit/source-slots.test.ts` (the order, the key, the sentence and the
 reason), `client/tests/outbound-mail-tools.test.ts` (only a one-line reason leaves main; a malformed
 `alreadySent` never reaches the card), `client/tests/ui/mail-draft-card.spec.ts` (the earlier send
 shown, sent only with the reason written).

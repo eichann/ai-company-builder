@@ -70,8 +70,6 @@ policy:
   next_step: auto
 `
 const ts = () => new Date().toISOString()
-/** Mails of these tests on the same まとまり are separate errands: 「それでも送る」 with a reason (outbound-mail.md "One send per source"). */
-const OTHER_ERRAND = '別の用件のメールのため'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let app: any, services: any, db: any
@@ -582,7 +580,7 @@ describe('返事を待つ: a new mail we send first waits for their answer (outb
     const taskId = task.body.data.record.id as string
     const d = await draft({ expectsReply: true, taskId })
     const until = day(5)
-    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until }, resendReason: OTHER_ERRAND })
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until } })
     expect(r.body.data?.outcome, r.text).toBe('sent')
     expect(r.body.data.draft.awaitReply.chosenUntil).toBe(until)
     const interaction = interactionOfLastSent()
@@ -624,7 +622,7 @@ describe('返事を待つ: a new mail we send first waits for their answer (outb
     const d = await draft({ expectsReply: true })
     const until = day(3)
     google.faults.dropAnswerAfterSend(1)
-    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until }, resendReason: OTHER_ERRAND })
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: d.hash, awaitReply: { until } })
     expect(r.body.data?.outcome, r.text).toBe('unknown')
     const before = requestCount()
     const resolved = await person('m-sato', 'POST', `/outbound/${d.id}/resolve`, { sent: true })
@@ -786,7 +784,7 @@ describe('attachments: a PDF fixed with the version (outbound-mail.md "Attachmen
     expect((await attach({ user: 'm-sato' }, d.id, 1, a)).status).toBe(200)
     const v = (await attach({ token }, d.id, 2, b, '別紙_見積.pdf')).body.data.draft
     const before = google.sent.length
-    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: v.hash, attachmentsShown: [sha(b), sha(a)], resendReason: OTHER_ERRAND })
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: v.hash, attachmentsShown: [sha(b), sha(a)] })
     expect(r.body.data?.outcome, r.text).toBe('sent')
     expect(google.sent.length).toBe(before + 1)
     const mail = google.sent[google.sent.length - 1]
@@ -971,6 +969,19 @@ describe('one send per source: what was already sent is shown, a reason lets it 
     const r = await send('m-tanaka', made.draft)
     expect(r.body.data?.outcome, r.text).toBe('sent')
     expect(JSON.stringify(r.body)).not.toContain(hidden.id)
+  })
+
+  it('a mail of a まとまり only has no source: two people send on the same deal, no reason asked (owner decision: one deal, many different mails)', async () => {
+    const first = (await drafted(satoToken, { bundleId })).draft
+    const second = (await drafted(tanakaToken, { bundleId })).draft
+    expect(first.meetingId).toBeNull()
+    expect((await send('m-sato', first)).body.data?.outcome).toBe('sent')
+    const sent = sentCount()
+    const r = await send('m-tanaka', second)
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(sentCount()).toBe(sent + 1)
+    expect(sendRow(first.id).source_key).toBeNull()
+    expect(sendRow(second.id)).toMatchObject({ source_key: null, resend_reason: null })
   })
 
   it('a nudge (催促) is its own source: it never meets the thank-you mail of the meeting, and one nudge per round', async () => {
