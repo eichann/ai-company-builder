@@ -105,6 +105,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   outbound_mail_versions: ['adapters/sqlite/outbound-mail.ts'],
   outbound_typed_recipients: ['adapters/sqlite/outbound-mail.ts'],
   outbound_sends: ['adapters/sqlite/outbound-mail.ts'],
+  outbound_mail_attachments: ['adapters/sqlite/outbound-mail.ts'],
   // Fixed content of approvals and outbound mail (approvals.md).
   fixed_payloads: ['adapters/sqlite/fixed-payloads.ts'],
   // Task settings and department membership (tasks.md).

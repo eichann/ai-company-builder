@@ -154,7 +154,9 @@ contract.invoke notifications:watch
 contract.invoke outboundMail:addRecipient
 contract.invoke outboundMail:discard
 contract.invoke outboundMail:get
+contract.invoke outboundMail:openAttachment
 contract.invoke outboundMail:recipients
+contract.invoke outboundMail:removeAttachment
 contract.invoke outboundMail:resolve
 contract.invoke outboundMail:send
 contract.invoke outboundMail:update
@@ -462,6 +464,7 @@ contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe
 contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
 contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
 contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
+contract.type ElectronAPI.openOutboundMailAttachment = openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
 contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
 contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
 contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
@@ -473,6 +476,7 @@ contract.type ElectronAPI.reconcileTaskRun = reconcileTaskRun: Invoke<'tasks:rec
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
 contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
+contract.type ElectronAPI.removeOutboundMailAttachment = removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
 contract.type ElectronAPI.requestMeetingReading = requestMeetingReading: Invoke<'minutes:requestReading'>
@@ -791,9 +795,11 @@ contract.type IpcInvokeChannels.'notifications:watch' = 'notifications:watch': {
 contract.type IpcInvokeChannels.'outboundMail:addRecipient' = 'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:discard' = 'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:get' = 'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:openAttachment' = 'outboundMail:openAttachment': { args: [companyId: string, messageId: string, sha256: string]; result: MailAttachmentOpenResult }
 contract.type IpcInvokeChannels.'outboundMail:recipients' = 'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:removeAttachment' = 'outboundMail:removeAttachment': { args: [companyId: string, messageId: string, sha256: string, expectedVersion: number]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:resolve' = 'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
-contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
@@ -1065,9 +1071,11 @@ main.handle notifications:watch @ features/notifications/ipc.ts (companyId)
 main.handle outboundMail:addRecipient @ features/outbound-mail/ipc.ts (companyId, messageId, email, name)
 main.handle outboundMail:discard @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:get @ features/outbound-mail/ipc.ts (companyId, messageId)
+main.handle outboundMail:openAttachment @ features/outbound-mail/ipc.ts (companyId, messageId, sha256)
 main.handle outboundMail:recipients @ features/outbound-mail/ipc.ts (companyId, messageId)
+main.handle outboundMail:removeAttachment @ features/outbound-mail/ipc.ts (companyId, messageId, sha256, expectedVersion)
 main.handle outboundMail:resolve @ features/outbound-mail/ipc.ts (companyId, messageId, sent)
-main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply)
+main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash, awaitReply, attachmentsShown)
 main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, messageId, edit, conversationId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
@@ -1448,6 +1456,8 @@ preload openExternal -> invoke shell:openExternal($0)
 preload openExternal : (url: string) => Promise<SimpleResult>
 preload openFileInMainWindow -> invoke chatWindow:openFile($0)
 preload openFileInMainWindow : (filePath: string) => Promise<ChatWindowOpenFileResult>
+preload openOutboundMailAttachment -> invoke outboundMail:openAttachment($0, $1, $2)
+preload openOutboundMailAttachment : (companyId: string, messageId: string, sha256: string) => Promise<MailAttachmentOpenResult>
 preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
 preload patchChatSession : (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
 preload publishSkill -> invoke skills:publish($0, $1)
@@ -1470,6 +1480,8 @@ preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
 preload removeAbsence -> invoke absences:remove($0, $1)
 preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
+preload removeOutboundMailAttachment -> invoke outboundMail:removeAttachment($0, $1, $2, $3)
+preload removeOutboundMailAttachment : (companyId: string, messageId: string, sha256: string, expectedVersion: number) => Promise<OutboundMailResult>
 preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
@@ -1502,8 +1514,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
-preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3)
-preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined) => Promise<OutboundMailResult>
+preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2, $3, $4)
+preload sendOutboundMail : (companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null | undefined, attachmentsShown?: string[] | null | undefined) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)

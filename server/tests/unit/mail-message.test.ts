@@ -5,9 +5,9 @@
  * travel as RFC 2047 words and bodies as base64, so the text arrives as written.
  */
 import { describe, expect, it } from 'vitest'
-import { buildMailMessage, encodeHeaderWords, gmailRaw } from '../../src/lib/mail-message'
+import { buildMailMessage, encodeHeaderWords, gmailRaw, rfc2231Parameter } from '../../src/lib/mail-message'
 import { CORE_TYPE_FILES, coreTypeDefinitions } from '../../../shared/core/core-types'
-import { awaitReplyDefault, awaitReplyUntilProblem, mailContentCanonical } from '../../../shared/core/mail'
+import { awaitReplyDefault, awaitReplyUntilProblem, looksLikePdf, mailContentCanonical, sanitizeAttachmentName } from '../../../shared/core/mail'
 import { compareTypeDefinitions, parseTypeFile } from '../../../shared/core/record-types'
 
 const base = { from: 'sato@div.example', to: ['suzuki@a-corp.example'], cc: [], subject: 'お礼', body: '本文', date: new Date('2026-11-05T06:52:00Z') }
@@ -135,3 +135,73 @@ final: [sent, discarded]
 ---
 # 送るもの
 `
+
+describe('attachments (outbound-mail.md "Attachments")', () => {
+  const content = { from: 'sato@div.example', to: ['suzuki@a-corp.example'], cc: [], subject: 'お礼', body: '本文' }
+  const OLD = '{"attachments":[],"body":"本文","cc":[],"from":"sato@div.example","subject":"お礼","to":["suzuki@a-corp.example"],"v":1}'
+  const file = { name: '提案書（株式会社サンプル様）.pdf', size: 5, sha256: 'a'.repeat(64) }
+
+  it('additive: a mail without files keeps exactly the canonical text (and hash) it always had; a file changes it, and so does each of its facts', () => {
+    expect(mailContentCanonical({ ...content, attachments: [] })).toBe(OLD)
+    expect(mailContentCanonical(content)).toBe(OLD)
+    const one = mailContentCanonical({ ...content, attachments: [file] })
+    expect(one).toContain('"attachments":[{"name":"提案書（株式会社サンプル様）.pdf","sha256":"' + 'a'.repeat(64) + '","size":5}]')
+    for (const other of [{ ...file, name: '提案書.pdf' }, { ...file, size: 6 }, { ...file, sha256: 'b'.repeat(64) }]) {
+      expect(mailContentCanonical({ ...content, attachments: [other] })).not.toBe(one)
+    }
+    const second = { ...file, sha256: 'c'.repeat(64) }
+    expect(mailContentCanonical({ ...content, attachments: [file, second] })).not.toBe(mailContentCanonical({ ...content, attachments: [second, file] }))
+  })
+
+  it('a file name: the last path segment, NFC, no control or direction characters, ending .pdf, ≤ 120 characters', () => {
+    expect(sanitizeAttachmentName('営業部/.personal/提案書/A社/提案書.pdf')).toBe('提案書.pdf')
+    expect(sanitizeAttachmentName('C:\\Users\\x\\見積.PDF')).toBe('見積.PDF')
+    expect(sanitizeAttachmentName('提案\r\nBcc: x@y.example.pdf')).toBe('提案Bcc: x@y.example.pdf')
+    expect(sanitizeAttachmentName('invoice\u202Efdp.exe')).toBeNull()
+    expect(sanitizeAttachmentName('ガ'.normalize('NFD') + '.pdf')).toBe('ガ.pdf')
+    for (const bad of ['proposal.exe', '.pdf', '', 'a/', `${'あ'.repeat(117)}.pdf`, 3, null]) expect(sanitizeAttachmentName(bad), String(bad)).toBeNull()
+    expect(sanitizeAttachmentName(`${'あ'.repeat(116)}.pdf`)).not.toBeNull()
+    expect(looksLikePdf(new TextEncoder().encode('%PDF-1.7'))).toBe(true)
+    expect(looksLikePdf(new TextEncoder().encode('%PDF'))).toBe(false)
+    expect(looksLikePdf(new TextEncoder().encode('MZ%PDF-'))).toBe(false)
+  })
+
+  const pdfBytes = (text: string) => new TextEncoder().encode(`%PDF-1.7\n${text}`)
+  const headerBlock = (m: string) => m.slice(0, m.indexOf('\r\n\r\n'))
+
+  it('without files the message is the one ACB always built, byte for byte', () => {
+    const plain = buildMailMessage({ ...base, messageId: '<acb.1@div.example>' })
+    expect(buildMailMessage({ ...base, messageId: '<acb.1@div.example>', attachments: [] })).toBe(plain)
+    expect(headersOf(plain).at(-2)).toBe('Content-Type: text/plain; charset=UTF-8')
+  })
+
+  it('multipart/mixed: the text part, then each PDF base64 with Content-Disposition attachment and its name as RFC 2231 continuations', () => {
+    const name = `${'提案書'.repeat(10)}（株式会社サンプル様）"; filename=evil.exe.pdf`
+    const bytes = pdfBytes('x'.repeat(200))
+    const m = buildMailMessage({ ...base, messageId: '<acb.1@div.example>', attachments: [{ name, bytes }] })
+    const boundary = /boundary="([^"]+)"/.exec(headerBlock(m))![1]
+    for (const line of m.split('\r\n')) expect(line.length).toBeLessThanOrEqual(78)
+    const parts = m.split(`--${boundary}`)
+    expect(parts.at(-1)).toBe('--\r\n')
+    const [text, pdf] = parts.slice(1, 3)
+    expect(text).toContain('Content-Type: text/plain; charset=UTF-8')
+    expect(Buffer.from(text.split('\r\n\r\n')[1].replace(/\s+/g, ''), 'base64').toString('utf8')).toBe('本文')
+    const head = pdf.split('\r\n\r\n')[0].replace(/\r\n /g, ' ')
+    expect(head).toMatch(/Content-Type: application\/pdf; name\*0\*=UTF-8''/)
+    expect(head).toMatch(/Content-Disposition: attachment; filename\*0\*=UTF-8''/)
+    // The name never closes the parameter: no quote, semicolon or space survives inside a value.
+    const disposition = /Content-Disposition: attachment; (.*?)(\r?\n|$)/.exec(head.split('Content-Transfer-Encoding')[0])![1]
+    const pieces = disposition.split('; ').map(p => /^filename\*(\d+)\*=(.*)$/.exec(p.trim())!)
+    for (const p of pieces) expect(p[2].replace(/^UTF-8''/, '')).toMatch(/^[A-Za-z0-9!#$&+\-.^_`|~%]+$/)
+    const decoded = decodeURIComponent(pieces.map(p => p[2].replace(/^UTF-8''/, '')).join(''))
+    expect(decoded).toBe(name)
+    expect(Buffer.from(pdf.split('\r\n\r\n')[1].replace(/\s+/g, ''), 'base64').equals(Buffer.from(bytes))).toBe(true)
+    expect(rfc2231Parameter('filename', '%%%%', 4)).toBe("filename*0*=UTF-8''%25;\r\n filename*1*=%25;\r\n filename*2*=%25;\r\n filename*3*=%25")
+  })
+
+  it('refuses a file that is not a PDF or a name that was not made plain — nothing to send', () => {
+    expect(() => buildMailMessage({ ...base, attachments: [{ name: 'a.pdf', bytes: new TextEncoder().encode('MZ...') }] })).toThrow()
+    expect(() => buildMailMessage({ ...base, attachments: [{ name: 'a\r\nBcc: spy@attacker.example.pdf', bytes: pdfBytes('') }] })).toThrow()
+    expect(() => buildMailMessage({ ...base, attachments: [{ name: 'dir/a.pdf', bytes: pdfBytes('') }] })).toThrow()
+  })
+})

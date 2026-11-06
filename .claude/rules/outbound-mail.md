@@ -14,6 +14,9 @@ paths:
   - "client/electron/features/outbound-mail/**"
   - "client/src/features/chat/components/MailDraftCard.tsx"
   - "client/tests/outbound-mail-tools.test.ts"
+  - "client/tests/outbound-mail-attachments.test.ts"
+  - "client/electron/records/mail-attachments.ts"
+  - "server/src/routes/mail-attachments.ts"
   - "client/tests/mail-draft-card-ui.*"
   - "client/tests/ui/mail-draft-card.spec.ts"
   - "server/src/services/threads.ts"
@@ -79,8 +82,8 @@ of the company went to (`outbound.sentDomains()`).
   body; NFC, `\n`; nothing trimmed) in `fixed_payloads` (owner kind `outbound_message`,
   `services/fixed-payloads.ts` `fix`, its hash), its recipients (ref, address, name, source) in
   `outbound_mail_versions`, the record's fields — in one transaction (all or nothing).
-  `mailContentProblems` decides what is refused (400 `MAIL_INVALID` + `problems`). Plain text, no
-  attachments.
+  `mailContentProblems` decides what is refused (400 `MAIL_INVALID` + `problems`). Plain text, plus
+  up to 3 PDFs on a new mail ("Attachments" below).
 - Only the author sees or changes a draft: anyone else, another company's id or a missing one
   answer the same 404 `MAIL_NOT_FOUND`. A stale `expectedVersion` → 409 `VERSION_CONFLICT`.
 
@@ -89,7 +92,8 @@ of the company went to (`outbound.sentDomains()`).
 In this order, nothing sent unless all pass:
 1. records on, the author's own draft, state `draft` (else 409 `NOT_DRAFT`);
 2. the hash equals the current version's (record and fixed payload), else 409 `CONTENT_CHANGED`
-   「内容が変わりました。もう一度確かめてください。」 with the current draft;
+   「内容が変わりました。もう一度確かめてください。」 with the current draft; a version with files also
+   needs `attachmentsShown` naming exactly its files (else 409 `ATTACHMENTS_NOT_SHOWN`, "Attachments");
 3. through the role メールを送る (`MailSender.senderAccount`, `connector-roles.md`): the member's
    Google grant is active with `gmail.send` and メールを送る not turned off (409
    `GOOGLE_FEATURE_OFF` `feature: mail`; no usable connector → 503 `GOOGLE_UNAVAILABLE`
@@ -99,12 +103,14 @@ In this order, nothing sent unless all pass:
 4. every recipient is still at its source right now (only the sources the version uses are
    read): unreadable → 409 `RECIPIENTS_UNVERIFIABLE` 「…確かめられないため送れません…」;
    gone → 409 `RECIPIENT_GONE` + `goneRefs`;
-5. the send row (`outbound_sends`, outcome `sending`) is written **before** Gmail is called — at
-   most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`;
+5. each attached file is read again from storage and must match the version (size, sha256, `%PDF-`),
+   else 409 `ATTACHMENT_CHANGED`; then the send row (`outbound_sends`, outcome `sending`) is written
+   **before** Gmail is called — at most one live send per draft (`startSend`), else 409 `SEND_IN_PROGRESS`;
 6. the RFC 2822 message (`lib/mail-message.ts`: UTF-8, RFC 2047 subject words ≤ 60 characters,
    base64 body, From = the version's, To / Cc from the version; it throws on anything that is not
    one plain address or a subject with a control character — no header injection) →
-   `googleClient.request` Gmail `POST /gmail/v1/users/me/messages/send { raw }`, **never retried**
+   `googleClient.request` Gmail `POST /gmail/v1/users/me/messages/send { raw }` (with files:
+   `multipart/mixed` through the media upload, "Attachments"), **never retried**
    (G3: writes are not retried; every Google switch is checked there: operator stop, company
    client off, vault, membership, grant, scope);
 7. 2xx → record `sent` (`sent_at`, `provider_message_id` = Gmail's id), the retention clock starts,
@@ -241,12 +247,96 @@ the day's range, v5 / v4 additive), `client/tests/outbound-mail-tools.test.ts` (
 main, a stored card keeps the offer), `client/tests/ui/mail-draft-card.spec.ts` (unticked old
 draft sends nothing to wait for; pre-ticked, the day changed, the send carries it).
 
+## Attachments (plan §14-1 「承認した送信を中身の版に固定」, owner decision 2026-11-06)
+
+The first use is div's proposal: the company Skill `sales-proposal-v1` writes a PDF under
+`<department>/.personal/提案書/<date>_<customer>/…pdf` on the member's PC (never synced), the AI
+attaches it, the member opens it on the card and sends. Drive links are not used (their content
+changes after the person looked).
+
+- **What**: a **new mail** only (not a reply in a thread — Gmail's media upload cannot carry the
+  `threadId` — not Slack: 400 `ATTACHMENT_NOT_HERE`); at most 3 PDFs, 10 MB together
+  (`ATTACHMENT_LIMITS`, `attachmentListProblems`); each file's bytes start `%PDF-`
+  (`looksLikePdf`); its name is `sanitizeAttachmentName`'d (last path segment only, NFC, no control
+  or direction characters, ≤ 120, ends `.pdf`). Else 400 `ATTACHMENT_INVALID` (413 for a body over
+  the limit, Hono `bodyLimit`). All in `shared/core/mail.ts`.
+- **Fixed with the version**: the canonical content carries `attachments: [{ name, size, sha256 }]`
+  in order — additive: a mail without files keeps `attachments: []`, its old canonical text and hash
+  (`mail-message.test.ts` "additive"). Attaching (`POST …/attachments { expectedVersion, name,
+  contentBase64 }`, JSON with base64: the existing body style, `serviceBody`, and the AI's
+  `keyedWrite`) and taking off (`DELETE …/attachments/:sha256?expectedVersion=N`) each make a new
+  version in the same transaction as any edit (fixed payload, record fields, version row and the
+  bytes); a `PUT` keeps the files. The same bytes again change nothing. So a file swapped after the
+  person looked is a new hash: the send answers `CONTENT_CHANGED`.
+- **Storage**: `outbound_mail_attachments` (company handle `outbound`, `HANDLE_TABLES`; one row per
+  distinct file of a draft by sha256: name, size, `application/pdf`, bytes, who / when,
+  `bytes_deleted_at`); each version's list in `outbound_mail_versions.attachments_json` (nullable,
+  `migrateOutboundAttachments`; null = none, every version from before).
+- **Who**: the draft's author only — uploading and taking off with the session **or** the AI's act
+  token (the AI attaches the Skill's output; it still cannot send); **downloading**
+  (`GET …/attachments/:sha256`, `application/pdf`, `Content-Disposition: attachment`, `no-store`,
+  `nosniff`) with the session only, and only a file of the current version: the person opens exactly
+  what will be sent. Anyone else / another company / a missing id: the same 404 `MAIL_NOT_FOUND`; a
+  file the version does not name: 404 `ATTACHMENT_NOT_FOUND`; bytes deleted: 410 `ATTACHMENT_GONE`.
+- **Released apps** (the compatibility choice): the hash alone is not proof that the person saw
+  the files — the server made it and any app echoes it. A send of a version with files must carry
+  `attachmentsShown` = the sha256 of every file the card showed (exactly the version's set), else
+  409 `ATTACHMENTS_NOT_SHOWN` with a sentence a released card shows as is
+  (「…お使いのアプリでは表示できません。アプリを新しくして…何も送っていません。」). A version without files
+  needs nothing new, so released apps send them as before.
+- **Sending**: before the send row, each file is read from storage and its size, sha256 and `%PDF-`
+  checked against the version (else 409 `ATTACHMENT_CHANGED`, nothing sent, no send row). The
+  message is `multipart/mixed` (`lib/mail-message.ts`: the same text part; each PDF base64 with
+  `Content-Disposition: attachment` and `name*` / `filename*` as RFC 2231 continuations of
+  percent-encoded UTF-8 — only attr-chars and `%` in a value, so a name can never close the
+  parameter or start a header; lines ≤ 78), sent by `MailSender.send(…, { upload: true })` →
+  Gmail `POST /upload/gmail/v1/users/me/messages/send?uploadType=media` (`message/rfc822`), the one
+  upload `gmailCallAllowed` lets through (`google-connector.md`). Without files: the plain `raw`
+  send, byte for byte as before. Never retried.
+- **Retention**: the bytes go with the body (`cleanupBodies`, 30 days after sent / discarded); the
+  name, size and sha256 stay in the versions (the view says `bytesDeleted`). When a draft leaves
+  「下書き」 (sent or discarded), the bytes of files its last version no longer names go at once
+  (`dropUnsentFiles`): nothing will send them.
+- **Logs**: never a file name or bytes (ids and fixed words only).
+- **The app**: `mail_draft_create` / `mail_draft_update` take `attachments: [{ path }]` (≤ 3; paths
+  in the company folder, `.personal/` allowed). Main reads each (`electron/records/mail-attachments.ts`
+  `readMailAttachment`, bound in `features/chat/server-config.ts` to the consultation's company
+  folder): it must resolve — realpath, links followed — inside that folder, end `.pdf`, start
+  `%PDF-`, ≤ 10 MB; one that cannot be read stops the tool before anything reaches the server. Then
+  the draft is made or changed and the files uploaded with the turn's record token
+  (`access.call`, 120 s); for an update the list is the draft's list (files no longer named are
+  taken off; `[]` takes all off). The tools and `RECORDS_INSTRUCTIONS` say: PDFs only, the draft is
+  not sent, the member checks them. The AI is told names and sizes, never a path.
+  The card (`MailDraftCard`, so also `PreparedMailCard`) lists each file (name, size) with
+  「開いて確かめる」 — IPC `outboundMail:openAttachment` (main downloads with the session, checks
+  `%PDF-` and the sha256 asked for, saves it under `<temp>/acb-mail-files/<random>/` (older than a
+  day removed), opens it with the OS viewer; the bytes never reach the renderer) — and, on a draft,
+  「外す」 (`outboundMail:removeAttachment`, a new version). The confirm step lists them again
+  (「付いているファイルも、このまま送ります」) and the send carries `attachmentsShown`
+  (`outboundMail:send`'s 5th argument; main lets only sha256s leave). No ハッシュ on screen.
+
+Tests: `server/tests/integration/outbound-mail.test.ts` 「attachments」 (the AI attaches, the same
+bytes change nothing, an edit keeps them; only PDFs / 3 / 10 MB / the name / a stale version, nothing
+written; only the author downloads, the AI cannot, the same 404 for a colleague and another company
+on all three routes; a released app's send refused, a file swapped after confirming →
+CONTENT_CHANGED; other bytes in storage → ATTACHMENT_CHANGED with no send row; the upload way, the
+MIME parsed back with the Japanese names and exact bytes, mails without files still `raw`, the
+allow-list's exact upload; taking a file off, its bytes gone at discard, the rest after 30 days,
+410; no file name in logs), `threads.test.ts` (a reply and a Slack reply take no file),
+`server/tests/unit/mail-message.test.ts` 「attachments」 (canonical additive, names, the message
+without files byte for byte, the MIME and RFC 2231, refusals), permission matrix + `CROSS`,
+`company-scoped-sql.test.ts`; `client/tests/outbound-mail-attachments.test.ts` (path escape, links
+out, non-PDF, size, nothing made on a bad file, record token not session, the update's list, the
+send's `attachmentsShown`, opening only the bytes asked for), `client/tests/ui/mail-draft-card.spec.ts`
+(files shown, opened, one taken off, listed again at confirm, the send names those shown).
+
 ## Retention (§9 q9)
 
 `cleanupBodies` at startup + every 24 h (`lib/mail-body-retention.ts`, one run per server, each
 company through its handle): a mail `sent` or `discarded` more than 30 days ago loses its body —
-the fixed payloads' canonical text (`clearBodies`); the hash, recipients, subject, Gmail id, state
-and ledger stay. The view says `bodyDeleted`.
+the fixed payloads' canonical text (`clearBodies`) and its attachments' bytes; the hash, recipients,
+subject, Gmail id, state, ledger and the files' names, sizes and sha256 stay. The view says
+`bodyDeleted` (and each file `bytesDeleted`).
 
 ## Routes (contract `shared/types/outbound-mail.ts`)
 
@@ -256,7 +346,10 @@ POST /outbound-recipients                  POST /outbound-recipients   (read; ma
 POST /outbound                             POST /outbound              (act; mail_draft_create)
 GET|PUT /outbound/:messageId               GET /outbound/:messageId (read; mail_draft_show), PUT (act; mail_draft_update)
 GET|POST /outbound/:messageId/recipients   —
-POST /outbound/:messageId/send             —   (no route: the AI cannot send; { hash, awaitReply? })
+POST /outbound/:messageId/attachments      POST /outbound/:messageId/attachments (act; tools' `attachments`)
+DELETE /outbound/:messageId/attachments/:sha256   DELETE (act)
+GET /outbound/:messageId/attachments/:sha256      —   (no route: the person opens what will be sent)
+POST /outbound/:messageId/send             —   (no route: the AI cannot send; { hash, awaitReply?, attachmentsShown? })
 POST /outbound/:messageId/resolve          —
 POST /outbound/:messageId/discard          —
 ```
@@ -287,12 +380,12 @@ Hono change routers (`records.md`). Permission matrix rows + `CROSS` for every `
   (`PreparedMailCard.tsx`: `outboundMail:get` reads the latest version, so a draft is checked and
   sent from the task without going back to the consultation; `tasks-ui.md` "The card").
 - IPC (main, the session stays there): `outboundMail:get`, `:recipients`, `:update`,
-  `:addRecipient`, `:send`, `:resolve`, `:discard` (`client/electron/features/outbound-mail/ipc.ts`;
-  ids and hashes checked before anything leaves).
+  `:addRecipient`, `:send`, `:resolve`, `:discard`, `:openAttachment`, `:removeAttachment`
+  (`client/electron/features/outbound-mail/ipc.ts`; ids and hashes checked before anything leaves).
 
 ## Logs
 
-Never a subject, body or address: ids and fixed words only (`logError`). Test: the integration
+Never a subject, body, address or attachment name / bytes: ids and fixed words only (`logError`). Test: the integration
 test greps every log line.
 
 ## Tests (each guard mutation-checked)

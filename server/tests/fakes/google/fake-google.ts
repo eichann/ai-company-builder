@@ -29,6 +29,7 @@
  *                                 POST /upload/drive/v3/files?uploadType=multipart
  *   apis.google.com               GET  /js/api.js — a stand-in Google Picker (staging only; picks through /__picker/*)
  *   gmail.googleapis.com          POST /gmail/v1/users/{userId}/messages/send
+ *                                 POST /upload/gmail/v1/users/{userId}/messages/send?uploadType=media (message/rfc822 bytes)
  *                                 GET  /gmail/v1/users/{userId}/messages (q `after:<seconds>`, labelIds, maxResults, pageToken)
  *                                 GET  /gmail/v1/users/{userId}/messages/{id} (format minimal | metadata | full)
  *                                 GET  /gmail/v1/users/{userId}/threads/{id} (format full | minimal)
@@ -153,6 +154,12 @@ export interface SentMessage {
   body: string
   headers: Record<string, string>
   sentAt: string
+  /** `raw` (messages.send with JSON) or `upload` (the media upload of message/rfc822 bytes). */
+  via: 'raw' | 'upload'
+  /** The message as it arrived (CRLF), for a test that parses it again. */
+  raw: string
+  /** The attached files (multipart/mixed parts with `Content-Disposition: attachment`), decoded. */
+  attachments: Array<{ filename: string | null; contentType: string; disposition: string; bytes: Buffer }>
 }
 
 export interface FakeGoogleRequestLog {
@@ -997,19 +1004,44 @@ export function createFakeGoogle(options: FakeGoogleOptions = {}): FakeGoogle {
     if (userId !== 'me' && userId.toLowerCase() !== a.email.toLowerCase()) throw apiError(403, 'Delegation denied for ' + a.email, 'forbidden')
     const body = await c.req.json().catch(() => null) as { raw?: unknown; threadId?: unknown } | null
     if (!body || typeof body.raw !== 'string' || body.raw === '') throw apiError(400, '\'raw\' RFC822 payload message string or uploading message via /upload/* URL required', 'invalidArgument')
-    const parsed = parseMessage(Buffer.from(body.raw, 'base64url').toString('utf8'))
+    const text = Buffer.from(body.raw, 'base64url').toString('utf8')
+    const parsed = parseMessage(text)
     if (parsed.to.length + parsed.cc.length + parsed.bcc.length === 0) throw apiError(400, 'Recipient address required', 'invalidArgument')
     if (parsed.from && !addressesOf(parsed.from).some(f => f.toLowerCase() === a.email.toLowerCase())) {
       throw apiError(400, `Invalid From header: not the account ${a.email}`, 'invalidArgument')
     }
     const id = randomBytes(8).toString('hex')
     const threadId = typeof body.threadId === 'string' && body.threadId ? body.threadId : id
-    sent.push({ id, threadId, account: a.email, ...parsed, sentAt: iso(now()) })
+    sent.push({ id, threadId, account: a.email, ...parsed, sentAt: iso(now()), via: 'raw', raw: text })
     if (dropCount > 0) {
       dropCount--
       return dropAnswer(c)
     }
     return c.json({ id, threadId, labelIds: ['SENT'] })
+  })
+
+  // messages.send's media upload (a message with attachments, up to 35 MB at Google).
+  app.post('/upload/gmail/v1/users/:userId/messages/send', async c => {
+    const a = bearer(c, NEEDS.gmailSend, 'gmail.googleapis.com')
+    const userId = decodeURIComponent(c.req.param('userId') ?? '')
+    if (userId !== 'me' && userId.toLowerCase() !== a.email.toLowerCase()) throw apiError(403, 'Delegation denied for ' + a.email, 'forbidden')
+    if (c.req.query('uploadType') !== 'media') throw apiError(400, 'Invalid uploadType', 'badRequest')
+    if ((c.req.header('content-type') ?? '').toLowerCase() !== 'message/rfc822') throw apiError(400, 'Media type not supported', 'badContent')
+    const raw = Buffer.from(await c.req.arrayBuffer())
+    if (raw.byteLength > 35 * 1024 * 1024) throw apiError(413, 'Request too large', 'uploadTooLarge')
+    const text = raw.toString('utf8')
+    const parsed = parseMessage(text)
+    if (parsed.to.length + parsed.cc.length + parsed.bcc.length === 0) throw apiError(400, 'Recipient address required', 'invalidArgument')
+    if (parsed.from && !addressesOf(parsed.from).some(f => f.toLowerCase() === a.email.toLowerCase())) {
+      throw apiError(400, `Invalid From header: not the account ${a.email}`, 'invalidArgument')
+    }
+    const id = randomBytes(8).toString('hex')
+    sent.push({ id, threadId: id, account: a.email, ...parsed, sentAt: iso(now()), via: 'upload', raw: text })
+    if (dropCount > 0) {
+      dropCount--
+      return dropAnswer(c)
+    }
+    return c.json({ id, threadId: id, labelIds: ['SENT'] })
   })
 
   // Received mail (gmail.readonly): only the token's own mailbox; Gmail's message resource shapes.
@@ -1580,15 +1612,41 @@ function decodeBody(headers: Record<string, string>, body: string): string {
   return body
 }
 
-function parseMessage(text: string): Omit<SentMessage, 'id' | 'threadId' | 'account' | 'sentAt'> {
+/** An RFC 2231 parameter (`name*0*=UTF-8''…; name*1*=…`, or `name*=…`, or a plain `name="…"`) of a header value. */
+export function headerParameter(value: string, name: string): string | null {
+  const pieces = new Map<number, string>()
+  let charset = 'utf-8'
+  for (const m of value.matchAll(new RegExp(`;\\s*${name}\\*(\\d+)?\\*?=([^;]*)`, 'gi'))) {
+    let v = m[2].trim()
+    const n = m[1] === undefined ? 0 : Number(m[1])
+    if (n === 0 && /^[^']*'[^']*'/.test(v)) { charset = v.slice(0, v.indexOf("'")).toLowerCase(); v = v.slice(v.indexOf("'", v.indexOf("'") + 1) + 1) }
+    pieces.set(n, v)
+  }
+  if (pieces.size > 0) {
+    const joined = [...pieces.keys()].sort((x, y) => x - y).map(k => pieces.get(k)).join('')
+    const bytes = Buffer.from(joined.replace(/%([0-9A-Fa-f]{2})/g, (_x, h: string) => String.fromCharCode(parseInt(h, 16))), 'latin1')
+    return charset === 'utf-8' ? bytes.toString('utf8') : bytes.toString('latin1')
+  }
+  const plain = new RegExp(`;\\s*${name}="?([^";]*)"?`, 'i').exec(value)
+  return plain ? decodeWords(plain[1]) : null
+}
+
+function parseMessage(text: string): Omit<SentMessage, 'id' | 'threadId' | 'account' | 'sentAt' | 'via' | 'raw'> {
   const { headers, body } = splitHeadersBody(text)
   let plain = decodeBody(headers, body)
+  const attachments: SentMessage['attachments'] = []
   const boundary = /multipart\/[^;]+;.*boundary="?([^";]+)"?/i.exec(headers['content-type'] ?? '')?.[1]
   if (boundary) {
-    // The first text/plain part.
-    const parts = body.split(`--${boundary}`).slice(1).filter(p => !p.startsWith('--'))
-    const part = parts.map(p => splitHeadersBody(p.replace(/^\r?\n/, ''))).find(p => (p.headers['content-type'] ?? 'text/plain').toLowerCase().startsWith('text/plain'))
+    // The first text/plain part; every part with Content-Disposition: attachment is a file.
+    const parts = body.split(`--${boundary}`).slice(1).filter(p => !p.startsWith('--')).map(p => splitHeadersBody(p.replace(/^\r?\n/, '')))
+    const part = parts.find(p => (p.headers['content-type'] ?? 'text/plain').toLowerCase().startsWith('text/plain'))
     plain = part ? decodeBody(part.headers, part.body) : ''
+    for (const p of parts) {
+      const disposition = p.headers['content-disposition'] ?? ''
+      if (!/^attachment\b/i.test(disposition)) continue
+      const bytes = (p.headers['content-transfer-encoding'] ?? '').toLowerCase() === 'base64' ? Buffer.from(p.body.replace(/\s+/g, ''), 'base64') : Buffer.from(p.body, 'latin1')
+      attachments.push({ filename: headerParameter(disposition, 'filename'), contentType: (p.headers['content-type'] ?? '').split(';')[0].trim(), disposition, bytes })
+    }
   }
   const list = (name: string) => (headers[name] ? addressesOf(decodeWords(headers[name])) : [])
   return {
@@ -1599,5 +1657,6 @@ function parseMessage(text: string): Omit<SentMessage, 'id' | 'threadId' | 'acco
     subject: decodeWords(headers.subject ?? ''),
     body: plain.replace(/\r\n/g, '\n'),
     headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, decodeWords(v)])),
+    attachments,
   }
 }

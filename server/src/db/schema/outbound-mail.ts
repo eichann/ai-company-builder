@@ -1,3 +1,5 @@
+import type Database from 'better-sqlite3'
+
 /**
  * Outbound mail: drafts, recipients per version, typed recipients, send attempts (outbound-mail.md).
  * Part of the one schema run by db/index.ts initDatabase (tables before every migration).
@@ -63,6 +65,35 @@ export const outboundMailSchema = `
       FOREIGN KEY (company_id, message_id) REFERENCES outbound_mails(company_id, message_id) ON DELETE CASCADE
     );
 
+    -- The PDFs attached to a draft (plan §14-1, outbound-mail.md "Attachments"): one row per
+    -- distinct file of a draft, by its sha256; a version names its files (attachments_json of
+    -- outbound_mail_versions). The bytes go with the body (retention) or once no version of a
+    -- discarded draft names them; the name, size and sha256 stay.
+    CREATE TABLE IF NOT EXISTS outbound_mail_attachments (
+      company_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      sha256 TEXT NOT NULL CHECK (length(sha256) = 64),
+      name TEXT NOT NULL,
+      size INTEGER NOT NULL CHECK (size > 0),
+      content_type TEXT NOT NULL CHECK (content_type = 'application/pdf'),
+      bytes BLOB,
+      added_by TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      bytes_deleted_at TEXT,
+      PRIMARY KEY (company_id, message_id, sha256),
+      FOREIGN KEY (company_id, message_id) REFERENCES outbound_mails(company_id, message_id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_outbound_sends_message ON outbound_sends(company_id, message_id, started_at);
     CREATE INDEX IF NOT EXISTS idx_outbound_mails_finished ON outbound_mails(company_id, finished_at);
 `
+
+/**
+ * Attachments per version (outbound-mail.md "Attachments"): a nullable JSON list of
+ * `{ name, size, sha256 }` on each version row; null (every version made before) = none.
+ * Additive: an older build ignores the column.
+ */
+export function migrateOutboundAttachments(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(outbound_mail_versions)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('attachments_json')) conn.exec('ALTER TABLE outbound_mail_versions ADD COLUMN attachments_json TEXT')
+}

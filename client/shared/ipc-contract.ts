@@ -49,7 +49,7 @@ import type { DroppedThing, DropLinkResult } from './link-drop'
 import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
-import type { MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
+import type { MailAttachmentOpenResult, MailAwaitReply, MailDraftEdit, OutboundMailResult } from './outbound-mail'
 import type { AppCommandAnswer, AppCommandRequest } from './app-commands'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -628,7 +628,9 @@ export interface IpcInvokeChannels {
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
   'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
-  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string, awaitReply?: MailAwaitReply | null, attachmentsShown?: string[] | null]; result: OutboundMailResult }
+  'outboundMail:openAttachment': { args: [companyId: string, messageId: string, sha256: string]; result: MailAttachmentOpenResult }
+  'outboundMail:removeAttachment': { args: [companyId: string, messageId: string, sha256: string, expectedVersion: number]; result: OutboundMailResult }
   'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
   'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
@@ -1060,6 +1062,8 @@ export interface ElectronAPI {
   sendOutboundMail: Invoke<'outboundMail:send'>
   resolveOutboundMail: Invoke<'outboundMail:resolve'>
   discardOutboundMail: Invoke<'outboundMail:discard'>
+  openOutboundMailAttachment: Invoke<'outboundMail:openAttachment'>
+  removeOutboundMailAttachment: Invoke<'outboundMail:removeAttachment'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

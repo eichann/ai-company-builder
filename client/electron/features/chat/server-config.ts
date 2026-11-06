@@ -11,6 +11,7 @@ import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import type { RecordsApi } from '../../records/api'
 import { createRecordTools } from '../../records/tools'
+import { readMailAttachment } from '../../records/mail-attachments'
 import { recordToolProviders } from '../../records/tool-providers'
 import type { DrivePicking } from '../google/drive'
 import type { PathGuard } from '../ports'
@@ -159,7 +160,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         const topic = topicAfterTaskMade(deps.history.get(companyId, conversationId), made)
         if (topic && deps.history.patch(companyId, conversationId, { topicRecordId: topic })) deps.chatHistory.changed({ companyId, sessionId: conversationId, kind: 'patch' })
       }
-      return access ? createRecordTools(access, signal, { companyId, conversationId, department, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
+      // A mail draft's PDFs are read here, in main, inside this consultation's company folder only.
+      const readAttachment = companyRoot ? (file: string) => readMailAttachment(file, companyRoot) : undefined
+      return access ? createRecordTools(access, signal, { companyId, conversationId, department, largeContext, onRecordChanged, onRecordCreated, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders, readMailAttachment: readAttachment }) : null
     },
     consultationTopic: (companyId, conversationId) => {
       const session = deps.history.get(companyId, conversationId)

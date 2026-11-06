@@ -25,11 +25,16 @@
  *   says whether it was sent.
  * - **Retention** (§9 q9): the body (the canonical text) is deleted 30 days
  *   after sent / discarded; the hash, recipients, subject and Gmail id stay.
+ * - **Attachments** (plan §14-1): up to 3 PDFs on a new mail, part of the fixed
+ *   content by name, size and sha256; the bytes are kept here behind the
+ *   company handle, re-read and checked against the version before the send,
+ *   and deleted with the body.
  *
  * Never logged: subjects, bodies, addresses (only ids and fixed words).
  */
 import { CONTENT_HASH_RE } from '../../shared/core/fixed-content'
 import {
+  ATTACHMENT_LIMITS, attachmentListProblems, looksLikePdf, sanitizeAttachmentName, SHA256_HEX_RE, type MailAttachment,
   awaitReplyDefault, awaitReplyUntilProblem, awaitReplyWaitUntil,
   chatReplyCanonical, chatReplyProblems, countLinks, emailDomain, isExternalAddress, mailContentCanonical, mailContentProblems, MAIL_LIMITS,
   MESSAGE_ID_RE, normalizeEmail, REPLY_REFERENCES_MAX, type MailReplyHeaders, type RecipientSource,
@@ -37,7 +42,7 @@ import {
 import { MEETING_TYPE } from '../../shared/core/minutes'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
-import type { MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
+import type { MailAttachmentView, MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { ChatSender, ChatSendResult } from '../ports/chat'
 import type { MailReader, MailSendResult, MailSender, MailThread } from '../ports/mail'
@@ -65,6 +70,13 @@ const CLEANUP_CHUNK = 500
 
 export const MAIL_NOT_FOUND = { error: 'メールの下書きが見つかりません', code: 'MAIL_NOT_FOUND' }
 export const MAIL_UNKNOWN_TEXT = '届いたか分かりません。Gmail の送信済みを確かめてください。'
+/**
+ * A send of a version with files from an app that did not show them (a released app knows no
+ * attachments: it echoes the hash but never lists the files). Said so that such an app's card,
+ * which shows the server's sentence as is, tells the person what to do.
+ */
+export const ATTACHMENTS_NOT_SHOWN_TEXT = 'このメールにはファイル（PDF）が付いていますが、お使いのアプリでは表示できません。アプリを新しくして、付いているファイルを確かめてから送ってください。何も送っていません。'
+const ATTACHMENT_CHANGED_TEXT = '付いているファイルが、確かめたときのものと違っています。もう一度確かめてください。何も送っていません。'
 const MAIL_UNAVAILABLE = 'いまは Google でメールを送れません（止められているか、つながりません）。何も送っていません。'
 const MAIL_TURNED_OFF = '「メールを送る」をオフにしています。アプリの「設定」→「Google」でオンにしてから、もう一度押してください。何も送っていません。'
 const UNVERIFIABLE = 'いまは宛先の出どころ（カレンダー・HubSpot）を読めず、宛先を確かめられないため送れません。少し待ってから、もう一度「確かめて送る」を押してください。'
@@ -84,6 +96,8 @@ export interface OutboundMailDeps {
   payloads: MailPayloadStore
   /** sha256 hex of a text (the refs; not a secret). */
   digest: (text: string) => string
+  /** sha256 hex of bytes (an attachment's fingerprint); without it no file can be attached. */
+  digestBytes?: (bytes: Uint8Array) => string
   /** The company's members with their ACB email and display name. */
   members: (companyId: string) => Array<{ userId: string; email: string; name: string | null }>
   /** The meeting's calendar attendees, re-read from Google now; null when they cannot be read (minutes, G7). */
@@ -142,6 +156,19 @@ const SLACK_TURNED_OFF = '「返事を送る」をオフにしています。ア
 const SLACK_UNAVAILABLE = 'いまは Slack に返事を送れません（止められているか、つながりません）。何も送っていません。'
 
 const bad = (error: string, code = 'BAD_REQUEST', extra: Record<string, unknown> = {}) => refuse('bad-request', error, { code, ...extra })
+const ATTACHMENT_NOT_FOUND = () => refuse('not-found', 'このファイルは下書きに付いていません。', { code: 'ATTACHMENT_NOT_FOUND' })
+/** The longest base64 text of a file within the limit (4 characters per 3 bytes). */
+const MAX_BASE64 = Math.ceil(ATTACHMENT_LIMITS.totalBytes / 3) * 4
+/** The largest request body an attachment upload may be (the base64 plus the name and version). */
+export const ATTACHMENT_BODY_MAX = MAX_BASE64 + 64 * 1024
+// A plain character class (no grouped repetition: V8 would run out of stack on a 13 MB text).
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
+
+/** The bytes of a strict base64 text (standard alphabet, padded), or null. */
+function base64Bytes(raw: unknown): Uint8Array | null {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_BASE64 || raw.length % 4 !== 0 || !BASE64_RE.test(raw)) return null
+  return new Uint8Array(Buffer.from(raw, 'base64'))
+}
 const notFound = () => refuse('not-found', MAIL_NOT_FOUND.error, { code: MAIL_NOT_FOUND.code })
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const REF_RE = /^r[0-9a-f]{24}$/
@@ -357,6 +384,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       providerMessageId: typeof fields.provider_message_id === 'string' ? fields.provider_message_id : null,
       lastChangedBy: v.actorKind,
       updatedAt: s.updatedAt,
+      attachments: attachmentViews(companyId, mail.messageId, v.attachments ?? []),
       ...(offersAwait(companyId, mail.messageId, fields) ? {
         awaitReply: {
           expected: fields.expects_reply === true,
@@ -365,6 +393,13 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         },
       } : {}),
     }
+  }
+
+  /** A version's files as shown: name, size, sha256 and whether the bytes were deleted (retention). */
+  function attachmentViews(companyId: string, messageId: string, list: readonly MailAttachment[]): MailAttachmentView[] {
+    if (list.length === 0) return []
+    const deleted = new Set(companyData.forCompany(companyId).outbound.deletedAttachmentBytes(messageId))
+    return list.map(a => ({ name: a.name, size: a.size, sha256: a.sha256, bytesDeleted: deleted.has(a.sha256) }))
   }
 
   /** The member's own draft (the author only; anyone else, another company's id or a missing one: the same 404). */
@@ -437,9 +472,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return { to: refs.to.map(r => byRef.get(r)!), cc: refs.cc.map(r => byRef.get(r)!) }
   }
 
-  function contentCheck(from: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], subject: unknown, body: unknown, reply?: MailReplyHeaders): { canonical: string; subject: string } | Refusal {
+  function contentCheck(from: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], subject: unknown, body: unknown, reply?: MailReplyHeaders, attachments: readonly MailAttachment[] = []): { canonical: string; subject: string } | Refusal {
     if (typeof subject !== 'string' || typeof body !== 'string') return bad('subject and body: text', 'MAIL_INVALID')
-    const content = { from, to: to.map(r => r.email), cc: cc.map(r => r.email), subject, body, ...(reply ? { reply } : {}) }
+    const content = { from, to: to.map(r => r.email), cc: cc.map(r => r.email), subject, body, ...(reply ? { reply } : {}), attachments }
     const problems = mailContentProblems(content)
     if (problems.length > 0) return bad(problems[0], 'MAIL_INVALID', { problems })
     return { canonical: mailContentCanonical(content), subject: subject.normalize('NFC') }
@@ -483,8 +518,17 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       return refuse('conflict', '内容が変わりました。もう一度確かめてください。', { code: 'CONTENT_CHANGED', ...(view ? { draft: view } : {}) })
     }
     if (d.fields.channel === 'slack') return chatSendStep(member, d, version, body.hash, payload.canonical)
-    let content: { from: string; to: string[]; cc: string[]; subject: string; body: string; reply?: MailReplyHeaders }
+    let content: { from: string; to: string[]; cc: string[]; subject: string; body: string; reply?: MailReplyHeaders; attachments?: MailAttachment[] }
     try { content = JSON.parse(payload.canonical) as typeof content } catch { return notFound() }
+    // Files go only when the person was shown each one: the request names them (an app that knows no
+    // attachments echoes the hash, which the server made, but cannot name files it never showed).
+    const files = Array.isArray(content.attachments) ? content.attachments : []
+    if (files.length > 0) {
+      const shown = Array.isArray(body.attachmentsShown) ? body.attachmentsShown : null
+      if (!shown || shown.length !== files.length || !files.every(f => shown.includes(f.sha256))) {
+        return refuse('conflict', ATTACHMENTS_NOT_SHOWN_TEXT, { code: 'ATTACHMENTS_NOT_SHOWN' })
+      }
+    }
     // 2. The member's permission to send mail (the role メールを送る), from the account the draft names.
     const sender = await deps.mail.senderAccount(member.companyId, member.userId)
     if (!sender.ok && sender.reason === 'consent-needed') {
@@ -506,21 +550,34 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     if (gone.length > 0) {
       return refuse('conflict', '宛先の中に、もう出どころ（カレンダーの参加者・HubSpot の連絡先など）にない人がいます。宛先を直してから、もう一度確かめてください。', { code: 'RECIPIENT_GONE', goneRefs: gone })
     }
-    // 4. The operation record, before anything leaves (one send at a time; never twice).
+    // 4. Each file read again from storage: exactly the bytes the version names (size and sha256), else nothing leaves.
+    const fileBytes: Array<{ name: string; bytes: Uint8Array }> = []
+    for (const f of files) {
+      const row = handle.outbound.attachment(d.mail.messageId, f.sha256)
+      const bytes = row?.bytes ?? null
+      if (!bytes || !deps.digestBytes || bytes.byteLength !== f.size || deps.digestBytes(bytes) !== f.sha256 || !looksLikePdf(bytes)) {
+        logError('outbound-mail', 'attachment does not match its version', undefined, { message: d.mail.messageId })
+        return refuse('conflict', ATTACHMENT_CHANGED_TEXT, { code: 'ATTACHMENT_CHANGED' })
+      }
+      fileBytes.push({ name: f.name, bytes })
+    }
+    // 5. The operation record, before anything leaves (one send at a time; never twice).
     const sendId = deps.ids.newId()
     const startedAt = deps.clock.now()
     if (!handle.outbound.startSend({ id: sendId, messageId: d.mail.messageId, version, hash: body.hash, by: member.userId, startedAt, outcome: 'sending', reason: null, providerMessageId: null, finishedAt: null })) {
       return refuse('conflict', 'このメールはいま送っている途中か、すでに送られています。', { code: 'SEND_IN_PROGRESS' })
     }
-    // 5. Gmail, once (a reply: into the member's own conversation, with the thread's ids).
+    // 6. Gmail, once (a reply: into the member's own conversation, with the thread's ids; files: the upload way).
     let result: MailSendResult
     try {
       const raw = gmailRaw(buildMailMessage({
         from: content.from, to: content.to, cc: content.cc, subject: content.subject, body: content.body, date: new Date(deps.clock.nowMs()),
         messageId: ourMessageId(sendId, content.from),
         ...(content.reply ? { inReplyTo: content.reply.inReplyTo, references: content.reply.references } : {}),
+        ...(fileBytes.length > 0 ? { attachments: fileBytes } : {}),
       }))
-      result = await deps.mail.send(member.companyId, member.userId, raw, content.reply ? { threadId: content.reply.threadId } : undefined)
+      const options = fileBytes.length > 0 ? { upload: true } : content.reply ? { threadId: content.reply.threadId } : undefined
+      result = await deps.mail.send(member.companyId, member.userId, raw, options)
     } catch (err) {
       // Whether it left is not known (the build cannot fail for a stored version; a throw in the call can be after sending).
       logError('outbound-mail', 'send threw', err, { message: d.mail.messageId })
@@ -566,6 +623,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     })
     if (!moved.ok) logError('outbound-mail', 'sent state not recorded', undefined, { message: mail.messageId, reason: moved.reason })
     handle.outbound.setFinished(mail.messageId, at)
+    dropUnsentFiles(member.companyId, mail.messageId, at)
     const interactionId = interactionOf(member.companyId, mail.messageId)
     const ownId = sendId ? ourMessageId(sendId, mail.fromEmail) : null
     // A reply belongs to its 連絡's thread (one interaction per thread, inbox.md): the inbox hears it; no new receipt.
@@ -577,6 +635,19 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     }
     const view = viewOf(member.companyId, mail, mail.messageId)
     return view ? ok({ outcome: 'sent', draft: view }) : notFound()
+  }
+
+  /**
+   * A draft that left 「下書き」 (sent or discarded) keeps the bytes of its last version's files only
+   * (until retention); the bytes of files taken off earlier go now — nothing will send them.
+   */
+  function dropUnsentFiles(companyId: string, messageId: string, at: string): void {
+    const outbound = companyData.forCompany(companyId).outbound
+    const s = companyData.forCompany(companyId).records.states([messageId])[0]
+    let version = 0
+    try { version = Number((JSON.parse(s?.fields ?? '{}') as { payload_version?: unknown }).payload_version) || 0 } catch { version = 0 }
+    const keep = outbound.version(messageId, version)?.attachments?.map(a => a.sha256) ?? []
+    outbound.deleteAttachmentBytes(messageId, at, keep)
   }
 
   /** The Message-ID ACB gives a mail it sends (known afterwards, for the inbox's thread). */
@@ -781,7 +852,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   /** A new version of a draft: the content, the record's fields and the recipients, all or nothing. */
-  function newVersion(member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, canonical: string, subject: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[], extra: Record<string, LedgerValue> = {}): Outcome<{ draft: OutboundMailView }> {
+  function newVersion(
+    member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, version: number, canonical: string, subject: string, to: OutboundRecipientRow[], cc: OutboundRecipientRow[],
+    extra: Record<string, LedgerValue> = {}, files: { list: readonly MailAttachment[]; store?: () => void } = { list: [] },
+  ): Outcome<{ draft: OutboundMailView }> {
     const handle = companyData.forCompany(member.companyId)
     const next = version + 1
     const at = deps.clock.now()
@@ -793,11 +867,44 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         fields: { subject, payload_hash: fixed.hash, payload_version: next, ...extra }, actor: { id: member.userId, ...actor, source: actor.source ?? null },
       })
       if (!r.ok) throw new WriteFailed(r)
-      handle.outbound.insertVersion({ messageId: d.mail.messageId, version: next, to, cc, actorKind: actor.kind, createdAt: at })
+      // A new file's bytes with the version that names it (all or nothing).
+      files.store?.()
+      handle.outbound.insertVersion({ messageId: d.mail.messageId, version: next, to, cc, attachments: [...files.list], actorKind: actor.kind, createdAt: at })
       return r
     })
     if (!moved.ok) return writeFailed(moved)
     return draftAnswer(member, d.mail)
+  }
+
+  /**
+   * A new version with another list of files (`change` returns it, null = nothing to change, or
+   * 'not-found'): the same checks and transaction as any edit; the recipients, subject and body
+   * stay as they are.
+   */
+  function changeFiles(
+    member: Member, actor: ActorInput, d: NonNullable<ReturnType<typeof ownDraft>>, expectedVersion: number,
+    change: (list: readonly MailAttachment[]) => { list: MailAttachment[]; store?: (handle: ReturnType<CompanyDataSource['forCompany']>) => void } | null | 'not-found',
+  ): Outcome<{ draft: OutboundMailView }> {
+    if (d.state !== 'draft') return refuse('conflict', 'この下書きはもう直せません。', { code: 'NOT_DRAFT', state: d.state })
+    const handle = companyData.forCompany(member.companyId)
+    if (handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending') return refuse('conflict', 'このメールはいま送っている途中です。', { code: 'SEND_IN_PROGRESS' })
+    const version = typeof d.fields.payload_version === 'number' ? d.fields.payload_version : 0
+    if (expectedVersion !== version) return refuse('conflict', 'ほかの変更が先にありました。もう一度読み込んでください。', { code: 'VERSION_CONFLICT', version })
+    const current = handle.outbound.version(d.mail.messageId, version)
+    const payload = deps.payloads.current(member.companyId, KIND, d.mail.messageId)
+    if (!current || !payload || payload.canonical === null || payload.version !== version) return notFound()
+    let old: { subject: string; body: string; reply?: MailReplyHeaders }
+    try { old = JSON.parse(payload.canonical) as typeof old } catch { return notFound() }
+    const next = change(current.attachments ?? [])
+    if (next === 'not-found') return ATTACHMENT_NOT_FOUND()
+    if (next === null) return draftAnswer(member, d.mail)
+    const problems = attachmentListProblems(next.list)
+    if (problems.length > 0) return bad(problems[0], 'ATTACHMENT_INVALID', { problems })
+    const checked = contentCheck(d.mail.fromEmail, current.to, current.cc, old.subject, old.body, old.reply, next.list)
+    if ('ok' in checked) return checked
+    return newVersion(member, actor, d, version, checked.canonical, checked.subject, current.to, current.cc, {}, {
+      list: next.list, ...(next.store ? { store: () => next.store!(handle) } : {}),
+    })
   }
 
   return {
@@ -945,11 +1052,74 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
         [...current.to, ...current.cc, ...handle.outbound.typedRecipients(d.mail.messageId)],
         draftCtx(member.companyId, d.mail))
       if ('ok' in resolved) return resolved
-      // A reply keeps the thread it was drafted for (the hash covers it).
-      const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body, old.reply)
+      // A reply keeps the thread it was drafted for, every edit the files attached (the hash covers both).
+      const kept = current.attachments ?? []
+      const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body, old.reply, kept)
       if ('ok' in checked) return checked
       const mark: Record<string, LedgerValue> = expects !== undefined && offersAwait(member.companyId, d.mail.messageId, d.fields) ? { expects_reply: expects } : {}
-      return newVersion(member, actor, d, version, checked.canonical, checked.subject, resolved.to, resolved.cc, mark)
+      return newVersion(member, actor, d, version, checked.canonical, checked.subject, resolved.to, resolved.cc, mark, { list: kept })
+    },
+
+    /**
+     * A PDF attached (person or their AI): POST /outbound/:id/attachments { expectedVersion, name,
+     * contentBase64 } → a new version whose fixed content names the file (name, size, sha256).
+     * The same bytes attached already change nothing.
+     */
+    attach(member: Member, actor: ActorInput, messageId: unknown, rawBody: unknown): Outcome<{ draft: OutboundMailView }> {
+      const off = enabled(member.companyId)
+      if (off) return off
+      const d = ownDraft(member, messageId)
+      if (!d) return notFound()
+      const body = isObj(rawBody) ? rawBody : {}
+      if (typeof body.expectedVersion !== 'number' || !Number.isInteger(body.expectedVersion)) return bad('expectedVersion: the version you read')
+      const name = sanitizeAttachmentName(body.name)
+      if (!name) return bad('ファイルの名前は「.pdf」で終わる名前にしてください（120 文字まで）。', 'ATTACHMENT_INVALID')
+      const bytes = base64Bytes(body.contentBase64)
+      if (!bytes) return bad('ファイルの中身を読めませんでした（10 MB までの PDF だけ付けられます）。', 'ATTACHMENT_INVALID')
+      if (!looksLikePdf(bytes)) return bad('付けられるのは PDF のファイルだけです。', 'ATTACHMENT_INVALID')
+      if (d.fields.channel === 'slack' || interactionOf(member.companyId, d.mail.messageId) !== null) {
+        return bad('ファイルを付けられるのは、新しく送るメールだけです（返事や Slack には付けられません）。', 'ATTACHMENT_NOT_HERE')
+      }
+      if (!deps.digestBytes) return refuse('unavailable', 'いまはファイルを付けられません。', { code: 'ATTACHMENTS_UNAVAILABLE' })
+      const sha256 = deps.digestBytes(bytes)
+      return changeFiles(member, actor, d, body.expectedVersion, list => {
+        if (list.some(a => a.sha256 === sha256)) return null
+        return { list: [...list, { name, size: bytes.byteLength, sha256 }], store: handle => handle.outbound.putAttachment({ messageId: d.mail.messageId, sha256, name, size: bytes.byteLength, bytes, addedBy: member.userId, addedAt: deps.clock.now() }) }
+      })
+    },
+
+    /** A file taken off (person or their AI): DELETE /outbound/:id/attachments/:sha256?expectedVersion=N → a new version without it. */
+    detach(member: Member, actor: ActorInput, messageId: unknown, sha256: unknown, expectedVersion: unknown): Outcome<{ draft: OutboundMailView }> {
+      const off = enabled(member.companyId)
+      if (off) return off
+      const d = ownDraft(member, messageId)
+      if (!d) return notFound()
+      const expected = typeof expectedVersion === 'string' && /^[1-9][0-9]{0,8}$/.test(expectedVersion) ? Number(expectedVersion) : expectedVersion
+      if (typeof expected !== 'number' || !Number.isInteger(expected)) return bad('expectedVersion: the version you read')
+      if (typeof sha256 !== 'string' || !SHA256_HEX_RE.test(sha256)) return ATTACHMENT_NOT_FOUND()
+      return changeFiles(member, actor, d, expected, list => {
+        if (!list.some(a => a.sha256 === sha256)) return 'not-found'
+        return { list: list.filter(a => a.sha256 !== sha256) }
+      })
+    },
+
+    /**
+     * The bytes of a file of the version as it is now (GET /outbound/:id/attachments/:sha256, a
+     * person's session only): the person opens exactly what will be sent.
+     */
+    attachmentFile(member: Member, messageId: unknown, sha256: unknown): Outcome<{ name: string; bytes: Uint8Array }> {
+      const off = enabled(member.companyId)
+      if (off) return off
+      const d = ownDraft(member, messageId)
+      if (!d) return notFound()
+      if (typeof sha256 !== 'string' || !SHA256_HEX_RE.test(sha256)) return ATTACHMENT_NOT_FOUND()
+      const handle = companyData.forCompany(member.companyId)
+      const version = typeof d.fields.payload_version === 'number' ? d.fields.payload_version : 0
+      const named = handle.outbound.version(d.mail.messageId, version)?.attachments?.find(a => a.sha256 === sha256)
+      if (!named) return ATTACHMENT_NOT_FOUND()
+      const row = handle.outbound.attachment(d.mail.messageId, sha256)
+      if (!row?.bytes) return refuse('gone', 'このファイルは、送ってから30日たったためサーバーから消しました（Gmail の送信済みには残っています）。', { code: 'ATTACHMENT_GONE' })
+      return ok({ name: named.name, bytes: row.bytes })
     },
 
     /** A person types an address (「あなたが入力」): POST /outbound/:id/recipients { email, name? }. Session only. */
@@ -1029,7 +1199,9 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (handle.outbound.lastSend(d.mail.messageId)?.outcome === 'sending') return refuse('conflict', 'このメールはいま送っている途中です。', { code: 'SEND_IN_PROGRESS' })
       const moved = writer.transition(member.companyId, { recordId: d.mail.messageId, action: 'discard', expectedVersion: d.recordVersion, to: 'discarded', actor: { id: member.userId, kind: 'human', source: null } })
       if (!moved.ok) return writeFailed(moved)
-      handle.outbound.setFinished(d.mail.messageId, deps.clock.now())
+      const at = deps.clock.now()
+      handle.outbound.setFinished(d.mail.messageId, at)
+      dropUnsentFiles(member.companyId, d.mail.messageId, at)
       return draftAnswer(member, d.mail)
     },
 
@@ -1049,6 +1221,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
           for (const m of due) {
             deps.transactions.run(() => {
               deps.payloads.clearBodies(companyId, KIND, [m.messageId])
+              // The files' bytes go with the body; their names, sizes and sha256 stay in the versions.
+              outbound.deleteAttachmentBytes(m.messageId, at)
               outbound.markBodyDeleted(m.messageId, at)
             })
             deleted++

@@ -21,7 +21,7 @@
  * (`features_off`) — applies from the next call. Only `users/me` is ever
  * asked for: nothing here can name another mailbox.
  */
-import { GMAIL_ARCHIVE_BODY, GMAIL_UNARCHIVE_BODY, googleFeaturesOff, GOOGLE_SCOPE } from '../../shared/core/google'
+import { GMAIL_ARCHIVE_BODY, GMAIL_UNARCHIVE_BODY, GMAIL_UPLOAD_SEND_PATH, googleFeaturesOff, GOOGLE_SCOPE } from '../../shared/core/google'
 import { normalizeEmail } from '../../shared/core/mail'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { InboxSource } from '../ports/inbox'
@@ -384,6 +384,15 @@ export function createGoogleMail(deps: GoogleMailDeps): MailReader & MailSender 
     },
 
     send(companyId, userId, raw, options) {
+      // With attachments: the message as bytes through the media upload (the one upload call
+      // `gmailCallAllowed` lets through). Only new mails carry files, so there is no threadId here.
+      if (options?.upload) {
+        return request(companyId, userId, {
+          api: 'gmail', method: 'POST', path: GMAIL_UPLOAD_SEND_PATH, query: { uploadType: 'media' },
+          rawBody: { contentType: 'message/rfc822', bytes: new Uint8Array(Buffer.from(raw, 'base64url')) },
+          scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send.attachments',
+        })
+      }
       const threadId = options?.threadId && ID_RE.test(options.threadId) ? options.threadId : null
       return request(companyId, userId, {
         api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send',

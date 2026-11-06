@@ -302,7 +302,10 @@ grant** — never a key, never a service account — so every switch above appli
   reply ACB has not read out of the inbox) whose body is exactly `{ removeLabelIds:
   ['INBOX'] }` or `{ addLabelIds: ['INBOX'] }`, on the `gmail` API; any other Gmail call must be a read
   (`GET` of messages, threads, history, profile, labels) with `gmail.readonly` or `messages/send` with
-  `gmail.send`; no other API may name a Gmail route (`/gmail/…`, `/upload/gmail/…`, `/batch/gmail/…`,
+  `gmail.send` — or, for a mail with attachments (`outbound-mail.md` "Attachments"), exactly
+  `POST /upload/gmail/v1/users/me/messages/send` with the query `uploadType=media` alone, a
+  `message/rfc822` body and `gmail.send` (the JSON `raw` form cannot carry 10 MB of files; no other
+  upload path, query, type or scope); no other API may name a Gmail route (`/gmail/…`, `/upload/gmail/…`, `/batch/gmail/…`,
   escaped or not — Google serves Gmail on the shared host too). The access token carries every granted
   scope, so the declared scope alone is not trusted: the call's shape is. Never trash, delete, a draft,
   a send, a read, another label, a batch or another mailbox with it.
@@ -444,7 +447,9 @@ Drive through the role ports (`connector-roles.md`).
   INBOX off or back on; `gmail.messages.archive` / `.unarchive`). A write: never retried.
 - **Send** (`mail`, `gmail.send`; `MailSender`): `senderAccount` (the active grant with
   `gmail.send` and `mail` not off → the Google email; else `consent-needed` / `turned-off`) and
-  `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`).
+  `send` (`POST users/me/messages/send`, never retried; a reply adds `threadId`; `{ upload: true }`
+  — a mail with attachments — the media upload `POST /upload/gmail/v1/users/me/messages/send?uploadType=media`
+  with the message as `message/rfc822` bytes, operation `gmail.send.attachments`).
 
 ## Practice Google (staging)
 

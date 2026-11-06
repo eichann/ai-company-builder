@@ -3,16 +3,17 @@
  * company: every statement binds `company_id = ?` with the handle's id.
  */
 import type Database from 'better-sqlite3'
-import type { RecipientSource } from '../../../shared/core/mail'
+import { SHA256_HEX_RE, type MailAttachment, type RecipientSource } from '../../../shared/core/mail'
 import type {
-  OutboundMailRepository, OutboundMailRow, OutboundRecipientRow, OutboundSendOutcome, OutboundSendRow,
+  OutboundAttachmentRow, OutboundMailRepository, OutboundMailRow, OutboundRecipientRow, OutboundSendOutcome, OutboundSendRow,
 } from '../../ports/outbound-mail'
 
 type MailRow = {
   message_id: string; author_id: string; from_email: string; minutes_id: string | null; deal_id: string | null
   created_at: string; finished_at: string | null; body_deleted_at: string | null
 }
-type VersionRow = { message_id: string; version: number; to_json: string; cc_json: string; actor_kind: string; created_at: string }
+type VersionRow = { message_id: string; version: number; to_json: string; cc_json: string; attachments_json: string | null; actor_kind: string; created_at: string }
+type AttachmentRow = { message_id: string; sha256: string; name: string; size: number; bytes: Buffer | null; added_by: string; added_at: string; bytes_deleted_at: string | null }
 type SendRow = {
   id: string; message_id: string; version: number; hash: string; by_user: string; started_at: string; outcome: string
   reason: string | null; provider_message_id: string | null; finished_at: string | null
@@ -35,6 +36,21 @@ function recipientsOf(text: string): OutboundRecipientRow[] {
       const o = x as Record<string, unknown>
       return o && typeof o.ref === 'string' && typeof o.email === 'string' && SOURCES.includes(o.source as string)
         ? [{ ref: o.ref, email: o.email, name: typeof o.name === 'string' ? o.name : null, source: o.source as RecipientSource }]
+        : []
+    })
+  } catch {
+    return []
+  }
+}
+function attachmentsOf(text: string | null): MailAttachment[] {
+  if (!text) return []
+  try {
+    const v = JSON.parse(text) as unknown
+    if (!Array.isArray(v)) return []
+    return v.flatMap((x: unknown) => {
+      const o = x as Record<string, unknown>
+      return o && typeof o.name === 'string' && typeof o.size === 'number' && typeof o.sha256 === 'string' && SHA256_HEX_RE.test(o.sha256)
+        ? [{ name: o.name, size: o.size, sha256: o.sha256 }]
         : []
     })
   } catch {
@@ -69,16 +85,42 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
     },
 
     insertVersion(row) {
-      conn.prepare('INSERT INTO outbound_mail_versions (company_id, message_id, version, to_json, cc_json, actor_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(companyId, row.messageId, row.version, JSON.stringify(row.to), JSON.stringify(row.cc), row.actorKind, row.createdAt)
+      // A version without files keeps the column null (as every version made before attachments).
+      const files = row.attachments && row.attachments.length > 0 ? JSON.stringify(row.attachments.map(a => ({ name: a.name, size: a.size, sha256: a.sha256 }))) : null
+      conn.prepare('INSERT INTO outbound_mail_versions (company_id, message_id, version, to_json, cc_json, attachments_json, actor_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(companyId, row.messageId, row.version, JSON.stringify(row.to), JSON.stringify(row.cc), files, row.actorKind, row.createdAt)
     },
     version(messageId, version) {
-      const r = conn.prepare('SELECT message_id, version, to_json, cc_json, actor_kind, created_at FROM outbound_mail_versions WHERE company_id = ? AND message_id = ? AND version = ?')
+      const r = conn.prepare('SELECT message_id, version, to_json, cc_json, attachments_json, actor_kind, created_at FROM outbound_mail_versions WHERE company_id = ? AND message_id = ? AND version = ?')
         .get(companyId, messageId, version) as VersionRow | undefined
       return r ? {
-        messageId: r.message_id, version: r.version, to: recipientsOf(r.to_json), cc: recipientsOf(r.cc_json),
+        messageId: r.message_id, version: r.version, to: recipientsOf(r.to_json), cc: recipientsOf(r.cc_json), attachments: attachmentsOf(r.attachments_json),
         actorKind: r.actor_kind === 'ai' ? 'ai' : 'human', createdAt: r.created_at,
       } : null
+    },
+
+    putAttachment(row) {
+      conn.prepare(`INSERT INTO outbound_mail_attachments (company_id, message_id, sha256, name, size, content_type, bytes, added_by, added_at, bytes_deleted_at)
+        VALUES (?, ?, ?, ?, ?, 'application/pdf', ?, ?, ?, NULL)
+        ON CONFLICT (company_id, message_id, sha256) DO UPDATE SET bytes = excluded.bytes, bytes_deleted_at = NULL WHERE outbound_mail_attachments.bytes IS NULL`)
+        .run(companyId, row.messageId, row.sha256, row.name, row.size, Buffer.from(row.bytes), row.addedBy, row.addedAt)
+    },
+    attachment(messageId, sha256) {
+      const r = conn.prepare('SELECT message_id, sha256, name, size, bytes, added_by, added_at, bytes_deleted_at FROM outbound_mail_attachments WHERE company_id = ? AND message_id = ? AND sha256 = ?')
+        .get(companyId, messageId, sha256) as AttachmentRow | undefined
+      return r ? {
+        messageId: r.message_id, sha256: r.sha256, name: r.name, size: r.size, bytes: r.bytes ? new Uint8Array(r.bytes) : null,
+        addedBy: r.added_by, addedAt: r.added_at, bytesDeletedAt: r.bytes_deleted_at,
+      } satisfies OutboundAttachmentRow : null
+    },
+    deletedAttachmentBytes(messageId) {
+      return (conn.prepare('SELECT sha256 FROM outbound_mail_attachments WHERE company_id = ? AND message_id = ? AND bytes IS NULL ORDER BY sha256')
+        .all(companyId, messageId) as Array<{ sha256: string }>).map(r => r.sha256)
+    },
+    deleteAttachmentBytes(messageId, at, keep = []) {
+      return conn.prepare(`UPDATE outbound_mail_attachments SET bytes = NULL, bytes_deleted_at = ?
+        WHERE company_id = ? AND message_id = ? AND bytes IS NOT NULL AND sha256 NOT IN (SELECT value FROM json_each(?))`)
+        .run(at, companyId, messageId, JSON.stringify(keep)).changes
     },
 
     typedRecipients(messageId) {

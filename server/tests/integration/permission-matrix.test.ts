@@ -420,10 +420,16 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/outbound/:messageId/send', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/send`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/outbound/:messageId/resolve', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/resolve`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/outbound/:messageId/discard', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/discard`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  // PDF attachments (outbound-mail.md "Attachments"): the draft's author only, like every draft route.
+  r('POST /api/companies/:companyId/outbound/:messageId/attachments', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/attachments`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('DELETE /api/companies/:companyId/outbound/:messageId/attachments/:sha256', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/attachments/0000000000000000000000000000000000000000000000000000000000000000?expectedVersion=1` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/outbound/:messageId/attachments/:sha256', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/attachments/0000000000000000000000000000000000000000000000000000000000000000` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/records-ai/outbound-recipients', () => ({ path: '/api/records-ai/outbound-recipients', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/outbound', () => ({ path: '/api/records-ai/outbound', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('PUT /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/outbound/:messageId/attachments', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001/attachments', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('DELETE /api/records-ai/outbound/:messageId/attachments/:sha256', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001/attachments/0000000000000000000000000000000000000000000000000000000000000000' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
 
   // The Google connection (google-connector.md): the client and members' grants are owner/admin;
   // a member's own permission is any member's; Google's return to the server is public.
@@ -663,6 +669,9 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/outbound/:messageId/send', (w, id) => ({ path: `${C(w)}/outbound/${id}/send`, body: { hash: `sha256:${'0'.repeat(64)}` } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
   x('POST /api/companies/:companyId/outbound/:messageId/resolve', (w, id) => ({ path: `${C(w)}/outbound/${id}/resolve`, body: { sent: true } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
   x('POST /api/companies/:companyId/outbound/:messageId/discard', (w, id) => ({ path: `${C(w)}/outbound/${id}/discard`, body: {} }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/attachments', (w, id) => ({ path: `${C(w)}/outbound/${id}/attachments`, body: { expectedVersion: 1, name: '乗っ取り.pdf', contentBase64: Buffer.from('%PDF-1.7 x').toString('base64') } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('DELETE /api/companies/:companyId/outbound/:messageId/attachments/:sha256', (w, id) => ({ path: `${C(w)}/outbound/${id}/attachments/0000000000000000000000000000000000000000000000000000000000000000?expectedVersion=1` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('GET /api/companies/:companyId/outbound/:messageId/attachments/:sha256', (w, id) => ({ path: `${C(w)}/outbound/${id}/attachments/0000000000000000000000000000000000000000000000000000000000000000` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
   x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
@@ -718,6 +727,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'DELETE /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
   'GET /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
   'PUT /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
+  'POST /api/records-ai/outbound/:messageId/attachments': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
+  'DELETE /api/records-ai/outbound/:messageId/attachments/:sha256': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
   'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',

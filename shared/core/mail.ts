@@ -9,7 +9,9 @@
  *   (「あなたが入力」). A draft names them by `ref`; an address the AI wrote
  *   that is in none of these is not even offered (the server keeps refs, not
  *   the AI's text).
- * - Plain text only, no attachments (milestone 4).
+ * - Plain text, with up to `ATTACHMENT_LIMITS.count` PDF files attached (plan §14-1: the
+ *   proposal a company Skill wrote). Each file is part of the fixed content by its name, size
+ *   and sha256, so a changed file is a changed mail.
  * - The canonical form (hashed by the server) is the sender, To, CC, subject,
  *   body with line ends as `\n` and NFC — nothing trimmed: one character's
  *   difference is a different content.
@@ -91,6 +93,60 @@ export interface MailReplyHeaders {
 export const MESSAGE_ID_RE = /^<[\x21-\x3b\x3d\x3f-\x7e]{3,250}>$/
 export const REPLY_REFERENCES_MAX = 20
 
+/** A file attached to a mail, as the fixed content names it (the bytes are kept by the server). */
+export interface MailAttachment {
+  /** The file name shown and sent (`sanitizeAttachmentName`). */
+  name: string
+  /** Bytes. */
+  size: number
+  /** Lower-case hex sha256 of the bytes. */
+  sha256: string
+}
+
+/** PDFs only (owner decision §14-1): what a company Skill writes and a customer can open. */
+export const ATTACHMENT_LIMITS = {
+  count: 3,
+  /** All files of one mail together (one file at most the same). */
+  totalBytes: 10 * 1024 * 1024,
+  name: 120,
+} as const
+export const ATTACHMENT_CONTENT_TYPE = 'application/pdf'
+/** The first bytes of every PDF file. */
+export const PDF_MAGIC = '%PDF-'
+export const SHA256_HEX_RE = /^[0-9a-f]{64}$/
+
+/** Whether the bytes start like a PDF file (`%PDF-`). */
+export function looksLikePdf(bytes: Uint8Array): boolean {
+  if (bytes.length < PDF_MAGIC.length) return false
+  for (let i = 0; i < PDF_MAGIC.length; i++) if (bytes[i] !== PDF_MAGIC.charCodeAt(i)) return false
+  return true
+}
+
+/**
+ * The name an attachment is shown and sent under, or null when none fits: the last path segment
+ * (no folder ever travels), NFC, without control characters, trimmed, at most
+ * `ATTACHMENT_LIMITS.name` characters, ending in `.pdf`. Direction marks go too (a name drawn
+ * right to left could hide its real ending).
+ */
+export function sanitizeAttachmentName(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  const last = raw.split(/[\\/]/).pop() ?? ''
+  // eslint-disable-next-line no-control-regex
+  const name = last.normalize('NFC').replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u2028-\u202e\u2066-\u2069]/g, '').trim()
+  if (name === '' || name.startsWith('.') || [...name].length > ATTACHMENT_LIMITS.name || !/\.pdf$/i.test(name)) return null
+  return name
+}
+
+/** Why a mail's list of attachments cannot be (Japanese sentences), or an empty list. */
+export function attachmentListProblems(list: readonly MailAttachment[]): string[] {
+  const problems: string[] = []
+  if (list.length > ATTACHMENT_LIMITS.count) problems.push(`付けられるファイルは ${ATTACHMENT_LIMITS.count} つまでです`)
+  if (list.reduce((n, a) => n + a.size, 0) > ATTACHMENT_LIMITS.totalBytes) problems.push('付けるファイルは、合わせて 10 MB までです')
+  if (new Set(list.map(a => a.sha256)).size !== list.length) problems.push('同じファイルが2回付いています')
+  if (list.some(a => sanitizeAttachmentName(a.name) !== a.name || !SHA256_HEX_RE.test(a.sha256) || !Number.isInteger(a.size) || a.size <= 0)) problems.push('付けるファイルの形が正しくありません')
+  return problems
+}
+
 export interface MailContent {
   from: string
   to: string[]
@@ -98,6 +154,8 @@ export interface MailContent {
   subject: string
   body: string
   reply?: MailReplyHeaders
+  /** PDFs attached (absent or empty: none — the canonical text of a mail without files is unchanged). */
+  attachments?: readonly MailAttachment[]
 }
 
 // eslint-disable-next-line no-control-regex
@@ -123,7 +181,11 @@ export function mailContentProblems(c: { to: readonly string[]; cc: readonly str
   return problems
 }
 
-/** The canonical text the server hashes for a mail (no attachments in milestone 4). */
+/**
+ * The canonical text the server hashes for a mail. Attachments are `{ name, size, sha256 }` in the
+ * order attached; a mail without any keeps `attachments: []`, so every hash made before files
+ * existed still matches.
+ */
 export function mailContentCanonical(c: MailContent): string {
   return canonicalJson({
     v: 1,
@@ -132,7 +194,7 @@ export function mailContentCanonical(c: MailContent): string {
     cc: [...c.cc],
     subject: canonicalMailText(c.subject),
     body: canonicalMailText(c.body),
-    attachments: [],
+    attachments: (c.attachments ?? []).map(a => ({ name: a.name, size: a.size, sha256: a.sha256 })),
     // Only a reply carries it (a draft made before replies keeps its hash).
     ...(c.reply ? { reply: { threadId: c.reply.threadId, inReplyTo: c.reply.inReplyTo, references: [...c.reply.references] } } : {}),
   })

@@ -21,7 +21,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
@@ -630,5 +630,231 @@ describe('返事を待つ: a new mail we send first waits for their answer (outb
     expect(requestCount()).toBe(before + 1)
     const interaction = interactionOfLastSent()
     expect(JSON.parse(waitingFor(interaction.id)[0].fields).wait_until).toBe(`${until}T09:00`)
+  })
+})
+
+describe('attachments: a PDF fixed with the version (outbound-mail.md "Attachments", plan §14-1)', () => {
+  let token: string
+  let hubRef: string
+  const pdf = (size: number, seed = 'x') => Buffer.concat([Buffer.from(`%PDF-1.7\n%${seed}\n`), randomBytes(size)]).subarray(0, size)
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex')
+  const NAME = '提案書（株式会社サンプル様）.pdf'
+  const attach = (as: { token?: string; user?: string }, id: string, expectedVersion: number, bytes: Buffer, name = NAME) => {
+    const body = { expectedVersion, name, contentBase64: bytes.toString('base64') }
+    return as.token ? ai(as.token, 'POST', `/outbound/${id}/attachments`, body) : person(as.user!, 'POST', `/outbound/${id}/attachments`, body)
+  }
+  async function download(user: string | null, path: string, token?: string) {
+    currentUser.id = user
+    const res: Response = await app.request(`${PUBLIC}${path}`, { method: 'GET', headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    return { status: res.status, headers: res.headers, bytes: Buffer.from(await res.arrayBuffer()) }
+  }
+  async function draft() {
+    const made = await ai(token, 'POST', '/outbound', { bundleId, toRefs: [hubRef], subject: `提案書のご送付 ${Math.random()}`, body: '提案書をお送りします。' })
+    expect(made.status, made.text).toBe(201)
+    return made.body.data.draft as Json
+  }
+  const versions = (id: string) => (db.prepare('SELECT COUNT(*) AS n FROM outbound_mail_versions WHERE company_id = ? AND message_id = ?').get(CO, id) as Json).n
+  const bytesOf = (id: string, sha256: string) => (db.prepare('SELECT bytes FROM outbound_mail_attachments WHERE company_id = ? AND message_id = ? AND sha256 = ?').get(CO, id, sha256) as Json)?.bytes ?? null
+
+  beforeAll(async () => {
+    token = await tokenFor('m-sato')
+    hubRef = (await ai(token, 'POST', '/outbound-recipients', { bundleId })).body.data.recipients.find((x: Json) => x.source === 'hubspot' && x.email === GOOGLE_SEED.customerSuzuki).ref
+  })
+
+  it('the AI attaches the Skill\'s PDF: a new version naming it (name, size, sha256); the same bytes again change nothing', async () => {
+    const d = await draft()
+    expect(d.attachments).toEqual([])
+    const file = pdf(50_000)
+    // The tool sends the path's last segment only; a folder in the name is dropped by the server too.
+    const r = await attach({ token }, d.id, 1, file, `営業部/.personal/提案書/2026-11-06_サンプル/${NAME}`)
+    expect(r.status, r.text).toBe(200)
+    const v2 = r.body.data.draft
+    expect(v2).toMatchObject({ version: 2, lastChangedBy: 'ai', attachments: [{ name: NAME, size: file.byteLength, sha256: sha(file), bytesDeleted: false }] })
+    expect(v2.hash).not.toBe(d.hash)
+    expect(JSON.stringify(v2)).not.toContain('.personal')
+    const same = await attach({ token }, d.id, 2, file)
+    expect(same.body.data.draft.version).toBe(2)
+    expect(versions(d.id)).toBe(2)
+    // An edit of the text keeps the file (the hash still covers it).
+    const v3 = await ai(token, 'PUT', `/outbound/${d.id}`, { expectedVersion: 2, body: '提案書をお送りします。ご確認ください。' })
+    expect(v3.body.data.draft.attachments.map((a: Json) => a.sha256)).toEqual([sha(file)])
+  })
+
+  it('only PDFs, 3 at most, 10 MB together, a name ending in .pdf; a stale version refused — nothing written', async () => {
+    const d = await draft()
+    const notPdf = await attach({ token }, d.id, 1, Buffer.concat([Buffer.from('MZ'), randomBytes(100)]))
+    expect([notPdf.status, notPdf.body.code]).toEqual([400, 'ATTACHMENT_INVALID'])
+    const badName = await attach({ token }, d.id, 1, pdf(100), 'proposal.exe')
+    expect([badName.status, badName.body.code]).toEqual([400, 'ATTACHMENT_INVALID'])
+    const stale = await attach({ token }, d.id, 0, pdf(100))
+    expect([stale.status, stale.body.code]).toEqual([409, 'VERSION_CONFLICT'])
+    expect(versions(d.id)).toBe(1)
+    let v = 1
+    for (const seed of ['a', 'b', 'c']) {
+      const ok = await attach({ token }, d.id, v, pdf(1000, seed), `${seed}.pdf`)
+      expect(ok.status, ok.text).toBe(200)
+      v = ok.body.data.draft.version
+    }
+    const fourth = await attach({ token }, d.id, v, pdf(1000, 'd'), 'd.pdf')
+    expect([fourth.status, fourth.body.code]).toEqual([400, 'ATTACHMENT_INVALID'])
+    const big = await draft()
+    const six = await attach({ token }, big.id, 1, pdf(6 * 1024 * 1024, 'six'))
+    expect(six.status, six.text).toBe(200)
+    const tooMuch = await attach({ token }, big.id, 2, pdf(5 * 1024 * 1024, 'five'), 'five.pdf')
+    expect([tooMuch.status, tooMuch.body.code]).toEqual([400, 'ATTACHMENT_INVALID'])
+    const oneTooBig = await attach({ user: 'm-sato' }, (await draft()).id, 1, pdf(10 * 1024 * 1024 + 1, 'big'))
+    expect([400, 413]).toContain(oneTooBig.status)
+    expect(oneTooBig.body.code).toBe('ATTACHMENT_INVALID')
+    expect(db.prepare('SELECT COUNT(*) AS n FROM outbound_mail_attachments WHERE company_id = ? AND size > ?').get(CO, 10 * 1024 * 1024).n).toBe(0)
+  })
+
+  it('only the author: another member, another company\'s id and the AI\'s download get nothing; the person downloads exactly the bytes', async () => {
+    const d = await draft()
+    const file = pdf(4000)
+    expect((await attach({ token }, d.id, 1, file)).status).toBe(200)
+    const path = `/outbound/${d.id}/attachments/${sha(file)}`
+    const mine = await download('m-sato', `${C()}${path}`)
+    expect(mine.status).toBe(200)
+    expect(mine.bytes.equals(file)).toBe(true)
+    expect(mine.headers.get('content-type')).toBe('application/pdf')
+    expect(mine.headers.get('cache-control')).toBe('no-store')
+    expect(mine.headers.get('content-disposition')).toContain(encodeURIComponent(NAME))
+    // The AI cannot download (no route) nor use the session's route.
+    expect((await download(null, `/api/records-ai${path}`, token)).status).toBe(404)
+    expect((await download(null, `${C()}${path}`, token)).status).toBe(401)
+    // A colleague and another company: the same 404 as a missing draft, for download, upload and removal alike.
+    const missing = await call({ user: 'm-other-owner', method: 'GET', path: `${C(OTHER)}/outbound/outbound_message-0000000000000000` })
+    for (const [user, co] of [['m-tanaka', CO], ['m-other-owner', OTHER]]) {
+      const got = await download(user, `${C(co)}${path}`)
+      expect(got.status).toBe(404)
+      expect(JSON.parse(got.bytes.toString())).toEqual(missing.body)
+      const up = await call({ user, method: 'POST', path: `${C(co)}/outbound/${d.id}/attachments`, body: { expectedVersion: 2, name: 'x.pdf', contentBase64: pdf(10).toString('base64') } })
+      expect([up.status, up.body]).toEqual([404, missing.body])
+      const del = await call({ user, method: 'DELETE', path: `${C(co)}${path}?expectedVersion=2` })
+      expect([del.status, del.body]).toEqual([404, missing.body])
+    }
+    expect(versions(d.id)).toBe(2)
+    // A file the version does not name.
+    expect((await download('m-sato', `${C()}/outbound/${d.id}/attachments/${'0'.repeat(64)}`)).status).toBe(404)
+  })
+
+  it('an app that does not show files (sends the hash only) cannot send them; a changed file after confirming stops the send', async () => {
+    const d = await draft()
+    const first = pdf(3000, 'first')
+    const shown = (await attach({ token }, d.id, 1, first)).body.data.draft
+    const before = sentCount()
+    // A released app: only the hash.
+    const old = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: shown.hash })
+    expect([old.status, old.body.code]).toEqual([409, 'ATTACHMENTS_NOT_SHOWN'])
+    expect(old.body.error).toContain('アプリを新しく')
+    // Naming another file than the version's is no better.
+    const wrong = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: shown.hash, attachmentsShown: ['0'.repeat(64)] })
+    expect(wrong.body.code).toBe('ATTACHMENTS_NOT_SHOWN')
+    // The AI swaps the file after the person looked: the shown version is no longer the current one.
+    const second = pdf(3000, 'second')
+    const removed = await ai(token, 'DELETE', `/outbound/${d.id}/attachments/${sha(first)}?expectedVersion=2`)
+    expect(removed.status, removed.text).toBe(200)
+    expect((await attach({ token }, d.id, 3, second)).status).toBe(200)
+    const changed = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: shown.hash, attachmentsShown: [sha(first)] })
+    expect([changed.status, changed.body.code]).toEqual([409, 'CONTENT_CHANGED'])
+    expect(changed.body.draft.attachments.map((a: Json) => a.sha256)).toEqual([sha(second)])
+    expect(sentCount()).toBe(before)
+    expect(stateOf(d.id).state).toBe('draft')
+  })
+
+  it('the stored bytes are checked before anything leaves: other bytes under the same name → ATTACHMENT_CHANGED, nothing sent', async () => {
+    const d = await draft()
+    const file = pdf(3000, 'kept')
+    const v = (await attach({ token }, d.id, 1, file)).body.data.draft
+    const before = sentCount()
+    const tampered = Buffer.from(file)
+    tampered[tampered.length - 1] ^= 0xff
+    db.prepare('UPDATE outbound_mail_attachments SET bytes = ? WHERE company_id = ? AND message_id = ?').run(tampered, CO, d.id)
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: v.hash, attachmentsShown: [sha(file)] })
+    expect([r.status, r.body.code]).toEqual([409, 'ATTACHMENT_CHANGED'])
+    expect(sentCount()).toBe(before)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM outbound_sends WHERE company_id = ? AND message_id = ?').get(CO, d.id).n).toBe(0)
+    expect(stateOf(d.id).state).toBe('draft')
+  })
+
+  it('sent through Gmail\'s upload as multipart/mixed: the text as written, each PDF with its Japanese name; a mail without files keeps the plain send', async () => {
+    const d = await draft()
+    const a = pdf(70_001, 'one')
+    const b = pdf(2_000, 'two')
+    expect((await attach({ user: 'm-sato' }, d.id, 1, a)).status).toBe(200)
+    const v = (await attach({ token }, d.id, 2, b, '別紙_見積.pdf')).body.data.draft
+    const before = google.sent.length
+    const r = await person('m-sato', 'POST', `/outbound/${d.id}/send`, { hash: v.hash, attachmentsShown: [sha(b), sha(a)] })
+    expect(r.body.data?.outcome, r.text).toBe('sent')
+    expect(google.sent.length).toBe(before + 1)
+    const mail = google.sent[google.sent.length - 1]
+    expect(mail.via).toBe('upload')
+    expect(mail.headers['content-type']).toMatch(/^multipart\/mixed; boundary="acb-mixed-[0-9a-f]{32}"$/)
+    expect(mail.to).toEqual([GOOGLE_SEED.customerSuzuki])
+    expect(mail.body).toBe('提案書をお送りします。')
+    expect(mail.attachments.map(f => [f.filename, f.contentType])).toEqual([[NAME, 'application/pdf'], ['別紙_見積.pdf', 'application/pdf']])
+    expect(mail.attachments[0].bytes.equals(a)).toBe(true)
+    expect(mail.attachments[1].bytes.equals(b)).toBe(true)
+    expect(r.body.data.draft).toMatchObject({ state: 'sent', providerMessageId: mail.id })
+    // Every mail sent without files went the plain way (the upload is only for files).
+    expect(google.sent.filter(m => m.via === 'upload')).toHaveLength(1)
+    expect(google.sent.filter(m => m.attachments.length === 0).every(m => m.via === 'raw')).toBe(true)
+    // The Google client's one guard lets exactly this upload through.
+    const { gmailCallAllowed, GOOGLE_SCOPE } = await import('../../../shared/core/google')
+    const up = { api: 'gmail', method: 'POST', path: '/upload/gmail/v1/users/me/messages/send', scope: GOOGLE_SCOPE.gmailSend, query: { uploadType: 'media' }, rawContentType: 'message/rfc822' }
+    expect(gmailCallAllowed(up)).toBe(true)
+    for (const bad of [
+      { ...up, query: { uploadType: 'multipart' } }, { ...up, query: { uploadType: 'media', alt: 'json' } }, { ...up, query: {} },
+      { ...up, rawContentType: 'multipart/related' }, { ...up, scope: GOOGLE_SCOPE.gmailModify }, { ...up, method: 'PUT' },
+      { ...up, path: '/upload/gmail/v1/users/me/drafts' }, { ...up, path: '/upload/gmail/v1/users/someone@else.example/messages/send' },
+      { ...up, path: '/upload/gmail/v1/users/me/messages/import' }, { ...up, api: 'drive' },
+    ]) expect(gmailCallAllowed(bad), JSON.stringify(bad)).toBe(false)
+  })
+
+  it('a person takes a file off (a new version); the bytes of files no longer in it go when the draft is discarded, the rest 30 days after', async () => {
+    const d = await draft()
+    const keep = pdf(1000, 'keep')
+    const drop = pdf(1000, 'drop')
+    expect((await attach({ token }, d.id, 1, keep)).status).toBe(200)
+    expect((await attach({ token }, d.id, 2, drop, 'drop.pdf')).status).toBe(200)
+    const off = await call({ user: 'm-sato', method: 'DELETE', path: `${C()}/outbound/${d.id}/attachments/${sha(drop)}?expectedVersion=3` })
+    expect(off.status, off.text).toBe(200)
+    expect(off.body.data.draft).toMatchObject({ version: 4, lastChangedBy: 'human' })
+    expect(off.body.data.draft.attachments.map((a: Json) => a.name)).toEqual([NAME])
+    const notThere = await call({ user: 'm-sato', method: 'DELETE', path: `${C()}/outbound/${d.id}/attachments/${sha(drop)}?expectedVersion=4` })
+    expect([notThere.status, notThere.body.code]).toEqual([404, 'ATTACHMENT_NOT_FOUND'])
+    // Still a draft: both kept (an earlier version names the one taken off).
+    expect(bytesOf(d.id, sha(drop))).not.toBeNull()
+    expect((await person('m-sato', 'POST', `/outbound/${d.id}/discard`, {})).body.data.draft.state).toBe('discarded')
+    expect(bytesOf(d.id, sha(drop))).toBeNull()
+    expect(bytesOf(d.id, sha(keep))).not.toBeNull()
+    // 30 days later the rest goes with the body; the name, size and sha256 stay.
+    const { createOutboundMailService } = await import('../../src/services/outbound-mail')
+    const { createFixedPayloads } = await import('../../src/services/fixed-payloads')
+    const { sqliteCompanyData } = await import('../../src/adapters/sqlite/company-data')
+    const { sqliteTransactions } = await import('../../src/adapters/sqlite/transactions')
+    const companyData = sqliteCompanyData(db)
+    const nowMs = Date.now() + 31 * 24 * 3600_000
+    const clock = { nowMs: () => nowMs, now: () => new Date(nowMs).toISOString() }
+    const service = createOutboundMailService({
+      companyData, transactions: sqliteTransactions(db), clock, ids: { newId: () => 'x', newToken: () => 'x' },
+      writer: null as never, digest: () => '', members: () => [], meetingAttendees: async () => null,
+      bundleContacts: async () => ({ ok: false, reason: 'x' }), mail: { senderAccount: async () => ({ ok: false, reason: 'unavailable' }), send: async () => ({ ok: false, kind: 'not-sent', reason: 'x' }) },
+      companyIds: () => [CO, OTHER], payloads: createFixedPayloads({ companyData, clock }),
+    })
+    service.cleanupBodies()
+    expect(bytesOf(d.id, sha(keep))).toBeNull()
+    const kept = (await person('m-sato', 'GET', `/outbound/${d.id}`)).body.data.draft
+    expect(kept.attachments).toEqual([{ name: NAME, size: 1000, sha256: sha(keep), bytesDeleted: true }])
+    const gone = await download('m-sato', `${C()}/outbound/${d.id}/attachments/${sha(keep)}`)
+    expect(gone.status).toBe(410)
+    // Sent mails lose their files' bytes the same way.
+    const sentWithFiles = db.prepare('SELECT COUNT(*) AS n FROM outbound_mail_attachments a JOIN outbound_mails m ON m.company_id = a.company_id AND m.message_id = a.message_id WHERE a.company_id = ? AND m.finished_at IS NOT NULL AND a.bytes IS NOT NULL').get(CO).n
+    expect(sentWithFiles).toBe(0)
+  })
+
+  it('no file name or bytes in any log line', () => {
+    const logs = logLines.join('\n')
+    for (const word of ['提案書（株式会社サンプル様）', '別紙_見積', '%PDF-', encodeURIComponent('提案書')]) expect(logs).not.toContain(word)
   })
 })

@@ -10,13 +10,27 @@
  *   PUT  /outbound/:messageId               MailDraftChange → { draft }
  *   GET  /outbound/:messageId/recipients    → MailRecipientsView (the draft's sources, typed ones included)
  *   POST /outbound/:messageId/recipients    { email, name? } → { recipient, draft } (「あなたが入力」, a person only)
- *   POST /outbound/:messageId/send          { hash, awaitReply?: { until } } → MailSendAnswer (a person only)
+ *   POST /outbound/:messageId/attachments   MailAttachInput → { draft } (a new version with the PDF attached)
+ *   DELETE /outbound/:messageId/attachments/:sha256?expectedVersion=N → { draft } (a new version without it)
+ *   GET  /outbound/:messageId/attachments/:sha256 → the PDF's bytes (a person only: what will be sent)
+ *   POST /outbound/:messageId/send          { hash, awaitReply?, attachmentsShown? } → MailSendAnswer (a person only)
  *   POST /outbound/:messageId/resolve       { sent: boolean } → { draft }    (after an unknown send; a person only)
  *   POST /outbound/:messageId/discard       {} → { draft }                   (a person only)
  *
  * Record token (the member's AI): POST /outbound-recipients (read), POST /outbound
- * (act), GET /outbound/:messageId (read), PUT /outbound/:messageId (act). There is
- * no send, resolve, discard or typed address for the AI: no route exists.
+ * (act), GET /outbound/:messageId (read), PUT /outbound/:messageId (act), POST and DELETE
+ * /outbound/:messageId/attachments… (act: the AI attaches the PDF a company Skill wrote). There is
+ * no send, resolve, discard, typed address or attachment download for the AI: no route exists.
+ *
+ * Attachments (plan §14-1 「承認した送信を中身の版に固定」, outbound-mail.md "Attachments"): a new mail
+ * (not a reply, not Slack) may carry up to 3 PDFs, 10 MB together; each is part of the fixed
+ * content (name, size, sha256), so attaching or removing one is a new version and a changed file
+ * makes the send stop with CONTENT_CHANGED. A send of a version with files must name them in
+ * `attachmentsShown` (the sha256 of each file the person was shown): an app that cannot show
+ * files cannot send them unseen (ATTACHMENTS_NOT_SHOWN). Codes: ATTACHMENT_INVALID (400, `problems`),
+ * ATTACHMENT_NOT_HERE (400: a reply or a Slack reply), ATTACHMENT_NOT_FOUND (404),
+ * ATTACHMENT_GONE (410: the bytes were deleted 30 days after sending), ATTACHMENT_CHANGED (409: the
+ * stored file no longer matches; nothing sent), ATTACHMENTS_NOT_SHOWN (409).
  *
  * Refusal codes: MAIL_NOT_FOUND (404, also another company's / another member's
  * draft), RECIPIENT_NOT_OFFERED (400: a ref not from a source), MAIL_INVALID (400,
@@ -88,6 +102,17 @@ export interface OutboundMailView {
    * when it was sent (null: not waited for).
    */
   awaitReply?: { expected: boolean; defaultUntil: string; chosenUntil: string | null }
+  /** The PDFs attached to this version, in order (empty: none; absent from an older server). */
+  attachments?: MailAttachmentView[]
+}
+
+/** A PDF attached to a version (the fixed content names it; `bytesDeleted` after retention). */
+export interface MailAttachmentView {
+  name: string
+  size: number
+  sha256: string
+  /** True once the bytes were deleted (30 days after sent / discarded); the name and size stay. */
+  bytesDeleted: boolean
 }
 
 export interface MailRecipientsView {
@@ -129,6 +154,18 @@ export interface MailSendInput {
   hash: string
   /** 「返事を待つ」 ticked: the day to notice silence (`YYYY-MM-DD`, today … 180 days). A new mail only. */
   awaitReply?: { until: string }
+  /** The sha256 of every file attached to the version shown (required, exactly, when it has files). */
+  attachmentsShown?: string[]
+}
+
+/** Attaching a PDF: POST /outbound/:messageId/attachments (JSON; the bytes as base64). */
+export interface MailAttachInput {
+  /** The version the change is made on (`OutboundMailView.version`). */
+  expectedVersion: number
+  /** The file name (a path's last segment is taken; it must end in `.pdf`). */
+  name: string
+  /** The file's bytes, base64 (standard alphabet); they must start with `%PDF-`. */
+  contentBase64: string
 }
 
 export type MailSendAnswer =
