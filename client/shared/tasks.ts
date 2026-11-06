@@ -7,7 +7,7 @@
 import { addBusinessDays, addDays, businessDaysBetween, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
 import { argDefaultOf, MESSAGE_TYPE } from '../../shared/core/core-types'
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
-import { parseTagsValue } from '../../shared/core/record-types'
+import { actionWho, linkWhoName, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import { restingTask } from '../../shared/core/turn-timing'
 import type { BundleKindsResult, RecordSummary } from '../../shared/types/records'
 import type { MeetingBundleQuestion } from '../../shared/types/minutes'
@@ -143,10 +143,50 @@ export interface TaskProposal {
   assigneeName: string | null
   /** `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM`, or null. */
   due: string | null
+  /** The minutes text it rests on (task version 13 `basis`), or null (an older server, or none given). */
+  basis: string | null
+  /** Whose AI added it (`requested_by`) and their name. */
+  addedBy: string | null
+  addedByName: string | null
+  /** 「似ている案があります」: an earlier proposal of the meeting with a close title, until someone says 「別のもの」. */
+  similarTo: { id: string; title: string } | null
+  /** What the member may press here: the type's `who` (the server decides each press). */
+  may: ProposalMay
+}
+
+/** The proposal buttons the member is offered (足す・要らない・案に戻す・別のもの). */
+export interface ProposalMay {
+  adopt: boolean
+  dismiss: boolean
+  proposeAgain: boolean
+  keepApart: boolean
+}
+
+/**
+ * Which proposal buttons to show the member (task version 13, `who` of adopt / dismiss / propose_again /
+ * keep_apart): a person field holding the member, `anyone`, or `link:<name>` when the member reads that
+ * linked record — `readsMeeting`: the list came through the meeting, so the member reads it. Roles
+ * (admin, 部署の管理役) are not known here: an older server's type (who: requested_by and roles) shows the
+ * buttons to the requester only. An action the type lacks (an older server: no 別のもの) is never offered.
+ */
+export function proposalMay(def: TypeDefinition | undefined, fields: Readonly<Record<string, unknown>>, me: string | null, readsMeeting: boolean): ProposalMay {
+  const may = (action: string) => {
+    const a = def && Object.prototype.hasOwnProperty.call(def.actions, action) ? def.actions[action] : undefined
+    if (!a || !me) return false
+    return actionWho(a, fields).some(w => w === 'anyone'
+      || (def?.fields[w]?.kind === 'person' && fields[w] === me)
+      || (linkWhoName(w) === 'meeting' && readsMeeting))
+  }
+  return { adopt: may('adopt'), dismiss: may('dismiss'), proposeAgain: may('propose_again'), keepApart: may('keep_apart') }
+}
+
+/** 「〇〇さんの AI が読みました・案 N 件」: who had the meeting read, and the proposals still open. */
+export function proposalsHeadline(readerName: string | null, open: number): string {
+  return `${readerName ? `${readerName}さんの AI が読みました・` : ''}案 ${open} 件`
 }
 
 export type TaskProposalsResult =
-  | { success: true; proposals: TaskProposal[] }
+  | { success: true; proposals: TaskProposal[]; readerId?: string | null; readerName?: string | null }
   | { success: false; offline: boolean; error: string }
 
 /**

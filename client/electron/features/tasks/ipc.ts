@@ -46,7 +46,7 @@ import { linkedPaths } from '../../../shared/record-views'
 import { dropLinkPlan, type DroppedThing, type DropLinkResult } from '../../../shared/link-drop'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
-  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
+  ARCHIVE_PAGE, ARCHIVE_SHOWN_DAYS, archivedTasks, archivePage, classifyTasks, isArchiveCursor, OPEN_TASK_STATES, proposalMay, TASKS_OFFLINE_TEXT,
   type ArchivedTasksResult, type BundleChoicesResult, type BundleCreateInput, type BundleKindsAnswer, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskProposalsResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -226,9 +226,10 @@ export function createTasksApi(deps: TasksDeps) {
 
     async proposals(companyId: string, meetingId: string): Promise<TaskProposalsResult> {
       if (!COMPANY.test(companyId) || typeof meetingId !== 'string' || !RECORD_ID_RE.test(meetingId)) return { success: false, offline: false, error: '入力が正しくありません。' }
-      const [a, names] = await Promise.all([
+      const [a, names, defs, id, meeting] = await Promise.all([
         call(companyId, 'POST', '/records/query', { type: 'task', state: ['proposed', 'dismissed'], link: { name: 'meeting', id: meetingId }, limit: 200 }),
-        people(companyId),
+        people(companyId), typeDefs(companyId), myId(),
+        call(companyId, 'GET', `/records/item/${encodeURIComponent(meetingId)}`),
       ])
       const list = records(a)
       if (!list) {
@@ -236,13 +237,25 @@ export function createTasksApi(deps: TasksDeps) {
         return { success: false, offline: f.offline, error: f.error }
       }
       const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : null)
+      const shown = list.filter(r => r.state === 'proposed' || r.state === 'dismissed')
+      const titleOf = new Map(shown.map(r => [r.id, r.title || '（名前なし）']))
+      // The list came through the meeting (the server answers it only to its readers): `link:meeting` holds.
+      const def = defs.get('task')
+      const readerId = meeting?.status === 200 ? str((meeting.json?.data as RecordDetail | undefined)?.record?.fields?.assignee) : null
       return {
         success: true,
-        proposals: list.filter(r => r.state === 'proposed' || r.state === 'dismissed').map(r => {
+        readerId, readerName: readerId ? names[readerId] ?? null : null,
+        proposals: shown.map(r => {
           const assignee = str(r.fields.assignee)
+          const addedBy = str(r.fields.requested_by)
+          // 「似ている案があります」 while the earlier one is still listed and nobody said 「別のもの」.
+          const similar = str(r.fields.similar_to)
+          const similarTo = similar && !str(r.fields.apart_by) && r.state === 'proposed' && titleOf.has(similar) ? { id: similar, title: titleOf.get(similar) as string } : null
           return {
             id: r.id, title: r.title || '（名前なし）', state: r.state as 'proposed' | 'dismissed', version: r.version,
             assignee, assigneeName: assignee ? names[assignee] ?? null : null, due: str(r.fields.due),
+            basis: str(r.fields.basis), addedBy, addedByName: addedBy ? names[addedBy] ?? null : null, similarTo,
+            may: proposalMay(def, r.fields, id, true),
           }
         }),
       }

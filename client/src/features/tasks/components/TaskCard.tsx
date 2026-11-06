@@ -172,7 +172,7 @@ export function TaskCard({ companyId, rootPath, recordId, knownVersion, renderPr
   })
   // 「議事録を確認する」: the meeting's summary, the AI's proposals and its decisions, each pressed on its own record.
   const review = card.review && <MinutesReview companyId={companyId} review={card.review} busy={busy}
-    onAct={(id, action, at) => change(async () => { const r = await actOnTask(companyId, id, { action, expectedVersion: at }); return r.success ? null : r.error })} />
+    onAct={(id, action, at, note) => change(async () => { const r = await actOnTask(companyId, id, { action, expectedVersion: at, ...(note ? { note } : {}) }); return r.success ? null : r.error })} />
   // 「タグ」: who may set tags edits them in place (AI suggestions inside); a typed 案件 name offers ［案件につなぐ］.
   const tagField = <TagField companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} canEdit={card.canSetTags} busy={busy}
     onSet={tags => runSteps([{ action: 'set_tags', args: { tags } }])}

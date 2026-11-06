@@ -522,3 +522,37 @@ test('a record written by the member\'s own AI tells the app at once (the task l
   await tools!.execute('records_create', { type: 'task', title: 'x' })
   assert.equal(changed, 1)
 })
+
+test('a meeting output whose basis quote is not in the minutes this turn read never reaches the server; one that is does', async () => {
+  const text = '■ 会議メモ\n佐藤さんが来週までに修正見積を鈴木様へ送る。\n事例集は高杉さんが探す。'
+  const posted: unknown[] = []
+  const fetch = (async (url: string, init?: RequestInit) => {
+    const json = (status: number, data: unknown) => new Response(JSON.stringify({ success: true, data }), { status })
+    if (url.endsWith('/me/record-tokens')) return json(201, { token: 'acb_rec_co.' + 'a'.repeat(64), tokenId: 'tok-1', scope: 'act', expiresAt: 'x' })
+    if (url.includes('/me/record-tokens/')) return json(200, { revoked: true })
+    if (url.endsWith('/api/records-ai/types')) return json(200, { types: TYPES.map(definition => ({ definition, source: 'core', versions: [1] })) })
+    if (url.includes('/api/records-ai/minutes/meeting-abcdef123456/text')) {
+      return json(200, { recordId: 'meeting-abcdef123456', version: 2, header: MINUTES_TEXT_HEADER, text, footer: MINUTES_TEXT_FOOTER, truncated: false, docVersion: 'notes:1',
+        meeting: { title: '商談', at: '2026-11-06T05:00:00.000Z' }, attendees: [], externalAttendees: 0, bundle: null, candidates: [], noBundle: true, instructionLike: [] })
+    }
+    if (url.endsWith('/api/records-ai/item')) { posted.push(JSON.parse(String(init?.body))); return json(201, { record: { id: 'task-0000aa', type: 'task', fields: {} }, entry: null }) }
+    return json(200, { plugins: [] })
+  }) as unknown as typeof globalThis.fetch
+  const api = createRecordsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], fetch })
+  const access = await api.openTurn('co', { conversationId: 'c1', agent: 'claude-code', scope: 'act' })
+  const tools = await createRecordTools(access!, undefined, { companyId: 'co', conversationId: 'c1' })
+  const create = (quote: string) => tools!.execute('records_create', { type: 'task', title: '見積を送る', links: { meeting: 'meeting-abcdef123456' }, quote })
+  // Before the minutes were read in this turn there is nothing to check against: the server keeps it as given.
+  await create('どこにもない作り話の文です')
+  assert.equal(posted.length, 1)
+  await tools!.execute('minutes_read', { id: 'meeting-abcdef123456' })
+  const refused = JSON.parse(await create('来週までに見積をお送りします'))
+  assert.equal(refused.code, 'QUOTE_NOT_IN_MINUTES')
+  assert.equal(posted.length, 1)
+  // The minutes' own words pass (a line break in them may be a space).
+  await create('来週までに修正見積を鈴木様へ送る。 事例集は')
+  assert.equal(posted.length, 2)
+  assert.equal((posted[1] as { quote?: string }).quote, '来週までに修正見積を鈴木様へ送る。 事例集は')
+  // The tool never offers a serial key any more.
+  assert.equal(tools!.specs.find(s => s.name === 'records_create')!.schema.safeParse({ type: 'task', title: 'x', key: 'task:1' }).success, false)
+})

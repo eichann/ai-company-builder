@@ -4,6 +4,8 @@ paths:
   - "server/src/services/google-meetings.ts"
   - "server/src/routes/minutes.ts"
   - "server/src/services/meeting-outputs.ts"
+  - "server/src/services/source-slot-candidates.ts"
+  - "shared/core/source-slot-candidates.ts"
   - "shared/core/meeting-outputs.ts"
   - "shared/types/meeting-outputs.ts"
   - "admin/src/app/companies/[[]id]/task-list/meeting-duplicates.tsx"
@@ -108,8 +110,9 @@ access itself: `google-connector.md` (G3).
    assignee = attending member ids, due within a year —, `decisions_record` linking meeting /
    bundle, the mail draft (G8)), each citing the minutes text it rests on, then
    `meeting__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
-   (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote
-   check (`quoteAppearsIn`) is not wired (owner §11: optional).
+   (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The basis quote is checked by the
+   app against the minutes its turn read (`quoteAppearsIn`, "Outputs made once" below); the server
+   does not read Google at create time.
 
 ### A まとまり chosen later (meeting version 4, owner FB 20, 2026-11-02)
 
@@ -140,23 +143,61 @@ is the same request and gets the new behaviour. Test: `server/tests/integration/
 `plugin-steps.test.ts` 「the まとまり chosen later by a person…」 (the deal at after_meeting, its step
 in the turns, once), `server/tests/unit/meeting-bundle-parts.test.ts` (the migration).
 
-## Outputs made once (owner FB 29, 2026-11-02)
+## Outputs made once: the meeting's slot (owner FB 29, 2026-11-02; 出どころの枠 §10, 2026-11-06)
 
-Reading a meeting again (「もう一度読む」, a retry, a rerun) made the same task five times. **What a
-meeting's reading makes is made once per meeting and item, decided by the server**
-(`services/meeting-outputs.ts`, `shared/core/meeting-outputs.ts`):
+Reading a meeting again (「もう一度読む」, a retry, a rerun) made the same task five times; FB 29's fix
+keyed outputs by the AI's serial number (`task:1`), and a second reading — or another attendee's
+consultation — reusing `task:1` for a **different** item got the earlier record back and the new one
+silently disappeared. Now (owner decision 2026-11-06 「出どころの枠」 §10: **when an AI makes something
+shared, it goes through the source's slot; what a person does is free**): **what an AI makes from a
+meeting is a candidate in that meeting's slot**, decided in one place,
+`services/source-slot-candidates.ts` `decideSlot` (pure half `shared/core/source-slot-candidates.ts`;
+generic shape: source record id + kind + key, so it can join its sibling `services/source-slots.ts` —
+a source's outside acts: one send per source, one pending create per source, `outbound-mail.md`,
+`approvals.md` — later). `server/tests/unit/source-slot-one-place.test.ts` fails when the engine's create
+or the decision service stops calling it, or another module uses the older per-meeting helpers.
 
-- **Task** (`POST /records/item`, `records_create`, any type with a `meeting` link to a meeting):
-  optional `key` (≤ 200, one line, the AI's item mark `task:1`; only with `links.meeting`, else 400
-  `KEY_NEEDS_MEETING`). With a key the id is derived from meeting + type + key (`meetingOutputId`), so
-  the same key never makes a second record (one the member cannot read → 409 `KEY_TAKEN`, never
-  named). Without a key, or a different one, a record of the same type linked to the same meeting
-  whose title is the same after `outputTitleKey` (NFKC, A–Z folded, no spaces / brackets /
-  punctuation) is the same item. Found → 200 `{ record, entry: null, reused: true, note }`, nothing
-  written; otherwise 201 as before.
-- **Decision** (`decisions_record`): with a meeting link the key is the meeting's
-  (`<meeting id>:<key>` unless it starts with it), so another meeting's `1` is never this one; the
-  same title of the same meeting is the same item too (200 `created: false, reused: true, note`).
+- **Identity = (meeting, kind, normalized quote).** The AI gives the minutes text its output rests
+  on: `quote` on `POST /records-ai/item` / `records_create` and `decisions_record` (6–300 characters
+  after folding spaces, `slotQuote`; else 400 `BAD_QUOTE`; only with `links.meeting`, else 400
+  `QUOTE_NEEDS_MEETING`). Its key is `outputTitleKey` of the quote (NFKC, A–Z folded, no spaces /
+  brackets / punctuation: `【】` and `〔〕` alike), digested into the id (`slotCandidateId`), so the same
+  quote is the same candidate whoever's AI gives it, in any reading, two calls at once included. A
+  task stores it in `basis` (task version 13).
+- **The same quote** → the existing candidate, 200 `{ record, entry: null, reused: true, note:
+  「同じ根拠の案がもうあります（<title>）…」 }`, nothing written — **only when the caller reads it**.
+  Held by a record the caller cannot read (an AI narrowed its candidate's members) → a candidate of
+  its own under a fresh id, nothing said. **A different quote** → a new candidate.
+- **「似ている案があります」**: a new candidate whose title is close to a live candidate the caller
+  reads (`slotTitlesClose`: the same after `outputTitleKey`, or one inside the other, the shorter ≥ 2
+  characters) is kept and marked: task field `similar_to` = the oldest such (the answer adds
+  `similar: { id, title }` and a note). **Never merged on title alone.** The review card offers ［同じ］
+  (`dismiss` of the newer, note 「「…」と同じ案のため」) and ［別のもの］ (`keep_apart`).
+- **Visibility** (§9 rule 4): compared and answered only within what the caller reads; owner-only
+  records (「あなただけ」) are never compared or mentioned — an owner-only create does not enter the
+  slot at all, and an owner-only record is never an answer. Candidates follow the meeting's 見える範囲
+  (members-only, "Meetings for their attendees").
+- **Only the AI's creates.** A person's create (session) is free: never compared, never answered with
+  another (§10; 「似ているやることがあります」 for people is a later item).
+- **An older app** (only the serial `key`, no quote): a serial key counts only inside the same run or
+  consultation (the slot key `key:<run, else conversation>:<serial>`), and so does the exact title
+  (`outputTitleKey`, the create entry's run / conversation). A second reading's `task:1` is a new
+  candidate (with `similar_to` when its title is close) — nothing is lost; at worst a person presses
+  ［同じ］. `key` is still accepted (≤ 200, one line, only with `links.meeting`, else 400
+  `KEY_NEEDS_MEETING`); `KEY_TAKEN` is gone.
+- **Decision** (`decisions_record`): an AI's decision with a meeting link takes the same identity
+  (meeting, quote) through `decideSlot` (`source_key` keeps `<meeting id>:<slot key>`); no similar
+  mark (decisions have no proposal list). A person's decision keeps the key rule (`<meeting id>:<key>`;
+  without a meeting, company-wide as before).
+- **Where the quote is checked**: the server cannot read the minutes at create time (it reads Google
+  only with the member's grant, in an async call, and never keeps the text), so the **app** checks
+  it: `records_create` / `decisions_record` with `links.meeting` and a `quote` whose meeting this turn
+  read with `minutes_read` (`minutesKept`) is refused locally when `quoteAppearsIn` does not find it
+  (`QUOTE_NOT_IN_MINUTES`: 「議事録の文を、言い換えずにそのまま写してください」); minutes not read in the
+  turn are not checked. A made-up quote only makes a separate candidate: it can never take another's.
+- The first message (`minutesFirstMessage`), `minutes_read`'s description and the tools' schemas ask
+  for `links.meeting` + `quote`, never a serial key (`records_create` no longer offers `key`), and say
+  what `reused` / `similar` mean.
 - **Mail draft** (`mail_draft_create` / `POST /outbound` with `meetingId`, not a reply): the member's
   own draft of that meeting with the same subject (title key), not discarded (sent included), is
   the answer (200 `reused`); the tool tells the AI (`MEETING_OUTPUT_REUSED_NOTE`).
@@ -170,9 +211,15 @@ meeting's reading makes is made once per meeting and item, decided by the server
   through the engine as that admin, note 「同じ会議から重複して作られたため、こちらは使いません。残したもの：…（id）」
   — nothing is deleted; a mail draft is listed only (`mergeable: false`, its author discards it).
   Admin console: 「やることの一覧」→「同じ会議から重複して作られたもの」 (`meeting-duplicates.tsx`).
-- Test: `server/tests/integration/minutes.test.ts` 「made once (FB 29)」 (a second reading reuses by key
-  and by reworded title; a different item is made; another meeting is unaffected; decisions; the
-  duplicates list and merge), `outbound-mail.test.ts` 「the meeting's mail is made once」,
+- Test: `server/tests/unit/source-slot-candidates.test.ts` (a second reading's reused `task:1` is made;
+  one candidate per quote from two attendees' AIs, told only when readable; a close title kept and
+  marked; owner-only never compared or mentioned; a person's create free; decisions by quote; who may
+  act; `link:` parsing; the v13 migration once — each guard mutation-checked),
+  `source-slot-one-place.test.ts` (the one place), `server/tests/integration/minutes.test.ts`
+  「made once (FB 29)」 (an older app: reused inside its consultation, another reading's `task:1` made,
+  a same title marked similar; another meeting is unaffected; decisions; the duplicates list and
+  merge), `outbound-mail.test.ts` 「the meeting's mail is made once」, `client/tests/records-tools.test.ts`
+  (the quote checked against the turn's minutes, no serial key offered),
   `client/tests/outbound-mail-tools.test.ts` (the AI told), `minutes-app.test.ts` (the first message).
 
 ## The AI's proposals and 「議事録を確認する」 (owner decision 2026-11-02, plan F)
@@ -181,8 +228,10 @@ meeting's reading makes is made once per meeting and item, decided by the server
   `links.meeting`) starts as a proposal when the company's 「会議から AI が作るやること」 is
   「案として出す」 (default; `tasks.md` `meetingTasks`), as a task at once when 「自動で作る」.
   A proposal is nobody's turn; a person adds it (`adopt`) or puts it away (`dismiss`, kept,
-  `propose_again` brings it back) — records.md "Task version 11". The first message tells the AI
-  to leave proposals as they are.
+  `propose_again` brings it back) — records.md "Task version 11". **Everyone who reads the meeting**
+  may (task version 13's `link:meeting`, records.md "Task version 13"): attendees, invited members,
+  not only who pressed ［AI に読ませる］; the AI never. The first message tells the AI to leave
+  proposals as they are.
 - **The review task** (`services/minutes-review.ts`, wired as the engine's `afterAct`): when a
   meeting becomes `read` — internal or external — its assignee gets one task
   「議事録を確認する：<meeting title>」 (`task_kind: minutes_review`; requested_by = assignee, so
@@ -192,8 +241,11 @@ meeting's reading makes is made once per meeting and item, decided by the server
   itself — handling every proposal leaves it open; the assignee completes it. A meeting without an
   assignee gets none; a failure is logged and never changes the reading.
 - The app: `tasks:proposals (companyId, meetingId)` lists the meeting's proposals (proposed and put
-  away, `TaskProposal`); 足す / 要らない / 案に戻す are `tasks:act` with `adopt` / `dismiss` /
-  `propose_again`.
+  away, `TaskProposal`: each with its `basis`, whose AI added it — `addedBy` = `requested_by` —,
+  `similarTo` while nobody said 別のもの, and `may` from the type's `who` via `proposalMay`) and
+  `readerId` / `readerName` (the meeting's assignee); 足す / 要らない / 案に戻す / 別のもの are `tasks:act`
+  with `adopt` / `dismiss` / `propose_again` / `keep_apart`. The card: `tasks-ui.md` "The minutes
+  review card".
 - Test: `server/tests/unit/meeting-proposals.test.ts`; `minutes.test.ts`'s output counts leave the
   review task out.
 

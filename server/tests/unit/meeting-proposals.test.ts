@@ -99,7 +99,7 @@ describe('the AI’s homework of a meeting as proposals (案)', () => {
     const add = ok(homework(AI)).record
     const away = ok(homework(AI, '日程を決める', 'task:2')).record
     expect(await engine.act(m('u-alice'), AI, add.id, 'adopt', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
-    expect(await engine.act(m('u-bob'), HUMAN, add.id, 'adopt', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
+    // Any reader of the meeting may (task version 13, source-slot-candidates.test.ts); here everyone reads it.
     notified = []
     expect(ok(await engine.act(m('u-alice'), HUMAN, add.id, 'adopt', { expectedVersion: 1 })).record.state).toBe('todo')
     expect(notified).toEqual([['u-bob']])

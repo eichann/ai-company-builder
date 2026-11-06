@@ -338,6 +338,34 @@ link to one is **its maker's alone**: everyone else — owners and admins includ
   replaced; moved exactly once, never before, with the line; もう少し待つ; the mark; old waiting tasks
   untouched; `waitCameBack` cases) — mutation-checked; `server-clock.test.ts`, `ai-runs.test.ts`.
 
+### Task version 13: the meeting's slot (owner decision 2026-11-06 「出どころの枠」 §10)
+
+Additive over version 12 (three fields, one action, a wider `who`, one new who-entry kind):
+
+- **`link:<name>` in `who`** (generic, `LINK_WHO_RE` / `linkWhoName` in `shared/core/record-types.ts`):
+  a member who reads the record this record's link `<name>` points to (their own reader, a link that
+  may be followed — `linkAllowed`). The parser accepts only a record link of the type (a file link or
+  a missing one is an error). The engine (`act.ts` `readsLink`, passed to `mayAct`) asks it only when
+  `who` names one; a delegate qualifies only on their own reading (the absentee path gets none, fails
+  closed); never the AI unless `who` lists `ai`. The app evaluates it from what the server answered
+  (`task-card.ts`: an out link of that name with its record; `proposalMay`: the list came through the
+  meeting).
+- `adopt` / `dismiss` / `propose_again` gain **`link:meeting`**: every reader of the task's meeting —
+  attendees, invited members — besides `requested_by`, `dept_manager`, `admin`. Proposals inherit the
+  meeting's members-only list ("Members-only records"), so the readers of a proposal are the
+  meeting's readers plus the people it names; an assignee who did not attend reads the task but not
+  the meeting and gets nothing new. A task with no meeting is not widened. `dismiss` from 未着手 /
+  引き受け待ち of a meeting's task (made at once by 「自動で作る」, or adopted) is the meeting readers' too.
+- Fields `basis` (long_text: the minutes quote, the candidate's identity — minutes.md "Outputs made
+  once"), `similar_to` (record → task: an earlier candidate whose title is close; written only by the
+  slot — a create naming it, or `apart_by`, is 400 `BAD_VALUE`), `apart_by` (person). Action
+  `keep_apart` (別のもの: from `proposed`, no state change, the same `who`, arg `apart_by` filled with
+  the person acting — `ACTOR_ARGS`); the app hides it on the task card (`NOT_ON_CARD`: it belongs to
+  the review list).
+- Migration: `TASK_VERSION` 13 (the "Task version 9" mechanism: the core definition stored once, every
+  task's index row moved, no ledger entry). Tests: `server/tests/unit/source-slot-candidates.test.ts`,
+  `meeting-proposals.test.ts` — mutation-checked.
+
 ### Task version 11: the AI's proposals (案) and 「議事録を確認する」 (owner decision 2026-11-02, plan F)
 
 Additive over version 10 (two states, one field, three actions, a wider `dismiss`):
@@ -354,7 +382,8 @@ Additive over version 10 (two states, one field, three actions, a wider `dismiss
   may still start in `proposed` itself: `create_states`). The made-once rule is unchanged and
   runs first (minutes.md "Outputs made once"): reading again finds a proposal, even a put-away
   one, and does not propose it again.
-- **Taking it up** — people only (`who: [requested_by, dept_manager, admin]`, never the AI):
+- **Taking it up** — people only (`who: [requested_by, dept_manager, admin]`, never the AI; since
+  version 13 also `link:meeting`, every reader of the meeting):
   `adopt` (足す: proposed → todo, `hand_to` / `notify` the assignee; acceptance applies as for any
   request), `dismiss` (要らない: proposed / todo / awaiting_acceptance → `dismissed`, final, kept —
   never deleted; also a task the AI made at once), `propose_again` (案に戻す: dismissed →
@@ -480,8 +509,8 @@ Additive over version 8 (who / from / notify / labels widened, one field, two ac
   entry carries `accepted_by` (`ACCEPTANCE.finishes`, `services/record-engine/acceptance.ts` with
   the action's `fromState`). The requester completing it does not.
 - **Migration** (`migrateTaskVersion` in `db/index.ts` → `adapters/sqlite/records.ts`
-  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 12 since "Task version
-  12"): at startup, every company whose map has the task type stores that core version when
+  `migrateCompanyTaskVersion`, `TASK_VERSION` = the core task version, 13 since "Task version
+  13"): at startup, every company whose map has the task type stores that core version when
   nothing as new is stored, then every task's index row says it (`type_version`). No value changes, so no ledger entry. Idempotent.
 - Test: `server/tests/unit/record-task-v9.test.ts` (from 未着手 with no start made up, requester
   told and reopening; never from 準備中; the AI never; 確かめてから hands over from 未着手 and the
@@ -1190,7 +1219,8 @@ clock's, a separate service writing through the service writer: `notifications.m
   `dept_manager` (manages the department holding the record's path or folder), `anyone`; `system`
   (2026-11-05) — only the server's own services move it through the service writer: the engine
   refuses it to every member and AI, and no screen (`recordActionChoices`) or AI tool offers it
-  (`isSystemOnly`). First use: interaction v8's `left_inbox`. Roles do
+  (`isSystemOnly`). First use: interaction v8's `left_inbox`. `link:<name>` (task version 13) — a
+  member who reads the record that link points to ("Task version 13"). Roles do
   not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
   member who qualifies on their own — so the AI cannot complete a task. When `who` is `[ai]`
   alone, only the AI of the record's own people: `assignee`, `next_actor` (the 「AI の番」 rule) or
@@ -1761,8 +1791,9 @@ and (with the ledger's actions) when it finished. Nobody presses 着手 for it.
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
 `decisions_record`): `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-important?, exception?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key, or the
-same title of the same meeting: `minutes.md` "Outputs made once"; a key with a meeting link is that meeting's).
+important?, exception?, key?, quote? }` → 201 `{ record, created: true }` (200 `created: false` for a known key; an
+AI's decision with a meeting link is a candidate of the meeting's slot, the same basis `quote` answering the
+existing one: `minutes.md` "Outputs made once"; a person's key with a meeting link is that meeting's).
 - A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
   row (`path` null, `folder` = the department folder) and its state `unconfirmed`, with `why` /
   `source` as server fields (the summary is the start of `why`, what text search reads). Earlier

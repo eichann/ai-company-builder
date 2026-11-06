@@ -5,7 +5,7 @@
  * OK-giver); the server's engine still decides every action. Pure.
  */
 import { WAIT_OVER, waitCameBack } from '../../shared/core/core-types'
-import { actionWho, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
+import { actionWho, linkWhoName, parseTagsValue, type TypeDefinition } from '../../shared/core/record-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { ViewersLabel } from '../../shared/types/viewers'
@@ -137,8 +137,10 @@ export type TaskCardResult =
   | { success: false; offline: boolean; notFound?: boolean; error: string }
 
 /** Actions that are the AI's own or need a chooser the card does not have. */
-const NOT_ON_CARD = new Set(['finish_prep', 'hand_over', 'set_bundle', 'set_tags', 'set_wait_until'])
-const FIELDS_SHOWN_ELSEWHERE = new Set(['title', 'due', 'tags', 'prep_summary', 'ok_by', 'ok_note', 'accepted_by', 'purpose'])
+const NOT_ON_CARD = new Set(['finish_prep', 'hand_over', 'set_bundle', 'set_tags', 'set_wait_until',
+  // 「別のもの」 answers 「似ている案があります」 on the meeting's list of proposals (MinutesReview), not here.
+  'keep_apart'])
+const FIELDS_SHOWN_ELSEWHERE = new Set(['title', 'due', 'tags', 'prep_summary', 'ok_by', 'ok_note', 'accepted_by', 'purpose', 'similar_to', 'apart_by'])
 
 const nameOf = (people: Record<string, string>, id: unknown) => (typeof id === 'string' && id ? people[id] ?? 'メンバー' : 'メンバー')
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
@@ -196,7 +198,9 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   const personName = (field: string) => { const id = str(r.fields[field]); return id ? people[id] ?? null : null }
   const names = { assignee: personName('assignee'), requester: personName('requested_by'), reviewer: personName('reviewer') }
   const whenDone = r.fields.when_done === 'check' ? 'check' as const : r.fields.when_done === 'notify' ? 'notify' as const : null
-  const personMay = (who: string[]) => who.includes('anyone') || who.some(w => def?.fields[w]?.kind === 'person' && holds(w))
+  // `link:<name>` (task version 13: 「その会議を読める人」): the server answered the link's record, so the member reads it.
+  const readsLink = (name: string) => src.detail.links.some(l => l.direction === 'out' && l.name === name && !!l.record)
+  const personMay = (who: string[]) => who.includes('anyone') || who.some(w => (def?.fields[w]?.kind === 'person' && holds(w)) || (linkWhoName(w) !== null && readsLink(linkWhoName(w) as string)))
   const offer = (state: string | null, startFirst: boolean): TaskCardAction[] => (def ? recordActionChoices(def, state) : [])
     .filter(c => !NOT_ON_CARD.has(c.action) && c.links.length === 0)
     .flatMap(c => {

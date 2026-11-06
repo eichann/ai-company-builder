@@ -2,7 +2,8 @@
  * 出どころの枠 (owner design 2026-11-06 §10; `shared/core/source-slots.ts` holds the pure part):
  * the one place that says what a piece of shared work came from and what earlier work on the
  * same source a person may be told about. Outbound mail (one send per source) and approvals (one
- * pending create per source) use it; the meeting outputs' slot will too.
+ * pending create per source) use it. What an AI makes shared from a meeting (its tasks and
+ * decisions as candidates) is the sibling `source-slot-candidates.ts`; the two may merge later.
  *
  * Never reveal what cannot be seen (owner decision B, design §9 rule 4): earlier work counts only
  * when the person reads the source record **and** the earlier work's own record, through the one

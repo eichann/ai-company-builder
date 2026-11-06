@@ -350,6 +350,27 @@ and passes only what the server answered for that record (`viewers`); a record l
 nothing (`client/tests/record-card-viewers.test.ts`).
 Tests: `client/tests/record-details.test.ts`, `tests/ui/record-card.spec.ts`.
 
+## The minutes review card (「議事録を確認する」, `MinutesReview.tsx`; owner decision 2026-11-06 「出どころの枠」 §10)
+
+The AI's proposals of a meeting, on the review task's card and the meeting's card (`minutes.md` "In
+the app"), from `tasks:proposals` (`minutes.md` "The AI's proposals"):
+
+- Under the list's title: **「〇〇さんの AI が読みました・案 N 件」** (`proposalsHeadline`: the meeting's
+  assignee — who had it read — and the proposals still open).
+- Each proposal: title, 担当・期限, then a quiet line with **its basis quote** 「…」 (`basis`) and, when
+  another attendee's consultation added it (`addedBy` ≠ the reader), **「〇〇さんの AI が追加」**.
+- **「似ている案があります：「…」」** (an amber note on the newer one, `similarTo`, while nobody said
+  別のもの): ［同じ］ = `dismiss` of this one with the note 「「…」と同じ案のため」 (the older kept),
+  ［別のもの］ = `keep_apart` (both kept, the note goes).
+- **Buttons only where the server would allow them** (`may`, `proposalMay` in `client/shared/tasks.ts`
+  over the type's `who` with `actionWho`): on task version 13 every reader of the meeting gets 足す・
+  要らない・戻す・同じ・別のもの (the list came through the meeting); an older server's type shows them to
+  the proposal's requester only (roles are not known to the app) and never 別のもの. ［全部足す］
+  ［選んで足す］［要らない］ act on the proposals the member may press. The server decides each press.
+- Tests: `client/tests/tasks-list.test.ts` (「a meeting's proposals: the buttons follow the type's who…」),
+  `tests/ui/task-card.spec.ts` (「議事録を確認する」: the headline, the basis, 「〇〇さんの AI が追加」, ［同じ］
+  with its note, ［別のもの］; `?proposals=none`: no button).
+
 ## The archive (アーカイブ, owner decision 2026-11-03)
 
 - The bottom of the list, in every view: a folded section 「アーカイブ」 (`ArchiveSection.tsx`). Nothing

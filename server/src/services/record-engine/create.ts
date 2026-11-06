@@ -11,7 +11,7 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORDS_DISABLED } from '../records'
-import { acceptanceOf, messageOriginLinks, proposalOf } from '../../../shared/core/core-types'
+import { acceptanceOf, messageOriginLinks, proposalOf, SLOT_FIELDS } from '../../../shared/core/core-types'
 import { DEFAULT_TASK_SETTINGS, replyTarget } from '../../../shared/core/task-settings'
 import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
@@ -19,8 +19,9 @@ import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
 import { ASSIGNEE_CANNOT_READ, REVIEWER_CANNOT_READ, bad, FILE_NOT_LINKABLE, FOLDER_NOT_PLACEABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
 import type { ActorInput } from './types'
 import { checkValue, provenance } from './values'
-import { MEETING_OUTPUT_KEY_MAX, MEETING_OUTPUT_REUSED_NOTE } from '../../../shared/core/meeting-outputs'
-import { findMeetingOutput, meetingOutputId } from '../meeting-outputs'
+import { MEETING_OUTPUT_KEY_MAX } from '../../../shared/core/meeting-outputs'
+import { slotQuote } from '../../../shared/core/source-slot-candidates'
+import { decideSlot, slotScope } from '../source-slot-candidates'
 import { meetingMembers, membersList, withNamedPeople } from './members'
 import { placeOfRow } from './service-writer'
 import { coreStepCreateTypes } from '../../../shared/core/ai-runs'
@@ -164,7 +165,7 @@ export function creating(ctx: EngineContext) {
      * A record that lives on the server (types with storage `server` or
      * `either`; a company's own file-backed type is created by writing its file).
      */
-    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; placed?: { personal: boolean; folder: string | null; membersOnly?: true } }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry | null; reused?: true; note?: string; similar?: { id: string; title: string }; placed?: { personal: boolean; folder: string | null; membersOnly?: true } }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -182,6 +183,9 @@ export function creating(ctx: EngineContext) {
         return bad(`key: 1–${MEETING_OUTPUT_KEY_MAX} characters on one line`)
       }
       const itemKey = typeof b.key === 'string' ? b.key.normalize('NFC').trim() : null
+      // The basis quote of a meeting's output (task version 13, the source's slot): its identity there.
+      const quote = b.quote === undefined || b.quote === null ? null : slotQuote(b.quote)
+      if (b.quote !== undefined && b.quote !== null && quote === null) return bad('quote: the minutes text the output rests on, copied as is (6–300 characters)', 'BAD_QUOTE')
       // `personal: true` = owner-only (「持ち主だけ」): the creator alone sees it, never with a folder.
       if (b.personal !== undefined && typeof b.personal !== 'boolean') return bad('personal must be true or false')
       let personalOwner = b.personal === true ? member.userId : null
@@ -227,6 +231,8 @@ export function creating(ctx: EngineContext) {
         if (!f || f.source !== 'server') return bad(`${name} is not a server field of ${def.name}`)
         // Who accepted is the engine's to write (records.md "Acceptance"), never a create's.
         if (name === acceptanceOf(def.name)?.acceptedBy) return bad(`${name} is set by accepting`, 'BAD_VALUE')
+        // 「似ている案」 and 「別のもの」 are the slot's and the person's (task version 13), never a create's.
+        if (name === SLOT_FIELDS.similarTo || name === SLOT_FIELDS.apartBy) return bad(`${name} is set by the server`, 'BAD_VALUE')
         // Money (`money: true`) is written only through an approval request (plugins.md "Money"), never by a create.
         if (f.money) return bad(`「${f.label}」はお金の欄です。承認のお願いを通してだけ書けます`, 'MONEY_NEEDS_APPROVAL')
         const v = checkValue(f.kind, value, f.options, isMember)
@@ -319,20 +325,29 @@ export function creating(ctx: EngineContext) {
       if (typeof fields.reviewer === 'string' && !canRead(member.companyId, fields.reviewer, place)) {
         return bad(REVIEWER_CANNOT_READ, 'REVIEWER_CANNOT_READ')
       }
-      // What a meeting's reading makes, made once: the same item of the same meeting is the answer.
+      // What an AI makes from a meeting is a candidate in the meeting's slot (出どころの枠, minutes.md
+      // "Outputs made once"): the one place that decides new or already there is source-slot-candidates.
+      // A person's create is free, and so is an owner-only one (「あなただけ」 is never compared).
       const meetingId = def.links.meeting?.target === 'meeting' ? links.find(l => l.name === 'meeting' && l.targetId)?.targetId ?? null : null
       if (itemKey !== null && !meetingId) return bad('key: only for a record linked to its meeting (links.meeting)', 'KEY_NEEDS_MEETING')
-      if (meetingId) {
-        const keyed = itemKey !== null && deps.tokenDigest ? meetingOutputId(deps.tokenDigest, def.name, meetingId, itemKey) : null
-        const keyTaken = keyed !== null && records.byIds([keyed]).some(r => r.removedAt === null)
-        const same = findMeetingOutput(records, r => reader.record(r), { type: def.name, meetingId, title: b.title as string, byId: keyed })
-        if (same) return ok({ record: summaryOf(records, same.id), entry: null, reused: true as const, note: MEETING_OUTPUT_REUSED_NOTE })
-        // The key's record exists but the member does not read it: never a second one, never named.
-        if (keyTaken) return refuse('conflict', 'この目印の記録は、すでにほかの場所にあります', { code: 'KEY_TAKEN' })
-        if (keyed) {
-          id = keyed
-          for (const l of links) l.sourceId = keyed
+      if (quote !== null && !meetingId) return bad('quote: only for a record linked to its meeting (links.meeting)', 'QUOTE_NEEDS_MEETING')
+      if (quote !== null && def.fields[SLOT_FIELDS.basis]?.source === 'server' && fields[SLOT_FIELDS.basis] === undefined) fields[SLOT_FIELDS.basis] = quote
+      let similar: { id: string; title: string } | null = null
+      let slotNote: string | null = null
+      if (meetingId && actor.kind === 'ai' && personalOwner === null) {
+        const slot = decideSlot(records, r => reader.record(r), deps.tokenDigest, {
+          slot: { sourceId: meetingId, linkName: 'meeting', kind: def.name }, title: b.title as string, quote, serialKey: itemKey, scope: slotScope(actor),
+        })
+        if (slot.kind === 'existing') return ok({ record: summaryOf(records, slot.row.id), entry: null, reused: true as const, note: slot.note })
+        if (slot.id !== null) {
+          id = slot.id
+          for (const l of links) l.sourceId = slot.id
         }
+        if (slot.similarTo && def.fields[SLOT_FIELDS.similarTo]?.source === 'server') {
+          similar = slot.similarTo
+          fields[SLOT_FIELDS.similarTo] = slot.similarTo.id
+        }
+        slotNote = slot.note
       }
       // A proposal (案, task version 11): the AI's homework of a meeting, as the company says.
       const proposal = proposalOf(def.name)
@@ -371,7 +386,10 @@ export function creating(ctx: EngineContext) {
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over. A proposal (案) tells nobody either.
       if (initial === null || !noTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       else changed(member.companyId, id)
-      return ok({ record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder, ...(members !== null ? { membersOnly: true as const } : {}) } })
+      return ok({
+        record: summaryOf(records, id), entry, placed: { personal: personalOwner !== null, folder, ...(members !== null ? { membersOnly: true as const } : {}) },
+        ...(similar ? { similar, ...(slotNote ? { note: slotNote } : {}) } : {}),
+      })
     },
   }
   return api

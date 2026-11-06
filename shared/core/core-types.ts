@@ -61,6 +61,13 @@
  * `minutes_review` marks 「議事録を確認する」, the one task per meeting the server makes for the
  * meeting's assignee when it is read (services/minutes-review.ts).
  *
+ * Version 13 (owner decision 2026-11-06 「出どころの枠」 §10, additive): a meeting's proposals belong to
+ * everyone who reads the meeting — `adopt` / `dismiss` / `propose_again` add the who-entry
+ * `link:meeting` (a reader of the linked meeting; never the AI). Fields `basis` (the minutes quote a
+ * proposal rests on: its identity in the meeting's slot, server/src/services/source-slot-candidates.ts),
+ * `similar_to` (an earlier proposal of the same meeting whose title is close: 「似ている案があります」)
+ * and `apart_by` (who said 「別のもの」: action `keep_apart`, filled with the person acting, ACTOR_ARGS).
+ *
  * Version 10 (owner decision 2026-11-02, つなぐ・外す): the links that say where a task came
  * from — `meeting`, `interaction`, `prepared` — are marked `origin` (出どころ) and are never
  * linked or removed by hand; the others (bundle, counterpart, related, files) are filing and
@@ -139,7 +146,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 12
+version: 13
 implements: [request]
 storage: server
 fields:
@@ -159,6 +166,9 @@ fields:
   accepted_by:  { label: 引き受けた人, kind: person, source: server }
   when_done:    { label: 終わったら, kind: choice, options: [notify, check], option_labels: { notify: 知らせるだけ, check: 確かめてから }, source: server }
   task_kind:    { label: 種類, kind: choice, options: [minutes_review], option_labels: { minutes_review: 議事録を確認する }, source: server }
+  basis:        { label: 根拠（議事録の引用）, kind: long_text, source: server }
+  similar_to:   { label: 似ている案, kind: record, target: task, source: server }
+  apart_by:     { label: 別のものとした人, kind: person, source: server }
 links:
   files:        { label: 関係するファイル, target: file, cardinality: many }
   related:      { label: 関係するタスク, target: task, cardinality: many }
@@ -192,9 +202,10 @@ actions:
   set_bundle:     { label: まとまりに入れる, who: [requested_by, assignee, ai], links: [bundle], note: optional }
   set_when_done:  { label: 終わったらを決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { when_done: choice }, notify: assignee, note: optional }
   set_reviewer:   { label: 確かめる人を決める, from: [todo, in_progress, waiting, preparing, declined, awaiting_acceptance], who: [requested_by, admin], args: { reviewer: person }, notify: reviewer, note: optional }
-  adopt:          { label: 足す, from: [proposed], to: todo, who: [requested_by, dept_manager, admin], notify: assignee, note: optional, hand_to: assignee }
-  dismiss:        { label: 要らない, from: [proposed, todo, awaiting_acceptance], to: dismissed, who: [requested_by, dept_manager, admin], note: optional }
-  propose_again:  { label: 案に戻す, from: [dismissed], to: proposed, who: [requested_by, dept_manager, admin], note: optional }
+  adopt:          { label: 足す, from: [proposed], to: todo, who: [requested_by, dept_manager, admin, link:meeting], notify: assignee, note: optional, hand_to: assignee }
+  dismiss:        { label: 要らない, from: [proposed, todo, awaiting_acceptance], to: dismissed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
+  propose_again:  { label: 案に戻す, from: [dismissed], to: proposed, who: [requested_by, dept_manager, admin, link:meeting], note: optional }
+  keep_apart:     { label: 別のもの, from: [proposed], who: [requested_by, dept_manager, admin, link:meeting], args: { apart_by: person }, note: optional }
 ---
 # タスク
 
@@ -205,6 +216,7 @@ ACB に最初からある「依頼」の形。記録はサーバーだけが持�
 完了はどの状態からでもできます（準備中だけは先に「自分で進める」）。「終わったら」が「知らせるだけ」（初めはこれ）なら担当が完了にし、頼んだ人に知らせます（頼んだ人は「やり直す」で戻せます）。「確かめてから」なら担当は「終わったので見てもらう」で確かめる人に渡し、確かめる人の OK で完了します（確かめる人が ACB の外で OK したときは、担当がそのいきさつを書いて完了にできます）。
 「返事待ち」にするときは、いつごろ来そうか（返事の見込み）も決めます。決めなければ 3 営業日後です。見込みを過ぎても返事待ちのままなら、担当の番に戻ります（自動で進めるなら、AI が催促の下書きを用意します）。
 会議から AI が作る宿題は、会社の設定が「案として出す」（初めはこれ）なら「案」になります。案はだれの番でもなく、一覧にも出ません。「議事録を確認する」やることの中で、人が「足す」とふつうのやることに、「要らない」でしまいます（消しません。「案に戻す」で戻せます）。
+会議の案は、その会議を読める人ならだれでも「足す」「要らない」「案に戻す」ができます。AI は案ごとに根拠になった議事録の文を添え、同じ根拠の案は1つにまとまります。件名が似ている案は「似ている案があります」と並び、人が「同じ」（新しいほうを要らないに）か「別のもの」を選びます。
 `,
   interaction: `---
 label: やりとり
@@ -628,7 +640,7 @@ export const ACCEPTANCE: Readonly<Record<string, {
  * `migrateCompanyTaskVersion`): the core definition of that version is stored first, then each task's
  * index row says it (no value changes, so no ledger entry).
  */
-export const TASK_VERSION = 12
+export const TASK_VERSION = 13
 
 /**
  * Proposals (案, task version 11): a record of `type` that the member's **AI** creates with its
@@ -641,6 +653,14 @@ export const TASK_VERSION = 12
 export const PROPOSALS: Readonly<Record<string, { state: string; origin: string }>> = {
   task: { state: 'proposed', origin: 'meeting' },
 }
+
+/**
+ * The slot fields of a type's candidates (task version 13, owner decision 2026-11-06 「出どころの枠」):
+ * `basis` — the source quote the AI gave (written by the create from its `quote`); `similarTo` — an
+ * earlier candidate whose title is close (the server's, never a body's); `apartBy` — who said
+ * 「別のもの」 (its action's ACTOR_ARGS). A type without these fields simply has none of them.
+ */
+export const SLOT_FIELDS = { basis: 'basis', similarTo: 'similar_to', apartBy: 'apart_by' } as const
 
 /** The proposal rule of a type, or undefined. */
 export function proposalOf(type: string) {
@@ -796,6 +816,8 @@ export function argDefaultValue(rule: { businessDays: number }, current: unknown
  */
 export const ACTOR_ARGS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   interaction: { settle: ['settled_by'] },
+  // Task version 13: 「別のもの」 on a proposal marked similar records who said so.
+  task: { keep_apart: ['apart_by'] },
 }
 
 /** Whether the engine fills this argument with the person acting (`ACTOR_ARGS`). */

@@ -9,6 +9,7 @@ import { createTasksApi } from '../electron/features/tasks/ipc'
 import { cameBackLine, classifyTasks, defaultWaitUntil, waitChoices, type TaskSources } from '../shared/tasks'
 import type { RecordSummary } from '../../shared/types/records'
 import { turnTiming } from '../../shared/core/turn-timing'
+import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { thisWeeksTurn, type TurnItem } from '../shared/notifications-app'
 import { companyNow, listSections } from '../src/features/tasks/model'
 
@@ -423,4 +424,40 @@ test('今日終わったこと asks for the 来た連絡 the member settled toda
     assert.deepEqual(bodies.find(b => (b as { type?: string }).type === 'interaction'), { type: 'interaction', finishedSince: '2026-11-04T15:00:00.000Z', fields: { settled_by: ME }, limit: 100 })
     assert.deepEqual(listed.data.items.map(i => [i.id, i.turn]), status === 200 ? [['interaction-0004', 'done']] : [])
   }
+})
+
+test('a meeting\'s proposals: the buttons follow the type\'s who — every reader of the meeting on task 13, the requester only on an older server', async () => {
+  const task13 = coreTypeDefinitions().find(d => d.name === 'task')!
+  // An older server's type (task 12): adopt / dismiss / propose_again for requested_by and the roles, no 別のもの.
+  const strip = (who: string[]) => who.filter(w => w !== 'link:meeting')
+  const older = Object.fromEntries(Object.entries(task13.actions).filter(([n]) => n !== 'keep_apart'))
+  const task12 = { ...task13, version: 12, actions: Object.fromEntries(Object.entries(older).map(([n, a]) => [n, { ...a, who: strip(a.who) }])) }
+  const proposal = (id: string, requestedBy: string, extra: Record<string, string> = {}) =>
+    rec(id, 'proposed', { requested_by: requestedBy, assignee: 'u-tanaka', basis: '来週までに見積を送ります', ...extra })
+  const run = async (def: typeof task13) => {
+    const h = harness({
+      '/api/me': { status: 200, body: { data: { id: ME } } },
+      '/api/companies/co1/records/types': { status: 200, body: { data: { types: [{ definition: def }] } } },
+      '/api/companies/co1/records/item/meeting-000001': { status: 200, body: { data: { record: { id: 'meeting-000001', fields: { assignee: 'u-reader' } }, links: [] } } },
+      'POST /api/companies/co1/records/query': { status: 200, body: { data: { records: [
+        proposal('task-p00001', 'u-reader'),
+        proposal('task-p00002', ME, { similar_to: 'task-p00001' }),
+        proposal('task-p00003', 'u-reader', { similar_to: 'task-p00001', apart_by: 'u-reader' }),
+      ] } } },
+    })
+    const r = await h.api.proposals('co1', 'meeting-000001')
+    assert.ok(r.success)
+    return r
+  }
+  const now = await run(task13)
+  assert.equal(now.readerId, 'u-reader')
+  // Not the reader nor the requester of p1, yet a reader of the meeting (the list came through it): every button.
+  assert.deepEqual(now.proposals[0].may, { adopt: true, dismiss: true, proposeAgain: true, keepApart: true })
+  assert.equal(now.proposals[0].basis, '来週までに見積を送ります')
+  // 「似ている案があります」 until someone says 「別のもの」.
+  assert.equal(now.proposals[1].similarTo?.id, 'task-p00001')
+  assert.equal(now.proposals[2].similarTo, null)
+  const before = await run(task12 as typeof task13)
+  assert.deepEqual(before.proposals[0].may, { adopt: false, dismiss: false, proposeAgain: false, keepApart: false })
+  assert.deepEqual(before.proposals[1].may, { adopt: true, dismiss: true, proposeAgain: true, keepApart: false })
 })
