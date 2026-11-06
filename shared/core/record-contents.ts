@@ -32,7 +32,7 @@ export function parseContentRef(value: unknown): { id: string; hash: string } | 
  * source, and a mail's subject (the record's title is the same words).
  */
 export const EXTRA_CONTENT_FIELDS: Readonly<Record<string, readonly string[]>> = {
-  decision: ['source'],
+  decision: ['source', 'said_by'],
   outbound_message: ['subject'],
 }
 

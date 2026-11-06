@@ -11,7 +11,7 @@ import { coreTypeDefinitions } from '../../shared/core/core-types'
 import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { RecordDetail, RecordSummary } from '../../shared/types/records'
-import { taskCardOf, type TaskCardSources } from '../shared/task-card'
+import { cannotReadLine, taskCardOf, type TaskCardSources } from '../shared/task-card'
 import { createTasksApi } from '../electron/features/tasks/ipc'
 
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
@@ -168,17 +168,27 @@ test('チームの進め方 on the card is the company\'s setting as the server 
   assert.equal(await cardWith({ status: 500, body: {} }), false)
 })
 
-test('「議事録を確認する」 carries its meeting\'s summary and decisions (［確かめる］ only for the member\'s own); any other task carries none', () => {
+test('「議事録を確認する」 carries its meeting\'s summary and decisions, ［そうです］［違う］ as the server says (decision version 6), a 責任者 who cannot read it by name; any other task carries none', () => {
   const meeting: RecordSummary = { ...task('read', { summary_text: '合意しました' }), id: 'meeting-0000mm', type: 'meeting', title: 'A社' }
   const decision = (id: string, state: string, owner: string): RecordSummary => ({ ...task(state, { owner }), id, type: 'decision', title: id, version: 2 })
+  const no = { confirm: false, reject: false, retract: false }
   const meetingDetail: RecordDetail = { record: meeting, links: [
-    { name: 'meeting', direction: 'in', record: decision('decision-000001', 'unconfirmed', ME) },
-    { name: 'meeting', direction: 'in', record: decision('decision-000002', 'unconfirmed', BOSS) },
+    { name: 'meeting', direction: 'in', record: decision('decision-000001', 'unconfirmed', BOSS) },
+    { name: 'meeting', direction: 'in', record: decision('decision-000002', 'unconfirmed', ME) },
     { name: 'meeting', direction: 'in', record: decision('decision-000003', 'retracted', ME) },
-  ] }
+  ], decisionChecks: {
+    'decision-000001': { may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: [BOSS] },
+    // The member is its 残した人 but there is a 責任者: the server's answer wins over the `owner` field.
+    'decision-000002': { may: no, responsible: ['u-tanaka'], cannotRead: [] },
+  } }
   const review = taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME, task_kind: 'minutes_review' }), links: [] }, meeting: meetingDetail, def: defs.get('task'), defs, entries: [], people, runs: [] }).review
-  assert.deepEqual(review && { summary: review.summary, decisions: review.decisions.map(d => `${d.id}:${d.mine}`) },
-    { summary: '合意しました', decisions: ['decision-000001:true', 'decision-000002:false'] })
+  assert.deepEqual(review && { summary: review.summary, decisions: review.decisions.map(d => `${d.id}:${d.may.confirm}:${d.may.reject}:${d.cannotRead.join()}`) },
+    { summary: '合意しました', decisions: ['decision-000001:true:true:阿部', 'decision-000002:false:false:'] })
+  assert.equal(cannotReadLine(['阿部', '阿部']), '阿部さんはこの会議を見られません。決めたことの案は、この会議を見られる人が確かめます。')
+  assert.equal(cannotReadLine([]), null)
+  // An older server sends no checks: the decision's owner confirms, as before.
+  const older = taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME, task_kind: 'minutes_review' }), links: [] }, meeting: { ...meetingDetail, decisionChecks: undefined }, def: defs.get('task'), defs, entries: [], people, runs: [] }).review
+  assert.deepEqual(older?.decisions.map(d => `${d.id}:${d.may.confirm}`), ['decision-000001:false', 'decision-000002:true'])
   assert.equal(taskCardOf({ me: ME, detail: { record: task('todo', { assignee: ME }), links: [] }, meeting: meetingDetail, def: defs.get('task'), defs, entries: [], people, runs: [] }).review, null)
 })
 

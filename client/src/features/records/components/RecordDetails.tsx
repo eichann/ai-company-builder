@@ -6,7 +6,7 @@ import { CalendarBlank, CheckCircle } from '@phosphor-icons/react'
 import type { IncomingDetailView, MeetingDetailView, OpenLink, ReplyRequestDetailView } from '../../../../shared/record-details'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import { runCommand } from '../../../shared/commands/commands'
-import { NEXT_STEP } from '../../../../shared/thing-words'
+import { DECISION_PROPOSAL_NAME, NEXT_STEP } from '../../../../shared/thing-words'
 import { MoreMenu } from '../../../shared/ui/MoreMenu'
 import { Chip, MAIN_BUTTON, SMALL_BUTTON } from '../../../shared/ui/RecordPage'
 import { SourceIcon, ThingIcon } from '../../../shared/ui/ThingIcon'
@@ -71,9 +71,13 @@ export function MeetingSummary({ m }: { m: MeetingDetailView }) {
 
 /** What a meeting's links hold, as plain lists: until the screen has its proposals (or never, on an older server). */
 export function MeetingOutputs({ decisions, tasks }: { decisions: RecordViewSummary[]; tasks: RecordViewSummary[] }) {
+  // 決めたことの案 (not confirmed yet, decision version 6) apart from the confirmed ones.
+  const proposed = decisions.filter(d => d.typeLabel === DECISION_PROPOSAL_NAME)
+  const decided = decisions.filter(d => d.typeLabel !== DECISION_PROPOSAL_NAME)
   return (
     <>
-      {decisions.length > 0 && <Section kind="decision" title="決めたこと"><Items records={decisions} /></Section>}
+      {proposed.length > 0 && <Section kind="decision" title={DECISION_PROPOSAL_NAME}><Items records={proposed} /></Section>}
+      {decided.length > 0 && <Section kind="decision" title="決めたこと"><Items records={decided} /></Section>}
       {tasks.length > 0 && <Section kind="task" title="やること"><Items records={tasks} /></Section>}
     </>
   )

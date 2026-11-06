@@ -19,7 +19,12 @@
  *   With a meeting link the key is the meeting's (`<meeting id>:<key>`, unless it starts
  *   with the meeting's id already), so another meeting's `1` is never this one; and a
  *   decision of the same meeting with the same title is the same item too
- *   (minutes.md "Outputs made once").
+ *   (minutes.md "Outputs made once");
+ * - decision version 6 (owner decision 2026-11-07 「決めたことを人が確かめる」): it starts as
+ *   「決めたことの案」 — `decided_by` stays empty until a person confirms it (the engine fills it with
+ *   the confirmer); `owner` (残した人) is the member only for a decision with no meeting (who decides
+ *   when there is no まとまりの責任者: the meeting's readers, else they); `said_by` / `objection` are
+ *   what the AI read in the minutes (who said it, whether anyone objected) — outside text.
  */
 import { nameKey, normalizeRepoPath, isSameOrAncestorPath } from '../../shared/core/paths'
 import { findPrivateScope, resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
@@ -35,6 +40,7 @@ import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { MEETING_OUTPUT_REUSED_NOTE } from '../../shared/core/meeting-outputs'
 import { slotQuote } from '../../shared/core/source-slot-candidates'
+import { neutralizeOutsideText } from '../../shared/core/outside-text'
 import { decideSlot, slotScope } from './source-slot-candidates'
 import { recordReader } from './record-access'
 import { ASSIGNEE_CANNOT_READ, type ActorInput, type ServiceRecordWriter } from './record-engine'
@@ -59,6 +65,9 @@ const WHY_MAX = 1000
 const SOURCE_MAX = 300
 const KEY_MAX = 200
 const SUMMARY_MAX = 300
+const SAID_BY_MAX = 60
+/** `objection` (decision version 6): whether anyone objected, as the minutes say. */
+const OBJECTIONS = ['none', 'raised', 'unknown']
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/
 
@@ -87,7 +96,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
-      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key', 'quote']
+      const known = ['folder', 'title', 'why', 'source', 'links', 'important', 'exception', 'key', 'quote', 'said_by', 'objection']
       for (const k of Object.keys(b)) if (!known.includes(k)) return bad(`Unknown key: ${k}`)
       const title = line(b.title, TITLE_MAX, true)
       if (!title) return bad(`title: 1–${TITLE_MAX} characters on one line`)
@@ -98,6 +107,13 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (!source) return bad(`source: 1–${SOURCE_MAX} characters`)
       if (b.important !== undefined && typeof b.important !== 'boolean') return bad('important: true or false')
       if (b.exception !== undefined && typeof b.exception !== 'boolean') return bad('exception: true or false')
+      // Who said it and whether anyone objected (decision version 6): what the minutes say — outside
+      // text, kept on one line with its brackets neutralized like every outside text (outside-text.ts).
+      const saidByLine = line(b.said_by, SAID_BY_MAX, false)
+      if (saidByLine === null) return bad(`said_by: who said it, up to ${SAID_BY_MAX} characters on one line`)
+      const saidBy = saidByLine === undefined ? null : neutralizeOutsideText(saidByLine)
+      if (b.objection !== undefined && b.objection !== null && (typeof b.objection !== 'string' || !OBJECTIONS.includes(b.objection))) return bad(`objection: ${OBJECTIONS.join(' / ')}`)
+      const objection = typeof b.objection === 'string' ? b.objection : null
       const givenKey = line(b.key, KEY_MAX, false)
       if (givenKey === null) return bad(`key: up to ${KEY_MAX} characters`)
       // The basis quote (the source's slot, minutes.md "Outputs made once"): its identity in the meeting's slot.
@@ -175,17 +191,16 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         }
       }
 
-      const meeting = links.meeting ? linked.find(r => r.id === links.meeting) : undefined
-      let owner: LedgerValue = member.userId
-      if (meeting) {
-        try { owner = (JSON.parse(records.states([meeting.id])[0]?.fields ?? '{}') as Record<string, LedgerValue>).assignee ?? member.userId } catch { /* the member */ }
-      }
+      // 残した人 (decision version 6): only without a meeting — with one, the meeting's readers decide
+      // when there is no まとまりの責任者, and the meeting's assignee has no part of it.
+      const owner: LedgerValue = links.meeting ? null : member.userId
       const input = {
         // The summary is what text search reads: the start of why.
         type: 'decision', id, title, summary: why.slice(0, SUMMARY_MAX), folder,
         fields: {
-          recorded_by: actor.kind === 'ai' ? 'ai' : 'human', important: b.important === true, exception: b.exception === true, decided_by: actor.kind === 'ai' ? null : member.userId,
-          owner, source_key: key ?? null, why, source,
+          // 決めた人 is whoever confirms it (the engine, `confirm`): nobody yet.
+          recorded_by: actor.kind === 'ai' ? 'ai' : 'human', important: b.important === true, exception: b.exception === true, decided_by: null,
+          owner, source_key: key ?? null, why, source, said_by: saidBy, objection,
         },
         links: Object.fromEntries(Object.entries(links).map(([k, v]) => [k, [v]])),
         actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null, runId: actor.runId ?? null },

@@ -288,7 +288,7 @@ describe('the company map, end to end', () => {
     const id = (made.body.data?.record as { id: string }).id
     expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(before)
     const detail = await api('u-owner', 'GET', `/item/${id}`)
-    expect(detail.body.data?.record).toMatchObject({ id, path: null, state: 'unconfirmed', version: 1, fields: { recorded_by: 'human', decided_by: 'u-member', why: 'チャット窓口も最初から入れたいとの要望' } })
+    expect(detail.body.data?.record).toMatchObject({ id, path: null, state: 'unconfirmed', version: 1, fields: { recorded_by: 'human', decided_by: null, owner: 'u-member', why: 'チャット窓口も最初から入れたいとの要望' } })
     // Again with the same key: nothing new.
     const again = await api('u-member', 'POST', '/decisions', { folder: '営業部', title: '対象の窓口を3つにする', why: '同じ', source: '同じ', key: 'k-1' })
     expect(again).toMatchObject({ status: 200, body: { data: { created: false, record: { id } } } })

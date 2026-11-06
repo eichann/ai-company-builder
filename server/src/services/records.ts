@@ -18,7 +18,7 @@ import { enteredByWaitOver, SERVICE_STATE_TYPES, TASK_WAIT_OVER_STEP, WAIT_OVER,
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
-import { DECISION_EXCEPTION_NOTICE, OLD_CONNECTION_LABEL } from '../../shared/types/records'
+import { DECISION_CHECK_ACTIONS, DECISION_EXCEPTION_NOTICE, DECISION_PROPOSAL_NOTICE, OLD_CONNECTION_LABEL, type DecisionCheck } from '../../shared/types/records'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordFileRepo, RecordFileSource } from '../ports/record-files'
@@ -52,6 +52,11 @@ export interface RecordServiceDeps {
   recordFiles?: Pick<RecordFileSource, 'existing'>
   /** Whom this member covers today (代わりの人, services/absences.ts); nobody without it. */
   actsFor?: (companyId: string, userId: string) => string[]
+  /**
+   * The engine's answer to which actions the member may run on a record (record-engine `whoMay`),
+   * for `decisionChecks` (decision version 6). Without it the detail carries none.
+   */
+  whoMay?: (member: Member, recordId: string, actions: readonly string[]) => { may: Record<string, boolean>; responsible: string[]; cannotRead: string[] } | null
 }
 
 /**
@@ -235,6 +240,8 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
       ...(r.members !== null ? { membersOnly: true as const } : {}),
       // 例外（この件だけ）: said in words wherever the AI reads it (never a precedent elsewhere).
       ...(r.type === 'decision' && fields.exception === true ? { exceptionNotice: DECISION_EXCEPTION_NOTICE } : {}),
+      // 決めたことの案 (decision version 6): not a decision until a person confirms it — never a precedent.
+      ...(r.type === 'decision' && s?.state === 'unconfirmed' ? { proposalNotice: DECISION_PROPOSAL_NOTICE } : {}),
     } satisfies RecordSummary]
   }))
 }
@@ -621,9 +628,24 @@ export function createRecordService(deps: RecordServiceDeps) {
       // 見える範囲, for its participants' card. The caller reads the record, so they read that folder.
       const own = row.path === null && row.folder !== null && types.get(row.type)?.definition.implements.includes('bundle')
         ? scopes.find(s => s.repoId !== null && pathKey(s.path) === pathKey(row.folder as string)) : undefined
+      // Who may confirm each decision here (decision version 6): the engine's answer; the 責任者's id only
+      // to a caller who reads that まとまり (it is a field of the まとまり).
+      const decisionChecks: Record<string, DecisionCheck> = {}
+      for (const d of [row, ...shown.values()].filter(r => r.type === 'decision')) {
+        const answer = deps.whoMay?.(member, d.id, DECISION_CHECK_ACTIONS)
+        if (!answer) continue
+        const bundleIds = records.linksFrom([d.id]).filter(l => l.name === 'bundle' && l.targetId !== null).map(l => l.targetId as string)
+        const readsBundle = bundleIds.length > 0 && records.byIds(bundleIds).some(b => b.removedAt === null && linkAllowed(d, b) && reader.record(b))
+        decisionChecks[d.id] = {
+          may: { confirm: answer.may.confirm === true, reject: answer.may.reject === true, retract: answer.may.retract === true },
+          responsible: readsBundle ? answer.responsible : [],
+          cannotRead: readsBundle ? answer.cannotRead : [],
+        }
+      }
       return ok({
         record: sums.get(row.id)!,
         ...(own ? { privateFolder: { scopeId: own.id, path: own.path } } : {}),
+        ...(Object.keys(decisionChecks).length > 0 ? { decisionChecks } : {}),
         links: links.map((l): RecordLinkView => ({
           ...(l.id
             ? { name: l.name, direction: l.direction, record: sums.get(l.id)! }

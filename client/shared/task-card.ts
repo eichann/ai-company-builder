@@ -163,13 +163,28 @@ export function archiveLine(e: Pick<LedgerEntry, 'action' | 'note' | 'fromState'
   return null
 }
 
+/**
+ * A decision the AI left from the meeting (decision version 6): `may` — whether ［そうです］ (confirm) /
+ * ［違う］ (reject) are the member's to press, as the server answers it (`decisionChecks`: the まとまり's
+ * 責任者, else the meeting's readers; a department manager, an admin); `cannotRead` — the names of a
+ * 責任者 who cannot read this meeting (「〇〇さんはこの会議を見られません」; given only to a reader of the
+ * まとまり).
+ */
+export interface MinutesReviewDecision {
+  id: string
+  title: string
+  state: string | null
+  version: number
+  may: { confirm: boolean; reject: boolean }
+  cannotRead: string[]
+}
+
 /** 「議事録を確認する」's own parts (task version 11): the meeting, its summary and the decisions the AI left. */
 export interface MinutesReviewView {
   meetingId: string
   meetingTitle: string
   summary: string | null
-  /** `mine`: the member is its 確かめる人 (the decision's `owner`), so ［確かめる］ is theirs to press. */
-  decisions: Array<{ id: string; title: string; state: string | null; version: number; mine: boolean }>
+  decisions: MinutesReviewDecision[]
 }
 
 export interface TaskCardSources {
@@ -297,7 +312,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
-    review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me) : null,
+    review: r.fields.task_kind === 'minutes_review' && src.meeting ? reviewOf(src.meeting, me, people) : null,
     teamMode: src.teamMode === true,
     roles, names, reviewerId: str(r.fields.reviewer), assigneeId: str(r.fields.assignee), self: { id: me, name: people[me] ?? null }, whenDone, bundle, origin, fromIncoming,
     canSetBundle: !!def?.links.bundle && !def.links.bundle.origin && !(def.final ?? []).includes(r.state ?? ''), actions, canSetTags, okLine,
@@ -308,13 +323,28 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
   }
 }
 
-/** 「議事録を確認する」 and the meeting card: the meeting's summary and its decisions not retracted (`mine`: theirs to confirm). */
-export function reviewOf(meeting: RecordDetail, me: string): MinutesReviewView {
+/**
+ * 「議事録を確認する」 and the meeting card: the meeting's summary and its decisions not retracted, each
+ * with who may say 「そうです」 as the server answered (`decisionChecks`, decision version 6). An older
+ * server sends none: then the decision's `owner` (its 確かめる人 then) may confirm, as before.
+ */
+export function reviewOf(meeting: RecordDetail, me: string, people: Record<string, string> = {}): MinutesReviewView {
   const m = meeting.record
   return {
     meetingId: m.id, meetingTitle: m.title || '（名前なし）', summary: str(m.fields.summary_text),
-    decisions: meeting.links.flatMap(l => (l.record?.type === 'decision' && l.record.state !== 'retracted'
-      ? [{ id: l.record.id, title: l.record.title || '（名前なし）', state: l.record.state, version: l.record.version, mine: l.record.fields.owner === me }]
-      : [])),
+    decisions: meeting.links.flatMap(l => {
+      if (l.record?.type !== 'decision' || l.record.state === 'retracted') return []
+      const check = meeting.decisionChecks?.[l.record.id]
+      const may = check ? { confirm: check.may.confirm, reject: check.may.reject } : { confirm: l.record.fields.owner === me, reject: false }
+      const cannotRead = (check?.cannotRead ?? []).map(id => people[id] ?? '責任者')
+      return [{ id: l.record.id, title: l.record.title || '（名前なし）', state: l.record.state, version: l.record.version, may, cannotRead }]
+    }),
   }
+}
+
+/** 「〇〇さんはこの会議を見られません」: a 責任者 the meeting's decisions cannot reach (never widened). */
+export function cannotReadLine(names: readonly string[]): string | null {
+  const unique = [...new Set(names)]
+  if (unique.length === 0) return null
+  return `${unique.map(n => `${n}さん`).join('・')}はこの会議を見られません。決めたことの案は、この会議を見られる人が確かめます。`
 }

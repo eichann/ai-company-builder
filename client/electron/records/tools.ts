@@ -294,9 +294,18 @@ const DECISION_TOOL: RecordToolSpec = {
     exception: z.boolean().optional().describe('例外（この件だけ）：つながった件だけの一回限りの判断（例「今回の見積は特別に20%値引きしてよい」）なら true / true for a one-off judgement that applies only to its linked thing and must not become a precedent'),
     key: z.string().min(1).max(200).optional().describe('会議と関係ない決めたことを2回残さないための目印。会議から残すときは付けず quote を使う / an idempotency key for a decision not from a meeting; from a meeting give `quote` instead'),
     quote: z.string().min(MINUTES_QUOTE_MIN).max(MINUTES_QUOTE_MAX).optional().describe('会議から残すとき（links.meeting と一緒に）：根拠になった議事録の文をそのまま写す。同じ会議で同じ根拠のものがあれば、それが返る / from a meeting (with links.meeting): the minutes text it rests on, copied exactly; the same basis returns the existing decision'),
+    // Decision version 6 (records.md "Decisions"): what the minutes say about who said it and whether anyone objected.
+    said_by: z.string().min(1).max(60).optional().describe('誰が言ったか。議事録に出てくる呼び方のまま（例「高杉さん」「先方の部長」） / who said it, as the minutes name them'),
+    objection: z.enum(['none', 'raised', 'unknown']).optional().describe('反対が出たか：none（反対なし）・raised（反対あり）・unknown（議事録から分からない） / whether anyone objected'),
   }).strict(),
-  description: '「決めたこと」をサーバーの記録として残す（ファイルは作らない。未確認の状態で始まり、確かめるのは人）。folder の部署のフォルダを読める人だけが見られる（出席者だけの会議からは folder を付けず、その会議の人だけが見られる）。' +
+  description: '「決めたことの案」をサーバーの記録として残す（ファイルは作らない。決める立場の人が「そうです」と確かめるまでは決めたことではない）。' +
+    '拾うのは、決める立場の人が「こうする」と言ったこと、または誰かが言ってほかの人が反対しなかったこと。誰が言ったか（said_by）と反対が出たか（objection）を添える。' +
+    '「次回決めよう」「検討しよう」のような保留や、見込み（「たぶん A 社」）は決めたことにしない（残さない）。' +
+    'folder の部署のフォルダを読める人だけが見られる（出席者だけの会議からは folder を付けず、その会議の人だけが見られる）。' +
     'まとまり（案件など）・会議はつながり（links）で示す。会議から残すときは quote（根拠の議事録の文そのまま）を付け、同じ根拠なら1回だけ残る。その件だけの一回限りの判断（特別な値引きなど）は exception: true（例外（この件だけ））にする。\n' +
+    'Record a proposed decision (決めたことの案) as a server record (no file): it is not a decision until the person who decides confirms it. ' +
+    'Pick up what someone with authority said, or what someone said and nobody objected to; add who said it (said_by) and whether anyone objected (objection). ' +
+    'Never record a postponement (「次回決めよう」, 「検討しよう」) or an expectation (「たぶん A 社」) as a decision. ' +
     'Record a decision as a server record (no file; it starts unconfirmed and a person confirms it). Only those who can read the department folder `folder` see it (from a meeting for its attendees, give no folder: that meeting\'s people see it). ' +
     'Link the bundle (a deal…) / meeting. From a meeting give `quote` (the minutes text, exactly): the same basis records once. Mark a one-off judgement for this case only (a special discount…) `exception: true`.',
   request: input => ({ method: 'POST', path: '/decisions', body: input }),
@@ -768,6 +777,7 @@ export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECOR
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。提案書などの PDF を付けるときは mail_draft_create / mail_draft_update の attachments に会社フォルダの中のパスを渡します（PDF だけ。付けても送られず、メンバーがカードでファイルを開いて確かめてから送ります）。` +
   `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「引き受ける」「受けられない」は本人だけができます（AI はできません）。ほかの部署の人に頼んだタスクは「引き受け待ち」になり、担当が引き受けると担当の番になります。` +
+  `決めたこと（decision）のうち state が unconfirmed のもの（proposalNotice「まだ確かめていない案」つき）は、決める立場の人がまだ確かめていない案です。決めたこととして扱わず、前例や根拠に使わないでください。話に出すときは「まだ確かめていない案」と添えてください。` +
   `過去の決めたことを前例として使うときは、exception: true（exceptionNotice「例外（この件だけ）」つき）の決めたことを、ほかの件に当てはめないでください。それはつながった件だけの判断です。一回限りの判断を decisions_record で残すときは exception: true にしてください。`
 
 export interface RecordTools {

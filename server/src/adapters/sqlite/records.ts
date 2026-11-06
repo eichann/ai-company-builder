@@ -15,7 +15,7 @@ import type {
   RecordRow, RecordStateRow, RecordTypeRow,
   MeetingEventRow,
 } from '../../ports/records'
-import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
+import { BUNDLE_PART_ENDED_ACTION, coreTypeDefinitions, DECISION_VERSION, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION, TASK_VERSION } from '../../../shared/core/core-types'
 import { canonicalTypeJson } from '../../../shared/core/record-types'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
@@ -212,17 +212,30 @@ export function migrateCompanyBundleParts(conn: Database.Database, companyId: st
  * tasks moved.
  */
 export function migrateCompanyTaskVersion(conn: Database.Database, companyId: string, at: string): number {
+  return migrateCompanyCoreTypeVersion(conn, companyId, 'task', TASK_VERSION, at)
+}
+
+/**
+ * The same for decisions (decision version 6, records.md "Decisions": `DECISION_VERSION`). Additive:
+ * no value changes, no ledger entry.
+ */
+export function migrateCompanyDecisionVersion(conn: Database.Database, companyId: string, at: string): number {
+  return migrateCompanyCoreTypeVersion(conn, companyId, 'decision', DECISION_VERSION, at)
+}
+
+/** One core type's records moved to `version` (the core definition stored first when missing). */
+function migrateCompanyCoreTypeVersion(conn: Database.Database, companyId: string, type: string, version: number, at: string): number {
   return conn.transaction(() => {
-    const stored = conn.prepare(`SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'task'`).get(companyId) as { v: number | null }
+    const stored = conn.prepare(`SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = ?`).get(companyId, type) as { v: number | null }
     if (stored.v === null) return 0
-    if (stored.v < TASK_VERSION) {
-      const def = coreTypeDefinitions().find(d => d.name === 'task')
-      if (!def || def.version !== TASK_VERSION) throw new Error('core task definition is not at TASK_VERSION')
-      conn.prepare(`INSERT INTO record_types (company_id, name, version, definition, source, commit_sha, created_at) VALUES (?, 'task', ?, ?, 'core', NULL, ?)`)
-        .run(companyId, def.version, canonicalTypeJson(def), at)
+    if (stored.v < version) {
+      const def = coreTypeDefinitions().find(d => d.name === type)
+      if (!def || def.version !== version) throw new Error(`core ${type} definition is not at version ${version}`)
+      conn.prepare(`INSERT INTO record_types (company_id, name, version, definition, source, commit_sha, created_at) VALUES (?, ?, ?, ?, 'core', NULL, ?)`)
+        .run(companyId, type, def.version, canonicalTypeJson(def), at)
     }
-    return conn.prepare(`UPDATE records SET type_version = ? WHERE company_id = ? AND type = 'task' AND (type_version IS NULL OR type_version < ?)`)
-      .run(TASK_VERSION, companyId, TASK_VERSION).changes
+    return conn.prepare(`UPDATE records SET type_version = ? WHERE company_id = ? AND type = ? AND (type_version IS NULL OR type_version < ?)`)
+      .run(version, companyId, type, version).changes
   })()
 }
 

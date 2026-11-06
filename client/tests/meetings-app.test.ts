@@ -49,12 +49,15 @@ function fakeServer(opts: { arrivals?: 'missing'; readRequest?: { status: number
           { name: 'meeting', direction: 'in', record: summary({ id: 'decision-d1', type: 'decision', state: 'unconfirmed', fields: { owner: 'u-me' } }) },
           { name: 'meeting', direction: 'in', record: summary({ id: 'decision-d2', type: 'decision', state: 'retracted' }) },
         ],
+        // Decision version 6: who may say 「そうです」 is the server's answer; u-boss (a 責任者) cannot read this meeting.
+        decisionChecks: { 'decision-d1': { may: { confirm: true, reject: true, retract: false }, responsible: [], cannotRead: ['u-boss'] } },
       })
     }
     if (url.endsWith('/read-request')) {
       const r = opts.readRequest ?? { status: 200, body: { success: true, data: { recordId: ID, version: 2, state: 'received' } } }
       return new Response(JSON.stringify(r.body), { status: r.status })
     }
+    if (url.endsWith('/companies/co/members')) return json([{ userId: 'u-boss', name: '阿部', email: 'abe@acb.example.jp' }, { userId: 'u-me', name: '佐藤' }])
     if (url.endsWith('/members')) return json({ added: ['u-2'] })
     return json({ recordId: ID, version: 3 })
   }) as unknown as typeof globalThis.fetch
@@ -95,13 +98,13 @@ test('a read meeting says what its reading made: proposals and tasks but not the
   assert.equal(seen.filter(s => s.url.includes(`/records/item/${ID}`)).length, 1)
 })
 
-test('the card of a read meeting: its decisions for the proposals part, ［確かめる］ only on the member\'s own', async () => {
+test('the card of a read meeting: its decisions for the proposals part, ［そうです］ as the server says, a 責任者 who cannot read it by name', async () => {
   const { api } = fakeServer()
   const r = await api.meeting('co', ID)
   assert.ok(r.success)
   assert.equal(r.meeting.status, 'read')
   assert.equal(r.meeting.series, true)
-  assert.deepEqual(r.review?.decisions.map(d => [d.id, d.mine]), [['decision-d1', true]])
+  assert.deepEqual(r.review?.decisions.map(d => [d.id, d.may.confirm, d.cannotRead]), [['decision-d1', true, ['阿部']]])
 })
 
 test('［AI に読ませる］ goes at the version shown with the session, and the runner\'s queue is read again at once', async () => {

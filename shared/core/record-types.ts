@@ -223,6 +223,14 @@ export interface ActionDef {
    */
   whoUnless?: Record<string, Record<string, string>>
   /**
+   * YAML `who_fallback` (decision version 6, owner decision 2026-11-07): `who` entries that qualify
+   * only while the record has none of its own people for the action — none of `who`'s person fields
+   * and `link:<name>.<field>` entries names a member who can read the record (no まとまり, a まとまり
+   * without a 責任者, or one whose 責任者 cannot read it). Never widens who reads the record; it only
+   * says who decides when nobody named does. Absent = none (left out of the definition then).
+   */
+  whoFallback?: string[]
+  /**
    * YAML `links`: record links (not file links) the action may set (task
    * version 5: `set_bundle` → `bundle`, `finish_prep` → `prepared`). The body
    * gives `links: { <name>: id | [ids] | null }`; a link left out stays as it
@@ -305,6 +313,22 @@ export const LINK_WHO_RE = /^link:[a-z][a-z0-9_]{0,39}$/
 export const LINK_WHO_PREFIX = 'link:'
 /** The link a `link:<name>` who-entry names, or null for any other entry. */
 export const linkWhoName = (w: string): string | null => (LINK_WHO_RE.test(w) ? w.slice(LINK_WHO_PREFIX.length) : null)
+
+/**
+ * `link:<name>.<field>` in an action's `who` (decision version 6, owner decision 2026-11-07
+ * 「決めたことを人が確かめる」): the member held in person field `<field>` of the record this record's
+ * link `<name>` points to — 「つながっているまとまりの責任者」 (`link:bundle.owner`). The link must be a
+ * link to an **interface** and `<field>` a person field that interface requires: the interface is the
+ * promise every type implementing it keeps (a 案件's or a プロジェクト's `owner`), so the core never
+ * names a business type. Never the AI unless `who` also lists `ai`. Read from the stored value, not
+ * from who reads what (a delegate standing in for that person qualifies like for a person field).
+ */
+export const LINK_PERSON_WHO_RE = /^link:([a-z][a-z0-9_]{0,39})\.([a-z][a-z0-9_]{0,39})$/
+/** The link and field a `link:<name>.<field>` who-entry names, or null for any other entry. */
+export function linkPersonWho(w: string): { link: string; field: string } | null {
+  const m = LINK_PERSON_WHO_RE.exec(w)
+  return m ? { link: m[1], field: m[2] } : null
+}
 
 /**
  * What an interface asks of a type that claims it (`implements`): server
@@ -576,7 +600,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'who_unless', 'links', 'via']
+      const allowed = ['label', 'from', 'to', 'who', 'who_fallback', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to', 'ok_from', 'who_unless', 'links', 'via']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -608,8 +632,24 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       // a plugin package may name only roles it declares (validatePluginPackage).
       // `link:<name>` (task version 13): who reads the record that record link points to.
       const linkWhoOk = (w: string) => { const l = linkWhoName(w); return l !== null && links[l] !== undefined && links[l].target !== 'file' }
-      const whoOk = !!who && who.length > 0 && who.every(w => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w) || ROLE_REF_RE.test(w) || linkWhoOk(w)))
-      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} か role:<役割の名前> か link:<記録へのつながりの名前> で書いてください`)
+      // `link:<name>.<field>` (decision version 6): a person field the linked interface requires.
+      const linkPersonOk = (w: string) => {
+        const lp = linkPersonWho(w)
+        const l = lp ? links[lp.link] : undefined
+        return !!lp && !!l && l.targetIsInterface === true && INTERFACES[l.target]?.fields[lp.field] === 'person'
+      }
+      const entryOk = (w: unknown) => typeof w === 'string' && (personFields.has(w) || (ACTION_ACTORS as readonly string[]).includes(w) || ROLE_REF_RE.test(w) || linkWhoOk(w) || linkPersonOk(w))
+      const whoOk = !!who && who.length > 0 && who.every(entryOk)
+      if (!whoOk) err(`操作「${aname}」の who は人の欄の名前か ${ACTION_ACTORS.join(' / ')} か role:<役割の名前> か link:<記録へのつながりの名前> か link:<共通の型へのつながり>.<その人の欄> で書いてください`)
+      // `who_fallback` (decision version 6): who may act only while none of `who`'s own people — its
+      // person fields and `link:<name>.<field>` entries — names a member who reads the record.
+      let whoFallback: string[] | undefined
+      if (a.who_fallback !== undefined && a.who_fallback !== null) {
+        const f = list(a.who_fallback)
+        const ownPeople = (who ?? []).some(w => typeof w === 'string' && (personFields.has(w) || linkPersonOk(w)))
+        if (!f || f.length === 0 || !f.every(entryOk) || !ownPeople) err(`操作「${aname}」の who_fallback は who と同じ書き方の並びです。who に人の欄か link:<つながり>.<人の欄> があるときだけ書けます`)
+        else whoFallback = [...new Set(f as string[])]
+      }
       const notify = list(a.notify)
       const notifyOk = !!notify && notify.every(n => typeof n === 'string' && (personFields.has(n) || args[n] === 'person'))
       if (!notifyOk) err(`操作「${aname}」の notify は人の欄か人の引数の名前で書いてください`)
@@ -689,6 +729,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         handTo,
         ...(okFrom ? { okFrom } : {}),
         ...(whoUnless ? { whoUnless } : {}),
+        ...(whoFallback ? { whoFallback } : {}),
         ...(actionLinks ? { links: actionLinks } : {}),
         ...(via ? { via } : {}),
       }

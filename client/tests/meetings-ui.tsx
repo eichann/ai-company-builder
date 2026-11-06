@@ -82,7 +82,7 @@ installElectronAPI({
     const m = find(id)
     const d = detailOf(m)
     return { success: true, ...(params.get('renew') === '1' ? { renewGoogle: true as const } : {}), meeting: { ...arrivalOf(m), made: m.state === 'read' ? madeOf(d) : null },
-      review: m.state === 'read' ? { meetingId: m.id, meetingTitle: m.title, summary: '要約', decisions: outputs(m).filter(r => r.type === 'decision').map(r => ({ id: r.id, title: r.title, state: r.state, version: 1, mine: r.fields.owner === ME })) } : null }
+      review: m.state === 'read' ? { meetingId: m.id, meetingTitle: m.title, summary: '要約', decisions: outputs(m).filter(r => r.type === 'decision').map(r => ({ id: r.id, title: r.title, state: r.state, version: 1, may: { confirm: r.fields.owner === ME, reject: r.fields.owner === ME }, cannotRead: [] })) } : null }
   },
   connectGoogle: async (_c, features) => { say(`google ${features.join(',')}`); return { success: true } },
   requestMeetingReading: async (_c, id, at) => {

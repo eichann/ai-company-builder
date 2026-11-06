@@ -1153,13 +1153,17 @@ Milestone 4 adds four (people by id in person fields):
   unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.** Version 2 implements `prepared` (a task links
   the drafts its AI made). Version 5 (2026-11-03, `outbound-mail.md` "Waiting for their answer") adds `expects_reply`, `reply_wait_until` and the link `task`.
-- `decision` (決めたこと, server — version 5 marks `meeting` / `approval` as origin links; version 1 was a file, "Decisions" below):
-  `recorded_by` [ai, human], `important`, `exception` (例外（この件だけ）, version 4), `decided_by` (null when the AI recorded it), `owner`
-  (the linked meeting's assignee at creation, else the member — `who` cannot name "the meeting's
-  assignee"), `source_key`, `why` (long_text), `source`; links `bundle`,
-  `meeting`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
-  (note required), both `who: [owner, dept_manager, admin]`, decisions; `set_exception` (args
-  `exception: boolean`, no state change, same `who` — never the AI).
+- `decision` (決めたこと, server — version 6 (2026-11-07): what the AI records is 「決めたことの案」 until a
+  person confirms it, "Decisions" below; version 5 marks `meeting` / `approval` as origin links; version 1 was a file):
+  `recorded_by` [ai, human], `important`, `exception` (例外（この件だけ）, version 4), `decided_by` (the person
+  who confirmed it, null until then), `owner` (残した人: the member who recorded it, only for a decision
+  with no meeting; null with one), `source_key`, `why` (long_text), `source`, `said_by` (text: who said
+  it, as the minutes name them — content store), `objection` (choice none / raised / unknown); links
+  `bundle`, `meeting`, `approval`. unconfirmed → confirmed / retracted: `confirm` (決めたことにする — the
+  app's ［そうです］; arg `decided_by`, filled with the confirmer: `ACTOR_ARGS`), `reject` (違う, from
+  unconfirmed, note optional), `retract` (取り消す, from confirmed, note required), all decisions, and
+  `set_exception` (args `exception: boolean`, no state change) — each `who: [link:bundle.owner,
+  dept_manager, admin]`, `who_fallback: [link:meeting, owner]`, never the AI.
 
 A link's `target` (a type) is a label, not a check: the parser and the engine accept a link to a
 type that is not defined (a company's own types). Core types link only to core types, files and
@@ -1226,8 +1230,15 @@ clock's, a separate service writing through the service writer: `notifications.m
   (2026-11-05) — only the server's own services move it through the service writer: the engine
   refuses it to every member and AI, and no screen (`recordActionChoices`) or AI tool offers it
   (`isSystemOnly`). First use: interaction v8's `left_inbox`. `link:<name>` (task version 13) — a
-  member who reads the record that link points to ("Task version 13"). Roles do
-  not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
+  member who reads the record that link points to ("Task version 13"). `link:<name>.<field>` (decision
+  version 6) — the member held in person field `<field>` of the record that link points to, only for
+  a link to an interface and a person field that interface requires (`link:bundle.owner`: the まとまり's
+  責任者); read from the stored value (whether there is a 責任者 is the same answer for everyone), a
+  delegate standing in like for a person field. The action key **`who_fallback`** (decision version 6)
+  lists entries that qualify only while none of `who`'s own people — its person fields and
+  `link:<name>.<field>` entries — names a member who can read the record (`ownPeopleOf`,
+  `whoWithFallback` in `record-engine/act.ts`); the parser allows it only with such an entry in `who`.
+  Roles do not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
   member who qualifies on their own — so the AI cannot complete a task. When `who` is `[ai]`
   alone, only the AI of the record's own people: `assignee`, `next_actor` (the 「AI の番」 rule) or
   `requested_by` (a task the member's consultation made in 準備中) is the member — never another
@@ -1797,7 +1808,7 @@ and (with the ledger's actions) when it finished. Nobody presses 着手 for it.
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
 `decisions_record`): `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
-important?, exception?, key?, quote? }` → 201 `{ record, created: true }` (200 `created: false` for a known key; an
+important?, exception?, key?, quote?, said_by?, objection? }` → 201 `{ record, created: true }` (200 `created: false` for a known key; an
 AI's decision with a meeting link is a candidate of the meeting's slot, the same basis `quote` answering the
 existing one: `minutes.md` "Outputs made once"; a person's key with a meeting link is that meeting's).
 - A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
@@ -1824,6 +1835,55 @@ existing one: `minutes.md` "Outputs made once"; a person's key with a meeting li
 - `key` (e.g. `meeting-…:decision:2`): the id is derived from it (sha256) and it is stored in
   `source_key`; a known key answers the existing record, so the same item is written once even
   for two calls at once.
+
+### A person confirms it (decision version 6, owner decision 2026-11-07 「決めたことを人が確かめる」)
+
+Production had 0 decisions; once members-only meetings could record theirs (#643), the AI would read
+「それでいいんじゃない？」 as decisions. Now **the AI only proposes; the person who decides makes it a decision**.
+
+- **What the AI picks up** (the tool description, `minutesFirstMessage`): both A (someone with authority
+  said it) and C (someone said it and nobody objected), with `said_by` (who said it, as the minutes name
+  them, ≤ 60 characters on one line — outside text: brackets neutralized like every outside text,
+  `neutralizeOutsideText`, and kept in the content store) and `objection` (`none` / `raised` /
+  `unknown`). Never a postponement (「次回決めよう」「検討しよう」) or an expectation (「たぶん A 社」).
+- **Who says 「そうです」** (`confirm`) and 「違う」 (`reject`): the **責任者 of the linked まとまり** — the
+  `bundle` interface's `owner` (`link:bundle.owner`: the プロジェクト's 責任者, a 案件's `owner`; the core names
+  no business type — implementing `bundle` already promises `owner`, so a business plugin declares its
+  責任者 by what it maps into `owner`) — a department manager or an admin, as before. With **no
+  まとまり, a まとまり without a 責任者, or a 責任者 who cannot read the decision** (`who_fallback`): every
+  reader of its meeting (`link:meeting`, as a meeting's proposals), and for a decision with no meeting
+  whoever recorded it (`owner`, 残した人). **The meeting's assignee has no part of it** any more (before,
+  `owner` was the assignee). Never the AI.
+- **決めた人** (`decided_by`) is the person who confirmed it (`ACTOR_ARGS`: the engine fills it; a body
+  naming anyone else → 400 `BAD_VALUE`); null at creation, for a person's decision too.
+- **While unconfirmed it is not a decision**: every summary the AI reads (`recordSummaries`: get, query,
+  the turn lists) carries `proposalNotice` (`DECISION_PROPOSAL_NOTICE`, 「まだ確かめていない案…前例や根拠と
+  して使わないでください」), and `RECORDS_INSTRUCTIONS` says never to use one as a precedent. The app names
+  it 「決めたことの案」 (`thingName`, `DECISION_PROPOSAL_NAME`) apart from confirmed ones (`tasks-ui.md`
+  "The minutes review card").
+- **Never widened** (members-only meetings, "Members-only records"): who reads the decision is
+  unchanged. A 責任者 who is not on the meeting's list cannot read it, so cannot confirm — and counts as
+  no 責任者, so the meeting's people decide (otherwise nobody could: owners and admins are not on the list
+  either). The screen says so: `GET /records/item/:id` adds `decisionChecks` (`DecisionCheck`, for the
+  record itself when a decision and for every decision among its links): `may` (confirm / reject /
+  retract — the engine's own answer, `recordEngine.whoMay`, duties 1 and 2), `responsible` (the
+  責任者 who read it) and `cannotRead` (a 責任者 who cannot) — ids given only to a caller who reads that
+  まとまり, since they are its field. The card: 「〇〇さんはこの会議を見られません。決めたことの案は、この
+  会議を見られる人が確かめます。」 (`cannotReadLine`).
+- **Migration**: `DECISION_VERSION` 6 (`migrateDecisionVersion` → `migrateCompanyDecisionVersion`, the
+  "Task version 9" mechanism generalized as `migrateCompanyCoreTypeVersion`): the core definition stored
+  once, every decision's index row moved, no ledger entry. Additive (fields, an action, `who` changed,
+  `retract`'s `from` narrowed — not breaking). Decisions made before keep their `owner` (the meeting's
+  assignee then): it only counts in `who_fallback`, where that person reads the meeting anyway.
+- Test: `server/tests/unit/decision-confirm.test.ts` (the 責任者 confirms and is 決めた人; the meeting's
+  assignee and its other readers cannot while there is one; the 責任者's delegate; a meeting reader with
+  no まとまり or no 責任者; without a meeting the recorder only, and not with a 責任者; 違う / 取り消す notes;
+  a members-only meeting's 責任者 not on the list cannot, the attendees decide, nothing widened, the card
+  told — the 責任者 named only to a reader of the まとまり; `proposalNotice`; `said_by` / `objection`; the
+  parser's rules; the migration once) — each guard mutation-checked; `record-service-types.test.ts`,
+  `client/tests/records-tools.test.ts` (the tool's fields and words, `RECORDS_INSTRUCTIONS`, the first
+  message), `client/tests/task-card.test.ts`, `meetings-app.test.ts`, `thing-words.test.ts`,
+  `tests/ui/task-card.spec.ts`.
 
 ## Not yet
 
