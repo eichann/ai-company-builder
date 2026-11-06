@@ -9,6 +9,7 @@ import { LinkDropNotice } from '../../../shared/ui/LinkDropNotice'
 import { useLinkDrop } from '../../../shared/hooks/useLinkDrop'
 import { SeenBy } from '../../../shared/ui/ThingIcon'
 import { Chip, FieldsFold, HistoryFold, RecordPage } from '../../../shared/ui/RecordPage'
+import { ProjectParticipants } from './ProjectParticipants'
 import { actOnRecord, undoRecordChange, unlinkRecord } from '../api'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { AiBand, BundleBody } from './BundleBody'
@@ -140,12 +141,17 @@ export function RecordCard({ companyId, rootPath, recordId, renderSections, rend
       </p>
     )}
   </>
-  return <CardBody card={card} rootPath={rootPath} incoming={incoming} renderMeeting={renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
+  const participants = card.privateFolder && card.participants
+    ? <ProjectParticipants companyId={companyId} card={{ privateFolder: card.privateFolder, participants: card.participants, viewers: card.viewers, record: card.record }} onChanged={reload} />
+    : null
+  return <CardBody participants={participants} card={card} rootPath={rootPath} incoming={incoming} renderMeeting={renderMeeting} onReload={reload} sections={renderSections?.(card.record)} source={renderSource?.(card.record)} renderApproval={renderApproval}
     field={field} notes={notes} notDownloadedFolderOf={notDownloadedFolderOf} drop={{ label: 'ファイル・フォルダ・やること・相談', accepts: linkDrop.accepts, onDrop: e => { linkDrop.drop(card.record.id, e) }, notice: <LinkDropNotice notice={linkDrop.notice} busy={linkDrop.busy} /> }} onUnlink={(link, label) => void unlink(link, label)}
     consult={consultationLinks(consultations, onConsult && (fresh => onConsult({ id: card.record.id, title: card.record.title }, fresh)))} />
 }
 
-function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink }: {
+function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections, source, renderApproval, consult, field, notes, drop, notDownloadedFolderOf, onUnlink, participants }: {
+  /** A 非公開 案件・プロジェクト's 参加者 (`ProjectParticipants`). */
+  participants?: ReactNode
   drop: LinkedDrop
   /** A 来た連絡's ［済んだ］ and its 「…」 (`IncomingActions`), or a 返事のお願い's ［終わりにする］, beside the title. */
   incoming: ReactNode
@@ -178,7 +184,7 @@ function CardBody({ card, rootPath, incoming, renderMeeting, onReload, sections,
     actions = <>{incoming}{detail.open && <OpenButton link={detail.open} />}</>
     body = <IncomingBody m={detail} />
   } else if (detail?.kind === 'bundle') {
-    body = <BundleBody b={detail} renderApproval={renderApproval} />
+    body = <>{participants}<BundleBody b={detail} renderApproval={renderApproval} /></>
   } else if (detail?.kind === 'reply') {
     actions = incoming
   }

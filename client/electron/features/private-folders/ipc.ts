@@ -1,9 +1,9 @@
 // Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
 // icons. Only the person's dialog creates them — never the chat (no tool).
 //   privateFolders:mine, privateFolders:createContext, privateFolders:create,
-//   privateFolders:reservedPathRefusal
+//   privateFolders:reservedPathRefusal, privateFolders:members / setMembers (a 非公開 案件's 参加者)
 
-import type { CreatePrivateFolderRequest } from '../../../shared/private-folder-ui'
+import type { CreatePrivateFolderRequest, SetPrivateFolderMembersRequest } from '../../../shared/private-folder-ui'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PrivateFoldersApi } from '../../private-folders-api'
 import type { PathGuard } from '../ports'
@@ -39,6 +39,19 @@ export function registerPrivateFoldersIpc(ipc: IpcRegistrar, { paths, api, guard
   ipc.handle('privateFolders:createContext', async (_, companyId: string, parentPath: string) => {
     if (typeof companyId !== 'string' || !companyId || typeof parentPath !== 'string') return { success: false, offline: false, error: 'Invalid arguments' }
     return api.createContext(companyId, parentPath)
+  })
+  // A 非公開 案件・プロジェクト's 参加者 (records.md "Private 案件・プロジェクト"): the folder's readers, read and
+  // changed by a person on the 案件's card (the server allows owners/admins and the department's managers).
+  ipc.handle('privateFolders:members', async (_, companyId: string, scopeId: string) => {
+    if (typeof companyId !== 'string' || !companyId || typeof scopeId !== 'string') return { success: false, offline: false, error: 'Invalid arguments' }
+    return api.members(companyId, scopeId)
+  })
+  ipc.handle('privateFolders:setMembers', async (_, companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest) => {
+    const ids = (v: unknown) => Array.isArray(v) && v.length <= 1000 && v.every(x => typeof x === 'string' && x.length > 0 && x.length <= 200)
+    if (typeof companyId !== 'string' || !companyId || typeof scopeId !== 'string' || !input || !ids(input.viewers) || !ids(input.editors)) {
+      return { success: false, offline: false, error: 'Invalid arguments' }
+    }
+    return api.setMembers(companyId, scopeId, { viewers: input.viewers, editors: input.editors })
   })
   ipc.handle('privateFolders:create', async (_, companyId: string, input: CreatePrivateFolderRequest) => {
     if (typeof companyId !== 'string' || !companyId || !input || typeof input.name !== 'string' || typeof input.parentPath !== 'string') {

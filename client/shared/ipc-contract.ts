@@ -31,7 +31,7 @@ import type { PermissionMode } from './permission-mode'
 import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
-import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
+import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext, PrivateFolderMembersResult, SetPrivateFolderMembersRequest } from './private-folder-ui'
 import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
@@ -498,6 +498,8 @@ export interface IpcInvokeChannels {
   'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
   'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
   'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
+  'privateFolders:members': { args: [companyId: string, scopeId: string]; result: PrivateFolderMembersResult }
+  'privateFolders:setMembers': { args: [companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest]; result: PrivateFolderMembersResult }
   // The member's own API keys (「自分の鍵」): the value goes in once, never comes back.
   'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
   'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
@@ -979,6 +981,8 @@ export interface ElectronAPI {
   getMyPrivateFolders: Invoke<'privateFolders:mine'>
   getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
   createPrivateFolder: Invoke<'privateFolders:create'>
+  getPrivateFolderMembers: Invoke<'privateFolders:members'>
+  setPrivateFolderMembers: Invoke<'privateFolders:setMembers'>
   // The member's own API keys (「自分の鍵」): last 4 only ever comes back.
   listOwnBrokerKeys: Invoke<'brokerKeys:list'>
   saveOwnBrokerKey: Invoke<'brokerKeys:save'>

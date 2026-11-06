@@ -212,3 +212,28 @@ test('a やること dropped on a 案件 is linked to it, held by the やるこ�
   await expect(page.locator('#opened')).toContainText('undo task-0000zz 9@9')
   expectNoPageErrors(state)
 })
+
+// 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): 参加者 on the 案件's card.
+test('a 非公開 案件 shows who takes part; who may change it adds and takes off, others only see the names', async ({ page }) => {
+  const state = await openPreview(page, 'record-card', { record: 'bundle', private: 'edit' })
+  const box = page.getByRole('region', { name: '参加者' })
+  await expect(box).toContainText('見られる人：『A社 研修導入』の参加者（3人）')
+  await expect(box).toContainText('佐藤')
+  await expect(box).toContainText('ほかに管理者 1人')
+  await box.getByRole('button', { name: '参加者を足す' }).click()
+  await box.getByLabel('足す人').selectOption({ label: '加藤' })
+  await expect(page.locator('#opened')).toHaveText('members scope-1 viewers=u-sato|u-abe|u-kato editors=u-sato|u-kato')
+  await expect(box).toContainText('加藤')
+  await box.getByRole('button', { name: '阿部さんを外す' }).click()
+  await expect(page.getByText('阿部さんのパソコンにあるこの案件のフォルダも消えます')).toBeVisible()
+  await page.getByRole('button', { name: '外す', exact: true }).click()
+  await expect(page.locator('#opened')).toContainText('members scope-1 viewers=u-sato|u-kato editors=u-sato|u-kato')
+  expectNoPageErrors(state)
+
+  const reader = await openPreview(page, 'record-card', { record: 'bundle', private: 'read' })
+  const named = page.getByRole('region', { name: '参加者' })
+  await expect(named).toContainText('阿部')
+  await expect(named.getByRole('button', { name: '参加者を足す' })).toHaveCount(0)
+  await expect(named.getByRole('button', { name: /を外す$/ })).toHaveCount(0)
+  expectNoPageErrors(reader)
+})

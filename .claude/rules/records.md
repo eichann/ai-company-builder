@@ -961,7 +961,8 @@ folder the creator's own department ("A task and its 案件・プロジェクト
 - `POST /api/companies/:id/viewers { records?: string[], files?: string[] }` (any member, ≤ 200
   of each, 400 beyond) → `ViewersAnswer` (`shared/types/viewers.ts`): per record id and per company
   path a `ViewersLabel { kind, text, count }`. The phrase is `shared/core/viewers.ts`
-  `viewersLabel`, first that fits: 「あなただけ」 (owner-only, or nobody else reads it) →
+  `viewersLabel`, first that fits: 「『<案件>』の参加者（N人）」 (a 非公開 案件・プロジェクト, "Private
+  案件・プロジェクト") → 「あなただけ」 (owner-only, or nobody else reads it) →
   「あなたと〇〇さん」 → 「会社のみんな」 → 「『<private folder path>』を見られる人（N人）」 →
   「〇〇部のみんな」 (exactly the people who belong to the department holding it, owners / admins
   aside) → 「N人が見られます」. `count` includes owners and admins. Never 「公開」「権限」「スコープ」.
@@ -1033,6 +1034,37 @@ Words on screen: 見える範囲 / 見られる人, never 置き場所.
   to the まとまり's folder for a linked task of a reader only, no name to a non-reader, the route's first
   check) — mutation-checked; `client/src/features/tasks/model.test.ts` (`bundlePlacesOf`),
   `client/tests/ui/task-card.spec.ts` (the dialog's department, the narrowing question, ［〇〇の人に見せる］).
+
+### Private 案件・プロジェクト (非公開（参加者だけ）, owner decision 2026-11-06)
+
+A 案件・プロジェクト whose 見える範囲 is **its own private folder**, with today's private-folder rights — no
+new permission. Its 参加者 are that folder's readers (owners / admins always read it).
+
+- **Made** from 「新しい〇〇にする」 (`tasks-ui.md`): the app first creates the private folder through the
+  existing `POST /private-folders` (inside the 案件's department, named after it by the department
+  folder-name rule, `-2`… when taken; default readers the creator + the department's managers; the first
+  private folder's outdated-app gate as always), then the まとまり with `folder` = that folder. The
+  engine places a まとまり there only for **a person** (session) who **may manage that private folder**
+  (owner / admin, or a manager of the department holding it — who may create a private folder there),
+  **exactly at the folder** and **only a type implementing `bundle`** (`create.ts` `ownPrivate`); anyone
+  else, the AI, a task, a folder deeper inside → the one `FOLDER_NOT_PLACEABLE`.
+- **Read** like any server record in a folder (`recordReader`: the folder's readers). Its tasks follow "A
+  task and its 案件・プロジェクト" (made for it → its folder; wider ones narrowed or refused), so they are
+  the participants' too. `GET /records/item/:id` adds `privateFolder: { scopeId, path }` on a まとまり placed
+  exactly in a private folder (its readers read that folder; absent otherwise).
+- **見られる人**: 「『<title>』の参加者（N人）」 (`viewersLabel` `privateProject`, before the other phrases);
+  its tasks keep 「『<folder>』を見られる人（N人）」. `services/viewers.ts` judges whether the caller reads a
+  record over **every** folder (it used to judge over the folders the caller can see, which made a
+  server record inside an unreadable private folder look like everyone's).
+- **参加者** are changed with the existing private-folder editor (`GET /private-folders/:scopeId`, `PUT …/members`:
+  owners / admins and the department's managers; the app's ［参加者を足す］ / 外す, `tasks-ui.md`); taking
+  someone off removes their clone by the existing mechanism (`private-folders-client.md` "Access changes").
+- Not yet: linking files inside its own folder to it (a server record still never links a private
+  folder's file); changing a 案件's 見える範囲 afterwards (part C).
+- Tests: `server/tests/unit/record-private-projects.test.ts` (who may make one, the AI / a task / deeper
+  refused alike; a non-participant sees neither it nor its tasks nor its title in query or 見られる人; a
+  participant added sees them, taken off no more; the phrase and `privateFolder`) — mutation-checked; the
+  permission matrix row of `PUT …/private-folders/:scopeId/members` (who may change participants).
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 

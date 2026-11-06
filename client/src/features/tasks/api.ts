@@ -18,6 +18,28 @@ export type TaskWrites = ElectronPort<'createTask' | 'actOnTask' | 'undoTaskActi
 export type RecordLinkWrites = ElectronPort<'linkRecordToRecord' | 'unlinkRecordFromRecord'>
 /** 「新しい〇〇にする」: making a 案件・プロジェクト (shared state on the server). */
 export type BundleWrites = ElectronPort<'createBundle'>
+
+/**
+ * A 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): who may make one (the private-folder
+ * rights: role and managed departments) and its private folder, made by the existing private-folder
+ * route — a person's press only, never the chat.
+ */
+export type PrivateBundleWrites = ElectronPort<'getPrivateFolderCreateContext' | 'createPrivateFolder'>
+
+export async function privateBundleRights(companyId: string, ports: PrivateBundleWrites = window.electronAPI): Promise<{ role: string; managedDepartmentIds: string[] } | null> {
+  const r = await ports.getPrivateFolderCreateContext(companyId, '').catch(() => null)
+  return r?.success ? { role: r.context.role, managedDepartmentIds: r.context.managedDepartmentIds } : null
+}
+
+/** Makes the private folder under `parent` ('' = the company root) with the first free name: its path, or the reason in words. */
+export async function createPrivateBundleFolder(companyId: string, parent: string, names: string[], ports: PrivateBundleWrites = window.electronAPI): Promise<{ path: string } | { error: string }> {
+  for (const name of names) {
+    const r = await ports.createPrivateFolder(companyId, { parentPath: parent, name }).catch(() => null)
+    if (r?.success) return { path: r.path }
+    if (r?.code !== 'FOLDER_NAME_UNAVAILABLE') return { error: r?.error || 'サーバーに接続できませんでした。' }
+  }
+  return { error: '同じ名前のフォルダがあるため作れませんでした。名前を変えてください。' }
+}
 /** One task's card, and the AI's proposals (案) of a meeting for 「議事録を確認する」. */
 export type TaskCardReads = ElectronPort<'getTaskCard' | 'getTaskProposals'>
 /** Linking a company file to a task, or taking the link away (the server checks both sides). */

@@ -9,6 +9,7 @@ import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordFindHit, RecordFindHub, RecordSummary } from '../../shared/types/records'
 import type { RecordDetailView } from './record-details'
 import type { ViewersLabel } from '../../shared/types/viewers'
+import type { MyPrivateFolder, PrivateFolderMember } from '../../shared/types/private-folders'
 import { stateWord, thingKindOf, thingName, type ThingKind } from './thing-words'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
@@ -155,6 +156,14 @@ export interface RecordCardView {
   viewers?: ViewersLabel
   /** The AI on this record (plan I.4): working on it now, or what it last did after the last person's change. */
   ai?: { working: boolean; done: { at: string; text: string } | null }
+  /** A 非公開 案件・プロジェクト: the private folder that is its 見える範囲 (its 参加者 are that folder's readers). */
+  privateFolder?: { scopeId: string; path: string }
+  /**
+   * Who takes part in it (its private folder's readers): names of those named on the folder and how many
+   * owners / admins see it anyway; `members` (the full list) only when the server answered it — to those
+   * who may change it (owners / admins, the department's managers).
+   */
+  participants?: { names: string[]; admins: number; members: PrivateFolderMember[] | null }
   fields: RecordCardField[]
   history: RecordCardHistoryLine[]
   links: RecordCardLink[]
@@ -260,4 +269,20 @@ export function historyLines(entries: LedgerEntry[], def: TypeDefinition | undef
     if (e.action === WAIT_OVER_ACTION && e.note) return { at: e.at, text: `${who}：${e.note}`, ai: false, version: e.version, who }
     return { at: e.at, text: `${who}：${what}${e.note ? `（${e.note}）` : ''}`, ai: e.actorKind === 'ai', version: e.version, who }
   })
+}
+
+/**
+ * A 非公開 案件's 参加者 from the server's answers (records.md "Private 案件・プロジェクト"): the folder's full list
+ * when the member may change it (`GET /private-folders/:scopeId`), else the names every reader is shown
+ * (`GET /me/private-folders`). Owners / admins see it anyway: counted, not named.
+ */
+export function participantsOf(scopeId: string, full: PrivateFolderMember[] | null, mine: readonly MyPrivateFolder[] | null): NonNullable<RecordCardView['participants']> {
+  const isAdmin = (role: string) => role === 'owner' || role === 'admin'
+  if (full) {
+    const named = full.filter(m => m.via === 'rule')
+    return { names: named.map(m => m.name || m.email || 'メンバー'), admins: full.length - named.length, members: full }
+  }
+  const own = mine?.find(f => f.scopeId === scopeId)
+  const named = own ? own.viewers.filter(v => !isAdmin(v.role)) : []
+  return { names: named.map(v => v.name || 'メンバー'), admins: own ? own.viewers.length - named.length : 0, members: null }
 }

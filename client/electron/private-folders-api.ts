@@ -7,11 +7,15 @@
  * There is deliberately no chat tool / MCP around this: only a person, in the
  * dialog, creates private folders (shared/types/private-folders.ts).
  */
-import type {
-  CreatePrivateFolderRequest,
-  CreatePrivateFolderResult,
-  MyPrivateFolder,
-  PrivateFolderCreateContext,
+import {
+  PRIVATE_SCOPE_ID_RE,
+  type CreatePrivateFolderRequest,
+  type CreatePrivateFolderResult,
+  type MyPrivateFolder,
+  type PrivateFolderCreateContext,
+  type PrivateFolderMember,
+  type PrivateFolderMembersResult,
+  type SetPrivateFolderMembersRequest,
 } from '../shared/private-folder-ui'
 import type { SkillEditing } from '../../shared/core/skill-files'
 
@@ -37,6 +41,10 @@ export interface PrivateFoldersApi {
   mine(companyId: string): Promise<MyPrivateFoldersResult>
   createContext(companyId: string, parentPath: string): Promise<{ success: true; context: PrivateFolderCreateContext } | { success: false; offline: boolean; error: string }>
   create(companyId: string, input: CreatePrivateFolderRequest): Promise<CreatePrivateFolderResult>
+  /** A 非公開 案件's participants (owner/admin, the department's managers; anyone else a failure). */
+  members(companyId: string, scopeId: string): Promise<PrivateFolderMembersResult>
+  /** Replace its readers and editors (the server decides who may). */
+  setMembers(companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest): Promise<PrivateFolderMembersResult>
   /** GET /me/capabilities: role and managed departments (folders from servers that send them). */
   capabilities(companyId: string): Promise<{ success: true; role: string; managedDepartmentFolders?: string[]; skillEditing?: SkillEditing } | { success: false; offline: boolean; error: string }>
 }
@@ -124,6 +132,33 @@ export function createPrivateFoldersApi(deps: PrivateFoldersApiDeps): PrivateFol
       } catch (err) {
         return failure(err)
       }
+    },
+
+    async members(companyId, scopeId) {
+      if (!deps.baseUrl()) return { success: false, offline: true, error: OFFLINE }
+      if (!PRIVATE_SCOPE_ID_RE.test(scopeId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      try {
+        const d = await getData<{ members?: PrivateFolderMember[] }>(companyId, `/private-folders/${encodeURIComponent(scopeId)}`)
+        return { success: true, members: Array.isArray(d.members) ? d.members : [] }
+      } catch (err) {
+        return failure(err)
+      }
+    },
+
+    async setMembers(companyId, scopeId, input) {
+      if (!deps.baseUrl()) return { success: false, offline: true, error: OFFLINE }
+      if (!PRIVATE_SCOPE_ID_RE.test(scopeId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      let res: Response
+      try {
+        res = await doFetch(url(companyId, `/private-folders/${encodeURIComponent(scopeId)}/members`), {
+          method: 'PUT', headers: headers(true), body: JSON.stringify({ viewers: input.viewers, editors: input.editors }),
+        })
+      } catch {
+        return { success: false, offline: true, error: OFFLINE }
+      }
+      const body = (await res.json().catch(() => null)) as { data?: { members?: PrivateFolderMember[] }; error?: string } | null
+      if (res.ok && body?.data) return { success: true, members: Array.isArray(body.data.members) ? body.data.members : [] }
+      return { success: false, offline: false, error: typeof body?.error === 'string' ? body.error : `HTTP ${res.status}` }
     },
 
     async create(companyId, input) {

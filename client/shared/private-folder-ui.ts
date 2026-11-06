@@ -6,9 +6,27 @@
  *
  * Paths here are company-relative, '/'-separated (normalizeRepoPath).
  */
-import type { MyPrivateFolder } from '../../shared/types/private-folders'
+import type { MyPrivateFolder, PrivateFolderMember } from '../../shared/types/private-folders'
 
-export type { MyPrivateFolder } from '../../shared/types/private-folders'
+export type { MyPrivateFolder, PrivateFolderMember } from '../../shared/types/private-folders'
+
+/**
+ * 参加者 of a 非公開 案件・プロジェクト = its private folder's readers (records.md "Private 案件・プロジェクト"):
+ * `GET /private-folders/:scopeId`, which answers only owners/admins and the department's managers
+ * (anyone else: a failure, as for a folder that does not exist).
+ */
+export type PrivateFolderMembersResult =
+  | { success: true; members: PrivateFolderMember[] }
+  | { success: false; offline: boolean; error: string }
+
+/** ［参加者を足す］ / 外す: `PUT /private-folders/:scopeId/members` (the whole list; editors kept as they were). */
+export interface SetPrivateFolderMembersRequest {
+  viewers: string[]
+  editors: string[]
+}
+
+/** A private folder's scope id as the server makes them (never reshapes a URL). */
+export const PRIVATE_SCOPE_ID_RE = /^[A-Za-z0-9_-]{1,100}$/
 
 export interface PrivateFolderMemberOption {
   userId: string

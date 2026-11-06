@@ -32,6 +32,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader, type RecordReader } from './record-access'
+import { currentTypes } from './record-index'
 
 export interface ViewersDeps {
   companyData: CompanyDataSource
@@ -82,6 +83,10 @@ export function createViewersService(deps: ViewersDeps) {
         userId: m.user_id, reader: recordReader({ companyId: member.companyId, userId: m.user_id, role: m.role }, scopes),
       }))
       const caller = recordReader(member, scopes)
+      // Records are judged over every folder: a server record may now sit in a private folder (a 非公開
+      // 案件・プロジェクト and its tasks, records.md "Private 案件・プロジェクト"), which `scopes` leaves out for a
+      // non-reader — read through it, the record would look like everyone's.
+      const callerOverAll = recordReader(member, all)
       const fullAccess = new Set(members.filter(m => FULL_ACCESS_ROLES.has(m.role)).map(m => m.user_id))
       const departments = handle.departments.list().map(d => ({ id: d.id, name: d.name, key: pathKey(d.folder) }))
       const departmentMembers = new Map<string, string[]>()
@@ -124,9 +129,10 @@ export function createViewersService(deps: ViewersDeps) {
         return value
       }
 
+      const bundleTypes = new Set([...currentTypes(handle.records).values()].filter(t => t.definition.implements.includes('bundle')).map(t => t.definition.name))
       const out: ViewersAnswer = { records: {}, files: {} }
       for (const row of handle.records.byIds(recordIds)) {
-        if (!caller.record(row)) continue
+        if (!callerOverAll.record(row)) continue
         if (row.personalOwner !== null) {
           out.records[row.id] = viewersLabel({
             viewerId: member.userId, readers: [member.userId], ownerOnly: true, companyMembers: members.length,
@@ -146,6 +152,15 @@ export function createViewersService(deps: ViewersDeps) {
         const path = row.path ?? row.folder ?? ''
         const key = `record|${row.path === null ? 'server' : 'file'}|${row.scopeId ?? ''}|${placeOf(path)}`
         const priv = row.scopeId !== null ? scopes.find(s => s.id === row.scopeId) ?? null : findPrivateScope(scopes, path)
+        // A 非公開 案件・プロジェクト in its own private folder: 「『<title>』の参加者（N人）」 (records.md "Private
+        // 案件・プロジェクト"), outside the per-place cache (its tasks there keep the folder's phrase).
+        if (priv && row.path === null && row.folder !== null && pathKey(priv.path) === pathKey(row.folder) && bundleTypes.has(row.type)) {
+          out.records[row.id] = viewersLabel({
+            viewerId: member.userId, readers: readers.filter(r => r.reader.record(row)).map(r => r.userId), ownerOnly: false,
+            companyMembers: members.length, privateFolder: priv.path, privateProject: row.title, department: null, fullAccess, nameOf,
+          })
+          continue
+        }
         out.records[row.id] = label(key, path, priv, r => r.record(row))
       }
       for (const path of files) {
@@ -156,7 +171,7 @@ export function createViewersService(deps: ViewersDeps) {
       // for a record the caller reads and paths the caller reads (anything else is left out).
       if (linked) {
         const row = handle.records.byIds([linked.record])[0]
-        if (row && caller.record(row)) {
+        if (row && callerOverAll.record(row)) {
           const recordReaders = row.personalOwner !== null ? [] : readers.filter(r => r.reader.record(row))
           const cannotOpen: Record<string, number> = {}
           for (const path of linked.paths) {

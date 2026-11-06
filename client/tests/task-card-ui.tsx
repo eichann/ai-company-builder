@@ -39,6 +39,8 @@ const noBundle = params.get('bundle') === 'none'
 const wider = params.get('wider') === '1'
 // 「新しい〇〇にする」 with the member's own department (開発部) first.
 const withPlaces = params.get('places') === '1'
+// Who may make a 非公開 one: 開発部's manager, or a plain member.
+const rights = params.get('rights')
 // 返事待ち (task version 12): waiting, given back by the clock, or a plain task to make wait.
 const waitMode = ['waiting', 'back', 'todo-team', 'todo-own'].includes(params.get('task') ?? '') ? params.get('task') : null
 const plainTodo = waitMode === 'todo-team' || waitMode === 'todo-own'
@@ -145,6 +147,8 @@ installElectronAPI({
   exists: async (path: string) => path.endsWith('打ち合わせメモ.md'),
   gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   shareTask: async (_c, recordId, folder, version) => { show('acted', `share ${folder}@${version}`); return { success: true, recordId } },
+  getPrivateFolderCreateContext: async () => ({ success: true, context: { role: 'member', managedDepartmentIds: rights === 'manager' ? ['d-dev'] : [], department: null, managerIds: [], members: [] } }),
+  createPrivateFolder: async (_c, input) => { show('acted', `private ${input.parentPath}/${input.name}`); return { success: true, scopeId: 'scope-1', path: `${input.parentPath}/${input.name}`, viewerCount: 3 } },
   shareTaskToBundle: async (_c, recordId, version) => { show('acted', `share to bundle@${version}`); return { success: true, recordId } },
   suggestTaskTags: async (_c, title, inUse) => ({ source: 'ai', tags: title.includes('見積') ? inUse.filter(t => t === '経理') : [] }),
   reconcileTaskRun: async (_c, runId, key, isDone) => { show('acted', `reconcile ${runId} ${key} ${isDone}`); return { success: true, recordId: '' } },
@@ -169,8 +173,8 @@ function Preview() {
         onNudge={r => show('acted', `nudge ${r.id}`)}
         bundleKind={{ type: 'deal', name: '案件', source: 'plugin' }} bundleFolder="営業部"
         {...(withPlaces ? { bundlePlaces: { defaultFolder: '開発部', choices: [
-          { folder: '営業部', name: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' as const } },
-          { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const } },
+          { folder: '営業部', name: '営業部', kind: { type: 'deal', name: '案件', source: 'plugin' as const }, departmentId: 'd-sales' },
+          { folder: '開発部', name: '開発部', kind: { type: 'project', name: 'プロジェクト', source: 'core' as const }, departmentId: 'd-dev' },
         ] } } : {})}
         consultations={params.get('consult') === 'none' ? [] : [{ sessionId: 's-1', title: '見積の相談', updatedAt: '2026-11-05T07:00:00.000Z' }]}
         tagsInUse={['営業', '見積', '経理']} createTodayFile={createTodayFile} notDownloadedFolderOf={p => (p === '総務' || p.startsWith('総務/') ? '総務' : null)} onDetachConsultation={id => show('acted', `detach ${id}`)} />

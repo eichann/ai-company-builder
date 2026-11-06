@@ -13,7 +13,7 @@ import type { ChatMetadataPatch, ChatSaveReceipt, ChatSession } from '../shared/
 import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
-import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
+import type { CreatePrivateFolderRequest, SetPrivateFolderMembersRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
 import type { MailAwaitReply, MailDraftEdit } from '../shared/outbound-mail'
 import type { AbsenceAddInput } from '../shared/absences'
@@ -134,6 +134,9 @@ const api: ElectronAPI = {
     invoke('privateFolders:createContext', companyId, parentPath),
   createPrivateFolder: (companyId: string, input: CreatePrivateFolderRequest) =>
     invoke('privateFolders:create', companyId, input),
+  getPrivateFolderMembers: (companyId: string, scopeId: string) => invoke('privateFolders:members', companyId, scopeId),
+  setPrivateFolderMembers: (companyId: string, scopeId: string, input: SetPrivateFolderMembersRequest) =>
+    invoke('privateFolders:setMembers', companyId, scopeId, input),
   // The member's own API keys (「自分の鍵」): last 4 only ever comes back.
   listOwnBrokerKeys: (companyId: string) => invoke('brokerKeys:list', companyId),
   saveOwnBrokerKey: (companyId: string, service: string, secret: string, displayName?: string) =>

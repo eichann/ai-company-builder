@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { bundleListWord, bundlePlacesOf, companyNow, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
+import { bundleListWord, bundlePlacesOf, companyNow, mayMakePrivateBundle, privateBundleFolderNames, companyPathOf, dueText, dueWhen, listEvents, listRows, listSections, listShownFor, filterByTag, linkCandidates, nextCard, postponeChoices } from './model'
 import type { TaskCardData, TaskCardResult } from '../../../shared/task-card'
 
 // The card is no longer remounted per version (tasks-ui.md), so two reads can race: an older answer
@@ -188,5 +188,19 @@ test('a new 案件・プロジェクト belongs to the creator’s department: o
   // Belonging nowhere on 全社: the whole company, offered as a choice.
   const owner = bundlePlacesOf(departments, kinds, [], '')
   assert.equal(owner.defaultFolder, null)
-  assert.deepEqual(owner.choices.at(-1), { folder: null, name: '全社', kind: { type: 'project', name: 'プロジェクト' } })
+  assert.deepEqual(owner.choices.at(-1), { folder: null, name: '全社', kind: { type: 'project', name: 'プロジェクト' }, departmentId: null })
+})
+
+test('非公開 is offered exactly to who may make a private folder there: owners / admins anywhere, a manager in their department', () => {
+  const sales = { folder: '営業部', name: '営業部', kind: null, departmentId: 's' }
+  const whole = { folder: null, name: '全社', kind: null, departmentId: null }
+  assert.equal(mayMakePrivateBundle(sales, { role: 'member', managedDepartmentIds: ['s'] }), true)
+  assert.equal(mayMakePrivateBundle(sales, { role: 'member', managedDepartmentIds: ['d'] }), false)
+  assert.equal(mayMakePrivateBundle(whole, { role: 'member', managedDepartmentIds: ['s'] }), false)
+  assert.equal(mayMakePrivateBundle(whole, { role: 'admin', managedDepartmentIds: [] }), true)
+})
+
+test('a 非公開 one\'s folder name follows the folder-name rule, with -2… for a taken name', () => {
+  assert.deepEqual(privateBundleFolderNames('A社 研修/導入', 'プロジェクト').slice(0, 2), ['A社-研修-導入', 'A社-研修-導入-2'])
+  assert.equal(privateBundleFolderNames('...', 'プロジェクト')[0], 'プロジェクト')
 })

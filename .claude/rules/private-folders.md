@@ -55,6 +55,10 @@ or who can see it. So:
   "Where a record may be placed"). The one exception: a task shown to (or made for) the 案件・プロジェクト
   it links to takes that 案件's private folder, for a reader of the 案件 only (`records.md` "A task and
   its 案件・プロジェクト"); the refusal for anything else stays the same one answer.
+- A 非公開 案件・プロジェクト (`records.md` "Private 案件・プロジェクト") is a まとまり placed exactly in its own
+  private folder, made only by who may manage that folder (owner/admin, the department's managers). Its
+  参加者 are the folder's readers, changed through `PUT /private-folders/:scopeId/members` from the 案件's
+  card; 見られる人 says 「『<title>』の参加者（N人）」 to its readers only.
 - 見られる人 (`POST /viewers`, `records.md` "Who can see it") names a private folder
   (「『<path>』を見られる人（N人）」) only to its readers: an unreadable record is left out, and a
   path inside an unreadable folder is answered as if the folder did not exist.

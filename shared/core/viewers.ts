@@ -3,10 +3,12 @@
  * of the rule for the server (`POST …/viewers`) and anything that shows it
  * (plan「新しい画面のデモ」K サーバー乙 ②, words: 「言葉の決まり」5b).
  *
- * The phrase, first that fits:
+ * The phrase, first that fits (a 非公開 案件・プロジェクト's own phrase comes first: see below):
  * - 「あなただけ」 — an owner-only record (持ち主だけ), or nobody but the asker can see it;
  * - 「あなたと〇〇さん」 — the asker and one other person;
  * - 「会社のみんな」 — every member of the company;
+ * - 「『<案件>』の参加者（N人）」 — a 非公開 案件・プロジェクト, placed in its own private folder (records.md
+ *   "Private 案件・プロジェクト"): its participants are that folder's readers. Only for its readers;
  * - 「『<folder>』を見られる人（N人）」 — inside a private folder. The caller must only build it for
  *   someone who can read that folder (owner decision B: a private folder's name never reaches
  *   anyone else; the server answers nothing at all about an unreadable one);
@@ -38,6 +40,8 @@ export interface ViewersInput {
   companyMembers: number
   /** The private folder it is in (its path), or null. Only for someone who reads that folder. */
   privateFolder: string | null
+  /** A 非公開 案件・プロジェクト in its own private folder: its title (participants are the folder's readers). */
+  privateProject?: string | null
   /** The department whose folder holds it, with who belongs to it; null outside a department. */
   department: { name: string; memberIds: readonly string[] } | null
   /** Owners and admins (they read everything, so they do not make a department's 「みんな」 different). */
@@ -51,6 +55,10 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b
 export function viewersLabel(input: ViewersInput): ViewersLabel {
   const readers = new Set(input.readers)
   readers.add(input.viewerId)
+  // A 非公開 案件・プロジェクト says whose it is, however few take part.
+  if (!input.ownerOnly && input.privateFolder !== null && input.privateProject) {
+    return { kind: 'private-folder', text: `『${input.privateProject}』の参加者（${readers.size}人）`, count: readers.size }
+  }
   if (input.ownerOnly || readers.size === 1) return { kind: 'only-you', text: 'あなただけ', count: 1 }
   if (readers.size === 2) {
     const other = [...readers].find(id => id !== input.viewerId)!

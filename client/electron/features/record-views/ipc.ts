@@ -17,10 +17,11 @@ import type { LedgerEntry } from '../../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import type { RecordDetail, RecordFindHome, RecordFindResult, RecordQueryResult, RecordTypeView } from '../../../../shared/types/records'
 import {
-  cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
+  cardFields, findHitView, historyEntries, historyLines, linkedPathOf, linkedPaths, participantsOf, RECORD_VIEWS_OFFLINE_TEXT, removableOf, summaryView,
   type FindHomeResult, type FindResult, type RecordCardLink, type RecordCardResult, type RecordCardView, type RecordListResult,
 } from '../../../shared/record-views'
 import { bundleDetailOf, DETAIL_FIELDS, recordDetailOf } from '../../../shared/record-details'
+import { PRIVATE_SCOPE_ID_RE, type MyPrivateFolder, type PrivateFolderMember } from '../../../shared/private-folder-ui'
 import type { AiRunView } from '../../../../shared/types/ai-runs'
 import type { ViewersAnswer, ViewersLabel } from '../../../../shared/types/viewers'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -171,6 +172,10 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           : { label, ...linkedPathOf({ ...l, path: l.path as string }, cannotOpen) }
       })
       const isBundle = def?.implements.includes('bundle') ?? false
+      // A 非公開 案件: only a well-formed scope id and a company path (an older server sends none).
+      const pf = detail.privateFolder
+      const own = isBundle && pf && typeof pf.scopeId === 'string' && PRIVATE_SCOPE_ID_RE.test(pf.scopeId) && typeof pf.path === 'string' && fileLinkPath(pf.path)
+        ? { scopeId: pf.scopeId, path: pf.path } : null
       const view = isBundle
         ? bundleDetailOf(detail.record, detail.links.flatMap(l => (l.record ? [l.record] : [])), me, members)
         : recordDetailOf(detail.record, members, me, def)
@@ -188,9 +193,19 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
           links,
           ai: aiOnRecord(recordId, runList, entries, def, members),
           ...viewersOf(viewers, recordId),
+          ...(own ? { privateFolder: own, participants: await participantsFor(companyId, own.scopeId) } : {}),
         },
       }
     },
+  }
+
+  /** A 非公開 案件's 参加者: the full list when the server answers it (who may change it), else the readers' names. */
+  async function participantsFor(companyId: string, scopeId: string) {
+    const full = await call(companyId, 'GET', `/private-folders/${encodeURIComponent(scopeId)}`)
+    const members = full?.status === 200 ? (full.json?.data as { members?: PrivateFolderMember[] } | undefined)?.members ?? null : null
+    if (members) return participantsOf(scopeId, members, null)
+    const mine = await call(companyId, 'GET', '/me/private-folders')
+    return participantsOf(scopeId, null, mine?.status === 200 ? (mine.json?.data as MyPrivateFolder[] | undefined) ?? null : null)
   }
 
   /** The member's own id (for 「あなたの番」), cached per session; null when unreachable. */

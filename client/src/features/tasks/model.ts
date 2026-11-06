@@ -11,6 +11,7 @@ import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 import { bundleWords } from '../../../shared/thing-words'
 import type { BundleKind, BundleKindsResult } from '../../../../shared/types/records'
 import { defaultBundleFolder } from '../../../../shared/core/bundle-place'
+import { suggestFolderName } from '../../../../shared/core/names'
 
 /** 番ごと ｜ 〇〇ごと (what the items belong to: 案件, プロジェクト…) ｜ 日付ごと. */
 export type ListMode = 'turn' | 'bundle' | 'date'
@@ -205,6 +206,23 @@ export interface BundlePlace {
   folder: string | null
   name: string
   kind: BundleKind | null
+  /** The department's id (null = 全社): who may make a 非公開 one there. */
+  departmentId: string | null
+}
+
+/**
+ * Who may make a 非公開 案件・プロジェクト (records.md "Private 案件・プロジェクト"): exactly who may create a
+ * private folder there today — owners / admins anywhere, a department's managers inside it.
+ */
+export function mayMakePrivateBundle(place: BundlePlace, rights: { role: string; managedDepartmentIds: readonly string[] }): boolean {
+  if (rights.role === 'owner' || rights.role === 'admin') return true
+  return place.departmentId !== null && rights.managedDepartmentIds.includes(place.departmentId)
+}
+
+/** The private folder's name for a 非公開 one: its name as a folder name, then -2, -3… when that is taken. */
+export function privateBundleFolderNames(title: string, word: string): string[] {
+  const base = suggestFolderName(title).slice(0, 80) || suggestFolderName(word) || 'project'
+  return [base, ...[2, 3, 4, 5].map(n => `${base}-${n}`)]
 }
 
 /**
@@ -220,8 +238,8 @@ export function bundlePlacesOf(
 ): { choices: BundlePlace[]; defaultFolder: string | null } {
   const listed = departments.filter(d => d.folder)
   const defaultFolder = defaultBundleFolder({ departments: listed, mine, onScreen: onScreen || null })
-  const choices: BundlePlace[] = listed.map(d => ({ folder: d.folder, name: d.name, kind: departmentBundleKind(kinds, d.folder) }))
-  if (defaultFolder === null) choices.push({ folder: null, name: '全社', kind: kinds?.core ?? null })
+  const choices: BundlePlace[] = listed.map(d => ({ folder: d.folder, name: d.name, kind: departmentBundleKind(kinds, d.folder), departmentId: d.id }))
+  if (defaultFolder === null) choices.push({ folder: null, name: '全社', kind: kinds?.core ?? null, departmentId: null })
   return { choices, defaultFolder }
 }
 
