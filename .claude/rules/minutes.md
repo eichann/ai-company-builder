@@ -338,7 +338,8 @@ or the decision service stops calling it, or another module uses the older per-m
   「…ほかの参加者が［AI に読ませる］を押すと、その人の AI が読めます。」, `noAccess: true`; a request
   accepted re-reads the received minutes at once, `onReadRequested` → `minutes.recordsSignal`),
   `minutes:autoSeries`, `minutes:invite` (`POST /records/item/:id/members`, any members-only record;
-  member ids checked, de-duplicated). Malformed ids never reach a URL.
+  member ids checked, de-duplicated; groups / departments sent as `{ subjectType, subjectId }`) and
+  `minutes:inviteChoices` (`GET …/members/choices`: what the dialog may offer besides people). Malformed ids never reach a URL.
 - **The banner** (`src/features/minutes/components/MeetingBanners.tsx`, the words in `model.ts`
   `meetingBanner`): at the top of やること (AppShell wraps `TaskListPanel`; `useMeetingArrivals`: at
   mount, on `minutes:changed` / `records:changed` / `notifications:changed`, every 2 minutes, after a
@@ -370,7 +371,9 @@ or the decision service stops calling it, or another module uses the older per-m
   「やることの案」 (「やること」 with no proposal left: the proposals with their buttons, put-away ones with
   ［戻す］, then the other tasks made from the meeting, each once; its 「議事録を確認する」 only on the
   right; under it 「＋ やることを足す」 — a task of the meeting made by hand, `tasks-ui.md` "Similar items"), the one-time offer below; ［AI に読ませる］ while arrived / skipped / failed, ［この会議について相談する］ (`chat.consultAbout`;
-  the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members; 「招待した人は
+  the only thing here that opens a consultation), ［招待する］ (`InviteDialog`: choose members — and, when the server says the member may (`maySets`:
+  the record's 責任者, a 部署の管理役, an owner / admin), 「まとまりや部署で招待する」 with `INVITE_SETS_NOTE`
+  「…オーナーや管理者も、入れなければ見られません。」, the list's groups / departments named, not offered; 「招待した人は
   会議の記録と要約・決めたこと・やることを見られます。Google の議事録そのものは、Google で共有されていないと読めません。
   一度招待すると、取り消すことはできません。」) and the 案件 field; then 「つながっているもの」 (the documents
   and the calendar day: 「Google で開く」), 経緯. The offer comes once per meeting (localStorage

@@ -60,7 +60,7 @@ import { MeetingReadFailed as GoogleReadFailed, type MeetEvent, type MeetingAtte
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
-import { recordReader, type RecordReader } from './record-access'
+import { onList, recordReader, type RecordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter } from './record-engine'
 import type { AfterActionListener } from './record-engine/types'
 import { currentTypes, ensureCoreTypes } from './record-index'
@@ -381,10 +381,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
   const hasBundleLink = (handle: CompanyData, id: string) => handle.records.linksFrom([id]).some(l => l.name === 'bundle' && l.targetId)
   /**
    * Who chooses a meeting's まとまり: its assignee, an owner / admin (for a meeting they may read), and
-   * on a members-only meeting anyone on its list (design §2: the attendees choose to share it).
+   * on a members-only meeting anyone on its list (design §2: the attendees choose to share it) —
+   * a person on it or someone in a group / department on it.
    */
   const mayChooseBundle = (member: Member, fields: Record<string, LedgerValue>, row: RecordRow) =>
-    fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role) || (row.members?.includes(member.userId) ?? false)
+    fields.assignee === member.userId || FULL_ACCESS_ROLES.has(member.role) || onList(row, member.userId)
 
   /**
    * Which meetings ask together (one row 「まとまりを選ぶ会議 n件」): the same 相手, else the same
@@ -467,7 +468,11 @@ export function createMinutesService(deps: MinutesServiceDeps) {
     return stale
   }
 
-  /** Is the member one of the meeting's people: on its list, its assignee or an attendee? */
+  /**
+   * Is the member one of the meeting's people: on its list as a person, its assignee or an attendee?
+   * (Someone who reads it through a group or department on the list did not attend: the minutes'
+   * own steps stay with the attendees, records.md "Members-only records".)
+   */
   function isAttendee(row: RecordRow, fields: Record<string, LedgerValue>, userId: string): boolean {
     return (row.members?.includes(userId) ?? false) || isYours(fields, userId)
   }

@@ -11,7 +11,7 @@ import { parseAiRunProcedure } from '../../../shared/core/ai-runs'
 import type { ExternalReceipt, LedgerEntry, LedgerVia } from '../../../shared/core/record-ledger'
 import { parseSkillUses } from '../../../shared/core/skill-uses'
 import type {
-  RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
+  RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordMemberSet, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
   MeetingEventRow,
 } from '../../ports/records'
@@ -39,15 +39,37 @@ const membersOf = (json: string | null): string[] | null => {
   } catch { return [] }
 }
 const ownerOf = (personalOwner: string | null) => personalOwner === MEMBERS_ONLY ? null : personalOwner
+/**
+ * The groups and departments on a marked row's list (`record_viewer_sets`), each with who is in it
+ * now — read here, never stored, like a place rule's `memberIds` (permission-store.ts): changing a
+ * group or who belongs to a department changes who reads at once.
+ */
+const memberSetsColumn = (alias: string) => `CASE WHEN ${alias}.personal_owner = '${MEMBERS_ONLY}' THEN (SELECT json_group_array(json_object(
+    'type', s.subject_type, 'id', s.subject_id, 'memberIds', json(CASE s.subject_type
+      WHEN 'group' THEN (SELECT json_group_array(g.user_id) FROM member_group_members g WHERE g.company_id = s.company_id AND g.group_id = s.subject_id)
+      ELSE (SELECT json_group_array(d.user_id) FROM department_members d WHERE d.company_id = s.company_id AND d.department_id = s.subject_id) END)))
+  FROM (SELECT * FROM record_viewer_sets v WHERE v.company_id = ${alias}.company_id AND v.record_id = ${alias}.id ORDER BY v.added_at, v.subject_type, v.subject_id) s) END AS sets_json`
+const memberSetsOf = (json: string | null): RecordMemberSet[] | undefined => {
+  if (json === null) return undefined
+  try {
+    const list = JSON.parse(json) as unknown
+    if (!Array.isArray(list)) return []
+    return list.flatMap((x: Record<string, unknown>) => (x && (x.type === 'group' || x.type === 'department') && typeof x.id === 'string')
+      ? [{ type: x.type, id: x.id, memberIds: Array.isArray(x.memberIds) ? x.memberIds.filter((u): u is string => typeof u === 'string') : [] }]
+      : [])
+  } catch { return [] }
+}
 
 type Row = {
   id: string; type: string; type_version: number | null; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null
-  members_json: string | null; title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
+  members_json: string | null; sets_json: string | null; title: string; summary: string; created_at: string; updated_at: string; removed_at: string | null
 }
-const COLUMNS = `id, type, type_version, scope_id, path, folder, personal_owner, ${membersColumn('records')}, title, summary, created_at, updated_at, removed_at`
+const COLUMNS = `id, type, type_version, scope_id, path, folder, personal_owner, ${membersColumn('records')}, ${memberSetsColumn('records')}, title, summary, created_at, updated_at, removed_at`
+/** `memberSets` only on a marked row that has some (absent otherwise, so a row of people reads exactly as before). */
+const withSets = (json: string | null) => { const sets = memberSetsOf(json); return sets === undefined || sets.length === 0 ? {} : { memberSets: sets } }
 const toRecord = (r: Row): RecordRow => ({
   id: r.id, type: r.type, typeVersion: r.type_version, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner),
-  members: membersOf(r.members_json), title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
+  members: membersOf(r.members_json), ...withSets(r.sets_json), title: r.title, summary: r.summary, createdAt: r.created_at, updatedAt: r.updated_at, removedAt: r.removed_at,
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null; created_by: string | null }
 const toLink = (r: LinkRow): RecordLinkRow => ({ sourceId: r.source_id, name: r.name, position: r.position, targetId: r.target_id, targetPath: r.target_path, createdBy: r.created_by ?? null })
@@ -349,6 +371,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         .run(place.folder, place.personalOwner, at, companyId, id)
       // No longer members-only: its list goes (the ledger keeps who was on it).
       conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND record_id = ?').run(companyId, id)
+      conn.prepare('DELETE FROM record_viewer_sets WHERE company_id = ? AND record_id = ?').run(companyId, id)
     },
     addMembers(id, userIds, by, at) {
       const marked = conn.prepare('SELECT 1 FROM records WHERE company_id = ? AND id = ? AND personal_owner = ?').get(companyId, id, MEMBERS_ONLY)
@@ -356,6 +379,28 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       if (!marked) throw new Error('not a members-only record')
       const add = conn.prepare('INSERT OR IGNORE INTO record_viewers (company_id, record_id, user_id, added_at, added_by) VALUES (?, ?, ?, ?, ?)')
       return [...new Set(userIds)].filter(userId => add.run(companyId, id, userId, at, by).changes > 0)
+    },
+    addMemberSets(id, sets, by, at) {
+      const marked = conn.prepare('SELECT 1 FROM records WHERE company_id = ? AND id = ? AND personal_owner = ?').get(companyId, id, MEMBERS_ONLY)
+      if (!marked) throw new Error('not a members-only record')
+      const add = conn.prepare('INSERT OR IGNORE INTO record_viewer_sets (company_id, record_id, subject_type, subject_id, added_at, added_by) VALUES (?, ?, ?, ?, ?, ?)')
+      const seen = new Set<string>()
+      return sets.filter(s => {
+        const key = `${s.type}:${s.id}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return add.run(companyId, id, s.type, s.id, at, by).changes > 0
+      }).map(s => ({ type: s.type, id: s.id }))
+    },
+    removeMembers(id, userIds, sets) {
+      const marked = conn.prepare('SELECT 1 FROM records WHERE company_id = ? AND id = ? AND personal_owner = ?').get(companyId, id, MEMBERS_ONLY)
+      if (!marked) throw new Error('not a members-only record')
+      const dropUser = conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND record_id = ? AND user_id = ?')
+      const dropSet = conn.prepare('DELETE FROM record_viewer_sets WHERE company_id = ? AND record_id = ? AND subject_type = ? AND subject_id = ?')
+      return {
+        users: [...new Set(userIds)].filter(u => dropUser.run(companyId, id, u).changes > 0),
+        sets: sets.filter(s => dropSet.run(companyId, id, s.type, s.id).changes > 0).map(s => ({ type: s.type, id: s.id })),
+      }
     },
     forgetMember(userId) {
       conn.prepare('DELETE FROM record_viewers WHERE company_id = ? AND user_id = ?').run(companyId, userId)
@@ -544,12 +589,12 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       params.push(limit)
       const extra = where.map(w => ` AND ${w}`).join('')
       return (conn.prepare(`
-        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner, ${membersColumn('r')} FROM records r
+        SELECT r.id, r.type, r.scope_id, r.path, r.folder, r.personal_owner, ${membersColumn('r')}, ${memberSetsColumn('r')} FROM records r
         LEFT JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id
         WHERE r.company_id = ? AND r.removed_at IS NULL${extra}
         ORDER BY ${order} LIMIT ?
-      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null; members_json: string | null }>)
-        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner), members: membersOf(r.members_json) }))
+      `).all(...params) as Array<{ id: string; type: string; scope_id: string | null; path: string | null; folder: string | null; personal_owner: string | null; members_json: string | null; sets_json: string | null }>)
+        .map(r => ({ id: r.id, type: r.type, scopeId: r.scope_id, path: r.path, folder: r.folder, personalOwner: ownerOf(r.personal_owner), members: membersOf(r.members_json), ...withSets(r.sets_json) }))
     },
     byIds(ids) {
       if (ids.length === 0) return []

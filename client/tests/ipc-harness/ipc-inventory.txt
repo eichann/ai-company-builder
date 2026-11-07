@@ -139,6 +139,7 @@ contract.invoke minutes:autoSeries
 contract.invoke minutes:bundleQuestion
 contract.invoke minutes:check
 contract.invoke minutes:invite
+contract.invoke minutes:inviteChoices
 contract.invoke minutes:linkBundle
 contract.invoke minutes:meeting
 contract.invoke minutes:noBundle
@@ -392,6 +393,7 @@ contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleRelay = getGoogleRelay: Invoke<'google:relay'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
+contract.type ElectronAPI.getInviteChoices = getInviteChoices: Invoke<'minutes:inviteChoices'>
 contract.type ElectronAPI.getMeetingArrivals = getMeetingArrivals: Invoke<'minutes:arrivals'>
 contract.type ElectronAPI.getMeetingBundleQuestion = getMeetingBundleQuestion: Invoke<'minutes:bundleQuestion'>
 contract.type ElectronAPI.getMeetingCardState = getMeetingCardState: Invoke<'minutes:meeting'>
@@ -794,7 +796,8 @@ contract.type IpcInvokeChannels.'minutes:arrivals' = 'minutes:arrivals': { args:
 contract.type IpcInvokeChannels.'minutes:autoSeries' = 'minutes:autoSeries': { args: [companyId: string, meetingId: string, auto: boolean]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:bundleQuestion' = 'minutes:bundleQuestion': { args: [companyId: string, minutesId: string]; result: MeetingBundleQuestionResult }
 contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
-contract.type IpcInvokeChannels.'minutes:invite' = 'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number]; result: MeetingInviteResult }
+contract.type IpcInvokeChannels.'minutes:invite' = 'minutes:invite': { args: [companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[]]; result: MeetingInviteResult }
+contract.type IpcInvokeChannels.'minutes:inviteChoices' = 'minutes:inviteChoices': { args: [companyId: string, recordId: string]; result: MeetingInviteChoicesResult }
 contract.type IpcInvokeChannels.'minutes:linkBundle' = 'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:meeting' = 'minutes:meeting': { args: [companyId: string, meetingId: string]; result: MeetingCardStateResult }
 contract.type IpcInvokeChannels.'minutes:noBundle' = 'minutes:noBundle': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
@@ -1077,7 +1080,8 @@ main.handle minutes:arrivals @ features/minutes/ipc.ts (companyId)
 main.handle minutes:autoSeries @ features/minutes/ipc.ts (companyId, meetingId, auto)
 main.handle minutes:bundleQuestion @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:check @ features/minutes/ipc.ts (companyId)
-main.handle minutes:invite @ features/minutes/ipc.ts (companyId, recordId, memberIds, expectedVersion)
+main.handle minutes:invite @ features/minutes/ipc.ts (companyId, recordId, memberIds, expectedVersion, sets)
+main.handle minutes:inviteChoices @ features/minutes/ipc.ts (companyId, recordId)
 main.handle minutes:linkBundle @ features/minutes/ipc.ts (companyId, minutesId, bundleId)
 main.handle minutes:meeting @ features/minutes/ipc.ts (companyId, meetingId)
 main.handle minutes:noBundle @ features/minutes/ipc.ts (companyId, minutesId)
@@ -1325,6 +1329,8 @@ preload getGoogleStatus -> invoke google:status($0)
 preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
+preload getInviteChoices -> invoke minutes:inviteChoices($0, $1)
+preload getInviteChoices : (companyId: string, recordId: string) => Promise<MeetingInviteChoicesResult>
 preload getMeetingArrivals -> invoke minutes:arrivals($0)
 preload getMeetingArrivals : (companyId: string) => Promise<MeetingArrivalsResult>
 preload getMeetingBundleQuestion -> invoke minutes:bundleQuestion($0, $1)
@@ -1411,8 +1417,8 @@ preload gitUnsharedLargeFiles -> invoke git:unsharedLargeFiles($0)
 preload gitUnsharedLargeFiles : (repoPath: string) => Promise<{ success: boolean; files: string[]; }>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
-preload inviteToRecord -> invoke minutes:invite($0, $1, $2, $3)
-preload inviteToRecord : (companyId: string, recordId: string, memberIds: string[], expectedVersion: number) => Promise<MeetingInviteResult>
+preload inviteToRecord -> invoke minutes:invite($0, $1, $2, $3, $4)
+preload inviteToRecord : (companyId: string, recordId: string, memberIds: string[], expectedVersion: number, sets?: InviteSet[] | undefined) => Promise<MeetingInviteResult>
 preload linkFileToTask -> invoke tasks:linkFile($0, $1, $2, $3)
 preload linkFileToTask : (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)

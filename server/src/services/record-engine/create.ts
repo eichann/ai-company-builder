@@ -6,7 +6,7 @@ import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/cor
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import { isSameOrAncestorPath, normalizeRepoPath, pathKey } from '../../../shared/core/paths'
 import type { RecordSummary } from '../../../shared/types/records'
-import type { RecordLinkRow } from '../../ports/records'
+import type { RecordLinkRow, RecordMemberSet } from '../../ports/records'
 import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
@@ -203,6 +203,8 @@ export function creating(ctx: EngineContext) {
       // `members` = members-only (「この人たちだけ」, records.md "Members-only records"): the creator and these.
       const isPluginType = records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')
       let members: string[] | null = null
+      // Groups / departments on the list: only ever inherited here (a meeting's, a まとまり's); a person adds them by 招待する.
+      let memberSets: RecordMemberSet[] = []
       if (b.members !== undefined && b.members !== null) {
         if (personalOwner !== null || (b.folder !== undefined && b.folder !== null)) {
           return bad('見る人を選んだ記録には、自分用や部署を一緒に指定できません', 'MEMBERS_WITH_PLACE')
@@ -296,14 +298,15 @@ export function creating(ctx: EngineContext) {
       const meetingList = personalOwner === null ? meetingMembers(records, links) : null
       // The AI may narrow a meeting's list but not widen it: showing it to others is a person's act.
       if (meetingList !== null && members !== null && actor.kind === 'ai') {
-        const allowed = new Set(withNamedPeople([member.userId, ...meetingList], def, fields))
+        const allowed = new Set(withNamedPeople([member.userId, ...meetingList.readers], def, fields))
         if (members.some(u => !allowed.has(u))) return bad('会議に出ていない人を、AI が見る人に足すことはできません', 'MEMBERS_NOT_IN_MEETING')
       }
       const inherited = members === null ? meetingList : null
       if (inherited !== null) {
         if (folder !== null) return bad('見る人が決まった会議からできた記録には、部署を指定できません', 'MEMBERS_WITH_PLACE')
         if (isPluginType) return bad('この種類の記録は見る人を選んで作れません', 'MEMBERS_NOT_FOR_TYPE')
-        members = withNamedPeople([member.userId, ...inherited], def, fields)
+        members = withNamedPeople([member.userId, ...inherited.users], def, fields)
+        memberSets = inherited.sets
       }
       // A task that belongs to a まとまり is never seen by more people than the まとまり (records.md "A task
       // and its 案件・プロジェクト"): with no place of its own it takes the まとまり's (`placeOfRow`'s three
@@ -313,17 +316,17 @@ export function creating(ctx: EngineContext) {
         if (bundle && folder === null && members === null) {
           const from = placeOfRow(bundle)
           if ('personalOwner' in from) personalOwner = from.personalOwner
-          else if ('members' in from) members = [...from.members]
+          else if ('members' in from) { members = [...from.members]; memberSets = [...(from.memberSets ?? [])] }
           else folder = from.folder
         } else if (bundle) {
           const scopes = companyData.forCompany(member.companyId).scopes.listWithRules()
-          const task = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+          const task = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
           if (!placeWithin(member.companyId, scopes, id => deps.roleOf(member.companyId, id), task, bundle)) {
             return bad(WIDER_THAN_BUNDLE.error, WIDER_THAN_BUNDLE.code)
           }
         }
       }
-      const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members }
+      const place = { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner, members, memberSets }
       if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, place)) {
         return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
       }
@@ -388,6 +391,7 @@ export function creating(ctx: EngineContext) {
           title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
         })
         if (members !== null) records.addMembers(id, members, member.userId, at)
+        if (members !== null && memberSets.length > 0) records.addMemberSets(id, memberSets, member.userId, at)
         records.replaceLinks(id, links)
         if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
         records.appendLedger(entry)
