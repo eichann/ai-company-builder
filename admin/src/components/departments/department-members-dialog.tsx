@@ -22,6 +22,7 @@ import {
   type DepartmentMembersView,
   type Member,
 } from '@/lib/api'
+import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
 import { roleLabel } from '@/lib/format'
 import { formatDay } from '@/lib/task-settings'
@@ -33,6 +34,19 @@ const MEMBERS_OUTDATED_MESSAGE =
   '次のメンバーは古いアプリを使っています。所属から外すと、その部署のフォルダに変更を送れなくなり、同期が止まってしまいます。先にアプリを更新してもらってください。'
 
 /** Multi-select of company members who belong to one department (所属する部署). */
+/**
+ * What 所属 is for, under 「それぞれの部署に、だれが所属していますか？」 and in its dialog. A company with
+ * the shared folder: who belongs edits a new department's folder and everyone reads it. Without the
+ * folder (PR #650) who sees a department's things is set per department (「見られる人」), so
+ * 「見るのは全員できます」 would be wrong there.
+ */
+export const MEMBERSHIP_NOTE_WITH_FOLDER = '所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。新しく作った部署では、所属する人だけがその部署のフォルダを編集できます（オーナーと管理者はいつでも編集できます。見るのは全員できます）。1人が複数の部署に所属できます。'
+export const MEMBERSHIP_NOTE_WITHOUT_FOLDER =
+  '所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。部署のものをだれが見られるかは、部署ごとの「見られる人」で決めます。1人が複数の部署に所属できます。'
+export function membershipNote(hasCompanyFolder: boolean): string {
+  return hasCompanyFolder ? MEMBERSHIP_NOTE_WITH_FOLDER : MEMBERSHIP_NOTE_WITHOUT_FOLDER
+}
+
 export function DepartmentMembersDialog({
   open,
   onOpenChange,
@@ -86,6 +100,7 @@ function MembersForm({
   onCancel: () => void
   onSaved: (view: DepartmentMembersView) => void
 }) {
+  const { hasCompanyFolder } = useCompany()
   const [selected, setSelected] = useState<Set<string>>(() => new Set(current))
   const [busy, setBusy] = useState(false)
 
@@ -121,7 +136,7 @@ function MembersForm({
       <DialogHeader className="p-6 pb-4">
         <DialogTitle>「{department.name}」に所属する人</DialogTitle>
         <DialogDescription>
-所属は、やることの一覧や部署あての連絡をだれが受け持つかに使います。新しく作った部署では、所属する人だけがその部署のフォルダを編集できます（オーナーと管理者はいつでも編集できます。見るのは全員できます）。1人が複数の部署に所属できます。
+{membershipNote(hasCompanyFolder)}
         </DialogDescription>
       </DialogHeader>
       <Command className="border-y" loop>

@@ -40,6 +40,10 @@ export interface PermissionHistoryEntry {
     | 'department-members'
     /** Who reads / edits a private folder (its viewers and editors). */
     | 'private-folder-members'
+    /** A department deleted: with it went who belonged (所属) and the rules naming it. */
+    | 'department-delete'
+    /** A private folder made, with its first viewers and editors. */
+    | 'private-folder-create'
   /**
    * What changed, as JSON-able data (ids, names, a place's path, rules before / after; for a
    * group's or a department's members `before` / `after` ids and, when not an edit of the list

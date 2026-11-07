@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Bell, GearSix } from '@phosphor-icons/react'
 import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KINDS, UNDOABLE_NOTIFICATION_KINDS } from '../../../../../shared/types/notifications'
+import { DEFAULT_FEATURES, noticeKindsShown, type CompanyFeatures } from '../../../../../shared/core/features'
 import { shortDue, turnGroups, type MeetingTurn, type NoticesState, type NoticeTarget } from '../../../../shared/notifications-app'
 import { ThingIcon } from '../../../shared/ui/ThingIcon'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
@@ -24,6 +25,8 @@ interface Props {
   onOpen: (target: NoticeTarget) => void
   /** Show the task list (the morning's 「今日のあなたの番」 is about no one record). */
   onOpenTasks?: () => void
+  /** The company's 「使う機能」 (absent = all on): 「知らせの設定」 lists no kind of a feature that is off. */
+  features?: CompanyFeatures
 }
 
 type Open = 'turn' | 'bell' | 'settings' | null
@@ -35,7 +38,7 @@ type Open = 'turn' | 'bell' | 'settings' | null
  * Each list item opens its record; reading the bell's list marks nothing until
  * an item is opened or 「すべて既読」 is pressed, so the other PC's dot stays honest.
  */
-export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpenTasks }: Props) {
+export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpenTasks, features = DEFAULT_FEATURES }: Props) {
   const [open, setOpen] = useState<Open>(null)
   const [kinds, setKinds] = useState<Record<string, boolean> | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -183,7 +186,7 @@ export function TitleBarNotices({ companyId, state, meetings = [], onOpen, onOpe
           <p className="border-b border-gray-100 px-3 py-2 text-xs text-gray-500 dark:border-zinc-800 dark:text-zinc-400">どの知らせを出すかを選べます。ほかのパソコンでも同じ設定になります。</p>
           {error && <p role="alert" className="px-3 py-2 text-xs text-red-600">{error}</p>}
           {kinds === null && !error && <p className="px-3 py-2 text-gray-500">読み込んでいます…</p>}
-          {kinds && NOTIFICATION_KINDS.map(kind => (
+          {kinds && noticeKindsShown(NOTIFICATION_KINDS, features).map(kind => (
             <label key={kind} className="flex cursor-pointer items-start gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-zinc-800">
               <input type="checkbox" className="mt-0.5" checked={kinds[kind] === true} onChange={e => void switchKind(kind, e.target.checked)} />
               <span className="text-gray-700 dark:text-zinc-200">{NOTIFICATION_KIND_LABELS[kind]}</span>

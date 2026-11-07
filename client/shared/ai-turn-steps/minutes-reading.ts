@@ -51,5 +51,6 @@ export const minutesReading = {
   },
   consultationTitle: c => minutesConsultationTitle({ title: c.title, meetingAt: meetingAt(c) }),
   linksMinutes: true,
-  firstMessage: (c, version) => autoMinutesFirstMessage(minutesFirstMessage({ id: c.id, title: c.title, meetingAt: meetingAt(c) }), version),
+  // 決めたこと off: no decision paragraph, like the manual start (startReading.ts).
+  firstMessage: (c, version, features) => autoMinutesFirstMessage(minutesFirstMessage({ id: c.id, title: c.title, meetingAt: meetingAt(c) }, features), version),
 } as const satisfies AiTurnStepDefinition<'minutes-reading'>

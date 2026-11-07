@@ -1,6 +1,7 @@
 // A company with or without the shared company folder (全社フォルダ, owner decision 2026-11-07):
 // the operator chooses when creating it (nothing is sent that would change today's default), and
-// a company without one is not offered folder pages or actions that need the folder.
+// a company without one is not offered folder pages or actions that need the folder, and is not
+// told that everyone reads a department (its 見られる人 are set per department, PR #650).
 import type { ReactNode } from 'react'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,9 +13,11 @@ import FoldersPage from '@/app/companies/[id]/folders/page'
 import MembersPage from '@/app/companies/[id]/members/page'
 import OverviewPage from '@/app/companies/[id]/page'
 import SettingsPage from '@/app/companies/[id]/advanced/info/page'
+import { MembershipCard } from '@/components/advanced/task-settings-page'
+import { MEMBERSHIP_NOTE_WITH_FOLDER, MEMBERSHIP_NOTE_WITHOUT_FOLDER } from '@/components/departments/department-members-dialog'
 import { AuthProvider } from '@/lib/auth-context'
 import { base, companyRoutes, renderInCompany } from './company-harness'
-import { busyOverview, company, homeOf, ok, quietOverview } from './fixtures'
+import { busyOverview, company, departments, homeOf, ok, quietOverview } from './fixtures'
 import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -112,6 +115,19 @@ describe.each(['git', 'none'] as const)('wording for a %s company', (kind) => {
     expect(within(dialog).queryByText(GIT_INVITE_TEXT) !== null).toBe(!none)
     expect(within(dialog).queryByText(NONE_INVITE_TEXT) !== null).toBe(none)
     expect(within(dialog).queryAllByText(/同期|ダウンロード|ファイル/).length > 0).toBe(!none)
+  })
+
+  it('「それぞれの部署に、だれが所属していますか？」 and its dialog: 見るのは全員 only where the folder is; otherwise 見られる人 per department', async () => {
+    const memberRoutes = Object.fromEntries(departments.map((d) => [`GET ${base}/departments/${d.id}/members`, { body: ok({ members: [], canEdit: true }) }]))
+    mockApi(routesOf(kind, memberRoutes))
+    renderInCompany(<MembershipCard departments={departments} error={null} onRetry={() => {}} />)
+    const expected = none ? MEMBERSHIP_NOTE_WITHOUT_FOLDER : MEMBERSHIP_NOTE_WITH_FOLDER
+    expect(await screen.findByText(expected)).toBeInTheDocument()
+    expect(screen.queryAllByText(/見るのは全員できます/).length > 0).toBe(!none)
+    await userEvent.click((await screen.findAllByRole('button', { name: '所属する人を変える' }))[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(expected)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/見るのは全員できます/) !== null).toBe(!none)
   })
 
   it('removing a member says what they lose', async () => {

@@ -296,7 +296,8 @@ owner-only record, another company hear nothing; content-free) — mutation-chec
   `turnTiming` is `now` (`thisWeeksTurn`, `client/shared/notifications-app.ts`, the company's today);
   the others (`resting`) get one line, 「…は、やることの一覧の「先のこと」「いつか」にあります」. The
   list's 「あなたの番」 and the morning summary use the same rule, so the three agree. The bell = 「起きたこと」 (読むだけ): a dot only for unread notices, the list, 「すべて読んだ」,
-  「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
+  「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`; none for a kind of a feature
+  that is off in 「使う機能」, `noticeKindsShown`, `records.md` "Features on and off"). Opening a notice marks only
   that notice read.
 - **Arrived minutes** (owner decision 2026-11-07): where the department shows no task list, the
   meetings that arrived and nobody asked the AI to read (`arrived`) are rows of the 「会議」 part too,

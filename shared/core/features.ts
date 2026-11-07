@@ -120,6 +120,17 @@ export function featureOfNoticeKind(kind: string): FeatureId | null {
 }
 
 /**
+ * The notice kinds a member may switch in 「知らせの設定」: a kind whose feature is off is not
+ * listed (none of it is written; the member's stored choice is left as it was).
+ */
+export function noticeKindsShown<K extends string>(kinds: readonly K[], features: CompanyFeatures): K[] {
+  return kinds.filter(kind => {
+    const f = featureOfNoticeKind(kind)
+    return f === null || features[f]
+  })
+}
+
+/**
  * Whether a notice is turned off with its feature: a kind the feature owns, or any notice about a
  * record of a 「見るだけ」 type (`recordType` null = a notice about no record).
  */
@@ -167,6 +178,12 @@ export const FEATURE_WORDS: Readonly<Record<FeatureId, { name: string; what: str
     whenOff: '新しいプロジェクトを作れなくなり、「どのプロジェクトの会議ですか？」と聞かなくなります。業務プラグインの案件はそのまま使えます。',
   }),
 })
+
+/**
+ * The admin console's line on a settings card of a feature that is off (owner decision
+ * 2026-11-08): the card keeps its title and shows only this; the stored answers stay as they are.
+ */
+export const FEATURE_OFF_SETTINGS_LINE = 'この機能は今オフです（使う機能で切り替えられます）'
 
 /** What the confirmation says before a switch-off (admin console). */
 export const FEATURE_OFF_CONFIRM = 'これまでの記録は消えず、見るだけで残ります。もう一度オンにすると、続きから使えます。'

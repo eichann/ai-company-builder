@@ -609,11 +609,13 @@ restriction there stays private folders; groups cannot be named in their rules).
   所属 on accepting (by its inviter, `via: 'invitation'`), and a member leaving the company
   (`via: 'left-company'`, also `group-members` for each group they were in)); private folders' readers
   (`private-folder-members`: `scopeId`, `path`, `before` / `after` viewers and editors, `PUT
-  /private-folders/:id/members`). No endpoint reads it yet. Not recorded: a department deleted with
-  its 所属 (refused while a restricted place is inside it), a private folder's creation (its first
-  readers are its creation).
+  /private-folders/:id/members`); a department deleted (`department-delete`: `departmentId`,
+  `folder`, `members` = who belonged, in the delete's transaction) and a private folder created
+  (`private-folder-create`: `scopeId`, `path`, `after` = its first viewers and editors; owners /
+  admins are implicit, as in `private-folder-members`). No endpoint reads it yet.
 - Tests: `tests/unit/permissions-groups.test.ts`, `tests/integration/restricted-places.test.ts`
-  (each guard mutation-checked; 所属 history), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
+  (each guard mutation-checked; 所属 history, a department deleted), `private-folders.test.ts` (a
+  folder's creation), `company-without-folder.test.ts`, `plugin-steps.test.ts` (the note),
   `private-folders.test.ts` and `account-security.test.ts` (history), permission matrix + `CROSS`,
   `admin-contract.test.ts`, `admin/tests/groups.test.tsx`, `admin/tests/place-readers.test.tsx`.
 

@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { FeatureOffLine, useCompanyFeatures } from '@/components/advanced/feature-off'
 import { ErrorState, ListSkeleton } from '@/components/app/states'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ApiError, minutesApi, type MinutesFolderSetting } from '@/lib/api'
@@ -22,6 +23,7 @@ function explain(err: unknown): string {
 }
 
 export function MinutesFolderSection({ companyId }: { companyId: string }) {
+  const features = useCompanyFeatures()
   const setting = useQuery(`minutes-folder:${companyId}`, () => minutesApi.folder(companyId))
   const [view, setView] = useState<MinutesFolderSetting | null>(null)
   const [busy, setBusy] = useState(false)
@@ -48,7 +50,10 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
         Google をつないだメンバーのカレンダーから Meet の会議を見つけ、その会議に出た人だけが見られる記録にします（会社の持ち主・管理者も、出ていない会議は見えません）。
         カレンダーで「非公開」にした予定は記録しません。議事録を AI が読むのは、出た人が［AI に読ませる］を押したときだけです。
       </p>
-      {setting.loading && !data ? (
+      {!features.meetings ? (
+        // 使う機能: 会議と議事録 is off — the stored answer is kept, nothing to choose now.
+        <p className="text-xs text-muted-foreground" data-testid="feature-off-line"><FeatureOffLine /></p>
+      ) : setting.loading && !data ? (
         <ListSkeleton rows={1} />
       ) : setting.error && !data ? (
         <ErrorState error={setting.error} onRetry={setting.reload} />

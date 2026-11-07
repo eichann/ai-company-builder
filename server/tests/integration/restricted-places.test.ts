@@ -352,6 +352,16 @@ describe('only owners and admins change who reads', () => {
     const r = await call('DELETE', co(`/departments/${hrId}`))
     expect(r).toMatchObject({ status: 409, body: { code: 'RESTRICTED_PLACES_INSIDE' } })
   })
+
+  it('deleting a department is recorded with who belonged to it (PR #650 decision 4)', async () => {
+    const made = await call('POST', co('/departments'), { name: '臨時', folder: '臨時' })
+    expect(made.status).toBe(201)
+    const id = made.body.data.id
+    expect((await call('PUT', co(`/departments/${id}/members`), { userIds: ['rp-bob', 'rp-carol'] })).status).toBe(200)
+    expect((await call('DELETE', co(`/departments/${id}`), undefined, 'rp-admin')).status).toBe(200)
+    const deleted = history(none).filter(e => e.action === 'department-delete').map(e => ({ by: e.byUser, ...JSON.parse(e.detail) }))
+    expect(deleted).toEqual([{ by: 'rp-admin', departmentId: id, folder: '臨時', members: ['rp-bob', 'rp-carol'] }])
+  })
 })
 
 describe('leaving the company', () => {
