@@ -20,6 +20,7 @@ import { migrateMeetingAutoSeries, migrateRecordLedgerProvenance, migrateRecordL
 import { migrateMemberAbsenceHistory, migrateMemberWorkSwitches, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 import { securityAlertSchema } from './schema/security-alerts'
+import { skillShelfSchema } from './schema/skill-shelf'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
@@ -85,6 +86,8 @@ const SCHEMA = [
   skillUseSchema,
   // 「気になる動き」 (security-alerts.md).
   securityAlertSchema,
+  // The Skill shelf of a company without the shared folder (plugins.md "The Skill shelf").
+  skillShelfSchema,
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // The Slack connection (slack-connector.md).

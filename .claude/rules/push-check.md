@@ -153,7 +153,8 @@ Deletions are always allowed except where noted (they are how something gets uns
   `chmod +x` or a `.pyc`. No header or an unreadable one is checked, so a plain `git push` never
   skips it. The hole stays open for such builds until they update; drop the gate when none is left
   in `client_activity`.
-  Test: `skill-files-hook.test.ts`; the list: `skill-editors.test.ts`.
+  Test: `skill-files-hook.test.ts`; the list: `skill-editors.test.ts`. A company without the shared
+  folder has no push: the same rules are asked on the server Skill shelf's upload (`plugins.md` "The Skill shelf").
 - **Auto-run parts of those files**: whoever else may edit the file, a change is owner/admin only
   when the new `.md` blob has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
   flow, escaped, anchored, nested), a body `!` + backtick where the `!` starts a line or follows
@@ -163,7 +164,9 @@ Deletions are always allowed except where noted (they are how something gets uns
   skill files. Contents unreadable, or `ACB_NODE` unusable →
   every changed path there is rejected for non-admins. The closing advice names who it is for:
   taking the part out helps only someone who may change the file. Text that is not the syntax (`!important`,
-  `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
+  `if ! grep`, prose) passes. The finding itself is `shared/core/skill-autorun.ts`
+  (`autorunFindingsInText`; `rules.ts` `autorunFindings` decodes the blob as UTF-8 and asks it), the
+  one copy the Skill shelf also uses (`plugins.md` "The Skill shelf"). Test: `skill-autorun-hook.test.ts`.
 - **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —
   Codex reads it in place of `AGENTS.md` — any depth, case-insensitive; and every `.md` inside
   `.claude/rules/`, which Claude Code loads like CLAUDE.md, since the default-deny): owner/admin anywhere; a department manager inside a department folder they
@@ -186,7 +189,7 @@ Deletions are always allowed except where noted (they are how something gets uns
 - **`.backups/` / `.workspace/`** (`[LOCAL_ONLY_PATH]`, everyone): adding or modifying anything
   inside them at any depth (conflict copies and the AI's scratch / cloned repos). A separate
   marker because old apps' `PERSONAL_PATH` recovery refuses non-`.personal/` paths.
-- **Secrets** (`[SECRET_DETECTED]`): added lines of each commit in `rev-list <new> --not --all`
+- **Secrets** (`[SECRET_DETECTED]`; patterns `shared/core/secret-patterns.ts`, also the Skill shelf's): added lines of each commit in `rev-list <new> --not --all`
   (first parent; merges as combined diffs; root commits against the empty tree) plus the net diff,
   one `diff-tree --stdin -p` stream, deduplicated per file × pattern. New branches: whole content
   of the tip's files. 200 commits / 50,000 lines check in under a second

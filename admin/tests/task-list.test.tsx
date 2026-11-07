@@ -55,8 +55,8 @@ describe('the menu (管理画面の見直し 2-3)', () => {
     expect(shown({ isAdmin: false, isManager: false, canViewAgentEvents: false, hasCompanyFolder: true })).toEqual(['ホーム', '部署'])
   })
 
-  it('a company without the shared folder has no 「フォルダ」 (nothing there to manage)', () => {
-    expect(shown({ isAdmin: true, isManager: true, canViewAgentEvents: true, hasCompanyFolder: false })).toEqual(['ホーム', 'メンバー', '部署', 'つなぎ先', '詳しい設定'])
+  it('a company without the shared folder has no 「フォルダ」 (nothing there to manage) and has 「会社の Skill」', () => {
+    expect(shown({ isAdmin: true, isManager: true, canViewAgentEvents: true, hasCompanyFolder: false })).toEqual(['ホーム', 'メンバー', '部署', '会社の Skill', 'つなぎ先', '詳しい設定'])
   })
 })
 

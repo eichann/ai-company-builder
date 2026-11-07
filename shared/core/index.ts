@@ -35,6 +35,9 @@
  *   absences.ts           absence and the delegate (代わりの人): the one resolution of who acts for whom today
  *   connector-roles.ts    the core roles (役目) a core connector serves, and resolving which one serves a role
  *   company-folder.ts     a company with or without the shared company folder: its kind, the refusal
+ *   skill-autorun.ts      the auto-run parts of a Skill's Markdown (push checker and Skill shelf)
+ *   secret-patterns.ts    secrets nobody may share (push checker and Skill shelf)
+ *   skill-shelf.ts        the server's Skill shelf (no shared folder): names, paths, checks, version listing
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -68,3 +71,6 @@ export * from './features'
 export * from './absences'
 export * from './connector-roles'
 export * from './company-folder'
+export * from './skill-autorun'
+export * from './skill-shelf'
+export * from './secret-patterns'

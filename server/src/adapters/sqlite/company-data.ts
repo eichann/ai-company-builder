@@ -18,6 +18,7 @@ import { sqliteScopeRepository } from './scopes'
 import { sqliteSecondOpinionSettingRepository } from './second-opinion'
 import { sqliteSecurityAlertRepository } from './security-alerts'
 import { sqliteSkillUseRepository } from './skill-uses'
+import { sqliteSkillShelfRepository } from './skill-shelf'
 import { sqliteTaskSettingsRepository } from './task-settings'
 
 // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
@@ -61,6 +62,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         skillUses: sqliteSkillUseRepository(conn, companyId),
         secondOpinion: sqliteSecondOpinionSettingRepository(conn, companyId),
         securityAlerts: sqliteSecurityAlertRepository(conn, companyId),
+        skillShelf: sqliteSkillShelfRepository(conn, companyId),
         // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
         // lane A ▼
         // lane A ▲

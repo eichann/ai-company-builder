@@ -82,3 +82,7 @@ same empty search, absent from every listing.
 The server answers `NO_COMPANY_FOLDER` for them, so the chat does not offer the `company_*` tools
 at all there (`features/chat/server-config.ts` `createCompanyFiles`: undefined for a registered
 working folder, `services/working-folders.ts`). Test: `client/tests/company-without-folder.test.ts`.
+
+Their Skills, AI instruction texts and rule files are not files of a company folder at all: they
+come from the server's Skill shelf (`plugins.md` "The Skill shelf"), checked on upload with the
+push checker's rules.

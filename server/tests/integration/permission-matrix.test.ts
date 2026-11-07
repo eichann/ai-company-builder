@@ -118,6 +118,8 @@ interface World {
     group: string
     /** An execution run of the other company's member, with an operation of unknown result (records.md "Execution runs"). */
     aiRun: string
+    /** A Skill on the other company's shelf (plugins.md "The Skill shelf"). */
+    shelfItem: string
   }
 }
 
@@ -333,6 +335,15 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', w => ({ path: `${C(w)}/me/record-tokens/no-such-token` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/me/skill-uses', w => ({ path: `${C(w)}/me/skill-uses`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  // The Skill shelf is only for a company without the shared folder; this one has it (409
+  // SKILL_SHELF_NOT_HERE). Who may do what in a company without it: tests/integration/skill-shelf.test.ts.
+  r('GET /api/companies/:companyId/skill-shelf', w => ({ path: `${C(w)}/skill-shelf` }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf', w => ({ path: `${C(w)}/skill-shelf`, body: {} }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/skill-shelf/:itemId/versions', w => ({ path: `${C(w)}/skill-shelf/no-such-item/versions` }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', w => ({ path: `${C(w)}/skill-shelf/no-such-item/versions/${'0'.repeat(64)}` }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf/:itemId/restore', w => ({ path: `${C(w)}/skill-shelf/no-such-item/restore`, body: {} }), [409, 409, 409, 409, 404, 401]),
+  r('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish', w => ({ path: `${C(w)}/skill-shelf/no-such-item/unpublish`, body: {} }), [409, 409, 409, 409, 404, 401]),
+  r('GET /api/companies/:companyId/me/skill-shelf', w => ({ path: `${C(w)}/me/skill-shelf` }), [409, 409, 409, 409, 404, 401]),
   // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
   r('GET /api/records-ai/types', () => ({ path: '/api/records-ai/types' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/my-turn', () => ({ path: '/api/records-ai/my-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
@@ -692,6 +703,10 @@ const CROSS: CrossRow[] = [
   x('PATCH /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}`, body: { name: '乗っ取り' } }), w => w.other.group),
   x('PUT /api/companies/:companyId/groups/:groupId/members', (w, id) => ({ path: `${C(w)}/groups/${id}/members`, body: { userIds: [] } }), w => w.other.group),
   x('DELETE /api/companies/:companyId/groups/:groupId', (w, id) => ({ path: `${C(w)}/groups/${id}` }), w => w.other.group),
+  x('GET /api/companies/:companyId/skill-shelf/:itemId/versions', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions` }), w => w.other.shelfItem),
+  x('GET /api/companies/:companyId/skill-shelf/:itemId/versions/:version', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/versions/${'a'.repeat(64)}` }), w => w.other.shelfItem),
+  x('POST /api/companies/:companyId/skill-shelf/:itemId/restore', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/restore`, body: { version: 'a'.repeat(64), expectedVersion: null } }), w => w.other.shelfItem),
+  x('POST /api/companies/:companyId/skill-shelf/:itemId/unpublish', (w, id) => ({ path: `${C(w)}/skill-shelf/${id}/unpublish`, body: { expectedVersion: 'a'.repeat(64) } }), w => w.other.shelfItem),
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
@@ -970,6 +985,11 @@ async function seed(): Promise<World> {
     VALUES (?, 'run-other-1', 'deal-other001', 'task-prep', ?, 'waiting_reconcile', 1, ?, ?)`).run(other, otherMember, expires, expires)
   db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
     VALUES (?, 'run-other-1', 'k1', 'f', 'plugin-operation', 'unknown', 1, ?, ?)`).run(other, expires, expires)
+  // A Skill on the other company's shelf, published (rows as adapters/sqlite/skill-shelf.ts writes them).
+  db.prepare(`INSERT INTO shelf_items (id, company_id, kind, department_id, name, current_version, created_at, created_by, changed_at, changed_by)
+    VALUES ('shelf-other-1', ?, 'skill', NULL, 'other-skill', ?, ?, ?, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember, expires, otherMember)
+  db.prepare(`INSERT INTO shelf_versions (company_id, item_id, version, files, file_count, total_bytes, autorun, published_at, published_by)
+    VALUES (?, 'shelf-other-1', ?, '[]', 0, 0, 0, ?, ?)`).run(other, 'a'.repeat(64), expires, otherMember)
 
   return {
     co, sales, accounting,
@@ -1003,6 +1023,7 @@ async function seed(): Promise<World> {
       absence: 'absence-other-1',
       group: 'group-other-1',
       aiRun: 'run-other-1',
+      shelfItem: 'shelf-other-1',
 
     },
   }
